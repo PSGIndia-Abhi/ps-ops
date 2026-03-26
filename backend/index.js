@@ -16,6 +16,8 @@ const teamRoutes = require("./src/routes/teams.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const bookingsRoutes = require('./src/routes/bookings.routes');
 const visitRoutes = require('./src/routes/visits.routes');
+const clientInviteRoutes = require("./src/routes/clientInvite.routes");
+const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
 
 
 
@@ -49,6 +51,8 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use(express.json());
 app.use("/api/bookings", bookingsRoutes);
 app.use("/api/visits", visitRoutes);
+app.use("/api", clientInviteRoutes);
+app.use("/api/invite", inviteAcceptRoutes);
 
 
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import "./AdminCompanies.css";
 
@@ -20,6 +21,18 @@ export default function AdminCompanies() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(defaultForm);
+  const navigate = useNavigate();
+
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    function handleResize() {
+      setIsMobile(window.innerWidth < 768);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const loadCompanies = async () => {
     try {
@@ -236,27 +249,54 @@ export default function AdminCompanies() {
           <div className="companies-loading">Loading companies...</div>
         ) : (
           <div className="companies-table">
-            <div className="companies-row companies-row-header">
-              <div>Code</div>
-              <div>Name</div>
-              <div>Site</div>
-              <div>Address</div>
-              <div>Type</div>
-              <div>Status</div>
-            </div>
+      
 
             {filteredCompanies.map(company => {
               const addressParts = [company.address, company.city, company.state].filter(Boolean);
               return (
-                <div key={company.id} className="companies-row">
-                  <div className="company-code">{company.code || "-"}</div>
-                  <div>{company.name || "-"}</div>
-                  <div>{company.site || "-"}</div>
-                  <div>{addressParts.join(", ") || "-"}</div>
-                  <div>{company.type || "-"}</div>
-                  <div className={company.is_active === 0 ? "company-inactive" : "company-active"}>
-                    {company.is_active === 0 ? "Inactive" : "Active"}
+                <div className="companies-row">
+
+                  <div className="company-mobile-card">
+
+                    <div className="company-row">
+                      <span className="label">Code</span>
+                      <span className="value">{company.code}</span>
+                    </div>
+
+                    <div className="company-row">
+                      <span className="label">Name</span>
+                      <span className="value">{company.name}</span>
+                    </div>
+
+                    <div className="company-row">
+                      <span className="label">Site</span>
+                      <span className="value">{company.site || "-"}</span>
+                    </div>
+
+                    <div className="company-row">
+                      <span className="label">Address</span>
+                      <span className="value">{company.address || "-"}</span>
+                    </div>
+
+                    <div className="company-row">
+                      <span className="label">Type</span>
+                      <span className="value">{company.type}</span>
+                    </div>
+
                   </div>
+
+                  <div className="status-cell">
+                    <div>{company.status}</div>
+
+                    <button
+                      onClick={() =>
+                        navigate(`/admin/sites/${company.id}/contacts`)
+                      }
+                    >
+                      Show Contacts
+                    </button>
+                  </div>
+
                 </div>
               );
             })}

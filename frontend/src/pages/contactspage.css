@@ -1,0 +1,61 @@
+/* ---------- CONTACT CARD ---------- */
+
+.contact-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid #e5e7eb;
+}
+
+.contact-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.contact-role {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 3px;
+}
+
+.contact-info {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.contact-info div {
+  margin-bottom: 4px;
+}
+
+.contact-primary {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.contact-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.convert-btn {
+  background: #0ea5e9;
+  color: white;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.convert-btn:active {
+  transform: scale(0.96);
+}
+
+.convert-btn.disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}

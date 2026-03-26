@@ -23,6 +23,7 @@ export default function BookingsPage() {
     startDate: "",
     endDate: "",
   });
+  const [dateError, setDateError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -68,6 +69,31 @@ export default function BookingsPage() {
   ];
 
   const hasFilters = Boolean(filters.status || filters.startDate || filters.endDate);
+  const isBefore = (a, b) => {
+    if (!a || !b) return false;
+    const aDate = new Date(`${a}T00:00:00`);
+    const bDate = new Date(`${b}T00:00:00`);
+    if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return false;
+    return aDate < bDate;
+  };
+
+  const updateDateFilter = (key, value) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+
+      if (key === "startDate" && value && prev.endDate && isBefore(prev.endDate, value)) {
+        next.endDate = value;
+        setDateError("End date adjusted to match start date.");
+      } else if (key === "endDate" && value && prev.startDate && isBefore(value, prev.startDate)) {
+        setDateError("End date cannot be before start date.");
+        return prev;
+      } else {
+        setDateError("");
+      }
+
+      return next;
+    });
+  };
 
   const filteredBookings = useMemo(() => {
     if (!hasFilters) return bookings;
@@ -135,7 +161,7 @@ export default function BookingsPage() {
           <input
             type="date"
             value={filters.startDate}
-            onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
+            onChange={(e) => updateDateFilter("startDate", e.target.value)}
           />
         </div>
         <div className="bookings-filter-field">
@@ -143,16 +169,20 @@ export default function BookingsPage() {
           <input
             type="date"
             value={filters.endDate}
-            onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
+            onChange={(e) => updateDateFilter("endDate", e.target.value)}
           />
         </div>
         <button
           type="button"
           className="bookings-filter-reset"
-          onClick={() => setFilters({ status: "", startDate: "", endDate: "" })}
+          onClick={() => {
+            setFilters({ status: "", startDate: "", endDate: "" });
+            setDateError("");
+          }}
         >
           Reset
         </button>
+        {dateError && <div className="bookings-filter-error">{dateError}</div>}
       </div>
 
       <div className="bookings-list">

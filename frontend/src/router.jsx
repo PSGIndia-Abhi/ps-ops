@@ -16,7 +16,12 @@ import Terms from "./pages/terms";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import SupervisorLayout from "./layouts/SupervisorLayout";
 import TechnicianLayout from "./layouts/TechnicianLayout";
-
+import ClientDashboard from "./pages/ClientDashboard";
+import ClientLayout from "./layouts/ClientLayout";
+import ClientJobsPage from "./pages/ClientJobsPage";
+import ClientJobUpdates from "./pages/ClientJobUpdates";
+import AcceptInvite from "./pages/AcceptInvite";
+import SiteContactsPage from "./pages/SiteContactsPage";
 
 const router = createBrowserRouter([
   {
@@ -46,6 +51,7 @@ const router = createBrowserRouter([
       { path: "map", element: <MapView /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "bookings", element: <BookingsPage /> },
+      { path: "sites/:siteId/contacts", element: <SiteContactsPage /> }
     ],
   },
 
@@ -65,6 +71,7 @@ const router = createBrowserRouter([
     { path: "map", element: <MapView /> },
     { path: "jobs/:jobId", element: <JobPage /> },
     { path: "bookings", element: <BookingsPage /> },
+    { path: "sites/:siteId/contacts", element: <SiteContactsPage /> }
   ],
 },
 
@@ -85,6 +92,23 @@ const router = createBrowserRouter([
 },
 
   // -------------------------
+  //Client  ROUTES
+  // -------------------------
+{
+  path: "/client",
+  element: (
+    <ProtectedRoute allowedRoles={["client"]}>
+      <ClientLayout />
+    </ProtectedRoute>
+  ),
+  children: [
+  { index: true, element: <ClientDashboard /> },
+  { path: "jobs", element: <ClientDashboard /> },
+  { path: "jobs/:jobId", element: <ClientJobUpdates /> }
+]
+},
+
+  // -------------------------
   // PUBLIC ROUTES
   // -------------------------
   {
@@ -96,6 +120,15 @@ const router = createBrowserRouter([
     path: "/login",
     element: <Login />,
   },
+
+  {
+  path: "/invite/:token",
+  element: <AcceptInvite />,
+},
+
+
+
+  
 ]);
 
 export default router;

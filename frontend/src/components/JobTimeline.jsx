@@ -1,12 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import "./jobrow.css";
-import { API_BASE } from "../api";
+import { API_BASE, apiFetch } from "../api";
 
 export default function JobTimeline({ history = [] }) {
   const [activeImage, setActiveImage] = useState(null);
   const [attachmentMap, setAttachmentMap] = useState({});
   const attachmentUrlRef = useRef({});
   const token = localStorage.getItem("token");
+  const role = localStorage.getItem("role");
+  const [timeline, setTimeline] = useState([]);
+
+  useEffect(() => {
+    setTimeline(history);
+  }, [history]);
 
   const actionMeta = (action) => {
     switch (action) {
@@ -138,12 +144,61 @@ export default function JobTimeline({ history = [] }) {
     };
   }, []);
 
+  async function changeVisibility(itemId, newValue) {
+    let previousValue;
+    let shouldPersist = false;
+
+    setTimeline((prev) => {
+      const current = prev.find((h) => h.id === itemId);
+      if (!current) return prev;
+
+      // if same value -> do nothing
+      if (current.visible_to_client === newValue) {
+        return prev;
+      }
+
+      const msg = newValue
+        ? "Make this update visible to client?"
+        : "Client may have already seen this. Hide anyway?";
+
+      const ok = window.confirm(msg);
+      if (!ok) return prev;
+
+      previousValue = current.visible_to_client;
+      shouldPersist = true;
+
+      return prev.map((h) =>
+        h.id === itemId ? { ...h, visible_to_client: newValue } : h
+      );
+    });
+
+    if (!shouldPersist) return;
+
+    try {
+      const res = await apiFetch(`/api/jobs/history/${itemId}/visibility`, {
+        method: "PATCH",
+        body: JSON.stringify({ visible_to_client: newValue }),
+      });
+
+      if (!res?.ok) {
+        throw new Error("Failed to update visibility");
+      }
+    } catch (err) {
+      console.error("Failed to persist visibility", err);
+      setTimeline((prev) =>
+        prev.map((h) =>
+          h.id === itemId ? { ...h, visible_to_client: previousValue } : h
+        )
+      );
+    }
+  }
+
   return (
     <>
       <div className="job-timeline">
         <h3>Timeline</h3>
 
-        {history.map((item) => (
+        {timeline.map((item) => (
           <div key={item.id} className="timeline-item">
             <div className="timeline-icon">
               {(() => {
@@ -173,6 +228,31 @@ export default function JobTimeline({ history = [] }) {
               <div className="timeline-message">
                 {item.message}
               </div>
+              {(role === "admin" || role === "supervisor") && (
+                <div className="timeline-visibility">
+                  <label>
+                    <input
+                      type="radio"
+                      name={`visibility-${item.id}`}
+                      checked={!item.visible_to_client}
+                      onClick={() => changeVisibility(item.id, false)}
+                    />
+                    Internal
+                  </label>
+
+                  <label style={{ marginLeft: 12 }}>
+                    <input
+                      type="radio"
+                      name={`visibility-${item.id}`}
+                      checked={item.visible_to_client}
+                      onClick={() => changeVisibility(item.id, true)}
+                    />
+                    Client Visible
+                  </label>
+
+
+                </div>
+              )}
 
               {item.attachments?.length > 0 && (
                 <div className="timeline-attachments">
@@ -193,6 +273,9 @@ export default function JobTimeline({ history = [] }) {
                           </button>
                         );
                       }
+
+
+
 
                       return (
                         <img

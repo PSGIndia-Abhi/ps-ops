@@ -1,6 +1,7 @@
 export const ROLE_ROUTES = {
-  admin: "/admin",
-  supervisor: "/supervisor",
-  technician: "/technician",
-  customer: "/customer",
+  ADMIN: "admin",
+  CLIENT: "client",
+  TECHNICIAN: "technician",
+  SUPERVISOR: "supervisor",
+  TELECALLER: "telecaller"
 };

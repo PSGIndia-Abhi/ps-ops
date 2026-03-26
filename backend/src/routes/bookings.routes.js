@@ -23,7 +23,7 @@ router.get("/", auth, allowRoles("admin","supervisor"), async (req,res)=>{
 
     // 1️⃣ get bookings
 let bookingsQuery = `
-SELECT 
+ SELECT 
   b.id,
   b.code,
   b.created_at,
@@ -31,6 +31,7 @@ SELECT
   c.name as contact_name,
   c.phone as contact_phone,
   c.email as contact_email,
+  co.id as company_id,
   co.name as company_name,
   co.code as company_code,
   co.type as company_type
@@ -66,6 +67,7 @@ const [bookings] = await connection.query(
           j.sub_service,
           j.status,
           j.start_date,
+          j.company_id AS job_company_id,
           c.id AS job_contact_id,
           c.name AS job_contact_name,
           c.phone AS job_contact_phone,
@@ -87,6 +89,10 @@ const [bookings] = await connection.query(
         sub_service: job.sub_service,
         status: job.status,
         start_date: job.start_date,
+        company_id: job.job_company_id || null,
+        company_name: job.job_company_name || null,
+        company_code: job.job_company_code || null,
+        company_type: job.job_company_type || null,
       }));
 
       const fallbackJob = jobs.find(job => job.job_contact_id || job.job_company_code || job.job_company_name);
@@ -161,6 +167,10 @@ const [bookings] = await connection.query(
           sub_service: job.sub_service,
           status: job.status,
           start_date: job.start_date,
+          company_id: job.company_id || null,
+          company_name: job.company_name || null,
+          company_code: job.company_code || null,
+          company_type: job.company_type || null,
         });
       }
 

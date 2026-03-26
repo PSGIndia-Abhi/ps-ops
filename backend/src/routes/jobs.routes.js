@@ -53,6 +53,22 @@ const canAccessJob = async (executor, user, jobId) => {
     return !!job;
   }
 
+  if (user.role === "client") {
+    const [[userRow]] = await executor.query(
+      `SELECT contact_id FROM users WHERE id = ?`,
+      [user.id]
+    );
+
+    if (!userRow?.contact_id) return false;
+
+    const [[job]] = await executor.query(
+      `SELECT id FROM jobs WHERE id = ? AND requested_by_contact_id = ? LIMIT 1`,
+      [jobId, userRow.contact_id]
+    );
+
+    return !!job;
+  }
+
   return false;
 };
 
@@ -121,7 +137,7 @@ const updateRangeRecurringJobs = async (
 router.get(
   "/",
   auth,
-  allowRoles("admin", "supervisor", "technician"),
+  allowRoles("admin", "supervisor", "technician", "client"),
   async (req, res) => {
     try {
 
@@ -134,10 +150,27 @@ router.get(
         params.push(req.user.id);
       }
 
+      if (req.user.role === "client") {
+
+        const [[user]] = await pool.query(
+          `SELECT contact_id FROM users WHERE id = ?`,
+          [req.user.id]
+        );
+
+        if (!user || !user.contact_id) {
+          return res.status(400).json({
+            error: "Client contact mapping not found"
+          });
+        }
+
+        conditions.push("j.requested_by_contact_id = ?");
+        params.push(user.contact_id);
+      }
+
       // technician → jobs where they are in team JSON
-// technician → jobs where technician has a relevant visit
-if (req.user.role === "technician") {
-  conditions.push(`
+      // technician → jobs where technician has a relevant visit
+      if (req.user.role === "technician") {
+        conditions.push(`
     EXISTS (
       SELECT 1
       FROM job_visits v
@@ -152,8 +185,8 @@ if (req.user.role === "technician") {
     )
   `);
 
-  params.push(req.user.id);
-}
+        params.push(req.user.id);
+      }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [rows] = await pool.query(
@@ -176,6 +209,7 @@ if (req.user.role === "technician") {
 
           -- Supervisor
           u.name AS supervisor_name,
+          u.phone AS supervisor_phone,
 
           -- Contact
           c.id   AS contact_id,
@@ -243,19 +277,20 @@ if (req.user.role === "technician") {
 
           supervisor: row.supervisor_id
             ? {
-                id: row.supervisor_id,
-                name: row.supervisor_name,
-              }
+              id: row.supervisor_id,
+              name: row.supervisor_name,
+              phone: row.supervisor_phone,
+            }
             : null,
 
           requestedBy: row.contact_id
             ? {
-                id: row.contact_id,
-                name: row.contact_name,
-                phone: row.contact_phone,
-                email: row.contact_email,
-                company: row.company_name,
-              }
+              id: row.contact_id,
+              name: row.contact_name,
+              phone: row.contact_phone,
+              email: row.contact_email,
+              company: row.company_name,
+            }
             : null,
 
           teamIds,
@@ -283,7 +318,7 @@ if (req.user.role === "technician") {
         teamUserMap = new Map(users.map((u) => [Number(u.id), u]));
       }
 
-      const finalJobs = jobs.map((job) => {
+      let finalJobs = jobs.map((job) => {
         const team = job.teamIds.map((id) => {
           const user = teamUserMap.get(Number(id));
           return user ? { id: user.id, name: user.name } : { id };
@@ -297,6 +332,44 @@ if (req.user.role === "technician") {
         };
       });
 
+      if (req.user.role === "client" && finalJobs.length) {
+        const jobIds = finalJobs.map((job) => job.id);
+        const placeholders = jobIds.map(() => "?").join(",");
+
+        const [historyRows] = await pool.query(
+          `
+          SELECT job_id, message, created_at, id
+          FROM job_history
+          WHERE (
+              visible_to_client = 1
+              OR visible_to_client = TRUE
+              OR visible_to_client = '1'
+              OR visible_to_client = 'true'
+            )
+            AND job_id IN (${placeholders})
+          ORDER BY created_at DESC, id DESC
+          `,
+          jobIds
+        );
+
+        const latestMap = new Map();
+        for (const row of historyRows) {
+          const key = String(row.job_id);
+          if (!latestMap.has(key)) {
+            latestMap.set(key, row);
+          }
+        }
+
+        finalJobs = finalJobs.map((job) => {
+          const latest = latestMap.get(String(job.id));
+          return {
+            ...job,
+            latest_comment: latest?.message || null,
+            latest_comment_at: latest?.created_at || null,
+          };
+        });
+      }
+
       res.json(finalJobs);
     } catch (err) {
       console.error("Error fetching jobs:", err);
@@ -305,7 +378,7 @@ if (req.user.role === "technician") {
   }
 );
 // GET single job by ID
-router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
+router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician", "client"), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -397,6 +470,7 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
     res.json({
       id: job.id,
       code: job.code,
+      booking_id: job.booking_id,
       title: job.sub_service,
       service_type: job.service_type,
       status: job.status,
@@ -438,11 +512,20 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
   }
 });
 // GET job history (timeline)
-router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
+router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technician", "client"), async (req, res) => {
   const { jobId } = req.params;
 
   try {
     if (!(await ensureJobAccess(req, res, pool, jobId))) return;
+
+    const visibilityClause = req.user.role === "client"
+      ? `AND (
+          h.visible_to_client = 1
+          OR h.visible_to_client = TRUE
+          OR h.visible_to_client = '1'
+          OR h.visible_to_client = 'true'
+        )`
+      : "";
 
     const [rows] = await pool.query(
       ` SELECT
@@ -451,6 +534,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
         h.message,
         h.metadata,
         h.created_at,
+        h.visible_to_client,
         u.name              AS created_by,
 
         a.id                AS attachment_id,
@@ -463,6 +547,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
       LEFT JOIN job_attachments a
         ON a.history_id = h.id
       WHERE h.job_id = ?
+      ${visibilityClause}
       ORDER BY h.created_at DESC, h.id DESC`,
       [jobId]
     );
@@ -479,6 +564,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
           metadata: row.metadata,
           created_at: row.created_at,
           created_by: row.created_by,
+          visible_to_client: !!row.visible_to_client, //client things :)
           attachments: [],
         };
       }
@@ -504,7 +590,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
 // POST job comment (timeline update)
 router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
   const { jobId } = req.params;
-  const { message } = req.body;
+  const { message, visible_to_client } = req.body;
   const created_by_user_id = req.user.id;
 
   if (!message?.trim()) {
@@ -537,15 +623,17 @@ router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technic
         job_id,
         action,
         message,
+        visible_to_client,
         created_by_user_id,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         id,
         jobId,
         "COMMENT",
         message,
+        visible_to_client ? 1 : 0,
         created_by_user_id
       ]
     );
@@ -562,6 +650,51 @@ router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technic
     res.status(500).json({ error: "Failed to create comment" });
   }
 });
+
+
+//client vis toggle
+router.patch(
+  "/history/:historyId/visibility",
+  auth,
+  allowRoles("admin", "supervisor"),
+  async (req, res) => {
+
+    const { historyId } = req.params;
+    const { visible_to_client } = req.body;
+
+    if (visible_to_client === undefined) {
+      return res.status(400).json({
+        error: "visible_to_client required"
+      });
+    }
+
+    try {
+
+      const [result] = await pool.query(
+        `
+        UPDATE job_history
+        SET visible_to_client = ?
+        WHERE id = ?
+        `,
+        [visible_to_client ? 1 : 0, historyId]
+      );
+
+      if (!result.affectedRows) {
+        return res.status(404).json({
+          error: "History entry not found"
+        });
+      }
+
+      res.json({ success: true });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        error: "Failed to update visibility"
+      });
+    }
+  }
+);
 
 // JOB STATUS UPDATE (single source of truth)
 router.patch("/:id/status", auth, async (req, res) => {
@@ -1584,6 +1717,67 @@ router.post("/:jobId/attachments/upload",
   }
 );
 
+// --------------------------------------------------
+// CLIENT → My Jobs
+// --------------------------------------------------
+router.get(
+  "/client/my-jobs",
+  auth,
+  allowRoles("client"),
+  async (req, res) => {
+    try {
+
+      console.log("JWT USER →", req.user);
+
+      const userId = req.user.id;
+
+      // get contact_id from users table
+      const [[user]] = await pool.query(
+        `SELECT contact_id FROM users WHERE id = ?`,
+        [userId]
+      );
+
+      if (!user || !user.contact_id) {
+        return res.status(400).json({
+          error: "Client contact mapping not found"
+        });
+      }
+
+      const contactId = user.contact_id;
+
+      const [rows] = await pool.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.service_type,
+          j.sub_service,
+          j.status,
+          j.approval_status,
+          j.start_date,
+          j.created_at,
+          j.address,
+
+          u.name AS supervisor_name
+
+        FROM jobs j
+        LEFT JOIN users u
+          ON j.supervisor_id = u.id
+
+        WHERE j.requested_by_contact_id = ?
+        ORDER BY j.created_at DESC
+        `,
+        [contactId]
+      );
+
+      res.json(rows);
+
+    } catch (err) {
+      console.error("Client jobs error:", err);
+      res.status(500).json({ error: "Failed to fetch client jobs" });
+    }
+  }
+);
 
 
 

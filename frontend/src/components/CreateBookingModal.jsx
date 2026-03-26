@@ -16,6 +16,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   const [assignedTechnicianName, setAssignedTechnicianName] = useState("");
   const role = localStorage.getItem("role");
   const loggedInUserId = Number(localStorage.getItem("userId"));
+  const loggedInContactId = localStorage.getItem("contactId");
   const [showContactResults, setShowContactResults] = useState(false);
 
   const [form, setForm] = useState({
@@ -69,6 +70,12 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     loadContacts();
     loadCompanies();
   }, []);
+
+  useEffect(() => {
+    if (role === "client" && loggedInContactId) {
+      setForm(prev => ({ ...prev, contactId: loggedInContactId }));
+    }
+  }, [role, loggedInContactId]);
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
@@ -200,7 +207,9 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
   async function handleSubmit() {
     if (!form.contactId) {
-      alert("Please select who is requesting this booking");
+      alert(role === "client"
+        ? "Your contact profile is missing. Please contact support."
+        : "Please select who is requesting this booking");
       return;
     }
 
@@ -486,6 +495,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
         {/* BODY */}
         <div style={body}>
+          {role !== "client" && (
+          <>
           {/* REQUESTED BY */}
           <div style={section}>
             <h4>Requested By</h4>
@@ -587,6 +598,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
               }}
               companies={companies}
             />
+          )}
+          </>
           )}
 
 
@@ -719,34 +732,37 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
             )}
           </div>
 
-          {/* Assignment */}
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setShowAssignModal(true)}
-            >
-              Assign Team
-            </button>
-            {(assignedSupervisorId || assignedTechnicianId) && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  background: "#eef2ff",
-                  border: "1px solid #c7d2fe",
-                  fontSize: 13,
-                  color: "#1e3a8a",
-                }}
-              >
-                <strong>Assigned:</strong>{" "}
-                {assignedSupervisorName || "No supervisor"}
-                {"  •  "}
-                {assignedTechnicianName || "No technician"}
-              </div>
-            )}
-          </div>
+       {/* Assignment */}
+{role !== "client" && (
+  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+    <button
+      type="button"
+      className="secondary"
+      onClick={() => setShowAssignModal(true)}
+    >
+      Assign Team
+    </button>
+
+    {(assignedSupervisorId || assignedTechnicianId) && (
+      <div
+        style={{
+          marginTop: 8,
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: "#eef2ff",
+          border: "1px solid #c7d2fe",
+          fontSize: 13,
+          color: "#1e3a8a",
+        }}
+      >
+        <strong>Assigned:</strong>{" "}
+        {assignedSupervisorName || "No supervisor"}
+        {"  •  "}
+        {assignedTechnicianName || "No technician"}
+      </div>
+    )}
+  </div>
+)}
           {/* RECURRENCE */}
           <div style={section}>
             <h4>Recurring</h4>

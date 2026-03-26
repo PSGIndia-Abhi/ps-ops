@@ -13,8 +13,19 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
+
     const [rows] = await pool.query(
-      "SELECT id, role, password_hash FROM users WHERE email = ? AND is_active = 1",
+      `
+      SELECT 
+        id,
+        role,
+        password_hash,
+        invite_status,
+        is_active
+      FROM users
+      WHERE email = ?
+      LIMIT 1
+      `,
       [email]
     );
 
@@ -24,6 +35,20 @@ router.post("/login", async (req, res) => {
 
     const user = rows[0];
 
+    // 🔴 block if invite not accepted
+    if (user.invite_status === "INVITED") {
+      return res.status(403).json({
+        error: "Please activate your account using invite link"
+      });
+    }
+
+    // 🔴 block if inactive
+    if (user.is_active === 0) {
+      return res.status(403).json({
+        error: "Account is inactive"
+      });
+    }
+
     const match = await bcrypt.compare(password, user.password_hash);
 
     if (!match) {
@@ -31,12 +56,18 @@ router.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, role: user.role },
+      {
+        id: user.id,
+        role: user.role
+      },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { expiresIn: "8h" }
     );
 
-    res.json({ token, role: user.role });
+    res.json({
+      token,
+      role: user.role
+    });
 
   } catch (err) {
     console.error("Login error:", err);
@@ -248,6 +279,83 @@ router.get("/me", auth, async (req, res) => {
   } catch (err) {
     console.error("ME ERROR:", err);
     res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+//-------------------------------Invite Route ----------------------------
+// ACCEPT INVITE (magic link password setup)
+router.post("/accept-invite", async (req, res) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    return res.status(400).json({
+      error: "Token and password are required",
+    });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+
+    // 1️⃣ Find invited user
+    const [[user]] = await connection.query(
+      `
+      SELECT id, invite_expiry, invite_status
+      FROM users
+      WHERE invite_token = ?
+      LIMIT 1
+      `,
+      [token]
+    );
+
+    if (!user) {
+      return res.status(400).json({
+        error: "Invalid invite token",
+      });
+    }
+
+    // 2️⃣ Check expiry
+    if (new Date(user.invite_expiry) < new Date()) {
+      return res.status(400).json({
+        error: "Invite link expired",
+      });
+    }
+
+    if (user.invite_status !== "INVITED") {
+      return res.status(400).json({
+        error: "Invite already used",
+      });
+    }
+
+    // 3️⃣ Hash password
+    const hash = await bcrypt.hash(password, 10);
+
+    // 4️⃣ Activate user
+    await connection.query(
+      `
+      UPDATE users
+      SET password_hash = ?,
+          invite_status = 'ACTIVE',
+          invite_token = NULL,
+          invite_expiry = NULL,
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [hash, user.id]
+    );
+
+    res.json({
+      success: true,
+      message: "Account activated. You can login now.",
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: "Failed to activate account",
+    });
+  } finally {
+    connection.release();
   }
 });
 

@@ -9,9 +9,14 @@ const { v4: uuid } = require("uuid");
 
 
 // GET all contacts (active only)
+// GET contacts (optionally filter by site)
 router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
+
+  const { site_id } = req.query;
+
   try {
-    const [rows] = await pool.query(`
+
+    let sql = `
       SELECT
         c.id,
         c.name,
@@ -25,16 +30,26 @@ router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
       FROM contacts c
       LEFT JOIN companies co ON c.company_id = co.id
       WHERE c.is_verified = 1
-      ORDER BY c.name ASC
-    `);
+    `;
+
+    const params = [];
+
+    if (site_id) {
+      sql += ` AND c.company_id = ? `;
+      params.push(site_id);
+    }
+
+    sql += ` ORDER BY c.name ASC`;
+
+    const [rows] = await pool.query(sql, params);
 
     res.json(rows);
+
   } catch (err) {
     console.error("Error fetching contacts:", err);
     res.status(500).json({ error: "Failed to fetch contacts" });
   }
 });
-
 
 
 // CREATE contact
