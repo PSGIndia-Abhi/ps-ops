@@ -40,6 +40,8 @@ export default function ProtectedRoute({ children, allowedRoles }) {
         return <Navigate to="/technician" replace />;
       case "client":
         return <Navigate to="/client" replace />;
+      case "branch_admin":
+        return <Navigate to="/admin" replace />;
       default:
         return <Navigate to="/login" replace />;
     }

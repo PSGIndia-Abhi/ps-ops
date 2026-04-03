@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import "./jobrow.css";
 import { API_BASE, apiFetch } from "../api";
+import { formatDateTime } from "../utils/date";
 
 export default function JobTimeline({ history = [] }) {
   const [activeImage, setActiveImage] = useState(null);
@@ -144,54 +145,51 @@ export default function JobTimeline({ history = [] }) {
     };
   }, []);
 
-  async function changeVisibility(itemId, newValue) {
-    let previousValue;
-    let shouldPersist = false;
+async function changeVisibility(itemId, newValue) {
+  const current = timeline.find((h) => h.id === itemId);
+  if (!current) return;
 
-    setTimeline((prev) => {
-      const current = prev.find((h) => h.id === itemId);
-      if (!current) return prev;
+  if (current.visible_to_client === newValue) return;
 
-      // if same value -> do nothing
-      if (current.visible_to_client === newValue) {
-        return prev;
-      }
+  const msg = newValue
+    ? "Make this update visible to client?"
+    : "Client may have already seen this. Hide anyway?";
 
-      const msg = newValue
-        ? "Make this update visible to client?"
-        : "Client may have already seen this. Hide anyway?";
+  const ok = window.confirm(msg);
+  if (!ok) return;
 
-      const ok = window.confirm(msg);
-      if (!ok) return prev;
+  const previousValue = current.visible_to_client;
 
-      previousValue = current.visible_to_client;
-      shouldPersist = true;
+  // optimistic update
+  setTimeline((prev) =>
+    prev.map((h) =>
+      h.id === itemId ? { ...h, visible_to_client: newValue } : h
+    )
+  );
 
-      return prev.map((h) =>
-        h.id === itemId ? { ...h, visible_to_client: newValue } : h
-      );
+  try {
+    const res = await apiFetch(`/api/jobs/history/${itemId}/visibility`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ visible_to_client: newValue }),
     });
 
-    if (!shouldPersist) return;
+    if (!res?.ok) throw new Error("Failed");
+  } catch (err) {
+    console.error(err);
 
-    try {
-      const res = await apiFetch(`/api/jobs/history/${itemId}/visibility`, {
-        method: "PATCH",
-        body: JSON.stringify({ visible_to_client: newValue }),
-      });
-
-      if (!res?.ok) {
-        throw new Error("Failed to update visibility");
-      }
-    } catch (err) {
-      console.error("Failed to persist visibility", err);
-      setTimeline((prev) =>
-        prev.map((h) =>
-          h.id === itemId ? { ...h, visible_to_client: previousValue } : h
-        )
-      );
-    }
+    // rollback
+    setTimeline((prev) =>
+      prev.map((h) =>
+        h.id === itemId
+          ? { ...h, visible_to_client: previousValue }
+          : h
+      )
+    );
   }
+}
 
   return (
     <>
@@ -218,10 +216,7 @@ export default function JobTimeline({ history = [] }) {
               <div className="timeline-meta">
                 <strong className="timeline-author">{item.created_by || "System"}</strong>
                 <span className="timeline-date">
-                  {new Date(item.created_at).toLocaleString("en-IN", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
+                  {formatDateTime(item.created_at)}
                 </span>
               </div>
 

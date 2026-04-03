@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import RequesterPopover from "./RequesterPopover";
 import { apiFetch } from "../api";
+import { formatDateTime } from "../utils/date";
 import { roleBasePath } from "../auth/roleBasePath";
 
 export default function JobDetails({ job }) {
@@ -104,10 +105,7 @@ export default function JobDetails({ job }) {
           </div>
           <div className="job-details-value">
             {job.start_date
-              ? new Date(job.start_date).toLocaleString("en-IN", {
-                dateStyle: "medium",
-                timeStyle: "short"
-              })
+              ? formatDateTime(job.start_date)
               : "—"}
           </div>
         </div>
@@ -116,10 +114,7 @@ export default function JobDetails({ job }) {
             <div className="job-details-label">End Date</div>
             <div className="job-details-value">
               {job.dueDate
-                ? new Date(job.dueDate).toLocaleString("en-IN", {
-                  dateStyle: "medium",
-                  timeStyle: "short"
-                })
+                ? formatDateTime(job.dueDate)
                 : "—"}
             </div>
           </div>
@@ -188,16 +183,13 @@ export default function JobDetails({ job }) {
               {latestUpdate.message}
             </div>
             <div className="job-details-timestamp">
-              {new Date(latestUpdate.created_at).toLocaleString("en-IN")}
+              {formatDateTime(latestUpdate.created_at)}
             </div>
           </>
         )}
       </div>
 
       <div className="job-details-actions">
-        <button className="job-action-btn secondary">
-          Share Service Proof
-        </button>
         <button
           onClick={() => navigate(`${base}/jobs/${job.id}`)}
           className="job-action-btn primary"
@@ -208,5 +200,6 @@ export default function JobDetails({ job }) {
     </div>
   );
 }
+
 
 

@@ -3,6 +3,7 @@ import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminTeamManagement from "./pages/AdminTeamManagement";
 import AdminCompanies from "./pages/AdminCompanies";
+import AdminBranches from "./pages/AdminBranches";
 import MapView from "./pages/MapView";
 import JobPage from "./pages/JobPage";
 import BookingsPage from "./pages/BookingsPage";
@@ -20,8 +21,11 @@ import ClientDashboard from "./pages/ClientDashboard";
 import ClientLayout from "./layouts/ClientLayout";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
+import ClientTickets from "./pages/ClientTickets";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
+import AdminTickets from "./pages/AdminTickets";
+
 
 const router = createBrowserRouter([
   {
@@ -40,7 +44,7 @@ const router = createBrowserRouter([
   {
     path: "/admin",
     element: (
-      <ProtectedRoute allowedRoles={["admin"]}>
+      <ProtectedRoute allowedRoles={["admin", "branch_admin"]}>
         <AdminLayout />
       </ProtectedRoute>
     ),
@@ -48,10 +52,12 @@ const router = createBrowserRouter([
       { index: true, element: <AdminDashboard /> },
       { path: "team", element: <AdminTeamManagement /> },
       { path: "companies", element: <AdminCompanies /> },
+      { path: "branches", element: <AdminBranches /> },
       { path: "map", element: <MapView /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "bookings", element: <BookingsPage /> },
-      { path: "sites/:siteId/contacts", element: <SiteContactsPage /> }
+      { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
+      { path: "tickets", element: <AdminTickets /> }
     ],
   },
 
@@ -71,7 +77,8 @@ const router = createBrowserRouter([
     { path: "map", element: <MapView /> },
     { path: "jobs/:jobId", element: <JobPage /> },
     { path: "bookings", element: <BookingsPage /> },
-    { path: "sites/:siteId/contacts", element: <SiteContactsPage /> }
+    { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
+    { path: "tickets", element: <AdminTickets /> }
   ],
 },
 
@@ -104,7 +111,8 @@ const router = createBrowserRouter([
   children: [
   { index: true, element: <ClientDashboard /> },
   { path: "jobs", element: <ClientDashboard /> },
-  { path: "jobs/:jobId", element: <ClientJobUpdates /> }
+  { path: "jobs/:jobId", element: <ClientJobUpdates /> },
+  { path: "tickets", element: <ClientTickets /> }
 ]
 },
 

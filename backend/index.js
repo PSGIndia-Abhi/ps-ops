@@ -10,6 +10,9 @@ const debugRoutes = require('./src/routes/debug.routes');
 const usersRoutes = require("./src/routes/users.routes");
 const contactRoutes = require("./src/routes/contacts.routes");
 const companiesRoutes = require("./src/routes/companies.routes");
+const groupsRoutes = require("./src/routes/groups.routes");
+const sitesRoutes = require("./src/routes/sites.routes");
+const branchesRoutes = require("./src/routes/branches.routes");
 const attachmentsRouter = require("./src/routes/attachments.routes");
 const authroutes = require("./src/routes/auth.routes");
 const teamRoutes = require("./src/routes/teams.routes");
@@ -18,6 +21,7 @@ const bookingsRoutes = require('./src/routes/bookings.routes');
 const visitRoutes = require('./src/routes/visits.routes');
 const clientInviteRoutes = require("./src/routes/clientInvite.routes");
 const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
+const ticketsRoutes = require("./src/routes/tickets.routes");
 
 
 
@@ -44,6 +48,9 @@ app.use('/debug', debugRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/contacts", contactRoutes);
 app.use("/api/companies", companiesRoutes);
+app.use("/api/groups", groupsRoutes);
+app.use("/api/sites", sitesRoutes);
+app.use("/api/branches", branchesRoutes);
 app.use("/api/attachments", attachmentsRouter);
 app.use("/api/auth", authroutes);
 app.use("/api/teams", teamRoutes);
@@ -51,6 +58,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use(express.json());
 app.use("/api/bookings", bookingsRoutes);
 app.use("/api/visits", visitRoutes);
+app.use("/api/tickets", ticketsRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 

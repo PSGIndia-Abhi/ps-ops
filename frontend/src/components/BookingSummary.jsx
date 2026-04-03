@@ -129,7 +129,7 @@ export default function BookingSummary() {
       const code = job?.company_code || booking?.company_code || null;
       const id = job?.company_id || booking?.company_id || null;
       const label = name && code ? `${name} (${code})` : name || code || "Unknown Company";
-      const key = id || code || name || "unknown";
+      const key = code || name || id || "unknown";
       return { id, name, code, label, key };
     };
 

@@ -13,6 +13,7 @@ async function createVisit(jobId, scheduledDate, technicianIds = [], createdBy) 
        WHERE job_id = ?`,
       [jobId]
     );
+    
 
     const visitNumber = rows[0].nextVisit;
     const visitId = uuidv4();

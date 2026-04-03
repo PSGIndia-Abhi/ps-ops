@@ -20,7 +20,7 @@ router.post(
 
       // 1️⃣ check contact exists
       const [[contact]] = await connection.query(
-        `SELECT id, email, phone, name FROM contacts WHERE id = ?`,
+        `SELECT id, email, phone, name, branch_id FROM contacts WHERE id = ?`,
         [contactId]
       );
 
@@ -52,6 +52,11 @@ router.post(
 }
 
       // 4️⃣ create user
+      if (!contact.branch_id) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Contact has no branch assigned" });
+      }
+
       await connection.query(
         `
         INSERT INTO users (
@@ -60,6 +65,7 @@ router.post(
           phone,
           role,
           contact_id,
+          branch_id,
           invite_status,
           invite_token,
           invite_expiry,
@@ -70,6 +76,7 @@ router.post(
           ?,
           ?,
           'client',
+          ?,
           ?,
           'INVITED',
           ?,
@@ -82,6 +89,7 @@ router.post(
           contact.email,
           contact.phone,
           contactId,
+          contact.branch_id,
           inviteToken,
           expiry
         ]
@@ -97,9 +105,7 @@ router.post(
       });
 
     } catch (err) {
-  console.log("❌ INVITE SQL ERROR:");
-  console.log(err);
-  console.log(err.sqlMessage);
+
   await connection.rollback();
   res.status(500).json({ error: "Failed to send invite" });
 } finally {

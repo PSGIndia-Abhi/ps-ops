@@ -51,7 +51,7 @@ router.post("/accept", async (req, res) => {
       return res.status(400).json({ error: "Invite already used" });
 
     const jwtToken = jwt.sign(
-      { userId: user.id, role: user.role },
+      { userId: user.id, role: user.role, branch_id: user.branch_id },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );

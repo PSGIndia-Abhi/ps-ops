@@ -19,9 +19,11 @@ router.post("/login", async (req, res) => {
       SELECT 
         id,
         role,
+        branch_id,
         password_hash,
         invite_status,
-        is_active
+        is_active,
+        contact_id
       FROM users
       WHERE email = ?
       LIMIT 1
@@ -58,7 +60,8 @@ router.post("/login", async (req, res) => {
     const token = jwt.sign(
       {
         id: user.id,
-        role: user.role
+        role: user.role,
+        branch_id: user.branch_id
       },
       process.env.JWT_SECRET,
       { expiresIn: "8h" }
@@ -66,13 +69,18 @@ router.post("/login", async (req, res) => {
 
     res.json({
       token,
-      role: user.role
+      role: user.role,
+      user_id: user.id,
+      branch_id: user.branch_id,
+      contact_id: user.contact_id || null
     });
 
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Login failed" });
   }
+
+  
 });
 
 // --------------------
@@ -131,7 +139,7 @@ await pool.query(
 });
 
 router.post("/signup/verify-otp", async (req, res) => {
-  const { name, phone, email, password, otp } = req.body;
+  const { name, phone, email, password, otp, branch_id } = req.body;
 
   try {
     // 1. check otp
@@ -149,10 +157,24 @@ router.post("/signup/verify-otp", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     // 3. create user (default role technician)
+    let resolvedBranchId = branch_id || null;
+    if (!resolvedBranchId) {
+      const [[headOffice]] = await pool.query(
+        "SELECT id FROM branches WHERE name LIKE '%Head Office%' ORDER BY created_at ASC LIMIT 1"
+      );
+      if (headOffice?.id) {
+        resolvedBranchId = headOffice.id;
+      }
+    }
+
+    if (!resolvedBranchId) {
+      return res.status(400).json({ error: "Branch is required for new users" });
+    }
+
     await pool.query(
-      `INSERT INTO users (name, email, phone, password_hash, role, is_active)
-       VALUES (?, ?, ?, ?, 'technician', 1)`,
-      [name, email, phone, passwordHash]
+      `INSERT INTO users (name, email, phone, password_hash, role, is_active, branch_id)
+       VALUES (?, ?, ?, ?, 'technician', 1, ?)`,
+      [name, email, phone, passwordHash, resolvedBranchId]
     );
 
     // 4. cleanup otp
@@ -264,9 +286,26 @@ router.post("/forgot-password/send-otp", async (req, res) => {
 router.get("/me", auth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, email, role, is_active
-       FROM users
-       WHERE id = ?`,
+      `
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        u.is_active,
+        u.contact_id,
+        c.name AS contact_name,
+        c.company_id AS site_id,
+        s.name AS company_site,
+        co.id AS company_id,
+        co.name AS company_name,
+        co.code AS company_code
+      FROM users u
+      LEFT JOIN contacts c ON c.id = u.contact_id
+      LEFT JOIN sites s ON s.id = c.company_id
+      LEFT JOIN companies co ON co.id = s.company_id
+      WHERE u.id = ?
+      `,
       [req.user.id]
     );
 
@@ -274,7 +313,11 @@ router.get("/me", auth, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json(rows[0]);
+    const user = rows[0];
+    res.json({
+      ...user,
+      company_logo_url: null,
+    });
 
   } catch (err) {
     console.error("ME ERROR:", err);

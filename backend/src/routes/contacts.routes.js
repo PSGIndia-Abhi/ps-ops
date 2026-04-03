@@ -5,16 +5,21 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { v4: uuid } = require("uuid");
+const { resolveHeadOfficeBranchId } = require("../utils/branch");
+const { resolveGroupTable } = require("../utils/groupTable");
 
 
 
 // GET all contacts (active only)
 // GET contacts (optionally filter by site)
-router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
+//add logo object key here later
+router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
 
   const { site_id } = req.query;
 
   try {
+    const groupTable = await resolveGroupTable(pool);
+    const groupRef = "`group_name`"; // Default to old column name for backward compatibility
 
     let sql = `
       SELECT
@@ -26,13 +31,29 @@ router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
         co.name AS company_name,
         co.code AS company_code,
         co.type AS company_type,
-        co.site AS company_site
+        s.name AS company_site,
+        g.name AS group_name
+
       FROM contacts c
-      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN sites s ON c.company_id = s.id
+      LEFT JOIN companies co ON s.company_id = co.id
+      LEFT JOIN ${groupRef} g ON co.group_id = g.id
       WHERE c.is_verified = 1
     `;
 
     const params = [];
+
+    if (["branch_admin", "supervisor"].includes(req.user.role)) {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+      if (!me?.branch_id) {
+        return res.status(403).json({ error: "Branch not assigned" });
+      }
+      sql += ` AND c.branch_id = ? `;
+      params.push(me.branch_id);
+    }
 
     if (site_id) {
       sql += ` AND c.company_id = ? `;
@@ -53,86 +74,138 @@ router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
 
 
 // CREATE contact
-router.post("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
-  const {
-    name,
-    phone,
-    email,
-    company_id,
-    role,
-    is_primary
-  } = req.body;
+router.post(
+  "/",
+  auth,
+  allowRoles("admin", "branch_admin", "supervisor"),
+  async (req, res) => {
+    const {
+      name,
+      phone,
+      email,
+      company_id,
+      role,
+      is_primary
+    } = req.body;
 
-  if (!name || !phone) {
-    return res.status(400).json({ error: "Name and phone are required" });
-  }
-
-  try {
-    const id = uuid();
-
-    await pool.query(
-      `
-      INSERT INTO contacts (
-        id,
-        company_id,
-        name,
-        phone,
-        email,
-        role,
-        is_primary,
-        is_verified
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-      `,
-      [
-        id,
-        company_id || null,
-        name,
-        phone,
-        email || null,
-        role || null,
-        is_primary ? 1 : 0
-      ]
-    );
-
-    let companyMeta = null;
-    if (company_id) {
-      const [[company]] = await pool.query(
-        "SELECT id, name, code, type, site FROM companies WHERE id = ?",
-        [company_id]
-      );
-      if (company) {
-        companyMeta = {
-          id: company.id,
-          name: company.name || null,
-          code: company.code || null,
-          type: company.type || null,
-          site: company.site || null,
-        };
-      }
+    if (!name || !phone) {
+      return res.status(400).json({ error: "Name and phone are required" });
     }
 
-    res.json({
-      success: true,
-      contact: {
-        id,
-        name,
-        phone,
-        email: email || null,
-        company_id: company_id || null,
-        company_code: companyMeta?.code || null,
-        company_name: companyMeta?.name || null,
-        company_type: companyMeta?.type || null,
-        company_site: companyMeta?.site || null,
-        role: role || null,
-        is_primary: is_primary ? 1 : 0,
-      },
-    });
+    try {
+      const id = uuid();
 
-  } catch (err) {
-    console.error("Create contact error:", err);
-    res.status(500).json({ error: "Failed to create contact" });
+      // ✅ Resolve branch_id
+      let resolvedBranchId = null;
+
+      if (req.user.role === "admin") {
+        resolvedBranchId = await resolveHeadOfficeBranchId(pool);
+
+      } else {
+        const [[me]] = await pool.query(
+          "SELECT branch_id FROM users WHERE id = ?",
+          [req.user.id]
+        );
+
+        if (!me?.branch_id) {
+          return res.status(403).json({ error: "User has no branch assigned" });
+        }
+
+        resolvedBranchId = me.branch_id;
+      }
+
+      // ✅ Duplicate check
+      const [existing] = await pool.query(
+        `SELECT id FROM contacts WHERE phone = ? AND (company_id <=> ?)`,
+        [phone, company_id || null]
+      );
+
+      if (existing.length > 0) {
+        return res.status(409).json({
+          error: "Contact already exists for this company",
+        });
+      }
+
+      // ✅ Insert
+      await pool.query(
+        `
+        INSERT INTO contacts (
+          id,
+          company_id,
+          name,
+          phone,
+          email,
+          role,
+          is_primary,
+          is_verified,
+          branch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        `,
+        [
+          id,
+          company_id || null,
+          name,
+          phone,
+          email || null,
+          role || null,
+          is_primary ? 1 : 0,
+          resolvedBranchId
+        ]
+      );
+
+      // ✅ Fetch company meta
+      let companyMeta = null;
+
+      if (company_id) {
+        const [[company]] = await pool.query(
+          `
+          SELECT
+            co.id,
+            co.name,
+            co.code,
+            co.type,
+            g.name AS group_name,
+            co.logo_object_key
+          FROM companies co
+          LEFT JOIN group_name g ON g.id = co.group_id
+          WHERE co.id = ?
+          `,
+          [company_id]
+        );
+
+        if (company) {
+          companyMeta = company;
+        }
+      }
+
+      // ✅ Response
+      res.json({
+        success: true,
+        contact: {
+          id,
+          name,
+          phone,
+          email: email || null,
+          company_id: company_id || null,
+          branch_id: resolvedBranchId,
+          company_name: companyMeta?.name || null,
+          company_code: companyMeta?.code || null,
+          company_type: companyMeta?.type || null,
+          group_name: companyMeta?.group_name || null,
+          company_logo_url: companyMeta?.logo_object_key
+            ? `/api/companies/${companyMeta.id}/logo`
+            : null,
+          role: role || null,
+          is_primary: is_primary ? 1 : 0,
+        },
+      });
+
+    } catch (err) {
+      console.error("Create contact error:", err);
+      res.status(500).json({ error: "Failed to create contact" });
+    }
   }
-});
+);
 
 
 module.exports = router;

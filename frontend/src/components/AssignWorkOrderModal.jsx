@@ -11,6 +11,9 @@ function getLoggedInUser() {
   }
 } 
 
+const loggedUser = getLoggedInUser();
+
+
 export default function AssignWorkOrderModal({
   isOpen,
   jobCount,
@@ -40,7 +43,7 @@ useEffect(() => {
   async function loadUsers() {
     try {
       // ADMIN
-      if (role === "admin") {
+      if (role === "admin" || role === "branch_admin") {
 
         // 1️⃣ load supervisors
         const supRes = await apiFetch("/api/users?role=supervisor");

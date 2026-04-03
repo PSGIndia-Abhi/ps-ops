@@ -6,6 +6,7 @@ import JobTimeline from "../components/JobTimeline";
 import "./jobpage.css";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import { apiFetch } from "../api";
+import { formatDate } from "../utils/date";
 
 
 
@@ -25,6 +26,7 @@ export default function JobPage() {
   const [savingDates, setSavingDates] = useState(false);
   const role = localStorage.getItem("role");
   const canAssign = role !== "technician";
+  const canGenerateRecurring = ["admin", "branch_admin", "supervisor"].includes(role);
   const [openVisitMenu, setOpenVisitMenu] = useState(null);
 
   // Visit scheduling state
@@ -32,6 +34,8 @@ export default function JobPage() {
   const [visitDate, setVisitDate] = useState("");
   const [visitTechs, setVisitTechs] = useState([]);
   const [savingVisit, setSavingVisit] = useState(false);
+  const [generatingRecurring, setGeneratingRecurring] = useState(false);
+  const [recurringMessage, setRecurringMessage] = useState("");
 
   //visit reschedule/change tech state
   const [editVisit, setEditVisit] = useState(null);
@@ -133,11 +137,7 @@ export default function JobPage() {
   }
   const today = new Date().toLocaleDateString("en-CA");
 
-  console.log("userId from token:", userId);
-  console.log("ROLE:", role);
-  console.log("USER ID:", userId);
-  console.log("TODAY:", today);
-  console.log("VISITS:", visits);
+ 
 
 
 
@@ -154,7 +154,7 @@ export default function JobPage() {
       })
       : visits;
 
-  console.log("VISIBLE VISITS:", visibleVisits);
+ 
 
   //visits status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
   async function startVisit(visitId) {
@@ -358,6 +358,28 @@ export default function JobPage() {
     }
   }
 
+  async function handleGenerateRecurring() {
+    if (!job?.booking_id) return;
+    try {
+      setGeneratingRecurring(true);
+      const res = await apiFetch(`/api/bookings/${job.booking_id}/generate-jobs`, {
+        method: "POST",
+        body: JSON.stringify({ days: 30 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to generate recurring jobs");
+      }
+      const createdCount = Number(data?.created || 0);
+      setRecurringMessage(`Generated ${createdCount} job${createdCount === 1 ? "" : "s"} for the next 30 days.`);
+    } catch (err) {
+      console.error(err);
+      setRecurringMessage("Failed to generate recurring jobs.");
+    } finally {
+      setGeneratingRecurring(false);
+    }
+  }
+
   // Handle assignment from AssignWorkOrderModal
   async function handleAssignSingle({ supervisorId, technicianIds, scope, rangeStart, rangeEnd }) {
     try {
@@ -412,14 +434,14 @@ export default function JobPage() {
                   <div className="job-schedule-field">
                     <span>Start date</span>
                     <div className="job-schedule-value">
-                      {new Date(job.start_date).toLocaleDateString()}
+                      {formatDate(job.start_date)}
                     </div>
                   </div>
 
                   <div className="job-schedule-field">
                     <span>End date</span>
                     <div className="job-schedule-value">
-                      {new Date(job.dueDate).toLocaleDateString()}
+                      {formatDate(job.dueDate)}
                     </div>
                   </div>
                 </div>
@@ -428,12 +450,36 @@ export default function JobPage() {
                   <div className="job-schedule-field">
                     <span>Date of service</span>
                     <div className="job-schedule-value">
-                      {new Date(job.start_date).toLocaleDateString()}
+                      {formatDate(job.start_date)}
                     </div>
                   </div>
                 </div>
               )}
             </div>)}
+
+          {canGenerateRecurring && job?.booking_id && (
+            <div className="job-booking-card">
+              <div className="job-booking-title">Booking</div>
+              <div className="job-booking-row">
+                <span>Booking Code</span>
+                <strong>{job.booking_code || job.booking_id}</strong>
+              </div>
+              {job.has_recurring ? (
+                <button
+                  className="job-btn job-btn-primary"
+                  onClick={handleGenerateRecurring}
+                  disabled={generatingRecurring}
+                >
+                  {generatingRecurring ? "Generating..." : "Generate Next 30 Days"}
+                </button>
+              ) : (
+                <div className="job-booking-note">No recurring schedule for this booking.</div>
+              )}
+              {recurringMessage && (
+                <div className="job-booking-message">{recurringMessage}</div>
+              )}
+            </div>
+          )}
 
 
           {role !== "technician" && (
@@ -558,7 +604,7 @@ export default function JobPage() {
 
                 <div className="job-visit-date">
                   {visit.scheduled_date
-                    ? new Date(visit.scheduled_date).toLocaleDateString()
+                    ? formatDate(visit.scheduled_date)
                     : "Unscheduled"}
                 </div>
 
@@ -871,6 +917,7 @@ export default function JobPage() {
 
 
 }
+
 
 
 

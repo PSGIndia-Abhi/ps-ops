@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const auth = require("../middleware/auth.middleware");
 const {
   createVisitController,
   getJobVisits,
@@ -10,6 +11,7 @@ const {
   rescheduleVisit,
   cancelVisit,
   getMyVisits,   
+  getClientUpcomingVisit,
 } = require("../controllers/visits.controller");
 
 router.post("/jobs/:jobId/visits", createVisitController);
@@ -23,6 +25,9 @@ router.patch("/:visitId/approve", approveVisit);
 router.patch("/:visitId/technicians", updateVisitTechnicians);
 router.patch("/:visitId/reschedule", rescheduleVisit);
 router.patch("/:visitId/cancel", cancelVisit);
+
+router.get("/client/upcoming", auth, getClientUpcomingVisit);
+
 
 
 router.get("/my", getMyVisits);

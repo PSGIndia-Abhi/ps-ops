@@ -14,7 +14,7 @@ body:
   technicianIds: [105,106,107]
 }
 */
-router.post("/", auth, allowRoles("admin"), async (req, res) => {
+router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
 
   const { supervisorId, technicianIds } = req.body;
 
@@ -80,7 +80,7 @@ body:
   technicianId: 105
 }
 */
-router.post("/assign", auth, allowRoles("admin"), async (req, res) => {
+router.post("/assign", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
   const { supervisorId, technicianId } = req.body;
 
   if (!supervisorId || !technicianId) {
@@ -118,7 +118,7 @@ router.post("/assign", auth, allowRoles("admin"), async (req, res) => {
 GET /api/teams/overview
 Admin overview: supervisors with technicians + unassigned technicians
 */
-router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
+router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
   try {
     const [supervisors] = await pool.query(
       `SELECT id, name, email FROM users WHERE role = 'supervisor' AND is_active = 1 ORDER BY name ASC`
@@ -162,7 +162,7 @@ router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
 GET /api/teams/monitor
 Supervisor monitoring dashboard data
 */
-router.get("/monitor", auth, allowRoles("supervisor"), async (req, res) => {
+router.get("/monitor", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
   const supervisorId = req.user.id;
 
   try {
@@ -244,7 +244,7 @@ Return technicians under a supervisor
 GET /api/teams/my/team
 Supervisor gets only THEIR technicians
 */
-router.get("/my/team", auth, allowRoles("supervisor"), async (req, res) => {
+router.get("/my/team", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
 
   const supervisorId = req.user.id;
 

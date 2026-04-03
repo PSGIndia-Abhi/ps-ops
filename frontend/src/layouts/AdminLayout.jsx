@@ -10,6 +10,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useMe();
+  const role = localStorage.getItem("role");
 
   /* ---------------- MOBILE DETECTION ---------------- */
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -76,6 +77,11 @@ export default function AdminLayout() {
   }
 
   const isActive = (path) => location.pathname.startsWith(path);
+  const isJobsActive = (location.pathname === "/admin" || location.pathname.startsWith("/admin/jobs"))
+    && !isActionsOpen
+    && mobilePanel === null;
+
+
 
   return (
     <div className="app-shell">
@@ -128,6 +134,14 @@ export default function AdminLayout() {
                 Companies
               </button>
 
+              {role?.trim() === "admin" && (
+                <button
+                  className={`nav-btn ${isActive("/admin/branches") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/branches")}
+                >
+                  Branches
+                </button>)}
+
               <button
                 className={`nav-btn ${isActive("/admin/team") ? "active" : ""}`}
                 onClick={() => navigate("/admin/team")}
@@ -141,6 +155,15 @@ export default function AdminLayout() {
               >
                 Map
               </button>
+
+              <button
+                className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
+                onClick={() => navigate("/admin/tickets")}
+              >
+                Tickets
+              </button>
+
+
             </nav>
           </aside>
         )}
@@ -177,6 +200,16 @@ export default function AdminLayout() {
           >
             Companies
           </button>
+          {role?.trim() === "admin" && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/branches");
+              }}
+            >
+              Branches
+            </button>
+          )}
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -193,6 +226,15 @@ export default function AdminLayout() {
           >
             Map
           </button>
+
+          <button
+            className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
+            onClick={() => navigate("/admin/tickets")}
+          >
+            Tickets
+          </button>
+
+
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -217,10 +259,31 @@ export default function AdminLayout() {
       {/* ---------- MOBILE TAB BAR ---------- */}
       {isMobile && (
         <div className="mobile-tabbar">
-          <button onClick={goJobs}>Jobs</button>
-          <button onClick={openActions} disabled={!hasActions}>Actions</button>
-          <button onClick={openSummary}>Summary</button>
-          <button onClick={openMenu}>Menu</button>
+          <button
+            onClick={goJobs}
+            className={isJobsActive ? "active" : ""}
+          >
+            Jobs
+          </button>
+          <button
+            onClick={openActions}
+            disabled={!hasActions}
+            className={isActionsOpen ? "active" : ""}
+          >
+            Actions
+          </button>
+          <button
+            onClick={openSummary}
+            className={mobilePanel === "summary" ? "active" : ""}
+          >
+            Summary
+          </button>
+          <button
+            onClick={openMenu}
+            className={mobilePanel === "menu" ? "active" : ""}
+          >
+            Menu
+          </button>
         </div>
       )}
     </div>

@@ -10,22 +10,11 @@ export default function JobCard({
 }) {
   const navigate = useNavigate();
 
-  const title =
-    job.title ||
-    job.name ||
-    job.serviceType ||
-    job.service_type ||
-    (Array.isArray(job.subServices) && job.subServices.length
-      ? job.subServices.join(", ")
-      : "") ||
-    "Service Job";
+  const title = job.title;
   const displayStatus = job.display_status || job.status || "";
-  const companyName =
-    job.companyname ||
-    job.company_name ||
-    job.company?.name ||
-    job.company_code ||
-    "";
+  const companyName = job.companyname;
+
+
   const requestedByName =
     job.requestedBy?.name ||
     job.requested_by_name ||
@@ -55,11 +44,15 @@ export default function JobCard({
     ["IN_PROGRESS", "PAUSED"].includes(job.status);
   const isCanceled = job.status === "CANCELED";
   const isLost = displayStatus === "LOST";
-  const canStart = job.status === "NOT_STARTED" && !isCanceled && !isLost;
+const canStart =
+  ["CREATED", "NOT_STARTED"].includes(job.status) &&
+  !isCanceled &&
+  !isLost;
 
   function openJob() {
     navigate(`${basePath}/jobs/${job.id}`);
   }
+ 
 
   return (
     <div className="job-card">
@@ -112,6 +105,7 @@ export default function JobCard({
             Submit for Approval
           </button>
         )}
+        
 
       </div>)}
     </div>

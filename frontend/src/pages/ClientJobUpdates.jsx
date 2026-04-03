@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../api";
+import { formatDate, formatDateTime } from "../utils/date";
 import JobTimeline from "../components/JobTimeline";
 
 export default function ClientJobUpdates() {
@@ -106,13 +107,13 @@ export default function ClientJobUpdates() {
           <div>
             <div style={{ fontSize: 12, color: "#6b7280" }}>Start</div>
             <div style={{ fontWeight: 600 }}>
-              {job?.start_date ? new Date(job.start_date).toDateString() : "Not scheduled"}
+              {job?.start_date ? formatDate(job.start_date) : "Not scheduled"}
             </div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: "#6b7280" }}>End</div>
             <div style={{ fontWeight: 600 }}>
-              {job?.dueDate ? new Date(job.dueDate).toDateString() : "—"}
+              {job?.dueDate ? formatDate(job.dueDate) : "—"}
             </div>
           </div>
           <div>
@@ -222,16 +223,3 @@ export default function ClientJobUpdates() {
   );
 }
 
-function formatDate(value) {
-  if (!value) return "â€”";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "â€”";
-  return parsed.toLocaleDateString();
-}
-
-function formatDateTime(value) {
-  if (!value) return "â€”";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "â€”";
-  return parsed.toLocaleString();
-}

@@ -1,340 +1,465 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
+import { formatDate } from "../utils/date";
 import CreateBookingModal from "../components/CreateBookingModal";
+import "./clientDashboard.css";
+
+
+
+
 
 export default function ClientDashboard() {
-  const navigate = useNavigate();
-
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [user, setUser] = useState(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [showComingSoonModal, setShowComingSoonModal] = useState(false);
+  const [comingSoonMessage, setComingSoonMessage] = useState("");
 
-  const API = import.meta.env.VITE_API_BASE;
+  const [selectedJobs, setSelectedJobs] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [priority, setPriority] = useState("low");
+
+  // Load user info on mount
 
   useEffect(() => {
+    async function loadUser() {
+      try {
+        const res = await apiFetch("/api/auth/me");
+        const data = await res.json();
+        if (!res?.ok) return;
+        setUser(data || null);
+      } catch (err) {
+        console.error("Failed to load user", err);
+      }
+    }
+
+    loadUser();
+  }, []);
+
+  //load jobs, visits, etc as needed using similar useEffect hooks and store in state
+
+  useEffect(() => {
+    async function loadJobs() {
+      try {
+        const res = await apiFetch("/api/jobs");
+        const data = await res.json();
+        setJobs(data);
+      } catch (err) {
+        console.error("Failed to load jobs", err);
+      }
+    }
+
     loadJobs();
   }, []);
 
-  const loadJobs = async () => {
+  function closeModal() {
+    setShowComplaintModal(false);
+    setSubject("");
+    setMessage("");
+    setPriority("low");
+    setSelectedJobs([]);
+    setFiles([]);
+  }
+
+  //load visits 
+
+  const [nextVisit, setNextVisit] = useState(null);
+
+  useEffect(() => {
+    async function loadNextVisit() {
+      try {
+        const res = await apiFetch("/api/visits/client/upcoming");
+        const data = await res.json();
+        setNextVisit(data);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    loadNextVisit();
+  }, []);
+
+  // Compute analytics
+  const [jobs, setJobs] = useState([]);
+  const total = jobs.length;
+
+  const active = jobs.filter(j =>
+    ["IN_PROGRESS", "NOT_STARTED"].includes(j.status)
+  ).length;
+
+  const completed = jobs.filter(j =>
+    j.status === "COMPLETED"
+  ).length;
+
+  const nextJob = jobs
+    .filter(j => j.dueDate)
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
+
+
+  // tickes 
+  const [showComplaintModal, setShowComplaintModal] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleCreateTicket() {
     try {
+      setLoading(true);
 
-      console.log("CALLING API", API);
-      const token = localStorage.getItem("token");
-
-      if (!API) {
-        setError("API URL not configured");
-        return;
-      }
-
-      const res = await fetch(
-        `${API}/api/jobs`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-
-      if (!res.ok) {
-        throw new Error("Failed to load jobs");
-      }
+      const res = await apiFetch("/api/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          job_ids: selectedJobs,
+          subject,
+          message,
+          priority,
+        }),
+      });
 
       const data = await res.json();
-      setJobs(data || []);
+
+      if (!res.ok) throw new Error(data.error);
+
+      alert("Complaint submitted");
+      closeModal();
 
     } catch (err) {
       console.error(err);
-      setError("Unable to load services");
+      alert("Failed to submit complaint");
     } finally {
       setLoading(false);
     }
-  };
-
-  if (loading) {
-    return <div style={{ padding: 30 }}>Loading services...</div>;
   }
 
-  if (error) {
-    return <div style={{ padding: 30, color: "red" }}>{error}</div>;
+  async function handleCreateBooking(form) {
+    const payload = {
+      client: {
+        contact_id: form.contact_id,
+        serviceType: form.serviceType,
+      },
+      subServices: form.subServices,
+      address: form.location || null,
+      start_date: form.start_date,
+      end_date: form.end_date,
+      notes: form.notes,
+      recurrence: form.recurrence || null,
+      supervisor_id: null,
+      technician_id: null,
+    };
+
+    const res = await apiFetch("/api/bookings", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    if (!res?.ok) {
+      const t = await res.text();
+      console.error("Create booking failed:", t);
+      throw new Error("Create booking failed");
+    }
+
+    await res.json();
+    const jobsRes = await apiFetch("/api/jobs");
+    if (jobsRes?.ok) {
+      const data = await jobsRes.json();
+      setJobs(Array.isArray(data) ? data : []);
+    }
+    setIsCreateOpen(false);
   }
+
+  function showComingSoon(label = "Coming soon") {
+    setComingSoonMessage(label);
+    setShowComingSoonModal(true);
+  }
+
+  const displayName =
+    user?.company_name ||
+    jobs?.[0]?.companyname ||
+    user?.contact_name ||
+    user?.name ||
+    "Client";
+
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(word => word[0].toUpperCase())
+    .join("");
+
+
 
   return (
-    <div style={{ padding: 20 }}>
+    <div className="dashboard">
 
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 20,
-          flexWrap: "wrap",
-          gap: 10
-        }}
-      >
+      {/* TOP */}
+      <div className="top">
+
         <div>
-          <h2 style={{ margin: 0 }}>My Services</h2>
-          <p style={{ margin: 0, color: "#6b7280" }}>
-            Track job progress and updates
-          </p>
+          Hi! {user?.name}, Welcome to your Dashboard
+
         </div>
 
-        <button
-          style={{
-            background: "#2563eb",
-            color: "white",
-            border: "none",
-            padding: "10px 18px",
-            borderRadius: 8,
-            cursor: "pointer"
-          }}
-          onClick={() => setIsCreateOpen(true)}
-        >
-          + Request Service
-        </button>
       </div>
 
-      {/* EMPTY STATE */}
-      {jobs.length === 0 && (
-        <div
-          style={{
-            background: "white",
-            padding: 30,
-            borderRadius: 10
-          }}
-        >
-          No services requested yet.
+      <div className="layout">
+
+        {/* LEFT CONTENT */}
+        <div className="left">
+
+          {/* ANALYTICS */}
+          <div className="section">
+            <h3 className="section-title">Overview</h3>
+
+            <div className="analytics">
+              <div className="tile">
+                <h3>{total}</h3>
+                <p>Total Jobs</p>
+              </div>
+
+              <div className="tile">
+                <h3>{active}</h3>
+                <p>Active Jobs</p>
+              </div>
+
+              <div className="tile">
+                <h3>{completed}</h3>
+                <p>Completed</p>
+              </div>
+
+              <div className="tile highlight">
+                <h3>
+                  {nextVisit
+                    ? formatDate(nextVisit.scheduled_date)
+                    : "-"}
+                </h3>
+
+                <p>Next Visit</p>
+
+                <small>{nextVisit?.title || "-"}</small>
+              </div>
+            </div>
+          </div>
+
+          {/* ONGOING */}
+          <div className="section">
+            <h3 className="section-title">Ongoing Jobs</h3>
+
+            {jobs
+              .filter(j => j.status !== "COMPLETED")
+              .slice(0, 3)
+              .map(job => (
+                <div key={job.id} className="job">
+                  <div className="job-top">
+                    <b>{job.title}</b>
+                    <span className="status">{job.status}</span>
+                  </div>
+
+                  <div className="progress">
+                    <div
+                      className="bar"
+                      style={{
+                        width:
+                          job.status === "COMPLETED"
+                            ? "100%"
+                            : job.status === "IN_PROGRESS"
+                              ? "60%"
+                              : "20%",
+                      }}
+                    />
+                  </div>
+
+                  <p className="update">
+                    Latest: {job.latest_comment || "No updates"}
+                  </p>
+                </div>
+              ))}
+          </div>
+
+          {/* RECENT UPDATES */}
+
+
+        </div>
+
+        {/* RIGHT PANEL */}
+        <div className="right">
+
+          <div className="panel">
+
+            {/* CLIENT LOGO */}
+            {user?.company_logo_url ? (
+              <img
+                src={user.company_logo_url}
+                className="client-logo"
+              />
+            ) : (
+              <div className="client-logo-placeholder">{initials}</div>
+            )}
+
+            {/* CLIENT DP */}
+
+            <h3>{displayName}</h3>
+
+            {/* ACTIONS */}
+            <div className="panel-actions">
+              <button className="primary" onClick={() => setIsCreateOpen(true)}>
+                + Request Service
+              </button>
+              <button onClick={() => setShowComplaintModal(true)}>
+                Raise Complaint
+              </button>
+              <button onClick={() => showComingSoon("Feedback is coming soon")}>
+                Give Feedback
+              </button>
+              <button onClick={() => showComingSoon("Certificates are coming soon")}>
+                Download Certificates
+              </button>
+              <button className="msds" onClick={() => showComingSoon("MSDS sheet is coming soon")}>
+                MSDS Sheet
+              </button>
+            </div>
+
+
+            {/* INVOICE */}
+            <div className="invoice">
+              <h4>Invoices</h4>
+              <p>Comming Soon</p>
+
+            </div>
+            <button onClick={() => showComingSoon("Invoices are coming soon")}>
+              View All Invoices (coming soon)
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* COMPLAINT MODAL */}
+      {showComplaintModal && (
+        <div className="modal">
+          <div className="modal-content">
+            <h3>Raise Complaint</h3>
+
+            {/* SUBJECT */}
+            <input
+              placeholder="Subject"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+            />
+
+            {/* MESSAGE */}
+            <textarea
+              placeholder="Describe the issue"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+
+            {/* PRIORITY */}
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+
+            {/* JOB SELECTION */}
+            <div style={{ marginTop: 10 }}>
+              <b>Select Jobs (optional)</b>
+
+              {jobs.length === 0 && <div>No jobs available</div>}
+
+              <div className="job-list">
+                {jobs.map((job) => {
+                  const isSelected = selectedJobs.includes(job.id);
+                  return (
+                    <button
+                      key={job.id}
+                      type="button"
+                      className={`job-item ${isSelected ? "selected" : ""}`}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedJobs(prev => prev.filter(id => id !== job.id));
+                        } else {
+                          setSelectedJobs(prev => [...prev, job.id]);
+                        }
+                      }}
+                    >
+                      <span className="job-title">{job.title || job.id}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* FILE UPLOAD */}
+            <div style={{ marginTop: 10 }}>
+              <b>Attachments</b>
+
+              <input
+                type="file"
+                multiple
+                onChange={(e) => setFiles([...e.target.files])}
+              />
+
+              {files.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {files.map((file, i) => (
+                    <div key={i}>{file.name}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ACTIONS */}
+            <div className="modal-actions">
+              <button onClick={closeModal}>Cancel</button>
+
+              <button
+                className="primary"
+                onClick={handleCreateTicket}
+                disabled={loading}
+              >
+                {loading ? "Submitting..." : "Submit"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* JOBS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))",
-          gap: 20
-        }}
-      >
-        {jobs.map(job => {
-
-          const progress = getProgress(job.status);
-
-          
-
-          return (
-            <div
-              key={job.id}
-              style={{
-                background: "white",
-                padding: 20,
-                borderRadius: 12,
-                boxShadow: "0 4px 10px rgba(0,0,0,0.05)"
-              }}
-            >
-
-               {/* TITLE */}
-               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                 <div>
-                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-                     {job.title || job.sub_service || "Service Job"}
-                   </h3>
-                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                     Booking #{job.booking_id || "—"}
-                   </div>
-                 </div>
-
-                 <span
-                   style={{
-                     background: "#e0f2fe",
-                     color: "#0369a1",
-                    padding: "4px 10px",
-                    borderRadius: 20,
-                    fontSize: 12
-                  }}
-                >
-                  {job.status}
-                </span>
-              </div>
-
-              {/* PROGRESS */}
-              <div style={{ marginTop: 15 }}>
-                <div
-                  style={{
-                    height: 8,
-                    background: "#e5e7eb",
-                    borderRadius: 10
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${progress}%`,
-                      height: "100%",
-                      background: "#22c55e",
-                      borderRadius: 10
-                    }}
-                  />
-                </div>
-
-                <div style={{ fontSize: 12, marginTop: 4 }}>
-                  {progress}% completed
-                </div>
-              </div>
-
-              {/* META */}
-              <div style={{ marginTop: 15, fontSize: 14 }}>
-                <div>
-                  <b>Start:</b>{" "}
-                  {job.start_date
-                    ? new Date(job.start_date).toDateString()
-                    : "Not started"}
-                </div>
-
-                <div>
-                  <b>Next Visit:</b>{" "}
-                  {job.next_visit
-                    ? new Date(job.next_visit).toDateString()
-                    : "Not scheduled"}
-                </div>
-              </div>
-
-              {/* SUPERVISOR */}
-              <div
-                style={{
-                  marginTop: 15,
-                  padding: 10,
-                  background: "#f9fafb",
-                  borderRadius: 8,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center"
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    Supervisor
-                  </div>
-                  <div>
-                    {job.supervisor?.name || job.supervisor_name || "Pending Assignment"}
-                  </div>
-                </div>
-
-                {(job.supervisor?.phone || job.supervisor_phone) && (
-                  <a
-                    href={`tel:${job.supervisor?.phone || job.supervisor_phone}`}
-                    style={{
-                      background: "#16a34a",
-                      color: "white",
-                      padding: "6px 12px",
-                      borderRadius: 6,
-                      textDecoration: "none",
-                      fontSize: 13
-                    }}
-                  >
-                    Call
-                  </a>
-                )}
-              </div>
-
-              {/* COMMENT */}
-              <div style={{ marginTop: 15 }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Latest Update
-                </div>
-                <div>
-                  {job.latest_comment || "No updates yet"}
-                </div>
-              </div>
-
-              {/* ACTIONS */}
-              <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/client/jobs/${job.id}`)}
-                  style={{
-                    background: "#111827",
-                    color: "white",
-                    border: "none",
-                    padding: "8px 14px",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    fontSize: 13
-                  }}
-                >
-                  View Updates
-                </button>
-              </div>
-
+      {showComingSoonModal && (
+        <div className="modal">
+          <div className="modal-content">
+            <h3>Coming Soon</h3>
+            <p>{comingSoonMessage}</p>
+            <div className="modal-actions">
+              <button onClick={() => setShowComingSoonModal(false)}>OK</button>
             </div>
-          );
+          </div>
+        </div>
+      )}
 
-        })}
-      </div>
-        {
-            isCreateOpen && (
-              <CreateBookingModal
-                isOpen={isCreateOpen}
-                onClose={() => setIsCreateOpen(false)}
-                onCreate={handleCreateBooking}
-                supervisors={[]}
-                technicians={[]}
-              />
-            )
-          }
+      <CreateBookingModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreate={handleCreateBooking}
+        supervisors={[]}
+        technicians={[]}
+        clientContact={
+          user?.contact_id
+            ? {
+                id: user.contact_id,
+                name: user.contact_name || user.name,
+                company_id: user.site_id || null,
+                company_name: user.company_name || null,
+                company_site: user.company_site || null,
+              }
+            : null
+        }
+      />
+
     </div>
   );
 }
 
-function getProgress(status) {
-  switch (status) {
-    case "CREATED":
-      return 10;
-    case "ASSIGNED":
-      return 25;
-    case "IN_PROGRESS":
-      return 60;
-    case "VISIT_DONE":
-      return 80;
-    case "COMPLETED":
-      return 100;
-    default:
-      return 5;
-  }
-}
-
-async function handleCreateBooking(form) {
-
-  const payload = {
-    client: {
-      contact_id: localStorage.getItem("contactId"),
-      serviceType: form.serviceType,
-    },
-    subServices: form.subServices,
-    address: form.location || null,
-    start_date: form.start_date,
-    end_date: form.end_date,
-    notes: form.notes,
-    recurrence: form.recurrence || null
-  };
-
-  const token = localStorage.getItem("token");
-
-  const res = await fetch(`${API}/api/bookings`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    alert("Booking failed");
-    return;
-  }
-
-  await res.json();
-
-  setIsCreateOpen(false);
-  loadJobs();
-}

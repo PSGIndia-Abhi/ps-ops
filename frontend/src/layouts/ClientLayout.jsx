@@ -8,6 +8,7 @@ export default function ClientLayout() {
   const location = useLocation();
 
   const isActive = (path) => location.pathname.startsWith(path);
+  const isDashboardActive = location.pathname === "/client" || location.pathname === "/client/";
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
@@ -45,28 +46,53 @@ export default function ClientLayout() {
 
         {/* SIDEBAR */}
         {!isMobile && (
-          <aside className="sidebar">
+<aside className="sidebar">
 
-            <nav className="nav">
+  <nav className="nav">
+    <button
+      className={`nav-btn ${isActive("/client") ? "active" : ""}`}
+      onClick={() => navigate("/client")}
+    >
+      Dashboard
+    </button>
 
-              <button
-                className={`nav-btn ${isActive("/client") ? "active" : ""}`}
-                onClick={() => navigate("/client")}
-              >
-                Dashboard
-              </button>
+    <button
+      className={`nav-btn ${isActive("/client/jobs") ? "active" : ""}`}
+      onClick={() => navigate("/client/jobs")}
+    >
+      My Jobs
+    </button>
 
-              <button
-                className={`nav-btn ${isActive("/client/jobs") ? "active" : ""}`}
-                onClick={() => navigate("/client/jobs")}
-              >
-                My Jobs
-              </button>
+    <button
+      className={`nav-btn ${isActive("/client/tickets") ? "active" : ""}`}
+      onClick={() => navigate("/client/tickets")}
+    >
+      Tickets
+    </button>
+  </nav>
 
-            </nav>
+  {/* SPOC BLOCK */}
+  <div className="sidebar-spoc">
+    <img src="/spoc.jpg" alt="spoc" />
 
-          </aside>
+    <div className="spoc-info">
+      <h4>Account Manager</h4>
+      <div className="name">Ramesh Kumar</div>
+      <div className="role">Account Manager</div>
+    </div>
+
+    <div className="spoc-actions">
+      <button>Call</button>
+      <button>Email</button>
+    </div>
+  </div>
+
+</aside>
+
+          
         )}
+
+        
 
         {/* MAIN */}
         <main className="main-content">
@@ -78,8 +104,24 @@ export default function ClientLayout() {
       {/* MOBILE TAB BAR */}
       {isMobile && (
         <div className="mobile-tabbar">
-          <button onClick={() => navigate("/client")}>Dashboard</button>
-          <button onClick={() => navigate("/client/jobs")}>Jobs</button>
+          <button
+            onClick={() => navigate("/client")}
+            className={isDashboardActive ? "active" : ""}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => navigate("/client/jobs")}
+            className={isActive("/client/jobs") ? "active" : ""}
+          >
+            Jobs
+          </button>
+          <button
+            onClick={() => navigate("/client/tickets")}
+            className={isActive("/client/tickets") ? "active" : ""}
+          >
+            Tickets
+          </button>
           <button onClick={logout}>Logout</button>
         </div>
       )}

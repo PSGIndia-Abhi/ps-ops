@@ -1,10 +1,18 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { apiFetch } from "../api";
 import CreateContactModal from "./CreateContactModal";
 import AssignWorkOrderModal from "./AssignWorkOrderModal";
 
 
-export default function CreateBookingModal({ isOpen, onClose, onCreate, supervisors, technicians }) {
+
+export default function CreateBookingModal({
+  isOpen,
+  onClose,
+  onCreate,
+  supervisors,
+  technicians,
+  clientContact,
+}) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -33,6 +41,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     recurrenceDayOfMonth: "",
     recurrenceWeeksOfMonth: [],
     recurrenceMonthWeekdays: [],
+    recurrenceEndDate: "",
   });
   const defaultSchedule = { scheduleType: "single", start_date: "", end_date: "" };
   const [serviceSchedules, setServiceSchedules] = useState({});
@@ -41,9 +50,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [companies, setCompanies] = useState([]);
   const [contactSearch, setContactSearch] = useState("");
+  const [useCompanyAddress, setUseCompanyAddress] = useState(false);
 
   useEffect(() => {
     async function loadContacts() {
+      if (role === "client") {
+        if (clientContact?.id) {
+          setContacts([clientContact]);
+        }
+        setLoadingContacts(false);
+        return;
+      }
       try {
         const res = await apiFetch(`/api/contacts`);
         if (!res?.ok) throw new Error("Failed to load contacts");
@@ -58,8 +75,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
     async function loadCompanies() {
       try {
-        const res = await apiFetch(`/api/companies`);
-        if (!res?.ok) throw new Error("Failed to load companies");
+        const res = await apiFetch(`/api/sites`);
+        if (!res?.ok) throw new Error("Failed to load sites");
         const data = await res.json();
         setCompanies(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -69,13 +86,55 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
     loadContacts();
     loadCompanies();
-  }, []);
+  }, [role, clientContact]);
 
   useEffect(() => {
     if (role === "client" && loggedInContactId) {
       setForm(prev => ({ ...prev, contactId: loggedInContactId }));
     }
   }, [role, loggedInContactId]);
+
+  const selectedContact = useMemo(
+    () => contacts.find(c => String(c.id) === String(form.contactId)),
+    [contacts, form.contactId]
+  );
+
+  const selectedCompany = useMemo(() => {
+    if (!selectedContact?.company_id) return null;
+    return companies.find(c => String(c.id) === String(selectedContact.company_id)) || null;
+  }, [companies, selectedContact]);
+
+  const companyAddress = useMemo(() => {
+    if (!selectedCompany) return "";
+    const parts = [selectedCompany.address, selectedCompany.city, selectedCompany.state]
+      .map(part => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean);
+    return parts.join(", ");
+  }, [selectedCompany]);
+
+  useEffect(() => {
+    if (!selectedContact?.company_id) {
+      if (useCompanyAddress) {
+        setUseCompanyAddress(false);
+      }
+      return;
+    }
+
+    if (useCompanyAddress && companyAddress) {
+      setForm(prev => ({ ...prev, location: companyAddress }));
+    }
+  }, [selectedContact?.company_id, companyAddress, useCompanyAddress]);
+
+  useEffect(() => {
+    if (role !== "client") return;
+    if (!selectedContact?.company_id) return;
+    if (!companyAddress) return;
+    setUseCompanyAddress(true);
+    setForm(prev => ({
+      ...prev,
+      location: prev.location?.trim() ? prev.location : companyAddress,
+    }));
+  }, [role, selectedContact?.company_id, companyAddress]);
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
@@ -95,6 +154,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   }, [contacts, contactSearch]);
 
   async function reloadContacts() {
+    if (role === "client") return;
     try {
       const res = await apiFetch(`/api/contacts`);
       if (!res?.ok) throw new Error("Failed to load contacts");
@@ -159,9 +219,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     setServiceSchedules(prev => {
       const current = prev[service] || defaultSchedule;
       const next = { ...current, ...patch };
-      if (next.scheduleType === "single") {
-        next.end_date = "";
-      }
+      next.scheduleType = "single";
+      next.end_date = "";
       return { ...prev, [service]: next };
     });
   }
@@ -271,6 +330,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         alert("Start date is required for recurring bookings");
         return;
       }
+      if (!form.recurrenceEndDate) {
+        alert("End date is required for recurring bookings");
+        return;
+      }
+      const recurrenceEndDate = form.recurrenceEndDate;
+      const recurrenceEndObj = new Date(`${recurrenceEndDate}T00:00:00`);
+      const recurrenceStartObj = new Date(`${startDateValue}T00:00:00`);
+      if (recurrenceEndObj < recurrenceStartObj) {
+        alert("Recurring end date cannot be before start date");
+        return;
+      }
 
       let frequency = "WEEKLY";
       let intervalValue = 1;
@@ -344,6 +414,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         day_of_month: dayOfMonth,
         day_of_week: dayOfWeek,
         week_of_month: weekOfMonth,
+        start_date: startDateValue,
+        end_date: recurrenceEndDate,
       };
     }
 
@@ -351,7 +423,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
     try {
       await onCreate({
-        contact_id: form.contactId,
+        contact_id: form.contactId ,
         serviceType: form.serviceType,
         subServices: form.subServices,
         start_date: startDateValue,
@@ -483,6 +555,25 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     || form.recurrenceType === "CUSTOM_MONTHS";
   const recurrenceIsMonthly = form.recurrenceType === "CUSTOM_MONTHS";
 
+const contactDropdownRef = useRef(null);
+
+useEffect(() => {
+  function handleClickOutside(e) {
+    if (
+      contactDropdownRef.current &&
+      !contactDropdownRef.current.contains(e.target)
+    ) {
+      setShowContactResults(false);
+    }
+  }
+
+  document.addEventListener("mousedown", handleClickOutside);
+
+  return () => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  };
+}, []);
+
   /* ---------- RENDER ---------- */
 
   return (
@@ -501,7 +592,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
           <div style={section}>
             <h4>Requested By</h4>
 
-            <div style={{ position: "relative" }}>
+            <div ref={contactDropdownRef} style={{ position: "relative" }}>
 
               <input
                 type="text"
@@ -591,6 +682,9 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
                     return [newContact, ...prev];
                   });
                   setForm(prev => ({ ...prev, contactId: newContact.id }));
+                  const phoneLabel = newContact.phone || newContact.contact_phone || "";
+                  setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
+                  setShowContactResults(false);
                 } else {
                   reloadContacts();
                 }
@@ -613,6 +707,23 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
               placeholder="Enter service address or location"
               style={input}
             />
+            {selectedContact?.company_id && (
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", fontSize: "13px" }}>
+                <input
+                  type="checkbox"
+                  checked={useCompanyAddress}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUseCompanyAddress(checked);
+                    if (checked && companyAddress) {
+                      setForm(prev => ({ ...prev, location: companyAddress }));
+                    }
+                  }}
+                  disabled={!companyAddress}
+                />
+                Use company address
+              </label>
+            )}
           </div>
 
           {/* SERVICE TYPE */}
@@ -665,66 +776,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
                   return (
                     <div key={service} style={serviceScheduleCard}>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>{service}</div>
-                      <div style={{ marginBottom: "12px" }}>
+                      <div>
                         <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                          Schedule Type
+                          First Service Visit Date
                         </div>
-                        <div style={pillRow}>
-                          {[
-                            { key: "single", label: "Single Day" },
-                            { key: "range", label: "Multi-day" },
-                          ].map((option) => (
-                            <div
-                              key={option.key}
-                              style={pill(schedule.scheduleType === option.key)}
-                              onClick={() => updateServiceSchedule(service, { scheduleType: option.key })}
-                            >
-                              {option.label}
-                            </div>
-                          ))}
-                        </div>
+                        <input
+                          type="date"
+                          value={schedule.start_date || ""}
+                          onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
+                          style={input}
+                        />
                       </div>
-
-                      {schedule.scheduleType === "single" ? (
-                        <div>
-                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                            Date of Service
-                          </div>
-                          <input
-                            type="date"
-                            value={schedule.start_date || ""}
-                            onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
-                            style={input}
-                          />
-                        </div>
-                      ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                          <div>
-                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                              Start Date
-                            </div>
-                            <input
-                              type="date"
-                              value={schedule.start_date || ""}
-                              onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
-                              max={schedule.end_date || undefined}
-                              style={input}
-                            />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                              End Date
-                            </div>
-                            <input
-                              type="date"
-                              value={schedule.end_date || ""}
-                              onChange={e => updateServiceSchedule(service, { end_date: e.target.value })}
-                              min={schedule.start_date || undefined}
-                              style={input}
-                            />
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -732,38 +794,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
             )}
           </div>
 
-       {/* Assignment */}
-{role !== "client" && (
-  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-    <button
-      type="button"
-      className="secondary"
-      onClick={() => setShowAssignModal(true)}
-    >
-      Assign Team
-    </button>
-
-    {(assignedSupervisorId || assignedTechnicianId) && (
-      <div
-        style={{
-          marginTop: 8,
-          padding: "8px 10px",
-          borderRadius: 8,
-          background: "#eef2ff",
-          border: "1px solid #c7d2fe",
-          fontSize: 13,
-          color: "#1e3a8a",
-        }}
-      >
-        <strong>Assigned:</strong>{" "}
-        {assignedSupervisorName || "No supervisor"}
-        {"  •  "}
-        {assignedTechnicianName || "No technician"}
-      </div>
-    )}
-  </div>
-)}
-          {/* RECURRENCE */}
+                    {/* RECURRENCE */}
           <div style={section}>
             <h4>Recurring</h4>
             <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px" }}>
@@ -777,6 +808,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
             {recurrenceActive && (
               <div style={{ marginTop: "12px" }}>
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                    Recurrence End Date
+                  </div>
+                  <input
+                    type="date"
+                    value={form.recurrenceEndDate}
+                    onChange={(e) => update("recurrenceEndDate", e.target.value)}
+                    style={input}
+                  />
+                </div>
                 <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
                   Frequency
                 </div>
@@ -933,6 +975,39 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
               </div>
             )}
           </div>
+
+       {/* Assignment */}
+{role !== "client" && (
+  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+    <button
+      type="button"
+      className="secondary"
+      onClick={() => setShowAssignModal(true)}
+    >
+      Assign Team
+    </button>
+
+    {(assignedSupervisorId || assignedTechnicianId) && (
+      <div
+        style={{
+          marginTop: 8,
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: "#eef2ff",
+          border: "1px solid #c7d2fe",
+          fontSize: 13,
+          color: "#1e3a8a",
+        }}
+      >
+        <strong>Assigned:</strong>{" "}
+        {assignedSupervisorName || "No supervisor"}
+        {"  •  "}
+        {assignedTechnicianName || "No technician"}
+      </div>
+    )}
+  </div>
+)}
+
 
           {/* NOTES */}
           <div style={section}>

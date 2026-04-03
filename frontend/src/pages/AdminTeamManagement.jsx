@@ -2,6 +2,54 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api";
 import "./AdminTeamManagement.css";
 
+const branchEndpoints = ["/api/branches", "/branches"];
+
+async function safeJson(res) {
+  if (!res) return null;
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchJsonWithFallback(endpoints) {
+  let lastError = "Request failed";
+  for (const endpoint of endpoints) {
+    const res = await apiFetch(endpoint);
+    if (res?.ok) {
+      return await safeJson(res);
+    }
+    const data = await safeJson(res);
+    lastError = data?.error || lastError;
+    if (res?.status === 404 || res?.status === 405) {
+      continue;
+    }
+    break;
+  }
+  throw new Error(lastError);
+}
+
+function normalizeBranches(data) {
+  if (!Array.isArray(data)) return [];
+  if (data.length === 0) return [];
+  if (data[0]?.admins) {
+    return data.map((branch) => ({
+      id: branch.id,
+      name: branch.name,
+    }));
+  }
+
+  const map = new Map();
+  data.forEach((row) => {
+    if (!row?.id) return;
+    if (!map.has(row.id)) {
+      map.set(row.id, { id: row.id, name: row.name });
+    }
+  });
+  return Array.from(map.values());
+}
+
 export default function AdminTeamManagement() {
   const [supervisors, setSupervisors] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
@@ -10,6 +58,15 @@ export default function AdminTeamManagement() {
   const [activeSupervisorId, setActiveSupervisorId] = useState(null);
   const [selectedTechs, setSelectedTechs] = useState([]);
   const [error, setError] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [loadingBranches, setLoadingBranches] = useState(true);
+  const [promoteUserId, setPromoteUserId] = useState("");
+  const [promoteRole, setPromoteRole] = useState("supervisor");
+  const [promoteBranchId, setPromoteBranchId] = useState("");
+  const [promoting, setPromoting] = useState(false);
+  const [assignTechId, setAssignTechId] = useState("");
+  const [assignBranchId, setAssignBranchId] = useState("");
+  const [assigning, setAssigning] = useState(false);
 
   const loadOverview = async () => {
     try {
@@ -31,6 +88,24 @@ export default function AdminTeamManagement() {
     loadOverview();
   }, []);
 
+  useEffect(() => {
+    async function loadBranches() {
+      try {
+        setLoadingBranches(true);
+        const data = await fetchJsonWithFallback(branchEndpoints);
+        setBranches(normalizeBranches(data));
+      } catch (err) {
+        console.error(err);
+        setBranches([]);
+        setError(err.message || "Failed to load branches");
+      } finally {
+        setLoadingBranches(false);
+      }
+    }
+
+    loadBranches();
+  }, []);
+
   const technicianIndex = useMemo(() => {
     const map = new Map();
     supervisors.forEach((sup) => {
@@ -49,6 +124,21 @@ export default function AdminTeamManagement() {
     });
     return Array.from(map.values());
   }, [supervisors, unassigned]);
+
+  const promotableUsers = useMemo(() => {
+    const map = new Map();
+    supervisors.forEach((sup) => {
+      if (!sup?.id) return;
+      map.set(Number(sup.id), { id: sup.id, name: sup.name, role: "supervisor" });
+    });
+    allTechnicians.forEach((tech) => {
+      if (!tech?.id) return;
+      if (!map.has(Number(tech.id))) {
+        map.set(Number(tech.id), { id: tech.id, name: tech.name, role: "technician" });
+      }
+    });
+    return Array.from(map.values());
+  }, [supervisors, allTechnicians]);
 
   const activeSupervisor = supervisors.find(s => Number(s.id) === Number(activeSupervisorId));
 
@@ -91,12 +181,82 @@ export default function AdminTeamManagement() {
     }
   }
 
-  if (loading) {
-    return <div className="team-page">Loading team overview...</div>;
+  async function handlePromoteUser() {
+    if (!promoteUserId) {
+      setError("Select a user to promote.");
+      return;
+    }
+    if (promoteRole === "branch_admin" && !promoteBranchId) {
+      setError("Select a branch for branch admin.");
+      return;
+    }
+
+    try {
+      setPromoting(true);
+      const res = await apiFetch(`/api/users/${promoteUserId}/role`, {
+        method: "POST",
+        body: JSON.stringify({
+          role: promoteRole,
+          branch_id: promoteBranchId || undefined,
+        }),
+      });
+      if (!res?.ok) {
+        const data = await safeJson(res);
+        throw new Error(data?.error || "Failed to update role");
+      }
+      setPromoteUserId("");
+      setPromoteRole("supervisor");
+      setPromoteBranchId("");
+      setError(null);
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to update role");
+    } finally {
+      setPromoting(false);
+    }
+
+    const confirmed = window.confirm(
+  `Are you sure you want to change this user's role to ${promoteRole}?`
+);
+
+if (!confirmed) return;
   }
 
-  if (error) {
-    return <div className="team-page">Error: {error}</div>;
+  async function handleAssignTechBranch() {
+    if (!assignTechId) {
+      setError("Select a technician.");
+      return;
+    }
+    if (!assignBranchId) {
+      setError("Select a branch.");
+      return;
+    }
+
+    try {
+      setAssigning(true);
+      const res = await apiFetch(`/api/users/${assignTechId}/branch`, {
+        method: "POST",
+        body: JSON.stringify({ branch_id: assignBranchId }),
+      });
+      if (!res?.ok) {
+        const data = await safeJson(res);
+        throw new Error(data?.error || "Failed to assign branch");
+      }
+      setAssignTechId("");
+      setAssignBranchId("");
+      setError(null);
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to assign branch");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  if (loading) {
+    return <div className="team-page">Loading team overview...</div>;
   }
 
   return (
@@ -105,6 +265,120 @@ export default function AdminTeamManagement() {
         <div>
           <h2>Team Management</h2>
           <p>Select a supervisor and add technicians under them.</p>
+        </div>
+      </div>
+
+      {error && <div className="team-error">Error: {error}</div>}
+
+      <div className="team-card">
+        <div className="team-card-header">
+          <div>
+            <div className="team-card-title">Promote User</div>
+            <div className="team-card-subtitle">
+              Upgrade technicians to supervisor or branch admin.
+            </div>
+          </div>
+        </div>
+
+        <div className="team-form">
+          <label className="team-field">
+            <span>User *</span>
+            <select
+              value={promoteUserId}
+              onChange={(e) => setPromoteUserId(e.target.value)}
+            >
+              <option value="">Select user</option>
+              {promotableUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name || user.id} ({user.role})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="team-field">
+            <span>New Role *</span>
+            <select
+              value={promoteRole}
+              onChange={(e) => setPromoteRole(e.target.value)}
+            >
+              <option value="supervisor">Supervisor</option>
+              <option value="technician">Technician</option>
+              <option value="branch_admin">Branch Admin</option>
+            </select>
+          </label>
+
+          <label className="team-field">
+            <span>Branch {promoteRole === "branch_admin" ? "*" : "(optional)"}</span>
+            <select
+              value={promoteBranchId}
+              onChange={(e) => setPromoteBranchId(e.target.value)}
+              disabled={loadingBranches}
+            >
+              <option value="">Select branch</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name || branch.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="team-form-actions">
+          <button onClick={handlePromoteUser} disabled={promoting}>
+            {promoting ? "Updating..." : "Update Role"}
+          </button>
+        </div>
+      </div>
+
+      <div className="team-card">
+        <div className="team-card-header">
+          <div>
+            <div className="team-card-title">Assign Technician to Branch</div>
+            <div className="team-card-subtitle">
+              Set the branch for a technician.
+            </div>
+          </div>
+        </div>
+
+        <div className="team-form">
+          <label className="team-field">
+            <span>Technician *</span>
+            <select
+              value={assignTechId}
+              onChange={(e) => setAssignTechId(e.target.value)}
+            >
+              <option value="">Select technician</option>
+              {allTechnicians.map((tech) => (
+                <option key={tech.id} value={tech.id}>
+                  {tech.name || tech.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="team-field">
+            <span>Branch *</span>
+            <select
+              value={assignBranchId}
+              onChange={(e) => setAssignBranchId(e.target.value)}
+              disabled={loadingBranches}
+            >
+              <option value="">Select branch</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name || branch.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="team-form-actions">
+          <button onClick={handleAssignTechBranch} disabled={assigning}>
+            {assigning ? "Assigning..." : "Assign Branch"}
+          </button>
         </div>
       </div>
 

@@ -8,7 +8,7 @@ router.get("/summary", auth, async (req, res) => {
     let where = "WHERE 1=1";
     let params = [];
 
-    console.log("User role for summary:", req.user.role);
+    
 
     if (req.user.role === "supervisor") {
       where += " AND j.supervisor_id = ?";
@@ -18,6 +18,20 @@ router.get("/summary", auth, async (req, res) => {
     if (req.user.role === "technician") {
       where += " AND JSON_CONTAINS(j.team, JSON_QUOTE(?))";
       params.push(String(req.user.id));
+    }
+
+    let branchId = null;
+    if (req.user.role !== "admin") {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+      if (!me?.branch_id) {
+        return res.status(403).json({ error: "Branch not assigned" });
+      }
+      branchId = me.branch_id;
+      where += " AND j.branch_id = ?";
+      params.push(branchId);
     }
 
     const [rows] = await pool.query(`
@@ -49,8 +63,21 @@ router.get("/summary", auth, async (req, res) => {
 
     const s = rows[0];
 
+    let bookingCountQuery = `SELECT COUNT(*) AS total_bookings FROM bookings`;
+    const bookingParams = [];
+    if (branchId) {
+      bookingCountQuery = `
+        SELECT COUNT(DISTINCT b.id) AS total_bookings
+        FROM bookings b
+        JOIN jobs j ON j.booking_id = b.id
+        WHERE j.branch_id = ?
+      `;
+      bookingParams.push(branchId);
+    }
+
     const [[bookingCount]] = await pool.query(
-      `SELECT COUNT(*) AS total_bookings FROM bookings`
+      bookingCountQuery,
+      bookingParams
     );
 
     res.json({

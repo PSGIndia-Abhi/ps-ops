@@ -1,4 +1,5 @@
 import "./JobRow.css";
+import { formatDate } from "../utils/date";
 
 const isCorporateJob = (code) => /^[A-Z]{2,}[\s-]\d+/.test(code);
 const getInitials = (code) => code.split(/[\s-]/)[0];
@@ -40,19 +41,11 @@ export default function JobRow({
 
   function formatDueDate(date) {
     if (!date) return "Unscheduled";
-
     const d = new Date(date);
-
-    // catches Invalid Date and epoch
-    if (isNaN(d.getTime()) || d.getFullYear() === 1970) {
+    if (Number.isNaN(d.getTime()) || d.getFullYear() === 1970) {
       return "Unscheduled";
     }
-
-    return d.toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: "numeric"
-    });
+    return formatDate(d);
   }
 
   const scheduleDate = job.dueDate || job.start_date;
@@ -79,11 +72,12 @@ export default function JobRow({
         </div>
 
         <div className="job-identity-text">
-          <div className="job-code">{job.site}</div>
+          <div className="job-code">
+            {job.site || job.companyname || job.requestedBy?.name || "—"}
+          </div>
+
           <div className="job-customer-type">
-            {isCorporateJob(job.code)
-              ? "Corporate Work Order"
-              : "Individual Customer"}
+            {job.companyname ? "Corporate Work Order" : "Individual Customer"}
           </div>
         </div>
       </div>

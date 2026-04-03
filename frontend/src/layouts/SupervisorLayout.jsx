@@ -30,6 +30,10 @@ export default function SupervisorLayout() {
   const [actionsConfig, setActionsConfig] = useState(null);
   const hasActions = Boolean(actionsConfig);
 
+  const isJobsActive = (location.pathname === "/supervisor" || location.pathname.startsWith("/supervisor/jobs"))
+    && !isActionsOpen
+    && mobilePanel === null;
+
   function openActions() {
     setMobilePanel(null);
     setIsActionsOpen(true);
@@ -133,6 +137,13 @@ export default function SupervisorLayout() {
               >
                 Map View
               </button>
+
+              <button
+                className={`nav-btn ${isActive("/supervisor/tickets") ? "active" : ""}`}
+                onClick={() => navigate("/supervisor/tickets")}
+              >
+                Tickets
+              </button>
             </nav>
           </aside>
         )}
@@ -178,6 +189,16 @@ export default function SupervisorLayout() {
           >
             Map View
           </button>
+          
+          
+                        <button
+                className={`nav-btn ${isActive("/supervisor/tickets") ? "active" : ""}`}
+                onClick={() => navigate("/supervisor/tickets")}
+              >
+                Tickets
+              </button>
+          
+          
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -202,10 +223,31 @@ export default function SupervisorLayout() {
       {/* ---------- MOBILE TAB BAR ---------- */}
       {isMobile && (
         <div className="mobile-tabbar">
-          <button onClick={goJobs}>Jobs</button>
-          <button onClick={openActions} disabled={!hasActions}>Actions</button>
-          <button onClick={openSummary}>Summary</button>
-          <button onClick={openMenu}>Menu</button>
+          <button
+            onClick={goJobs}
+            className={isJobsActive ? "active" : ""}
+          >
+            Jobs
+          </button>
+          <button
+            onClick={openActions}
+            disabled={!hasActions}
+            className={isActionsOpen ? "active" : ""}
+          >
+            Actions
+          </button>
+          <button
+            onClick={openSummary}
+            className={mobilePanel === "summary" ? "active" : ""}
+          >
+            Summary
+          </button>
+          <button
+            onClick={openMenu}
+            className={mobilePanel === "menu" ? "active" : ""}
+          >
+            Menu
+          </button>
         </div>
       )}
     </div>

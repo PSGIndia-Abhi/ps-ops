@@ -24,7 +24,7 @@ export default function SiteContactsPage() {
 
 async function handleConvert(contactId) {
 
-  console.log("CONVERT CLICKED", contactId);
+
 
   try {
 
@@ -42,7 +42,7 @@ async function handleConvert(contactId) {
 
     const data = await res.json();
 
-    console.log("INVITE RESPONSE", data);
+   
 
     alert("Invite link generated. Check console.");
 

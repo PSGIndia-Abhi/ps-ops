@@ -7,6 +7,7 @@
   width: 100%;
   padding: 8px;
   box-sizing: border-box;
+  padding-bottom: 50px;
 }
 
 .job-visits{
@@ -215,6 +216,38 @@
   padding: 14px;
 }
 
+.job-booking-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.job-booking-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #111827;
+}
+
+.job-booking-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #4b5563;
+  margin-bottom: 12px;
+}
+
+.job-booking-note {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.job-booking-message {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #1d4ed8;
+}
+
 .job-schedule-title {
   font-weight: 600;
   margin-bottom: 10px;
@@ -363,6 +396,11 @@
 
 .job-btn-resume {
   background: #0ea5e9;
+  color: #fff;
+}
+
+.job-btn-primary {
+  background: #2563eb;
   color: #fff;
 }
 

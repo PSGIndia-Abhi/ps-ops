@@ -1,6 +1,8 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 
+
+
 const { createVisit } = require("../services/Visit.service");
 
 async function createVisitController(req, res) {
@@ -15,6 +17,7 @@ async function createVisitController(req, res) {
       technician_ids || [],
       created_by_user_id
     );
+
 
     res.json({
       success: true,
@@ -48,14 +51,14 @@ async function getJobVisits(req, res) {
       LEFT JOIN users u ON u.id = vt.technician_id
       WHERE v.job_id = ?
       ORDER BY v.visit_number
-    `,[jobId]);
+    `, [jobId]);
 
     const visitMap = new Map();
 
     rows.forEach(r => {
 
       if (!visitMap.has(r.id)) {
-        visitMap.set(r.id,{
+        visitMap.set(r.id, {
           id: r.id,
           visit_number: r.visit_number,
           scheduled_date: r.scheduled_date,
@@ -263,5 +266,49 @@ async function getMyVisits(req, res) {
   }
 }
 
+async function getClientUpcomingVisit(req, res) {
+  
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized - user missing" });
+  }
 
-    module.exports = { startVisit, submitVisit, approveVisit, createVisitController, getMyVisits, getJobVisits, updateVisitTechnicians, rescheduleVisit, cancelVisit };
+
+  try {
+
+    const [users] = await pool.query(
+      `SELECT contact_id FROM users WHERE id = ?`,
+      [userId]
+    );
+
+    if (!users.length || !users[0].contact_id) {
+      return res.status(400).json({
+        error: "Client contact mapping not found"
+      });
+    }
+
+    const contactId = users[0].contact_id;
+
+    const [rows] = await pool.query(`
+      SELECT 
+  v.scheduled_date,
+  j.sub_service
+FROM job_visits v
+JOIN jobs j ON j.id = v.job_id
+WHERE j.requested_by_contact_id = '9d63d58f-aa54-4af1-b1fe-3f933e580f5f'
+  AND v.status = 'SCHEDULED'
+  AND v.scheduled_date >= NOW()
+ORDER BY v.scheduled_date ASC
+LIMIT 1;
+    `, [contactId]);
+
+    res.json(rows.length ? rows[0] : null);
+
+  } catch (err) {
+    console.error("❌ Upcoming visit error:", err);
+    res.status(500).json({ error: "Failed to fetch upcoming visit" });
+  }
+}
+
+
+module.exports = { startVisit, submitVisit, approveVisit, createVisitController, getMyVisits, getJobVisits, updateVisitTechnicians, rescheduleVisit, cancelVisit, getClientUpcomingVisit };
