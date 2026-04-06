@@ -305,6 +305,23 @@ export default function AdminTickets() {
                         {formatDateTime(msg.created_at)}
                       </div>
                       <div className="ticket-message-text">{msg.message}</div>
+
+                      {msg.attachments?.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          {msg.attachments.map((att) => (
+                            <img
+                              key={att.id}
+                              src={`${import.meta.env.VITE_API_BASE}${att.url}`}
+                              style={{
+                                width: "100%",
+                                maxWidth: 300,
+                                borderRadius: 8,
+                                marginTop: 6,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {(activeTicket.messages || []).length === 0 && (

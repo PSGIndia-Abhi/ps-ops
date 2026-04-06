@@ -5,6 +5,10 @@ const { v4: uuid } = require("uuid");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { sendTicketCreatedEmail } = require("../utils/mailer");
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage() });
+const minioClient = require("../lib/minio");
+const BUCKET = process.env.MINIO_BUCKET;
 
 const isValidJobId = (jobId) => {
   if (!jobId) return false;
@@ -134,23 +138,27 @@ const ensureTicketAccess = async (req, res, executor, ticketId) => {
   return { allowed: false, jobIds };
 };
 
-async function buildTicketResponse(tickets, messages, links) {
+async function buildTicketResponse(tickets, messages, links, attachmentMap) {
   const messageMap = new Map();
-  messages.forEach((msg) => {
-    const list = messageMap.get(msg.ticket_id) || [];
-    list.push({
-      id: msg.id,
-      ticket_id: msg.ticket_id,
-      message: msg.message,
-      created_at: msg.created_at,
-      created_by: {
-        id: msg.created_by_user_id,
-        name: msg.created_by_name,
-        email: msg.created_by_email,
-      },
-    });
-    messageMap.set(msg.ticket_id, list);
+  
+messages.forEach((msg) => {
+  const list = messageMap.get(msg.ticket_id) || [];
+
+  list.push({
+    id: msg.id,
+    ticket_id: msg.ticket_id,
+    message: msg.message,
+    created_at: msg.created_at,
+    created_by: {
+      id: msg.created_by_user_id,
+      name: msg.created_by_name,
+      email: msg.created_by_email,
+    },
+    attachments: attachmentMap.get(msg.id) || [], // 👈 ADD THIS
   });
+
+  messageMap.set(msg.ticket_id, list);
+});
 
   return tickets.map((t) => ({
     id: t.id,
@@ -262,6 +270,26 @@ router.get(
         ticketIds
       );
 
+      const [attachments] = await pool.query(
+        `
+  SELECT id, ticket_id, message_id, object_key
+  FROM ticket_attachments
+  WHERE ticket_id IN (${placeholders})
+  `,
+        ticketIds
+      );
+
+      const attachmentMap = new Map();
+
+attachments.forEach((att) => {
+  const list = attachmentMap.get(att.message_id) || [];
+  list.push({
+    id: att.id,
+    url: `/api/tickets/attachments?key=${encodeURIComponent(att.object_key)}`
+  });
+  attachmentMap.set(att.message_id, list);
+});
+
       const [links] = await pool.query(
         `
         SELECT
@@ -288,7 +316,7 @@ router.get(
         linkMap.set(row.ticket_id, list);
       });
 
-      const payload = await buildTicketResponse(tickets, messages, linkMap);
+      const payload = await buildTicketResponse(tickets, messages, linkMap, attachmentMap);
       res.json(payload);
     } catch (err) {
       console.error("Failed to fetch tickets:", err);
@@ -297,14 +325,27 @@ router.get(
   }
 );
 
-// POST /api/tickets
+
 // POST /api/tickets
 router.post(
   "/",
   auth,
   allowRoles("admin", "branch_admin", "supervisor", "client"),
+  upload.array("files", 5), // Allow up to 5 files
   async (req, res) => {
-    const { job_ids = [], subject, message, priority } = req.body || {};
+
+    const subject = req.body.subject;
+    const message = req.body.message;
+    const priority = req.body.priority;
+
+    // handle FormData array
+    let jobIds = req.body["job_ids[]"];
+
+    if (!jobIds) {
+      jobIds = [];
+    } else if (!Array.isArray(jobIds)) {
+      jobIds = [jobIds];
+    }
     const created_by_user_id = req.user?.id;
 
     if (!subject?.trim()) {
@@ -321,8 +362,8 @@ router.post(
 
     try {
       // ✅ Validate job access (only if jobs provided)
-      if (job_ids.length > 0) {
-        for (const jobId of job_ids) {
+      if (jobIds.length > 0) {
+        for (const jobId of jobIds) {
           if (!isValidJobId(jobId)) {
             return res.status(400).json({ error: "Invalid job_id" });
           }
@@ -333,6 +374,26 @@ router.post(
 
       const ticketId = uuid();
       const messageId = uuid();
+      let uploadedFiles = [];
+
+      // 1. Upload files first
+      if (req.files && req.files.length > 0) {
+        for (const file of req.files) {
+          const objectKey = `tickets/${Date.now()}_${file.originalname}`;
+
+          await minioClient.putObject(
+            BUCKET,
+            objectKey,
+            file.buffer,
+            file.size,
+            {
+              "Content-Type": file.mimetype,
+            }
+          );
+
+          uploadedFiles.push(objectKey);
+        }
+      }
 
       const normalizedPriority = (priority || "MEDIUM").toUpperCase();
       const allowedPriorities = new Set(["LOW", "MEDIUM", "HIGH", "URGENT"]);
@@ -356,8 +417,8 @@ router.post(
       );
 
       // ✅ 2. Link jobs (optional)
-      if (job_ids.length > 0) {
-        for (const jobId of job_ids) {
+      if (jobIds.length > 0) {
+        for (const jobId of jobIds) {
           await pool.query(
             `
             INSERT INTO job_ticket_links (id, ticket_id, job_id)
@@ -379,10 +440,23 @@ router.post(
         [messageId, ticketId, message.trim(), created_by_user_id]
       );
 
+      if (uploadedFiles.length > 0) {
+        for (const key of uploadedFiles) {
+          await pool.query(
+            `
+      INSERT INTO ticket_attachments
+        (id, ticket_id, message_id, object_key)
+      VALUES (?, ?, ?, ?)
+      `,
+            [uuid(), ticketId, messageId, key]
+          );
+        }
+      }
+
       // ✅ 3b. Add ticket comment to job history (if linked)
-      if (job_ids.length > 0) {
+      if (jobIds.length > 0) {
         const visibleToClient = req.user.role === "client" ? 1 : 0;
-        for (const jobId of job_ids) {
+        for (const jobId of jobIds) {
           await pool.query(
             `
             INSERT INTO job_history (
@@ -413,10 +487,11 @@ router.post(
       try {
         let job = null;
 
-        if (job_ids.length > 0) {
+        console.log("FILES:", req.files);
+        if (jobIds.length > 0) {
           const [[firstJob]] = await pool.query(
             `SELECT id, code, supervisor_id FROM jobs WHERE id = ?`,
-            [job_ids[0]]
+            [jobIds[0]]
           );
           job = firstJob;
         }
@@ -563,4 +638,31 @@ router.patch(
   }
 );
 
+// GET /api/tickets/attachments/:key
+
+router.get('/attachments', async (req, res) => {
+  const key = req.query.key;
+
+  if (!key) {
+    return res.status(400).json({ error: "Missing key" });
+  }
+
+  try {
+    const stat = await minioClient.statObject(BUCKET, key);
+
+    res.setHeader(
+      'Content-Type',
+      stat.metaData['content-type'] || 'application/octet-stream'
+    );
+
+    const stream = await minioClient.getObject(BUCKET, key);
+    stream.pipe(res);
+
+  } catch (err) {
+    console.error('Failed to get attachment:', err);
+    res.status(404).json({ error: 'Attachment not found' });
+  }
+});
+
 module.exports = router;
+

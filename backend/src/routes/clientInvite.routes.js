@@ -9,7 +9,7 @@ const crypto = require("crypto");
 router.post(
   "/contacts/:id/invite",
   auth,
-  allowRoles("admin"),
+  allowRoles("admin", "branch_admin"),
   async (req, res) => {
     const contactId = req.params.id;
 

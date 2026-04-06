@@ -124,7 +124,9 @@ router.post("/:id/role", auth, allowRoles("admin", "branch_admin"), async (req, 
   }
 
   const requestedRole = role;
+  
   const allowedRoles = new Set(["technician", "supervisor", "branch_admin", "client"]);
+  
   if (!allowedRoles.has(requestedRole)) {
     return res.status(400).json({ error: "Invalid role" });
   }

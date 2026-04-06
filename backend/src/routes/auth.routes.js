@@ -294,16 +294,24 @@ router.get("/me", auth, async (req, res) => {
         u.role,
         u.is_active,
         u.contact_id,
+        COALESCE(u.branch_id, c.branch_id) AS branch_id,
         c.name AS contact_name,
         c.company_id AS site_id,
         s.name AS company_site,
         co.id AS company_id,
         co.name AS company_name,
-        co.code AS company_code
+        co.code AS company_code,
+        b.name AS branch_name,
+        ba.id AS branch_admin_id,
+        ba.name AS branch_admin_name,
+        ba.email AS branch_admin_email,
+        ba.phone AS branch_admin_phone
       FROM users u
       LEFT JOIN contacts c ON c.id = u.contact_id
       LEFT JOIN sites s ON s.id = c.company_id
       LEFT JOIN companies co ON co.id = s.company_id
+      LEFT JOIN branches b ON b.id = COALESCE(u.branch_id, c.branch_id)
+      LEFT JOIN users ba ON ba.branch_id = b.id AND ba.role = 'branch_admin'
       WHERE u.id = ?
       `,
       [req.user.id]
@@ -316,6 +324,18 @@ router.get("/me", auth, async (req, res) => {
     const user = rows[0];
     res.json({
       ...user,
+      branch_id: user.branch_id || null,
+      branch: user.branch_id
+        ? { id: user.branch_id, name: user.branch_name }
+        : null,
+      branch_admin: user.branch_admin_id
+        ? {
+            id: user.branch_admin_id,
+            name: user.branch_admin_name,
+            email: user.branch_admin_email,
+            phone: user.branch_admin_phone,
+          }
+        : null,
       company_logo_url: null,
     });
 

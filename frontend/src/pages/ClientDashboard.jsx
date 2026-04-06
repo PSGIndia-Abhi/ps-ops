@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import { formatDate } from "../utils/date";
 import CreateBookingModal from "../components/CreateBookingModal";
 import "./clientDashboard.css";
-
-
-
-
 
 export default function ClientDashboard() {
   const [user, setUser] = useState(null);
@@ -14,9 +11,11 @@ export default function ClientDashboard() {
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
   const [comingSoonMessage, setComingSoonMessage] = useState("");
 
+  const navigate = useNavigate();
   const [selectedJobs, setSelectedJobs] = useState([]);
   const [files, setFiles] = useState([]);
   const [priority, setPriority] = useState("low");
+  const API = import.meta.env.VITE_API_BASE;
 
   // Load user info on mount
 
@@ -78,6 +77,20 @@ export default function ClientDashboard() {
     loadNextVisit();
   }, []);
 
+  useEffect(() => {
+    async function loadTickets() {
+      try {
+        const res = await apiFetch("/api/tickets");
+        const data = await res.json();
+        setTickets(data);
+      } catch (err) {
+        console.error("Failed to load tickets", err);
+      }
+    }
+
+    loadTickets();
+  }, []);
+
   // Compute analytics
   const [jobs, setJobs] = useState([]);
   const total = jobs.length;
@@ -101,18 +114,29 @@ export default function ClientDashboard() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [tickets, setTickets] = useState([]);
+
   async function handleCreateTicket() {
     try {
       setLoading(true);
 
+      const formData = new FormData();
+
+      formData.append("subject", subject);
+      formData.append("message", message);
+      formData.append("priority", priority);
+
+      selectedJobs.forEach((jobId) => {
+        formData.append("job_ids[]", jobId);
+      });
+
+      files.forEach((file) => {
+        formData.append("files", file);
+      });
+
       const res = await apiFetch("/api/tickets", {
         method: "POST",
-        body: JSON.stringify({
-          job_ids: selectedJobs,
-          subject,
-          message,
-          priority,
-        }),
+        body: formData,
       });
 
       const data = await res.json();
@@ -247,9 +271,13 @@ export default function ClientDashboard() {
               .filter(j => j.status !== "COMPLETED")
               .slice(0, 3)
               .map(job => (
-                <div key={job.id} className="job">
+                <div
+                  key={job.id}
+                  className="job clickable"
+                  onClick={() => navigate(`/client/jobs/${job.id}`)}
+                >
                   <div className="job-top">
-                    <b>{job.title}</b>
+                    <b>{job.title || job.service_type || `Job #${job.id}`}</b>
                     <span className="status">{job.status}</span>
                   </div>
 
@@ -268,10 +296,40 @@ export default function ClientDashboard() {
                   </div>
 
                   <p className="update">
-                    Latest: {job.latest_comment || "No updates"}
+                    Latest: {job.notes ? job.notes.substring(0, 80) : "No updates"}
                   </p>
                 </div>
               ))}
+          </div>
+
+          {/* SUPPORT TICKETS */}
+          <div className="section">
+            <h3 className="section-title">Support Tickets</h3>
+            {tickets.length === 0 && <p>No tickets yet.</p>}
+            {tickets.map(ticket => (
+              <div key={ticket.id} className="ticket">
+                <div className="ticket-header">
+                  <b>{ticket.subject}</b>
+                  <span className="status">{ticket.status}</span>
+                </div>
+                {ticket.messages.map(msg => (
+                  <div key={msg.id} className="message">
+                    <p>{msg.message}</p>
+                    {msg.attachments?.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        {msg.attachments.map((att) => (
+                          <img
+                            key={att.id}
+                            src={`${import.meta.env.VITE_API_BASE_URL}${att.url}`}
+                            style={{ width: "100%", borderRadius: 8, marginTop: 6 }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
 
           {/* RECENT UPDATES */}
@@ -294,6 +352,14 @@ export default function ClientDashboard() {
               <div className="client-logo-placeholder">{initials}</div>
             )}
 
+            {/* BRANCH INFO */}
+            <div className="branch-info">
+              <h5>Branch</h5>
+              <div className="branch-name">
+                {user?.branch?.name || user?.branch_name || "Not assigned"}
+              </div>
+            </div>
+
             {/* CLIENT DP */}
 
             <h3>{displayName}</h3>
@@ -309,11 +375,9 @@ export default function ClientDashboard() {
               <button onClick={() => showComingSoon("Feedback is coming soon")}>
                 Give Feedback
               </button>
-              <button onClick={() => showComingSoon("Certificates are coming soon")}>
-                Download Certificates
+              <button onClick={() => showComingSoon("Certificates are coming soon")}> Certificates
               </button>
-              <button className="msds" onClick={() => showComingSoon("MSDS sheet is coming soon")}>
-                MSDS Sheet
+              <button className="" onClick={() => showComingSoon("MSDS Sheets are coming soon")}> MSDS Sheets
               </button>
             </div>
 
@@ -400,7 +464,9 @@ export default function ClientDashboard() {
               <input
                 type="file"
                 multiple
-                onChange={(e) => setFiles([...e.target.files])}
+                onChange={(e) =>
+                  setFiles((prev) => [...prev, ...Array.from(e.target.files)])
+                }
               />
 
               {files.length > 0 && (
@@ -449,12 +515,12 @@ export default function ClientDashboard() {
         clientContact={
           user?.contact_id
             ? {
-                id: user.contact_id,
-                name: user.contact_name || user.name,
-                company_id: user.site_id || null,
-                company_name: user.company_name || null,
-                company_site: user.company_site || null,
-              }
+              id: user.contact_id,
+              name: user.contact_name || user.name,
+              company_id: user.site_id || null,
+              company_name: user.company_name || null,
+              company_site: user.company_site || null,
+            }
             : null
         }
       />

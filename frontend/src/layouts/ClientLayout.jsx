@@ -1,6 +1,7 @@
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { useState, useEffect } from "react";
+import useMe from "../hooks/useMe";
 
 export default function ClientLayout() {
 
@@ -11,6 +12,12 @@ export default function ClientLayout() {
   const isDashboardActive = location.pathname === "/client" || location.pathname === "/client/";
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const { user: me } = useMe();
+
+  const accountManager = me?.branch_admin || null;
+  const accountManagerName = accountManager?.name || "Account Manager";
+  const accountManagerEmail = accountManager?.email;
+  const accountManagerPhone = accountManager?.phone;
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -35,6 +42,7 @@ export default function ClientLayout() {
         </div>
 
         <div className="header-right">
+          <button className="logout-btn" onClick={() => navigate("/client/profile")}>Profile</button>
           <button className="logout-btn" onClick={logout}>
             Logout
           </button>
@@ -64,6 +72,13 @@ export default function ClientLayout() {
     </button>
 
     <button
+      className={`nav-btn ${isActive("/client/profile") ? "active" : ""}`}
+      onClick={() => navigate("/client/profile")}
+    >
+      Profile
+    </button>
+
+    <button
       className={`nav-btn ${isActive("/client/tickets") ? "active" : ""}`}
       onClick={() => navigate("/client/tickets")}
     >
@@ -73,17 +88,35 @@ export default function ClientLayout() {
 
   {/* SPOC BLOCK */}
   <div className="sidebar-spoc">
-    <img src="/spoc.jpg" alt="spoc" />
+    <div className="spoc-avatar">AM</div>
 
     <div className="spoc-info">
       <h4>Account Manager</h4>
-      <div className="name">Ramesh Kumar</div>
-      <div className="role">Account Manager</div>
+      <div className="name">{accountManagerName}</div>
+      <div className={`role ${accountManager ? "assigned" : "unassigned"}`}>
+        {accountManager ? "Assigned" : "Unassigned"}
+      </div>
+      {me?.branch?.name && (
+        <div className="branch-name">{me.branch.name}</div>
+      )}
+      {accountManagerPhone && (
+        <div className="spoc-contact">{accountManagerPhone}</div>
+      )}
     </div>
 
     <div className="spoc-actions">
-      <button>Call</button>
-      <button>Email</button>
+      <button
+        onClick={() => accountManagerPhone && (window.location.href = `tel:${accountManagerPhone}`)}
+        disabled={!accountManagerPhone}
+      >
+        Call
+      </button>
+      <button
+        onClick={() => accountManagerEmail && (window.location.href = `mailto:${accountManagerEmail}`)}
+        disabled={!accountManagerEmail}
+      >
+        Email
+      </button>
     </div>
   </div>
 
@@ -117,12 +150,18 @@ export default function ClientLayout() {
             Jobs
           </button>
           <button
+            onClick={() => navigate("/client/profile")}
+            className={isActive("/client/profile") ? "active" : ""}
+          >
+            Profile
+          </button>
+          <button
             onClick={() => navigate("/client/tickets")}
             className={isActive("/client/tickets") ? "active" : ""}
           >
             Tickets
           </button>
-          <button onClick={logout}>Logout</button>
+         
         </div>
       )}
 

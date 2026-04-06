@@ -22,6 +22,7 @@ import ClientLayout from "./layouts/ClientLayout";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
 import ClientTickets from "./pages/ClientTickets";
+import ClientProfilePage from "./pages/ClientProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
@@ -109,19 +110,12 @@ const router = createBrowserRouter([
     </ProtectedRoute>
   ),
   children: [
-  { index: true, element: <ClientDashboard /> },
-  { path: "jobs", element: <ClientDashboard /> },
-  { path: "jobs/:jobId", element: <ClientJobUpdates /> },
-  { path: "tickets", element: <ClientTickets /> }
-]
-},
-
-  // -------------------------
-  // PUBLIC ROUTES
-  // -------------------------
-  {
-    path: "/signup",
-    element: <Signup />,
+      { index: true, element: <ClientDashboard /> },
+      { path: "jobs", element: <ClientJobsPage /> },
+      { path: "jobs/:jobId", element: <ClientJobUpdates /> },
+      { path: "tickets", element: <ClientTickets /> },
+      { path: "profile", element: <ClientProfilePage /> }
+    ]
   },
 
   {
