@@ -67,6 +67,7 @@ export default function AdminTeamManagement() {
   const [assignTechId, setAssignTechId] = useState("");
   const [assignBranchId, setAssignBranchId] = useState("");
   const [assigning, setAssigning] = useState(false);
+  const role = localStorage.getItem("role");
 
   const loadOverview = async () => {
     try {
@@ -308,7 +309,7 @@ if (!confirmed) return;
             </select>
           </label>
 
-          <label className="team-field">
+          {role==="admin"&& <label className="team-field">
             <span>Branch {promoteRole === "branch_admin" ? "*" : "(optional)"}</span>
             <select
               value={promoteBranchId}
@@ -322,7 +323,7 @@ if (!confirmed) return;
                 </option>
               ))}
             </select>
-          </label>
+          </label>}
         </div>
 
         <div className="team-form-actions">
@@ -332,7 +333,7 @@ if (!confirmed) return;
         </div>
       </div>
 
-      <div className="team-card">
+      {role==="admin"&&<div className="team-card">
         <div className="team-card-header">
           <div>
             <div className="team-card-title">Assign Technician to Branch</div>
@@ -380,7 +381,7 @@ if (!confirmed) return;
             {assigning ? "Assigning..." : "Assign Branch"}
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="team-supervisor-grid">
         {supervisors.map((supervisor) => (

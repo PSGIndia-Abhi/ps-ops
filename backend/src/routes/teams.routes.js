@@ -120,12 +120,46 @@ Admin overview: supervisors with technicians + unassigned technicians
 */
 router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
   try {
+    let branchFilter = "";
+    let params = [];
+
+    // 🔥 get branch_id for branch_admin
+    if (req.user.role === "branch_admin") {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+
+      if (!me?.branch_id) {
+        return res.status(403).json({ error: "Branch not assigned" });
+      }
+
+      branchFilter = "AND branch_id = ?";
+      params.push(me.branch_id);
+    }
+
+    // ✅ supervisors (filtered)
     const [supervisors] = await pool.query(
-      `SELECT id, name, email FROM users WHERE role = 'supervisor' AND is_active = 1 ORDER BY name ASC`
+      `SELECT id, name, email 
+       FROM users 
+       WHERE role = 'supervisor' 
+       AND is_active = 1 
+       ${branchFilter}
+       ORDER BY name ASC`,
+      params
     );
+
+    // ✅ technicians (filtered)
     const [technicians] = await pool.query(
-      `SELECT id, name, email FROM users WHERE role = 'technician' AND is_active = 1 ORDER BY name ASC`
+      `SELECT id, name, email 
+       FROM users 
+       WHERE role = 'technician' 
+       AND is_active = 1 
+       ${branchFilter}
+       ORDER BY name ASC`,
+      params
     );
+
     const [links] = await pool.query(
       `SELECT supervisor_id, technician_id FROM supervisor_technicians`
     );
@@ -140,6 +174,7 @@ router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, r
       const tech = technicianMap.get(Number(link.technician_id));
       const supervisor = supervisorMap.get(Number(link.supervisor_id));
       if (!tech || !supervisor) continue;
+
       supervisor.technicians.push(tech);
       assignedTechs.add(Number(link.technician_id));
     }
@@ -152,6 +187,7 @@ router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, r
       supervisors: Array.from(supervisorMap.values()),
       unassignedTechnicians
     });
+
   } catch (err) {
     console.error("Team overview failed:", err);
     res.status(500).json({ error: "Failed to load team overview" });

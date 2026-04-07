@@ -138,7 +138,6 @@ router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => 
         trimmedState || null
       ]
     );
-
     const groupTable = await resolveGroupTable(pool);
     const groupRef = "`group_name`";
     const [[created]] = await pool.query(
