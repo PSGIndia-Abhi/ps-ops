@@ -39,6 +39,12 @@ const router = createBrowserRouter([
     element: <Terms />,
   },
 
+  {
+    path: "/signup",
+    element: <Signup />,
+  },
+
+
   // -------------------------
   // ADMIN (protected)
   // -------------------------
@@ -65,51 +71,51 @@ const router = createBrowserRouter([
   // -------------------------
   // SUPERVISOR (protected)
   // -------------------------
-{
-  path: "/supervisor",
-  element: (
-    <ProtectedRoute allowedRoles={["supervisor"]}>
-      <SupervisorLayout />
-    </ProtectedRoute>
-  ),
-  children: [
-    { index: true, element: <SupervisorDashboard /> },
-    { path: "team", element: <SupervisorTeamMonitor /> },
-    { path: "map", element: <MapView /> },
-    { path: "jobs/:jobId", element: <JobPage /> },
-    { path: "bookings", element: <BookingsPage /> },
-    { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
-    { path: "tickets", element: <AdminTickets /> }
-  ],
-},
+  {
+    path: "/supervisor",
+    element: (
+      <ProtectedRoute allowedRoles={["supervisor"]}>
+        <SupervisorLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <SupervisorDashboard /> },
+      { path: "team", element: <SupervisorTeamMonitor /> },
+      { path: "map", element: <MapView /> },
+      { path: "jobs/:jobId", element: <JobPage /> },
+      { path: "bookings", element: <BookingsPage /> },
+      { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
+      { path: "tickets", element: <AdminTickets /> }
+    ],
+  },
 
   // -------------------------
   // TECHNICIAN (protected)
   // -------------------------
-{
-  path: "/technician",
-  element: (
-    <ProtectedRoute allowedRoles={["technician"]}>
-      <TechnicianLayout />
-    </ProtectedRoute>
-  ),
-  children: [
-    { index: true, element: <TechnicianDashboard /> },
-    { path: "jobs/:jobId", element: <JobPage /> },
-  ],
-},
+  {
+    path: "/technician",
+    element: (
+      <ProtectedRoute allowedRoles={["technician"]}>
+        <TechnicianLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <TechnicianDashboard /> },
+      { path: "jobs/:jobId", element: <JobPage /> },
+    ],
+  },
 
   // -------------------------
   //Client  ROUTES
   // -------------------------
-{
-  path: "/client",
-  element: (
-    <ProtectedRoute allowedRoles={["client"]}>
-      <ClientLayout />
-    </ProtectedRoute>
-  ),
-  children: [
+  {
+    path: "/client",
+    element: (
+      <ProtectedRoute allowedRoles={["client"]}>
+        <ClientLayout />
+      </ProtectedRoute>
+    ),
+    children: [
       { index: true, element: <ClientDashboard /> },
       { path: "jobs", element: <ClientJobsPage /> },
       { path: "jobs/:jobId", element: <ClientJobUpdates /> },
@@ -124,13 +130,11 @@ const router = createBrowserRouter([
   },
 
   {
-  path: "/invite/:token",
-  element: <AcceptInvite />,
-},
+    path: "/invite/:token",
+    element: <AcceptInvite />,
+  },
 
 
-
-  
 ]);
 
 export default router;

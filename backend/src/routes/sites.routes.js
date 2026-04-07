@@ -11,6 +11,8 @@ const { resolveGroupTable } = require("../utils/groupTable");
 router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor", "client"), async (req, res) => {
   const { company_id } = req.query;
 
+
+
   try {
     const groupTable = await resolveGroupTable(pool);
     const groupRef = "`group_name`";
@@ -82,6 +84,15 @@ router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => 
     state
   } = req.body || {};
 
+  const [[me]] = await pool.query(
+    "SELECT branch_id FROM users WHERE id = ?",
+    [req.user.id]
+  );
+
+  if (!me?.branch_id) {
+    return res.status(403).json({ error: "Branch not assigned" });
+  }
+
   const trimmedName = typeof name === "string" ? name.trim() : "";
   const trimmedAddress = typeof address === "string" ? address.trim() : "";
   const trimmedCity = typeof city === "string" ? city.trim() : "";
@@ -115,11 +126,12 @@ router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => 
     const id = uuid();
     await pool.query(
       `INSERT INTO sites
-      (id, company_id, name, address, city, state, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, 1)`,
+  (id, company_id, branch_id, name, address, city, state, is_active)
+  VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         id,
         company_id,
+        me.branch_id, // ✅ correct position
         trimmedName,
         trimmedAddress || null,
         trimmedCity || null,
@@ -128,7 +140,7 @@ router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => 
     );
 
     const groupTable = await resolveGroupTable(pool);
-     const groupRef = "`group_name`";
+    const groupRef = "`group_name`";
     const [[created]] = await pool.query(
       `
       SELECT
