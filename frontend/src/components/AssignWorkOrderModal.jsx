@@ -40,19 +40,22 @@ export default function AssignWorkOrderModal({
 
   // Fetch supervisors & technicians when modal opens
 useEffect(() => {
+  if (!isOpen) return;
+
   async function loadUsers() {
     try {
+      setLoadingUsers(true);
       // ADMIN
       if (role === "admin" || role === "branch_admin") {
-
-        // 1️⃣ load supervisors
-        const supRes = await apiFetch("/api/users?role=supervisor");
-        const sups = await supRes.json();
+        const [supRes, techRes] = await Promise.all([
+          apiFetch("/api/users?role=supervisor"),
+          apiFetch("/api/users?role=technician"),
+        ]);
+        const [sups, techs] = await Promise.all([
+          supRes.json(),
+          techRes.json(),
+        ]);
         setSupervisors(Array.isArray(sups) ? sups : []);
-
-        // 2️⃣ load technicians
-        const techRes = await apiFetch("/api/users?role=technician");
-        const techs = await techRes.json();
         setTechnicians(Array.isArray(techs) ? techs : []);
       }
 
@@ -67,11 +70,13 @@ useEffect(() => {
       console.error("Failed loading users", err);
       setSupervisors([]);
       setTechnicians([]);
+    } finally {
+      setLoadingUsers(false);
     }
   }
 
   loadUsers();
-}, [role]);
+}, [isOpen, role]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -198,7 +203,7 @@ function handleAssign() {
               <option value="">Select supervisor</option>
               {(Array.isArray(supervisors) ? supervisors : []).map((sup) => (
                 <option key={sup.id} value={sup.id}>
-                  {sup.name}
+                  {sup.branch_name ? `${sup.name} - ${sup.branch_name}` : sup.name}
                 </option>
               ))}
             </select>
@@ -216,7 +221,9 @@ function handleAssign() {
                 checked={selectedTechnicianIds.includes(tech.id)}
                 onChange={() => toggleTechnician(tech.id)}
               />
-              <span style={{ marginLeft: "8px" }}>{tech.name}</span>
+              <span style={{ marginLeft: "8px" }}>
+                {tech.branch_name ? `${tech.name} - ${tech.branch_name}` : tech.name}
+              </span>
             </label>
           ))}
         </div>

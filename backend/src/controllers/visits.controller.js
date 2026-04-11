@@ -5,15 +5,56 @@ const { v4: uuid } = require("uuid");
 
 const { createVisit } = require("../services/Visit.service");
 
+function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
+  const rawDate = typeof scheduledDate === "string"
+    ? scheduledDate.trim()
+    : scheduledDate;
+  const rawTime = typeof scheduledTime === "string"
+    ? scheduledTime.trim()
+    : scheduledTime;
+
+  if (!rawDate) return null;
+
+  if (
+    rawTime &&
+    /^\d{2}:\d{2}$/.test(rawTime) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+  ) {
+    return `${rawDate} ${rawTime}:00`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+    return `${rawDate} 00:00:00`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(rawDate)) {
+    return rawDate.replace("T", " ") + ":00";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(rawDate)) {
+    return rawDate.replace("T", " ");
+  }
+
+  return null;
+}
+
 async function createVisitController(req, res) {
   try {
     const { jobId } = req.params;
-    const { scheduled_date, technician_ids } = req.body;
+    const { scheduled_date, scheduled_time, technician_ids } = req.body;
     const created_by_user_id = req.user?.id;
+    const scheduledDateTime = normalizeScheduledDateTime(
+      scheduled_date,
+      scheduled_time
+    );
+
+    if (!scheduledDateTime) {
+      return res.status(400).json({ error: "Valid scheduled date and time are required" });
+    }
 
     const visitId = await createVisit(
       jobId,
-      scheduled_date,
+      scheduledDateTime,
       technician_ids || [],
       created_by_user_id
     );
@@ -39,10 +80,10 @@ async function getJobVisits(req, res) {
       SELECT
         v.id,
         v.visit_number,
-        v.scheduled_date,
+        DATE_FORMAT(v.scheduled_date, '%Y-%m-%d %H:%i:%s') AS scheduled_date,
         v.status,
-        v.started_at,
-        v.completed_at,
+        DATE_FORMAT(v.started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+        DATE_FORMAT(v.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
         v.notes,
         u.id AS technician_id,
         u.name AS technician_name
@@ -50,7 +91,7 @@ async function getJobVisits(req, res) {
       LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
       LEFT JOIN users u ON u.id = vt.technician_id
       WHERE v.job_id = ?
-      ORDER BY v.visit_number
+      ORDER BY v.scheduled_date IS NULL ASC, v.scheduled_date ASC, v.visit_number ASC
     `, [jobId]);
 
     const visitMap = new Map();
@@ -125,7 +166,15 @@ async function updateVisitTechnicians(req, res) {
 
 async function rescheduleVisit(req, res) {
   const { visitId } = req.params;
-  const { scheduled_date } = req.body;
+  const { scheduled_date, scheduled_time } = req.body;
+  const scheduledDateTime = normalizeScheduledDateTime(
+    scheduled_date,
+    scheduled_time
+  );
+
+  if (!scheduledDateTime) {
+    return res.status(400).json({ error: "Valid scheduled date and time are required" });
+  }
 
   try {
 
@@ -133,7 +182,7 @@ async function rescheduleVisit(req, res) {
       `UPDATE job_visits
        SET scheduled_date = ?, updated_at = NOW()
        WHERE id = ?`,
-      [scheduled_date, visitId]
+      [scheduledDateTime, visitId]
     );
 
     res.json({ success: true });
@@ -188,6 +237,106 @@ async function startVisit(req, res) {
   }
 }
 
+async function startVisitAnyway(req, res) {
+  const { visitId } = req.params;
+  const userId = req.user?.id;
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    // 1. get original visit
+    const [[visit]] = await conn.query(
+      `SELECT * FROM job_visits WHERE id = ?`,
+      [visitId]
+    );
+
+    if (!visit) {
+      return res.status(404).json({ error: "Visit not found" });
+    }
+
+    const now = new Date();
+
+    // 2. block if active visit exists
+    const [[active]] = await conn.query(
+      `SELECT id FROM job_visits
+       WHERE job_id = ?
+       AND status = 'IN_PROGRESS'`,
+      [visit.job_id]
+    );
+
+    if (active) {
+      return res.status(400).json({
+        error: "Another visit already in progress",
+      });
+    }
+
+    // 3. get next visit number
+    const [[row]] = await conn.query(
+      `SELECT COALESCE(MAX(visit_number),0) + 1 AS nextVisit
+       FROM job_visits
+       WHERE job_id = ?`,
+      [visit.job_id]
+    );
+
+    const newVisitId = uuid();
+
+    // 4. create new visit
+    await conn.query(
+      `INSERT INTO job_visits
+       (id, job_id, visit_number, scheduled_date, status, started_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, 'IN_PROGRESS', NOW(), ?)`,
+      [
+        newVisitId,
+        visit.job_id,
+        row.nextVisit,
+        now,
+        userId,
+      ]
+    );
+
+    // 5. copy technicians
+    const [techs] = await conn.query(
+      `SELECT technician_id FROM visit_technicians WHERE visit_id = ?`,
+      [visitId]
+    );
+
+    for (const t of techs) {
+      await conn.query(
+        `INSERT INTO visit_technicians (id, visit_id, technician_id)
+         VALUES (?, ?, ?)`,
+        [uuid(), newVisitId, t.technician_id]
+      );
+    }
+
+    // 6. add system comment
+    await conn.query(
+      `INSERT INTO job_comments (id, job_id, comment, type)
+       VALUES (?, ?, ?, 'SYSTEM')`,
+      [
+        uuid(),
+        visit.job_id,
+        `Visit scheduled for ${visit.scheduled_date} was missed. Started on ${now}.`,
+      ]
+    );
+
+    await conn.commit();
+
+    res.json({
+      success: true,
+      visit_id: newVisitId,
+    });
+
+  } catch (err) {
+    await conn.rollback();
+    console.error("Start anyway failed:", err);
+    res.status(500).json({ error: "Failed to start visit anyway" });
+  } finally {
+    conn.release();
+  }
+}
+
 async function submitVisit(req, res) {
   const { visitId } = req.params;
 
@@ -237,25 +386,30 @@ async function getMyVisits(req, res) {
   try {
 
     const [rows] = await pool.query(`
-      SELECT
-        v.id,
-        v.visit_number,
-        v.scheduled_date,
-        v.status,
-        v.job_id,
-        j.code AS job_code,
-        j.service_type,
-        j.address
-      FROM job_visits v
-      JOIN visit_technicians vt ON vt.visit_id = v.id
-      JOIN jobs j ON j.id = v.job_id
-      WHERE vt.technician_id = ?
-      AND (
-            (DATE(v.scheduled_date) = CURDATE() AND v.status = 'SCHEDULED')
-         OR v.status = 'IN_PROGRESS'
-         OR v.status = 'AWAITING_APPROVAL'
-      )
-      ORDER BY v.scheduled_date ASC
+SELECT
+  v.id,
+  v.visit_number,
+  v.scheduled_date, 
+  v.status,
+  v.job_id,
+
+  j.code AS job_code,
+  j.sub_service,
+  j.status AS job_status,
+  j.address
+
+FROM job_visits v
+
+JOIN visit_technicians vt
+  ON vt.visit_id = v.id
+
+JOIN jobs j
+  ON j.id = v.job_id
+
+WHERE vt.technician_id = ?
+AND v.status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')
+
+ORDER BY v.scheduled_date ASC;
     `, [technicianId]);
 
     res.json(rows);
@@ -267,7 +421,7 @@ async function getMyVisits(req, res) {
 }
 
 async function getClientUpcomingVisit(req, res) {
-  
+
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized - user missing" });
@@ -291,11 +445,11 @@ async function getClientUpcomingVisit(req, res) {
 
     const [rows] = await pool.query(`
       SELECT 
-  v.scheduled_date,
-  j.sub_service
+  DATE_FORMAT(v.scheduled_date, '%Y-%m-%d %H:%i:%s') AS scheduled_date,
+  j.sub_service AS title
 FROM job_visits v
 JOIN jobs j ON j.id = v.job_id
-WHERE j.requested_by_contact_id = '9d63d58f-aa54-4af1-b1fe-3f933e580f5f'
+WHERE j.requested_by_contact_id = ?
   AND v.status = 'SCHEDULED'
   AND v.scheduled_date >= NOW()
 ORDER BY v.scheduled_date ASC
@@ -311,4 +465,4 @@ LIMIT 1;
 }
 
 
-module.exports = { startVisit, submitVisit, approveVisit, createVisitController, getMyVisits, getJobVisits, updateVisitTechnicians, rescheduleVisit, cancelVisit, getClientUpcomingVisit };
+module.exports = { startVisit, startVisitAnyway, submitVisit, approveVisit, createVisitController, getMyVisits, getJobVisits, updateVisitTechnicians, rescheduleVisit, cancelVisit, getClientUpcomingVisit };

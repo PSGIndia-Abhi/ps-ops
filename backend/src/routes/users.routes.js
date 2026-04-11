@@ -10,9 +10,10 @@ router.get("/", auth, allowRoles("admin","branch_admin","supervisor"), async (re
 
   try {
     let query = `
-      SELECT id, name
-      FROM users
-      WHERE is_active = 1
+      SELECT u.id, u.name, u.branch_id, b.name AS branch_name
+      FROM users u
+      LEFT JOIN branches b ON b.id = u.branch_id
+      WHERE u.is_active = 1
     `;
     const params = [];
 
@@ -24,16 +25,16 @@ router.get("/", auth, allowRoles("admin","branch_admin","supervisor"), async (re
       if (!me?.branch_id) {
         return res.status(403).json({ error: "Branch not assigned" });
       }
-      query += " AND branch_id = ?";
+      query += " AND u.branch_id = ?";
       params.push(me.branch_id);
     }
 
     if (role) {
-      query += " AND role = ?";
+      query += " AND u.role = ?";
       params.push(role);
     }
 
-    query += " ORDER BY name ASC";
+    query += " ORDER BY u.name ASC";
 
     const [rows] = await pool.query(query, params);
     res.json(rows);

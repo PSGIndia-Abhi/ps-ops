@@ -341,9 +341,9 @@ if (req.user.role === "technician") {
         LEFT JOIN (
           SELECT
             job_id,
-            MIN(scheduled_date) AS next_visit_date
+            DATE_FORMAT(MIN(scheduled_date), '%Y-%m-%d %H:%i:%s') AS next_visit_date
           FROM job_visits
-          WHERE status <> 'CANCELLED'
+          WHERE status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')
             AND scheduled_date IS NOT NULL
           GROUP BY job_id
         ) v ON v.job_id = j.id
@@ -528,6 +528,7 @@ router.get("/:jobId", auth, allowRoles("admin", "branch_admin", "supervisor", "t
         c.phone AS contact_phone,
         c.email AS contact_email,
         s.id    AS company_id,
+        co.name  AS company_name,
         co.code AS company_code,
         co.type AS company_type,
         s.name  AS company_site,
@@ -622,6 +623,7 @@ router.get("/:jobId", auth, allowRoles("admin", "branch_admin", "supervisor", "t
             ? {
               id: job.company_id,
               code: job.company_code,
+              name: job.company_name,
               type: job.company_type,
               site: job.company_site || null,
             }
@@ -1108,10 +1110,13 @@ router.post(
         }
       }
 
-      const branchId = await resolveJobBranchId(connection, job, supervisorId);
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
       if (!branchId) {
         await connection.rollback();
-        return res.status(400).json({ error: "Job branch is not set" });
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
       }
 
       const branchOk = await ensureUsersInBranch(
@@ -1262,10 +1267,13 @@ router.post(
         }
       }
 
-      const branchId = await resolveJobBranchId(connection, job, supervisorId);
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
       if (!branchId) {
         await connection.rollback();
-        return res.status(400).json({ error: "Job branch is not set" });
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
       }
 
       const branchOk = await ensureUsersInBranch(
@@ -1428,10 +1436,13 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
         }
       }
 
-      const branchId = await resolveJobBranchId(connection, job, supervisorId);
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
       if (!branchId) {
         await connection.rollback();
-        return res.status(400).json({ error: "Job branch is not set" });
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
       }
 
       const branchOk = await ensureUsersInBranch(
@@ -1590,12 +1601,12 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
 
       if (!job) continue;
 
-      if (job.branch_id && job.branch_id !== supervisorBranchId) {
+      if (req.user.role !== "admin" && job.branch_id && job.branch_id !== supervisorBranchId) {
         await connection.rollback();
         return res.status(400).json({ error: "Job belongs to a different branch" });
       }
 
-      if (!job.branch_id) {
+      if (!job.branch_id || req.user.role === "admin") {
         await connection.query(
           "UPDATE jobs SET branch_id = ? WHERE id = ?",
           [supervisorBranchId, job.id]

@@ -252,10 +252,10 @@ export default function BookingSummary() {
       </div>
 
       <div className="divider" />
-      {role !== "technician" && (
+      {role !== "technician" && role !== "supervisor" && (
         <button
           className="primary booking-view-btn"
-          onClick={() => navigate(`/${role}/bookings`)}
+          onClick={() => navigate(`/admin/bookings`)}
         >
           View All Bookings
         </button>

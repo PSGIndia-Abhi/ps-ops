@@ -4,6 +4,7 @@ const auth = require("../middleware/auth.middleware");
 const {
   createVisitController,
   getJobVisits,
+  startVisitAnyway,
   startVisit,
   submitVisit,
   approveVisit,
@@ -28,8 +29,10 @@ router.patch("/:visitId/cancel", cancelVisit);
 
 router.get("/client/upcoming", auth, getClientUpcomingVisit);
 
+router.post("/:visitId/start-anyway", startVisitAnyway);
 
 
-router.get("/my", getMyVisits);
+
+router.get("/my", auth, getMyVisits);
 
 module.exports = router;

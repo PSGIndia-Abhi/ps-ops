@@ -6,7 +6,13 @@ import JobTimeline from "../components/JobTimeline";
 import "./jobpage.css";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import { apiFetch } from "../api";
-import { formatDate } from "../utils/date";
+import {
+  compareDateValues,
+  formatDate,
+  formatTime,
+  toDateInputValue,
+  toTimeInputValue,
+} from "../utils/date";
 
 
 
@@ -32,6 +38,7 @@ export default function JobPage() {
   // Visit scheduling state
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [visitDate, setVisitDate] = useState("");
+  const [visitTime, setVisitTime] = useState("");
   const [visitTechs, setVisitTechs] = useState([]);
   const [savingVisit, setSavingVisit] = useState(false);
   const [generatingRecurring, setGeneratingRecurring] = useState(false);
@@ -43,6 +50,12 @@ export default function JobPage() {
 
   const [rescheduleVisit, setRescheduleVisit] = useState(null);
   const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+
+  function resetVisitForm() {
+    setVisitDate("");
+    setVisitTime("");
+    setVisitTechs([]);
+  }
 
 
   // ✅ Fetch job visits (reusable)
@@ -135,26 +148,51 @@ export default function JobPage() {
       console.error("Token parse failed", err);
     }
   }
-  const today = new Date().toLocaleDateString("en-CA");
+  const today = toDateInputValue(new Date());
 
- 
+  const sortedVisits = [...visits].sort((a, b) =>
+    compareDateValues(a.scheduled_date, b.scheduled_date)
+  );
+
+
 
 
 
   const visibleVisits =
     role === "technician"
-      ? visits.filter((v) => {
-
+      ? sortedVisits.filter((v) => {
         const assigned =
           v.technicians?.some((t) => Number(t.id) === Number(userId));
 
-        const visitDate = new Date(v.scheduled_date).toLocaleDateString("en-CA");
-
-        return assigned && visitDate === today;
+        return assigned; // ✅ NO DATE FILTER
       })
-      : visits;
+      : sortedVisits;
 
- 
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+
+  const toDateOnly = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+
+  const missedVisits = visibleVisits.filter(
+    v =>
+      toDateOnly(v.scheduled_date) < todayDate &&
+      v.status === "SCHEDULED"
+  );
+
+  const todayVisits = visibleVisits.filter(
+    v =>
+      toDateOnly(v.scheduled_date).getTime() === todayDate.getTime()
+  );
+
+  const upcomingVisits = visibleVisits.filter(
+    v =>
+      toDateOnly(v.scheduled_date) > todayDate
+  );
+
 
   //visits status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
   async function startVisit(visitId) {
@@ -234,13 +272,16 @@ export default function JobPage() {
       const res = await apiFetch(`/api/visits/${visitId}/reschedule`, {
         method: "PATCH",
         body: JSON.stringify({
-          scheduled_date: visitDate
+          scheduled_date: visitDate,
+          scheduled_time: visitTime,
         })
       });
 
       if (!res.ok) throw new Error("Reschedule failed");
 
       setRescheduleVisit(null);
+      setVisitDate("");
+      setVisitTime("");
       await loadVisits();
 
     } catch (err) {
@@ -302,13 +343,53 @@ export default function JobPage() {
   // Handle visit cancellation
   function openReschedule(visit) {
     setRescheduleVisit(visit);
-    setVisitDate(
-      visit.scheduled_date
-        ? new Date(visit.scheduled_date).toISOString().slice(0, 10)
-        : ""
-    );
+    setVisitDate(toDateInputValue(visit.scheduled_date));
+    setVisitTime(toTimeInputValue(visit.scheduled_date));
     setIsRescheduleModalOpen(true);
   }
+
+  function VisitCard({ visit, type }) {
+
+  const isMissed = type === "missed";
+
+  async function handleStart() {
+    if (isMissed) {
+      console.log("Start Anyway", visit.id); //change to visit.id when API ready
+      // later → start-anyway API
+    } else {
+      await startVisit(visit.id);
+      // existing startVisit
+    }
+  }
+
+  return (
+    <div className="job-visit-card">
+
+      <div className="job-visit-header">
+        <strong>Visit #{visit.visit_number}</strong>
+        <span className={`job-visit-status ${visit.status}`}>
+          {isMissed ? "MISSED" : visit.status}
+        </span>
+      </div>
+
+      <div className="job-visit-schedule">
+        <div>{formatDate(visit.scheduled_date)}</div>
+        <div>{formatTime(visit.scheduled_date)}</div>
+      </div>
+
+      {/* 🔥 BUTTON LOGIC */}
+      {visit.status === "SCHEDULED" && (
+        <button
+          className="visit-start-btn"
+          onClick={handleStart}
+        >
+          {isMissed ? "Start Anyway" : "Start Visit"}
+        </button>
+      )}
+
+    </div>
+  );
+}
 
   // Handle visit cancellation
   async function cancelVisit(visitId) {
@@ -336,6 +417,7 @@ export default function JobPage() {
         method: "POST",
         body: JSON.stringify({
           scheduled_date: visitDate,
+          scheduled_time: visitTime,
           technician_ids: visitTechs,
         }),
       });
@@ -345,8 +427,7 @@ export default function JobPage() {
       await res.json();
 
       setIsVisitModalOpen(false);
-      setVisitDate("");
-      setVisitTechs([]);
+      resetVisitForm();
 
       await reloadHistory();
       await loadVisits();
@@ -584,131 +665,53 @@ export default function JobPage() {
           <div className="job-visits">
             <h3>Visits</h3>
 
-            {visibleVisits.length === 0 && (
-              <div className="job-visits-empty">
-                {role === "technician"
-                  ? "No visit scheduled for today"
-                  : "No visits scheduled"}
-              </div>
+            {/* MISSED */}
+            {missedVisits.length > 0 && (
+              <>
+                <h4>Missed</h4>
+                {missedVisits.map((visit) => (
+                  <VisitCard key={visit.id} visit={visit} type="missed" />
+                ))}
+              </>
             )}
 
-            {visibleVisits.map((visit) => (
-              <div key={visit.id} className="job-visit-card">
+            {/* TODAY */}
+            {todayVisits.length > 0 && (
+              <>
+                <h4>Today</h4>
+                {todayVisits.map((visit) => (
+                  <VisitCard key={visit.id} visit={visit} type="today" />
+                ))}
+              </>
+            )}
 
-                <div className="job-visit-header">
-                  <strong>Visit #{visit.visit_number}</strong>
-                  <span className={`job-visit-status ${visit.status}`}>
-                    {visit.status}
-                  </span>
-                </div>
+            {/* UPCOMING */}
+            {upcomingVisits.length > 0 && (
+              <>
+                <h4>Upcoming</h4>
+                {upcomingVisits.map((visit) => (
+                  <VisitCard key={visit.id} visit={visit} type="upcoming" />
+                ))}
+              </>
+            )}
 
-                <div className="job-visit-date">
-                  {visit.scheduled_date
-                    ? formatDate(visit.scheduled_date)
-                    : "Unscheduled"}
-                </div>
-
-
-
-
-
-
-
-
-
-
-                {["technician", "supervisor", "admin"].includes(role) && visit.status === "SCHEDULED" && (
-                  <button
-                    className="visit-start-btn"
-                    onClick={() => startVisit(visit.id)}
-                  >
-                    Start Visit
-                  </button>
-                )}
-
-                {["technician", "supervisor", "admin"].includes(role) && visit.status === "IN_PROGRESS" && (
-                  <button
-                    className="visit-submit-btn"
-                    onClick={() => submitVisit(visit.id)}
-                  >
-                    Submit for Approval
-                  </button>
-                )}
-
-                {role !== "technician" && visit.status === "AWAITING_APPROVAL" && (
-                  <button
-                    className="visit-approve-btn"
-                    onClick={() => approveVisit(visit.id)}
-                  >
-                    Approve Visit
-                  </button>
-                )}
-
-
-
-
-
-
-
-
-                {visit.technicians?.length > 0 && (
-                  <div className="job-visit-techs">
-                    {visit.technicians.map((t) => (
-                      <span key={t.id} className="job-visit-tech">
-                        {t.name}
-                      </span>
-                    ))}
-
-
-                  </div>
-
-
-                )}
-
-                <div className="job-visit-actions">
-
-                  <button
-                    className="visit-menu-trigger"
-                    onClick={() =>
-                      setOpenVisitMenu(openVisitMenu === visit.id ? null : visit.id)
-                    }
-                  >
-                    ⋯
-                  </button>
-
-                  {openVisitMenu === visit.id && (
-                    <div className="visit-menu">
-
-                      <button onClick={() => openChangeTech(visit)}>
-                        Change Tech
-                      </button>
-
-                      <button onClick={() => openReschedule(visit)}>
-                        Reschedule
-                      </button>
-
-                      <button
-                        className="danger"
-                        onClick={() => cancelVisit(visit.id)}
-                      >
-                        Cancel Visit
-                      </button>
-
-                    </div>
-                  )}
-
-                </div>
-
+            {/* EMPTY */}
+            {visibleVisits.length === 0 && (
+              <div className="job-visits-empty">
+                No visits assigned
               </div>
-
-            ))}
+            )}
           </div>
+
 
           {role !== "technician" && (
             <div className="job-visits-actions">
               <button
                 className="job-btn job-btn-primary"
-                onClick={() => setIsVisitModalOpen(true)}
+                onClick={() => {
+                  resetVisitForm();
+                  setIsVisitModalOpen(true);
+                }}
               >
                 Schedule Visit
               </button>
@@ -795,6 +798,17 @@ export default function JobPage() {
             </div>
 
             <div className="visit-form-group">
+              <label>Visit Time</label>
+
+              <input
+                type="time"
+                className="visit-date-input"
+                value={visitTime}
+                onChange={(e) => setVisitTime(e.target.value)}
+              />
+            </div>
+
+            <div className="visit-form-group">
               <label>Technicians</label>
 
               <div className="visit-tech-list">
@@ -821,12 +835,17 @@ export default function JobPage() {
             </div>
 
             <div className="modal-actions">
-              <button onClick={() => setIsVisitModalOpen(false)}>
+              <button
+                onClick={() => {
+                  setIsVisitModalOpen(false);
+                  resetVisitForm();
+                }}
+              >
                 Cancel
               </button>
 
               <button
-                disabled={savingVisit || !visitDate}
+                disabled={savingVisit || !visitDate || !visitTime}
                 onClick={handleCreateVisit}
               >
                 {savingVisit ? "Saving..." : "Create Visit"}
@@ -882,18 +901,39 @@ export default function JobPage() {
 
             <h3>Reschedule Visit</h3>
 
-            <input
-              type="date"
-              value={visitDate}
-              onChange={(e) => setVisitDate(e.target.value)}
-            />
+            <div className="visit-form-group">
+              <label>Visit Date</label>
+              <input
+                type="date"
+                className="visit-date-input"
+                value={visitDate}
+                onChange={(e) => setVisitDate(e.target.value)}
+              />
+            </div>
+
+            <div className="visit-form-group">
+              <label>Visit Time</label>
+              <input
+                type="time"
+                className="visit-date-input"
+                value={visitTime}
+                onChange={(e) => setVisitTime(e.target.value)}
+              />
+            </div>
 
             <div className="modal-actions">
-              <button onClick={() => setRescheduleVisit(null)}>
+              <button
+                onClick={() => {
+                  setRescheduleVisit(null);
+                  setVisitDate("");
+                  setVisitTime("");
+                }}
+              >
                 Cancel
               </button>
 
               <button
+                disabled={!visitDate || !visitTime}
                 onClick={() => rescheduleVisitDate(rescheduleVisit.id)}
               >
                 Save

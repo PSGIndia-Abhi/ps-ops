@@ -98,6 +98,7 @@ export default function AdminLayout() {
             <div className="user-box">
               <div className="user-name">{user.name}</div>
               <div className="user-role">{user.role}</div>
+              {user?.branch && (<span className="header-subtitle">{user?.branch?.name}</span>)}
             </div>
           )}
           <button className="logout-btn" onClick={logout}>Logout</button>

@@ -353,6 +353,29 @@ async function processRule(connection, rule, windowStart, windowEnd) {
       );
 
       await connection.query(
+  `INSERT INTO job_visits
+   (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
+   VALUES (?, ?, 1, ?, 'SCHEDULED', ?, NOW(), NOW())`,
+  [
+    visitId,
+    jobId,
+    jobDate, // same as start_date
+    rule.created_by_user_id || null
+  ]
+);
+
+// attach technicians (from rule.team)
+const team = JSON.parse(rule.team || "[]");
+
+for (const techId of team) {
+  await connection.query(
+    `INSERT INTO visit_technicians (id, visit_id, technician_id)
+     VALUES (?, ?, ?)`,
+    [uuid(), visitId, techId]
+  );
+}
+
+      await connection.query(
         `INSERT INTO job_history (
           id, job_id, action, message, created_by_user_id, created_at
         ) VALUES (?, ?, ?, ?, ?, NOW())`,

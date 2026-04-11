@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import "./BookingsPage.css";
+import { roleBasePath } from "../auth/roleBasePath";
 
 function formatDate(value) {
   if (!value) return "-";
@@ -367,19 +368,21 @@ export default function BookingsPage() {
               <div className="booking-section-card">
                 <div className="booking-section-title">Tasks</div>
                 <div className="booking-job-list">
-                  {(booking.jobs || []).map(job => (
-                    <div
-                      key={job.id}
-                      className="booking-job-row"
-                      onClick={() => navigate(`/${role}/jobs/${job.id}`)}
-                    >
-                      <div className="job-service">{job.sub_service}</div>
-                      <div className="job-date">{formatDate(job.start_date)}</div>
-                      <div className={`job-status status-${job.status}`}>
-                        {job.status}
+                  {[...(booking.jobs || [])]
+                    .sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
+                    .map(job => (
+                      <div
+                        key={job.id}
+                        className="booking-job-row"
+                        onClick={() => navigate(`${roleBasePath(role)}/jobs/${job.id}`)}
+                      >
+                        <div className="job-service">{job.sub_service}</div>
+                        <div className="job-date">{formatDate(job.start_date)}</div>
+                        <div className={`job-status status-${job.status}`}>
+                          {job.status}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                   {(booking.jobs || []).length === 0 && (
                     <div className="booking-job-empty">No jobs yet</div>
                   )}
