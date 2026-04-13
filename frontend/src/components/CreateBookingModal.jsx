@@ -318,6 +318,7 @@ export default function CreateBookingModal({
         scheduleType,
         start_date: startDateValue,
         end_date: endDateValue || null,
+        time: schedule.time || null
       };
     }
 
@@ -423,7 +424,7 @@ export default function CreateBookingModal({
 
     try {
       await onCreate({
-        contact_id: form.contactId ,
+        contact_id: form.contactId,
         serviceType: form.serviceType,
         subServices: form.subServices,
         start_date: startDateValue,
@@ -555,24 +556,24 @@ export default function CreateBookingModal({
     || form.recurrenceType === "CUSTOM_MONTHS";
   const recurrenceIsMonthly = form.recurrenceType === "CUSTOM_MONTHS";
 
-const contactDropdownRef = useRef(null);
+  const contactDropdownRef = useRef(null);
 
-useEffect(() => {
-  function handleClickOutside(e) {
-    if (
-      contactDropdownRef.current &&
-      !contactDropdownRef.current.contains(e.target)
-    ) {
-      setShowContactResults(false);
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (
+        contactDropdownRef.current &&
+        !contactDropdownRef.current.contains(e.target)
+      ) {
+        setShowContactResults(false);
+      }
     }
-  }
 
-  document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
 
-  return () => {
-    document.removeEventListener("mousedown", handleClickOutside);
-  };
-}, []);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   /* ---------- RENDER ---------- */
 
@@ -587,113 +588,113 @@ useEffect(() => {
         {/* BODY */}
         <div style={body}>
           {role !== "client" && (
-          <>
-          {/* REQUESTED BY */}
-          <div style={section}>
-            <h4>Requested By</h4>
+            <>
+              {/* REQUESTED BY */}
+              <div style={section}>
+                <h4>Requested By</h4>
 
-            <div ref={contactDropdownRef} style={{ position: "relative" }}>
+                <div ref={contactDropdownRef} style={{ position: "relative" }}>
 
-              <input
-                type="text"
-                value={contactSearch}
-                onFocus={() => setShowContactResults(true)}
-                onChange={(e) => {
-                  setContactSearch(e.target.value);
-                  setShowContactResults(true);
-                }}
-                placeholder="Search contacts by name, phone, email, or company"
-                style={input}
-              />
-              {showContactResults && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    right: 0,
-                    background: "#fff",
-                    border: "1px solid #d1d5db",
-                    borderRadius: "8px",
-                    maxHeight: "220px",
-                    overflowY: "auto",
-                    marginTop: "4px",
-                    zIndex: 50
-                  }}
-                >
-                  {loadingContacts ? (
-                    <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
-                      Loading contacts…
-                    </div>
-                  ) : filteredContacts.length === 0 ? (
-                    <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
-                      No contacts found
-                    </div>
-                  ) : (
-                    filteredContacts.map(c => {
-                      const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
-                      const phoneLabel = c.phone || c.contact_phone || "";
-
-                      return (
-                        <div
-                          key={c.id}
-                          style={{
-                            padding: "10px",
-                            cursor: "pointer",
-                            borderBottom: "1px solid #f3f4f6",
-                            fontSize: "13px"
-                          }}
-                          onClick={() => {
-                            setForm(prev => ({ ...prev, contactId: c.id }));
-                            setContactSearch(`${c.name} - ${c.phone || c.contact_phone || ""}`);
-                            setShowContactResults(false);
-                          }}
-                          
-                        >
-                          <strong>{c.name}</strong>
-                          {phoneLabel ? ` • ${phoneLabel}` : ""}
-                          {companyLabel ? ` • ${companyLabel}` : ""}
-                          {c.company_code ? ` (${c.company_code})` : ""}
+                  <input
+                    type="text"
+                    value={contactSearch}
+                    onFocus={() => setShowContactResults(true)}
+                    onChange={(e) => {
+                      setContactSearch(e.target.value);
+                      setShowContactResults(true);
+                    }}
+                    placeholder="Search contacts by name, phone, email, or company"
+                    style={input}
+                  />
+                  {showContactResults && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        background: "#fff",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "8px",
+                        maxHeight: "220px",
+                        overflowY: "auto",
+                        marginTop: "4px",
+                        zIndex: 50
+                      }}
+                    >
+                      {loadingContacts ? (
+                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                          Loading contacts…
                         </div>
-                      );
-                    })
+                      ) : filteredContacts.length === 0 ? (
+                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                          No contacts found
+                        </div>
+                      ) : (
+                        filteredContacts.map(c => {
+                          const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
+                          const phoneLabel = c.phone || c.contact_phone || "";
+
+                          return (
+                            <div
+                              key={c.id}
+                              style={{
+                                padding: "10px",
+                                cursor: "pointer",
+                                borderBottom: "1px solid #f3f4f6",
+                                fontSize: "13px"
+                              }}
+                              onClick={() => {
+                                setForm(prev => ({ ...prev, contactId: c.id }));
+                                setContactSearch(`${c.name} - ${c.phone || c.contact_phone || ""}`);
+                                setShowContactResults(false);
+                              }}
+
+                            >
+                              <strong>{c.name}</strong>
+                              {phoneLabel ? ` • ${phoneLabel}` : ""}
+                              {companyLabel ? ` • ${companyLabel}` : ""}
+                              {c.company_code ? ` (${c.company_code})` : ""}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   )}
+
                 </div>
+
+                <button
+                  style={{ marginTop: "10px" }}
+                  onClick={() => setIsContactModalOpen(true)}
+                >
+                  + Create Contact
+                </button>
+              </div>
+
+              {isContactModalOpen && (
+                <CreateContactModal
+                  onClose={() => setIsContactModalOpen(false)}
+                  onCreated={(newContact) => {
+                    if (newContact?.id) {
+                      setContacts(prev => {
+                        const exists = prev.some(c => c.id === newContact.id);
+                        if (exists) return prev;
+                        return [newContact, ...prev];
+                      });
+                      setForm(prev => ({ ...prev, contactId: newContact.id }));
+                      const phoneLabel = newContact.phone || newContact.contact_phone || "";
+                      setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
+                      setShowContactResults(false);
+                    } else {
+                      reloadContacts();
+                    }
+                    setIsContactModalOpen(false);
+                  }}
+                  companies={companies}
+                />
               )}
-
-            </div>
-
-            <button
-              style={{ marginTop: "10px" }}
-              onClick={() => setIsContactModalOpen(true)}
-            >
-              + Create Contact
-            </button>
-          </div>
-
-          {isContactModalOpen && (
-            <CreateContactModal
-              onClose={() => setIsContactModalOpen(false)}
-              onCreated={(newContact) => {
-                if (newContact?.id) {
-                  setContacts(prev => {
-                    const exists = prev.some(c => c.id === newContact.id);
-                    if (exists) return prev;
-                    return [newContact, ...prev];
-                  });
-                  setForm(prev => ({ ...prev, contactId: newContact.id }));
-                  const phoneLabel = newContact.phone || newContact.contact_phone || "";
-                  setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
-                  setShowContactResults(false);
-                } else {
-                  reloadContacts();
-                }
-                setIsContactModalOpen(false);
-              }}
-              companies={companies}
-            />
-          )}
-          </>
+            </>
           )}
 
 
@@ -786,6 +787,13 @@ useEffect(() => {
                           onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
                           style={input}
                         />
+
+                        <input
+                          type="time"
+                          value={schedule.time || ""}
+                          onChange={e => updateServiceSchedule(service, { time: e.target.value })}
+                          style={{ ...input, marginTop: "8px" }}
+                        />
                       </div>
                     </div>
                   );
@@ -794,7 +802,7 @@ useEffect(() => {
             )}
           </div>
 
-                    {/* RECURRENCE */}
+          {/* RECURRENCE */}
           <div style={section}>
             <h4>Recurring</h4>
             <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px" }}>
@@ -976,37 +984,37 @@ useEffect(() => {
             )}
           </div>
 
-       {/* Assignment */}
-{role !== "client" && (
-  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-    <button
-      type="button"
-      className="secondary"
-      onClick={() => setShowAssignModal(true)}
-    >
-      Assign Team
-    </button>
+          {/* Assignment */}
+          {role !== "client" && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setShowAssignModal(true)}
+              >
+                Assign Team
+              </button>
 
-    {(assignedSupervisorId || assignedTechnicianId) && (
-      <div
-        style={{
-          marginTop: 8,
-          padding: "8px 10px",
-          borderRadius: 8,
-          background: "#eef2ff",
-          border: "1px solid #c7d2fe",
-          fontSize: 13,
-          color: "#1e3a8a",
-        }}
-      >
-        <strong>Assigned:</strong>{" "}
-        {assignedSupervisorName || "No supervisor"}
-        {"  •  "}
-        {assignedTechnicianName || "No technician"}
-      </div>
-    )}
-  </div>
-)}
+              {(assignedSupervisorId || assignedTechnicianId) && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    fontSize: 13,
+                    color: "#1e3a8a",
+                  }}
+                >
+                  <strong>Assigned:</strong>{" "}
+                  {assignedSupervisorName || "No supervisor"}
+                  {"  •  "}
+                  {assignedTechnicianName || "No technician"}
+                </div>
+              )}
+            </div>
+          )}
 
 
           {/* NOTES */}

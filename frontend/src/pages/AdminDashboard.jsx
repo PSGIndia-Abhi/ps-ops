@@ -182,6 +182,7 @@ useEffect(() => {
       end_date: form.end_date,
       notes: form.notes,
       recurrence: form.recurrence || null,
+      serviceSchedules: form.serviceSchedules,
 
 
       supervisor_id: form.supervisor_id ?? null,

@@ -353,14 +353,12 @@ export default function JobPage() {
   const isMissed = type === "missed";
 
   async function handleStart() {
-    if (isMissed) {
-      console.log("Start Anyway", visit.id); //change to visit.id when API ready
-      // later → start-anyway API
-    } else {
-      await startVisit(visit.id);
-      // existing startVisit
-    }
+  if (isMissed) {
+    await startVisitAnyway(visit.id);
+  } else {
+    await startVisit(visit.id);
   }
+}
 
   return (
     <div className="job-visit-card">

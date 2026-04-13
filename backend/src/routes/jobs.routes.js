@@ -854,7 +854,7 @@ router.patch("/:id/status", auth, async (req, res) => {
     const currentStatus = job.status;
     const currentApproval = job.approval_status;
 
-    console.log("STATUS TRANSITION:", currentStatus, "→", newStatus, "by", userRole);
+  
 
     const isLost =
       currentStatus === "NOT_STARTED"

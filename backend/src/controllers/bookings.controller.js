@@ -279,7 +279,7 @@ async function createBooking(req, res) {
       for (const rule of rules) {
         await connection.query(
           `INSERT INTO recurring_rules
-          (id, booking_id, supervisor_id, team, frequency, interval_value, day_of_week, days_of_week, day_of_month, week_of_month, start_date, end_date, last_generated_until)
+          (id, booking_id, supervisor_id, team, frequency, interval_value, scheduled_time,day_of_week, days_of_week, day_of_month, week_of_month, start_date, end_date, last_generated_until)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
           [
             uuid(),
@@ -288,6 +288,7 @@ async function createBooking(req, res) {
             teamJson,
             rule.frequency,
             rule.interval_value,
+            rule.scheduled_time,
             rule.day_of_week,
             rule.days_of_week
               ? JSON.stringify(rule.days_of_week)
@@ -364,6 +365,8 @@ async function createBooking(req, res) {
 
       // Create Visit #1 for this job
       const visitId = uuid();
+      const serviceTime = schedule?.time || "00:00";
+      const scheduledDateTime = `${serviceStartDate} ${serviceTime}:00`;
       await connection.query(
         `INSERT INTO job_visits
   (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
@@ -371,7 +374,7 @@ async function createBooking(req, res) {
         [
           visitId,
           jobId,
-          serviceStartDate || null,
+          scheduledDateTime,
           created_by_user_id,
         ]
       );

@@ -487,7 +487,7 @@ router.post(
       try {
         let job = null;
 
-        console.log("FILES:", req.files);
+       
         if (jobIds.length > 0) {
           const [[firstJob]] = await pool.query(
             `SELECT id, code, supervisor_id FROM jobs WHERE id = ?`,

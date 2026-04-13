@@ -165,6 +165,7 @@ export default function ClientDashboard() {
       start_date: form.start_date,
       end_date: form.end_date,
       notes: form.notes,
+      serviceSchedules: form.serviceSchedules,
       recurrence: form.recurrence || null,
       supervisor_id: null,
       technician_id: null,

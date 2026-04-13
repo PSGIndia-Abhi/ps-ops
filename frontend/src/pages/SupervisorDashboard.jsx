@@ -19,6 +19,7 @@ async function handleCreateBooking(form) {
     end_date: form.end_date,
     notes: form.notes,
     recurrence: form.recurrence || null,
+    serviceSchedules: form.serviceSchedules,
 
     // IMPORTANT
     supervisor_id: null, // backend will auto use req.user.id

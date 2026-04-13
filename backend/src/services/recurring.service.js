@@ -304,11 +304,14 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     const normalizedTeam = normalizeTeam(rule.team);
     const teamValue = JSON.stringify(normalizedTeam);
     const branchId = rule.branch_id || null;
+    
 
     for (const job of jobsToCreate) {
       sequenceValue += 1;
       const jobId = uuid();
+      const visitId = uuid();
       const jobDate = formatDate(job.date);
+      const scheduledDateTime = `${jobDate} ${rule.scheduled_time || "00:00"}:00`;
       const jobCode = companyCode
         ? `${companyCode} ${sequenceValue}`
         : `${new Date().getFullYear()}-${sequenceValue}`;
@@ -359,7 +362,7 @@ async function processRule(connection, rule, windowStart, windowEnd) {
   [
     visitId,
     jobId,
-    jobDate, // same as start_date
+    scheduledDateTime,
     rule.created_by_user_id || null
   ]
 );
