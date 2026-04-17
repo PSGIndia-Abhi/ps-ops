@@ -4,6 +4,8 @@ import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import { useState, useEffect } from "react";
 import DashboardActions from "../components/DashboardActions";
+import NotificationsMenu from "../components/NotificationsMenu";
+import UserMenu from "../components/UserMenu";
 
 export default function AdminLayout() {
 
@@ -94,14 +96,17 @@ export default function AdminLayout() {
         </div>
 
         <div className="header-right">
-          {user && (
-            <div className="user-box">
-              <div className="user-name">{user.name}</div>
-              <div className="user-role">{user.role}</div>
-              {user?.branch && (<span className="header-subtitle">{user?.branch?.name}</span>)}
-            </div>
-          )}
-          <button className="logout-btn" onClick={logout}>Logout</button>
+          <NotificationsMenu />
+          <UserMenu
+            user={user}
+            onLogout={logout}
+            actions={[
+              {
+                label: "Profile",
+                onClick: () => navigate("/admin/profile"),
+              },
+            ]}
+          />
         </div>
       </header>
 

@@ -11,12 +11,25 @@ const upload = multer({
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { createBooking } = require("../controllers/bookings.controller");
+const { notifyJobAssignmentChange } = require("../services/notifications.service");
 
 const isValidJobId = (jobId) => {
   if (!jobId) return false;
   const isNumeric = /^\d+$/.test(jobId);
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId);
   return isNumeric || isUUID;
+};
+
+const parseAssignedIds = (value) => {
+  if (!value) return [];
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed)
+      ? parsed.map((id) => Number(id)).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
 };
 
 const getUserBranchId = async (executor, userId) => {
@@ -963,7 +976,7 @@ router.patch("/:id/status", auth, async (req, res) => {
 });
 
 // Submit job for approval (technician only)
-router.post("/:id/submit-approval", auth, allowRoles("technician"), async (req, res) => {
+router.post("/:id/submit-approval", auth, allowRoles("technician", "supervisor"), async (req, res) => {
   const jobId = req.params.id;
   const userId = req.user.id;
   const connection = await pool.getConnection();
@@ -1093,9 +1106,10 @@ router.post(
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobId]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -1250,9 +1264,10 @@ router.post(
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobId]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -1365,6 +1380,18 @@ router.post(
 
       await connection.commit();
       res.json({ success: true, updatedCount });
+
+      notifyJobAssignmentChange({
+        jobId,
+        supervisorId,
+        technicianIds: normalizedTechIds,
+        actorUserId: created_by_user_id,
+        scope: selectedScope,
+        previousSupervisorId: job.supervisor_id || null,
+        previousTechnicianIds,
+      }).catch((notifyErr) => {
+        console.error("Scoped reassignment notification failed:", notifyErr);
+      });
     } catch (err) {
       await connection.rollback();
       console.error("Scoped reassignment failed:", err);
@@ -1419,9 +1446,10 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobIds[0]]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -1538,7 +1566,20 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
       );
 
       await connection.commit();
-      return res.json({ success: true, updatedCount });
+      res.json({ success: true, updatedCount });
+
+      notifyJobAssignmentChange({
+        jobId: job.id,
+        supervisorId,
+        technicianIds: normalizedTechIds,
+        actorUserId: created_by_user_id,
+        scope: selectedScope,
+        previousSupervisorId: job.supervisor_id || null,
+        previousTechnicianIds,
+      }).catch((notifyErr) => {
+        console.error("Scoped assignment notification failed:", notifyErr);
+      });
+      return;
     } catch (err) {
       await connection.rollback();
       console.error("Scoped assignment failed:", err);
@@ -1591,11 +1632,13 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
       return res.status(400).json({ error: "Assigned users must belong to the same branch" });
     }
 
+    const notificationPayloads = [];
+
     for (const jobId of jobIds) {
 
       // current job
       const [[job]] = await connection.query(
-        "SELECT id, supervisor_id, status, booking_id, branch_id FROM jobs WHERE id = ?",
+        "SELECT id, supervisor_id, status, booking_id, branch_id, team FROM jobs WHERE id = ?",
         [jobId]
       );
 
@@ -1614,6 +1657,7 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
       }
 
       const oldSupervisorId = job.supervisor_id;
+      const previousTechnicianIds = parseAssignedIds(job.team);
 
       // old supervisor name
       let oldSupervisorName = "Unassigned";
@@ -1692,6 +1736,12 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
           created_by_user_id,
         ]
       );
+
+      notificationPayloads.push({
+        jobId,
+        previousSupervisorId: oldSupervisorId || null,
+        previousTechnicianIds,
+      });
     }
 
     await connection.commit();
@@ -1699,6 +1749,22 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
     res.json({
       success: true,
       updatedJobIds: jobIds,
+    });
+
+    Promise.allSettled(
+      notificationPayloads.map(({ jobId, previousSupervisorId, previousTechnicianIds }) =>
+        notifyJobAssignmentChange({
+          jobId,
+          supervisorId,
+          technicianIds: normalizedTechIds,
+          actorUserId: created_by_user_id,
+          scope: "current",
+          previousSupervisorId,
+          previousTechnicianIds,
+        })
+      )
+    ).catch((notifyErr) => {
+      console.error("Assignment notification failed:", notifyErr);
     });
 
   } catch (err) {

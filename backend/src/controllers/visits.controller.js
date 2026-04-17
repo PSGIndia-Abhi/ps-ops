@@ -1,9 +1,11 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
-
-
-
 const { createVisit } = require("../services/Visit.service");
+const {
+  notifyVisitCreated,
+  notifyVisitTechniciansUpdated,
+  notifyVisitRescheduled,
+} = require("../services/notifications.service");
 
 function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
   const rawDate = typeof scheduledDate === "string"
@@ -63,6 +65,13 @@ async function createVisitController(req, res) {
     res.json({
       success: true,
       visit_id: visitId
+    });
+
+    notifyVisitCreated({
+      visitId,
+      actorUserId: created_by_user_id,
+    }).catch((err) => {
+      console.error("Visit creation notification failed:", err);
     });
 
   } catch (err) {
@@ -131,6 +140,7 @@ async function getJobVisits(req, res) {
 async function updateVisitTechnicians(req, res) {
   const { visitId } = req.params;
   const { technician_ids } = req.body;
+  const actorUserId = req.user?.id;
 
   const conn = await pool.getConnection();
 
@@ -155,6 +165,13 @@ async function updateVisitTechnicians(req, res) {
 
     res.json({ success: true });
 
+    notifyVisitTechniciansUpdated({
+      visitId,
+      actorUserId,
+    }).catch((err) => {
+      console.error("Visit technician notification failed:", err);
+    });
+
   } catch (err) {
     await conn.rollback();
     console.error(err);
@@ -167,6 +184,7 @@ async function updateVisitTechnicians(req, res) {
 async function rescheduleVisit(req, res) {
   const { visitId } = req.params;
   const { scheduled_date, scheduled_time } = req.body;
+  const actorUserId = req.user?.id;
   const scheduledDateTime = normalizeScheduledDateTime(
     scheduled_date,
     scheduled_time
@@ -186,6 +204,13 @@ async function rescheduleVisit(req, res) {
     );
 
     res.json({ success: true });
+
+    notifyVisitRescheduled({
+      visitId,
+      actorUserId,
+    }).catch((err) => {
+      console.error("Visit reschedule notification failed:", err);
+    });
 
   } catch (err) {
     console.error(err);
@@ -282,6 +307,14 @@ async function startVisitAnyway(req, res) {
 
     const newVisitId = uuid();
 
+    // 3.5 Mark old visit as Canceled (could also do "MISSED" but that would require more frontend changes)
+    await conn.query(
+      `UPDATE job_visits
+   SET status = 'CANCELED', updated_at = NOW()
+   WHERE id = ?`,
+      [visitId]
+    );
+
     // 4. create new visit
     await conn.query(
       `INSERT INTO job_visits
@@ -365,18 +398,18 @@ async function approveVisit(req, res) {
 
     await pool.query(
       `UPDATE job_visits
-       SET status = 'COMPLETED',
-           completed_at = NOW(),
-           updated_at = NOW()
-       WHERE id = ?`,
-      [visitId]
+   SET status = 'COMPLETED',
+       completed_at = NOW(),
+       updated_at = NOW()
+   WHERE TRIM(id) = ?`,
+      [visitId.trim()]
     );
 
     res.json({ success: true });
 
   } catch (err) {
     console.error("Approve visit failed:", err);
-    res.status(500).json({ error: "Failed to approve visit" });
+    res.status(500).json({ error: err.message });
   }
 }
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
+const { notifyUserBranchChanged } = require("../services/notifications.service");
 
 // GET /api/users?role=supervisor|technician
 router.get("/", auth, allowRoles("admin","branch_admin","supervisor"), async (req, res) => {
@@ -85,7 +86,7 @@ router.post("/:id/branch", auth, allowRoles("admin"), async (req, res) => {
 
   try {
     const [[user]] = await pool.query(
-      "SELECT id, role FROM users WHERE id = ?",
+      "SELECT id, role, branch_id FROM users WHERE id = ?",
       [userId]
     );
     if (!user) {
@@ -109,6 +110,17 @@ router.post("/:id/branch", auth, allowRoles("admin"), async (req, res) => {
     );
 
     res.json({ success: true, branch_id: resolvedBranchId });
+
+    if (String(user.branch_id || "") !== String(resolvedBranchId)) {
+      notifyUserBranchChanged({
+        userId,
+        branchId: resolvedBranchId,
+        actorUserId: req.user?.id,
+        previousBranchId: user.branch_id || null,
+      }).catch((notifyErr) => {
+        console.error("Branch change notification failed:", notifyErr);
+      });
+    }
   } catch (err) {
     console.error("Error updating user branch:", err);
     res.status(500).json({ error: "Failed to update user branch" });
@@ -176,6 +188,17 @@ router.post("/:id/role", auth, allowRoles("admin", "branch_admin"), async (req, 
     }
 
     res.json({ success: true, role: requestedRole, branch_id: finalBranchId });
+
+    if (String(user.branch_id || "") !== String(finalBranchId || "")) {
+      notifyUserBranchChanged({
+        userId,
+        branchId: finalBranchId,
+        actorUserId: req.user?.id,
+        previousBranchId: user.branch_id || null,
+      }).catch((notifyErr) => {
+        console.error("Role/branch change notification failed:", notifyErr);
+      });
+    }
   } catch (err) {
     console.error("Error updating user role:", err);
     res.status(500).json({ error: "Failed to update user role" });

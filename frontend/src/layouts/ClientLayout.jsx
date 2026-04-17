@@ -2,6 +2,8 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import logo from "../assets/logo.png";
 import { useState, useEffect } from "react";
 import useMe from "../hooks/useMe";
+import NotificationsMenu from "../components/NotificationsMenu";
+import UserMenu from "../components/UserMenu";
 
 export default function ClientLayout() {
 
@@ -42,10 +44,17 @@ export default function ClientLayout() {
         </div>
 
         <div className="header-right">
-          <button className="logout-btn" onClick={() => navigate("/client/profile")}>Profile</button>
-          <button className="logout-btn" onClick={logout}>
-            Logout
-          </button>
+          <NotificationsMenu />
+          <UserMenu
+            user={me}
+            onLogout={logout}
+            actions={[
+              {
+                label: "Profile",
+                onClick: () => navigate("/client/profile"),
+              },
+            ]}
+          />
         </div>
       </header>
 

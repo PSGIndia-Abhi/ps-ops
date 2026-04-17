@@ -2,6 +2,8 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
+import NotificationsMenu from "../components/NotificationsMenu";
+import UserMenu from "../components/UserMenu";
 
 export default function TechnicianLayout() {
   const navigate = useNavigate();
@@ -46,13 +48,17 @@ export default function TechnicianLayout() {
         </div>
 
         <div className="header-right">
-          {user && (
-            <div className="user-box">
-              <div className="user-name">{user.name}</div>
-              <div className="user-role">{user.role}</div>
-            </div>
-          )}
-          <button className="logout-btn" onClick={logout}>Logout</button>
+          <NotificationsMenu />
+          <UserMenu
+            user={user}
+            onLogout={logout}
+            actions={[
+              {
+                label: "Profile",
+                onClick: () => navigate("/technician/profile"),
+              },
+            ]}
+          />
         </div>
       </header>
 

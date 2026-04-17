@@ -291,8 +291,10 @@ router.get("/me", auth, async (req, res) => {
         u.id,
         u.name,
         u.email,
+        u.phone,
         u.role,
         u.is_active,
+        DATE_FORMAT(u.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         u.contact_id,
         COALESCE(u.branch_id, c.branch_id) AS branch_id,
         c.name AS contact_name,
@@ -342,6 +344,110 @@ router.get("/me", auth, async (req, res) => {
   } catch (err) {
     console.error("ME ERROR:", err);
     res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+router.patch("/me", auth, async (req, res) => {
+  const { name, email, phone } = req.body || {};
+
+  if (!name?.trim()) {
+    return res.status(400).json({ error: "Name is required" });
+  }
+
+  if (!email?.trim()) {
+    return res.status(400).json({ error: "Email is required" });
+  }
+
+  try {
+    const [[existingUser]] = await pool.query(
+      `SELECT id, contact_id
+       FROM users
+       WHERE id = ?
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const [emailRows] = await pool.query(
+      `SELECT id
+       FROM users
+       WHERE email = ?
+         AND id <> ?
+       LIMIT 1`,
+      [email.trim(), req.user.id]
+    );
+
+    if (emailRows.length > 0) {
+      return res.status(400).json({ error: "Email is already in use" });
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET name = ?, email = ?, phone = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [name.trim(), email.trim(), phone?.trim() || null, req.user.id]
+    );
+
+    if (existingUser.contact_id) {
+      await pool.query(
+        `UPDATE contacts
+         SET name = ?, email = ?, phone = ?
+         WHERE id = ?`,
+        [name.trim(), email.trim(), phone?.trim() || null, existingUser.contact_id]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Profile update failed:", err);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+router.post("/me/password", auth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "Current and new password are required" });
+  }
+
+  if (String(newPassword).length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters" });
+  }
+
+  try {
+    const [[user]] = await pool.query(
+      `SELECT id, password_hash
+       FROM users
+       WHERE id = ?
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const matches = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!matches) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query(
+      `UPDATE users
+       SET password_hash = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [passwordHash, req.user.id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Password update failed:", err);
+    res.status(500).json({ error: "Failed to update password" });
   }
 });
 

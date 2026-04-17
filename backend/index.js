@@ -22,6 +22,7 @@ const visitRoutes = require('./src/routes/visits.routes');
 const clientInviteRoutes = require("./src/routes/clientInvite.routes");
 const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
 const ticketsRoutes = require("./src/routes/tickets.routes");
+const notificationsRoutes = require("./src/routes/notifications.routes");
 
 
 
@@ -59,6 +60,7 @@ app.use(express.json());
 app.use("/api/bookings", bookingsRoutes);
 app.use("/api/visits", visitRoutes);
 app.use("/api/tickets", ticketsRoutes);
+app.use("/api/notifications", notificationsRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 

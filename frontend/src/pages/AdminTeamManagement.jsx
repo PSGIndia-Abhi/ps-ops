@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../api";
 import "./AdminTeamManagement.css";
 
@@ -64,9 +64,11 @@ export default function AdminTeamManagement() {
   const [promoteRole, setPromoteRole] = useState("supervisor");
   const [promoteBranchId, setPromoteBranchId] = useState("");
   const [promoting, setPromoting] = useState(false);
-  const [assignTechId, setAssignTechId] = useState("");
+  const [assignTechIds, setAssignTechIds] = useState([]);
+  const [assignTechMenuOpen, setAssignTechMenuOpen] = useState(false);
   const [assignBranchId, setAssignBranchId] = useState("");
   const [assigning, setAssigning] = useState(false);
+  const assignTechMenuRef = useRef(null);
   const role = localStorage.getItem("role");
 
   const loadOverview = async () => {
@@ -107,6 +109,19 @@ export default function AdminTeamManagement() {
     loadBranches();
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (!assignTechMenuRef.current?.contains(event.target)) {
+        setAssignTechMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   const technicianIndex = useMemo(() => {
     const map = new Map();
     supervisors.forEach((sup) => {
@@ -126,6 +141,15 @@ export default function AdminTeamManagement() {
     return Array.from(map.values());
   }, [supervisors, unassigned]);
 
+  const branchNameById = useMemo(() => {
+    const map = new Map();
+    branches.forEach((branch) => {
+      if (!branch?.id) return;
+      map.set(String(branch.id), branch.name || `Branch ${branch.id}`);
+    });
+    return map;
+  }, [branches]);
+
   const promotableUsers = useMemo(() => {
     const map = new Map();
     supervisors.forEach((sup) => {
@@ -142,6 +166,23 @@ export default function AdminTeamManagement() {
   }, [supervisors, allTechnicians]);
 
   const activeSupervisor = supervisors.find(s => Number(s.id) === Number(activeSupervisorId));
+  const selectedAssignTechnicians = allTechnicians.filter((tech) =>
+    assignTechIds.includes(Number(tech.id))
+  );
+  const assignTechTriggerLabel =
+    selectedAssignTechnicians.length === 0
+      ? "Select technicians"
+      : selectedAssignTechnicians.length === 1
+        ? selectedAssignTechnicians[0].name || `ID ${selectedAssignTechnicians[0].id}`
+        : `${selectedAssignTechnicians.length} technicians selected`;
+
+  function getTechnicianBranchLabel(tech) {
+    const branchName =
+      tech?.branch_name ||
+      (tech?.branch?.name ? tech.branch.name : null) ||
+      (tech?.branch_id ? branchNameById.get(String(tech.branch_id)) : null);
+    return branchName ? `Branch: ${branchName}` : "Branch: Unassigned";
+  }
 
   function openSupervisor(supervisorId) {
     setActiveSupervisorId(supervisorId);
@@ -157,6 +198,14 @@ export default function AdminTeamManagement() {
       }
       return [...prev, techId];
     });
+  }
+
+  function toggleAssignTech(id) {
+    setAssignTechIds(prev =>
+      prev.includes(id)
+        ? prev.filter((techId) => techId !== id)
+        : [...prev, id]
+    );
   }
 
   async function saveTeam() {
@@ -225,8 +274,8 @@ if (!confirmed) return;
   }
 
   async function handleAssignTechBranch() {
-    if (!assignTechId) {
-      setError("Select a technician.");
+    if (assignTechIds.length === 0) {
+      setError("Select at least one technician");
       return;
     }
     if (!assignBranchId) {
@@ -236,15 +285,18 @@ if (!confirmed) return;
 
     try {
       setAssigning(true);
-      const res = await apiFetch(`/api/users/${assignTechId}/branch`, {
-        method: "POST",
-        body: JSON.stringify({ branch_id: assignBranchId }),
-      });
-      if (!res?.ok) {
-        const data = await safeJson(res);
-        throw new Error(data?.error || "Failed to assign branch");
+      for (const techId of assignTechIds) {
+        const res = await apiFetch(`/api/users/${techId}/branch`, {
+          method: "POST",
+          body: JSON.stringify({ branch_id: assignBranchId }),
+        });
+        if (!res?.ok) {
+          const data = await safeJson(res);
+          throw new Error(data?.error || "Failed to assign branch");
+        }
       }
-      setAssignTechId("");
+      setAssignTechIds([]);
+      setAssignTechMenuOpen(false);
       setAssignBranchId("");
       setError(null);
       await loadOverview();
@@ -338,26 +390,48 @@ if (!confirmed) return;
           <div>
             <div className="team-card-title">Assign Technician to Branch</div>
             <div className="team-card-subtitle">
-              Set the branch for a technician.
+              Set the branch for one or more technicians.
             </div>
           </div>
         </div>
 
         <div className="team-form">
-          <label className="team-field">
-            <span>Technician *</span>
-            <select
-              value={assignTechId}
-              onChange={(e) => setAssignTechId(e.target.value)}
-            >
-              <option value="">Select technician</option>
-              {allTechnicians.map((tech) => (
-                <option key={tech.id} value={tech.id}>
-                  {tech.name || tech.id}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="team-field">
+            <span>Technicians *</span>
+            <div className="team-multi-select" ref={assignTechMenuRef}>
+              <button
+                type="button"
+                className="team-multi-select-trigger"
+                onClick={() => setAssignTechMenuOpen((prev) => !prev)}
+                aria-expanded={assignTechMenuOpen}
+              >
+                <span>{assignTechTriggerLabel}</span>
+                <span className="team-multi-select-caret">
+                  {assignTechMenuOpen ? "^" : "v"}
+                </span>
+              </button>
+
+              {assignTechMenuOpen && (
+                <div className="team-multi-select-menu">
+                  <div className="team-multi-select-list">
+                    {allTechnicians.map((tech) => (
+                      <label key={tech.id} className="team-tech-select">
+                        <input
+                          type="checkbox"
+                          checked={assignTechIds.includes(Number(tech.id))}
+                          onChange={() => toggleAssignTech(Number(tech.id))}
+                        />
+                        <div>
+                          <div className="team-tech-name">{tech.name || "Unnamed technician"}</div>
+                          <div className="team-tech-email">{getTechnicianBranchLabel(tech)}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           <label className="team-field">
             <span>Branch *</span>

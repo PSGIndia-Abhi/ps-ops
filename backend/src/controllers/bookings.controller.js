@@ -1,6 +1,7 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { normalizeRecurrenceInput, generateRecurringJobsForBooking } = require("../services/recurring.service");
+const { notifyJobCreated } = require("../services/notifications.service");
 
 async function getUserBranchId(connection, userId) {
   if (!userId) return null;
@@ -430,6 +431,17 @@ async function createBooking(req, res) {
     res.json({
       success: true,
       jobs: createdJobs,
+    });
+
+    Promise.allSettled(
+      createdJobs.map((job) =>
+        notifyJobCreated({
+          jobId: job.id,
+          actorUserId: created_by_user_id,
+        })
+      )
+    ).catch((notifyErr) => {
+      console.error("Job creation notification failed:", notifyErr);
     });
   } catch (err) {
     await connection.rollback();

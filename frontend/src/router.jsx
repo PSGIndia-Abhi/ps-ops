@@ -22,7 +22,7 @@ import ClientLayout from "./layouts/ClientLayout";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
 import ClientTickets from "./pages/ClientTickets";
-import ClientProfilePage from "./pages/ClientProfilePage";
+import ProfilePage from "./pages/ProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
@@ -64,7 +64,8 @@ const router = createBrowserRouter([
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "bookings", element: <BookingsPage /> },
       { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
-      { path: "tickets", element: <AdminTickets /> }
+      { path: "tickets", element: <AdminTickets /> },
+      { path: "profile", element: <ProfilePage /> }
     ],
   },
 
@@ -85,7 +86,8 @@ const router = createBrowserRouter([
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "bookings", element: <BookingsPage /> },
       { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
-      { path: "tickets", element: <AdminTickets /> }
+      { path: "tickets", element: <AdminTickets /> },
+      { path: "profile", element: <ProfilePage /> }
     ],
   },
 
@@ -102,6 +104,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <TechnicianDashboard /> },
       { path: "jobs/:jobId", element: <JobPage /> },
+      { path: "profile", element: <ProfilePage /> },
     ],
   },
 
@@ -120,7 +123,7 @@ const router = createBrowserRouter([
       { path: "jobs", element: <ClientJobsPage /> },
       { path: "jobs/:jobId", element: <ClientJobUpdates /> },
       { path: "tickets", element: <ClientTickets /> },
-      { path: "profile", element: <ClientProfilePage /> }
+      { path: "profile", element: <ProfilePage /> }
     ]
   },
 

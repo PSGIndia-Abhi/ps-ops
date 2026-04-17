@@ -180,7 +180,7 @@ export default function JobPage() {
   const missedVisits = visibleVisits.filter(
     v =>
       toDateOnly(v.scheduled_date) < todayDate &&
-      v.status === "SCHEDULED"
+    ["SCHEDULED", "CANCELED"].includes(v.status)
   );
 
   const todayVisits = visibleVisits.filter(
@@ -206,6 +206,20 @@ export default function JobPage() {
 
       await loadVisits();   // refresh UI
 
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function startVisitAnyway(visitId) {
+    try {
+      const res = await apiFetch(`/api/visits/${visitId}/start-anyway`, {
+        method: "POST",
+      });
+
+      if (!res.ok) throw new Error("Start anyway failed");
+
+      await loadVisits();
     } catch (err) {
       console.error(err);
     }
@@ -349,45 +363,121 @@ export default function JobPage() {
   }
 
   function VisitCard({ visit, type }) {
+    const isMissed = type === "missed";
+    const canManageVisit =
+      role !== "technician" &&
+      !["COMPLETED", "CANCELED"].includes(String(visit.status || "").toUpperCase());
 
-  const isMissed = type === "missed";
+    async function handleStart() {
+      if (isMissed) {
+        await startVisitAnyway(visit.id);
+      } else {
+        await startVisit(visit.id);
+      }
+    }
 
-  async function handleStart() {
-  if (isMissed) {
-    await startVisitAnyway(visit.id);
-  } else {
-    await startVisit(visit.id);
+    return (
+      <div className="job-visit-card">
+
+        <div className="job-visit-header">
+          <strong>Visit #{visit.visit_number}</strong>
+          <span className={`job-visit-status ${visit.status}`}>
+            {isMissed ? "MISSED" : visit.status}
+          </span>
+        </div>
+
+        <div className="job-visit-schedule">
+          <div>{formatDate(visit.scheduled_date)}</div>
+          <div>{formatTime(visit.scheduled_date)}</div>
+        </div>
+
+        {visit.technicians?.length > 0 && (
+          <div className="job-visit-techs">
+            {visit.technicians.map((tech) => (
+              <span key={tech.id} className="job-visit-tech">
+                {tech.name}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* 🔥 BUTTON LOGIC */}
+        
+          <div className="job-visit-actions">
+            {visit.status === "SCHEDULED" && (
+              <button
+                className="visit-start-btn"
+                onClick={handleStart}
+              >
+                {isMissed ? "Start Anyway" : "Start Visit"}
+              </button>
+            )}
+
+
+            {/* SUBMIT (technician + supervisor) */}
+            {visit.status === "IN_PROGRESS" && (
+              <button 
+              className="visit-start-btn"
+              onClick={() => submitVisit(visit.id)}>
+                Submit for Approval
+              </button>
+            )
+            }
+
+            {visit.status === "AWAITING_APPROVAL" && role !== "technician" && (
+              <button onClick={() => approveVisit(visit.id)}>
+                Approve
+              </button>
+            )}
+
+
+            {canManageVisit && (
+              <>
+                <button
+                  className="visit-action-btn"
+                  onClick={() =>
+                    setOpenVisitMenu((prev) => (prev === visit.id ? null : visit.id))
+                  }
+                >
+                  Edit Visit
+                </button>
+
+                {openVisitMenu === visit.id && (
+                  <div className="visit-menu">
+                    <button
+                      onClick={() => {
+                        setOpenVisitMenu(null);
+                        openReschedule(visit);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                    <button
+                      onClick={() => {
+                        setOpenVisitMenu(null);
+                        openChangeTech(visit);
+                      }}
+                    >
+                      Change Technicians
+                    </button>
+                    <button
+                      className="danger"
+                      onClick={() => {
+                        setOpenVisitMenu(null);
+                        cancelVisit(visit.id);
+                      }}
+                    >
+                      Cancel Visit
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+      </div>
+    );
   }
-}
-
-  return (
-    <div className="job-visit-card">
-
-      <div className="job-visit-header">
-        <strong>Visit #{visit.visit_number}</strong>
-        <span className={`job-visit-status ${visit.status}`}>
-          {isMissed ? "MISSED" : visit.status}
-        </span>
-      </div>
-
-      <div className="job-visit-schedule">
-        <div>{formatDate(visit.scheduled_date)}</div>
-        <div>{formatTime(visit.scheduled_date)}</div>
-      </div>
-
-      {/* 🔥 BUTTON LOGIC */}
-      {visit.status === "SCHEDULED" && (
-        <button
-          className="visit-start-btn"
-          onClick={handleStart}
-        >
-          {isMissed ? "Start Anyway" : "Start Visit"}
-        </button>
-      )}
-
-    </div>
-  );
-}
 
   // Handle visit cancellation
   async function cancelVisit(visitId) {
@@ -580,33 +670,34 @@ export default function JobPage() {
               )}
 
               {jobstatus === "IN_PROGRESS" && !awaitingApproval && (
-                role === "technician" ? (
-                  <button
-                    className="job-btn job-btn-complete"
-                    onClick={submitForApproval}
-                  >
-                    Submit for Approval
-                  </button>
-                ) : (
-                  <div className="job-actions-row">
-                    <button
-                      className="job-btn job-btn-pause"
-                      onClick={() => updateStatus("PAUSED")}
-                    >
-                      Pause
-                    </button>
+                role === "technician" || role === "supervisor"
+                  ? (
                     <button
                       className="job-btn job-btn-complete"
-                      onClick={() => updateStatus("COMPLETED")}
+                      onClick={submitForApproval}
                     >
-                      Complete
+                      Submit for Approval
                     </button>
-                  </div>
-                )
+                  ) : (
+                    <div className="job-actions-row">
+                      <button
+                        className="job-btn job-btn-pause"
+                        onClick={() => updateStatus("PAUSED")}
+                      >
+                        Pause
+                      </button>
+                      <button
+                        className="job-btn job-btn-complete"
+                        onClick={() => updateStatus("COMPLETED")}
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  )
               )}
 
               {jobstatus === "PAUSED" && !awaitingApproval && (
-                role === "technician" ? (
+                role === "technician" || role === "supervisor" ? (
                   <button
                     className="job-btn job-btn-complete"
                     onClick={submitForApproval}
@@ -660,13 +751,18 @@ export default function JobPage() {
 
             </div>)}
 
+
+
+
+          {/* Visits------------------------------------------------------------------------------------------------------------------------------------- */}
+
           <div className="job-visits">
             <h3>Visits</h3>
 
             {/* MISSED */}
             {missedVisits.length > 0 && (
               <>
-                <h4>Missed</h4>
+                <h4>Missed Or Canceled</h4>
                 {missedVisits.map((visit) => (
                   <VisitCard key={visit.id} visit={visit} type="missed" />
                 ))}
@@ -789,6 +885,7 @@ export default function JobPage() {
 
               <input
                 type="date"
+                min={new Date().toISOString().split("T")[0]}
                 className="visit-date-input"
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}
@@ -903,6 +1000,7 @@ export default function JobPage() {
               <label>Visit Date</label>
               <input
                 type="date"
+                min={new Date().toISOString().split("T")[0]}
                 className="visit-date-input"
                 value={visitDate}
                 onChange={(e) => setVisitDate(e.target.value)}

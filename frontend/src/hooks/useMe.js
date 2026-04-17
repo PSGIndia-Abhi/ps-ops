@@ -20,8 +20,16 @@ export default function useMe() {
       }
     }
 
+    function handleProfileRefresh() {
+      load();
+    }
+
     load();
-    return () => (mounted = false);
+    window.addEventListener("profile-updated", handleProfileRefresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener("profile-updated", handleProfileRefresh);
+    };
   }, []);
 
   return { user, loading };

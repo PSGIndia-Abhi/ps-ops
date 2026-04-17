@@ -784,6 +784,7 @@ export default function CreateBookingModal({
                         <input
                           type="date"
                           value={schedule.start_date || ""}
+                          min={new Date().toISOString().split("T")[0]}
                           onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
                           style={input}
                         />

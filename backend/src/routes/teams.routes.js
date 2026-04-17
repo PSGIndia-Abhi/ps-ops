@@ -134,29 +134,41 @@ router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, r
         return res.status(403).json({ error: "Branch not assigned" });
       }
 
-      branchFilter = "AND branch_id = ?";
+      branchFilter = "AND u.branch_id = ?";
       params.push(me.branch_id);
     }
 
     // ✅ supervisors (filtered)
     const [supervisors] = await pool.query(
-      `SELECT id, name, email 
-       FROM users 
-       WHERE role = 'supervisor' 
-       AND is_active = 1 
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.branch_id,
+         b.name AS branch_name
+       FROM users u
+       LEFT JOIN branches b ON b.id = u.branch_id
+       WHERE u.role = 'supervisor'
+       AND u.is_active = 1
        ${branchFilter}
-       ORDER BY name ASC`,
+       ORDER BY u.name ASC`,
       params
     );
 
     // ✅ technicians (filtered)
     const [technicians] = await pool.query(
-      `SELECT id, name, email 
-       FROM users 
-       WHERE role = 'technician' 
-       AND is_active = 1 
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.branch_id,
+         b.name AS branch_name
+       FROM users u
+       LEFT JOIN branches b ON b.id = u.branch_id
+       WHERE u.role = 'technician'
+       AND u.is_active = 1
        ${branchFilter}
-       ORDER BY name ASC`,
+       ORDER BY u.name ASC`,
       params
     );
 
