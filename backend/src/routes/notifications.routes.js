@@ -75,4 +75,25 @@ router.post(
   }
 );
 
+router.delete("/clear-read", async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [result] = await pool.query(
+      `DELETE FROM notifications 
+       WHERE user_id = ? AND is_read = 1`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      deleted: result.affectedRows
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to clear notifications" });
+  }
+});
+
 module.exports = router;

@@ -56,6 +56,7 @@ export default function NotificationsMenu() {
   const role = localStorage.getItem("role") || "";
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const {
     notifications,
     unreadCount,
@@ -82,7 +83,7 @@ export default function NotificationsMenu() {
     const nextOpen = !open;
     setOpen(nextOpen);
     if (nextOpen) {
-      await refresh();
+      await refresh({ unreadOnly: showUnreadOnly });
     }
   }
 
@@ -97,6 +98,7 @@ export default function NotificationsMenu() {
 
   async function handleMarkAll() {
     await markAllAsRead();
+    await refresh({ unreadOnly: showUnreadOnly });
   }
 
   return (
@@ -138,6 +140,17 @@ export default function NotificationsMenu() {
               >
                 Mark all read
               </button>
+              <button
+                type="button"
+                className="notifications-mark-all"
+                onClick={() => {
+                  setShowUnreadOnly(true);
+                  refresh({ unreadOnly: true });
+                }}
+              >
+                Clear read
+              </button>
+
             </div>
 
             {loading ? (

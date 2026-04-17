@@ -23,6 +23,7 @@ const clientInviteRoutes = require("./src/routes/clientInvite.routes");
 const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
 const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
+const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 
 
 
@@ -75,6 +76,7 @@ const PORT = process.env.PORT || 3000;
     await testConnection();
     console.log('MySQL connected successfully');
     startRecurringScheduler(pool);
+    startVisitMissedCron();
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);

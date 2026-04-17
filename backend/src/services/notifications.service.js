@@ -435,6 +435,64 @@ async function notifyUserBranchChanged({
   );
 }
 
+async function notifyVisitSubmitted({ visitId, actorUserId = null }) {
+  const visit = await getVisitContext(pool, visitId);
+  if (!visit) return 0;
+
+  const [branchAdminIds] = await Promise.all([
+    getBranchAdminUserIds(pool, visit.branch_id),
+  ]);
+
+  return insertNotifications(
+    pool,
+    [
+      ...branchAdminIds,
+      visit.supervisor_id,   // supervisor of job
+      ...visit.technician_ids, // optional (remove if not needed)
+    ],
+    {
+      actorUserId,
+      type: "VISIT_SUBMITTED",
+      title: `Visit submitted: ${visit.job_code || visit.job_id}`,
+      message: `Visit #${visit.visit_number} is awaiting approval.`,
+      entityType: "job",
+      entityId: visit.job_id,
+    }
+  );
+}
+
+async function notifyVisitMissed({ visitId, actorUserId = null }) {
+  const visit = await getVisitContext(pool, visitId);
+  if (!visit) return 0;
+
+  const [branchAdminIds] = await Promise.all([
+    getBranchAdminUserIds(pool, visit.branch_id),
+  ]);
+  console.log("MISS DEBUG:", {
+  visitId,
+  branchAdminIds,
+  supervisor: visit.supervisor_id,
+  technicians: visit.technician_ids
+});
+
+  return insertNotifications(
+    pool,
+    [
+      ...branchAdminIds,
+      visit.supervisor_id,
+      ...visit.technician_ids,
+    ],
+    {
+      actorUserId,
+      type: "VISIT_MISSED",
+      title: `Visit missed: ${visit.job_code || visit.job_id}`,
+      message: `Visit #${visit.visit_number} was missed.`,
+      entityType: "job",
+      entityId: visit.job_id,
+    }
+  );
+}
+
 module.exports = {
   listNotificationsForUser,
   getUnreadNotificationCount,
@@ -446,4 +504,6 @@ module.exports = {
   notifyVisitTechniciansUpdated,
   notifyVisitRescheduled,
   notifyUserBranchChanged,
+  notifyVisitSubmitted,
+  notifyVisitMissed,
 };

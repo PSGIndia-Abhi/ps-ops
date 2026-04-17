@@ -5,6 +5,7 @@ const {
   notifyVisitCreated,
   notifyVisitTechniciansUpdated,
   notifyVisitRescheduled,
+  notifyVisitSubmitted,
 } = require("../services/notifications.service");
 
 function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
@@ -238,6 +239,8 @@ async function cancelVisit(req, res) {
   }
 }
 
+
+
 //status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
 
 async function startVisit(req, res) {
@@ -372,6 +375,7 @@ async function startVisitAnyway(req, res) {
 
 async function submitVisit(req, res) {
   const { visitId } = req.params;
+  const actorUserId = req.user?.id;
 
   try {
 
@@ -384,6 +388,14 @@ async function submitVisit(req, res) {
     );
 
     res.json({ success: true });
+
+    // 👇 ADD THIS
+    notifyVisitSubmitted({
+      visitId,
+      actorUserId,
+    }).catch((err) => {
+      console.error("Visit submit notification failed:", err);
+    });
 
   } catch (err) {
     console.error("Submit visit failed:", err);
