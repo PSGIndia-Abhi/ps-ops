@@ -6,10 +6,14 @@ export default function useNotifications(limit = 8) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  async function refresh({ unreadOnly = false } = {}) {
     try {
-      const [listRes, countRes] = await Promise.all([
-        apiFetch(`/api/notifications?limit=${limit}`),
+      const query = unreadOnly
+        ? `/api/notifications?limit=${limit}&unreadOnly=true`
+        : `/api/notifications?limit=${limit}`;
+      
+        const [listRes, countRes] = await Promise.all([
+        apiFetch(query),
         apiFetch("/api/notifications/unread-count"),
       ]);
 
@@ -25,6 +29,7 @@ export default function useNotifications(limit = 8) {
     } finally {
       setLoading(false);
     }
+    console.log("Refreshing notifications");
   }
 
   async function markAsRead(notificationId) {
@@ -64,12 +69,12 @@ export default function useNotifications(limit = 8) {
 
     async function load() {
       if (cancelled) return;
-      await refresh();
+      await refresh({ unreadOnly: false });
     }
 
     function handleFocus() {
       if (!cancelled) {
-        refresh();
+        refresh({ unreadOnly: false });
       }
     }
 
@@ -77,7 +82,7 @@ export default function useNotifications(limit = 8) {
 
     const intervalId = window.setInterval(() => {
       if (!cancelled) {
-        refresh();
+        refresh({ unreadOnly: false });
       }
     }, 10000);
 

@@ -550,37 +550,51 @@ export default function JobPage() {
   }
 
   // Handle assignment from AssignWorkOrderModal
-  async function handleAssignSingle({ supervisorId, technicianIds, scope, rangeStart, rangeEnd }) {
-    try {
-      const res = await apiFetch(`/api/jobs/assign`, {
-        method: "POST",
-        body: JSON.stringify({
-          jobIds: [job.id],
-          supervisorId,
-          technicianIds,
-          scope,
-          rangeStart,
-          rangeEnd,
-        }),
-      });
+async function handleAssignSingle({
+  supervisorId,
+  technicianIds,
+  scope,
+  rangeStart,
+  rangeEnd,
+}) {
+  try {
+    const res = await apiFetch(`/api/jobs/assign`, {
+      method: "POST",
+      body: JSON.stringify({
+        jobIds: [job.id],
+        supervisorId,
+        technicianIds,
+        scope,
+        rangeStart,
+        rangeEnd,
+      }),
+    });
 
-      if (!res.ok) throw new Error("Assign failed");
+    // 👇 handle error properly
+    if (!res.ok) {
+      let errorMsg = "Assignment failed";
 
-      // refresh job + timeline
-      const jobRes = await apiFetch(`/api/jobs/${job.id}`);
-      setJob(await jobRes.json());
+      try {
+        const data = await res.clone().json();
+        errorMsg = data.error || errorMsg;
+      } catch {}
 
-      await reloadHistory();
-      await loadVisits();
-      setIsAssignOpen(false);
-    } catch (err) {
-      console.error("Assignment failed", err);
+      alert(errorMsg);
+      return; // ⛔ stop execution
     }
 
+    // ✅ success flow
+    const jobRes = await apiFetch(`/api/jobs/${job.id}`);
+    setJob(await jobRes.json());
 
+    await reloadHistory();
+    await loadVisits();
+    setIsAssignOpen(false);
 
+  } catch (err) {
+    console.error("Assignment failed", err);
   }
-
+}
   return (
     <div className="job-page">
       <div className="job-page-layout">

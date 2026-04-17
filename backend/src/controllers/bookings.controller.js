@@ -281,7 +281,7 @@ async function createBooking(req, res) {
         await connection.query(
           `INSERT INTO recurring_rules
           (id, booking_id, supervisor_id, team, frequency, interval_value, scheduled_time,day_of_week, days_of_week, day_of_month, week_of_month, start_date, end_date, last_generated_until)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
           [
             uuid(),
             bookingId,

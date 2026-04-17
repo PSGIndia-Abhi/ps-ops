@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+
   const defaultFilters = {
     status: "",
     startDate: "",
@@ -48,49 +48,40 @@ export default function AdminDashboard() {
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
-const fetchJobs = async () => {
-  setLoading(true);
-  setError(null);
+  const fetchJobs = async () => {
+    setLoading(true);
+    setError(null);
 
-  try {
-    const res = await apiFetch(`/api/jobs`);
-    if (!res.ok) throw new Error("Failed to fetch jobs");
-    const data = await res.json();
-    setJobs(data);
-  } catch (err) {
-    console.error(err);
-    setError(err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+    try {
+      const res = await apiFetch(`/api/jobs`);
+      if (!res.ok) throw new Error("Failed to fetch jobs");
+      const data = await res.json();
+      setJobs(data);
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-useEffect(() => {
-  fetchJobs();
-}, []);
+  useEffect(() => {
+    fetchJobs();
+  }, []);
 
-useEffect(() => {
-  setSelectedJobIds([]);
-  setExpandedJobId(null);
-}, [jobs]);
+  useEffect(() => {
+    setSelectedJobIds([]);
+    setExpandedJobId(null);
+  }, [jobs]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function fetchUsersByRole(role) {
-      const endpoints = [`/api/users?role=${role}`, `/users?role=${role}`];
-      for (const endpoint of endpoints) {
-        try {
-          const res = await apiFetch(endpoint);
-          if (res?.ok) {
-            const data = await res.json();
-            return Array.isArray(data) ? data : [];
-          }
-        } catch (err) {
-          // try next endpoint
-        }
-      }
-      return [];
+      const res = await apiFetch(`/api/users?role=${role}`);
+      if (!res?.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
 
     async function loadPeople() {
@@ -117,16 +108,16 @@ useEffect(() => {
   }, []);
 
   useEffect(() => {
-  if (!setActionsConfig) return undefined;
+    if (!setActionsConfig) return undefined;
 
-  setActionsConfig({
-    onCreate: () => setIsCreateOpen(true),
-    onAssign: () => setIsAssignOpen(true),
-    disableAssign: selectedJobIds.length === 0,
-  });
+    setActionsConfig({
+      onCreate: () => setIsCreateOpen(true),
+      onAssign: () => setIsAssignOpen(true),
+      disableAssign: selectedJobIds.length === 0,
+    });
 
-  return () => setActionsConfig(null);
-}, [setActionsConfig, selectedJobIds.length]);
+    return () => setActionsConfig(null);
+  }, [setActionsConfig, selectedJobIds.length]);
 
   const supervisorOptions = useMemo(() => {
     if (supervisors.length > 0) {
@@ -195,9 +186,15 @@ useEffect(() => {
     });
 
     if (!res.ok) {
-      const t = await res.text();
-      console.error("Create booking failed:", t);
-      throw new Error("Create booking failed");
+      let errorMsg = "Create booking failed";
+
+      try {
+        const data = await res.clone().json();
+        errorMsg = data.error || errorMsg;
+      } catch { }
+
+      alert(errorMsg);
+      return;
     }
 
     await res.json();
@@ -238,12 +235,29 @@ useEffect(() => {
         payload.rangeEnd = rangeEnd;
       }
 
+      // const res = await apiFetch("/api/jobs/assign", {
+      //   method: "POST",
+      //   body: JSON.stringify(payload),
+      // });
+
+      // if (!res.ok) throw new Error("Assign failed");
+
       const res = await apiFetch("/api/jobs/assign", {
         method: "POST",
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Assign failed");
+      let errorMsg = "Assignment failed";
+
+      if (!res.ok) {
+        try {
+          const data = await res.clone().json();
+          errorMsg = data.error || errorMsg;
+        } catch { }
+
+        alert(errorMsg);
+        return;
+      }
 
       await fetchJobs();
 
@@ -256,12 +270,9 @@ useEffect(() => {
 
       setJobs(prevJobs);
 
-      setToast({
-        type: "error",
-        message: "Assignment failed. Changes reverted.",
-      });
+      alert(err.message || "Assignment failed");
 
-      setTimeout(() => setToast(null), 3000);
+
     }
 
 
