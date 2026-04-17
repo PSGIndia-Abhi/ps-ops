@@ -18,7 +18,7 @@ export default function CreateBookingModal({
   const [showAssignModal, setShowAssignModal] = useState(false);
 
   const [assignedSupervisorId, setAssignedSupervisorId] = useState(null);
-  const [assignedTechnicianId, setAssignedTechnicianId] = useState(null);
+  const [assignedTechnicianIds, setAssignedTechnicianIds] = useState([]);
 
   const [assignedSupervisorName, setAssignedSupervisorName] = useState("");
   const [assignedTechnicianName, setAssignedTechnicianName] = useState("");
@@ -434,8 +434,12 @@ export default function CreateBookingModal({
         notes: form.notes,
         recurrence,
         supervisor_id: assignedSupervisorId,
-        technician_id: assignedTechnicianId
+        technician_ids: assignedTechnicianIds
       });
+      alert("Booking created successfully");
+
+      onClose(); // 👈 close modal if you have it
+
     } catch (err) {
       console.error("Create booking failed", err);
       alert("Failed to create booking");
@@ -996,7 +1000,7 @@ export default function CreateBookingModal({
                 Assign Team
               </button>
 
-              {(assignedSupervisorId || assignedTechnicianId) && (
+              {(assignedSupervisorId || assignedTechnicianIds) && (
                 <div
                   style={{
                     marginTop: 8,
@@ -1053,20 +1057,23 @@ export default function CreateBookingModal({
         hideSupervisor={role === "supervisor"}
         onAssign={({ supervisorId, technicianIds }) => {
 
-          const techId = technicianIds?.[0] || null;
-
           setAssignedSupervisorId(supervisorId);
-          setAssignedTechnicianId(techId);
+          setAssignedTechnicianIds(technicianIds || []);
 
-          // Resolve display names
           const sup = supervisors?.find(u => String(u.id) === String(supervisorId));
-          const tech = technicians?.find(u => String(u.id) === String(techId));
+
+          const selectedTechs = (technicianIds || [])
+            .map(id => technicians?.find(u => String(u.id) === String(id)))
+            .filter(Boolean);
+
+          const techNames = selectedTechs.map(t => t.name).join(", ");
 
           setAssignedSupervisorName(sup?.name || `Supervisor #${supervisorId}`);
-          setAssignedTechnicianName(tech?.name || (techId ? `Tech #${techId}` : ""));
+          setAssignedTechnicianName(techNames || "No technician");
 
           setShowAssignModal(false);
         }}
+
       />
     </div>
 

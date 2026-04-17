@@ -47,18 +47,23 @@ async function createBooking(req, res) {
   const created_by_user_id = req.user?.id;
 
   let supervisorId = null;
-  let technicianId = null;
+  const technicianIds =
+    Array.isArray(req.body.technician_ids)
+      ? req.body.technician_ids.map(Number).filter(Boolean)
+      : req.body.technician_id
+        ? [Number(req.body.technician_id)]
+        : [];
 
   // role handling
   if (req.user.role === "supervisor") {
     supervisorId = req.user.id;
   } else if (req.user.role === "client") {
     supervisorId = null;
-    technicianId = null;
+
   } else {
     // admin flow
     supervisorId = req.body.supervisor_id || null;
-    technicianId = req.body.technician_id || null;
+
   }
 
   // validation
@@ -209,8 +214,9 @@ async function createBooking(req, res) {
       throw withStatus("Invalid branch");
     }
 
-    if (technicianId) {
-      const technicianBranchId = await getUserBranchId(connection, technicianId);
+    for (const techId of technicianIds) {
+      const technicianBranchId = await getUserBranchId(connection, techId);
+
       if (!technicianBranchId || technicianBranchId !== jobBranchId) {
         throw withStatus("Technician must belong to the same branch");
       }
@@ -274,9 +280,7 @@ async function createBooking(req, res) {
     // recurrence rule
     if (recurrenceRule) {
       const rules = Array.isArray(recurrenceRule) ? recurrenceRule : [recurrenceRule];
-      const teamJson = JSON.stringify(
-        technicianId ? [Number(technicianId)].filter(Boolean) : []
-      );
+      const teamJson = JSON.stringify(technicianIds);
       for (const rule of rules) {
         await connection.query(
           `INSERT INTO recurring_rules
@@ -351,7 +355,7 @@ async function createBooking(req, res) {
           service,
           initialStatus,
           supervisorId,
-          JSON.stringify([]),
+          JSON.stringify(technicianIds),
           jobCompanyId,
           contact.id,
           jobAddress,
@@ -381,16 +385,11 @@ async function createBooking(req, res) {
       );
 
       // attach technician if provided
-      if (technicianId) {
+      for (const techId of technicianIds) {
         await connection.query(
-          `INSERT INTO visit_technicians
-    (id, visit_id, technician_id, created_at)
-    VALUES (?, ?, ?, NOW())`,
-          [
-            uuid(),
-            visitId,
-            technicianId
-          ]
+          `INSERT INTO visit_technicians (id, visit_id, technician_id, created_at)
+     VALUES (?, ?, ?, NOW())`,
+          [uuid(), visitId, techId]
         );
       }
 

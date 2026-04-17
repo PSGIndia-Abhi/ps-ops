@@ -180,7 +180,7 @@ export default function JobPage() {
   const missedVisits = visibleVisits.filter(
     v =>
       toDateOnly(v.scheduled_date) < todayDate &&
-    ["SCHEDULED", "CANCELED"].includes(v.status)
+      ["SCHEDULED", "CANCELED"].includes(v.status)
   );
 
   const todayVisits = visibleVisits.filter(
@@ -402,78 +402,78 @@ export default function JobPage() {
         )}
 
         {/* 🔥 BUTTON LOGIC */}
-        
-          <div className="job-visit-actions">
-            {visit.status === "SCHEDULED" && (
-              <button
-                className="visit-start-btn"
-                onClick={handleStart}
-              >
-                {isMissed ? "Start Anyway" : "Start Visit"}
-              </button>
-            )}
+
+        <div className="job-visit-actions">
+          {visit.status === "SCHEDULED" && (
+            <button
+              className="visit-start-btn"
+              onClick={handleStart}
+            >
+              {isMissed ? "Start Anyway" : "Start Visit"}
+            </button>
+          )}
 
 
-            {/* SUBMIT (technician + supervisor) */}
-            {visit.status === "IN_PROGRESS" && (
-              <button 
+          {/* SUBMIT (technician + supervisor) */}
+          {visit.status === "IN_PROGRESS" && (
+            <button
               className="visit-start-btn"
               onClick={() => submitVisit(visit.id)}>
-                Submit for Approval
+              Submit for Approval
+            </button>
+          )
+          }
+
+          {visit.status === "AWAITING_APPROVAL" && role !== "technician" && (
+            <button onClick={() => approveVisit(visit.id)}>
+              Approve
+            </button>
+          )}
+
+
+          {canManageVisit && (
+            <>
+              <button
+                className="visit-action-btn"
+                onClick={() =>
+                  setOpenVisitMenu((prev) => (prev === visit.id ? null : visit.id))
+                }
+              >
+                Edit Visit
               </button>
-            )
-            }
 
-            {visit.status === "AWAITING_APPROVAL" && role !== "technician" && (
-              <button onClick={() => approveVisit(visit.id)}>
-                Approve
-              </button>
-            )}
-
-
-            {canManageVisit && (
-              <>
-                <button
-                  className="visit-action-btn"
-                  onClick={() =>
-                    setOpenVisitMenu((prev) => (prev === visit.id ? null : visit.id))
-                  }
-                >
-                  Edit Visit
-                </button>
-
-                {openVisitMenu === visit.id && (
-                  <div className="visit-menu">
-                    <button
-                      onClick={() => {
-                        setOpenVisitMenu(null);
-                        openReschedule(visit);
-                      }}
-                    >
-                      Reschedule
-                    </button>
-                    <button
-                      onClick={() => {
-                        setOpenVisitMenu(null);
-                        openChangeTech(visit);
-                      }}
-                    >
-                      Change Technicians
-                    </button>
-                    <button
-                      className="danger"
-                      onClick={() => {
-                        setOpenVisitMenu(null);
-                        cancelVisit(visit.id);
-                      }}
-                    >
-                      Cancel Visit
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              {openVisitMenu === visit.id && (
+                <div className="visit-menu">
+                  <button
+                    onClick={() => {
+                      setOpenVisitMenu(null);
+                      openReschedule(visit);
+                    }}
+                  >
+                    Reschedule
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOpenVisitMenu(null);
+                      openChangeTech(visit);
+                    }}
+                  >
+                    Change Technicians
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      setOpenVisitMenu(null);
+                      cancelVisit(visit.id);
+                    }}
+                  >
+                    Cancel Visit
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
       </div>
     );
@@ -550,51 +550,51 @@ export default function JobPage() {
   }
 
   // Handle assignment from AssignWorkOrderModal
-async function handleAssignSingle({
-  supervisorId,
-  technicianIds,
-  scope,
-  rangeStart,
-  rangeEnd,
-}) {
-  try {
-    const res = await apiFetch(`/api/jobs/assign`, {
-      method: "POST",
-      body: JSON.stringify({
-        jobIds: [job.id],
-        supervisorId,
-        technicianIds,
-        scope,
-        rangeStart,
-        rangeEnd,
-      }),
-    });
+  async function handleAssignSingle({
+    supervisorId,
+    technicianIds,
+    scope,
+    rangeStart,
+    rangeEnd,
+  }) {
+    try {
+      const res = await apiFetch(`/api/jobs/assign`, {
+        method: "POST",
+        body: JSON.stringify({
+          jobIds: [job.id],
+          supervisorId,
+          technicianIds,
+          scope,
+          rangeStart,
+          rangeEnd,
+        }),
+      });
 
-    // 👇 handle error properly
-    if (!res.ok) {
-      let errorMsg = "Assignment failed";
+      // 👇 handle error properly
+      if (!res.ok) {
+        let errorMsg = "Assignment failed";
 
-      try {
-        const data = await res.clone().json();
-        errorMsg = data.error || errorMsg;
-      } catch {}
+        try {
+          const data = await res.clone().json();
+          errorMsg = data.error || errorMsg;
+        } catch { }
 
-      alert(errorMsg);
-      return; // ⛔ stop execution
+        alert(errorMsg);
+        return; // ⛔ stop execution
+      }
+
+      // ✅ success flow
+      const jobRes = await apiFetch(`/api/jobs/${job.id}`);
+      setJob(await jobRes.json());
+
+      await reloadHistory();
+      await loadVisits();
+      setIsAssignOpen(false);
+
+    } catch (err) {
+      console.error("Assignment failed", err);
     }
-
-    // ✅ success flow
-    const jobRes = await apiFetch(`/api/jobs/${job.id}`);
-    setJob(await jobRes.json());
-
-    await reloadHistory();
-    await loadVisits();
-    setIsAssignOpen(false);
-
-  } catch (err) {
-    console.error("Assignment failed", err);
   }
-}
   return (
     <div className="job-page">
       <div className="job-page-layout">
@@ -921,22 +921,28 @@ async function handleAssignSingle({
               <label>Technicians</label>
 
               <div className="visit-tech-list">
-                {job.team?.map((t) => (
-                  <label key={t.id} className="visit-tech-item">
-                    <input
-                      type="checkbox"
-                      checked={visitTechs.includes(t.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setVisitTechs([...visitTechs, t.id]);
-                        } else {
-                          setVisitTechs(visitTechs.filter(id => id !== t.id));
-                        }
-                      }}
-                    />
-                    <span>{t.name}</span>
-                  </label>
-                ))}
+                {!job.team || job.team.length === 0 ? (
+                  <div className="empty-state">
+                    No technicians assigned to this job
+                  </div>
+                ) : (
+                  job.team.map((t) => (
+                    <label key={t.id} className="visit-tech-item">
+                      <input
+                        type="checkbox"
+                        checked={visitTechs.includes(t.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setVisitTechs([...visitTechs, t.id]);
+                          } else {
+                            setVisitTechs(visitTechs.filter(id => id !== t.id));
+                          }
+                        }}
+                      />
+                      <span>{t.name}</span>
+                    </label>
+                  ))
+                )}
               </div>
 
 
