@@ -304,7 +304,7 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     const normalizedTeam = normalizeTeam(rule.team);
     const teamValue = JSON.stringify(normalizedTeam);
     const branchId = rule.branch_id || null;
-    
+
 
     for (const job of jobsToCreate) {
       sequenceValue += 1;
@@ -356,27 +356,34 @@ async function processRule(connection, rule, windowStart, windowEnd) {
       );
 
       await connection.query(
-  `INSERT INTO job_visits
+        `INSERT INTO job_visits
    (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
    VALUES (?, ?, 1, ?, 'SCHEDULED', ?, NOW(), NOW())`,
-  [
-    visitId,
-    jobId,
-    scheduledDateTime,
-    rule.created_by_user_id || null
-  ]
-);
+        [
+          visitId,
+          jobId,
+          scheduledDateTime,
+          rule.created_by_user_id || null
+        ]
+      );
 
-// attach technicians (from rule.team)
-const team = JSON.parse(rule.team || "[]");
+      // attach technicians (from rule.team)
+      let team = [];
+      try {
+        team = Array.isArray(rule.team)
+          ? rule.team
+          : JSON.parse(rule.team || "[]");
+      } catch {
+        team = [];
+      }
 
-for (const techId of team) {
-  await connection.query(
-    `INSERT INTO visit_technicians (id, visit_id, technician_id)
+      for (const techId of team) {
+        await connection.query(
+          `INSERT INTO visit_technicians (id, visit_id, technician_id)
      VALUES (?, ?, ?)`,
-    [uuid(), visitId, techId]
-  );
-}
+          [uuid(), visitId, techId]
+        );
+      }
 
       await connection.query(
         `INSERT INTO job_history (

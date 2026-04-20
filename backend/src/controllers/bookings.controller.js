@@ -307,6 +307,8 @@ async function createBooking(req, res) {
       }
     }
 
+ 
+
     // 4) Create jobs
     const createdJobs = [];
 
@@ -367,6 +369,9 @@ async function createBooking(req, res) {
           serviceEndDate,
         ]
       );
+
+      console.log("BODY:", req.body);
+      console.log("TECH IDS:", technicianIds);
 
       // Create Visit #1 for this job
       const visitId = uuid();

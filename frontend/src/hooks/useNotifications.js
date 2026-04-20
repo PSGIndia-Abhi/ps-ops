@@ -84,7 +84,7 @@ export default function useNotifications(limit = 8) {
       if (!cancelled) {
         refresh({ unreadOnly: false });
       }
-    }, 10000);
+    }, 25000);
 
     window.addEventListener("focus", handleFocus);
 
