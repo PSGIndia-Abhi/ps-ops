@@ -163,7 +163,10 @@ export default function NotificationsMenu() {
                   <button
                     key={notification.id}
                     type="button"
-                    className={`notifications-item ${notification.is_read ? "" : "unread"}`}
+                    className={`notifications-item 
+  ${notification.is_read ? "" : "unread"} 
+  ${notification.type === "JOB_APPROVAL_REQUEST" ? "approval-highlight" : ""}
+`}
                     onClick={() => handleNotificationClick(notification)}
                   >
                     <div className="notifications-item-top">

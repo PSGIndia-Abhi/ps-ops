@@ -9,7 +9,7 @@ async function runMissedVisitCheck() {
     const [visits] = await pool.query(`
       SELECT id
       FROM job_visits
-      WHERE scheduled_date < NOW()
+      WHERE DATE(scheduled_date) < CURDATE()
       AND status = 'SCHEDULED'
     `);
 

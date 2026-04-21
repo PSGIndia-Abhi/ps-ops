@@ -126,7 +126,7 @@ await pool.query(
 
     // 4. Send OTP email (to admin inbox)
     await sendOTPEmail({
-      toEmail: process.env.ADMIN_OTP_INBOX,
+      toEmail: email,
       userEmail: email,
       otp,
     });
@@ -270,10 +270,17 @@ router.post("/forgot-password/send-otp", async (req, res) => {
     );
 
     await sendOTPEmail({
-      toEmail: "abhimanyu@psgindia.co.in",
+      toEmail: email,
       userEmail: email,
       otp,
     });
+
+    //  also send to admin
+await sendOTPEmail({
+  toEmail: process.env.ADMIN_OTP_INBOX,
+  userEmail: email,
+  otp,
+});
 
     res.json({ success: true });
   } catch (err) {

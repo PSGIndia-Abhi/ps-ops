@@ -493,6 +493,32 @@ async function notifyVisitMissed({ visitId, actorUserId = null }) {
   );
 }
 
+async function notifyVisitApproved({ visitId, actorUserId = null }) {
+  const visit = await getVisitContext(pool, visitId);
+  if (!visit) return 0;
+
+  const [branchAdminIds] = await Promise.all([
+    getBranchAdminUserIds(pool, visit.branch_id),
+  ]);
+
+  return insertNotifications(
+    pool,
+    [
+      ...branchAdminIds,
+      visit.supervisor_id,
+      ...visit.technician_ids,
+    ],
+    {
+      actorUserId,
+      type: "VISIT_APPROVED",
+      title: `Visit approved: ${visit.job_code || visit.job_id}`,
+      message: `Visit #${visit.visit_number} has been approved.`,
+      entityType: "job",
+      entityId: visit.job_id,
+    }
+  );
+}
+
 module.exports = {
   listNotificationsForUser,
   getUnreadNotificationCount,
@@ -506,4 +532,5 @@ module.exports = {
   notifyUserBranchChanged,
   notifyVisitSubmitted,
   notifyVisitMissed,
+  notifyVisitApproved,
 };

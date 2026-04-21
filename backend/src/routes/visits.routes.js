@@ -21,7 +21,7 @@ router.get("/jobs/:jobId/visits", getJobVisits);
 //visit status flow routes
 router.patch("/:visitId/start", startVisit);
 router.patch("/:visitId/submit", submitVisit);
-router.patch("/:visitId/approve", approveVisit);
+router.patch("/:visitId/approve", auth, approveVisit);
 
 router.patch("/:visitId/technicians", updateVisitTechnicians);
 router.patch("/:visitId/reschedule", rescheduleVisit);

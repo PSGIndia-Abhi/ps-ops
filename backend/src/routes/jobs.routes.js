@@ -293,13 +293,13 @@ router.get(
 
       // technician → jobs where they are in team JSON
       // technician → jobs where technician has a relevant visit
-if (req.user.role === "technician") {
-  conditions.push(`
+      if (req.user.role === "technician") {
+        conditions.push(`
     JSON_CONTAINS(j.team, CAST(? AS JSON))
   `);
 
-  params.push(req.user.id); // ⚠️ NOT string
-}
+        params.push(req.user.id); // ⚠️ NOT string
+      }
 
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -867,7 +867,7 @@ router.patch("/:id/status", auth, async (req, res) => {
     const currentStatus = job.status;
     const currentApproval = job.approval_status;
 
-  
+
 
     const isLost =
       currentStatus === "NOT_STARTED"
@@ -926,8 +926,24 @@ router.patch("/:id/status", auth, async (req, res) => {
       });
     }
 
-    // 4️⃣ update job status
+    // 4️⃣ update job status and check for approval if needed
     if (newStatus === "COMPLETED") {
+
+      // 🔥 block if pending visits
+      const [pendingVisits] = await connection.query(
+        `SELECT id FROM job_visits
+     WHERE job_id = ?
+     AND status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')`,
+        [jobId]
+      );
+
+      if (pendingVisits.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: "Cannot complete job with pending visits"
+        });
+      }
+
       if (userRole === "technician") {
         await connection.rollback();
         return res.status(403).json({
@@ -936,15 +952,25 @@ router.patch("/:id/status", auth, async (req, res) => {
       }
 
       await connection.query(
-        "UPDATE jobs SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), updated_at = NOW() WHERE id = ?",
+        `UPDATE jobs 
+     SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), updated_at = NOW() 
+     WHERE id = ?`,
         [newStatus, jobId]
       );
+
+      
+
     } else {
+
       await connection.query(
-        "UPDATE jobs SET status = ?, updated_at = NOW() WHERE id = ?",
+        `UPDATE jobs 
+     SET status = ?, updated_at = NOW() 
+     WHERE id = ?`,
         [newStatus, jobId]
       );
+
     }
+
 
     // 5️⃣ history entry
     await connection.query(
@@ -970,66 +996,6 @@ router.patch("/:id/status", auth, async (req, res) => {
     await connection.rollback();
     console.error("Status update failed:", err);
     res.status(500).json({ error: "Failed to update status" });
-  } finally {
-    connection.release();
-  }
-});
-
-// Submit job for approval (technician only)
-router.post("/:id/submit-approval", auth, allowRoles("technician", "supervisor"), async (req, res) => {
-  const jobId = req.params.id;
-  const userId = req.user.id;
-  const connection = await pool.getConnection();
-
-  try {
-    if (!(await ensureJobAccess(req, res, connection, jobId))) return;
-
-    await connection.beginTransaction();
-
-    const [[job]] = await connection.query(
-      "SELECT status, approval_status FROM jobs WHERE id = ? FOR UPDATE",
-      [jobId]
-    );
-
-    if (!job) {
-      await connection.rollback();
-      return res.status(404).json({ error: "Job not found" });
-    }
-
-    if (job.approval_status === "PENDING") {
-      await connection.rollback();
-      return res.status(400).json({ error: "Job is already submitted for approval" });
-    }
-
-    if (!["IN_PROGRESS", "PAUSED"].includes(job.status)) {
-      await connection.rollback();
-      return res.status(400).json({
-        error: "Only in-progress or paused jobs can be submitted for approval"
-      });
-    }
-
-    await connection.query(
-      "UPDATE jobs SET approval_status = 'PENDING', updated_at = NOW() WHERE id = ?",
-      [jobId]
-    );
-
-    await connection.query(
-      `INSERT INTO job_history
-      (id, job_id, action, message, created_by_user_id, created_at)
-      VALUES (UUID(), ?, 'SUBMITTED_FOR_APPROVAL', ?, ?, NOW())`,
-      [
-        jobId,
-        "Submitted for supervisor approval",
-        userId
-      ]
-    );
-
-    await connection.commit();
-    res.json({ success: true });
-  } catch (err) {
-    await connection.rollback();
-    console.error("Submit for approval failed:", err);
-    res.status(500).json({ error: "Failed to submit for approval" });
   } finally {
     connection.release();
   }
@@ -2016,7 +1982,7 @@ router.get(
   async (req, res) => {
     try {
 
-    
+
 
       const userId = req.user.id;
 

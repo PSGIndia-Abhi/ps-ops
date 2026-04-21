@@ -15,7 +15,7 @@ export default function JobCard({
   const title = job.title;
   const visitDate = job.visit_date;
 
-  const companyName = job.companyname;
+ const companyName = job.companyname;
 
   const requestedByName =
     job.requestedBy?.name ||
@@ -40,11 +40,11 @@ export default function JobCard({
       ? `Requested by: ${requestedByName}${requestedByIdText}`
       : "Individual Customer";
 
-  const site =
-    job.site ||
-    job.company_site ||
-    job.company?.site ||
-    "";
+ const site =
+  job?.site ||
+  job?.company_site ||
+  job?.company?.site ||
+  "";
 
   const visitTime = formatTime(visitDate);
 
@@ -139,26 +139,7 @@ async function startVisit(e) {
         </div>
       </div>
 
-      {/* ACTIONS */}
-      {role?.toLowerCase() === "technician" && (
-        <div className="job-card-actions">
-
-          {/* ✅ TODAY → Start */}
-          {isToday && (
-            <button className="btn-start" onClick={startVisit}>
-              Start
-            </button>
-          )}
-
-          {/* ✅ PAST → Start Anyway */}
-          {isPast && (
-            <button className="btn-start" onClick={startAnyway}>
-              Start Anyway
-            </button>
-          )}
-
-        </div>
-      )}
+    
     </div>
   );
 }

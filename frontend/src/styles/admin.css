@@ -276,6 +276,16 @@
   color: #6b7280;
 }
 
+.approval-highlight {
+  border-left: 4px solid #f59e0b;
+  background: #fff7ed;
+}
+
+.approval-highlight .notifications-item-title {
+  color: #b45309;
+  font-weight: 600;
+}
+
 /* BODY */
 .app-body {
   flex: 1;

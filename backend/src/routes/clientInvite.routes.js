@@ -3,6 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
+const { sendInviteEmail } = require("../utils/mailer");
 const crypto = require("crypto");
 
 // POST /api/contacts/:id/invite
@@ -47,9 +48,9 @@ router.post(
       expiry.setHours(expiry.getHours() + 24);
 
       if (!contact.email) {
-  await connection.rollback();
-  return res.status(400).json({ error: "Contact must have email to create user" });
-}
+        await connection.rollback();
+        return res.status(400).json({ error: "Contact must have email to create user" });
+      }
 
       // 4️⃣ create user
       if (!contact.branch_id) {
@@ -99,6 +100,15 @@ router.post(
 
       const inviteLink = `${process.env.FRONTEND_URL}/invite/${inviteToken}`;
 
+      // 🔥 do NOT block API if email fails
+      sendInviteEmail({
+        toEmail: contact.email,
+        name: contact.name,
+        inviteLink,
+      }).catch(err => {
+        console.error("Invite email failed:", err);
+      });
+
       res.json({
         success: true,
         inviteLink
@@ -106,9 +116,9 @@ router.post(
 
     } catch (err) {
 
-  await connection.rollback();
-  res.status(500).json({ error: "Failed to send invite" });
-} finally {
+      await connection.rollback();
+      res.status(500).json({ error: "Failed to send invite" });
+    } finally {
       connection.release();
     }
   }

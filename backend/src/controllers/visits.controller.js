@@ -257,6 +257,17 @@ async function startVisit(req, res) {
       [visitId]
     );
 
+    await pool.query(
+      `UPDATE jobs
+   SET status = 'IN_PROGRESS',
+       updated_at = NOW()
+   WHERE id = (
+     SELECT job_id FROM job_visits WHERE id = ?
+   )
+   AND status = 'NOT_STARTED'`,
+      [visitId]
+    );
+
     res.json({ success: true });
 
   } catch (err) {
@@ -306,6 +317,17 @@ async function startVisitAnyway(req, res) {
        FROM job_visits
        WHERE job_id = ?`,
       [visit.job_id]
+    );
+
+    await pool.query(
+      `UPDATE jobs
+   SET status = 'IN_PROGRESS',
+       updated_at = NOW()
+   WHERE id = (
+     SELECT job_id FROM job_visits WHERE id = ?
+   )
+   AND status = 'NOT_STARTED'`,
+      [visitId]
     );
 
     const newVisitId = uuid();
@@ -403,19 +425,54 @@ async function submitVisit(req, res) {
   }
 }
 
+//approve notifications and send notifications
 async function approveVisit(req, res) {
   const { visitId } = req.params;
 
   try {
 
-    await pool.query(
-      `UPDATE job_visits
-   SET status = 'COMPLETED',
-       completed_at = NOW(),
-       updated_at = NOW()
-   WHERE TRIM(id) = ?`,
+    // 1️⃣ Get visit + technicians
+    const [rows] = await pool.query(
+      `SELECT 
+          v.visit_number,
+          v.job_id,
+          vt.technician_id
+       FROM job_visits v
+       LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
+       WHERE TRIM(v.id) = ?`,
       [visitId.trim()]
     );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "Visit not found" });
+    }
+
+    const { visit_number, job_id } = rows[0];
+
+    // get all unique technicians
+    const technicianIds = [
+      ...new Set(rows.map(r => r.technician_id).filter(Boolean))
+    ];
+
+    // 2️⃣ Update visit
+    await pool.query(
+      `UPDATE job_visits
+       SET status = 'COMPLETED',
+           completed_at = NOW(),
+           updated_at = NOW()
+       WHERE TRIM(id) = ?`,
+      [visitId.trim()]
+    );
+
+    // 3️⃣ Notify ALL technicians
+    if (technicianIds.length > 0) {
+      const { notifyVisitApproved } = require("../services/notifications.service");
+
+      await notifyVisitApproved({
+        visitId,
+        actorUserId: req.user.id
+      });
+    }
 
     res.json({ success: true });
 
@@ -441,7 +498,13 @@ SELECT
   j.code AS job_code,
   j.sub_service,
   j.status AS job_status,
-  j.address
+  j.address,
+
+  j.company_id,              -- actually site_id
+
+  s.name AS sitename,
+  c.id AS company_id_real,
+  c.name AS companyname
 
 FROM job_visits v
 
@@ -450,6 +513,14 @@ JOIN visit_technicians vt
 
 JOIN jobs j
   ON j.id = v.job_id
+
+-- ✅ FIX STARTS HERE
+LEFT JOIN sites s
+  ON j.company_id = s.id
+
+LEFT JOIN companies c
+  ON s.company_id = c.id
+-- ✅ FIX ENDS HERE
 
 WHERE vt.technician_id = ?
 AND v.status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')

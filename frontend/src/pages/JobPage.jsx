@@ -177,11 +177,11 @@ export default function JobPage() {
     return x;
   };
 
-  const missedVisits = visibleVisits.filter(
-    v =>
-      toDateOnly(v.scheduled_date) < todayDate &&
-      ["SCHEDULED", "CANCELED"].includes(v.status)
-  );
+const missedVisits = visibleVisits.filter(
+  v =>
+    toDateOnly(v.scheduled_date) < todayDate &&
+    v.status === "MISSED"
+);
 
   const todayVisits = visibleVisits.filter(
     v =>
@@ -192,6 +192,12 @@ export default function JobPage() {
     v =>
       toDateOnly(v.scheduled_date) > todayDate
   );
+
+  const hasPendingVisits = visits.some(v =>
+  ["SCHEDULED", "IN_PROGRESS", "AWAITING_APPROVAL"].includes(v.status)
+);
+  
+
 
 
   //visits status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
@@ -316,7 +322,12 @@ export default function JobPage() {
         body: JSON.stringify({ status: newStatus }),
       });
 
-      if (!res.ok) throw new Error("Status update failed");
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Status update failed");
+        return;
+      }
 
       const jobRes = await apiFetch(`/api/jobs/${jobId}`, {
         headers: {
@@ -376,6 +387,8 @@ export default function JobPage() {
       }
     }
 
+
+
     return (
       <div className="job-visit-card">
 
@@ -404,7 +417,7 @@ export default function JobPage() {
         {/* 🔥 BUTTON LOGIC */}
 
         <div className="job-visit-actions">
-          {visit.status === "SCHEDULED" && (
+          {["SCHEDULED", "MISSED"].includes(visit.status) && (
             <button
               className="visit-start-btn"
               onClick={handleStart}
@@ -412,7 +425,6 @@ export default function JobPage() {
               {isMissed ? "Start Anyway" : "Start Visit"}
             </button>
           )}
-
 
           {/* SUBMIT (technician + supervisor) */}
           {visit.status === "IN_PROGRESS" && (
@@ -702,10 +714,17 @@ export default function JobPage() {
                       </button>
                       <button
                         className="job-btn job-btn-complete"
+                        disabled={hasPendingVisits}
                         onClick={() => updateStatus("COMPLETED")}
                       >
                         Complete
                       </button>
+
+                      {hasPendingVisits && (
+                        <div style={{ color: "red", fontSize: 12 }}>
+                          Cannot complete job until all visits are finished
+                        </div>
+                      )}
                     </div>
                   )
               )}
@@ -802,6 +821,8 @@ export default function JobPage() {
                 ))}
               </>
             )}
+
+            
 
             {/* EMPTY */}
             {visibleVisits.length === 0 && (

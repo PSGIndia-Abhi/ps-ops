@@ -43,7 +43,8 @@ export default function JobHeader({ job, setIsAssignOpen }) {
         <div className="job-people-row">
 
           {/* REQUESTED BY */}
-          <div className="job-person">
+          {role !== "technician" && (
+            <div className="job-person">
             <span className="label">Requested By:</span>
 
             {requestedBy ? (
@@ -56,7 +57,7 @@ export default function JobHeader({ job, setIsAssignOpen }) {
             ) : (
               <span>-</span>
             )}
-          </div>
+          </div>)}
 
           {/* SUPERVISOR */}
           {role !== "technician" && (

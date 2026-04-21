@@ -20,11 +20,11 @@ async function createVisit(jobId, scheduledDate, technicianIds = [], createdBy) 
 
     // create visit
     await conn.query(
-      `INSERT INTO job_visits
-       (id, job_id, visit_number, scheduled_date, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [visitId, jobId, visitNumber, scheduledDate, createdBy]
-    );
+  `INSERT INTO job_visits
+   (id, job_id, visit_number, scheduled_date, created_by_user_id, status)
+   VALUES (?, ?, ?, ?, ?, ?)`,
+  [visitId, jobId, visitNumber, scheduledDate, createdBy, "SCHEDULED"]
+);
 
     // attach technicians
     for (const techId of technicianIds) {

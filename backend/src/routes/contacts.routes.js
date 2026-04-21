@@ -32,12 +32,15 @@ router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (
         co.code AS company_code,
         co.type AS company_type,
         s.name AS company_site,
-        g.name AS group_name
+        g.name AS group_name,
+        u.id AS user_id,
+        u.invite_status
 
       FROM contacts c
       LEFT JOIN sites s ON c.company_id = s.id
       LEFT JOIN companies co ON s.company_id = co.id
       LEFT JOIN ${groupRef} g ON co.group_id = g.id
+      LEFT JOIN users u ON u.contact_id = c.id
       WHERE c.is_verified = 1
     `;
 
