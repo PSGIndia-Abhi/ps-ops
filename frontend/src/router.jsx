@@ -26,6 +26,7 @@ import ProfilePage from "./pages/ProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
+import ContactsPage from "./pages/ContactsPage";
 
 
 const router = createBrowserRouter([
@@ -65,7 +66,9 @@ const router = createBrowserRouter([
       { path: "bookings", element: <BookingsPage /> },
       { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
       { path: "tickets", element: <AdminTickets /> },
-      { path: "profile", element: <ProfilePage /> }
+      { path: "profile", element: <ProfilePage /> },
+      { path: "contacts", element: <ContactsPage /> },
+      { path: "contacts/:contactId", element: <ContactsPage /> }
     ],
   },
 

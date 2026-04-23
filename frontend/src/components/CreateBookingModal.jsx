@@ -169,20 +169,39 @@ export default function CreateBookingModal({
 
 
   const pestServices = [
-    "Cockroach Control",
-    "Bed Bug Control",
-    "Termite Control",
-    "Rodent Control",
-    "Ant Control",
-    "Mosquito Control",
-  ];
+  "General Pest Control (GPC)",
+  "General Pest Control + Rodent Control (GPC + RC)",
+  "Mosquito Treatment",
+  "Mosquito Fogging",
+  "Mosquito IRS (Indoor Residual Spray)",
+  "Mosquito Larval Treatment",
+  "Cockroach Treatment",
+  "Cockroach Gel Treatment",
+  "Ant Treatment",
+  "Fly Treatment",
+  "Bed Bug Treatment",
+  "Snake Control",
+  "Honey Bee Treatment",
+  "Rodent Control",
+  "Drainage Treatment",
+  "Termite Pre-Construction Treatment",
+  "Termite Post-Construction Treatment",
+  "Lizard Control",
+  "Deep Fumigation"
+];
 
-  const deepCleaningServices = [
-    "Kitchen Cleaning",
-    "Sofa Cleaning",
-    "Bathroom Cleaning",
-    "Full Home Cleaning",
-  ];
+const deepCleaningServices = [
+  "Floor Protection",
+  "Electrical Shifting",
+  "Electrical New Point Installation",
+  "Plumbing Work",
+  "Painting Work",
+  "Regular Cleaning",
+  "Deep Cleaning",
+  "Deep Cleaning with Scrubbing",
+  "Deep Cleaning with Sticker Removal",
+  "Debris Removal"
+];
 
   const visibleSubServices =
     form.serviceType === "PEST"
@@ -579,6 +598,25 @@ export default function CreateBookingModal({
     };
   }, []);
 
+
+  function getShortName(name) {
+  // Pest control
+    if (name.includes("Pre-Construction")) return "Termite Pre";
+  if (name.includes("Post-Construction")) return "Termite Post";
+  if (name.includes("Indoor Residual Spray")) return "Mosquito IRS";
+  if (name.includes("Larval")) return "Mosquito Larval";
+  if (name.includes("General Pest Control + Rodent Control")) return "GPC + Rodent Control";
+  // Deep cleaning
+  if (name === "Electrical New Point Installation") return "Electrical Point";
+  if (name === "Plumbing Work") return "Plumbing";
+  if (name === "Painting Work") return "Painting";
+  if (name === "Deep Cleaning with Scrubbing") return "Deep Clean + Scrub";
+  if (name === "Deep Cleaning with Sticker Removal") return "Deep Clean + Sticker";
+
+
+  return name;
+}
+
   /* ---------- RENDER ---------- */
 
   return (
@@ -761,7 +799,7 @@ export default function CreateBookingModal({
                   style={subItem(form.subServices.includes(service))}
                   onClick={() => toggleSubService(service)}
                 >
-                  {service}
+                  {getShortName(service)}
                 </div>
               ))}
             </div>

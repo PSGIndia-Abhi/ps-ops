@@ -41,7 +41,7 @@ router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (
       LEFT JOIN companies co ON s.company_id = co.id
       LEFT JOIN ${groupRef} g ON co.group_id = g.id
       LEFT JOIN users u ON u.contact_id = c.id
-      WHERE c.is_verified = 1
+      WHERE c.is_verified = 1 AND c.is_active = 1
     `;
 
     const params = [];
@@ -75,6 +75,24 @@ router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (
   }
 });
 
+// GET single contact by ID
+router.get("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM contacts WHERE id = ? AND is_active = 1`,
+      [req.params.id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "Contact not found" });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch contact" });
+  }
+});
 
 // CREATE contact
 router.post(
@@ -210,5 +228,73 @@ router.post(
   }
 );
 
+//update contact
+router.put("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+  const { name, phone, email, role, is_primary } = req.body;
+
+  try {
+    let sql = `
+      UPDATE contacts
+      SET name = ?, phone = ?, email = ?, role = ?, is_primary = ?
+      WHERE id = ?
+    `;
+
+    const params = [
+      name,
+      phone,
+      email || null,
+      role || null,
+      is_primary ? 1 : 0,
+      req.params.id
+    ];
+
+    // ✅ restrict branch_admin BEFORE query runs
+    if (req.user.role === "branch_admin") {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+
+      sql += ` AND branch_id = ?`;
+      params.push(me.branch_id);
+    }
+
+    await pool.query(sql, params);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update contact" });
+  }
+});
+
+//delete contact
+router.delete("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+  try {
+
+    let sql = `UPDATE contacts SET is_active = 0 WHERE id = ?`;
+    const params = [req.params.id];
+
+    // restrict branch_admin
+    if (req.user.role === "branch_admin") {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+
+      sql += ` AND branch_id = ?`;
+      params.push(me.branch_id);
+    }
+
+    await pool.query(sql, params);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete contact" });
+  }
+});
 
 module.exports = router;

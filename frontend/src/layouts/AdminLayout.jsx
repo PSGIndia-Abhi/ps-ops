@@ -140,6 +140,13 @@ export default function AdminLayout() {
                 Companies
               </button>
 
+              <button
+                className={`nav-btn ${isActive("/admin/contacts") ? "active" : ""}`}
+                onClick={() => navigate("/admin/contacts")}
+              >
+                Contacts
+              </button>
+
               {role?.trim() === "admin" && (
                 <button
                   className={`nav-btn ${isActive("/admin/branches") ? "active" : ""}`}
@@ -205,6 +212,14 @@ export default function AdminLayout() {
             }}
           >
             Companies
+          </button>
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/contacts");
+            }}
+          >
+            Contacts
           </button>
           {role?.trim() === "admin" && (
             <button
