@@ -1,12 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import "./jobrow.css";
-import { API_BASE } from "../api";
+import { API_BASE, apiFetch } from "../api";
+import { formatDateTime } from "../utils/date";
 
 export default function JobTimeline({ history = [] }) {
   const [activeImage, setActiveImage] = useState(null);
   const [attachmentMap, setAttachmentMap] = useState({});
   const attachmentUrlRef = useRef({});
   const token = localStorage.getItem("token");
+  const role = localStorage.getItem("role");
+  const [timeline, setTimeline] = useState([]);
+
+  useEffect(() => {
+    setTimeline(history);
+  }, [history]);
 
   const actionMeta = (action) => {
     switch (action) {
@@ -138,12 +145,58 @@ export default function JobTimeline({ history = [] }) {
     };
   }, []);
 
+async function changeVisibility(itemId, newValue) {
+  const current = timeline.find((h) => h.id === itemId);
+  if (!current) return;
+
+  if (current.visible_to_client === newValue) return;
+
+  const msg = newValue
+    ? "Make this update visible to client?"
+    : "Client may have already seen this. Hide anyway?";
+
+  const ok = window.confirm(msg);
+  if (!ok) return;
+
+  const previousValue = current.visible_to_client;
+
+  // optimistic update
+  setTimeline((prev) =>
+    prev.map((h) =>
+      h.id === itemId ? { ...h, visible_to_client: newValue } : h
+    )
+  );
+
+  try {
+    const res = await apiFetch(`/api/jobs/history/${itemId}/visibility`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ visible_to_client: newValue }),
+    });
+
+    if (!res?.ok) throw new Error("Failed");
+  } catch (err) {
+    console.error(err);
+
+    // rollback
+    setTimeline((prev) =>
+      prev.map((h) =>
+        h.id === itemId
+          ? { ...h, visible_to_client: previousValue }
+          : h
+      )
+    );
+  }
+}
+
   return (
     <>
       <div className="job-timeline">
         <h3>Timeline</h3>
 
-        {history.map((item) => (
+        {timeline.map((item) => (
           <div key={item.id} className="timeline-item">
             <div className="timeline-icon">
               {(() => {
@@ -163,16 +216,38 @@ export default function JobTimeline({ history = [] }) {
               <div className="timeline-meta">
                 <strong className="timeline-author">{item.created_by || "System"}</strong>
                 <span className="timeline-date">
-                  {new Date(item.created_at).toLocaleString("en-IN", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
+                  {formatDateTime(item.created_at)}
                 </span>
               </div>
 
               <div className="timeline-message">
                 {item.message}
               </div>
+              {(role === "admin" || role === "supervisor") && (
+                <div className="timeline-visibility">
+                  <label>
+                    <input
+                      type="radio"
+                      name={`visibility-${item.id}`}
+                      checked={!item.visible_to_client}
+                      onClick={() => changeVisibility(item.id, false)}
+                    />
+                    Internal
+                  </label>
+
+                  <label style={{ marginLeft: 12 }}>
+                    <input
+                      type="radio"
+                      name={`visibility-${item.id}`}
+                      checked={item.visible_to_client}
+                      onClick={() => changeVisibility(item.id, true)}
+                    />
+                    Client Visible
+                  </label>
+
+
+                </div>
+              )}
 
               {item.attachments?.length > 0 && (
                 <div className="timeline-attachments">
@@ -193,6 +268,9 @@ export default function JobTimeline({ history = [] }) {
                           </button>
                         );
                       }
+
+
+
 
                       return (
                         <img

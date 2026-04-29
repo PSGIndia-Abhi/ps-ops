@@ -86,30 +86,29 @@ export default function JobUpdateComposer({ onSubmit }) {
         setRecordError("Failed to record audio.");
       };
 
-      recorder.onstop = () => {
-        if (isUnmountingRef.current) {
-          cleanupMedia();
-          return;
-        }
+recorder.onstop = () => {
+  if (recordChunksRef.current.length) {
+    const finalType = recorder.mimeType || mimeType || "audio/webm";
 
-        if (recordChunksRef.current.length) {
-          const finalType = recorder.mimeType || mimeType || "audio/webm";
-          const blob = new Blob(recordChunksRef.current, { type: finalType });
-          const ext = finalType.includes("ogg")
-            ? "ogg"
-            : finalType.includes("mp4")
-              ? "mp4"
-              : "webm";
-          const file = new File([blob], `voice-note-${Date.now()}.${ext}`,
-            {
-              type: finalType,
-            }
-          );
-          addFiles([file]);
-        }
+    const blob = new Blob(recordChunksRef.current, { type: finalType });
 
-        cleanupMedia();
-      };
+    const ext = finalType.includes("ogg")
+      ? "ogg"
+      : finalType.includes("mp4")
+      ? "mp4"
+      : "webm";
+
+    const file = new File(
+      [blob],
+      `voice-note-${Date.now()}.${ext}`,
+      { type: finalType }
+    );
+
+    addFiles([file]);
+  }
+
+  cleanupMedia();
+};
 
       recorder.start();
       setIsRecording(true);

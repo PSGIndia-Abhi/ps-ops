@@ -7,6 +7,182 @@
   width: 100%;
   padding: 8px;
   box-sizing: border-box;
+  padding-bottom: 50px;
+}
+
+.job-visits{
+  margin:20px 0;
+}
+
+.job-visit-card{
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:12px;
+  margin-bottom:10px;
+  background:#fff;
+}
+
+.job-visit-header{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:6px;
+}
+
+/*tech date selection for visits  */
+.visit-tech-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.visit-tech-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f9fafb;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.visit-tech-item input {
+  transform: scale(1.2);
+}  
+
+.visit-form-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+}
+
+.visit-form-group label {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #374151;
+}
+
+.visit-date-input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  background: white;
+}
+
+.job-visit-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.visit-action-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: #f3f4f6;
+}
+
+.visit-action-btn.danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Visits actions */
+
+.job-visit-actions {
+  position: relative;
+  margin-top: 8px;
+}
+
+.visit-menu-trigger {
+  border: none;
+  background: #f3f4f6;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 18px;
+}
+
+.visit-menu {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  z-index: 10;
+}
+
+.visit-menu button {
+  padding: 10px;
+  border: none;
+  background: none;
+  text-align: left;
+}
+
+.visit-menu button:hover {
+  background: #f9fafb;
+}
+
+.visit-menu .danger {
+  color: #b91c1c;
+}
+
+
+.job-visit-techs {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.job-visit-tech {
+  background: #eef2ff;
+  color: #3730a3;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+/* visit statues updates */
+.visit-start-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: none;
+  background: #16a34a;
+  color: white;
+  font-weight: 600;
+}
+
+
+.visit-submit-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+}
+
+.visit-approve-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: none;
+  background: #16a34a;
+  color: white;
+  font-weight: 600;
 }
 
 /* main layout (PHONE DEFAULT) */
@@ -38,6 +214,38 @@
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 14px;
+}
+
+.job-booking-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.job-booking-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #111827;
+}
+
+.job-booking-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #4b5563;
+  margin-bottom: 12px;
+}
+
+.job-booking-note {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.job-booking-message {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #1d4ed8;
 }
 
 .job-schedule-title {
@@ -188,6 +396,11 @@
 
 .job-btn-resume {
   background: #0ea5e9;
+  color: #fff;
+}
+
+.job-btn-primary {
+  background: #2563eb;
   color: #fff;
 }
 

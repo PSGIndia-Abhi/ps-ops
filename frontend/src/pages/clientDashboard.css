@@ -1,0 +1,265 @@
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 50px;
+}
+
+/* LAYOUT */
+.layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+
+/* SECTION */
+.section {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.section-title {
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+/* ANALYTICS */
+.analytics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.tile {
+  background: #f9fafb;
+  padding: 16px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.tile.highlight {
+  background: #e0f2fe;
+}
+
+/* JOB */
+.job {
+  background: #f9fafb;
+  padding: 10px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.job.clickable {
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.job.clickable:hover {
+  background: #eef4ff;
+}
+
+.progress {
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  margin: 6px 0;
+}
+
+.bar {
+  height: 100%;
+  background: #22c55e;
+  border-radius: 10px;
+}
+
+/* RIGHT PANEL */
+
+
+.panel {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  
+}
+
+.btn {
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  background: #e5e7eb;
+}
+
+.panel h3 {
+    text-align: center;
+  align-self: center;
+}   
+
+/* LOGOS */
+.client-logo {
+  width: 120px;
+  margin: auto;
+}
+
+.client-logo-placeholder {
+  width: 120px;
+  height: 120px;
+  margin: auto;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* BRANCH INFO */
+.branch-info {
+  text-align: center;
+  margin: 16px 0;
+}
+
+.branch-info h5 {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.branch-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.client-dp {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  margin: auto;
+}
+
+/* ACTIONS */
+.panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-actions button {
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  background: #e5e7eb;
+}
+
+.panel-actions .primary {
+  background: #2563eb;
+  color: white;
+}
+
+.panel-actions .msds {
+  background: #111827;
+  color: white;
+}
+
+/* SPOC */
+.spoc {
+  text-align: center;
+}
+
+.spoc-avatar {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.spoc-contact {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.role.assigned {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.role.unassigned {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* UPDATES */
+.updates div {
+  margin-top: 6px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .analytics {
+    grid-template-columns: repeat(2, 1fr); /* 2 per row */
+  }
+
+  .tile {
+    padding: 12px;
+  }
+
+  .tile h3 {
+    font-size: 18px;
+  }
+
+  .tile p {
+    font-size: 12px;
+  }
+
+  .tile small {
+    font-size: 10px;
+  }
+}
+
+/* TICKETS */
+.ticket {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.ticket-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.message {
+  margin-bottom: 12px;
+  padding: 8px;
+  background: #f9f9f9;
+  border-radius: 4px;
+}
+
+.message p {
+  margin: 0 0 8px 0;
+}

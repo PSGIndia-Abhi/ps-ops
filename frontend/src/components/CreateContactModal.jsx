@@ -92,7 +92,7 @@ export default function CreateContactModal({ onClose, onCreated, companies = [] 
                 <option value="">Select Company & Site</option>
                 {companies.map(c => (
                   <option key={c.id} value={c.id}>
-                    {c.name || c.code}{c.site ? ` - ${c.site}` : ""}{c.code ? ` (${c.code})` : ""}
+                    {c.company_name || "Company"}{c.name ? ` - ${c.name}` : ""}{c.company_code ? ` (${c.company_code})` : ""}
                   </option>
                 ))}
               </select>

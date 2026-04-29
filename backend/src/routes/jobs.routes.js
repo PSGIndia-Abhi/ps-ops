@@ -11,6 +11,7 @@ const upload = multer({
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { createBooking } = require("../controllers/bookings.controller");
+const { notifyJobAssignmentChange } = require("../services/notifications.service");
 
 const isValidJobId = (jobId) => {
   if (!jobId) return false;
@@ -19,7 +20,94 @@ const isValidJobId = (jobId) => {
   return isNumeric || isUUID;
 };
 
+const parseAssignedIds = (value) => {
+  if (!value) return [];
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed)
+      ? parsed.map((id) => Number(id)).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const getUserBranchId = async (executor, userId) => {
+  if (!userId) return null;
+  const [[row]] = await executor.query(
+    "SELECT branch_id FROM users WHERE id = ?",
+    [userId]
+  );
+  return row?.branch_id || null;
+};
+
+const ensureUsersInBranch = async (executor, userIds, branchId) => {
+  if (!branchId) return false;
+  if (!userIds || userIds.length === 0) return true;
+  const uniqueIds = Array.from(new Set(userIds.map(id => String(id))));
+  const placeholders = uniqueIds.map(() => "?").join(",");
+  const [rows] = await executor.query(
+    `SELECT id, branch_id FROM users WHERE id IN (${placeholders})`,
+    uniqueIds
+  );
+  const branchMap = new Map(rows.map(row => [String(row.id), row.branch_id]));
+  return uniqueIds.every(id => branchMap.get(String(id)) === branchId);
+};
+
+const resolveJobBranchId = async (executor, job, supervisorId) => {
+  let branchId = job?.branch_id || null;
+  if (!branchId && supervisorId) {
+    branchId = await getUserBranchId(executor, supervisorId);
+    if (branchId && job?.id) {
+      await executor.query(
+        "UPDATE jobs SET branch_id = ? WHERE id = ?",
+        [branchId, job.id]
+      );
+    }
+  }
+  return branchId;
+};
+
+const resolveJobBranchForAccess = async (executor, job) => {
+  if (!job) return null;
+  let branchId = job.branch_id || null;
+  if (branchId) return branchId;
+
+  if (job.supervisor_id) {
+    branchId = await getUserBranchId(executor, job.supervisor_id);
+  }
+
+  if (!branchId && job.requested_by_contact_id) {
+    const [[row]] = await executor.query(
+      "SELECT branch_id FROM contacts WHERE id = ?",
+      [job.requested_by_contact_id]
+    );
+    branchId = row?.branch_id || null;
+  }
+
+  if (!branchId && job.created_by_user_id) {
+    branchId = await getUserBranchId(executor, job.created_by_user_id);
+  }
+
+  if (branchId) {
+    await executor.query(
+      "UPDATE jobs SET branch_id = ? WHERE id = ?",
+      [branchId, job.id]
+    );
+  }
+
+  return branchId;
+};
+
 const canAccessJob = async (executor, user, jobId) => {
+  const branchId = user.role === "admin"
+    ? null
+    : await getUserBranchId(executor, user.id);
+
+  if (user.role !== "admin" && !branchId) {
+    return false;
+  }
+
   if (user.role === "admin") {
     const [[job]] = await executor.query(
       `SELECT id FROM jobs WHERE id = ? LIMIT 1`,
@@ -30,26 +118,63 @@ const canAccessJob = async (executor, user, jobId) => {
 
   if (user.role === "supervisor") {
     const [[job]] = await executor.query(
-      `SELECT id FROM jobs WHERE id = ? AND supervisor_id = ? LIMIT 1`,
+      `SELECT id, supervisor_id, branch_id, requested_by_contact_id, created_by_user_id
+       FROM jobs WHERE id = ? AND supervisor_id = ? LIMIT 1`,
       [jobId, user.id]
     );
-    return !!job;
+    if (!job) return false;
+    const resolvedBranch = await resolveJobBranchForAccess(executor, job);
+    return resolvedBranch === branchId;
   }
 
   if (user.role === "technician") {
     const [[job]] = await executor.query(
       `
-      SELECT id
-      FROM jobs
-      WHERE id = ?
+      SELECT j.id
+      FROM jobs j
+      WHERE j.id = ?
+        AND j.branch_id = ?
         AND (
-          JSON_CONTAINS(team, CAST(? AS JSON))
-          OR JSON_CONTAINS(team, JSON_QUOTE(?))
+          JSON_CONTAINS(j.team, CAST(? AS JSON))
+          OR JSON_CONTAINS(j.team, JSON_QUOTE(?))
+          OR EXISTS (
+            SELECT 1
+            FROM job_visits v
+            JOIN visit_technicians vt ON vt.visit_id = v.id
+            WHERE v.job_id = j.id
+              AND vt.technician_id = ?
+          )
         )
       LIMIT 1
       `,
-      [jobId, String(user.id), String(user.id)]
+      [jobId, branchId, String(user.id), String(user.id), user.id]
     );
+    return !!job;
+  }
+  if (user.role === "branch_admin") {
+    const [[job]] = await executor.query(
+      `SELECT id, branch_id, supervisor_id, requested_by_contact_id, created_by_user_id
+       FROM jobs WHERE id = ? LIMIT 1`,
+      [jobId]
+    );
+    if (!job) return false;
+    const resolvedBranch = await resolveJobBranchForAccess(executor, job);
+    return resolvedBranch === branchId;
+  }
+
+  if (user.role === "client") {
+    const [[userRow]] = await executor.query(
+      `SELECT contact_id FROM users WHERE id = ?`,
+      [user.id]
+    );
+
+    if (!userRow?.contact_id) return false;
+
+    const [[job]] = await executor.query(
+      `SELECT id FROM jobs WHERE id = ? AND requested_by_contact_id = ? AND branch_id = ? LIMIT 1`,
+      [jobId, userRow.contact_id, branchId]
+    );
+
     return !!job;
   }
 
@@ -68,6 +193,8 @@ const ensureJobAccess = async (req, res, executor, jobId) => {
     return false;
   }
 
+
+
   return true;
 };
 
@@ -76,19 +203,21 @@ const updateFutureRecurringJobs = async (
   bookingId,
   startDate,
   supervisorId,
-  teamJson
+  teamJson,
+  branchId
 ) => {
   if (!bookingId || !startDate) return 0;
 
   const [result] = await executor.query(
     `
     UPDATE jobs
-    SET supervisor_id = ?, team = ?, updated_at = NOW()
+    SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
+        supervisor_id = ?, team = ?, branch_id = ?, updated_at = NOW()
     WHERE booking_id = ?
       AND start_date IS NOT NULL
-      AND DATE(start_date) > DATE(?)
+      AND DATE(start_date) >= DATE(?)
     `,
-    [supervisorId, teamJson, bookingId, startDate]
+    [supervisorId, teamJson, branchId, bookingId, startDate]
   );
 
   return result?.affectedRows || 0;
@@ -100,228 +229,285 @@ const updateRangeRecurringJobs = async (
   rangeStart,
   rangeEnd,
   supervisorId,
-  teamJson
+  teamJson,
+  branchId
 ) => {
   if (!bookingId || !rangeStart || !rangeEnd) return 0;
 
   const [result] = await executor.query(
     `
     UPDATE jobs
-    SET supervisor_id = ?, team = ?, updated_at = NOW()
+    SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
+        supervisor_id = ?, team = ?, branch_id = ?, updated_at = NOW()
     WHERE booking_id = ?
       AND start_date IS NOT NULL
       AND DATE(start_date) BETWEEN DATE(?) AND DATE(?)
     `,
-    [supervisorId, teamJson, bookingId, rangeStart, rangeEnd]
+    [supervisorId, teamJson, branchId, bookingId, rangeStart, rangeEnd]
   );
 
   return result?.affectedRows || 0;
 };
 // GET /api/jobs → from MySQL
-router.get("/", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
-  try {
-    const conditions = [];
-    const params = [];
-    const scope = String(req.query.scope || "active").toLowerCase();
+router.get(
+  "/",
+  auth,
+  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  async (req, res) => {
+    try {
 
-    // Supervisors see their jobs, technicians see jobs assigned to them
-    if (req.user.role === "supervisor") {
-      conditions.push("j.supervisor_id = ?");
-      params.push(req.user.id);
-    }
+      const conditions = [];
+      const params = [];
 
-    // technicians (later) → jobs where they are in team JSON
-    if (req.user.role === "technician") {
-      conditions.push(`(
-        JSON_CONTAINS(j.team, CAST(? AS JSON))
-        OR JSON_CONTAINS(j.team, JSON_QUOTE(?))
-      )`);
-      params.push(req.user.id, String(req.user.id));
-    }
-
-    if (scope === "summary") {
-      conditions.push(`(
-        j.status = 'COMPLETED'
-        OR (
-          j.approval_status = 'PENDING'
-          AND j.status IN ('IN_PROGRESS', 'PAUSED')
-        )
-      )`);
-    } else if (scope !== "all") {
-      // Active jobs only: Pending, Not Started, In Progress, Paused
-      conditions.push(`(
-        j.status IN ('NOT_STARTED', 'IN_PROGRESS', 'PAUSED')
-      )
-      AND NOT (
-        j.approval_status = 'PENDING'
-        AND j.status IN ('IN_PROGRESS', 'PAUSED')
-      )
-      AND NOT (
-        j.status = 'NOT_STARTED'
-        AND j.start_date IS NOT NULL
-        AND j.start_date < NOW()
-        AND (
-          YEAR(j.start_date) < YEAR(NOW())
-          OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
-        )
-      )`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const [rows] = await pool.query(`
-      SELECT
-        j.*,
-
-        CASE
-          WHEN j.approval_status = 'PENDING'
-            AND j.status IN ('IN_PROGRESS', 'PAUSED')
-            THEN 'AWAITING_APPROVAL'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            AND (
-              YEAR(j.start_date) < YEAR(NOW())
-              OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
-            )
-            THEN 'LOST'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            THEN 'PENDING'
-          ELSE j.status
-        END AS display_status,
-
-        -- Supervisor
-        u.name AS supervisor_name,
-
-        -- Requested by contact
-        c.id   AS contact_id,
-        c.name AS contact_name,
-        c.phone AS contact_phone,
-        c.email AS contact_email,
-
-        -- Company (if corporate / RWA)
-        co.id   AS company_id,
-        co.code AS company_code,
-        co.type AS company_type,
-        co.name AS company_name,
-        co.site AS company_site
-
-
-      FROM jobs j
-      LEFT JOIN users u
-        ON j.supervisor_id = u.id
-
-      LEFT JOIN contacts c
-        ON j.requested_by_contact_id = c.id
-
-      LEFT JOIN companies co
-        ON j.company_id = co.id
-
-      ${where}
-
-      ORDER BY j.created_at DESC
-    `, params);
-    const normalizedJobs = rows.map(job => {
-      let teamIds = [];
-
-      if (job.team) {
-        try {
-          teamIds = Array.isArray(job.team)
-            ? job.team
-            : JSON.parse(job.team);
-        } catch {
-          teamIds = [];
+      if (req.user.role !== "admin") {
+        const branchId = await getUserBranchId(pool, req.user.id);
+        if (!branchId) {
+          return res.status(403).json({ error: "Branch not assigned" });
         }
+        conditions.push("j.branch_id = ?");
+        params.push(branchId);
       }
 
-      teamIds = teamIds.map(id => Number(id)).filter(Boolean);
+      // supervisor → only their jobs
+      if (req.user.role === "supervisor") {
+        conditions.push("j.supervisor_id = ?");
+        params.push(req.user.id);
+      }
 
-      return {
-        id: job.id,
-        code: job.code,
-        booking_id: job.booking_id,
+      if (req.user.role === "client") {
 
-        service_type: job.service_type,
-        title: job.sub_service,
-        status: job.status,
-        display_status: job.display_status,
-        approval_status: job.approval_status,
-        dueDate: job.due_date,
-        notes: job.notes,
-        start_date: job.start_date,
-        address: job.address,
-        companyname: job.company_name,
-        site: job.company_site,
+        const [[user]] = await pool.query(
+          `SELECT contact_id FROM users WHERE id = ?`,
+          [req.user.id]
+        );
 
-        company_id: job.company_id, // authoritative job company
+        if (!user || !user.contact_id) {
+          return res.status(400).json({
+            error: "Client contact mapping not found"
+          });
+        }
 
-        supervisor: job.supervisor_id
-          ? {
-            id: job.supervisor_id,
-            name: job.supervisor_name,
-          }
-          : null,
+        conditions.push("j.requested_by_contact_id = ?");
+        params.push(user.contact_id);
+      }
 
-        requestedBy: job.contact_id
-          ? {
-            id: job.contact_id,
-            name: job.contact_name,
-            phone: job.contact_phone,
-            email: job.contact_email,
+      // technician → jobs where they are in team JSON
+      // technician → jobs where technician has a relevant visit
+      if (req.user.role === "technician") {
+        conditions.push(`
+    JSON_CONTAINS(j.team, CAST(? AS JSON))
+  `);
 
-            company: job.company_id
-              ? {
-                id: job.company_id,
-                code: job.company_code,
-                type: job.company_type,
-              }
-              : null,
-          }
-          : null,
+        params.push(req.user.id); // ⚠️ NOT string
+      }
 
-        teamIds,
-        history: [],
-        attachments: [],
-      };
-    });
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const allTeamIds = Array.from(
-      new Set(
-        normalizedJobs.flatMap(job => job.teamIds || [])
-      )
-    );
+      const [rows] = await pool.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.booking_id,
+          j.service_type,
+          j.sub_service,
+          j.status,
+          j.approval_status,
+          j.start_date,
+          j.due_date,
+          j.notes,
+          j.address,
+          j.created_at,
+          j.supervisor_id,
+          j.team,
+          v.next_visit_date,
 
-    let teamUserMap = new Map();
-    if (allTeamIds.length > 0) {
-      const placeholders = allTeamIds.map(() => "?").join(",");
-      const [users] = await pool.query(
-        `SELECT id, name FROM users WHERE id IN (${placeholders})`,
-        allTeamIds
+          -- Supervisor
+          u.name AS supervisor_name,
+          u.phone AS supervisor_phone,
+
+          -- Contact
+          c.id   AS contact_id,
+          c.name AS contact_name,
+          c.phone AS contact_phone,
+          c.email AS contact_email,
+
+          -- Company
+          s.id   AS company_id,
+          co.code AS company_code,
+          co.name AS company_name,
+          co.type AS company_type,
+          s.name AS company_site
+
+        FROM jobs j
+
+        LEFT JOIN users u
+          ON j.supervisor_id = u.id
+
+        LEFT JOIN contacts c
+          ON j.requested_by_contact_id = c.id
+
+        LEFT JOIN sites s
+          ON j.company_id = s.id
+        LEFT JOIN companies co
+          ON s.company_id = co.id
+        LEFT JOIN (
+          SELECT
+            job_id,
+            DATE_FORMAT(MIN(scheduled_date), '%Y-%m-%d %H:%i:%s') AS next_visit_date
+          FROM job_visits
+          WHERE status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')
+            AND scheduled_date IS NOT NULL
+          GROUP BY job_id
+        ) v ON v.job_id = j.id
+
+        ${where}
+
+        ORDER BY
+          (j.start_date IS NULL) ASC,
+          j.start_date ASC,
+          j.created_at DESC
+        `,
+        params
       );
-      teamUserMap = new Map(users.map(u => [Number(u.id), u]));
-    }
 
-    const finalJobs = normalizedJobs.map(job => {
-      const team = (job.teamIds || []).map(id => {
-        const user = teamUserMap.get(Number(id));
-        return user ? { id: user.id, name: user.name } : { id };
+      const jobs = rows.map((row) => {
+        let teamIds = [];
+
+        if (row.team) {
+          try {
+            teamIds = Array.isArray(row.team)
+              ? row.team
+              : JSON.parse(row.team);
+          } catch {
+            teamIds = [];
+          }
+        }
+
+        return {
+          id: row.id,
+          code: row.code,
+          booking_id: row.booking_id,
+
+          service_type: row.service_type,
+          title: row.sub_service,
+
+          status: row.status,
+          approval_status: row.approval_status,
+
+          start_date: row.start_date,
+          dueDate: row.due_date,
+          next_visit_date: row.next_visit_date,
+          notes: row.notes,
+          address: row.address,
+
+          company_id: row.company_id,
+          companyname: row.company_name,
+          site: row.company_site,
+
+          supervisor: row.supervisor_id
+            ? {
+              id: row.supervisor_id,
+              name: row.supervisor_name,
+              phone: row.supervisor_phone,
+            }
+            : null,
+
+          requestedBy: row.contact_id
+            ? {
+              id: row.contact_id,
+              name: row.contact_name,
+              phone: row.contact_phone,
+              email: row.contact_email,
+              company: row.company_name,
+            }
+            : null,
+
+          teamIds,
+          team: [],
+          history: [],
+          attachments: [],
+        };
       });
 
-      const { teamIds, ...rest } = job;
-      return { ...rest, team };
-    });
+      // resolve team users
+      const allTeamIds = Array.from(
+        new Set(jobs.flatMap((j) => j.teamIds))
+      );
 
-    res.json(finalJobs);
+      let teamUserMap = new Map();
 
-  } catch (err) {
-    console.error("Error fetching jobs:", err);
-    res.status(500).json({ error: "Failed to fetch jobs" });
+      if (allTeamIds.length) {
+        const placeholders = allTeamIds.map(() => "?").join(",");
+
+        const [users] = await pool.query(
+          `SELECT id, name FROM users WHERE id IN (${placeholders})`,
+          allTeamIds
+        );
+
+        teamUserMap = new Map(users.map((u) => [Number(u.id), u]));
+      }
+
+      let finalJobs = jobs.map((job) => {
+        const team = job.teamIds.map((id) => {
+          const user = teamUserMap.get(Number(id));
+          return user ? { id: user.id, name: user.name } : { id };
+        });
+
+        const { teamIds, ...rest } = job;
+
+        return {
+          ...rest,
+          team,
+        };
+      });
+
+      if (req.user.role === "client" && finalJobs.length) {
+        const jobIds = finalJobs.map((job) => job.id);
+        const placeholders = jobIds.map(() => "?").join(",");
+
+        const [historyRows] = await pool.query(
+          `
+          SELECT job_id, message, created_at, id
+          FROM job_history
+          WHERE (
+              visible_to_client = 1
+                          )
+            AND job_id IN (${placeholders})
+          ORDER BY created_at DESC, id DESC
+          `,
+          jobIds
+        );
+
+        const latestMap = new Map();
+        for (const row of historyRows) {
+          const key = String(row.job_id);
+          if (!latestMap.has(key)) {
+            latestMap.set(key, row);
+          }
+        }
+
+        finalJobs = finalJobs.map((job) => {
+          const latest = latestMap.get(String(job.id));
+          return {
+            ...job,
+            latest_comment: latest?.message || null,
+            latest_comment_at: latest?.created_at || null,
+          };
+        });
+      }
+
+
+
+      res.json(finalJobs);
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+      res.status(500).json({ error: "Failed to fetch jobs" });
+    }
   }
-});
+);
 // GET single job by ID
-router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
+router.get("/:jobId", auth, allowRoles("admin", "branch_admin", "supervisor", "technician", "client"), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -354,13 +540,18 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
         c.name AS contact_name,
         c.phone AS contact_phone,
         c.email AS contact_email,
-        co.id   AS company_id,
+        s.id    AS company_id,
+        co.name  AS company_name,
         co.code AS company_code,
-        co.type AS company_type
+        co.type AS company_type,
+        s.name  AS company_site,
+        b.code  AS booking_code
       FROM jobs j
+      LEFT JOIN bookings b ON b.id = j.booking_id
       LEFT JOIN users u ON j.supervisor_id = u.id
       LEFT JOIN contacts c ON j.requested_by_contact_id = c.id
-      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN sites s ON c.company_id = s.id
+      LEFT JOIN companies co ON s.company_id = co.id
       WHERE j.id = ?
       LIMIT 1
       `,
@@ -410,9 +601,16 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
 
 
 
+    const [[recurringRow]] = await pool.query(
+      `SELECT id FROM recurring_rules WHERE booking_id = ? LIMIT 1`,
+      [job.booking_id]
+    );
+
     res.json({
       id: job.id,
       code: job.code,
+      booking_id: job.booking_id,
+      booking_code: job.booking_code || null,
       title: job.sub_service,
       service_type: job.service_type,
       status: job.status,
@@ -438,13 +636,16 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
             ? {
               id: job.company_id,
               code: job.company_code,
+              name: job.company_name,
               type: job.company_type,
+              site: job.company_site || null,
             }
             : null,
         }
         : null,
 
       team: teamMembers,
+      has_recurring: !!recurringRow,
 
     });
 
@@ -453,12 +654,17 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
     res.status(500).json({ error: "Failed to fetch job" });
   }
 });
+
+
 // GET job history (timeline)
-router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
+router.get("/:jobId/history", auth, allowRoles("admin", "branch_admin", "supervisor", "technician", "client"), async (req, res) => {
   const { jobId } = req.params;
 
   try {
     if (!(await ensureJobAccess(req, res, pool, jobId))) return;
+
+    const visibilityClause =
+      req.user.role === "client" ? "AND h.visible_to_client = 1" : "";
 
     const [rows] = await pool.query(
       ` SELECT
@@ -467,6 +673,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
         h.message,
         h.metadata,
         h.created_at,
+        h.visible_to_client,
         u.name              AS created_by,
 
         a.id                AS attachment_id,
@@ -479,6 +686,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
       LEFT JOIN job_attachments a
         ON a.history_id = h.id
       WHERE h.job_id = ?
+      ${visibilityClause}
       ORDER BY h.created_at DESC, h.id DESC`,
       [jobId]
     );
@@ -495,6 +703,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
           metadata: row.metadata,
           created_at: row.created_at,
           created_by: row.created_by,
+          visible_to_client: !!row.visible_to_client, //client things :)
           attachments: [],
         };
       }
@@ -518,9 +727,9 @@ router.get("/:jobId/history", auth, allowRoles("admin", "supervisor", "technicia
 });
 
 // POST job comment (timeline update)
-router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
+router.post("/:jobId/comments", auth, allowRoles("admin", "branch_admin", "supervisor", "technician"), async (req, res) => {
   const { jobId } = req.params;
-  const { message } = req.body;
+  const { message, visible_to_client } = req.body;
   const created_by_user_id = req.user.id;
 
   if (!message?.trim()) {
@@ -553,15 +762,17 @@ router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technic
         job_id,
         action,
         message,
+        visible_to_client,
         created_by_user_id,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         id,
         jobId,
         "COMMENT",
         message,
+        visible_to_client ? 1 : 0,
         created_by_user_id
       ]
     );
@@ -578,6 +789,52 @@ router.post("/:jobId/comments", auth, allowRoles("admin", "supervisor", "technic
     res.status(500).json({ error: "Failed to create comment" });
   }
 });
+
+
+//client vis toggle
+router.patch(
+  "/history/:historyId/visibility",
+  auth,
+  allowRoles("admin", "branch_admin", "supervisor"),
+  async (req, res) => {
+
+    const { historyId } = req.params;
+    const { visible_to_client } = req.body;
+
+    if (visible_to_client === undefined) {
+      return res.status(400).json({
+        error: "visible_to_client required"
+      });
+    }
+
+    try {
+
+      const [result] = await pool.query(
+        `
+        UPDATE job_history
+        SET visible_to_client = ?
+        WHERE id = ?
+        `,
+        [visible_to_client ? 1 : 0, historyId]
+      );
+
+      if (!result.affectedRows) {
+        return res.status(404).json({
+          error: "History entry not found"
+        });
+      }
+
+      res.json({ success: true });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        error: "Failed to update visibility"
+      });
+    }
+  }
+);
+
 
 // JOB STATUS UPDATE (single source of truth)
 router.patch("/:id/status", auth, async (req, res) => {
@@ -610,7 +867,7 @@ router.patch("/:id/status", auth, async (req, res) => {
     const currentStatus = job.status;
     const currentApproval = job.approval_status;
 
-    console.log("STATUS TRANSITION:", currentStatus, "→", newStatus, "by", userRole);
+
 
     const isLost =
       currentStatus === "NOT_STARTED"
@@ -669,8 +926,24 @@ router.patch("/:id/status", auth, async (req, res) => {
       });
     }
 
-    // 4️⃣ update job status
+    // 4️⃣ update job status and check for approval if needed
     if (newStatus === "COMPLETED") {
+
+      // 🔥 block if pending visits
+      const [pendingVisits] = await connection.query(
+        `SELECT id FROM job_visits
+     WHERE job_id = ?
+     AND status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')`,
+        [jobId]
+      );
+
+      if (pendingVisits.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: "Cannot complete job with pending visits"
+        });
+      }
+
       if (userRole === "technician") {
         await connection.rollback();
         return res.status(403).json({
@@ -679,15 +952,25 @@ router.patch("/:id/status", auth, async (req, res) => {
       }
 
       await connection.query(
-        "UPDATE jobs SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), updated_at = NOW() WHERE id = ?",
+        `UPDATE jobs 
+     SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), updated_at = NOW() 
+     WHERE id = ?`,
         [newStatus, jobId]
       );
+
+      
+
     } else {
+
       await connection.query(
-        "UPDATE jobs SET status = ?, updated_at = NOW() WHERE id = ?",
+        `UPDATE jobs 
+     SET status = ?, updated_at = NOW() 
+     WHERE id = ?`,
         [newStatus, jobId]
       );
+
     }
+
 
     // 5️⃣ history entry
     await connection.query(
@@ -718,72 +1001,12 @@ router.patch("/:id/status", auth, async (req, res) => {
   }
 });
 
-// Submit job for approval (technician only)
-router.post("/:id/submit-approval", auth, allowRoles("technician"), async (req, res) => {
-  const jobId = req.params.id;
-  const userId = req.user.id;
-  const connection = await pool.getConnection();
-
-  try {
-    if (!(await ensureJobAccess(req, res, connection, jobId))) return;
-
-    await connection.beginTransaction();
-
-    const [[job]] = await connection.query(
-      "SELECT status, approval_status FROM jobs WHERE id = ? FOR UPDATE",
-      [jobId]
-    );
-
-    if (!job) {
-      await connection.rollback();
-      return res.status(404).json({ error: "Job not found" });
-    }
-
-    if (job.approval_status === "PENDING") {
-      await connection.rollback();
-      return res.status(400).json({ error: "Job is already submitted for approval" });
-    }
-
-    if (!["IN_PROGRESS", "PAUSED"].includes(job.status)) {
-      await connection.rollback();
-      return res.status(400).json({
-        error: "Only in-progress or paused jobs can be submitted for approval"
-      });
-    }
-
-    await connection.query(
-      "UPDATE jobs SET approval_status = 'PENDING', updated_at = NOW() WHERE id = ?",
-      [jobId]
-    );
-
-    await connection.query(
-      `INSERT INTO job_history
-      (id, job_id, action, message, created_by_user_id, created_at)
-      VALUES (UUID(), ?, 'SUBMITTED_FOR_APPROVAL', ?, ?, NOW())`,
-      [
-        jobId,
-        "Submitted for supervisor approval",
-        userId
-      ]
-    );
-
-    await connection.commit();
-    res.json({ success: true });
-  } catch (err) {
-    await connection.rollback();
-    console.error("Submit for approval failed:", err);
-    res.status(500).json({ error: "Failed to submit for approval" });
-  } finally {
-    connection.release();
-  }
-});
-
 
 // Update job schedule (start/end date)
 router.patch(
   "/:jobId/dates",
   auth,
-  allowRoles("admin", "supervisor"),
+  allowRoles("admin", "branch_admin", "supervisor"),
   async (req, res) => {
     const { jobId } = req.params;
     const { start_date, end_date } = req.body;
@@ -818,13 +1041,13 @@ router.patch(
 
 
 // create jobs from the booking form
-router.post("/", auth, allowRoles("admin", "supervisor"), createBooking);
+router.post("/", auth, allowRoles("admin", "branch_admin", "supervisor", "client"), createBooking);
 
 // Reassign a recurring job and propagate to future occurrences
 router.post(
   "/:jobId/assign-recurring",
   auth,
-  allowRoles("admin", "supervisor"),
+  allowRoles("admin", "branch_admin", "supervisor"),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds } = req.body;
@@ -849,9 +1072,10 @@ router.post(
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobId]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -866,24 +1090,45 @@ router.post(
         }
       }
 
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
+      if (!branchId) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
+      }
+
+      const branchOk = await ensureUsersInBranch(
+        connection,
+        [supervisorId, ...normalizedTechIds],
+        branchId
+      );
+      if (!branchOk) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Assigned users must belong to the same branch" });
+      }
+
       if (job.status === "CREATED") {
         await connection.query(
           `UPDATE jobs
            SET status = 'NOT_STARTED',
                supervisor_id = ?,
                team = ?,
+               branch_id = ?,
                updated_at = NOW()
            WHERE id = ?`,
-          [supervisorId, teamJson, jobId]
+          [supervisorId, teamJson, branchId, jobId]
         );
       } else {
         await connection.query(
           `UPDATE jobs
            SET supervisor_id = ?,
                team = ?,
+               branch_id = ?,
                updated_at = NOW()
            WHERE id = ?`,
-          [supervisorId, teamJson, jobId]
+          [supervisorId, teamJson, branchId, jobId]
         );
       }
 
@@ -903,7 +1148,8 @@ router.post(
         job.booking_id,
         job.start_date,
         supervisorId,
-        teamJson
+        teamJson,
+        branchId
       );
 
       await connection.query(
@@ -944,7 +1190,7 @@ router.post(
 router.post(
   "/:jobId/reassign",
   auth,
-  allowRoles("admin", "supervisor"),
+  allowRoles("admin", "branch_admin", "supervisor"),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
@@ -984,9 +1230,10 @@ router.post(
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobId]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -999,6 +1246,25 @@ router.post(
           await connection.rollback();
           return res.status(403).json({ error: "Not allowed to reassign this job" });
         }
+      }
+
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
+      if (!branchId) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
+      }
+
+      const branchOk = await ensureUsersInBranch(
+        connection,
+        [supervisorId, ...normalizedTechIds],
+        branchId
+      );
+      if (!branchOk) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Assigned users must belong to the same branch" });
       }
 
       if ((selectedScope === "range" || selectedScope === "future") && !job.booking_id) {
@@ -1019,9 +1285,10 @@ router.post(
            SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
                supervisor_id = ?,
                team = ?,
+               branch_id = ?,
                updated_at = NOW()
            WHERE id = ?`,
-          [supervisorId, teamJson, jobId]
+          [supervisorId, teamJson, branchId, jobId]
         );
         updatedCount = 1;
       } else if (selectedScope === "range") {
@@ -1034,7 +1301,8 @@ router.post(
           effectiveStart,
           rangeEnd,
           supervisorId,
-          teamJson
+          teamJson,
+          branchId
         );
       } else if (selectedScope === "future") {
         updatedCount = await updateFutureRecurringJobs(
@@ -1042,7 +1310,8 @@ router.post(
           job.booking_id,
           job.start_date,
           supervisorId,
-          teamJson
+          teamJson,
+          branchId
         );
       }
 
@@ -1057,8 +1326,8 @@ router.post(
 
       await connection.query(
         `INSERT INTO job_history
-         (id, job_id, action, message, metadata, created_by_user_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+         (id, job_id, action, message, metadata, created_by_user_id, visible_to_client, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           uuid(),
           jobId,
@@ -1071,11 +1340,24 @@ router.post(
             updatedCount
           }),
           created_by_user_id,
+          1 //client vis on by default for assignment changes
         ]
       );
 
       await connection.commit();
       res.json({ success: true, updatedCount });
+
+      notifyJobAssignmentChange({
+        jobId,
+        supervisorId,
+        technicianIds: normalizedTechIds,
+        actorUserId: created_by_user_id,
+        scope: selectedScope,
+        previousSupervisorId: job.supervisor_id || null,
+        previousTechnicianIds,
+      }).catch((notifyErr) => {
+        console.error("Scoped reassignment notification failed:", notifyErr);
+      });
     } catch (err) {
       await connection.rollback();
       console.error("Scoped reassignment failed:", err);
@@ -1086,9 +1368,8 @@ router.post(
   }
 );
 
-
 // POST /api/jobs/assign
-router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res) => {
+router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
   const { jobIds, supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
   const created_by_user_id = req.user?.id;
 
@@ -1131,9 +1412,10 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
       await connection.beginTransaction();
 
       const [[job]] = await connection.query(
-        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        "SELECT id, booking_id, start_date, status, supervisor_id, branch_id, team FROM jobs WHERE id = ? FOR UPDATE",
         [jobIds[0]]
       );
+      const previousTechnicianIds = parseAssignedIds(job?.team);
 
       if (!job) {
         await connection.rollback();
@@ -1146,6 +1428,25 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
           await connection.rollback();
           return res.status(403).json({ error: "Not allowed to reassign this job" });
         }
+      }
+
+      const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+      const branchId = req.user.role === "admin"
+        ? supervisorBranchId
+        : await resolveJobBranchId(connection, job, supervisorId);
+      if (!branchId) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Selected supervisor must belong to a branch" });
+      }
+
+      const branchOk = await ensureUsersInBranch(
+        connection,
+        [supervisorId, ...normalizedTechIds],
+        branchId
+      );
+      if (!branchOk) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Assigned users must belong to the same branch" });
       }
 
       if ((selectedScope === "range" || selectedScope === "future") && !job.booking_id) {
@@ -1171,9 +1472,10 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
            SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
                supervisor_id = ?,
                team = ?,
+               branch_id = ?,
                updated_at = NOW()
            WHERE id = ?`,
-          [supervisorId, teamJson, job.id]
+          [supervisorId, teamJson, branchId, job.id]
         );
         updatedCount = 1;
       } else if (selectedScope === "range") {
@@ -1186,7 +1488,8 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
           effectiveStart,
           rangeEnd,
           supervisorId,
-          teamJson
+          teamJson,
+          branchId
         );
       } else if (selectedScope === "future") {
         updatedCount = await updateFutureRecurringJobs(
@@ -1194,7 +1497,8 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
           job.booking_id,
           job.start_date,
           supervisorId,
-          teamJson
+          teamJson,
+          branchId
         );
       }
 
@@ -1209,8 +1513,8 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
 
       await connection.query(
         `INSERT INTO job_history
-         (id, job_id, action, message, metadata, created_by_user_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+         (id, job_id, action, message, metadata, created_by_user_id, visible_to_client, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           uuid(),
           job.id,
@@ -1223,11 +1527,25 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
             updatedCount
           }),
           created_by_user_id,
+          1 //client vis on by default for assignment changes
         ]
       );
 
       await connection.commit();
-      return res.json({ success: true, updatedCount });
+      res.json({ success: true, updatedCount });
+
+      notifyJobAssignmentChange({
+        jobId: job.id,
+        supervisorId,
+        technicianIds: normalizedTechIds,
+        actorUserId: created_by_user_id,
+        scope: selectedScope,
+        previousSupervisorId: job.supervisor_id || null,
+        previousTechnicianIds,
+      }).catch((notifyErr) => {
+        console.error("Scoped assignment notification failed:", notifyErr);
+      });
+      return;
     } catch (err) {
       await connection.rollback();
       console.error("Scoped assignment failed:", err);
@@ -1264,17 +1582,48 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
       technicianNames = techRows.map(t => t.name);
     }
 
+    const supervisorBranchId = await getUserBranchId(connection, supervisorId);
+    if (!supervisorBranchId) {
+      await connection.rollback();
+      return res.status(400).json({ error: "Supervisor must belong to a branch" });
+    }
+
+    const branchOk = await ensureUsersInBranch(
+      connection,
+      [supervisorId, ...normalizedTechIds],
+      supervisorBranchId
+    );
+    if (!branchOk) {
+      await connection.rollback();
+      return res.status(400).json({ error: "Assigned users must belong to the same branch" });
+    }
+
+    const notificationPayloads = [];
+
     for (const jobId of jobIds) {
 
       // current job
       const [[job]] = await connection.query(
-        "SELECT supervisor_id, status, booking_id FROM jobs WHERE id = ?",
+        "SELECT id, supervisor_id, status, booking_id, branch_id, team FROM jobs WHERE id = ?",
         [jobId]
       );
 
       if (!job) continue;
 
+      if (req.user.role !== "admin" && job.branch_id && job.branch_id !== supervisorBranchId) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Job belongs to a different branch" });
+      }
+
+      if (!job.branch_id || req.user.role === "admin") {
+        await connection.query(
+          "UPDATE jobs SET branch_id = ? WHERE id = ?",
+          [supervisorBranchId, job.id]
+        );
+      }
+
       const oldSupervisorId = job.supervisor_id;
+      const previousTechnicianIds = parseAssignedIds(job.team);
 
       // old supervisor name
       let oldSupervisorName = "Unassigned";
@@ -1295,9 +1644,10 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
      SET status = 'NOT_STARTED',
          supervisor_id = ?,
          team = ?,
+         branch_id = ?,
          updated_at = NOW()
      WHERE id = ?`,
-          [supervisorId, JSON.stringify(normalizedTechIds), jobId]
+          [supervisorId, JSON.stringify(normalizedTechIds), supervisorBranchId, jobId]
         );
       } else {
         // reassignment should not reset progress
@@ -1305,9 +1655,10 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
           `UPDATE jobs
      SET supervisor_id = ?,
          team = ?,
+         branch_id = ?,
          updated_at = NOW()
      WHERE id = ?`,
-          [supervisorId, JSON.stringify(normalizedTechIds), jobId]
+          [supervisorId, JSON.stringify(normalizedTechIds), supervisorBranchId, jobId]
         );
       }
 
@@ -1351,6 +1702,12 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
           created_by_user_id,
         ]
       );
+
+      notificationPayloads.push({
+        jobId,
+        previousSupervisorId: oldSupervisorId || null,
+        previousTechnicianIds,
+      });
     }
 
     await connection.commit();
@@ -1358,6 +1715,22 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
     res.json({
       success: true,
       updatedJobIds: jobIds,
+    });
+
+    Promise.allSettled(
+      notificationPayloads.map(({ jobId, previousSupervisorId, previousTechnicianIds }) =>
+        notifyJobAssignmentChange({
+          jobId,
+          supervisorId,
+          technicianIds: normalizedTechIds,
+          actorUserId: created_by_user_id,
+          scope: "current",
+          previousSupervisorId,
+          previousTechnicianIds,
+        })
+      )
+    ).catch((notifyErr) => {
+      console.error("Assignment notification failed:", notifyErr);
     });
 
   } catch (err) {
@@ -1368,7 +1741,6 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
     connection.release();
   }
 });
-
 
 
 // ADD attachments Meta Data
@@ -1600,6 +1972,72 @@ router.post("/:jobId/attachments/upload",
   }
 );
 
+// --------------------------------------------------
+// CLIENT → My Jobs
+// --------------------------------------------------
+router.get(
+  "/client/my-jobs",
+  auth,
+  allowRoles("client"),
+  async (req, res) => {
+    try {
+
+
+
+      const userId = req.user.id;
+
+      // get contact_id from users table
+      const [[user]] = await pool.query(
+        `SELECT contact_id FROM users WHERE id = ?`,
+        [userId]
+      );
+
+      if (!user || !user.contact_id) {
+        return res.status(400).json({
+          error: "Client contact mapping not found"
+        });
+      }
+
+      const contactId = user.contact_id;
+      const branchId = await getUserBranchId(pool, userId);
+      if (!branchId) {
+        return res.status(403).json({ error: "Branch not assigned" });
+      }
+
+      const [rows] = await pool.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.service_type,
+          j.sub_service,
+          j.status,
+          j.approval_status,
+          j.start_date,
+          j.created_at,
+          j.address,
+
+          u.name AS supervisor_name
+
+        FROM jobs j
+        LEFT JOIN users u
+          ON j.supervisor_id = u.id
+
+        WHERE j.requested_by_contact_id = ?
+          AND j.branch_id = ?
+        ORDER BY j.created_at DESC
+        `,
+        [contactId, branchId]
+      );
+
+      res.json(rows);
+
+    } catch (err) {
+      console.error("Client jobs error:", err);
+      res.status(500).json({ error: "Failed to fetch client jobs" });
+    }
+  }
+);
 
 
 

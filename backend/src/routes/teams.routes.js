@@ -14,7 +14,7 @@ body:
   technicianIds: [105,106,107]
 }
 */
-router.post("/", auth, allowRoles("admin"), async (req, res) => {
+router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
 
   const { supervisorId, technicianIds } = req.body;
 
@@ -80,7 +80,7 @@ body:
   technicianId: 105
 }
 */
-router.post("/assign", auth, allowRoles("admin"), async (req, res) => {
+router.post("/assign", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
   const { supervisorId, technicianId } = req.body;
 
   if (!supervisorId || !technicianId) {
@@ -118,14 +118,60 @@ router.post("/assign", auth, allowRoles("admin"), async (req, res) => {
 GET /api/teams/overview
 Admin overview: supervisors with technicians + unassigned technicians
 */
-router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
+router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
   try {
+    let branchFilter = "";
+    let params = [];
+
+    // 🔥 get branch_id for branch_admin
+    if (req.user.role === "branch_admin") {
+      const [[me]] = await pool.query(
+        "SELECT branch_id FROM users WHERE id = ?",
+        [req.user.id]
+      );
+
+      if (!me?.branch_id) {
+        return res.status(403).json({ error: "Branch not assigned" });
+      }
+
+      branchFilter = "AND u.branch_id = ?";
+      params.push(me.branch_id);
+    }
+
+    // ✅ supervisors (filtered)
     const [supervisors] = await pool.query(
-      `SELECT id, name, email FROM users WHERE role = 'supervisor' AND is_active = 1 ORDER BY name ASC`
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.branch_id,
+         b.name AS branch_name
+       FROM users u
+       LEFT JOIN branches b ON b.id = u.branch_id
+       WHERE u.role = 'supervisor'
+       AND u.is_active = 1
+       ${branchFilter}
+       ORDER BY u.name ASC`,
+      params
     );
+
+    // ✅ technicians (filtered)
     const [technicians] = await pool.query(
-      `SELECT id, name, email FROM users WHERE role = 'technician' AND is_active = 1 ORDER BY name ASC`
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.branch_id,
+         b.name AS branch_name
+       FROM users u
+       LEFT JOIN branches b ON b.id = u.branch_id
+       WHERE u.role = 'technician'
+       AND u.is_active = 1
+       ${branchFilter}
+       ORDER BY u.name ASC`,
+      params
     );
+
     const [links] = await pool.query(
       `SELECT supervisor_id, technician_id FROM supervisor_technicians`
     );
@@ -140,6 +186,7 @@ router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
       const tech = technicianMap.get(Number(link.technician_id));
       const supervisor = supervisorMap.get(Number(link.supervisor_id));
       if (!tech || !supervisor) continue;
+
       supervisor.technicians.push(tech);
       assignedTechs.add(Number(link.technician_id));
     }
@@ -152,6 +199,7 @@ router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
       supervisors: Array.from(supervisorMap.values()),
       unassignedTechnicians
     });
+
   } catch (err) {
     console.error("Team overview failed:", err);
     res.status(500).json({ error: "Failed to load team overview" });
@@ -162,7 +210,7 @@ router.get("/overview", auth, allowRoles("admin"), async (req, res) => {
 GET /api/teams/monitor
 Supervisor monitoring dashboard data
 */
-router.get("/monitor", auth, allowRoles("supervisor"), async (req, res) => {
+router.get("/monitor", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
   const supervisorId = req.user.id;
 
   try {
@@ -244,7 +292,7 @@ Return technicians under a supervisor
 GET /api/teams/my/team
 Supervisor gets only THEIR technicians
 */
-router.get("/my/team", auth, allowRoles("supervisor"), async (req, res) => {
+router.get("/my/team", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
 
   const supervisorId = req.user.id;
 

@@ -1,7 +1,5 @@
 import "./JobRow.css";
-
-const isCorporateJob = (code) => /^[A-Z]{2,}[\s-]\d+/.test(code);
-const getInitials = (code) => code.split(/[\s-]/)[0];
+import { formatDate } from "../utils/date";
 
 export default function JobRow({
   job,
@@ -10,12 +8,7 @@ export default function JobRow({
   onToggleSelect,
   onToggleExpand,
 }) {
-  const companyLabel =
-    job.companyname ||
-    job.company_name ||
-    job.company?.name ||
-    job.company_code ||
-    "";
+  const companyLabel = job.companyname;
   const requestedByName =
     job.requestedBy?.name ||
     job.requestedBy?.full_name ||
@@ -33,84 +26,69 @@ export default function JobRow({
     ? companyLabel
     : requestedByName || requestedById
       ? `Requested by: ${requestedByName || "Contact"}${requestedByIdText}`
-      : "—";
-  const service = job.title;
+      : "Not Available";
+  const service = job.title || job.service_type || "Service Not Available";
   const displayStatus = job.display_status || job.status || "";
-
-  function formatDueDate(date) {
-    if (!date) return "Unscheduled";
-
-    const d = new Date(date);
-
-    // catches Invalid Date and epoch
-    if (isNaN(d.getTime()) || d.getFullYear() === 1970) {
-      return "Unscheduled";
-    }
-
-    return d.toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: "numeric"
-    });
-  }
-
+  const location = job.site || job.company_site || job.address || "Not Available";
+  const workType = job.companyname ? "Corporate Work Order" : "Individual Customer";
   const scheduleDate = job.dueDate || job.start_date;
 
+  function formatScheduleDate(date) {
+    if (!date) return "Not Available";
+    const parsed = new Date(date);
+    if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() === 1970) {
+      return "Not Available";
+    }
+    return formatDate(parsed);
+  }
+
   return (
-  <div
-    className={`job-row ${isExpanded ? "expanded" : ""}`}
-    onClick={onToggleExpand}
-  >
+    <div
+      className={`job-row ${isExpanded ? "expanded" : ""}`}
+      onClick={onToggleExpand}
+    >
+      <div className="job-row-top">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggleSelect}
+          className="job-checkbox"
+          onClick={(event) => event.stopPropagation()}
+        />
 
-    {/* 1 — Checkbox */}
-    <input
-      type="checkbox"
-      checked={isSelected}
-      onChange={onToggleSelect}
-      className="job-checkbox"
-      onClick={(e) => e.stopPropagation()}
-    />
+        <div className="job-row-content">
+          <div className="job-row-header">
+            <div className="job-row-heading">
+              <div className="job-companyname">{title}</div>
+              <div className="job-meta-line">
+                <span className="job-location">{location}</span>
+                <span className="job-meta-separator" />
+                <span className="job-tag">{workType}</span>
+              </div>
+            </div>
 
-    {/* 2 — Identity (company + code) */}
-    <div className="job-identity">
-      <div className="job-companyname">
-        {title}
-      </div>
+            <div className={`job-status ${displayStatus}`}>
+              {displayStatus ? displayStatus.replace(/_/g, " ") : "Not Available"}
+            </div>
+          </div>
 
-      <div className="job-identity-text">
-        <div className="job-code">{job.site}</div>
-        <div className="job-customer-type">
-          {isCorporateJob(job.code)
-            ? "Corporate Work Order"
-            : "Individual Customer"}
+          <div className="job-service">{service}</div>
+
+          <div className="job-row-footer">
+            <div className="job-info-block">
+              <div className="job-supervisor-label">Supervisor</div>
+              <div className="job-supervisor-name">
+                {job.supervisor?.name || "Not Available"}
+              </div>
+            </div>
+
+            <div className="job-info-block job-info-block-right">
+              <div className="job-supervisor-label">Date of Service</div>
+              <div className="job-date">{formatScheduleDate(scheduleDate)}</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-
-    {/* 3 — Service */}
-    <div className="job-title">
-      {service}   
-    </div>
-
-    {/* 4 — Supervisor */}
-    <div className="job-supervisor-block">
-      <div className="job-supervisor-label">Supervisor</div>
-      <div className="job-supervisor-name">
-        {job.supervisor ? job.supervisor.name : "Unassigned"}
-      </div>
-    </div>
-
-    {/* 5 — Status + Due (RIGHT PANEL) */}
-    <div className="job-right">
-      <div className={`job-status ${displayStatus}`}>
-        {displayStatus.replace("_", " ")}
-      </div>
-
-      <div className="job-due">
-        {formatDueDate(scheduleDate)}
-      </div>
-    </div>
-
-  </div>
-);
+  );
 }

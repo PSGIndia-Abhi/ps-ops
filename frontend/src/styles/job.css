@@ -107,6 +107,37 @@
   cursor: pointer;
 }
 
+.job-card-visit {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+  border: 1px solid #bfdbfe;
+}
+
+.job-card-visit-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.job-card-visit-time {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.job-card-visit-date {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
 /* actions */
 .job-card-actions {
   margin-top: 14px;

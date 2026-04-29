@@ -4,6 +4,8 @@ import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import { useState, useEffect } from "react";
 import DashboardActions from "../components/DashboardActions";
+import NotificationsMenu from "../components/NotificationsMenu";
+import UserMenu from "../components/UserMenu";
 
 export default function SupervisorLayout() {
   const navigate = useNavigate();
@@ -29,6 +31,10 @@ export default function SupervisorLayout() {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [actionsConfig, setActionsConfig] = useState(null);
   const hasActions = Boolean(actionsConfig);
+
+  const isJobsActive = (location.pathname === "/supervisor" || location.pathname.startsWith("/supervisor/jobs"))
+    && !isActionsOpen
+    && mobilePanel === null;
 
   function openActions() {
     setMobilePanel(null);
@@ -87,13 +93,17 @@ export default function SupervisorLayout() {
         </div>
 
         <div className="header-right">
-          {user && (
-            <div className="user-box">
-              <div className="user-name">{user.name}</div>
-              <div className="user-role">{user.role}</div>
-            </div>
-          )}
-          <button className="logout-btn" onClick={logout}>Logout</button>
+          <NotificationsMenu />
+          <UserMenu
+            user={user}
+            onLogout={logout}
+            actions={[
+              {
+                label: "Profile",
+                onClick: () => navigate("/supervisor/profile"),
+              },
+            ]}
+          />
         </div>
       </header>
 
@@ -132,6 +142,13 @@ export default function SupervisorLayout() {
                 onClick={() => navigate("/supervisor/map")}
               >
                 Map View
+              </button>
+
+              <button
+                className={`nav-btn ${isActive("/supervisor/tickets") ? "active" : ""}`}
+                onClick={() => navigate("/supervisor/tickets")}
+              >
+                Tickets
               </button>
             </nav>
           </aside>
@@ -178,6 +195,16 @@ export default function SupervisorLayout() {
           >
             Map View
           </button>
+          
+          
+                        <button
+                className={`nav-btn ${isActive("/supervisor/tickets") ? "active" : ""}`}
+                onClick={() => navigate("/supervisor/tickets")}
+              >
+                Tickets
+              </button>
+          
+          
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -202,10 +229,31 @@ export default function SupervisorLayout() {
       {/* ---------- MOBILE TAB BAR ---------- */}
       {isMobile && (
         <div className="mobile-tabbar">
-          <button onClick={goJobs}>Jobs</button>
-          <button onClick={openActions} disabled={!hasActions}>Actions</button>
-          <button onClick={openSummary}>Summary</button>
-          <button onClick={openMenu}>Menu</button>
+          <button
+            onClick={goJobs}
+            className={isJobsActive ? "active" : ""}
+          >
+            Jobs
+          </button>
+          <button
+            onClick={openActions}
+            disabled={!hasActions}
+            className={isActionsOpen ? "active" : ""}
+          >
+            Actions
+          </button>
+          <button
+            onClick={openSummary}
+            className={mobilePanel === "summary" ? "active" : ""}
+          >
+            Summary
+          </button>
+          <button
+            onClick={openMenu}
+            className={mobilePanel === "menu" ? "active" : ""}
+          >
+            Menu
+          </button>
         </div>
       )}
     </div>

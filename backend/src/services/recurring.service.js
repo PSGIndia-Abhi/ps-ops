@@ -1,7 +1,7 @@
 const { v4: uuid } = require("uuid");
 
-const DEFAULT_LOOKAHEAD_DAYS = 14;
-const DEFAULT_MIN_LEAD_DAYS = 7;
+const DEFAULT_LOOKAHEAD_DAYS = 30;
+const DEFAULT_MIN_LEAD_DAYS = 0;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function normalizeRecurrenceInput(recurrence, fallbackStartDate) {
@@ -160,17 +160,7 @@ function startRecurringScheduler(pool, options = {}) {
 }
 
 async function generateRecurringJobs(pool, options = {}) {
-  const lookaheadDays = Math.max(
-    1,
-    Number(options.lookaheadDays ?? DEFAULT_LOOKAHEAD_DAYS)
-  );
-  const minLeadDays = Math.max(
-    0,
-    Number(options.minLeadDays ?? DEFAULT_MIN_LEAD_DAYS)
-  );
-  const today = startOfUtcDay(new Date());
-  const windowStart = addDays(today, Math.min(minLeadDays, lookaheadDays));
-  const windowEnd = addDays(today, lookaheadDays);
+  const { windowStart, windowEnd } = getGenerationWindow(options);
 
   const connection = await pool.getConnection();
 
@@ -196,9 +186,12 @@ async function generateRecurringJobs(pool, options = {}) {
         b.company_id,
         b.contact_id,
         b.created_by_user_id,
-        b.status
+        b.status,
+        COALESCE(su.branch_id, cu.branch_id) AS branch_id
       FROM recurring_rules r
       INNER JOIN bookings b ON b.id = r.booking_id
+      LEFT JOIN users cu ON cu.id = b.created_by_user_id
+      LEFT JOIN users su ON su.id = r.supervisor_id
       WHERE b.status = 'ACTIVE'
       `
     );
@@ -220,13 +213,13 @@ async function generateRecurringJobs(pool, options = {}) {
 
 async function processRule(connection, rule, windowStart, windowEnd) {
   const subServices = parseSubServices(rule.sub_services);
-  if (subServices.length === 0) return;
+  if (subServices.length === 0) return 0;
 
   const ruleStart = toUtcDateOnly(rule.rule_start_date);
-  if (!ruleStart) return;
+  if (!ruleStart) return 0;
 
   const ruleEnd = rule.rule_end_date ? toUtcDateOnly(rule.rule_end_date) : null;
-  if (ruleEnd && ruleEnd < windowStart) return;
+  if (ruleEnd && ruleEnd < windowStart) return 0;
 
   const lastGenerated = rule.last_generated_until
     ? toUtcDateOnly(rule.last_generated_until)
@@ -238,10 +231,10 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     lastGenerated ? addDays(lastGenerated, 1) : null
   );
 
-  if (cursor > windowEnd) return;
+  if (cursor > windowEnd) return 0;
 
   const occurrences = getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd);
-  if (occurrences.length === 0) return;
+  if (occurrences.length === 0) return 0;
 
   const [existingRows] = await connection.query(
     `
@@ -283,7 +276,7 @@ async function processRule(connection, rule, windowStart, windowEnd) {
         [lastOccurrenceStr, rule.rule_id]
       );
     }
-    return;
+    return 0;
   }
 
   await connection.beginTransaction();
@@ -291,7 +284,12 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     let companyCode = null;
     if (rule.company_id) {
       const [[company]] = await connection.query(
-        `SELECT code FROM companies WHERE id = ?`,
+        `
+        SELECT co.code
+        FROM sites s
+        JOIN companies co ON co.id = s.company_id
+        WHERE s.id = ?
+        `,
         [rule.company_id]
       );
       companyCode = company?.code || null;
@@ -305,11 +303,15 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     const supervisorId = rule.supervisor_id || null;
     const normalizedTeam = normalizeTeam(rule.team);
     const teamValue = JSON.stringify(normalizedTeam);
+    const branchId = rule.branch_id || null;
+
 
     for (const job of jobsToCreate) {
       sequenceValue += 1;
       const jobId = uuid();
+      const visitId = uuid();
       const jobDate = formatDate(job.date);
+      const scheduledDateTime = `${jobDate} ${rule.scheduled_time || "00:00"}:00`;
       const jobCode = companyCode
         ? `${companyCode} ${sequenceValue}`
         : `${new Date().getFullYear()}-${sequenceValue}`;
@@ -327,12 +329,13 @@ async function processRule(connection, rule, windowStart, windowEnd) {
           company_id,
           requested_by_contact_id,
           created_by_user_id,
+          branch_id,
           approval_status,
           start_date,
           due_date,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           jobId,
           jobCode,
@@ -345,11 +348,42 @@ async function processRule(connection, rule, windowStart, windowEnd) {
           rule.company_id || null,
           rule.contact_id || null,
           rule.created_by_user_id || null,
+          branchId,
           null,
           jobDate,
           jobDate
         ]
       );
+
+      await connection.query(
+        `INSERT INTO job_visits
+   (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
+   VALUES (?, ?, 1, ?, 'SCHEDULED', ?, NOW(), NOW())`,
+        [
+          visitId,
+          jobId,
+          scheduledDateTime,
+          rule.created_by_user_id || null
+        ]
+      );
+
+      // attach technicians (from rule.team)
+      let team = [];
+      try {
+        team = Array.isArray(rule.team)
+          ? rule.team
+          : JSON.parse(rule.team || "[]");
+      } catch {
+        team = [];
+      }
+
+      for (const techId of team) {
+        await connection.query(
+          `INSERT INTO visit_technicians (id, visit_id, technician_id)
+     VALUES (?, ?, ?)`,
+          [uuid(), visitId, techId]
+        );
+      }
 
       await connection.query(
         `INSERT INTO job_history (
@@ -378,13 +412,87 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     }
 
     await connection.commit();
+    return jobsToCreate.length;
   } catch (err) {
     await connection.rollback();
     console.error(
       `Failed generating recurring jobs for booking ${rule.booking_id}:`,
       err
     );
+    return 0;
   }
+}
+
+function getGenerationWindow(options = {}) {
+  const lookaheadDays = Math.max(
+    1,
+    Number(options.lookaheadDays ?? DEFAULT_LOOKAHEAD_DAYS)
+  );
+  const minLeadDays = Math.max(
+    0,
+    Number(options.minLeadDays ?? DEFAULT_MIN_LEAD_DAYS)
+  );
+  const today = startOfUtcDay(new Date());
+  const windowStart = addDays(today, Math.min(minLeadDays, lookaheadDays));
+  const windowEnd = addDays(today, lookaheadDays);
+  return { windowStart, windowEnd, lookaheadDays };
+}
+
+async function generateRecurringJobsForBooking(pool, bookingId, options = {}) {
+  const { windowStart, windowEnd } = getGenerationWindow(options);
+  const connection = await pool.getConnection();
+  let totalCreated = 0;
+
+  try {
+    const [rules] = await connection.query(
+      `
+      SELECT
+        r.id AS rule_id,
+        r.booking_id,
+        r.frequency,
+        r.interval_value,
+        r.day_of_week,
+        r.week_of_month,
+        r.day_of_month,
+        r.days_of_week,
+        r.supervisor_id,
+        r.team,
+        r.start_date AS rule_start_date,
+        r.end_date AS rule_end_date,
+        r.last_generated_until,
+        b.sub_services,
+        b.service_type,
+        b.company_id,
+        b.contact_id,
+        b.created_by_user_id,
+        b.status,
+        COALESCE(su.branch_id, cu.branch_id) AS branch_id
+      FROM recurring_rules r
+      INNER JOIN bookings b ON b.id = r.booking_id
+      LEFT JOIN users cu ON cu.id = b.created_by_user_id
+      LEFT JOIN users su ON su.id = r.supervisor_id
+      WHERE b.status = 'ACTIVE'
+        AND r.booking_id = ?
+      `,
+      [bookingId]
+    );
+
+    for (const rule of rules) {
+      try {
+        const created = await processRule(connection, rule, windowStart, windowEnd);
+        totalCreated += Number(created) || 0;
+      } catch (err) {
+        console.error(
+          `Recurring processing failed for booking ${rule.booking_id}:`,
+          err
+        );
+      }
+    }
+  } finally {
+    connection.release();
+  }
+
+  return { created: totalCreated, windowStart, windowEnd };
 }
 
 function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
@@ -393,13 +501,19 @@ function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
   const windowLimit = ruleEnd && ruleEnd < windowEnd ? ruleEnd : windowEnd;
 
   if (rule.frequency === "CUSTOM_DAYS") {
-    const diffDays = daysBetween(ruleStart, cursor);
-    const steps = diffDays <= 0 ? 0 : Math.ceil(diffDays / interval);
-    let next = addDays(ruleStart, steps * interval);
-    while (next <= windowLimit) {
-      occurrences.push(next);
+    let next = new Date(ruleStart);
+
+    // 🔑 Move forward until we reach cursor (no skipping bug)
+    while (next < cursor) {
       next = addDays(next, interval);
     }
+
+    // 🔑 Now generate occurrences
+    while (next <= windowLimit) {
+      occurrences.push(new Date(next));
+      next = addDays(next, interval);
+    }
+
   } else if (rule.frequency === "WEEKLY") {
     const daysOfWeek = normalizeDaysOfWeek(
       rule.days_of_week,
@@ -407,6 +521,7 @@ function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
         ? Number(rule.day_of_week)
         : ruleStart.getUTCDay()
     );
+
     const weeklyOccurrences = getWeeklyOccurrences({
       daysOfWeek,
       interval,
@@ -414,7 +529,9 @@ function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
       windowLimit,
       ruleStart,
     });
+
     occurrences.push(...weeklyOccurrences);
+
   } else if (rule.frequency === "MONTHLY") {
     const weekOfMonth = Number.isFinite(Number(rule.week_of_month))
       ? Number(rule.week_of_month)
@@ -432,17 +549,22 @@ function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
         windowLimit,
         ruleStart,
       });
+
       occurrences.push(...monthlyOccurrences);
+
     } else {
       const targetDom = Number.isFinite(Number(rule.day_of_month))
         ? Number(rule.day_of_month)
         : ruleStart.getUTCDate();
+
       let next = alignMonthly(ruleStart, targetDom, interval);
+
       while (next < cursor) {
         next = addMonths(next, interval, targetDom);
       }
+
       while (next <= windowLimit) {
-        occurrences.push(next);
+        occurrences.push(new Date(next));
         next = addMonths(next, interval, targetDom);
       }
     }
@@ -750,4 +872,5 @@ module.exports = {
   normalizeRecurrenceInput,
   startRecurringScheduler,
   generateRecurringJobs,
+  generateRecurringJobsForBooking,
 };

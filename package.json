@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "minio": "^8.0.6",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1"
   }
 }

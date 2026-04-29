@@ -1,116 +1,145 @@
 import { useNavigate } from "react-router-dom";
+import { formatDate, formatTime } from "../utils/date";
+import { apiFetch } from "../api";
+
+const role = localStorage.getItem("role");
 
 export default function JobCard({
   job,
-  updateStatus,
-  onSubmitApproval,
-  basePath = "/technician"
+  basePath = "/technician",
+  refreshData,
 }) {
   const navigate = useNavigate();
 
-  const title =
-    job.title ||
-    job.name ||
-    job.serviceType ||
-    job.service_type ||
-    (Array.isArray(job.subServices) && job.subServices.length
-      ? job.subServices.join(", ")
-      : "") ||
-    "Service Job";
-  const displayStatus = job.display_status || job.status || "";
-  const companyName =
-    job.companyname ||
-    job.company_name ||
-    job.company?.name ||
-    job.company_code ||
-    "";
+  // 🔹 Core data
+  const title = job.title;
+  const visitDate = job.visit_date;
+
+ const companyName = job.companyname;
+
   const requestedByName =
     job.requestedBy?.name ||
     job.requested_by_name ||
     job.requested_by ||
     job.contact_name ||
     "";
+
   const requestedById =
     job.requestedBy?.id ||
     job.contact_id ||
     "";
+
   const requestedByIdText =
     requestedById && /^\d+$/.test(String(requestedById))
       ? ` #${requestedById}`
       : "";
+
   const companyHeading = companyName
     ? companyName
     : requestedByName
       ? `Requested by: ${requestedByName}${requestedByIdText}`
       : "Individual Customer";
-  const site =
-    job.site ||
-    job.company_site ||
-    job.company?.site ||
-    "";
-  const awaitingApproval =
-    job.approval_status === "PENDING" &&
-    ["IN_PROGRESS", "PAUSED"].includes(job.status);
-  const isCanceled = job.status === "CANCELED";
-  const isLost = displayStatus === "LOST";
-  const canStart = job.status === "NOT_STARTED" && !isCanceled && !isLost;
 
+ const site =
+  job?.site ||
+  job?.company_site ||
+  job?.company?.site ||
+  "";
+
+  const visitTime = formatTime(visitDate);
+
+  // 🔹 DATE-ONLY LOGIC (IMPORTANT FIX)
+  function toDateOnly(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const visitDay = visitDate ? toDateOnly(visitDate) : null;
+
+  const isPast = visitDay && visitDay < today;
+  const isToday = visitDay && visitDay.getTime() === today.getTime();
+
+  // 🔹 Navigation
   function openJob() {
     navigate(`${basePath}/jobs/${job.id}`);
   }
 
+  // 🔹 Actions (backend later)
+async function startVisit(e) {
+  e.stopPropagation();
+
+  const res = await apiFetch(`/api/visits/${job.visit_id}/start`, {
+    method: "POST",
+  });
+
+  if (!res.ok) {
+    console.error("Start visit failed");
+    return;
+  }
+
+  refreshData?.();
+}
+
+  async function startAnyway(e) {
+    e.stopPropagation();
+
+    const res = await apiFetch(`/api/visits/${job.visit_id}/start-anyway`, {
+      method: "POST",
+    });
+
+    if (!res.ok) {
+      console.error("Start visit anyway failed");
+      return;
+    }
+
+    refreshData?.();
+  }
+  
+
   return (
     <div className="job-card">
 
-      {/* top section */}
+      {/* HEADER */}
       <div className="job-card-header" onClick={openJob}>
         <div className="job-card-headings">
           <div className="job-card-company">{companyHeading}</div>
           {site && <div className="job-card-site">{site}</div>}
-          <div className="job-card-title">
-            {title}
-          </div>
+          <div className="job-card-title">{title}</div>
         </div>
 
-        <div className={`job-card-status status-${displayStatus}`}>
-          {displayStatus.replace("_", " ")}
+        <div className="job-card-status">
+          {isPast ? "MISSED" : isToday ? "TODAY" : "UPCOMING"}
         </div>
       </div>
 
+      {/* BODY */}
       <div className="job-card-body" onClick={openJob}>
+        {visitDate && (
+          <div className="job-card-visit">
+            <div className="job-card-visit-label">
+              {isPast ? "Missed Visit" : "Scheduled Visit"}
+            </div>
+
+            <div className="job-card-visit-time">
+              {visitTime === "-" ? "Time TBD" : visitTime}
+            </div>
+
+            <div className="job-card-visit-date">
+              {formatDate(visitDate)}
+            </div>
+          </div>
+        )}
+
         <div className="job-card-address">
           {job.address || "No address"}
         </div>
       </div>
 
-      {/* actions */}
-      <div className="job-card-actions">
-
-        {awaitingApproval && (
-          <button className="btn-complete" disabled>
-            Awaiting Approval
-          </button>
-        )}
-
-        {!awaitingApproval && canStart && (
-          <button className="btn-start" onClick={() => updateStatus(job.id, "IN_PROGRESS")}>
-            Start
-          </button>
-        )}
-
-        {!awaitingApproval && job.status === "IN_PROGRESS" && onSubmitApproval && (
-          <button className="btn-complete" onClick={() => onSubmitApproval(job.id)}>
-            Submit for Approval
-          </button>
-        )}
-
-        {!awaitingApproval && job.status === "PAUSED" && onSubmitApproval && (
-          <button className="btn-complete" onClick={() => onSubmitApproval(job.id)}>
-            Submit for Approval
-          </button>
-        )}
-
-      </div>
+    
     </div>
   );
 }

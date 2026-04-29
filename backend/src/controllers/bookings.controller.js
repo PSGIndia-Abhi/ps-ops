@@ -1,6 +1,31 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
-const { normalizeRecurrenceInput } = require("../services/recurring.service");
+const { normalizeRecurrenceInput, generateRecurringJobsForBooking } = require("../services/recurring.service");
+const { notifyJobCreated } = require("../services/notifications.service");
+
+async function getUserBranchId(connection, userId) {
+  if (!userId) return null;
+  const [[row]] = await connection.query(
+    "SELECT branch_id FROM users WHERE id = ?",
+    [userId]
+  );
+  return row?.branch_id || null;
+}
+
+async function ensureBranchExists(connection, branchId) {
+  if (!branchId) return false;
+  const [[row]] = await connection.query(
+    "SELECT id FROM branches WHERE id = ?",
+    [branchId]
+  );
+  return !!row;
+}
+
+function withStatus(message, status = 400) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
 
 async function createBooking(req, res) {
   const {
@@ -22,15 +47,23 @@ async function createBooking(req, res) {
   const created_by_user_id = req.user?.id;
 
   let supervisorId = null;
-  let technicianId = null;
+  const technicianIds =
+    Array.isArray(req.body.technician_ids)
+      ? req.body.technician_ids.map(Number).filter(Boolean)
+      : req.body.technician_id
+        ? [Number(req.body.technician_id)]
+        : [];
 
   // role handling
   if (req.user.role === "supervisor") {
     supervisorId = req.user.id;
+  } else if (req.user.role === "client") {
+    supervisorId = null;
+
   } else {
     // admin flow
     supervisorId = req.body.supervisor_id || null;
-    technicianId = req.body.technician_id || null;
+
   }
 
   // validation
@@ -106,11 +139,19 @@ async function createBooking(req, res) {
     typeof address === "string" && address.trim()
       ? address.trim()
       : typeof location === "string" && location.trim()
-      ? location.trim()
-      : null;
+        ? location.trim()
+        : null;
 
   // recurrence normalize
   if (recurrence) {
+    const recurrenceEnd =
+      recurrence.end_date || recurrence.endDate || req.body?.recurrence_end_date || null;
+    if (!recurrenceEnd) {
+      return res.status(400).json({
+        error: "Recurring bookings require an end date",
+      });
+    }
+    recurrence.end_date = recurrenceEnd;
     try {
       recurrenceRule = normalizeRecurrenceInput(recurrence, start_date);
     } catch (err) {
@@ -125,9 +166,60 @@ async function createBooking(req, res) {
   try {
     await connection.beginTransaction();
 
-    const { contact_id } = client || {};
+    let { contact_id } = client || {};
+    const requestedBranchId = req.body?.branch_id || req.body?.branchId || null;
+    const creatorBranchId = await getUserBranchId(connection, created_by_user_id);
+    let jobBranchId = null;
+
+    if (req.user.role === "client") {
+      const [[userRow]] = await connection.query(
+        `SELECT contact_id FROM users WHERE id = ?`,
+        [req.user.id]
+      );
+      if (!userRow?.contact_id) {
+        throw new Error("Client contact mapping not found");
+      }
+      contact_id = userRow.contact_id;
+    }
+
     if (!contact_id) {
       throw new Error("requested_by_contact_id is required");
+    }
+
+    if (req.user.role !== "admin" && requestedBranchId && requestedBranchId !== creatorBranchId) {
+      throw withStatus("Branch mismatch: cannot create jobs for another branch");
+    }
+
+    if (supervisorId) {
+      jobBranchId = await getUserBranchId(connection, supervisorId);
+      if (!jobBranchId) {
+        throw withStatus("Assigned supervisor must belong to a branch");
+      }
+    }
+
+    if (requestedBranchId && jobBranchId && requestedBranchId !== jobBranchId) {
+      throw withStatus("Branch mismatch: supervisor and branch_id differ");
+    }
+
+    if (!jobBranchId) {
+      jobBranchId = requestedBranchId || creatorBranchId;
+    }
+
+    if (!jobBranchId) {
+      throw withStatus("Branch is required. Assign a supervisor or provide branch_id.");
+    }
+
+    const branchExists = await ensureBranchExists(connection, jobBranchId);
+    if (!branchExists) {
+      throw withStatus("Invalid branch");
+    }
+
+    for (const techId of technicianIds) {
+      const technicianBranchId = await getUserBranchId(connection, techId);
+
+      if (!technicianBranchId || technicianBranchId !== jobBranchId) {
+        throw withStatus("Technician must belong to the same branch");
+      }
     }
 
     // 1) Fetch contact
@@ -149,9 +241,12 @@ async function createBooking(req, res) {
     let companyCode = null;
     if (jobCompanyId) {
       const [[company]] = await connection.query(
-        `SELECT code
-         FROM companies
-         WHERE id = ?`,
+        `
+        SELECT co.code
+        FROM sites s
+        JOIN companies co ON co.id = s.company_id
+        WHERE s.id = ?
+        `,
         [jobCompanyId]
       );
 
@@ -185,14 +280,12 @@ async function createBooking(req, res) {
     // recurrence rule
     if (recurrenceRule) {
       const rules = Array.isArray(recurrenceRule) ? recurrenceRule : [recurrenceRule];
-      const teamJson = JSON.stringify(
-        technicianId ? [Number(technicianId)].filter(Boolean) : []
-      );
+      const teamJson = JSON.stringify(technicianIds);
       for (const rule of rules) {
         await connection.query(
           `INSERT INTO recurring_rules
-          (id, booking_id, supervisor_id, team, frequency, interval_value, day_of_week, days_of_week, day_of_month, week_of_month, start_date, end_date, last_generated_until)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          (id, booking_id, supervisor_id, team, frequency, interval_value, scheduled_time,day_of_week, days_of_week, day_of_month, week_of_month, start_date, end_date, last_generated_until)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
           [
             uuid(),
             bookingId,
@@ -200,6 +293,7 @@ async function createBooking(req, res) {
             teamJson,
             rule.frequency,
             rule.interval_value,
+            rule.scheduled_time,
             rule.day_of_week,
             rule.days_of_week
               ? JSON.stringify(rule.days_of_week)
@@ -212,6 +306,8 @@ async function createBooking(req, res) {
         );
       }
     }
+
+ 
 
     // 4) Create jobs
     const createdJobs = [];
@@ -251,8 +347,8 @@ async function createBooking(req, res) {
 
       await connection.query(
         `INSERT INTO jobs
-        (id, code, booking_id, service_type, sub_service, status, supervisor_id, team, company_id, requested_by_contact_id, address, created_by_user_id, approval_status, approved_at, start_date, due_date, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        (id, code, booking_id, service_type, sub_service, status, supervisor_id, team, company_id, requested_by_contact_id, address, created_by_user_id, branch_id, approval_status, approved_at, start_date, due_date, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           jobId,
           jobCode,
@@ -261,17 +357,46 @@ async function createBooking(req, res) {
           service,
           initialStatus,
           supervisorId,
-          JSON.stringify([]),
+          JSON.stringify(technicianIds),
           jobCompanyId,
           contact.id,
           jobAddress,
           created_by_user_id,
+          jobBranchId,
           null,
           null,
           serviceStartDate,
           serviceEndDate,
         ]
       );
+
+      console.log("BODY:", req.body);
+      console.log("TECH IDS:", technicianIds);
+
+      // Create Visit #1 for this job
+      const visitId = uuid();
+      const serviceTime = schedule?.time || "00:00";
+      const scheduledDateTime = `${serviceStartDate} ${serviceTime}:00`;
+      await connection.query(
+        `INSERT INTO job_visits
+  (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
+  VALUES (?, ?, 1, ?, 'SCHEDULED', ?, NOW(), NOW())`,
+        [
+          visitId,
+          jobId,
+          scheduledDateTime,
+          created_by_user_id,
+        ]
+      );
+
+      // attach technician if provided
+      for (const techId of technicianIds) {
+        await connection.query(
+          `INSERT INTO visit_technicians (id, visit_id, technician_id, created_at)
+     VALUES (?, ?, ?, NOW())`,
+          [uuid(), visitId, techId]
+        );
+      }
 
       // history
       await connection.query(
@@ -290,6 +415,7 @@ async function createBooking(req, res) {
         status: "CREATED",
         supervisor_id: supervisorId,
         team: [],
+        branch_id: jobBranchId,
         start_date: serviceStartDate,
         dueDate: serviceEndDate,
         address: jobAddress,
@@ -298,14 +424,33 @@ async function createBooking(req, res) {
 
     await connection.commit();
 
+    if (recurrenceRule) {
+      try {
+        await generateRecurringJobsForBooking(pool, bookingId, { lookaheadDays: 30 });
+      } catch (err) {
+        console.error("Failed to pre-generate recurring jobs:", err);
+      }
+    }
+
     res.json({
       success: true,
       jobs: createdJobs,
     });
+
+    Promise.allSettled(
+      createdJobs.map((job) =>
+        notifyJobCreated({
+          jobId: job.id,
+          actorUserId: created_by_user_id,
+        })
+      )
+    ).catch((notifyErr) => {
+      console.error("Job creation notification failed:", notifyErr);
+    });
   } catch (err) {
     await connection.rollback();
     console.error("Error creating jobs:", err);
-    res.status(500).json({
+    res.status(err.status || 500).json({
       error: err.message || "Failed to create jobs",
     });
   } finally {

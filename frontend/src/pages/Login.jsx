@@ -6,7 +6,7 @@ import logo from "../assets/logo.png";
 
 export default function Login() {
   const navigate = useNavigate();
-  console.log(import.meta.env.VITE_API_BASE);
+  
 
   const [mode, setMode] = useState("login");
   // login | forgot-email | forgot-verify
@@ -34,6 +34,16 @@ export default function Login() {
 
     localStorage.setItem("token", data.token);
     localStorage.setItem("role", data.role);
+    if (data.user_id) {
+      localStorage.setItem("userId", String(data.user_id));
+    } else {
+      localStorage.removeItem("userId");
+    }
+    if (data.contact_id) {
+      localStorage.setItem("contactId", String(data.contact_id));
+    } else {
+      localStorage.removeItem("contactId");
+    }
 
     navigate("/");
   };
@@ -130,6 +140,12 @@ export default function Login() {
             >
               Login
             </button>
+            <div style={{ marginTop: "12px", fontSize: "14px" }}>
+              Don't have an account?{" "}
+              <a href="/signup" style={{ color: "#2563eb", fontWeight: 500 }}>
+                Sign up
+              </a>
+            </div>
 
             <p
               style={{ cursor: "pointer", marginTop: 10 }}
@@ -146,7 +162,7 @@ export default function Login() {
             <h2>Reset Password</h2>
 
             <input
-            type="username"
+              type="username"
               placeholder="Enter your email"
               value={email}
               onChange={e => setEmail(e.target.value)}

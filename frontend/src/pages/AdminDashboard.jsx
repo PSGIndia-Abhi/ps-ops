@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState("active");
+
   const defaultFilters = {
     status: "",
     startDate: "",
@@ -48,13 +48,12 @@ export default function AdminDashboard() {
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
-  const fetchJobs = async (scope = viewMode) => {
+  const fetchJobs = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const query = scope === "summary" ? "?scope=summary" : "";
-      const res = await apiFetch(`/api/jobs${query}`);
+      const res = await apiFetch(`/api/jobs`);
       if (!res.ok) throw new Error("Failed to fetch jobs");
       const data = await res.json();
       setJobs(data);
@@ -66,33 +65,23 @@ export default function AdminDashboard() {
     }
   };
 
-
   useEffect(() => {
     fetchJobs();
-  }, [viewMode]);
+  }, []);
 
   useEffect(() => {
     setSelectedJobIds([]);
     setExpandedJobId(null);
-  }, [viewMode]);
+  }, [jobs]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function fetchUsersByRole(role) {
-      const endpoints = [`/api/users?role=${role}`, `/users?role=${role}`];
-      for (const endpoint of endpoints) {
-        try {
-          const res = await apiFetch(endpoint);
-          if (res?.ok) {
-            const data = await res.json();
-            return Array.isArray(data) ? data : [];
-          }
-        } catch (err) {
-          // try next endpoint
-        }
-      }
-      return [];
+      const res = await apiFetch(`/api/users?role=${role}`);
+      if (!res?.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
 
     async function loadPeople() {
@@ -124,11 +113,11 @@ export default function AdminDashboard() {
     setActionsConfig({
       onCreate: () => setIsCreateOpen(true),
       onAssign: () => setIsAssignOpen(true),
-      disableAssign: viewMode === "summary" || selectedJobIds.length === 0,
+      disableAssign: selectedJobIds.length === 0,
     });
 
     return () => setActionsConfig(null);
-  }, [setActionsConfig, selectedJobIds.length, viewMode]);
+  }, [setActionsConfig, selectedJobIds.length]);
 
   const supervisorOptions = useMemo(() => {
     if (supervisors.length > 0) {
@@ -184,21 +173,28 @@ export default function AdminDashboard() {
       end_date: form.end_date,
       notes: form.notes,
       recurrence: form.recurrence || null,
+      serviceSchedules: form.serviceSchedules,
 
 
       supervisor_id: form.supervisor_id ?? null,
-      technician_id: form.technician_id ?? null,
+      technician_id: form.technician_ids ?? [],
     };
 
-    const res = await apiFetch("/api/jobs", {
+    const res = await apiFetch("/api/bookings", {
       method: "POST",
       body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
-      const t = await res.text();
-      console.error("Create booking failed:", t);
-      throw new Error("Create booking failed");
+      let errorMsg = "Create booking failed";
+
+      try {
+        const data = await res.clone().json();
+        errorMsg = data.error || errorMsg;
+      } catch { }
+
+      alert(errorMsg);
+      return;
     }
 
     await res.json();
@@ -239,12 +235,29 @@ export default function AdminDashboard() {
         payload.rangeEnd = rangeEnd;
       }
 
+      // const res = await apiFetch("/api/jobs/assign", {
+      //   method: "POST",
+      //   body: JSON.stringify(payload),
+      // });
+
+      // if (!res.ok) throw new Error("Assign failed");
+
       const res = await apiFetch("/api/jobs/assign", {
         method: "POST",
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Assign failed");
+      let errorMsg = "Assignment failed";
+
+      if (!res.ok) {
+        try {
+          const data = await res.clone().json();
+          errorMsg = data.error || errorMsg;
+        } catch { }
+
+        alert(errorMsg);
+        return;
+      }
 
       await fetchJobs();
 
@@ -257,12 +270,9 @@ export default function AdminDashboard() {
 
       setJobs(prevJobs);
 
-      setToast({
-        type: "error",
-        message: "Assignment failed. Changes reverted.",
-      });
+      alert(err.message || "Assignment failed");
 
-      setTimeout(() => setToast(null), 3000);
+
     }
 
 
@@ -278,22 +288,7 @@ export default function AdminDashboard() {
 
         {/* job list  */}
         <div>
-          <div style={viewToggleRowStyle}>
-            <button
-              type="button"
-              onClick={() => setViewMode("active")}
-              style={viewToggleButtonStyle(viewMode === "active")}
-            >
-              Active Jobs
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("summary")}
-              style={viewToggleButtonStyle(viewMode === "summary")}
-            >
-              Summary Jobs
-            </button>
-          </div>
+
 
           <JobFilters
             filters={filters}
@@ -337,7 +332,7 @@ export default function AdminDashboard() {
           </button>
 
           <button
-            disabled={viewMode === "summary" || selectedJobIds.length === 0}
+            disabled={selectedJobIds.length === 0}
             onClick={() => setIsAssignOpen(true)}
           >
             Assign Work Order
@@ -392,18 +387,5 @@ export default function AdminDashboard() {
   )
 }
 
-const viewToggleRowStyle = {
-  display: "flex",
-  gap: "8px",
-  marginBottom: "12px",
-};
 
-const viewToggleButtonStyle = (active) => ({
-  padding: "8px 12px",
-  borderRadius: "999px",
-  border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
-  background: active ? "#eff6ff" : "#ffffff",
-  color: "#111827",
-  fontWeight: 600,
-  cursor: "pointer",
-});
+

@@ -1,8 +1,9 @@
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import BookingSummary from "../components/BookingSummary";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
+import NotificationsMenu from "../components/NotificationsMenu";
+import UserMenu from "../components/UserMenu";
 
 export default function TechnicianLayout() {
   const navigate = useNavigate();
@@ -18,17 +19,10 @@ export default function TechnicianLayout() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  /* ---------------- MOBILE PANELS ---------------- */
-  const [mobilePanel, setMobilePanel] = useState(null);
-  // null | "summary"
+  const isJobsActive = (location.pathname === "/technician" || location.pathname.startsWith("/technician/jobs"));
 
   function goJobs() {
-    setMobilePanel(null);
-    navigate("/technician");
-  }
-
-  function openSummary() {
-    setMobilePanel("summary");
+    setTab("pending");
   }
 
   function logout() {
@@ -38,9 +32,11 @@ export default function TechnicianLayout() {
   }
 
   /* ----- close panels on route change ----- */
-  useEffect(() => {
-    setMobilePanel(null);
-  }, [location.pathname]);
+  const setTab = (tab) => {
+    const params = new URLSearchParams(location.search);
+    params.set("tab", tab);
+    navigate(`/technician?${params.toString()}`);
+  };
 
   return (
     <div className="app-shell">
@@ -52,13 +48,17 @@ export default function TechnicianLayout() {
         </div>
 
         <div className="header-right">
-          {user && (
-            <div className="user-box">
-              <div className="user-name">{user.name}</div>
-              <div className="user-role">{user.role}</div>
-            </div>
-          )}
-          <button className="logout-btn" onClick={logout}>Logout</button>
+          <NotificationsMenu />
+          <UserMenu
+            user={user}
+            onLogout={logout}
+            actions={[
+              {
+                label: "Profile",
+                onClick: () => navigate("/technician/profile"),
+              },
+            ]}
+          />
         </div>
       </header>
 
@@ -66,7 +66,6 @@ export default function TechnicianLayout() {
       <div className="app-body">
         {!isMobile && (
           <aside className="sidebar">
-            <BookingSummary />
             <nav className="nav">
               <button
                 className={`nav-btn ${location.pathname.startsWith("/technician") ? "active" : ""}`}
@@ -84,17 +83,21 @@ export default function TechnicianLayout() {
       </div>
 
       {/* ---------- MOBILE PANELS ---------- */}
-      {isMobile && mobilePanel === "summary" && (
-        <div className="mobile-panel mobile-panel-summary">
-          <BookingSummary />
-        </div>
-      )}
-
       {/* ---------- MOBILE TAB BAR ---------- */}
       {isMobile && (
         <div className="mobile-tabbar two-col">
-          <button onClick={goJobs}>Jobs</button>
-          <button onClick={openSummary}>Summary</button>
+          <button
+            onClick={goJobs}
+            className={isJobsActive && (new URLSearchParams(location.search).get("tab") || "pending") === "pending" ? "active" : ""}
+          >
+            Pending Jobs
+          </button>
+          <button
+            onClick={() => setTab("today")}
+            className={new URLSearchParams(location.search).get("tab") === "today" ? "active" : ""}
+          >
+            Today
+          </button>
         </div>
       )}
     </div>

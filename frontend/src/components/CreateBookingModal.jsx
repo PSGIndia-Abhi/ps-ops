@@ -1,21 +1,31 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { apiFetch } from "../api";
 import CreateContactModal from "./CreateContactModal";
 import AssignWorkOrderModal from "./AssignWorkOrderModal";
 
 
-export default function CreateBookingModal({ isOpen, onClose, onCreate, supervisors, technicians }) {
+
+export default function CreateBookingModal({
+  isOpen,
+  onClose,
+  onCreate,
+  supervisors,
+  technicians,
+  clientContact,
+}) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
 
   const [assignedSupervisorId, setAssignedSupervisorId] = useState(null);
-  const [assignedTechnicianId, setAssignedTechnicianId] = useState(null);
+  const [assignedTechnicianIds, setAssignedTechnicianIds] = useState([]);
 
   const [assignedSupervisorName, setAssignedSupervisorName] = useState("");
   const [assignedTechnicianName, setAssignedTechnicianName] = useState("");
   const role = localStorage.getItem("role");
   const loggedInUserId = Number(localStorage.getItem("userId"));
+  const loggedInContactId = localStorage.getItem("contactId");
+  const [showContactResults, setShowContactResults] = useState(false);
 
   const [form, setForm] = useState({
     contactId: "",
@@ -31,6 +41,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     recurrenceDayOfMonth: "",
     recurrenceWeeksOfMonth: [],
     recurrenceMonthWeekdays: [],
+    recurrenceEndDate: "",
   });
   const defaultSchedule = { scheduleType: "single", start_date: "", end_date: "" };
   const [serviceSchedules, setServiceSchedules] = useState({});
@@ -39,9 +50,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [companies, setCompanies] = useState([]);
   const [contactSearch, setContactSearch] = useState("");
+  const [useCompanyAddress, setUseCompanyAddress] = useState(false);
 
   useEffect(() => {
     async function loadContacts() {
+      if (role === "client") {
+        if (clientContact?.id) {
+          setContacts([clientContact]);
+        }
+        setLoadingContacts(false);
+        return;
+      }
       try {
         const res = await apiFetch(`/api/contacts`);
         if (!res?.ok) throw new Error("Failed to load contacts");
@@ -56,8 +75,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
     async function loadCompanies() {
       try {
-        const res = await apiFetch(`/api/companies`);
-        if (!res?.ok) throw new Error("Failed to load companies");
+        const res = await apiFetch(`/api/sites`);
+        if (!res?.ok) throw new Error("Failed to load sites");
         const data = await res.json();
         setCompanies(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -67,7 +86,55 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
     loadContacts();
     loadCompanies();
-  }, []);
+  }, [role, clientContact]);
+
+  useEffect(() => {
+    if (role === "client" && loggedInContactId) {
+      setForm(prev => ({ ...prev, contactId: loggedInContactId }));
+    }
+  }, [role, loggedInContactId]);
+
+  const selectedContact = useMemo(
+    () => contacts.find(c => String(c.id) === String(form.contactId)),
+    [contacts, form.contactId]
+  );
+
+  const selectedCompany = useMemo(() => {
+    if (!selectedContact?.company_id) return null;
+    return companies.find(c => String(c.id) === String(selectedContact.company_id)) || null;
+  }, [companies, selectedContact]);
+
+  const companyAddress = useMemo(() => {
+    if (!selectedCompany) return "";
+    const parts = [selectedCompany.address, selectedCompany.city, selectedCompany.state]
+      .map(part => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean);
+    return parts.join(", ");
+  }, [selectedCompany]);
+
+  useEffect(() => {
+    if (!selectedContact?.company_id) {
+      if (useCompanyAddress) {
+        setUseCompanyAddress(false);
+      }
+      return;
+    }
+
+    if (useCompanyAddress && companyAddress) {
+      setForm(prev => ({ ...prev, location: companyAddress }));
+    }
+  }, [selectedContact?.company_id, companyAddress, useCompanyAddress]);
+
+  useEffect(() => {
+    if (role !== "client") return;
+    if (!selectedContact?.company_id) return;
+    if (!companyAddress) return;
+    setUseCompanyAddress(true);
+    setForm(prev => ({
+      ...prev,
+      location: prev.location?.trim() ? prev.location : companyAddress,
+    }));
+  }, [role, selectedContact?.company_id, companyAddress]);
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
@@ -87,6 +154,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   }, [contacts, contactSearch]);
 
   async function reloadContacts() {
+    if (role === "client") return;
     try {
       const res = await apiFetch(`/api/contacts`);
       if (!res?.ok) throw new Error("Failed to load contacts");
@@ -101,20 +169,39 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
 
   const pestServices = [
-    "Cockroach Control",
-    "Bed Bug Control",
-    "Termite Control",
-    "Rodent Control",
-    "Ant Control",
-    "Mosquito Control",
-  ];
+  "General Pest Control (GPC)",
+  "General Pest Control + Rodent Control (GPC + RC)",
+  "Mosquito Treatment",
+  "Mosquito Fogging",
+  "Mosquito IRS (Indoor Residual Spray)",
+  "Mosquito Larval Treatment",
+  "Cockroach Treatment",
+  "Cockroach Gel Treatment",
+  "Ant Treatment",
+  "Fly Treatment",
+  "Bed Bug Treatment",
+  "Snake Control",
+  "Honey Bee Treatment",
+  "Rodent Control",
+  "Drainage Treatment",
+  "Termite Pre-Construction Treatment",
+  "Termite Post-Construction Treatment",
+  "Lizard Control",
+  "Deep Fumigation"
+];
 
-  const deepCleaningServices = [
-    "Kitchen Cleaning",
-    "Sofa Cleaning",
-    "Bathroom Cleaning",
-    "Full Home Cleaning",
-  ];
+const deepCleaningServices = [
+  "Floor Protection",
+  "Electrical Shifting",
+  "Electrical New Point Installation",
+  "Plumbing Work",
+  "Painting Work",
+  "Regular Cleaning",
+  "Deep Cleaning",
+  "Deep Cleaning with Scrubbing",
+  "Deep Cleaning with Sticker Removal",
+  "Debris Removal"
+];  
 
   const visibleSubServices =
     form.serviceType === "PEST"
@@ -151,9 +238,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     setServiceSchedules(prev => {
       const current = prev[service] || defaultSchedule;
       const next = { ...current, ...patch };
-      if (next.scheduleType === "single") {
-        next.end_date = "";
-      }
+      next.scheduleType = "single";
+      next.end_date = "";
       return { ...prev, [service]: next };
     });
   }
@@ -199,7 +285,9 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
   async function handleSubmit() {
     if (!form.contactId) {
-      alert("Please select who is requesting this booking");
+      alert(role === "client"
+        ? "Your contact profile is missing. Please contact support."
+        : "Please select who is requesting this booking");
       return;
     }
 
@@ -249,6 +337,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         scheduleType,
         start_date: startDateValue,
         end_date: endDateValue || null,
+        time: schedule.time || null
       };
     }
 
@@ -259,6 +348,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     if (recurrenceActive) {
       if (!startDateValue) {
         alert("Start date is required for recurring bookings");
+        return;
+      }
+      if (!form.recurrenceEndDate) {
+        alert("End date is required for recurring bookings");
+        return;
+      }
+      const recurrenceEndDate = form.recurrenceEndDate;
+      const recurrenceEndObj = new Date(`${recurrenceEndDate}T00:00:00`);
+      const recurrenceStartObj = new Date(`${startDateValue}T00:00:00`);
+      if (recurrenceEndObj < recurrenceStartObj) {
+        alert("Recurring end date cannot be before start date");
         return;
       }
 
@@ -334,6 +434,8 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         day_of_month: dayOfMonth,
         day_of_week: dayOfWeek,
         week_of_month: weekOfMonth,
+        start_date: startDateValue,
+        end_date: recurrenceEndDate,
       };
     }
 
@@ -351,8 +453,12 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         notes: form.notes,
         recurrence,
         supervisor_id: assignedSupervisorId,
-        technician_id: assignedTechnicianId
+        technician_ids: assignedTechnicianIds
       });
+      alert("Booking created successfully");
+
+      onClose(); // 👈 close modal if you have it
+
     } catch (err) {
       console.error("Create booking failed", err);
       alert("Failed to create booking");
@@ -473,6 +579,44 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
     || form.recurrenceType === "CUSTOM_MONTHS";
   const recurrenceIsMonthly = form.recurrenceType === "CUSTOM_MONTHS";
 
+  const contactDropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (
+        contactDropdownRef.current &&
+        !contactDropdownRef.current.contains(e.target)
+      ) {
+        setShowContactResults(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+
+  function getShortName(name) {
+  // Pest control
+    if (name.includes("Pre-Construction")) return "Termite Pre";
+  if (name.includes("Post-Construction")) return "Termite Post";
+  if (name.includes("Indoor Residual Spray")) return "Mosquito IRS";
+  if (name.includes("Larval")) return "Mosquito Larval";
+  if (name.includes("General Pest Control + Rodent Control")) return "GPC + Rodent Control";
+  // Deep cleaning
+  if (name === "Electrical New Point Installation") return "Electrical Point";
+  if (name === "Plumbing Work") return "Plumbing";
+  if (name === "Painting Work") return "Painting";
+  if (name === "Deep Cleaning with Scrubbing") return "Deep Clean + Scrub";
+  if (name === "Deep Cleaning with Sticker Removal") return "Deep Clean + Sticker";
+
+
+  return name;
+}
+
   /* ---------- RENDER ---------- */
 
   return (
@@ -485,73 +629,114 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
         {/* BODY */}
         <div style={body}>
-          {/* REQUESTED BY */}
-          <div style={section}>
-            <h4>Requested By</h4>
+          {role !== "client" && (
+            <>
+              {/* REQUESTED BY */}
+              <div style={section}>
+                <h4>Requested By</h4>
 
-            <input
-              type="text"
-              value={contactSearch}
-              onChange={(e) => setContactSearch(e.target.value)}
-              placeholder="Search contacts by name, phone, email, or company"
-              style={{ ...input, marginBottom: "10px" }}
-            />
+                <div ref={contactDropdownRef} style={{ position: "relative" }}>
 
-            <select
-              value={form.contactId}
-              onChange={e =>
-                setForm(prev => ({
-                  ...prev,
-                  contactId: e.target.value,
-                }))
-              }
-              style={input}
-            >
-              <option value="">
-                {loadingContacts ? "Loading contacts…" : "Select requester"}
-              </option>
+                  <input
+                    type="text"
+                    value={contactSearch}
+                    onFocus={() => setShowContactResults(true)}
+                    onChange={(e) => {
+                      setContactSearch(e.target.value);
+                      setShowContactResults(true);
+                    }}
+                    placeholder="Search contacts by name, phone, email, or company"
+                    style={input}
+                  />
+                  {showContactResults && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        background: "#fff",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "8px",
+                        maxHeight: "220px",
+                        overflowY: "auto",
+                        marginTop: "4px",
+                        zIndex: 50
+                      }}
+                    >
+                      {loadingContacts ? (
+                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                          Loading contacts…
+                        </div>
+                      ) : filteredContacts.length === 0 ? (
+                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                          No contacts found
+                        </div>
+                      ) : (
+                        filteredContacts.map(c => {
+                          const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
+                          const phoneLabel = c.phone || c.contact_phone || "";
 
-              {filteredContacts.map(c => {
-                const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
-                const phoneLabel = c.phone || c.contact_phone || "";
-                return (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {phoneLabel ? ` - ${phoneLabel}` : ""}
-                    {companyLabel || c.company_code ? " - " : ""}
-                    {companyLabel}
-                    {c.company_code ? ` (${c.company_code})` : ""}
-                  </option>
-                );
-              })}
-            </select>
+                          return (
+                            <div
+                              key={c.id}
+                              style={{
+                                padding: "10px",
+                                cursor: "pointer",
+                                borderBottom: "1px solid #f3f4f6",
+                                fontSize: "13px"
+                              }}
+                              onClick={() => {
+                                setForm(prev => ({ ...prev, contactId: c.id }));
+                                setContactSearch(`${c.name} - ${c.phone || c.contact_phone || ""}`);
+                                setShowContactResults(false);
+                              }}
 
+                            >
+                              <strong>{c.name}</strong>
+                              {phoneLabel ? ` • ${phoneLabel}` : ""}
+                              {companyLabel ? ` • ${companyLabel}` : ""}
+                              {c.company_code ? ` (${c.company_code})` : ""}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
 
+                </div>
 
+                <button
+                  style={{ marginTop: "10px" }}
+                  onClick={() => setIsContactModalOpen(true)}
+                >
+                  + Create Contact
+                </button>
+              </div>
 
-            <button onClick={() => setIsContactModalOpen(true)}>
-              + Create Contact
-            </button>
-          </div>
-
-          {isContactModalOpen && (
-            <CreateContactModal
-              onClose={() => setIsContactModalOpen(false)}
-              onCreated={(newContact) => {
-                if (newContact?.id) {
-                  setContacts(prev => {
-                    const exists = prev.some(c => c.id === newContact.id);
-                    if (exists) return prev;
-                    return [newContact, ...prev];
-                  });
-                  setForm(prev => ({ ...prev, contactId: newContact.id }));
-                } else {
-                  reloadContacts();
-                }
-                setIsContactModalOpen(false);
-              }}
-              companies={companies}
-            />
+              {isContactModalOpen && (
+                <CreateContactModal
+                  onClose={() => setIsContactModalOpen(false)}
+                  onCreated={(newContact) => {
+                    if (newContact?.id) {
+                      setContacts(prev => {
+                        const exists = prev.some(c => c.id === newContact.id);
+                        if (exists) return prev;
+                        return [newContact, ...prev];
+                      });
+                      setForm(prev => ({ ...prev, contactId: newContact.id }));
+                      const phoneLabel = newContact.phone || newContact.contact_phone || "";
+                      setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
+                      setShowContactResults(false);
+                    } else {
+                      reloadContacts();
+                    }
+                    setIsContactModalOpen(false);
+                  }}
+                  companies={companies}
+                />
+              )}
+            </>
           )}
 
 
@@ -565,6 +750,23 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
               placeholder="Enter service address or location"
               style={input}
             />
+            {selectedContact?.company_id && (
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", fontSize: "13px" }}>
+                <input
+                  type="checkbox"
+                  checked={useCompanyAddress}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUseCompanyAddress(checked);
+                    if (checked && companyAddress) {
+                      setForm(prev => ({ ...prev, location: companyAddress }));
+                    }
+                  }}
+                  disabled={!companyAddress}
+                />
+                Use company address
+              </label>
+            )}
           </div>
 
           {/* SERVICE TYPE */}
@@ -597,7 +799,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
                   style={subItem(form.subServices.includes(service))}
                   onClick={() => toggleSubService(service)}
                 >
-                  {service}
+                  {getShortName(service)}
                 </div>
               ))}
             </div>
@@ -617,66 +819,25 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
                   return (
                     <div key={service} style={serviceScheduleCard}>
                       <div style={{ fontWeight: 600, marginBottom: 8 }}>{service}</div>
-                      <div style={{ marginBottom: "12px" }}>
+                      <div>
                         <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                          Schedule Type
+                          First Service Visit Date
                         </div>
-                        <div style={pillRow}>
-                          {[
-                            { key: "single", label: "Single Day" },
-                            { key: "range", label: "Multi-day" },
-                          ].map((option) => (
-                            <div
-                              key={option.key}
-                              style={pill(schedule.scheduleType === option.key)}
-                              onClick={() => updateServiceSchedule(service, { scheduleType: option.key })}
-                            >
-                              {option.label}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                        <input
+                          type="date"
+                          value={schedule.start_date || ""}
+                          min={new Date().toISOString().split("T")[0]}
+                          onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
+                          style={input}
+                        />
 
-                      {schedule.scheduleType === "single" ? (
-                        <div>
-                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                            Date of Service
-                          </div>
-                          <input
-                            type="date"
-                            value={schedule.start_date || ""}
-                            onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
-                            style={input}
-                          />
-                        </div>
-                      ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                          <div>
-                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                              Start Date
-                            </div>
-                            <input
-                              type="date"
-                              value={schedule.start_date || ""}
-                              onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
-                              max={schedule.end_date || undefined}
-                              style={input}
-                            />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                              End Date
-                            </div>
-                            <input
-                              type="date"
-                              value={schedule.end_date || ""}
-                              onChange={e => updateServiceSchedule(service, { end_date: e.target.value })}
-                              min={schedule.start_date || undefined}
-                              style={input}
-                            />
-                          </div>
-                        </div>
-                      )}
+                        <input
+                          type="time"
+                          value={schedule.time || ""}
+                          onChange={e => updateServiceSchedule(service, { time: e.target.value })}
+                          style={{ ...input, marginTop: "8px" }}
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -684,34 +845,6 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
             )}
           </div>
 
-          {/* Assignment */}
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setShowAssignModal(true)}
-            >
-              Assign Team
-            </button>
-            {(assignedSupervisorId || assignedTechnicianId) && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  background: "#eef2ff",
-                  border: "1px solid #c7d2fe",
-                  fontSize: 13,
-                  color: "#1e3a8a",
-                }}
-              >
-                <strong>Assigned:</strong>{" "}
-                {assignedSupervisorName || "No supervisor"}
-                {"  •  "}
-                {assignedTechnicianName || "No technician"}
-              </div>
-            )}
-          </div>
           {/* RECURRENCE */}
           <div style={section}>
             <h4>Recurring</h4>
@@ -726,6 +859,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
 
             {recurrenceActive && (
               <div style={{ marginTop: "12px" }}>
+                <div style={{ marginBottom: "12px" }}>
+                  <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                    Recurrence End Date
+                  </div>
+                  <input
+                    type="date"
+                    value={form.recurrenceEndDate}
+                    onChange={(e) => update("recurrenceEndDate", e.target.value)}
+                    style={input}
+                  />
+                </div>
                 <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
                   Frequency
                 </div>
@@ -883,6 +1027,39 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
             )}
           </div>
 
+          {/* Assignment */}
+          {role !== "client" && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setShowAssignModal(true)}
+              >
+                Assign Team
+              </button>
+
+              {(assignedSupervisorId || assignedTechnicianIds) && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    fontSize: 13,
+                    color: "#1e3a8a",
+                  }}
+                >
+                  <strong>Assigned:</strong>{" "}
+                  {assignedSupervisorName || "No supervisor"}
+                  {"  •  "}
+                  {assignedTechnicianName || "No technician"}
+                </div>
+              )}
+            </div>
+          )}
+
+
           {/* NOTES */}
           <div style={section}>
             <h4>Notes</h4>
@@ -918,20 +1095,23 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
         hideSupervisor={role === "supervisor"}
         onAssign={({ supervisorId, technicianIds }) => {
 
-          const techId = technicianIds?.[0] || null;
-
           setAssignedSupervisorId(supervisorId);
-          setAssignedTechnicianId(techId);
+          setAssignedTechnicianIds(technicianIds || []);
 
-          // Resolve display names
           const sup = supervisors?.find(u => String(u.id) === String(supervisorId));
-          const tech = technicians?.find(u => String(u.id) === String(techId));
+
+          const selectedTechs = (technicianIds || [])
+            .map(id => technicians?.find(u => String(u.id) === String(id)))
+            .filter(Boolean);
+
+          const techNames = selectedTechs.map(t => t.name).join(", ");
 
           setAssignedSupervisorName(sup?.name || `Supervisor #${supervisorId}`);
-          setAssignedTechnicianName(tech?.name || (techId ? `Tech #${techId}` : ""));
+          setAssignedTechnicianName(techNames || "No technician");
 
           setShowAssignModal(false);
         }}
+
       />
     </div>
 

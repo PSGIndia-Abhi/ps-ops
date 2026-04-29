@@ -15,6 +15,7 @@ export default function BookingSummary() {
     startDate: "",
     endDate: "",
   });
+  const [dateError, setDateError] = useState("");
 
   useEffect(() => {
 
@@ -47,6 +48,31 @@ export default function BookingSummary() {
   ];
 
   const hasFilters = Boolean(filters.status || filters.startDate || filters.endDate);
+  const isBefore = (a, b) => {
+    if (!a || !b) return false;
+    const aDate = new Date(`${a}T00:00:00`);
+    const bDate = new Date(`${b}T00:00:00`);
+    if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return false;
+    return aDate < bDate;
+  };
+
+  const updateDateFilter = (key, value) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+
+      if (key === "startDate" && value && prev.endDate && isBefore(prev.endDate, value)) {
+        next.endDate = value;
+        setDateError("End date adjusted to match start date.");
+      } else if (key === "endDate" && value && prev.startDate && isBefore(value, prev.startDate)) {
+        setDateError("End date cannot be before start date.");
+        return prev;
+      } else {
+        setDateError("");
+      }
+
+      return next;
+    });
+  };
 
   const filteredBookings = useMemo(() => {
     if (!hasFilters) return bookings;
@@ -76,35 +102,65 @@ export default function BookingSummary() {
   const summaryData = useMemo(() => {
     const list = filteredBookings;
     const today = new Date();
-    const todayCount = list
-      .flatMap(b => b.jobs || [])
-      .filter((job) => {
-        if (!job.start_date) return false;
-        const jobDate = new Date(job.start_date);
-        return (
-          jobDate.getFullYear() === today.getFullYear()
-          && jobDate.getMonth() === today.getMonth()
-          && jobDate.getDate() === today.getDate()
-        );
-      }).length;
 
+    const jobs = list.flatMap((booking) =>
+      (booking.jobs || []).map((job) => ({
+        ...job,
+        _booking: booking,
+      }))
+    );
+
+    const todayCount = jobs.filter((job) => {
+      if (!job.start_date) return false;
+      const jobDate = new Date(job.start_date);
+      return (
+        jobDate.getFullYear() === today.getFullYear()
+        && jobDate.getMonth() === today.getMonth()
+        && jobDate.getDate() === today.getDate()
+      );
+    }).length;
+
+    const commercialMap = new Map();
     let residentialJobs = 0;
     let commercialJobs = 0;
-    for (const booking of list) {
-      const isCommercial = Boolean(booking.company_name || booking.company_code);
-      const jobs = booking.jobs || [];
+
+    const normalizeCompany = (job, booking) => {
+      const name = job?.company_name || booking?.company_name || null;
+      const code = job?.company_code || booking?.company_code || null;
+      const id = job?.company_id || booking?.company_id || null;
+      const label = name && code ? `${name} (${code})` : name || code || "Unknown Company";
+      const key = code || name || id || "unknown";
+      return { id, name, code, label, key };
+    };
+
+    for (const job of jobs) {
+      const company = normalizeCompany(job, job._booking);
+      const isCommercial = Boolean(company.id || company.name || company.code);
+
       if (isCommercial) {
-        commercialJobs += jobs.length;
+        commercialJobs += 1;
+        const existing = commercialMap.get(company.key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          commercialMap.set(company.key, { ...company, count: 1 });
+        }
       } else {
-        residentialJobs += jobs.length;
+        residentialJobs += 1;
       }
     }
+
+    const commercialByCompany = Array.from(commercialMap.values()).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.label.localeCompare(b.label);
+    });
 
     return {
       today: todayCount,
       residential: residentialJobs,
       commercial: commercialJobs,
-      total: list.length,
+      total: jobs.length,
+      commercialByCompany,
     };
   }, [filteredBookings]);
 
@@ -136,7 +192,7 @@ export default function BookingSummary() {
           <input
             type="date"
             value={filters.startDate}
-            onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
+            onChange={(e) => updateDateFilter("startDate", e.target.value)}
           />
         </div>
         <div className="booking-filter-field">
@@ -144,22 +200,26 @@ export default function BookingSummary() {
           <input
             type="date"
             value={filters.endDate}
-            onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
+            onChange={(e) => updateDateFilter("endDate", e.target.value)}
           />
         </div>
         <button
           type="button"
           className="booking-filter-reset"
-          onClick={() => setFilters({ status: "", startDate: "", endDate: "" })}
+          onClick={() => {
+            setFilters({ status: "", startDate: "", endDate: "" });
+            setDateError("");
+          }}
         >
           Reset
         </button>
+        {dateError && <div className="booking-filter-error">{dateError}</div>}
       </div>
 
       <div className="booking-section">
         <div className="section-title">Details</div>
         <div className="summary-row">
-          <span> Today's Bookings</span>
+          <span>Today's Jobs</span>
           <span className="value">{summaryData.today}</span>
         </div>
         <div className="summary-row">
@@ -172,20 +232,30 @@ export default function BookingSummary() {
           <span>Commercial Jobs</span>
           <span className="value">{summaryData.commercial}</span>
         </div>
+        {summaryData.commercialByCompany.length > 0 && (
+          <div className="summary-sublist">
+            {summaryData.commercialByCompany.map((company) => (
+              <div key={company.key} className="summary-subrow">
+                <span>{company.label}</span>
+                <span className="value">{company.count}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
 
 
       <div className="summary-row">
-        <span>Total Bookings</span>
+        <span>Total Jobs</span>
         <span className="value">{summaryData.total}</span>
       </div>
 
       <div className="divider" />
-      {role !== "technician" && (
+      {role !== "technician" && role !== "supervisor" && (
         <button
           className="primary booking-view-btn"
-          onClick={() => navigate(`/${role}/bookings`)}
+          onClick={() => navigate(`/admin/bookings`)}
         >
           View All Bookings
         </button>

@@ -3,12 +3,11 @@ import { useState } from "react";
 import RequesterPopover from "./RequesterPopover";
 
 export default function JobHeader({ job, setIsAssignOpen }) {
-
   const [showRequester, setShowRequester] = useState(false);
   if (!job) return null;
+
   const role = localStorage.getItem("role");
   const canAssign = role !== "technician";
-  const canShowRequester = role !== "technician";
 
   const {
     title,
@@ -19,83 +18,87 @@ export default function JobHeader({ job, setIsAssignOpen }) {
     team = []
   } = job;
 
-  const jobTitle =
-    title ||
-    job.name ||
-    job.serviceType ||
-    job.service_type ||
-    (Array.isArray(job.subServices) && job.subServices.length
-      ? job.subServices.join(", ")
-      : "") ||
-    "Service Job";
-  
-  
-  
-    const displayStatus = job.display_status || status || "";
+  const displayStatus = job.display_status || status || "";
+
+  const companyName =
+    job.companyname ||
+    job.requestedBy?.company?.name ||
+    job.requestedBy?.company ||
+    "-";
 
   return (
     <div className="job-header">
 
       {/* LEFT */}
       <div className="job-header-left">
-        <h1 className="job-title">{jobTitle}</h1>
+
+        <h1 className="job-title">{title}</h1>
+        <h3 className="job-subtitle">{companyName}</h3>
 
         <div className="job-meta">
           <span className="job-code">{code}</span>
         </div>
 
-        {canShowRequester && (
-          <div className="job-people">
-            <div style={{ position: "relative" }}>
+        {/* PEOPLE ROW */}
+        <div className="job-people-row">
 
-              <div className="requester-wrap">
-                <strong>Requested By :</strong>{" "}
+          {/* REQUESTED BY */}
+          {role !== "technician" && (
+            <div className="job-person">
+            <span className="label">Requested By:</span>
 
-                {!showRequester && requestedBy && (
-                  <button
-                    className="link-button"
-                    onClick={() => setShowRequester(true)}
-                  >
-                    {requestedBy.name}
-                  </button>
-                )}
+            {requestedBy ? (
+              <button
+                className="link-button"
+                onClick={() => setShowRequester(prev => !prev)}
+              >
+                {requestedBy.name}
+              </button>
+            ) : (
+              <span>-</span>
+            )}
+          </div>)}
 
-                {showRequester && requestedBy && (
-                  <RequesterPopover
-                    contact={requestedBy}
-                    onClose={() => setShowRequester(false)}
-                  />
-                )}
+          {/* SUPERVISOR */}
+          {role !== "technician" && (
+            <div className="job-person">
+              <span className="label">Supervisor:</span>
 
-              </div>
+              {canAssign && setIsAssignOpen ? (
+                <button
+                  className="link-button"
+                  onClick={() => setIsAssignOpen(true)}
+                >
+                  {supervisor?.name ?? "Unassigned"}
+                </button>
+              ) : (
+                <span>{supervisor?.name ?? "Unassigned"}</span>
+              )}
             </div>
+          )}
+
+        </div>
+
+        {/* POPOVER (always below row) */}
+        {showRequester && requestedBy && (
+          <div className="requester-popover">
+            <RequesterPopover
+              contact={requestedBy}
+              onClose={() => setShowRequester(false)}
+            />
           </div>
         )}
-      </div>
 
+      </div>
 
       {/* RIGHT */}
       <div className="job-header-right">
 
-        <div className="team-details">
-          <strong>Supervisor:</strong>{" "}
-          {canAssign && setIsAssignOpen ? (
-            <button
-              style={{ color: "#2563eb", cursor: "pointer" }}
-              onClick={() => setIsAssignOpen(true)}
-            >
-              {supervisor?.name ?? "Unassigned"}
-            </button>
-          ) : (
-            <span>{supervisor?.name ?? "Unassigned"}</span>
-          )}
-        </div>
-
         {/* TEAM */}
-        {Array.isArray(team) && team.length > 0 && (
+        {role !== "technician" && team.length > 0 && (
           <div className="team-line">
-            <strong>Team:</strong>{" "}
-            {team.map(member => member.name).join(", ")}
+            <span className="label">Team:</span>{" "}
+            {team.map(m => m.name).join(", ")}
           </div>
         )}
 
