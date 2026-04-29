@@ -201,7 +201,7 @@ const deepCleaningServices = [
   "Deep Cleaning with Scrubbing",
   "Deep Cleaning with Sticker Removal",
   "Debris Removal"
-];
+];  
 
   const visibleSubServices =
     form.serviceType === "PEST"

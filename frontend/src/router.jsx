@@ -28,6 +28,11 @@ import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
 import ContactsPage from "./pages/ContactsPage";
 
+if (typeof window !== "undefined") {
+  window._0xA13H1 = () => {
+    console.log(atob("QnVpbHQgYnkgQWJoaSDigJQgbGF0ZSBuaWdodHMgJiBkZWRpY2F0aW9uIPCfjJk="));
+  };
+}
 
 const router = createBrowserRouter([
   {
