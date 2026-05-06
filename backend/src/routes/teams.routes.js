@@ -3,7 +3,8 @@ const router = express.Router();
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 
 /*
 POST /api/teams
@@ -14,7 +15,7 @@ body:
   technicianIds: [105,106,107]
 }
 */
-router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.post("/", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
 
   const { supervisorId, technicianIds } = req.body;
 
@@ -80,7 +81,7 @@ body:
   technicianId: 105
 }
 */
-router.post("/assign", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.post("/assign", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const { supervisorId, technicianId } = req.body;
 
   if (!supervisorId || !technicianId) {
@@ -118,7 +119,7 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin"), async (req, re
 GET /api/teams/overview
 Admin overview: supervisors with technicians + unassigned technicians
 */
-router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.get("/overview", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
   try {
     let branchFilter = "";
     let params = [];
@@ -210,7 +211,7 @@ router.get("/overview", auth, allowRoles("admin", "branch_admin"), async (req, r
 GET /api/teams/monitor
 Supervisor monitoring dashboard data
 */
-router.get("/monitor", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
+router.get("/monitor", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
   const supervisorId = req.user.id;
 
   try {
@@ -292,7 +293,7 @@ Return technicians under a supervisor
 GET /api/teams/my/team
 Supervisor gets only THEIR technicians
 */
-router.get("/my/team", auth, allowRoles("supervisor", "branch_admin"), async (req, res) => {
+router.get("/my/team", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
 
   const supervisorId = req.user.id;
 
@@ -318,7 +319,7 @@ router.get("/my/team", auth, allowRoles("supervisor", "branch_admin"), async (re
 GET /api/teams/:supervisorId
 Return technicians under a supervisor (Admin use)
 */
-router.get("/:supervisorId", auth, allowRoles("admin","supervisor"), async (req, res) => {
+router.get("/:supervisorId", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
 
   const { supervisorId } = req.params;
 

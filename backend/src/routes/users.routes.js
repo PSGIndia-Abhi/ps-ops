@@ -2,11 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { notifyUserBranchChanged } = require("../services/notifications.service");
 
 // GET /api/users?role=supervisor|technician
-router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
+router.get("/", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
   const { role } = req.query;
 
   try {
@@ -47,7 +48,7 @@ router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (
 });
 
 // POST /api/users/:id/remove-admin
-router.post("/:id/remove-admin", auth, allowRoles("admin"), async (req, res) => {
+router.post("/:id/remove-admin", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const userId = req.params.id;
 
   if (!userId) {
@@ -72,7 +73,7 @@ router.post("/:id/remove-admin", auth, allowRoles("admin"), async (req, res) => 
 });
 
 // POST /api/users/:id/branch
-router.post("/:id/branch", auth, allowRoles("admin"), async (req, res) => {
+router.post("/:id/branch", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const userId = req.params.id;
   const { branch_id, branchId } = req.body || {};
   const resolvedBranchId = branch_id || branchId || null;
@@ -129,7 +130,7 @@ router.post("/:id/branch", auth, allowRoles("admin"), async (req, res) => {
 });
 
 // POST /api/users/:id/role
-router.post("/:id/role", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.post("/:id/role", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const userId = req.params.id;
   const { role, branch_id, branchId } = req.body || {};
 

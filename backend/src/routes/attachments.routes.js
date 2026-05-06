@@ -6,10 +6,12 @@ const multer = require("multer");
 const minioClient = require("../lib/minio");
 const { v4: uuid } = require("uuid");
 const auth = require("../middleware/auth.middleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const upload = multer({
   storage: multer.memoryStorage(),
 });
-router.get("/:id/view", auth, async (req, res) => {
+router.get("/:id/view", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req, res) => {
   const { id } = req.params;
   const connection = await pool.getConnection();
 

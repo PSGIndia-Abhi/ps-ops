@@ -4,7 +4,8 @@ const { pool } = require("../../db");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveGroupTable } = require("../utils/groupTable");
 
@@ -15,7 +16,7 @@ const upload = multer({
 const buildLogoUrl = (companyId) => `/api/companies/${companyId}/logo`;
 
 // GET /api/companies (legal entities)
-router.get("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, res) => {
   const { group_id } = req.query;
 
   try {
@@ -89,7 +90,7 @@ router.get("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
 });
 
 // POST /api/companies (legal entity)
-router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req, res) => {
   const { group_id, name, code, gst_number, type } = req.body || {};
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
@@ -205,7 +206,7 @@ router.post("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => 
 router.post(
   "/:id/logo",
   auth,
-  allowRoles("admin", "branch_admin"),
+  requirePermission(PERMISSIONS.UPDATE_CONTACT),
   upload.single("file"),
   async (req, res) => {
     const { id } = req.params;
@@ -303,7 +304,7 @@ router.post(
 router.get(
   "/:id/logo",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.VIEW_CONTACT),
   async (req, res) => {
     const { id } = req.params;
 

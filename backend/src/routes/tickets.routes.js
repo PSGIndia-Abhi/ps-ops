@@ -3,7 +3,8 @@ const router = express.Router();
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { sendTicketCreatedEmail } = require("../utils/mailer");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
@@ -182,7 +183,7 @@ messages.forEach((msg) => {
 router.get(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     const { jobId } = req.query;
 
@@ -330,7 +331,7 @@ attachments.forEach((att) => {
 router.post(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "client"),
+  requirePermission(PERMISSIONS.CREATE_JOB),
   upload.array("files", 5), // Allow up to 5 files
   async (req, res) => {
 
@@ -543,7 +544,7 @@ router.post(
 router.post(
   "/:ticketId/messages",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "client"),
+  requirePermission(PERMISSIONS.ADD_JOB_COMMENT),
   async (req, res) => {
     const { ticketId } = req.params;
     const { message } = req.body || {};
@@ -602,7 +603,7 @@ router.post(
 router.patch(
   "/:ticketId/status",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.UPDATE_JOB_STATUS),
   async (req, res) => {
     const { ticketId } = req.params;
     const { status } = req.body || {};

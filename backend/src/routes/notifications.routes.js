@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const {
   listNotificationsForUser,
   getUnreadNotificationCount,
@@ -12,7 +13,7 @@ const {
 router.get(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     try {
       const notifications = await listNotificationsForUser(req.user.id, {
@@ -30,7 +31,7 @@ router.get(
 router.get(
   "/unread-count",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     try {
       const count = await getUnreadNotificationCount(req.user.id);
@@ -45,7 +46,7 @@ router.get(
 router.patch(
   "/:id/read",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.UPDATE_JOB),
   async (req, res) => {
     try {
       const updated = await markNotificationRead(req.user.id, req.params.id);
@@ -63,7 +64,7 @@ router.patch(
 router.post(
   "/read-all",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.UPDATE_JOB),
   async (req, res) => {
     try {
       const updated = await markAllNotificationsRead(req.user.id);
