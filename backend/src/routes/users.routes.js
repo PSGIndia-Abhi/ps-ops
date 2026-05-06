@@ -56,9 +56,26 @@ router.post("/:id/remove-admin", auth, requirePermission(PERMISSIONS.UPDATE_USER
   }
 
   try {
+    const [[supervisorRole]] = await pool.query(
+      `
+      SELECT id
+      FROM roles
+      WHERE name = 'supervisor'
+      LIMIT 1
+      `
+    );
+
+    if (!supervisorRole) {
+      return res.status(400).json({ error: "Supervisor role not found" });
+    }
+
     const [result] = await pool.query(
-      "UPDATE users SET role = 'supervisor' WHERE id = ?",
-      [userId]
+      `
+      UPDATE users
+      SET role_id = ?
+      WHERE id = ?
+      `,
+      [supervisorRole.id, userId]
     );
 
     if (result.affectedRows === 0) {
@@ -88,7 +105,7 @@ router.post("/:id/branch", auth, requirePermission(PERMISSIONS.UPDATE_USER), asy
 
   try {
     const [[user]] = await pool.query(
-      "SELECT id, role, branch_id FROM users WHERE id = ?",
+      "SELECT u.id, u.branch_id, r.name AS role FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?",
       [userId]
     );
     if (!user) {
@@ -132,25 +149,46 @@ router.post("/:id/branch", auth, requirePermission(PERMISSIONS.UPDATE_USER), asy
 // POST /api/users/:id/role
 router.post("/:id/role", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const userId = req.params.id;
-  const { role, branch_id, branchId } = req.body || {};
+  const { role, role_id, roleId, branch_id, branchId } = req.body || {};
 
   if (!userId) {
     return res.status(400).json({ error: "User id is required" });
   }
 
-  const requestedRole = role;
-
-  const allowedRoles = new Set(["technician", "supervisor", "branch_admin", "client"]);
-
-  if (!allowedRoles.has(requestedRole)) {
-    return res.status(400).json({ error: "Invalid role" });
-  }
-
   const resolvedBranchId = branch_id || branchId || null;
 
   try {
+    const resolvedRoleId = role_id || roleId || null;
+    let requestedRole = null;
+
+    if (resolvedRoleId) {
+      [[requestedRole]] = await pool.query(
+        `
+        SELECT id, name
+        FROM roles
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [resolvedRoleId]
+      );
+    } else if (role) {
+      [[requestedRole]] = await pool.query(
+        `
+        SELECT id, name
+        FROM roles
+        WHERE name = ?
+        LIMIT 1
+        `,
+        [role]
+      );
+    }
+
+    if (!requestedRole) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+
     const [[user]] = await pool.query(
-      "SELECT id, role, branch_id FROM users WHERE id = ?",
+      "SELECT u.id, u.branch_id, r.name AS role FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?",
       [userId]
     );
 
@@ -162,7 +200,7 @@ router.post("/:id/role", auth, requirePermission(PERMISSIONS.UPDATE_USER), async
       return res.status(400).json({ error: "Cannot change admin role" });
     }
 
-    if (requestedRole === "branch_admin" && !resolvedBranchId) {
+    if (requestedRole.name === "branch_admin" && !resolvedBranchId) {
       return res.status(400).json({ error: "branch_id is required for branch admins" });
     }
 
@@ -181,15 +219,20 @@ router.post("/:id/role", auth, requirePermission(PERMISSIONS.UPDATE_USER), async
     }
 
     const [result] = await pool.query(
-      "UPDATE users SET role = ?, branch_id = ? WHERE id = ?",
-      [requestedRole, finalBranchId, userId]
+      "UPDATE users SET role_id = ?, branch_id = ? WHERE id = ?",
+      [requestedRole.id, finalBranchId, userId]
     );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json({ success: true, role: requestedRole, branch_id: finalBranchId });
+    res.json({
+      success: true,
+      role_id: requestedRole.id,
+      role: requestedRole.name,
+      branch_id: finalBranchId
+    });
 
     if (String(user.branch_id || "") !== String(finalBranchId || "")) {
       notifyUserBranchChanged({

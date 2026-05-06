@@ -45,4 +45,6 @@ function buildScopeFilter(user, aliasMap = {}) {
   };
 }
 
+
+
 module.exports = buildScopeFilter;
