@@ -31,8 +31,12 @@ export default function Login() {
       alert(data.error || "Login failed");
       return;
     }
+    console.log("LOGIN RESPONSE:", data);
 
     localStorage.setItem("token", data.token);
+    console.log("TOKEN SAVED:", data.token);
+
+    console.log("TOKEN IN STORAGE:", localStorage.getItem("token"));
     localStorage.setItem("role", data.role);
     if (data.user_id) {
       localStorage.setItem("userId", String(data.user_id));

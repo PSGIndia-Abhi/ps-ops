@@ -6,15 +6,16 @@ const { allowRoles } = require("../middleware/roleMiddleware");
 const { notifyUserBranchChanged } = require("../services/notifications.service");
 
 // GET /api/users?role=supervisor|technician
-router.get("/", auth, allowRoles("admin","branch_admin","supervisor"), async (req, res) => {
+router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
   const { role } = req.query;
 
   try {
     let query = `
       SELECT u.id, u.name, u.branch_id, b.name AS branch_name
-      FROM users u
-      LEFT JOIN branches b ON b.id = u.branch_id
-      WHERE u.is_active = 1
+  FROM users u
+  LEFT JOIN branches b ON b.id = u.branch_id
+  LEFT JOIN roles r ON r.id = u.role_id   
+  WHERE u.is_active = 1
     `;
     const params = [];
 
@@ -31,7 +32,7 @@ router.get("/", auth, allowRoles("admin","branch_admin","supervisor"), async (re
     }
 
     if (role) {
-      query += " AND u.role = ?";
+      query += " AND r.name = ?";
       params.push(role);
     }
 
@@ -137,9 +138,9 @@ router.post("/:id/role", auth, allowRoles("admin", "branch_admin"), async (req, 
   }
 
   const requestedRole = role;
-  
+
   const allowedRoles = new Set(["technician", "supervisor", "branch_admin", "client"]);
-  
+
   if (!allowedRoles.has(requestedRole)) {
     return res.status(400).json({ error: "Invalid role" });
   }

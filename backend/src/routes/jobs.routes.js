@@ -9,9 +9,13 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 const auth = require("../middleware/auth.middleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { createBooking } = require("../controllers/bookings.controller");
 const { notifyJobAssignmentChange } = require("../services/notifications.service");
+const buildScopeFilter = require("../utils/buildScopeFilter");
+
 
 const isValidJobId = (jobId) => {
   if (!jobId) return false;
@@ -252,55 +256,29 @@ const updateRangeRecurringJobs = async (
 router.get(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
+  
   async (req, res) => {
     try {
 
       const conditions = [];
       const params = [];
+      //
+      const scope = buildScopeFilter(req.user, {
+  branch: "j.branch_id",
+  company: "s.company_id",
+  site: "j.company_id"
+});
 
-      if (req.user.role !== "admin") {
-        const branchId = await getUserBranchId(pool, req.user.id);
-        if (!branchId) {
-          return res.status(403).json({ error: "Branch not assigned" });
-        }
-        conditions.push("j.branch_id = ?");
-        params.push(branchId);
-      }
+if (scope.forbidden) {
+  return res.status(403).json({ error: "No scope assigned" });
+}
 
-      // supervisor → only their jobs
-      if (req.user.role === "supervisor") {
-        conditions.push("j.supervisor_id = ?");
-        params.push(req.user.id);
-      }
-
-      if (req.user.role === "client") {
-
-        const [[user]] = await pool.query(
-          `SELECT contact_id FROM users WHERE id = ?`,
-          [req.user.id]
-        );
-
-        if (!user || !user.contact_id) {
-          return res.status(400).json({
-            error: "Client contact mapping not found"
-          });
-        }
-
-        conditions.push("j.requested_by_contact_id = ?");
-        params.push(user.contact_id);
-      }
-
-      // technician → jobs where they are in team JSON
-      // technician → jobs where technician has a relevant visit
-      if (req.user.role === "technician") {
-        conditions.push(`
-    JSON_CONTAINS(j.team, CAST(? AS JSON))
-  `);
-
-        params.push(req.user.id); // ⚠️ NOT string
-      }
-
+if (scope.condition) {
+  conditions.push(scope.condition);
+  params.push(...scope.params);
+}
+     
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [rows] = await pool.query(

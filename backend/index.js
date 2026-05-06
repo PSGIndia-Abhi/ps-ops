@@ -27,7 +27,7 @@ const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 
-
+// Middleware
 
 
 app.use(cors());

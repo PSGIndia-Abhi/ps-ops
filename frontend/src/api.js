@@ -20,8 +20,9 @@ export async function apiFetch(endpoint, options = {}) {
   });
 
   if (res.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
+    console.warn("401 hit - not removing token");
+    // localStorage.removeItem("token");
+    // localStorage.removeItem("role");
     window.location.href = "/login";
     return;
   }
