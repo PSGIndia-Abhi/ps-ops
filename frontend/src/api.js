@@ -29,3 +29,30 @@ export async function apiFetch(endpoint, options = {}) {
 
   return res;
 }
+
+// Util for parsing JSON responses
+export async function safeJson(res) {
+  if (!res) return null;
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+// Util to try multiple endpoints for fetching branches (new vs old)
+export async function fetchJsonWithFallback(endpoints) {
+  let lastError = "Request failed";
+  for (const endpoint of endpoints) {
+    const res = await apiFetch(endpoint);
+    if (res?.ok) {
+      return await safeJson(res);
+    }
+    const data = await safeJson(res);
+    lastError = data?.error || lastError;
+    if (res?.status === 404 || res?.status === 405) {
+      continue;
+    }
+    break;
+  }
+  throw new Error(lastError);
+}

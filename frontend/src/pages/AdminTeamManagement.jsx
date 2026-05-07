@@ -1,35 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "../api";
+import { apiFetch, safeJson, fetchJsonWithFallback } from "../api";
 import "./AdminTeamManagement.css";
+// /import { getRoles, updateUserRole } from "../../services/roles.service";
+import UsersTab from "../components/admin/UsersTab";
+import TeamsTab from "../components/admin/TeamsTab";
+import RolesTab from "../components/admin/RolesTab";
 
 const branchEndpoints = ["/api/branches", "/branches"];
 
-async function safeJson(res) {
-  if (!res) return null;
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
 
-async function fetchJsonWithFallback(endpoints) {
-  let lastError = "Request failed";
-  for (const endpoint of endpoints) {
-    const res = await apiFetch(endpoint);
-    if (res?.ok) {
-      return await safeJson(res);
-    }
-    const data = await safeJson(res);
-    lastError = data?.error || lastError;
-    if (res?.status === 404 || res?.status === 405) {
-      continue;
-    }
-    break;
-  }
-  throw new Error(lastError);
-}
 
+
+//normalize branches for dropdowns, handling both new / old API formats
 function normalizeBranches(data) {
   if (!Array.isArray(data)) return [];
   if (data.length === 0) return [];
@@ -39,6 +21,9 @@ function normalizeBranches(data) {
       name: branch.name,
     }));
   }
+
+
+  //handle old format with potential duplicates by ID, keeping the first occurrence
 
   const map = new Map();
   data.forEach((row) => {
@@ -51,6 +36,7 @@ function normalizeBranches(data) {
 }
 
 export default function AdminTeamManagement() {
+
   const [supervisors, setSupervisors] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,16 +46,22 @@ export default function AdminTeamManagement() {
   const [error, setError] = useState(null);
   const [branches, setBranches] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(true);
-  const [promoteUserId, setPromoteUserId] = useState("");
-  const [promoteRole, setPromoteRole] = useState("supervisor");
-  const [promoteBranchId, setPromoteBranchId] = useState("");
-  const [promoting, setPromoting] = useState(false);
+  
+
+  
+  
   const [assignTechIds, setAssignTechIds] = useState([]);
   const [assignTechMenuOpen, setAssignTechMenuOpen] = useState(false);
   const [assignBranchId, setAssignBranchId] = useState("");
   const [assigning, setAssigning] = useState(false);
   const assignTechMenuRef = useRef(null);
   const role = localStorage.getItem("role");
+
+
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState("users");
+
 
   const loadOverview = async () => {
     try {
@@ -132,14 +124,7 @@ export default function AdminTeamManagement() {
     return map;
   }, [supervisors]);
 
-  const allTechnicians = useMemo(() => {
-    const fromSup = supervisors.flatMap(s => s.technicians || []);
-    const map = new Map(fromSup.map(t => [Number(t.id), t]));
-    unassigned.forEach(t => {
-      if (!map.has(Number(t.id))) map.set(Number(t.id), t);
-    });
-    return Array.from(map.values());
-  }, [supervisors, unassigned]);
+
 
   const branchNameById = useMemo(() => {
     const map = new Map();
@@ -150,31 +135,11 @@ export default function AdminTeamManagement() {
     return map;
   }, [branches]);
 
-  const promotableUsers = useMemo(() => {
-    const map = new Map();
-    supervisors.forEach((sup) => {
-      if (!sup?.id) return;
-      map.set(Number(sup.id), { id: sup.id, name: sup.name, role: "supervisor" });
-    });
-    allTechnicians.forEach((tech) => {
-      if (!tech?.id) return;
-      if (!map.has(Number(tech.id))) {
-        map.set(Number(tech.id), { id: tech.id, name: tech.name, role: "technician" });
-      }
-    });
-    return Array.from(map.values());
-  }, [supervisors, allTechnicians]);
+
 
   const activeSupervisor = supervisors.find(s => Number(s.id) === Number(activeSupervisorId));
-  const selectedAssignTechnicians = allTechnicians.filter((tech) =>
-    assignTechIds.includes(Number(tech.id))
-  );
-  const assignTechTriggerLabel =
-    selectedAssignTechnicians.length === 0
-      ? "Select technicians"
-      : selectedAssignTechnicians.length === 1
-        ? selectedAssignTechnicians[0].name || `ID ${selectedAssignTechnicians[0].id}`
-        : `${selectedAssignTechnicians.length} technicians selected`;
+
+
 
   function getTechnicianBranchLabel(tech) {
     const branchName =
@@ -231,47 +196,7 @@ export default function AdminTeamManagement() {
     }
   }
 
-  async function handlePromoteUser() {
-    if (!promoteUserId) {
-      setError("Select a user to promote.");
-      return;
-    }
-    if (promoteRole === "branch_admin" && !promoteBranchId) {
-      setError("Select a branch for branch admin.");
-      return;
-    }
 
-    try {
-      setPromoting(true);
-      const res = await apiFetch(`/api/users/${promoteUserId}/role`, {
-        method: "POST",
-        body: JSON.stringify({
-          role: promoteRole,
-          branch_id: promoteBranchId || undefined,
-        }),
-      });
-      if (!res?.ok) {
-        const data = await safeJson(res);
-        throw new Error(data?.error || "Failed to update role");
-      }
-      setPromoteUserId("");
-      setPromoteRole("supervisor");
-      setPromoteBranchId("");
-      setError(null);
-      await loadOverview();
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to update role");
-    } finally {
-      setPromoting(false);
-    }
-
-    const confirmed = window.confirm(
-  `Are you sure you want to change this user's role to ${promoteRole}?`
-);
-
-if (!confirmed) return;
-  }
 
   async function handleAssignTechBranch() {
     if (assignTechIds.length === 0) {
@@ -314,7 +239,35 @@ if (!confirmed) return;
 
   return (
     <div className="team-page">
-      <div className="team-page-header">
+
+
+      <div className="team-tabs">
+        <button onClick={() => setActiveTab("users")}>
+          Users
+        </button>
+
+        <button onClick={() => setActiveTab("roles")}>
+          Roles
+        </button>
+
+        <button onClick={() => setActiveTab("teams")}>
+          Teams
+        </button>
+      </div>
+
+      {activeTab === "users" && <UsersTab
+  supervisors={supervisors}
+  unassigned={unassigned}
+  loadOverview={loadOverview}
+  setError={setError}
+  branches={branches}
+  loadingBranches={loadingBranches}
+  role={role}
+/>}
+      {activeTab === "roles" && <RolesTab />}
+      {activeTab === "teams" && <TeamsTab />}
+
+      {/* <div className="team-page-header">
         <div>
           <h2>Team Management</h2>
           <p>Select a supervisor and add technicians under them.</p>
@@ -552,7 +505,7 @@ if (!confirmed) return;
             </button>
           </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 }
