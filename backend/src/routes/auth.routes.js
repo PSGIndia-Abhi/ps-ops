@@ -172,11 +172,35 @@ router.post("/signup/verify-otp", async (req, res) => {
       return res.status(400).json({ error: "Branch is required for new users" });
     }
 
+    const [[technicianRole]] = await pool.query(
+  `SELECT id FROM roles WHERE name = 'technician' LIMIT 1`
+);
+if (!technicianRole) {
+  return res.status(500).json({
+    error: "Default technician role not found"
+  });
+}
+
     await pool.query(
-      `INSERT INTO users (name, email, phone, password_hash, role, is_active, branch_id)
-       VALUES (?, ?, ?, ?, 'technician', 1, ?)`,
-      [name, email, phone, passwordHash, resolvedBranchId]
-    );
+  `INSERT INTO users (
+      name,
+      email,
+      phone,
+      password_hash,
+      role_id,
+      is_active,
+      branch_id
+   )
+   VALUES (?, ?, ?, ?, ?, 1, ?)`,
+  [
+    name,
+    email,
+    phone,
+    passwordHash,
+    technicianRole.id,
+    resolvedBranchId
+  ]
+);
 
     // 4. cleanup otp
     await pool.query(`DELETE FROM email_otps WHERE email = ?`, [email]);
