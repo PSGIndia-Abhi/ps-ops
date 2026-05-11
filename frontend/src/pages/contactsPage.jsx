@@ -2,25 +2,35 @@ import { useEffect, useState } from "react";
 import { API_BASE } from "../api";
 import { useNavigate, useParams } from "react-router-dom";
 import "./contactspage.css";
+import CreateContactModal from "../components/CreateContactModal";
 
 export default function ContactsPage() {
     const [contacts, setContacts] = useState([]);
     const [editingContact, setEditingContact] = useState(null);
+    const [companies, setCompanies] = useState([]);
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     const token = localStorage.getItem("token");
     const navigate = useNavigate();
     const { contactId } = useParams();
 
-    // ✅ fetch all contacts
+    // ✅ fetch all contacts and companies
     useEffect(() => {
-        fetch(`${API_BASE}/api/contacts`, {
-            headers: { Authorization: `Bearer ${token}` }
-        })
-            .then(res => res.json())
-            .then(data => {
-                const list = Array.isArray(data) ? data : data.contacts || [];
-                setContacts(list);
+        const loadData = async () => {
+            const res = await fetch(`${API_BASE}/api/contacts`, {
+                headers: { Authorization: `Bearer ${token}` }
             });
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : data.contacts || [];
+            setContacts(list);
+
+            const res2 = await fetch(`${API_BASE}/api/sites`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const data2 = await res2.json();
+            setCompanies(Array.isArray(data2) ? data2 : []);
+        };
+        loadData();
     }, [token]);
 
     // ✅ fetch single contact (edit mode)
@@ -75,6 +85,7 @@ export default function ContactsPage() {
     return (
         <div className="page">
             <h2>Contacts</h2>
+            <button onClick={() => setIsCreateModalOpen(true)}>Add Contact</button>
 
            
 
@@ -150,8 +161,24 @@ export default function ContactsPage() {
                     ))}
                 </div>
 
-
-
+            {isCreateModalOpen && (
+                <CreateContactModal
+                    onClose={() => setIsCreateModalOpen(false)}
+                    onCreated={(newContact) => {
+                        // refresh contacts
+                        fetch(`${API_BASE}/api/contacts`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                        })
+                            .then(res => res.json())
+                            .then(data => {
+                                const list = Array.isArray(data) ? data : data.contacts || [];
+                                setContacts(list);
+                            });
+                        setIsCreateModalOpen(false);
+                    }}
+                    companies={companies}
+                />
+            )}
             
         </div>
     );

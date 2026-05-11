@@ -24,6 +24,8 @@ Thumbs.db
 
 # misc
 coverage/
+test-results/
+playwright-report/
 .vscode/
 
 

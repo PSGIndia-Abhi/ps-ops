@@ -1,24 +1,35 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, safeJson } from "../../api";
 
 export default function UsersTab({
   supervisors,
   unassigned,
+  users = [],
   loadOverview,
   setError,
   branches,
   loadingBranches,
-  role
+  role,
+  roles = [],
 }) {
 
   const [promoteUserId, setPromoteUserId] = useState("");
-  const [promoteRole, setPromoteRole] = useState("supervisor");
+  const assignableRoles = useMemo(
+    () =>
+      roles.filter((item) => !["admin", "super_admin", "system"].includes(String(item.name || "").toLowerCase())),
+    [roles]
+  );
+  const [promoteRoleId, setPromoteRoleId] = useState("");
   const [promoteBranchId, setPromoteBranchId] = useState("");
   const [promoting, setPromoting] = useState(false);
-  const [assignTechIds, setAssignTechIds] = useState([]);
 
-  
+//assign branch to technicians
+    const [assignTechIds, setAssignTechIds] = useState([]);
+    const [assignTechMenuOpen, setAssignTechMenuOpen] = useState(false);
+    const [assignBranchId, setAssignBranchId] = useState("");
+    const [assigning, setAssigning] = useState(false);
 
+      const assignTechMenuRef = useRef(null);
 
   //find all the techs
   const allTechnicians = useMemo(() => {
@@ -43,6 +54,7 @@ export default function UsersTab({
 
   }, [supervisors, unassigned]);
 
+  //get selected techs for branch assignment
 const selectedAssignTechnicians = allTechnicians.filter((tech) =>
     assignTechIds.includes(Number(tech.id))
   );
@@ -86,14 +98,30 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
 
   }, [supervisors, allTechnicians]);
 
-    const assignTechTriggerLabel =
+    // Label for assign technicians button
+  const assignTechTriggerLabel =
     selectedAssignTechnicians.length === 0
       ? "Select technicians"
       : selectedAssignTechnicians.length === 1
         ? selectedAssignTechnicians[0].name || `ID ${selectedAssignTechnicians[0].id}`
-        : `${selectedAssignTechnicians.length} technicians selected`;
+      : `${selectedAssignTechnicians.length} technicians selected`;
 
-  //magic thing!
+  const selectedPromoteRole = useMemo(
+    () => assignableRoles.find((item) => String(item.id) === String(promoteRoleId)) || null,
+    [assignableRoles, promoteRoleId]
+  );
+
+  useEffect(() => {
+    if (!assignableRoles.length) return;
+    if (!promoteRoleId || !assignableRoles.some((item) => String(item.id) === String(promoteRoleId))) {
+      const supervisorRole = assignableRoles.find((item) => item.name === "supervisor");
+      setPromoteRoleId(String((supervisorRole || assignableRoles[0]).id));
+    }
+  }, [assignableRoles, promoteRoleId]);
+
+
+
+  //change the role!
   async function handlePromoteUser() {
 
     if (!promoteUserId) {
@@ -101,8 +129,13 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
       return;
     }
 
+    if (!promoteRoleId) {
+      setError("Select a role.");
+      return;
+    }
+
     if (
-      promoteRole === "branch_admin" &&
+      selectedPromoteRole?.name === "branch_admin" &&
       !promoteBranchId
     ) {
       setError("Select a branch for branch admin.");
@@ -110,7 +143,7 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
     }
 
     const confirmed = window.confirm(
-      `Are you sure you want to change this user's role to ${promoteRole}?`
+      `Are you sure you want to change this user's role to ${selectedPromoteRole?.name || "this role"}?`
     );
 
     if (!confirmed) return;
@@ -124,7 +157,7 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
         {
           method: "POST",
           body: JSON.stringify({
-            role: promoteRole,
+            role_id: promoteRoleId,
             branch_id: promoteBranchId || undefined,
           }),
         }
@@ -141,7 +174,8 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
       }
 
       setPromoteUserId("");
-      setPromoteRole("supervisor");
+      const supervisorRole = assignableRoles.find((item) => item.name === "supervisor");
+      setPromoteRoleId(String((supervisorRole || assignableRoles[0] || {}).id || ""));
       setPromoteBranchId("");
 
       setError(null);
@@ -163,11 +197,75 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
     }
   }
 
+    function toggleAssignTech(id) {
+    setAssignTechIds(prev =>
+      prev.includes(id)
+        ? prev.filter((techId) => techId !== id)
+        : [...prev, id]
+    );
+  }
+
+  //Move tec to branches
+  async function handleAssignTechBranch() {
+    if (assignTechIds.length === 0) {
+      setError("Select at least one technician");
+      return;
+    }
+    if (!assignBranchId) {
+      setError("Select a branch.");
+      return;
+    }
+
+    try {
+      setAssigning(true);
+      for (const techId of assignTechIds) {
+        const res = await apiFetch(`/api/users/${techId}/branch`, {
+          method: "POST",
+          body: JSON.stringify({ branch_id: assignBranchId }),
+        });
+        if (!res?.ok) {
+          const data = await safeJson(res);
+          throw new Error(data?.error || "Failed to assign branch");
+        }
+      }
+      setAssignTechIds([]);
+      setAssignTechMenuOpen(false);
+      setAssignBranchId("");
+      setError(null);
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to assign branch");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  // Branch name lookup for technicians
+    const branchNameById = useMemo(() => {
+    const map = new Map();
+    branches.forEach((branch) => {
+      if (!branch?.id) return;
+      map.set(String(branch.id), branch.name || `Branch ${branch.id}`);
+    });
+    return map;
+  }, [branches]);
+
+    function getTechnicianBranchLabel(tech) {
+    const branchName =
+      tech?.branch_name ||
+      (tech?.branch?.name ? tech.branch.name : null) ||
+      (tech?.branch_id ? branchNameById.get(String(tech.branch_id)) : null);
+    return branchName ? `Branch: ${branchName}` : "Branch: Unassigned";
+  }
+
   return (
+    <div className="team-page">
+      
        <div className="team-card">
         <div className="team-card-header">
           <div>
-            <div className="team-card-title">Promote User</div>
+            <div className="team-card-title">Change User Roles</div>
             <div className="team-card-subtitle">
               Upgrade technicians to supervisor or branch admin.
             </div>
@@ -193,17 +291,20 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
           <label className="team-field">
             <span>New Role *</span>
             <select
-              value={promoteRole}
-              onChange={(e) => setPromoteRole(e.target.value)}
+              value={promoteRoleId}
+              onChange={(e) => setPromoteRoleId(e.target.value)}
             >
-              <option value="supervisor">Supervisor</option>
-              <option value="technician">Technician</option>
-              <option value="branch_admin">Branch Admin</option>
+              <option value="">Select role</option>
+              {assignableRoles.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
             </select>
           </label>
 
           {role==="admin"&& <label className="team-field">
-            <span>Branch {promoteRole === "branch_admin" ? "*" : "(optional)"}</span>
+            <span>Branch {selectedPromoteRole?.name === "branch_admin" ? "*" : "(optional)"}</span>
             <select
               value={promoteBranchId}
               onChange={(e) => setPromoteBranchId(e.target.value)}
@@ -224,6 +325,113 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
             {promoting ? "Updating..." : "Update Role"}
           </button>
         </div>
+
+
+      </div>
+
+                    {role==="admin"&&<div className="team-card">
+        <div className="team-card-header">
+          <div>
+            <div className="team-card-title">Assign to Branch</div>
+            <div className="team-card-subtitle">
+              Set the branch for one or more Users.
+            </div>
+          </div>
+        </div>
+
+        <div className="team-form">
+          <div className="team-field">
+            <span>Technicians *</span>
+            <div className="team-multi-select" ref={assignTechMenuRef}>
+              <button
+                type="button"
+                className="team-multi-select-trigger"
+                onClick={() => setAssignTechMenuOpen((prev) => !prev)}
+                aria-expanded={assignTechMenuOpen}
+              >
+                <span>{assignTechTriggerLabel}</span>
+                <span className="team-multi-select-caret">
+                  {assignTechMenuOpen ? "^" : "v"}
+                </span>
+              </button>
+
+              {assignTechMenuOpen && (
+                <div className="team-multi-select-menu">
+                  <div className="team-multi-select-list">
+                    {allTechnicians.map((tech) => (
+                      <label key={tech.id} className="team-tech-select">
+                        <input
+                          type="checkbox"
+                          checked={assignTechIds.includes(Number(tech.id))}
+                          onChange={() => toggleAssignTech(Number(tech.id))}
+                        />
+                        <div>
+                          <div className="team-tech-name">{tech.name || "Unnamed technician"}</div>
+                          <div className="team-tech-email">{getTechnicianBranchLabel(tech)}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <label className="team-field">
+            <span>Branch *</span>
+            <select
+              value={assignBranchId}
+              onChange={(e) => setAssignBranchId(e.target.value)}
+              disabled={loadingBranches}
+            >
+              <option value="">Select branch</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name || branch.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="team-form-actions">
+          <button onClick={handleAssignTechBranch} disabled={assigning}>
+            {assigning ? "Assigning..." : "Assign Branch"}
+          </button>
+        </div>
+      </div>}
+
+      <div className="team-card">
+        <div className="team-card-header">
+          <div>
+            <div className="team-card-title">Visible Users</div>
+            <div className="team-card-subtitle">
+              Users available within your current scope.
+            </div>
+          </div>
+          <div className="team-card-count">{users.length}</div>
+        </div>
+
+        <div className="team-list">
+          {users.length === 0 && (
+            <div className="team-empty">No users found in your scope.</div>
+          )}
+
+          {users.map((user) => (
+            <div key={user.id} className="team-tech-row">
+              <div className="team-tech-info">
+                <div className="team-tech-name">{user.name || `User ${user.id}`}</div>
+                <div className="team-tech-email">{user.email || `ID ${user.id}`}</div>
+              </div>
+              <div className="team-list-meta">
+                <span className="team-role-badge">{user.role || "unassigned"}</span>
+                <span>{user.branch_name || "No branch"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+        
       </div>
 
     

@@ -1,9 +1,88 @@
 const express = require("express");
 const router = express.Router();
 const { pool } = require("../../db");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
 const auth = require("../middleware/auth.middleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
+const {
+  getAllPermissions,
+  getRolePermissions,
+  assignPermissionsToRole,
+  createRole,
+  deleteRole,
+} = require("../utils/roles.services");
+
+const RESERVED_ROLES = new Set(["admin", "super_admin", "system"]);
+
+function getScopedUserJoin(user) {
+  const scopes = Array.isArray(user?.scopes) ? user.scopes : [];
+
+  if (!scopes.length) {
+    return { forbidden: true };
+  }
+
+  const hasGlobal = scopes.some((scope) => scope.scope_type === "global");
+  if (hasGlobal) {
+    return { clause: "", params: [] };
+  }
+
+  const branchScopeIds = scopes
+    .filter((scope) => scope.scope_type === "branch" && scope.scope_id)
+    .map((scope) => scope.scope_id);
+
+  if (!branchScopeIds.length) {
+    return { forbidden: true };
+  }
+
+  const placeholders = branchScopeIds.map(() => "?").join(",");
+  return {
+    clause: ` AND u.branch_id IN (${placeholders})`,
+    params: branchScopeIds,
+  };
+}
+
+async function getRoleById(executor, roleId) {
+  const [[role]] = await executor.query(
+    `
+    SELECT id, name
+    FROM roles
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [roleId]
+  );
+
+  return role || null;
+}
+
+async function getRoleByName(executor, name) {
+  const [[role]] = await executor.query(
+    `
+    SELECT id, name
+    FROM roles
+    WHERE LOWER(name) = LOWER(?)
+    LIMIT 1
+    `,
+    [name.trim()]
+  );
+
+  return role || null;
+}
+
+router.get(
+  "/permissions",
+  auth,
+  requirePermission(PERMISSIONS.VIEW_ROLE),
+  async (req, res) => {
+    try {
+      const permissions = await getAllPermissions(pool);
+      res.json(permissions);
+    } catch (err) {
+      console.error("Error fetching permissions:", err);
+      res.status(500).json({ error: "Failed to fetch permissions" });
+    }
+  }
+);
 
 
 //view roles - as list with user count and permissions
@@ -14,6 +93,10 @@ router.get(
   async (req, res) => {
 
     try {
+      const scopedUserJoin = getScopedUserJoin(req.user);
+      if (scopedUserJoin.forbidden) {
+        return res.status(403).json({ error: "No scope assigned" });
+      }
 
       const [roles] = await pool.query(`
         SELECT
@@ -24,9 +107,11 @@ router.get(
         FROM roles r
         LEFT JOIN users u
           ON u.role_id = r.id
+          AND u.is_active = 1
+          ${scopedUserJoin.clause}
         GROUP BY r.id, r.name, r.created_at
         ORDER BY r.created_at ASC
-      `);
+      `, scopedUserJoin.params);
 
       const [permissions] = await pool.query(`
         SELECT
@@ -83,6 +168,10 @@ router.get(
     }
 
     try {
+      const scopedUserJoin = getScopedUserJoin(req.user);
+      if (scopedUserJoin.forbidden) {
+        return res.status(403).json({ error: "No scope assigned" });
+      }
 
       // role details
       const [roles] = await pool.query(
@@ -95,11 +184,13 @@ router.get(
         FROM roles r
         LEFT JOIN users u
           ON u.role_id = r.id
+          AND u.is_active = 1
+          ${scopedUserJoin.clause}
         WHERE r.id = ?
         GROUP BY r.id, r.name, r.created_at
         LIMIT 1
         `,
-        [roleId]
+        [...scopedUserJoin.params, roleId]
       );
 
       if (!roles.length) {
@@ -110,20 +201,7 @@ router.get(
 
       const role = roles[0];
 
-      // permissions
-      const [permissions] = await pool.query(
-        `
-        SELECT
-          p.id,
-          p.name
-        FROM role_permissions rp
-        JOIN permissions p
-          ON p.id = rp.permission_id
-        WHERE rp.role_id = ?
-        ORDER BY p.name ASC
-        `,
-        [roleId]
-      );
+      const permissions = await getRolePermissions(roleId);
 
       res.json({
         ...role,
@@ -170,15 +248,7 @@ router.post(
       await connection.beginTransaction();
 
       // prevent duplicates
-      const [[existingRole]] = await connection.query(
-        `
-        SELECT id
-        FROM roles
-        WHERE LOWER(name) = LOWER(?)
-        LIMIT 1
-        `,
-        [name.trim()]
-      );
+      const existingRole = await getRoleByName(connection, name);
 
       if (existingRole) {
         await connection.rollback();
@@ -189,57 +259,13 @@ router.post(
       }
 
       // create role
-      const [roleResult] = await connection.query(
-        `
-        INSERT INTO roles (name)
-        VALUES (?)
-        `,
-        [name.trim()]
-      );
+      const roleId = await createRole(connection, name);
 
-      const roleId = roleResult.insertId;
-
-      // permissions handling
-      if (permissions.length > 0) {
-
-        const [permissionRows] = await connection.query(
-          `
-          SELECT id, name
-          FROM permissions
-          WHERE name IN (?)
-          `,
-          [permissions]
-        );
-
-        const foundPermissions = permissionRows.map(p => p.name);
-
-        const invalidPermissions = permissions.filter(
-          p => !foundPermissions.includes(p)
-        );
-
-        if (invalidPermissions.length > 0) {
-
-          await connection.rollback();
-
-          return res.status(400).json({
-            error: "Invalid permissions",
-            invalid_permissions: invalidPermissions
-          });
-        }
-
-        const values = permissionRows.map(permission => [
-          roleId,
-          permission.id
-        ]);
-
-        await connection.query(
-          `
-          INSERT INTO role_permissions
-            (role_id, permission_id)
-          VALUES ?
-          `,
-          [values]
-        );
+      try {
+        await assignPermissionsToRole(connection, roleId, permissions);
+      } catch (assignErr) {
+        await connection.rollback();
+        return res.status(400).json({ error: assignErr.message });
       }
 
       await connection.commit();
@@ -310,15 +336,7 @@ router.patch(
       await connection.beginTransaction();
 
       // role exists
-      const [[existingRole]] = await connection.query(
-        `
-        SELECT id, name
-        FROM roles
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [roleId]
-      );
+      const existingRole = await getRoleById(connection, roleId);
 
       if (!existingRole) {
 
@@ -330,15 +348,7 @@ router.patch(
       }
 
       // reserved/system roles protection
-      const reservedRoles = [
-        "admin",
-        "super_admin",
-        "system"
-      ];
-
-      if (
-        reservedRoles.includes(existingRole.name?.toLowerCase())
-      ) {
+      if (RESERVED_ROLES.has(existingRole.name?.toLowerCase())) {
 
         await connection.rollback();
 
@@ -348,57 +358,15 @@ router.patch(
       }
 
       // duplicate name check
-      const [[duplicateRole]] = await connection.query(
-        `
-        SELECT id
-        FROM roles
-        WHERE LOWER(name) = LOWER(?)
-          AND id != ?
-        LIMIT 1
-        `,
-        [name.trim(), roleId]
-      );
+      const duplicateRole = await getRoleByName(connection, name);
 
-      if (duplicateRole) {
+      if (duplicateRole && Number(duplicateRole.id) !== Number(roleId)) {
 
         await connection.rollback();
 
         return res.status(400).json({
           error: "Role name already exists"
         });
-      }
-
-      // validate permissions
-      let permissionRows = [];
-
-      if (permissions.length > 0) {
-
-        const [rows] = await connection.query(
-          `
-          SELECT id, name
-          FROM permissions
-          WHERE name IN (?)
-          `,
-          [permissions]
-        );
-
-        permissionRows = rows;
-
-        const foundPermissions = rows.map(p => p.name);
-
-        const invalidPermissions = permissions.filter(
-          p => !foundPermissions.includes(p)
-        );
-
-        if (invalidPermissions.length > 0) {
-
-          await connection.rollback();
-
-          return res.status(400).json({
-            error: "Invalid permissions",
-            invalid_permissions: invalidPermissions
-          });
-        }
       }
 
       // update role name
@@ -411,31 +379,11 @@ router.patch(
         [name.trim(), roleId]
       );
 
-      // remove old permissions
-      await connection.query(
-        `
-        DELETE FROM role_permissions
-        WHERE role_id = ?
-        `,
-        [roleId]
-      );
-
-      // insert new permissions
-      if (permissionRows.length > 0) {
-
-        const values = permissionRows.map(permission => [
-          roleId,
-          permission.id
-        ]);
-
-        await connection.query(
-          `
-          INSERT INTO role_permissions
-            (role_id, permission_id)
-          VALUES ?
-          `,
-          [values]
-        );
+      try {
+        await assignPermissionsToRole(connection, roleId, permissions);
+      } catch (assignErr) {
+        await connection.rollback();
+        return res.status(400).json({ error: assignErr.message });
       }
 
       await connection.commit();
@@ -492,15 +440,7 @@ router.delete(
       await connection.beginTransaction();
 
       // role exists
-      const [[role]] = await connection.query(
-        `
-        SELECT id, name
-        FROM roles
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [roleId]
-      );
+      const role = await getRoleById(connection, roleId);
 
       if (!role) {
 
@@ -512,15 +452,7 @@ router.delete(
       }
 
       // protect system roles
-      const reservedRoles = [
-        "admin",
-        "super_admin",
-        "system"
-      ];
-
-      if (
-        reservedRoles.includes(role.name?.toLowerCase())
-      ) {
+      if (RESERVED_ROLES.has(role.name?.toLowerCase())) {
 
         await connection.rollback();
 
@@ -548,23 +480,7 @@ router.delete(
         });
       }
 
-      // delete permissions mapping
-      await connection.query(
-        `
-        DELETE FROM role_permissions
-        WHERE role_id = ?
-        `,
-        [roleId]
-      );
-
-      // delete role
-      await connection.query(
-        `
-        DELETE FROM roles
-        WHERE id = ?
-        `,
-        [roleId]
-      );
+      await deleteRole(connection, roleId);
 
       await connection.commit();
 

@@ -34,6 +34,23 @@
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
+.team-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.team-tabs button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .team-card-header {
   display: flex;
   justify-content: space-between;
@@ -69,6 +86,12 @@
   gap: 10px;
 }
 
+.team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .team-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -85,6 +108,16 @@
 }
 
 .team-field select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 13px;
+  background: #ffffff;
+  color: #111827;
+}
+
+.team-field input {
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
@@ -202,6 +235,28 @@
   min-width: 180px;
 }
 
+.team-list-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.team-role-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .team-select {
   width: 100%;
   border-radius: 10px;
@@ -282,6 +337,37 @@
 .team-empty {
   font-size: 12px;
   color: #94a3b8;
+}
+
+.team-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.team-permission-group {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.team-permission-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #334155;
+}
+
+.team-role-meta {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 @media (max-width: 768px) {

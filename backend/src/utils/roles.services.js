@@ -25,6 +25,20 @@ async function getRolePermissions(roleId) {
   return rows;
 }
 
+async function getAllPermissions(executor = pool) {
+  const [rows] = await executor.query(
+    `
+    SELECT
+      id,
+      name
+    FROM permissions
+    ORDER BY name ASC
+    `
+  );
+
+  return rows;
+}
+
 // -----------------------------------
 // ASSIGN PERMISSIONS TO ROLE
 // -----------------------------------
@@ -130,6 +144,7 @@ async function deleteRole(connection, roleId) {
 }
 
 module.exports = {
+  getAllPermissions,
   getRolePermissions,
   assignPermissionsToRole,
   createRole,

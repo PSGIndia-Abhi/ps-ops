@@ -5,14 +5,25 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { notifyUserBranchChanged } = require("../services/notifications.service");
+const buildScopeFilter = require("../utils/buildScopeFilter");
 
 // GET /api/users?role=supervisor|technician
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
   const { role } = req.query;
 
   try {
+    const scope = buildScopeFilter(req.user, {
+      branch: "u.branch_id",
+      company: "u.branch_id",
+      site: "u.branch_id",
+    });
+
+    if (scope.forbidden) {
+      return res.status(403).json({ error: "No scope assigned" });
+    }
+
     let query = `
-      SELECT u.id, u.name, u.branch_id, b.name AS branch_name
+      SELECT u.id, u.name, u.email, u.branch_id, b.name AS branch_name, r.name AS role
   FROM users u
   LEFT JOIN branches b ON b.id = u.branch_id
   LEFT JOIN roles r ON r.id = u.role_id   
@@ -20,16 +31,9 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res)
     `;
     const params = [];
 
-    if (req.user.role !== "admin") {
-      const [[me]] = await pool.query(
-        "SELECT branch_id FROM users WHERE id = ?",
-        [req.user.id]
-      );
-      if (!me?.branch_id) {
-        return res.status(403).json({ error: "Branch not assigned" });
-      }
-      query += " AND u.branch_id = ?";
-      params.push(me.branch_id);
+    if (scope.condition) {
+      query += ` AND ${scope.condition}`;
+      params.push(...scope.params);
     }
 
     if (role) {

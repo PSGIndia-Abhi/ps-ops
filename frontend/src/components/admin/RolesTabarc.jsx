@@ -5,132 +5,6 @@ function buildPermissionSet(values = []) {
   return new Set(values.map((value) => String(value)));
 }
 
-// Permission categories with descriptions
-const PERMISSION_CATEGORIES = {
-  jobs: {
-    label: "Jobs",
-    icon: "📋",
-    permissions: [
-      { name: "VIEW_JOB", desc: "View job details and listings" },
-      { name: "CREATE_JOB", desc: "Create new jobs" },
-      { name: "UPDATE_JOB", desc: "Modify job information" },
-      { name: "UPDATE_JOB_STATUS", desc: "Change job status" },
-      { name: "ADD_JOB_COMMENT", desc: "Add comments to jobs" },
-      { name: "REASSIGN_JOB", desc: "Reassign jobs to staff" },
-      { name: "ASSIGN_RECURRING_JOB", desc: "Create recurring job assignments" },
-      { name: "WHITELIST_CLIENT_COMMENT", desc: "Approve client comments" },
-    ],
-  },
-  visits: {
-    label: "Visits",
-    icon: "🏢",
-    permissions: [
-      { name: "CREATE_VISIT", desc: "Create new visits" },
-      { name: "VIEW_VISIT", desc: "View visit details" },
-      { name: "UPDATE_VISIT", desc: "Update visit information" },
-      { name: "START_VISIT", desc: "Start/begin visits" },
-      { name: "SUBMIT_VISIT", desc: "Submit visit reports" },
-      { name: "APPROVE_VISIT", desc: "Approve submitted visits" },
-    ],
-  },
-  contacts: {
-    label: "Contacts",
-    icon: "👥",
-    permissions: [
-      { name: "VIEW_CONTACT", desc: "View contact information" },
-      { name: "CREATE_CONTACT", desc: "Create new contacts" },
-      { name: "UPDATE_CONTACT", desc: "Edit contact details" },
-      { name: "DELETE_CONTACT", desc: "Remove contacts" },
-    ],
-  },
-  booking: {
-    label: "Booking",
-    icon: "📅",
-    permissions: [
-      { name: "CREATE_BOOKING", desc: "Create new bookings" },
-      { name: "VIEW_BOOKING", desc: "View booking details" },
-      { name: "UPDATE_BOOKING", desc: "Modify booking information" },
-      { name: "CANCEL_BOOKING", desc: "Cancel bookings" },
-      { name: "ARCHIVE_BOOKING", desc: "Archive completed bookings" },
-    ],
-  },
-  system: {
-    label: "System & Admin",
-    icon: "⚙️",
-    permissions: [
-      { name: "VIEW_USER", desc: "View user accounts" },
-      { name: "CREATE_USER", desc: "Create new users" },
-      { name: "UPDATE_USER", desc: "Modify user details" },
-      { name: "DELETE_USER", desc: "Remove users" },
-      { name: "CREATE_ROLE", desc: "Create new roles" },
-      { name: "VIEW_ROLE", desc: "View role configurations" },
-      { name: "UPDATE_ROLE", desc: "Edit role permissions" },
-      { name: "DELETE_ROLE", desc: "Delete roles" },
-      { name: "VIEW_BRANCH", desc: "View branch information" },
-      { name: "CREATE_BRANCH", desc: "Create new branches" },
-      { name: "UPDATE_BRANCH", desc: "Edit branch details" },
-      { name: "DELETE_BRANCH", desc: "Delete branches" },
-      { name: "ASSIGN_BRANCH_ADMIN", desc: "Assign branch administrators" },
-      { name: "UPDATE_BRANCH_ADMIN", desc: "Modify admin assignments" },
-      { name: "DELETE_BRANCH_ADMIN", desc: "Remove branch admins" },
-    ],
-  },
-  analytics: {
-    label: "Analytics",
-    icon: "📊",
-    permissions: [
-      { name: "VIEW_ANALYTICS", desc: "View analytics dashboards" },
-      { name: "VIEW_BRANCH_ANALYTICS", desc: "View branch-level analytics" },
-      { name: "VIEW_GLOBAL_ANALYTICS", desc: "View system-wide analytics" },
-    ],
-  },
-};
-
-function PermissionGroup({ category, categoryKey, permissionSet, onToggle, disabled }) {
-  const [expanded, setExpanded] = useState(false);
-  const selectedCount = category.permissions.filter((p) =>
-    permissionSet.has(p.name)
-  ).length;
-
-  return (
-    <div className="permission-group">
-      <button
-        className="permission-group-header"
-        onClick={() => setExpanded(!expanded)}
-        disabled={disabled}
-      >
-        <span className="permission-group-icon">{category.icon}</span>
-        <span className="permission-group-title">{category.label}</span>
-        <span className="permission-group-badge">
-          {selectedCount}/{category.permissions.length}
-        </span>
-        <span className={`permission-group-toggle ${expanded ? "expanded" : ""}`}>
-          ▼
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="permission-group-content">
-          {category.permissions.map((permission) => (
-            <label key={permission.name} className="permission-item">
-              <input
-                type="checkbox"
-                checked={permissionSet.has(permission.name)}
-                onChange={() => onToggle(permission.name)}
-                disabled={disabled}
-              />
-              <div className="permission-item-content">
-                <span className="permission-item-name">{permission.name}</span>
-                <span className="permission-item-desc">{permission.desc}</span>
-              </div>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function RolesTab({
   roles = [],
   permissions = [],
@@ -333,18 +207,16 @@ export default function RolesTab({
             </label>
           </div>
 
-          <div className="permissions-container">
-            {Object.entries(PERMISSION_CATEGORIES).map(([key, category]) => (
-              <PermissionGroup
-                key={key}
-                category={category}
-                categoryKey={key}
-                permissionSet={createPermissionSet}
-                onToggle={(permName) =>
-                  togglePermission(permName, setCreatePermissions)
-                }
-                disabled={false}
-              />
+          <div className="team-permission-group">
+            {permissions.map((permission) => (
+              <label key={permission.id} className="team-permission-item">
+                <input
+                  type="checkbox"
+                  checked={createPermissionSet.has(permission.name)}
+                  onChange={() => togglePermission(permission.name, setCreatePermissions)}
+                />
+                <span>{permission.name}</span>
+              </label>
             ))}
           </div>
 
@@ -392,18 +264,17 @@ export default function RolesTab({
             </label>
           </div>
 
-          <div className="permissions-container">
-            {Object.entries(PERMISSION_CATEGORIES).map(([key, category]) => (
-              <PermissionGroup
-                key={key}
-                category={category}
-                categoryKey={key}
-                permissionSet={editPermissionSet}
-                onToggle={(permName) =>
-                  togglePermission(permName, setEditPermissions)
-                }
-                disabled={!selectedRole}
-              />
+          <div className="team-permission-group">
+            {permissions.map((permission) => (
+              <label key={permission.id} className="team-permission-item">
+                <input
+                  type="checkbox"
+                  checked={editPermissionSet.has(permission.name)}
+                  onChange={() => togglePermission(permission.name, setEditPermissions)}
+                  disabled={!selectedRole}
+                />
+                <span>{permission.name}</span>
+              </label>
             ))}
           </div>
 
