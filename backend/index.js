@@ -25,9 +25,10 @@ const clientInviteRoutes = require("./src/routes/clientInvite.routes");
 const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
 const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
+const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 
-
+// Middleware
 
 
 app.use(cors());
@@ -64,6 +65,7 @@ app.use("/api/bookings", bookingsRoutes);
 app.use("/api/visits", visitRoutes);
 app.use("/api/tickets", ticketsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 

@@ -3,7 +3,8 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveHeadOfficeBranchId } = require("../utils/branch");
 const { resolveGroupTable } = require("../utils/groupTable");
@@ -13,7 +14,7 @@ const { resolveGroupTable } = require("../utils/groupTable");
 // GET all contacts (active only)
 // GET contacts (optionally filter by site)
 //add logo object key here later
-router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
+router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, res) => {
 
   const { site_id } = req.query;
 
@@ -76,7 +77,7 @@ router.get("/", auth, allowRoles("admin", "branch_admin", "supervisor"), async (
 });
 
 // GET single contact by ID
-router.get("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+router.get("/:id", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req,res)=>{
   try {
     const [rows] = await pool.query(
       `SELECT * FROM contacts WHERE id = ? AND is_active = 1`,
@@ -98,7 +99,7 @@ router.get("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
 router.post(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.CREATE_CONTACT),
   async (req, res) => {
     const {
       name,
@@ -229,7 +230,7 @@ router.post(
 );
 
 //update contact
-router.put("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (req,res)=>{
   const { name, phone, email, role, is_primary } = req.body;
 
   try {
@@ -270,7 +271,7 @@ router.put("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
 });
 
 //delete contact
-router.delete("/:id", auth, allowRoles("admin","branch_admin"), async (req,res)=>{
+router.delete("/:id", auth, requirePermission(PERMISSIONS.DELETE_CONTACT), async (req,res)=>{
   try {
 
     let sql = `UPDATE contacts SET is_active = 0 WHERE id = ?`;

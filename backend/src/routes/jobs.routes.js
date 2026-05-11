@@ -9,9 +9,12 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { createBooking } = require("../controllers/bookings.controller");
 const { notifyJobAssignmentChange } = require("../services/notifications.service");
+const buildScopeFilter = require("../utils/buildScopeFilter");
+
 
 const isValidJobId = (jobId) => {
   if (!jobId) return false;
@@ -252,55 +255,29 @@ const updateRangeRecurringJobs = async (
 router.get(
   "/",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor", "technician", "client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
+  
   async (req, res) => {
     try {
 
       const conditions = [];
       const params = [];
+      //
+      const scope = buildScopeFilter(req.user, {
+  branch: "j.branch_id",
+  company: "s.company_id",
+  site: "j.company_id"
+});
 
-      if (req.user.role !== "admin") {
-        const branchId = await getUserBranchId(pool, req.user.id);
-        if (!branchId) {
-          return res.status(403).json({ error: "Branch not assigned" });
-        }
-        conditions.push("j.branch_id = ?");
-        params.push(branchId);
-      }
+if (scope.forbidden) {
+  return res.status(403).json({ error: "No scope assigned" });
+}
 
-      // supervisor → only their jobs
-      if (req.user.role === "supervisor") {
-        conditions.push("j.supervisor_id = ?");
-        params.push(req.user.id);
-      }
-
-      if (req.user.role === "client") {
-
-        const [[user]] = await pool.query(
-          `SELECT contact_id FROM users WHERE id = ?`,
-          [req.user.id]
-        );
-
-        if (!user || !user.contact_id) {
-          return res.status(400).json({
-            error: "Client contact mapping not found"
-          });
-        }
-
-        conditions.push("j.requested_by_contact_id = ?");
-        params.push(user.contact_id);
-      }
-
-      // technician → jobs where they are in team JSON
-      // technician → jobs where technician has a relevant visit
-      if (req.user.role === "technician") {
-        conditions.push(`
-    JSON_CONTAINS(j.team, CAST(? AS JSON))
-  `);
-
-        params.push(req.user.id); // ⚠️ NOT string
-      }
-
+if (scope.condition) {
+  conditions.push(scope.condition);
+  params.push(...scope.params);
+}
+     
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [rows] = await pool.query(
@@ -507,7 +484,7 @@ router.get(
   }
 );
 // GET single job by ID
-router.get("/:jobId", auth, allowRoles("admin", "branch_admin", "supervisor", "technician", "client"), async (req, res) => {
+router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -657,7 +634,7 @@ router.get("/:jobId", auth, allowRoles("admin", "branch_admin", "supervisor", "t
 
 
 // GET job history (timeline)
-router.get("/:jobId/history", auth, allowRoles("admin", "branch_admin", "supervisor", "technician", "client"), async (req, res) => {
+router.get("/:jobId/history", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -727,7 +704,7 @@ router.get("/:jobId/history", auth, allowRoles("admin", "branch_admin", "supervi
 });
 
 // POST job comment (timeline update)
-router.post("/:jobId/comments", auth, allowRoles("admin", "branch_admin", "supervisor", "technician"), async (req, res) => {
+router.post("/:jobId/comments", auth, requirePermission(PERMISSIONS.ADD_JOB_COMMENT), async (req, res) => {
   const { jobId } = req.params;
   const { message, visible_to_client } = req.body;
   const created_by_user_id = req.user.id;
@@ -795,7 +772,7 @@ router.post("/:jobId/comments", auth, allowRoles("admin", "branch_admin", "super
 router.patch(
   "/history/:historyId/visibility",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.WHITELIST_CLIENT_COMMENT),
   async (req, res) => {
 
     const { historyId } = req.params;
@@ -837,7 +814,7 @@ router.patch(
 
 
 // JOB STATUS UPDATE (single source of truth)
-router.patch("/:id/status", auth, async (req, res) => {
+router.patch("/:id/status", auth, requirePermission(PERMISSIONS.UPDATE_JOB_STATUS), async (req, res) => {
   const jobId = req.params.id;
   const newStatus = req.body?.status;
   const userId = req.user.id;
@@ -1006,7 +983,7 @@ router.patch("/:id/status", auth, async (req, res) => {
 router.patch(
   "/:jobId/dates",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.UPDATE_JOB),
   async (req, res) => {
     const { jobId } = req.params;
     const { start_date, end_date } = req.body;
@@ -1041,13 +1018,13 @@ router.patch(
 
 
 // create jobs from the booking form
-router.post("/", auth, allowRoles("admin", "branch_admin", "supervisor", "client"), createBooking);
+router.post("/", auth, requirePermission(PERMISSIONS.CREATE_JOB), createBooking);
 
 // Reassign a recurring job and propagate to future occurrences
 router.post(
   "/:jobId/assign-recurring",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.ASSIGN_RECURRING_JOB),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds } = req.body;
@@ -1190,7 +1167,7 @@ router.post(
 router.post(
   "/:jobId/reassign",
   auth,
-  allowRoles("admin", "branch_admin", "supervisor"),
+  requirePermission(PERMISSIONS.REASSIGN_JOB),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
@@ -1369,7 +1346,7 @@ router.post(
 );
 
 // POST /api/jobs/assign
-router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), async (req, res) => {
+router.post("/assign", auth, requirePermission(PERMISSIONS.REASSIGN_JOB), async (req, res) => {
   const { jobIds, supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
   const created_by_user_id = req.user?.id;
 
@@ -1744,7 +1721,7 @@ router.post("/assign", auth, allowRoles("admin", "branch_admin", "supervisor"), 
 
 
 // ADD attachments Meta Data
-router.post("/:jobId/attachments", auth, async (req, res) => {
+router.post("/:jobId/attachments", auth, requirePermission(PERMISSIONS.ADD_JOB_COMMENT), async (req, res) => {
 
   const { jobId } = req.params;
   const {
@@ -1839,7 +1816,7 @@ router.post("/:jobId/attachments", auth, async (req, res) => {
 });
 
 // GET attachments for a job
-router.get("/:jobId/attachments", auth, async (req, res) => {
+router.get("/:jobId/attachments", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req, res) => {
   const { jobId } = req.params;
 
   try {
@@ -1874,6 +1851,7 @@ router.get("/:jobId/attachments", auth, async (req, res) => {
 //upload attachments to Minio directly from backend
 router.post("/:jobId/attachments/upload",
   auth,
+  requirePermission(PERMISSIONS.ADD_JOB_COMMENT),
   upload.single("file"),
   async (req, res) => {
     const { jobId } = req.params;
@@ -1978,7 +1956,7 @@ router.post("/:jobId/attachments/upload",
 router.get(
   "/client/my-jobs",
   auth,
-  allowRoles("client"),
+  requirePermission(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     try {
 

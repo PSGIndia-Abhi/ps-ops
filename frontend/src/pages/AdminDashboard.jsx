@@ -177,7 +177,7 @@ export default function AdminDashboard() {
 
 
       supervisor_id: form.supervisor_id ?? null,
-      technician_id: form.technician_ids ?? [],
+      technician_ids: form.technician_ids ?? [],
     };
 
     const res = await apiFetch("/api/bookings", {

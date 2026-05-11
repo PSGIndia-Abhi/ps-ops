@@ -2,11 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 
 // GET /api/branches
-router.get("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
+router.get("/", auth, requirePermission(PERMISSIONS.VIEW_BRANCH), async (req, res) => {
   try {
     const [rows] = await pool.query(
       `
@@ -32,7 +33,7 @@ router.get("/", auth, allowRoles("admin", "branch_admin"), async (req, res) => {
 });
 
 // POST /api/branches
-router.post("/", auth, allowRoles("admin"), async (req, res) => {
+router.post("/", auth, requirePermission(PERMISSIONS.CREATE_BRANCH), async (req, res) => {
   try {
     const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
 
@@ -64,7 +65,7 @@ router.post("/", auth, allowRoles("admin"), async (req, res) => {
 });
 
 // POST /api/branches/:id/assign-admin
-router.post("/:id/assign-admin", auth, allowRoles("admin"), async (req, res) => {
+router.post("/:id/assign-admin", auth, requirePermission(PERMISSIONS.ASSIGN_BRANCH_ADMIN), async (req, res) => {
   const branchId = req.params.id;
   const userId = req.body?.userId || req.body?.user_id;
 

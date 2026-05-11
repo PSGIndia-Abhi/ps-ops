@@ -3,9 +3,10 @@ const router = express.Router();
 const { pool } = require('../../db');
 const minioClient = require('../lib/minio');
 const auth = require("../middleware/auth.middleware");
-const { allowRoles } = require("../middleware/roleMiddleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 
-router.get('/db-check', auth, allowRoles("admin"), async (req, res) => {
+router.get('/db-check', auth, requirePermission(PERMISSIONS.VIEW_GLOBAL_ANALYTICS), async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT 1 AS ok');
     res.json({ db: 'connected', result: rows[0] });
@@ -14,7 +15,7 @@ router.get('/db-check', auth, allowRoles("admin"), async (req, res) => {
   }
 });
 
-router.get('/minio-check', auth, allowRoles("admin"), async (req, res) => {
+router.get('/minio-check', auth, requirePermission(PERMISSIONS.VIEW_GLOBAL_ANALYTICS), async (req, res) => {
   try {
     const bucket = process.env.MINIO_BUCKET;
     if (!bucket) {

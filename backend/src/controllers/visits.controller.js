@@ -411,7 +411,7 @@ async function submitVisit(req, res) {
 
     res.json({ success: true });
 
-    // 👇 ADD THIS
+   
     notifyVisitSubmitted({
       visitId,
       actorUserId,

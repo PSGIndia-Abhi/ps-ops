@@ -17,16 +17,17 @@ router.post("/login", async (req, res) => {
     const [rows] = await pool.query(
       `
       SELECT 
-        id,
-        role,
-        branch_id,
-        password_hash,
-        invite_status,
-        is_active,
-        contact_id
-      FROM users
-      WHERE email = ?
-      LIMIT 1
+  u.id,
+  r.name AS role,
+  u.branch_id,
+  u.password_hash,
+  u.invite_status,
+  u.is_active,
+  u.contact_id
+FROM users u
+JOIN roles r ON u.role_id = r.id
+WHERE u.email = ?
+LIMIT 1
       `,
       [email]
     );
@@ -80,7 +81,7 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ error: "Login failed" });
   }
 
-  
+
 });
 
 // --------------------
@@ -105,23 +106,23 @@ router.post("/signup/send-otp", async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     }
     // 2. Generate OTP
-const otp = Math.floor(100000 + Math.random() * 900000).toString();
-const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-console.log(`Generated OTP for ${email}: ${otp} (expires at ${expiresAt.toISOString()})`);
+    console.log(`Generated OTP for ${email}: ${otp} (expires at ${expiresAt.toISOString()})`);
 
-// 🔥 Delete previous OTPs
-await pool.query(
-  `DELETE FROM email_otps WHERE email = ?`,
-  [email]
-);
+    // 🔥 Delete previous OTPs
+    await pool.query(
+      `DELETE FROM email_otps WHERE email = ?`,
+      [email]
+    );
 
-// Insert new OTP
-await pool.query(
-  `INSERT INTO email_otps (email, otp_code, expires_at)
+    // Insert new OTP
+    await pool.query(
+      `INSERT INTO email_otps (email, otp_code, expires_at)
    VALUES (?, ?, ?)`,
-  [email, otp, expiresAt]
-);
+      [email, otp, expiresAt]
+    );
 
 
     // 4. Send OTP email (to admin inbox)
@@ -171,11 +172,35 @@ router.post("/signup/verify-otp", async (req, res) => {
       return res.status(400).json({ error: "Branch is required for new users" });
     }
 
+    const [[technicianRole]] = await pool.query(
+  `SELECT id FROM roles WHERE name = 'technician' LIMIT 1`
+);
+if (!technicianRole) {
+  return res.status(500).json({
+    error: "Default technician role not found"
+  });
+}
+
     await pool.query(
-      `INSERT INTO users (name, email, phone, password_hash, role, is_active, branch_id)
-       VALUES (?, ?, ?, ?, 'technician', 1, ?)`,
-      [name, email, phone, passwordHash, resolvedBranchId]
-    );
+  `INSERT INTO users (
+      name,
+      email,
+      phone,
+      password_hash,
+      role_id,
+      is_active,
+      branch_id
+   )
+   VALUES (?, ?, ?, ?, ?, 1, ?)`,
+  [
+    name,
+    email,
+    phone,
+    passwordHash,
+    technicianRole.id,
+    resolvedBranchId
+  ]
+);
 
     // 4. cleanup otp
     await pool.query(`DELETE FROM email_otps WHERE email = ?`, [email]);
@@ -276,11 +301,11 @@ router.post("/forgot-password/send-otp", async (req, res) => {
     });
 
     //  also send to admin
-await sendOTPEmail({
-  toEmail: process.env.ADMIN_OTP_INBOX,
-  userEmail: email,
-  otp,
-});
+    await sendOTPEmail({
+      toEmail: process.env.ADMIN_OTP_INBOX,
+      userEmail: email,
+      otp,
+    });
 
     res.json({ success: true });
   } catch (err) {
@@ -289,7 +314,7 @@ await sendOTPEmail({
   }
 });
 
-// Logged in user profile
+//Logged in user profile
 router.get("/me", auth, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -299,7 +324,7 @@ router.get("/me", auth, async (req, res) => {
         u.name,
         u.email,
         u.phone,
-        u.role,
+        r.name AS role,
         u.is_active,
         DATE_FORMAT(u.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         u.contact_id,
@@ -316,12 +341,18 @@ router.get("/me", auth, async (req, res) => {
         ba.email AS branch_admin_email,
         ba.phone AS branch_admin_phone
       FROM users u
-      LEFT JOIN contacts c ON c.id = u.contact_id
-      LEFT JOIN sites s ON s.id = c.company_id
-      LEFT JOIN companies co ON co.id = s.company_id
-      LEFT JOIN branches b ON b.id = COALESCE(u.branch_id, c.branch_id)
-      LEFT JOIN users ba ON ba.branch_id = b.id AND ba.role = 'branch_admin'
-      WHERE u.id = ?
+LEFT JOIN roles r ON r.id = u.role_id
+LEFT JOIN contacts c ON c.id = u.contact_id
+LEFT JOIN sites s ON s.id = c.company_id
+LEFT JOIN companies co ON co.id = s.company_id
+LEFT JOIN branches b ON b.id = COALESCE(u.branch_id, c.branch_id)
+LEFT JOIN users ba 
+  ON ba.branch_id = b.id
+LEFT JOIN roles r2 
+  ON r2.id = ba.role_id 
+  AND LOWER(r2.name) = 'branch_admin'
+
+WHERE u.id = ?
       `,
       [req.user.id]
     );
@@ -329,6 +360,9 @@ router.get("/me", auth, async (req, res) => {
     if (!rows.length) {
       return res.status(404).json({ error: "User not found" });
     }
+
+
+
 
     const user = rows[0];
     res.json({
@@ -339,11 +373,11 @@ router.get("/me", auth, async (req, res) => {
         : null,
       branch_admin: user.branch_admin_id
         ? {
-            id: user.branch_admin_id,
-            name: user.branch_admin_name,
-            email: user.branch_admin_email,
-            phone: user.branch_admin_phone,
-          }
+          id: user.branch_admin_id,
+          name: user.branch_admin_name,
+          email: user.branch_admin_email,
+          phone: user.branch_admin_phone,
+        }
         : null,
       company_logo_url: null,
     });
@@ -353,6 +387,28 @@ router.get("/me", auth, async (req, res) => {
     res.status(500).json({ error: "Failed to load profile" });
   }
 });
+
+//testing new me profile route with scopes and permissions
+// router.get("/me", auth, async (req, res) => {
+//   try {
+
+//     const [rows] = await pool.query(
+//       `SELECT id, role_id FROM users WHERE id = ? LIMIT 1`,
+//       [req.user.id]
+//     );
+
+//     if (!rows.length) {
+//       return res.status(404).json({ error: "User not found" });
+//     }
+
+//     res.json(rows[0]);
+
+//   } catch (err) {
+//     console.error("ME ERROR:", err);
+//     res.status(500).json({ error: "ME failed" });
+//   }
+// });
+
 
 router.patch("/me", auth, async (req, res) => {
   const { name, email, phone } = req.body || {};

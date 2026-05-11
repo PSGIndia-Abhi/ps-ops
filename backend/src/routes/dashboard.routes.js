@@ -2,8 +2,10 @@ const express = require("express");
 const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
+const requirePermission = require("../middleware/permission.middleware");
+const PERMISSIONS = require("../access/permissions");
 
-router.get("/summary", auth, async (req, res) => {
+router.get("/summary", auth, requirePermission(PERMISSIONS.VIEW_ANALYTICS), async (req, res) => {
   try {
     let where = "WHERE 1=1";
     let params = [];
