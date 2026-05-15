@@ -1,0 +1,469 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model bookings {
+  id                      String            @id @db.Char(36)
+  code                    String            @db.VarChar(50)
+  contact_id              String?           @db.Char(36)
+  company_id              String?           @db.Char(36)
+  requested_by_contact_id String?           @db.Char(36)
+  client_name             String?           @db.VarChar(100)
+  client_type             String?           @db.VarChar(30)
+  service_type            String?           @db.VarChar(50)
+  sub_services            Json?
+  notes                   String?           @db.Text
+  created_by_user_id      String?           @db.Char(36)
+  status                  bookings_status?  @default(ACTIVE)
+  created_at              DateTime          @db.DateTime(0)
+  updated_at              DateTime?         @db.DateTime(0)
+  recurring_rules         recurring_rules[]
+}
+
+model branches {
+  id         String    @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  name       String    @db.VarChar(255)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  jobs       jobs[]
+  sites      sites[]
+  users      users[]
+}
+
+model companies {
+  id              String          @id @db.Char(36)
+  group_id        String?         @db.Char(36)
+  name            String          @db.VarChar(255)
+  code            String?         @db.VarChar(64)
+  gst_number      String?         @db.VarChar(64)
+  type            companies_type?
+  is_active       Boolean?        @default(true)
+  created_at      DateTime?       @default(now()) @db.DateTime(0)
+  logo_object_key String?         @db.Text
+  logo_file_name  String?         @db.VarChar(255)
+  logo_file_type  String?         @db.VarChar(100)
+  logo_updated_at DateTime?       @db.DateTime(0)
+  group_name      group_name?     @relation(fields: [group_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_companies_group")
+
+  @@index([group_id], map: "idx_companies_group_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model contacts {
+  id          String    @id @db.Char(36)
+  company_id  String?   @db.Char(36)
+  name        String    @db.VarChar(150)
+  phone       String    @db.VarChar(20)
+  email       String?   @db.VarChar(150)
+  role        String?   @db.VarChar(100)
+  is_primary  Boolean?  @default(false)
+  is_verified Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  updated_at  DateTime? @default(now()) @db.DateTime(0)
+  branch_id   String?   @db.Char(36)
+  is_active   Int?      @default(1) @db.TinyInt
+  sites       sites?    @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_contacts_company")
+
+  @@unique([phone, company_id], map: "unique_contact")
+  @@index([branch_id], map: "idx_contacts_branch_id")
+  @@index([company_id], map: "idx_contacts_company")
+}
+
+model email_otps {
+  id         BigInt    @id @default(autoincrement())
+  email      String    @db.VarChar(255)
+  otp_code   String    @db.VarChar(10)
+  expires_at DateTime  @db.DateTime(0)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([email], map: "idx_email")
+}
+
+model group_name {
+  id         String      @id @db.Char(36)
+  name       String      @unique(map: "uniq_groups_name") @db.VarChar(255)
+  created_at DateTime?   @default(now()) @db.DateTime(0)
+  companies  companies[]
+}
+
+model job_attachments {
+  id         String   @id @db.Char(36)
+  job_id     String   @db.Char(36)
+  type       String   @db.VarChar(30)
+  object_key String   @db.VarChar(255)
+  created_at DateTime @db.DateTime(0)
+  file_name  String?  @db.VarChar(255)
+  file_type  String?  @db.VarChar(100)
+  file_url   String?  @db.Text
+  history_id String   @db.Char(36)
+}
+
+model job_comments {
+  id         String             @id @db.Char(36)
+  job_id     String             @db.Char(36)
+  comment    String             @db.Text
+  created_at DateTime           @default(now()) @db.DateTime(0)
+  type       job_comments_type? @default(USER)
+}
+
+model job_history {
+  id                 String   @id @db.Char(36)
+  job_id             String   @db.Char(36)
+  action             String   @db.VarChar(50)
+  message            String?  @db.Text
+  metadata           Json?
+  created_at         DateTime @db.DateTime(0)
+  created_by_user_id String?  @db.Char(36)
+  visible_to_client  Boolean? @default(false)
+}
+
+model job_ticket_links {
+  id          String      @id @db.Char(36)
+  ticket_id   String      @db.Char(36)
+  job_id      String      @db.Char(36)
+  job_tickets job_tickets @relation(fields: [ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "job_ticket_links_ibfk_1")
+  jobs        jobs        @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "job_ticket_links_ibfk_2")
+
+  @@index([job_id], map: "job_id")
+  @@index([ticket_id], map: "ticket_id")
+}
+
+model job_ticket_messages {
+  id                 String               @id @db.Char(36)
+  ticket_id          String               @db.Char(36)
+  message            String               @db.Text
+  created_by_user_id BigInt
+  created_at         DateTime?            @default(now()) @db.DateTime(0)
+  attachment_key     String?              @db.VarChar(255)
+  job_tickets        job_tickets          @relation(fields: [ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_message_ticket")
+  users              users                @relation(fields: [created_by_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_message_user")
+  ticket_attachments ticket_attachments[]
+
+  @@index([created_by_user_id], map: "fk_message_user")
+  @@index([ticket_id], map: "ticket_id")
+}
+
+model job_tickets {
+  id                  String                @id @db.Char(36)
+  subject             String                @db.VarChar(255)
+  status              job_tickets_status?   @default(OPEN)
+  priority            job_tickets_priority? @default(MEDIUM)
+  created_by_user_id  BigInt
+  created_at          DateTime?             @default(now()) @db.DateTime(0)
+  updated_at          DateTime?             @default(now()) @db.DateTime(0)
+  job_ticket_links    job_ticket_links[]
+  job_ticket_messages job_ticket_messages[]
+  users               users                 @relation(fields: [created_by_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ticket_user")
+  ticket_attachments  ticket_attachments[]
+
+  @@index([created_by_user_id], map: "created_by_user_id")
+}
+
+model job_visits {
+  id                 String             @id @db.Char(36)
+  job_id             String             @db.Char(36)
+  visit_number       Int
+  scheduled_date     DateTime?          @db.DateTime(0)
+  status             job_visits_status?
+  started_at         DateTime?          @db.DateTime(0)
+  completed_at       DateTime?          @db.DateTime(0)
+  notes              String?            @db.Text
+  created_by_user_id String?            @db.Char(36)
+  created_at         DateTime           @default(now()) @db.DateTime(0)
+  updated_at         DateTime           @default(now()) @db.DateTime(0)
+  jobs               jobs               @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_visit_job")
+
+  @@unique([job_id, visit_number], map: "uniq_job_visit")
+  @@index([scheduled_date], map: "idx_visits_date")
+  @@index([job_id], map: "idx_visits_job")
+  @@index([status], map: "idx_visits_status")
+}
+
+model jobs {
+  id                      String                  @id @db.Char(36)
+  code                    String                  @db.VarChar(50)
+  booking_id              String?                 @db.Char(36)
+  service_type            String                  @db.VarChar(50)
+  sub_service             String                  @db.VarChar(100)
+  status                  jobs_status             @default(CREATED)
+  priority                jobs_priority           @default(MEDIUM)
+  supervisor_id           Int?
+  assigned_at             DateTime?               @db.DateTime(0)
+  team                    Json?
+  due_date                DateTime?               @db.DateTime(0)
+  sla_minutes             Int?
+  start_date              DateTime?               @db.DateTime(0)
+  completed_at            DateTime?               @db.DateTime(0)
+  notes                   String?                 @db.Text
+  created_at              DateTime                @db.DateTime(0)
+  updated_at              DateTime                @db.DateTime(0)
+  requested_by_type       jobs_requested_by_type?
+  requested_by_id         String?                 @db.Char(36)
+  requested_by_contact_id String                  @db.Char(36)
+  created_by_user_id      String                  @db.Char(36)
+  approval_status         jobs_approval_status?
+  approved_at             DateTime?               @db.DateTime(0)
+  company_id              String?                 @db.Char(36)
+  address                 String?                 @db.Text
+  branch_id               String?                 @db.Char(36)
+  job_ticket_links        job_ticket_links[]
+  job_visits              job_visits[]
+  branches                branches?               @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_jobs_branch")
+  sites                   sites?                  @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_jobs_company")
+
+  @@index([company_id], map: "fk_jobs_company")
+  @@index([branch_id], map: "idx_jobs_branch_id")
+}
+
+model notifications {
+  id          String    @id @db.Char(36)
+  user_id     String?   @db.VarChar(50)
+  type        String?   @db.VarChar(50)
+  title       String?   @db.VarChar(255)
+  message     String?   @db.Text
+  entity_type String?   @db.VarChar(50)
+  entity_id   String?   @db.VarChar(50)
+  is_read     Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model permissions {
+  id               Int                @id @default(autoincrement())
+  name             String?            @db.VarChar(255)
+  created_at       DateTime?          @default(now()) @db.Timestamp(0)
+  role_permissions role_permissions[]
+}
+
+model recurring_rules {
+  id                   String                    @id @db.Char(36)
+  booking_id           String                    @db.Char(36)
+  supervisor_id        Int?
+  team                 Json?
+  frequency            recurring_rules_frequency
+  interval_value       Int                       @default(1)
+  day_of_week          Int?
+  week_of_month        Int?                      @db.TinyInt
+  days_of_week         Json?
+  day_of_month         Int?
+  start_date           DateTime                  @db.Date
+  end_date             DateTime?                 @db.Date
+  last_generated_until DateTime?                 @db.Date
+  scheduled_time       DateTime?                 @db.Time(0)
+  bookings             bookings                  @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_recurring_rules_booking")
+
+  @@index([booking_id], map: "fk_recurring_rules_booking")
+}
+
+model role_permissions {
+  role_id       Int
+  permission_id Int
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_permission")
+  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role")
+
+  @@id([role_id, permission_id])
+  @@index([permission_id], map: "fk_role_permissions_permission")
+}
+
+model roles {
+  id               Int                @id @default(autoincrement())
+  name             String?            @db.VarChar(255)
+  created_at       DateTime?          @default(now()) @db.Timestamp(0)
+  role_permissions role_permissions[]
+  users            users[]
+}
+
+model sequences {
+  name  String @id @db.VarChar(50)
+  value Int
+}
+
+model sites {
+  id         String     @id @db.Char(36)
+  company_id String?    @db.Char(36)
+  branch_id  String?    @db.Char(36)
+  address    String?    @db.Text
+  city       String?    @db.VarChar(100)
+  state      String?    @db.VarChar(100)
+  is_active  Boolean?   @default(true)
+  created_at DateTime?  @default(now()) @db.DateTime(0)
+  updated_at DateTime?  @default(now()) @db.DateTime(0)
+  name       String?    @unique(map: "uniq_companies_code_site") @db.VarChar(255)
+  contacts   contacts[]
+  jobs       jobs[]
+  branches   branches?  @relation(fields: [branch_id], references: [id], map: "fk_companies_branch")
+
+  @@unique([company_id, name], map: "uniq_sites_company_name")
+  @@index([branch_id], map: "fk_companies_branch")
+  @@index([company_id], map: "idx_sites_company_id")
+}
+
+model supervisor_technicians {
+  id                                                String    @id @db.Char(36)
+  supervisor_id                                     BigInt
+  technician_id                                     BigInt    @unique(map: "uniq_supervisor_technician")
+  created_at                                        DateTime? @default(now()) @db.Timestamp(0)
+  users_supervisor_technicians_supervisor_idTousers users     @relation("supervisor_technicians_supervisor_idTousers", fields: [supervisor_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "supervisor_technicians_ibfk_1")
+  users_supervisor_technicians_technician_idTousers users     @relation("supervisor_technicians_technician_idTousers", fields: [technician_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "supervisor_technicians_ibfk_2")
+
+  @@unique([supervisor_id, technician_id], map: "unique_pair")
+}
+
+model supervisors {
+  id         String    @id @db.VarChar(50)
+  name       String    @db.VarChar(100)
+  phone      String?   @db.VarChar(20)
+  active     Boolean?  @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model ticket_attachments {
+  id                  String               @id @db.Char(36)
+  ticket_id           String               @db.Char(36)
+  message_id          String?              @db.Char(36)
+  object_key          String               @db.VarChar(255)
+  created_at          DateTime?            @default(now()) @db.DateTime(0)
+  job_tickets         job_tickets          @relation(fields: [ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "ticket_attachments_ibfk_1")
+  job_ticket_messages job_ticket_messages? @relation(fields: [message_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "ticket_attachments_ibfk_2")
+
+  @@index([message_id], map: "message_id")
+  @@index([ticket_id], map: "ticket_id")
+}
+
+model user_scopes {
+  id         Int                    @id @default(autoincrement())
+  user_id    BigInt
+  scope_type user_scopes_scope_type
+  scope_id   String?                @db.VarChar(36)
+  created_at DateTime?              @default(now()) @db.Timestamp(0)
+  users      users                  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_scopes_ibfk_1")
+
+  @@index([scope_type, scope_id], map: "scope_type")
+  @@index([user_id], map: "user_id")
+}
+
+model users {
+  id                                                                 BigInt                   @id @default(autoincrement())
+  name                                                               String                   @db.VarChar(100)
+  email                                                              String                   @unique(map: "email") @db.VarChar(150)
+  phone                                                              String?                  @db.VarChar(20)
+  password_hash                                                      String?                  @db.VarChar(255)
+  role                                                               String?                  @db.VarChar(50)
+  is_active                                                          Boolean?                 @default(true)
+  created_at                                                         DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at                                                         DateTime?                @default(now()) @db.Timestamp(0)
+  contact_id                                                         String?                  @db.Char(36)
+  invite_status                                                      users_invite_status?
+  invite_token                                                       String?                  @db.VarChar(255)
+  invite_expiry                                                      DateTime?                @db.DateTime(0)
+  branch_id                                                          String?                  @db.Char(36)
+  role_id                                                            Int
+  job_ticket_messages                                                job_ticket_messages[]
+  job_tickets                                                        job_tickets[]
+  supervisor_technicians_supervisor_technicians_supervisor_idTousers supervisor_technicians[] @relation("supervisor_technicians_supervisor_idTousers")
+  supervisor_technicians_supervisor_technicians_technician_idTousers supervisor_technicians?  @relation("supervisor_technicians_technician_idTousers")
+  user_scopes                                                        user_scopes[]
+  branches                                                           branches?                @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_users_branch")
+  roles                                                              roles                    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
+
+  @@index([branch_id], map: "fk_users_branch")
+  @@index([role_id], map: "fk_users_role")
+}
+
+model visit_technicians {
+  id            String    @id @db.Char(36)
+  visit_id      String    @db.Char(36)
+  technician_id BigInt
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([technician_id], map: "technician_id")
+  @@index([visit_id], map: "visit_id")
+}
+
+enum job_tickets_status {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum user_scopes_scope_type {
+  global
+  branch
+  company
+  site
+}
+
+enum job_tickets_priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum job_comments_type {
+  SYSTEM
+  USER
+}
+
+enum job_visits_status {
+  SCHEDULED
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  COMPLETED
+  CANCELED
+  MISSED
+}
+
+enum recurring_rules_frequency {
+  WEEKLY
+  MONTHLY
+  CUSTOM_DAYS
+}
+
+enum companies_type {
+  CORPORATE
+  INDIVIDUAL
+  RWA
+}
+
+enum jobs_status {
+  CREATED
+  NOT_STARTED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELED
+}
+
+enum jobs_priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum users_invite_status {
+  INVITED
+  ACTIVE
+}
+
+enum bookings_status {
+  ACTIVE
+  CLOSED
+  CANCELED
+}
+
+enum jobs_requested_by_type {
+  USER
+  CONTACT
+}
+
+enum jobs_approval_status {
+  PENDING
+  APPROVED
+  REJECTED
+}
