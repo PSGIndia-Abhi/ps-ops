@@ -44,7 +44,7 @@ function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
 async function createVisitController(req, res) {
   try {
     const { jobId } = req.params;
-    const { scheduled_date, scheduled_time, technician_ids } = req.body;
+    const { scheduled_date, scheduled_time, technician_ids, temporary_access_ids = [] } = req.body;
     const created_by_user_id = req.user?.id;
     const scheduledDateTime = normalizeScheduledDateTime(
       scheduled_date,
@@ -61,6 +61,32 @@ async function createVisitController(req, res) {
       technician_ids || [],
       created_by_user_id
     );
+
+    const normalizedTempIds = Array.from(
+      new Set((temporary_access_ids || []).map((id) => String(id).trim()).filter(Boolean))
+    );
+    if (normalizedTempIds.length) {
+      const placeholders = normalizedTempIds.map(() => "?").join(",");
+      const [tempRows] = await pool.query(
+        `SELECT id
+         FROM temporary_access
+         WHERE id IN (${placeholders})
+           AND job_id = ?
+           AND revoked_at IS NULL`,
+        [...normalizedTempIds, jobId]
+      );
+      if (tempRows.length !== normalizedTempIds.length) {
+        return res.status(400).json({ error: "Some temporary workers are invalid for this job or revoked" });
+      }
+
+      for (const tempAccessId of normalizedTempIds) {
+        await pool.query(
+          `INSERT INTO visit_temporary_access (id, visit_id, temp_access_id)
+           VALUES (?, ?, ?)`,
+          [uuid(), visitId, tempAccessId]
+        );
+      }
+    }
 
 
     res.json({
@@ -96,10 +122,14 @@ async function getJobVisits(req, res) {
         DATE_FORMAT(v.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
         v.notes,
         u.id AS technician_id,
-        u.name AS technician_name
+        u.name AS technician_name,
+        ta.id AS temp_access_id,
+        ta.worker_name AS temp_worker_name
       FROM job_visits v
       LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
       LEFT JOIN users u ON u.id = vt.technician_id
+      LEFT JOIN visit_temporary_access vta ON vta.visit_id = v.id
+      LEFT JOIN temporary_access ta ON ta.id = vta.temp_access_id
       WHERE v.job_id = ?
       ORDER BY v.scheduled_date IS NULL ASC, v.scheduled_date ASC, v.visit_number ASC
     `, [jobId]);
@@ -117,15 +147,29 @@ async function getJobVisits(req, res) {
           started_at: r.started_at,
           completed_at: r.completed_at,
           notes: r.notes,
-          technicians: []
+          technicians: [],
+          temporary_workers: []
         });
       }
 
       if (r.technician_id) {
-        visitMap.get(r.id).technicians.push({
-          id: r.technician_id,
-          name: r.technician_name
-        });
+        const existingTechs = visitMap.get(r.id).technicians;
+        if (!existingTechs.some((t) => String(t.id) === String(r.technician_id))) {
+          existingTechs.push({
+            id: r.technician_id,
+            name: r.technician_name
+          });
+        }
+      }
+
+      if (r.temp_access_id) {
+        const existing = visitMap.get(r.id).temporary_workers;
+        if (!existing.some((w) => String(w.id) === String(r.temp_access_id))) {
+          existing.push({
+            id: r.temp_access_id,
+            name: r.temp_worker_name || "Temporary Worker",
+          });
+        }
       }
 
     });
@@ -140,7 +184,7 @@ async function getJobVisits(req, res) {
 
 async function updateVisitTechnicians(req, res) {
   const { visitId } = req.params;
-  const { technician_ids } = req.body;
+  const { technician_ids, temporary_access_ids = [] } = req.body;
   const actorUserId = req.user?.id;
 
   const conn = await pool.getConnection();
@@ -149,8 +193,42 @@ async function updateVisitTechnicians(req, res) {
 
     await conn.beginTransaction();
 
+    const [[visit]] = await conn.query(
+      `SELECT id, job_id FROM job_visits WHERE id = ? LIMIT 1`,
+      [visitId]
+    );
+    if (!visit) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Visit not found" });
+    }
+
+    const normalizedTempIds = Array.from(
+      new Set((temporary_access_ids || []).map((id) => String(id).trim()).filter(Boolean))
+    );
+
+    if (normalizedTempIds.length) {
+      const placeholders = normalizedTempIds.map(() => "?").join(",");
+      const [tempRows] = await conn.query(
+        `SELECT id
+         FROM temporary_access
+         WHERE id IN (${placeholders})
+           AND job_id = ?
+           AND revoked_at IS NULL`,
+        [...normalizedTempIds, visit.job_id]
+      );
+      if (tempRows.length !== normalizedTempIds.length) {
+        await conn.rollback();
+        return res.status(400).json({ error: "Some temporary workers are invalid for this job or revoked" });
+      }
+    }
+
     await conn.query(
       `DELETE FROM visit_technicians WHERE visit_id = ?`,
+      [visitId]
+    );
+
+    await conn.query(
+      `DELETE FROM visit_temporary_access WHERE visit_id = ?`,
       [visitId]
     );
 
@@ -159,6 +237,14 @@ async function updateVisitTechnicians(req, res) {
         `INSERT INTO visit_technicians (id, visit_id, technician_id)
          VALUES (UUID(), ?, ?)`,
         [visitId, techId]
+      );
+    }
+
+    for (const tempAccessId of normalizedTempIds) {
+      await conn.query(
+        `INSERT INTO visit_temporary_access (id, visit_id, temp_access_id)
+         VALUES (?, ?, ?)`,
+        [uuid(), visitId, tempAccessId]
       );
     }
 

@@ -1,6 +1,5 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -164,18 +163,19 @@ model job_tickets {
 }
 
 model job_visits {
-  id                 String             @id @db.Char(36)
-  job_id             String             @db.Char(36)
-  visit_number       Int
-  scheduled_date     DateTime?          @db.DateTime(0)
-  status             job_visits_status?
-  started_at         DateTime?          @db.DateTime(0)
-  completed_at       DateTime?          @db.DateTime(0)
-  notes              String?            @db.Text
-  created_by_user_id String?            @db.Char(36)
-  created_at         DateTime           @default(now()) @db.DateTime(0)
-  updated_at         DateTime           @default(now()) @db.DateTime(0)
-  jobs               jobs               @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_visit_job")
+  id                     String                   @id @db.Char(36)
+  job_id                 String                   @db.Char(36)
+  visit_number           Int
+  scheduled_date         DateTime?                @db.DateTime(0)
+  status                 job_visits_status?
+  started_at             DateTime?                @db.DateTime(0)
+  completed_at           DateTime?                @db.DateTime(0)
+  notes                  String?                  @db.Text
+  created_by_user_id     String?                  @db.Char(36)
+  created_at             DateTime                 @default(now()) @db.DateTime(0)
+  updated_at             DateTime                 @default(now()) @db.DateTime(0)
+  jobs                   jobs                     @relation(fields: [job_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_visit_job")
+  visit_temporary_access visit_temporary_access[]
 
   @@unique([job_id, visit_number], map: "uniq_job_visit")
   @@index([scheduled_date], map: "idx_visits_date")
@@ -274,6 +274,7 @@ model roles {
   created_at       DateTime?          @default(now()) @db.Timestamp(0)
   role_permissions role_permissions[]
   users            users[]
+  temporary_access temporary_access[]
 }
 
 model sequences {
@@ -366,6 +367,7 @@ model users {
   supervisor_technicians_supervisor_technicians_supervisor_idTousers supervisor_technicians[] @relation("supervisor_technicians_supervisor_idTousers")
   supervisor_technicians_supervisor_technicians_technician_idTousers supervisor_technicians?  @relation("supervisor_technicians_technician_idTousers")
   user_scopes                                                        user_scopes[]
+  temporary_access                                                   temporary_access[]
   branches                                                           branches?                @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_users_branch")
   roles                                                              roles                    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
 
@@ -381,6 +383,47 @@ model visit_technicians {
 
   @@index([technician_id], map: "technician_id")
   @@index([visit_id], map: "visit_id")
+}
+
+model temporary_access {
+  id String @id @default(uuid()) @db.Char(36)
+
+  job_id             String @db.Char(36)
+  created_by_user_id BigInt
+  role_id            Int
+
+  worker_name  String? @db.VarChar(255)
+  phone_number String? @db.VarChar(20)
+
+  otp_hash String @db.VarChar(255)
+
+  expires_at DateTime @db.DateTime(0)
+
+  used_at    DateTime? @db.DateTime(0)
+  revoked_at DateTime? @db.DateTime(0)
+
+  created_at DateTime @default(now()) @db.DateTime(0)
+
+  created_by_user users @relation(fields: [created_by_user_id], references: [id], onDelete: Cascade)
+
+  roles                  roles                    @relation(fields: [role_id], references: [id], onDelete: Restrict)
+  visit_temporary_access visit_temporary_access[]
+
+  @@index([job_id], map: "idx_temp_job")
+  @@index([phone_number], map: "idx_temp_phone")
+}
+
+model visit_temporary_access {
+  id               String           @id @db.Char(36)
+  visit_id         String           @db.Char(36)
+  temp_access_id   String           @db.Char(36)
+  created_at       DateTime         @default(now()) @db.DateTime(0)
+  job_visits       job_visits       @relation(fields: [visit_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_visit_temp_access_visit")
+  temporary_access temporary_access @relation(fields: [temp_access_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_visit_temp_access_temp_access")
+
+  @@unique([visit_id, temp_access_id], map: "uniq_visit_temp_access")
+  @@index([visit_id], map: "idx_visit_temp_access_visit")
+  @@index([temp_access_id], map: "idx_visit_temp_access_temp")
 }
 
 enum job_tickets_status {

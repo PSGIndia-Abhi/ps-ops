@@ -109,6 +109,57 @@ async function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded?.token_type === "temporary_worker" && decoded?.temp_access_id) {
+      const [[temporaryAccess]] = await pool.query(
+        `SELECT ta.id, ta.job_id, ta.role_id, ta.worker_name, ta.phone_number, ta.expires_at, ta.used_at, ta.revoked_at, r.name AS role_name
+         FROM temporary_access ta
+         JOIN roles r ON r.id = ta.role_id
+         WHERE ta.id = ?
+         LIMIT 1`,
+        [decoded.temp_access_id]
+      );
+
+      if (!temporaryAccess) {
+        return res.status(401).json({ error: "Temporary access not found" });
+      }
+
+      if (temporaryAccess.revoked_at) {
+        return res.status(401).json({ error: "Temporary access revoked" });
+      }
+
+      if (!temporaryAccess.used_at) {
+        return res.status(401).json({ error: "Temporary access not activated" });
+      }
+
+      if (new Date(temporaryAccess.expires_at) < new Date()) {
+        return res.status(401).json({ error: "Temporary access expired" });
+      }
+
+      const [permissions] = await pool.query(
+        `
+        SELECT p.name
+        FROM role_permissions rp
+        JOIN permissions p ON p.id = rp.permission_id
+        WHERE rp.role_id = ?
+        `,
+        [temporaryAccess.role_id]
+      );
+
+      req.user = {
+        id: null,
+        role: temporaryAccess.role_name,
+        role_id: temporaryAccess.role_id,
+        permissions: permissions.map((p) => p.name),
+        scopes: [],
+        is_temporary_worker: true,
+        temp_access_id: temporaryAccess.id,
+        temp_access_job_id: temporaryAccess.job_id,
+        temp_worker_name: temporaryAccess.worker_name || null,
+        temp_worker_phone: temporaryAccess.phone_number || null,
+      };
+
+      return next();
+    }
 
     const [[user]] = await pool.query(
       `SELECT u.id, u.role_id, r.name AS role_name

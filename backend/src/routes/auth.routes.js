@@ -5,6 +5,28 @@ const { sendOTPEmail } = require("../utils/mailer");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const auth = require("../middleware/auth.middleware");
+const { allowRoles } = require("../middleware/roleMiddleware");
+const { v4: uuid } = require("uuid");
+
+async function ensureTemporaryAccessIssuerCanManageJob(req, job) {
+  if (!job) return false;
+
+  if (req.user.role === "admin") return true;
+
+  if (req.user.role === "supervisor") {
+    return String(job.supervisor_id || "") === String(req.user.id || "");
+  }
+
+  if (req.user.role === "branch_admin") {
+    const [[me]] = await pool.query(
+      `SELECT branch_id FROM users WHERE id = ? LIMIT 1`,
+      [req.user.id]
+    );
+    return !!me?.branch_id && String(me.branch_id) === String(job.branch_id || "");
+  }
+
+  return false;
+}
 
 // --------------------
 // LOGIN 
@@ -80,8 +102,245 @@ LIMIT 1
     console.error("Login error:", err);
     res.status(500).json({ error: "Login failed" });
   }
+});
 
+router.post(
+  "/temporary-access/send-otp",
+  auth,
+  allowRoles("admin", "supervisor", "branch_admin"),
+  async (req, res) => {
+    const { job_id, phone_number, worker_name } = req.body || {};
 
+    if (!job_id || !phone_number) {
+      return res.status(400).json({ error: "job_id and phone_number are required" });
+    }
+
+    try {
+      const [[job]] = await pool.query(
+        `SELECT id, supervisor_id, branch_id FROM jobs WHERE id = ? LIMIT 1`,
+        [job_id]
+      );
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      const allowed = await ensureTemporaryAccessIssuerCanManageJob(req, job);
+      if (!allowed) {
+        return res.status(403).json({ error: "Forbidden: you cannot manage temporary access for this job" });
+      }
+
+      if (req.user.role === "branch_admin" && !job.branch_id) {
+        return res.status(400).json({ error: "Job must be assigned to your branch" });
+      }
+
+      const [[temporaryWorkerRole]] = await pool.query(
+        `SELECT id, name FROM roles WHERE name = 'temporary_worker' LIMIT 1`
+      );
+      if (!temporaryWorkerRole) {
+        return res.status(500).json({ error: "temporary_worker role not found" });
+      }
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpHash = await bcrypt.hash(otp, 10);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const accessId = uuid();
+
+      await pool.query(
+        `INSERT INTO temporary_access
+          (id, job_id, created_by_user_id, role_id, worker_name, phone_number, otp_hash, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          accessId,
+          job_id,
+          req.user.id,
+          temporaryWorkerRole.id,
+          worker_name || null,
+          phone_number,
+          otpHash,
+          expiresAt,
+        ]
+      );
+
+      const response = {
+        success: true,
+        access_id: accessId,
+        expires_at: expiresAt.toISOString(),
+      };
+      if (process.env.NODE_ENV !== "production") {
+        response.otp = otp;
+      }
+
+      return res.json(response);
+    } catch (err) {
+      console.error("Temporary access OTP generation failed:", err);
+      return res.status(500).json({ error: "Failed to generate temporary access OTP" });
+    }
+  }
+);
+
+router.get(
+  "/temporary-access",
+  auth,
+  allowRoles("admin", "supervisor", "branch_admin"),
+  async (req, res) => {
+    const { job_id } = req.query || {};
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    try {
+      const [[job]] = await pool.query(
+        `SELECT id, supervisor_id, branch_id FROM jobs WHERE id = ? LIMIT 1`,
+        [job_id]
+      );
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      const allowed = await ensureTemporaryAccessIssuerCanManageJob(req, job);
+      if (!allowed) {
+        return res.status(403).json({ error: "Forbidden: you cannot view temporary access for this job" });
+      }
+
+      const [rows] = await pool.query(
+        `SELECT
+           ta.id,
+           ta.job_id,
+           ta.worker_name,
+           ta.phone_number,
+           ta.expires_at,
+           ta.used_at,
+           ta.revoked_at,
+           ta.created_at,
+           ta.created_by_user_id,
+           u.name AS created_by_name
+         FROM temporary_access ta
+         LEFT JOIN users u ON u.id = ta.created_by_user_id
+         WHERE ta.job_id = ?
+         ORDER BY ta.created_at DESC`,
+        [job_id]
+      );
+
+      return res.json(rows);
+    } catch (err) {
+      console.error("Failed to list temporary access:", err);
+      return res.status(500).json({ error: "Failed to fetch temporary access records" });
+    }
+  }
+);
+
+router.patch(
+  "/temporary-access/:accessId/revoke",
+  auth,
+  allowRoles("admin", "supervisor", "branch_admin"),
+  async (req, res) => {
+    const { accessId } = req.params;
+    if (!accessId) {
+      return res.status(400).json({ error: "accessId is required" });
+    }
+
+    try {
+      const [[record]] = await pool.query(
+        `SELECT id, job_id, revoked_at
+         FROM temporary_access
+         WHERE id = ?
+         LIMIT 1`,
+        [accessId]
+      );
+      if (!record) {
+        return res.status(404).json({ error: "Temporary access not found" });
+      }
+
+      const [[job]] = await pool.query(
+        `SELECT id, supervisor_id, branch_id FROM jobs WHERE id = ? LIMIT 1`,
+        [record.job_id]
+      );
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+      const allowed = await ensureTemporaryAccessIssuerCanManageJob(req, job);
+      if (!allowed) {
+        return res.status(403).json({ error: "Forbidden: you cannot revoke this temporary access" });
+      }
+
+      if (record.revoked_at) {
+        return res.json({ success: true, already_revoked: true });
+      }
+
+      await pool.query(
+        `UPDATE temporary_access
+         SET revoked_at = NOW()
+         WHERE id = ?`,
+        [accessId]
+      );
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error("Failed to revoke temporary access:", err);
+      return res.status(500).json({ error: "Failed to revoke temporary access" });
+    }
+  }
+);
+
+router.post("/temporary-access/verify-otp", async (req, res) => {
+  const { access_id, otp } = req.body || {};
+  if (!access_id || !otp) {
+    return res.status(400).json({ error: "access_id and otp are required" });
+  }
+
+  try {
+    const [[record]] = await pool.query(
+      `SELECT ta.id, ta.job_id, ta.role_id, ta.otp_hash, ta.expires_at, ta.used_at, ta.revoked_at, r.name AS role_name
+       FROM temporary_access ta
+       JOIN roles r ON r.id = ta.role_id
+       WHERE ta.id = ?
+       LIMIT 1`,
+      [access_id]
+    );
+
+    if (!record || record.revoked_at || record.used_at) {
+      return res.status(400).json({ error: "Invalid or already used temporary access" });
+    }
+    if (new Date(record.expires_at) < new Date()) {
+      return res.status(400).json({ error: "OTP expired" });
+    }
+
+    const valid = await bcrypt.compare(String(otp), record.otp_hash);
+    if (!valid) {
+      return res.status(400).json({ error: "Invalid OTP" });
+    }
+
+    await pool.query(
+      `UPDATE temporary_access
+       SET used_at = NOW()
+       WHERE id = ? AND used_at IS NULL`,
+      [record.id]
+    );
+
+    const ttlSeconds = Math.max(
+      1,
+      Math.floor((new Date(record.expires_at).getTime() - Date.now()) / 1000)
+    );
+    const token = jwt.sign(
+      {
+        token_type: "temporary_worker",
+        temp_access_id: record.id,
+        role: record.role_name,
+        job_id: record.job_id,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: ttlSeconds }
+    );
+
+    return res.json({
+      success: true,
+      token,
+      role: record.role_name,
+      job_id: record.job_id,
+      expires_at: new Date(record.expires_at).toISOString(),
+    });
+  } catch (err) {
+    console.error("Temporary access OTP verification failed:", err);
+    return res.status(500).json({ error: "Failed to verify temporary access OTP" });
+  }
 });
 
 // --------------------

@@ -103,6 +103,10 @@ const resolveJobBranchForAccess = async (executor, job) => {
 };
 
 const canAccessJob = async (executor, user, jobId) => {
+  if (user.is_temporary_worker) {
+    return String(user.temp_access_job_id) === String(jobId);
+  }
+
   const branchId = user.role === "admin"
     ? null
     : await getUserBranchId(executor, user.id);
@@ -256,7 +260,7 @@ router.get(
   "/",
   auth,
   requirePermission(PERMISSIONS.VIEW_JOB),
-  
+
   async (req, res) => {
     try {
 
@@ -264,20 +268,20 @@ router.get(
       const params = [];
       //
       const scope = buildScopeFilter(req.user, {
-  branch: "j.branch_id",
-  company: "s.company_id",
-  site: "j.company_id"
-});
+        branch: "j.branch_id",
+        company: "s.company_id",
+        site: "j.company_id"
+      });
 
-if (scope.forbidden) {
-  return res.status(403).json({ error: "No scope assigned" });
-}
+      if (scope.forbidden) {
+        return res.status(403).json({ error: "No scope assigned" });
+      }
 
-if (scope.condition) {
-  conditions.push(scope.condition);
-  params.push(...scope.params);
-}
-     
+      if (scope.condition) {
+        conditions.push(scope.condition);
+        params.push(...scope.params);
+      }
+
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const [rows] = await pool.query(
@@ -390,15 +394,17 @@ if (scope.condition) {
             }
             : null,
 
-          requestedBy: row.contact_id
-            ? {
-              id: row.contact_id,
-              name: row.contact_name,
-              phone: row.contact_phone,
-              email: row.contact_email,
-              company: row.company_name,
-            }
-            : null,
+          requestedBy: req.user.is_temporary_worker
+            ? null
+            : row.contact_id
+              ? {
+                id: row.contact_id,
+                name: row.contact_name,
+                phone: row.contact_phone,
+                email: row.contact_email,
+                company: row.company_name,
+              }
+              : null,
 
           teamIds,
           team: [],
@@ -583,6 +589,20 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
       [job.booking_id]
     );
 
+    const [tempWorkers] = await pool.query(
+      `SELECT
+         id,
+         worker_name,
+         phone_number,
+         expires_at,
+         used_at,
+         revoked_at
+       FROM temporary_access
+       WHERE job_id = ?
+       ORDER BY created_at DESC`,
+      [job.id]
+    );
+
     res.json({
       id: job.id,
       code: job.code,
@@ -603,25 +623,37 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
         ? { id: job.supervisor_id, name: job.supervisor_name }
         : null,
 
-      requestedBy: job.contact_id
-        ? {
-          id: job.contact_id,
-          name: job.contact_name,
-          phone: job.contact_phone,
-          email: job.contact_email,
-          company: job.company_id
-            ? {
-              id: job.company_id,
-              code: job.company_code,
-              name: job.company_name,
-              type: job.company_type,
-              site: job.company_site || null,
-            }
-            : null,
-        }
-        : null,
+      requestedBy: req.user.is_temporary_worker
+        ? null
+        : job.contact_id
+          ? {
+            id: job.contact_id,
+            name: job.contact_name,
+            phone: job.contact_phone,
+            email: job.contact_email,
+            company: job.company_id
+              ? {
+                id: job.company_id,
+                code: job.company_code,
+                name: job.company_name,
+                type: job.company_type,
+                site: job.company_site || null,
+              }
+              : null,
+          }
+          : null,
 
       team: teamMembers,
+      temporary_workers: req.user.is_temporary_worker
+        ? []
+        : tempWorkers.map((w) => ({
+          id: w.id,
+          name: w.worker_name || "Temporary Worker",
+          phone_number: w.phone_number || null,
+          expires_at: w.expires_at,
+          used_at: w.used_at,
+          revoked_at: w.revoked_at,
+        })),
       has_recurring: !!recurringRow,
 
     });
@@ -651,7 +683,18 @@ router.get("/:jobId/history", auth, requirePermission(PERMISSIONS.VIEW_JOB), asy
         h.metadata,
         h.created_at,
         h.visible_to_client,
-        u.name              AS created_by,
+        COALESCE(
+  u.name,
+  CASE
+    WHEN JSON_UNQUOTE(JSON_EXTRACT(h.metadata, '$.temp_worker_name')) IS NOT NULL
+      THEN JSON_UNQUOTE(JSON_EXTRACT(h.metadata, '$.temp_worker_name'))
+    ELSE NULL
+  END
+) AS created_by,
+        CASE
+          WHEN JSON_EXTRACT(h.metadata, '$.is_temporary_worker') = true THEN 1
+          ELSE 0
+        END                 AS is_temporary_worker_comment,
 
         a.id                AS attachment_id,
         a.type              AS attachment_type,
@@ -680,6 +723,7 @@ router.get("/:jobId/history", auth, requirePermission(PERMISSIONS.VIEW_JOB), asy
           metadata: row.metadata,
           created_at: row.created_at,
           created_by: row.created_by,
+          is_temporary_worker_comment: !!row.is_temporary_worker_comment,
           visible_to_client: !!row.visible_to_client, //client things :)
           attachments: [],
         };
@@ -707,14 +751,17 @@ router.get("/:jobId/history", auth, requirePermission(PERMISSIONS.VIEW_JOB), asy
 router.post("/:jobId/comments", auth, requirePermission(PERMISSIONS.ADD_JOB_COMMENT), async (req, res) => {
   const { jobId } = req.params;
   const { message, visible_to_client } = req.body;
-  const created_by_user_id = req.user.id;
+  const created_by_user_id = req.user.is_temporary_worker ? null : req.user.id;
+  const metadata = req.user.is_temporary_worker
+    ? JSON.stringify({
+      is_temporary_worker: true,
+      temp_access_id: req.user.temp_access_id || null,
+      temp_worker_name: req.user.temp_worker_name || "Temporary Worker",
+    })
+    : null;
 
   if (!message?.trim()) {
     return res.status(400).json({ error: "Message is required" });
-  }
-
-  if (!created_by_user_id) {
-    return res.status(400).json({ error: "created_by_user_id is required" });
   }
 
   try {
@@ -739,16 +786,18 @@ router.post("/:jobId/comments", auth, requirePermission(PERMISSIONS.ADD_JOB_COMM
         job_id,
         action,
         message,
+        metadata,
         visible_to_client,
         created_by_user_id,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         id,
         jobId,
         "COMMENT",
         message,
+        metadata,
         visible_to_client ? 1 : 0,
         created_by_user_id
       ]
@@ -935,7 +984,7 @@ router.patch("/:id/status", auth, requirePermission(PERMISSIONS.UPDATE_JOB_STATU
         [newStatus, jobId]
       );
 
-      
+
 
     } else {
 
