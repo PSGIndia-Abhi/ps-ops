@@ -8,6 +8,7 @@ export default function JobHeader({ job, setIsAssignOpen }) {
 
   const role = localStorage.getItem("role");
   const canAssign = role !== "technician";
+  const canViewRequester = role !== "technician" && role !== "temporary_worker";
 
   const {
     title,
@@ -43,7 +44,7 @@ export default function JobHeader({ job, setIsAssignOpen }) {
         <div className="job-people-row">
 
           {/* REQUESTED BY */}
-          {role !== "technician" && (
+          {canViewRequester && (
             <div className="job-person">
             <span className="label">Requested By:</span>
 

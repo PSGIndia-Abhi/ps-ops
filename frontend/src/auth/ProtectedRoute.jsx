@@ -42,6 +42,8 @@ export default function ProtectedRoute({ children, allowedRoles }) {
         return <Navigate to="/client" replace />;
       case "branch_admin":
         return <Navigate to="/admin" replace />;
+      case "temporary_worker":
+        return <Navigate to="/temp" replace />;
       default:
         return <Navigate to="/login" replace />;
     }

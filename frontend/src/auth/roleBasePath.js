@@ -9,8 +9,10 @@ export const roleBasePath = role => {
       return "/technician";
     case "branch_admin":
       return "/admin";
-      case "client":
-        return "/client";
+    case "client":
+      return "/client";
+    case "temporary_worker":
+      return "/temp";
     default:
       return "/login";
   }

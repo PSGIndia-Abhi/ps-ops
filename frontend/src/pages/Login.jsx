@@ -150,6 +150,12 @@ export default function Login() {
                 Sign up
               </a>
             </div>
+            <div style={{ marginTop: "8px", fontSize: "14px" }}>
+              Temporary worker?{" "}
+              <a href="/temp-access" style={{ color: "#2563eb", fontWeight: 500 }}>
+                Enter OTP
+              </a>
+            </div>
 
             <p
               style={{ cursor: "pointer", marginTop: 10 }}

@@ -214,7 +214,10 @@ async function changeVisibility(itemId, newValue) {
 
             <div className="timeline-content">
               <div className="timeline-meta">
-                <strong className="timeline-author">{item.created_by || "System"}</strong>
+                <strong className="timeline-author">
+                  {item.created_by || "System"}
+                  {item.is_temporary_worker_comment ? " (One Time Access)" : ""}
+                </strong>
                 <span className="timeline-date">
                   {formatDateTime(item.created_at)}
                 </span>

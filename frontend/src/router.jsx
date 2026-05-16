@@ -11,6 +11,7 @@ import SupervisorDashboard from "./pages/SupervisorDashboard";
 import TechnicianDashboard from "./pages/TechnicianDashboard";
 import SupervisorTeamMonitor from "./pages/SupervisorTeamMonitor";
 import Login from "./pages/Login";
+import TemporaryAccessLogin from "./pages/TemporaryAccessLogin";
 import Signup from "./pages/signup";
 import AuthRedirect from "./auth/AuthRedirect";
 import Terms from "./pages/terms";
@@ -27,6 +28,7 @@ import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
 import ContactsPage from "./pages/ContactsPage";
+import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -138,6 +140,26 @@ const router = createBrowserRouter([
   {
     path: "/login",
     element: <Login />,
+  },
+  {
+    path: "/temp-access",
+    element: <TemporaryAccessLogin />,
+  },
+  {
+    path: "/temp",
+    element: (
+      <ProtectedRoute allowedRoles={["temporary_worker"]}>
+        <TemporaryWorkerHome />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/temp/jobs/:jobId",
+    element: (
+      <ProtectedRoute allowedRoles={["temporary_worker"]}>
+        <JobPage />
+      </ProtectedRoute>
+    ),
   },
 
   {
