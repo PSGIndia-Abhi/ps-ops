@@ -162,7 +162,7 @@ async function authMiddleware(req, res, next) {
     }
 
     const [[user]] = await pool.query(
-      `SELECT u.id, u.role_id, r.name AS role_name
+      `SELECT u.id, u.role_id, u.branch_id, r.name AS role_name
        FROM users u
        LEFT JOIN roles r ON u.role_id = r.id
        WHERE u.id = ?`,
@@ -192,12 +192,17 @@ async function authMiddleware(req, res, next) {
       [user.id]
     );
 
+    const normalizedScopes = Array.isArray(scopes) ? [...scopes] : [];
+    if (normalizedScopes.length === 0 && user.branch_id) {
+      normalizedScopes.push({ scope_type: "branch", scope_id: user.branch_id });
+    }
+
     req.user = {
       id: user.id,
       role: user.role_name,
       role_id: user.role_id,
       permissions: permissions.map(p => p.name),
-      scopes
+      scopes: normalizedScopes
     };
 
     
