@@ -145,8 +145,8 @@ router.post("/:id/scopes", auth, requirePermission(PERMISSIONS.UPDATE_USER), asy
 
       for (const item of deduped) {
         await connection.query(
-          `INSERT INTO user_scopes (id, user_id, scope_type, scope_id, created_at)
-           VALUES (UUID(), ?, ?, ?, NOW())`,
+          `INSERT INTO user_scopes (user_id, scope_type, scope_id, created_at)
+           VALUES (?, ?, ?, NOW())`,
           [userId, item.scope_type, item.scope_id]
         );
       }
