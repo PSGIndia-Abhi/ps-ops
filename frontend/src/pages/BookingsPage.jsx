@@ -25,6 +25,7 @@ export default function BookingsPage() {
   const [dateError, setDateError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [archivingJobId, setArchivingJobId] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -55,6 +56,31 @@ export default function BookingsPage() {
       isMounted = false;
     };
   }, []);
+
+  async function handleToggleArchive(jobId, archived) {
+    try {
+      setArchivingJobId(String(jobId));
+      const res = await apiFetch(`/api/jobs/${jobId}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ archived }),
+      });
+      if (!res?.ok) throw new Error("Failed to update archive state");
+
+      setBookings((prev) =>
+        prev.map((booking) => ({
+          ...booking,
+          jobs: (booking.jobs || []).map((job) =>
+            String(job.id) === String(jobId) ? { ...job, is_archived: archived } : job
+          ),
+        }))
+      );
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to update archive state");
+    } finally {
+      setArchivingJobId("");
+    }
+  }
 
   const hasFilters = Boolean(
     filters.companyId || filters.contactId || filters.startDate || filters.endDate || filters.search
@@ -381,6 +407,20 @@ export default function BookingsPage() {
                         <div className={`job-status status-${job.status}`}>
                           {job.status}
                         </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleArchive(job.id, !job.is_archived);
+                          }}
+                          disabled={archivingJobId === String(job.id)}
+                        >
+                          {archivingJobId === String(job.id)
+                            ? "Saving..."
+                            : job.is_archived
+                              ? "Unarchive"
+                              : "Archive"}
+                        </button>
                       </div>
                     ))}
                   {(booking.jobs || []).length === 0 && (
