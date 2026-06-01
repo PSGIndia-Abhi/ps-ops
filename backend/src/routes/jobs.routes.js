@@ -287,6 +287,7 @@ router.get(
         conditions.push(scope.condition);
         params.push(...scope.params);
       }
+      conditions.push("COALESCE(j.is_archived, 0) = 0");
 
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -307,6 +308,7 @@ router.get(
           j.created_at,
           j.supervisor_id,
           j.team,
+          COALESCE(j.is_archived, 0) AS is_archived,
           v.next_visit_date,
 
           -- Supervisor
@@ -413,6 +415,7 @@ router.get(
               : null,
 
           teamIds,
+          is_archived: Boolean(row.is_archived),
           team: [],
           history: [],
           attachments: [],
@@ -679,6 +682,49 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
   } catch (err) {
     console.error("Failed to fetch job:", err);
     res.status(500).json({ error: "Failed to fetch job" });
+  }
+});
+
+// POST /api/jobs/:jobId/archive
+router.post("/:jobId/archive", auth, requirePermission(PERMISSIONS.UPDATE_JOB), async (req, res) => {
+  const { jobId } = req.params;
+  const shouldArchive = req.body?.archived !== false;
+
+  const connection = await pool.getConnection();
+  try {
+    if (!(await ensureJobAccess(req, res, connection, jobId))) return;
+
+    const [result] = await connection.query(
+      `UPDATE jobs
+       SET is_archived = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [shouldArchive ? 1 : 0, jobId]
+    );
+
+    if (!result?.affectedRows) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    await connection.query(
+      `INSERT INTO job_history
+       (id, job_id, action, message, metadata, created_by_user_id, visible_to_client, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
+      [
+        uuid(),
+        jobId,
+        shouldArchive ? "ARCHIVED" : "UNARCHIVED",
+        shouldArchive ? "Job archived" : "Job unarchived",
+        JSON.stringify({ archived: shouldArchive }),
+        req.user?.id || null,
+      ]
+    );
+
+    res.json({ success: true, id: jobId, archived: shouldArchive });
+  } catch (err) {
+    console.error("Failed to update archive state:", err);
+    res.status(500).json({ error: "Failed to update archive state" });
+  } finally {
+    connection.release();
   }
 });
 
@@ -2070,6 +2116,7 @@ router.get(
 
         WHERE j.requested_by_contact_id = ?
           AND j.branch_id = ?
+          AND COALESCE(j.is_archived, 0) = 0
         ORDER BY j.created_at DESC
         `,
         [contactId, branchId]

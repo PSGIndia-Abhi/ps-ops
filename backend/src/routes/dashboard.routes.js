@@ -7,7 +7,7 @@ const PERMISSIONS = require("../access/permissions");
 
 router.get("/summary", auth, requirePermission(PERMISSIONS.VIEW_ANALYTICS), async (req, res) => {
   try {
-    let where = "WHERE 1=1";
+    let where = "WHERE 1=1 AND COALESCE(j.is_archived, 0) = 0";
     let params = [];
 
     
