@@ -8,6 +8,12 @@ const {
   notifyVisitSubmitted,
 } = require("../services/notifications.service");
 
+function isMissingTableError(err, tableName) {
+  if (!err) return false;
+  const raw = `${err.code || ""} ${err.sqlMessage || err.message || ""}`;
+  return raw.includes("ER_NO_SUCH_TABLE") && raw.includes(tableName);
+}
+
 function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
   const rawDate = typeof scheduledDate === "string"
     ? scheduledDate.trim()
@@ -111,28 +117,57 @@ async function getJobVisits(req, res) {
   const { jobId } = req.params;
 
   try {
-
-    const [rows] = await pool.query(`
-      SELECT
-        v.id,
-        v.visit_number,
-        DATE_FORMAT(v.scheduled_date, '%Y-%m-%d %H:%i:%s') AS scheduled_date,
-        v.status,
-        DATE_FORMAT(v.started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
-        DATE_FORMAT(v.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
-        v.notes,
-        u.id AS technician_id,
-        u.name AS technician_name,
-        ta.id AS temp_access_id,
-        ta.worker_name AS temp_worker_name
-      FROM job_visits v
-      LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
-      LEFT JOIN users u ON u.id = vt.technician_id
-      LEFT JOIN visit_temporary_access vta ON vta.visit_id = v.id
-      LEFT JOIN temporary_access ta ON ta.id = vta.temp_access_id
-      WHERE v.job_id = ?
-      ORDER BY v.scheduled_date IS NULL ASC, v.scheduled_date ASC, v.visit_number ASC
-    `, [jobId]);
+    let rows;
+    try {
+      [rows] = await pool.query(`
+        SELECT
+          v.id,
+          v.visit_number,
+          DATE_FORMAT(v.scheduled_date, '%Y-%m-%d %H:%i:%s') AS scheduled_date,
+          v.status,
+          DATE_FORMAT(v.started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+          DATE_FORMAT(v.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+          v.notes,
+          u.id AS technician_id,
+          u.name AS technician_name,
+          ta.id AS temp_access_id,
+          ta.worker_name AS temp_worker_name
+        FROM job_visits v
+        LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
+        LEFT JOIN users u ON u.id = vt.technician_id
+        LEFT JOIN visit_temporary_access vta ON vta.visit_id = v.id
+        LEFT JOIN temporary_access ta ON ta.id = vta.temp_access_id
+        WHERE v.job_id = ?
+        ORDER BY v.scheduled_date IS NULL ASC, v.scheduled_date ASC, v.visit_number ASC
+      `, [jobId]);
+    } catch (err) {
+      if (
+        isMissingTableError(err, "visit_temporary_access") ||
+        isMissingTableError(err, "temporary_access")
+      ) {
+        [rows] = await pool.query(`
+          SELECT
+            v.id,
+            v.visit_number,
+            DATE_FORMAT(v.scheduled_date, '%Y-%m-%d %H:%i:%s') AS scheduled_date,
+            v.status,
+            DATE_FORMAT(v.started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+            DATE_FORMAT(v.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+            v.notes,
+            u.id AS technician_id,
+            u.name AS technician_name,
+            NULL AS temp_access_id,
+            NULL AS temp_worker_name
+          FROM job_visits v
+          LEFT JOIN visit_technicians vt ON vt.visit_id = v.id
+          LEFT JOIN users u ON u.id = vt.technician_id
+          WHERE v.job_id = ?
+          ORDER BY v.scheduled_date IS NULL ASC, v.scheduled_date ASC, v.visit_number ASC
+        `, [jobId]);
+      } else {
+        throw err;
+      }
+    }
 
     const visitMap = new Map();
 

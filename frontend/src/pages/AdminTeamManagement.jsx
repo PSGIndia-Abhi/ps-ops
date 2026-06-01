@@ -44,7 +44,10 @@ export default function AdminTeamManagement() {
   const [rolesLoading, setRolesLoading] = useState(true);
   const [error, setError] = useState(null);
   const [branches, setBranches] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [sites, setSites] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(true);
+  const [loadingScopeData, setLoadingScopeData] = useState(true);
   const { user } = useMe();
   
   // Tab States
@@ -137,6 +140,40 @@ export default function AdminTeamManagement() {
   }, []);
 
   useEffect(() => {
+    async function loadScopeData() {
+      try {
+        setLoadingScopeData(true);
+        const [companiesRes, sitesRes] = await Promise.all([
+          apiFetch("/api/companies"),
+          apiFetch("/api/sites"),
+        ]);
+
+        if (!companiesRes?.ok) {
+          throw new Error("Failed to load companies");
+        }
+        if (!sitesRes?.ok) {
+          throw new Error("Failed to load sites");
+        }
+
+        const companiesData = await companiesRes.json();
+        const sitesData = await sitesRes.json();
+
+        setCompanies(Array.isArray(companiesData) ? companiesData : []);
+        setSites(Array.isArray(sitesData) ? sitesData : []);
+      } catch (err) {
+        console.error(err);
+        setCompanies([]);
+        setSites([]);
+        setError(err.message || "Failed to load scope data");
+      } finally {
+        setLoadingScopeData(false);
+      }
+    }
+
+    loadScopeData();
+  }, []);
+
+  useEffect(() => {
     loadRolesData();
   }, []);
 
@@ -176,6 +213,9 @@ export default function AdminTeamManagement() {
   setError={setError}
   branches={branches}
   loadingBranches={loadingBranches}
+  companies={companies}
+  sites={sites}
+  loadingScopeData={loadingScopeData}
   role={user?.role}
   roles={roles}
   users={users}

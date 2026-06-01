@@ -23,6 +23,12 @@ const isValidJobId = (jobId) => {
   return isNumeric || isUUID;
 };
 
+const isMissingTableError = (err, tableName) => {
+  if (!err) return false;
+  const raw = `${err.code || ""} ${err.sqlMessage || err.message || ""}`;
+  return raw.includes("ER_NO_SUCH_TABLE") && raw.includes(tableName);
+};
+
 const parseAssignedIds = (value) => {
   if (!value) return [];
   try {
@@ -584,24 +590,36 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
 
 
 
-    const [[recurringRow]] = await pool.query(
-      `SELECT id FROM recurring_rules WHERE booking_id = ? LIMIT 1`,
-      [job.booking_id]
-    );
+    let recurringRow = null;
+    try {
+      const [rows] = await pool.query(
+        `SELECT id FROM recurring_rules WHERE booking_id = ? LIMIT 1`,
+        [job.booking_id]
+      );
+      recurringRow = rows?.[0] || null;
+    } catch (err) {
+      if (!isMissingTableError(err, "recurring_rules")) throw err;
+    }
 
-    const [tempWorkers] = await pool.query(
-      `SELECT
-         id,
-         worker_name,
-         phone_number,
-         expires_at,
-         used_at,
-         revoked_at
-       FROM temporary_access
-       WHERE job_id = ?
-       ORDER BY created_at DESC`,
-      [job.id]
-    );
+    let tempWorkers = [];
+    try {
+      const [rows] = await pool.query(
+        `SELECT
+           id,
+           worker_name,
+           phone_number,
+           expires_at,
+           used_at,
+           revoked_at
+         FROM temporary_access
+         WHERE job_id = ?
+         ORDER BY created_at DESC`,
+        [job.id]
+      );
+      tempWorkers = rows || [];
+    } catch (err) {
+      if (!isMissingTableError(err, "temporary_access")) throw err;
+    }
 
     res.json({
       id: job.id,

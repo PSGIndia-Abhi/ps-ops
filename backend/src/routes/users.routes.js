@@ -51,6 +51,121 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res)
   }
 });
 
+// GET /api/users/:id/scopes
+router.get("/:id/scopes", auth, requirePermission(PERMISSIONS.VIEW_USER), async (req, res) => {
+  const userId = req.params.id;
+  if (!userId) {
+    return res.status(400).json({ error: "User id is required" });
+  }
+
+  try {
+    const [[user]] = await pool.query(
+      "SELECT id, branch_id FROM users WHERE id = ? LIMIT 1",
+      [userId]
+    );
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const [scopes] = await pool.query(
+      `SELECT id, scope_type, scope_id
+       FROM user_scopes
+       WHERE user_id = ?
+       ORDER BY created_at ASC`,
+      [userId]
+    );
+
+    res.json({
+      user_id: userId,
+      scopes: Array.isArray(scopes) ? scopes : [],
+      fallback_branch_id: user.branch_id || null,
+    });
+  } catch (err) {
+    console.error("Error fetching user scopes:", err);
+    res.status(500).json({ error: "Failed to fetch user scopes" });
+  }
+});
+
+// POST /api/users/:id/scopes
+router.post("/:id/scopes", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
+  const userId = req.params.id;
+  const { scopes } = req.body || {};
+
+  if (!userId) {
+    return res.status(400).json({ error: "User id is required" });
+  }
+  if (!Array.isArray(scopes)) {
+    return res.status(400).json({ error: "scopes must be an array" });
+  }
+
+  const normalized = [];
+  for (const scope of scopes) {
+    const scopeType = String(scope?.scope_type || "").trim().toLowerCase();
+    const scopeId = scope?.scope_id ? String(scope.scope_id).trim() : null;
+
+    if (!["global", "branch", "company", "site"].includes(scopeType)) {
+      return res.status(400).json({ error: `Invalid scope_type: ${scopeType}` });
+    }
+    if (scopeType !== "global" && !scopeId) {
+      return res.status(400).json({ error: `${scopeType} scope requires scope_id` });
+    }
+    if (scopeType === "global" && scopeId) {
+      return res.status(400).json({ error: "global scope must not include scope_id" });
+    }
+
+    normalized.push({
+      scope_type: scopeType,
+      scope_id: scopeType === "global" ? null : scopeId,
+    });
+  }
+
+  try {
+    const [[user]] = await pool.query(
+      "SELECT id FROM users WHERE id = ? LIMIT 1",
+      [userId]
+    );
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const deduped = Array.from(
+      new Map(
+        normalized.map((item) => [
+          `${item.scope_type}:${item.scope_id || ""}`,
+          item,
+        ])
+      ).values()
+    );
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      await connection.query("DELETE FROM user_scopes WHERE user_id = ?", [userId]);
+
+      for (const item of deduped) {
+        await connection.query(
+          `INSERT INTO user_scopes (id, user_id, scope_type, scope_id, created_at)
+           VALUES (UUID(), ?, ?, ?, NOW())`,
+          [userId, item.scope_type, item.scope_id]
+        );
+      }
+
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+
+    res.json({ success: true, user_id: userId, scopes: deduped });
+  } catch (err) {
+    console.error("Error updating user scopes:", err);
+    res.status(500).json({ error: "Failed to update user scopes" });
+  }
+});
+
 // POST /api/users/:id/remove-admin
 router.post("/:id/remove-admin", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
   const userId = req.params.id;

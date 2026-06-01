@@ -8,6 +8,9 @@ export default function UsersTab({
   loadOverview,
   setError,
   branches,
+  companies = [],
+  sites = [],
+  loadingScopeData = false,
   loadingBranches,
   role,
   roles = [],
@@ -22,6 +25,10 @@ export default function UsersTab({
   const [promoteRoleId, setPromoteRoleId] = useState("");
   const [promoteBranchId, setPromoteBranchId] = useState("");
   const [promoting, setPromoting] = useState(false);
+  const [scopeUserId, setScopeUserId] = useState("");
+  const [scopeRows, setScopeRows] = useState([]);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [scopeSaving, setScopeSaving] = useState(false);
 
 //assign branch to technicians
     const [assignTechIds, setAssignTechIds] = useState([]);
@@ -109,6 +116,17 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
   const selectedPromoteRole = useMemo(
     () => assignableRoles.find((item) => String(item.id) === String(promoteRoleId)) || null,
     [assignableRoles, promoteRoleId]
+  );
+  const scopeTargetOptions = useMemo(
+    () => ({
+      branch: branches.map((item) => ({ id: item.id, label: item.name || item.id })),
+      company: companies.map((item) => ({ id: item.id, label: item.name || item.id })),
+      site: sites.map((item) => ({
+        id: item.id,
+        label: item.company_name ? `${item.company_name} - ${item.name || item.id}` : (item.name || item.id),
+      })),
+    }),
+    [branches, companies, sites]
   );
 
   useEffect(() => {
@@ -238,6 +256,100 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
       setError(err.message || "Failed to assign branch");
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function handleLoadUserScopes() {
+    if (!scopeUserId) {
+      setError("Select a user for scope management.");
+      return;
+    }
+    try {
+      setScopeLoading(true);
+      const res = await apiFetch(`/api/users/${scopeUserId}/scopes`);
+      if (!res?.ok) {
+        const data = await safeJson(res);
+        throw new Error(data?.error || "Failed to load user scopes");
+      }
+      const data = await res.json();
+      const rows = Array.isArray(data?.scopes)
+        ? data.scopes.map((item) => ({
+            scope_type: item.scope_type,
+            scope_id: item.scope_id || "",
+          }))
+        : [];
+      setScopeRows(rows);
+      setError(null);
+    } catch (err) {
+      console.error(err);
+      setScopeRows([]);
+      setError(err.message || "Failed to load user scopes");
+    } finally {
+      setScopeLoading(false);
+    }
+  }
+
+  function addScopeRow() {
+    setScopeRows((prev) => [...prev, { scope_type: "branch", scope_id: "" }]);
+  }
+
+  function removeScopeRow(index) {
+    setScopeRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateScopeRow(index, key, value) {
+    setScopeRows((prev) =>
+      prev.map((row, i) => {
+        if (i !== index) return row;
+        if (key === "scope_type") {
+          return {
+            scope_type: value,
+            scope_id: value === "global" ? "" : row.scope_id,
+          };
+        }
+        return { ...row, [key]: value };
+      })
+    );
+  }
+
+  async function handleSaveUserScopes() {
+    if (!scopeUserId) {
+      setError("Select a user for scope management.");
+      return;
+    }
+
+    const invalid = scopeRows.find(
+      (row) => row.scope_type !== "global" && !String(row.scope_id || "").trim()
+    );
+    if (invalid) {
+      setError(`Select ${invalid.scope_type} for every non-global scope row.`);
+      return;
+    }
+
+    const payload = scopeRows.map((row) => ({
+      scope_type: row.scope_type,
+      scope_id: row.scope_type === "global" ? null : row.scope_id,
+    }));
+
+    try {
+      setScopeSaving(true);
+      const res = await apiFetch(`/api/users/${scopeUserId}/scopes`, {
+        method: "POST",
+        body: JSON.stringify({ scopes: payload }),
+      });
+
+      if (!res?.ok) {
+        const data = await safeJson(res);
+        throw new Error(data?.error || "Failed to save user scopes");
+      }
+
+      setError(null);
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Failed to save user scopes");
+    } finally {
+      setScopeSaving(false);
     }
   }
 
@@ -431,6 +543,88 @@ const selectedAssignTechnicians = allTechnicians.filter((tech) =>
           ))}
         </div>
       </div>
+
+      {role === "admin" && (
+        <div className="team-card">
+          <div className="team-card-header">
+            <div>
+              <div className="team-card-title">User Scope Management</div>
+              <div className="team-card-subtitle">
+                Decide access scope by user: global, branch, company, or site.
+              </div>
+            </div>
+          </div>
+
+          <div className="team-form">
+            <label className="team-field">
+              <span>User *</span>
+              <select value={scopeUserId} onChange={(e) => setScopeUserId(e.target.value)}>
+                <option value="">Select user</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name || user.id} ({user.role || "unassigned"})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="team-form-actions">
+            <button type="button" onClick={handleLoadUserScopes} disabled={!scopeUserId || scopeLoading}>
+              {scopeLoading ? "Loading..." : "Load Scopes"}
+            </button>
+            <button type="button" onClick={addScopeRow} disabled={loadingScopeData}>
+              Add Scope
+            </button>
+          </div>
+
+          {scopeRows.map((row, index) => (
+            <div className="team-form" key={`${row.scope_type}-${index}`}>
+              <label className="team-field">
+                <span>Scope Type</span>
+                <select
+                  value={row.scope_type}
+                  onChange={(e) => updateScopeRow(index, "scope_type", e.target.value)}
+                >
+                  <option value="global">Global</option>
+                  <option value="branch">Branch</option>
+                  <option value="company">Company</option>
+                  <option value="site">Site</option>
+                </select>
+              </label>
+
+              {row.scope_type !== "global" && (
+                <label className="team-field">
+                  <span>Scope Target</span>
+                  <select
+                    value={row.scope_id}
+                    onChange={(e) => updateScopeRow(index, "scope_id", e.target.value)}
+                  >
+                    <option value="">Select {row.scope_type}</option>
+                    {(scopeTargetOptions[row.scope_type] || []).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <div className="team-form-actions">
+                <button type="button" onClick={() => removeScopeRow(index)}>
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <div className="team-form-actions">
+            <button type="button" onClick={handleSaveUserScopes} disabled={!scopeUserId || scopeSaving}>
+              {scopeSaving ? "Saving..." : "Save Scopes"}
+            </button>
+          </div>
+        </div>
+      )}
         
       </div>
 
