@@ -191,8 +191,6 @@ export default function JobPage() {
   if (!job) return <div>Job not found</div>;
   const jobstatus = job.status;
   const displayStatus = job.display_status || jobstatus;
-  const approvalStatus = job.approval_status;
-  const awaitingApproval = approvalStatus === "PENDING" && ["IN_PROGRESS", "PAUSED"].includes(jobstatus);
   const isCanceled = jobstatus === "CANCELED";
   const isLost = displayStatus === "LOST";
   const canStart = jobstatus === "NOT_STARTED" && !isCanceled && !isLost;
@@ -233,7 +231,7 @@ export default function JobPage() {
         ? sortedVisits.filter((v) =>
           v.temporary_workers?.some((w) => String(w.id) === String(tempAccessId))
         )
-      : sortedVisits;
+        : sortedVisits;
 
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
@@ -244,11 +242,11 @@ export default function JobPage() {
     return x;
   };
 
-const missedVisits = visibleVisits.filter(
-  v =>
-    toDateOnly(v.scheduled_date) < todayDate &&
-    v.status === "MISSED"
-);
+  const missedVisits = visibleVisits.filter(
+    v =>
+      toDateOnly(v.scheduled_date) < todayDate &&
+      !["COMPLETED", "CANCELED"].includes(v.status)
+  );
 
   const todayVisits = visibleVisits.filter(
     v =>
@@ -261,9 +259,9 @@ const missedVisits = visibleVisits.filter(
   );
 
   const hasPendingVisits = visits.some(v =>
-  ["SCHEDULED", "IN_PROGRESS", "AWAITING_APPROVAL"].includes(v.status)
-);
-  
+    ["SCHEDULED", "IN_PROGRESS", "AWAITING_APPROVAL"].includes(v.status)
+  );
+
 
 
 
@@ -410,23 +408,6 @@ const missedVisits = visibleVisits.filter(
     }
   }
 
-  // Handle submit for approval (technician action)
-  async function submitForApproval() {
-    try {
-      const res = await apiFetch(`/api/jobs/${jobId}/submit-approval`, {
-        method: "POST",
-      });
-
-      if (!res.ok) throw new Error("Submit for approval failed");
-
-      const jobRes = await apiFetch(`/api/jobs/${jobId}`);
-      setJob(await jobRes.json());
-      await reloadHistory();
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
   // Handle visit cancellation
   function openChangeTech(visit) {
     setEditVisit(visit);
@@ -516,7 +497,7 @@ const missedVisits = visibleVisits.filter(
           }
 
           {visit.status === "AWAITING_APPROVAL" && !isTechnician && !isTemporaryWorker && (
-            <button onClick={() => approveVisit(visit.id)}>
+            <button className="visit-start-btn" onClick={() => approveVisit(visit.id)}>
               Approve
             </button>
           )}
@@ -1067,49 +1048,36 @@ const missedVisits = visibleVisits.filter(
                 </button>
               )}
 
-              {jobstatus === "IN_PROGRESS" && !awaitingApproval && (
-                isTechnician || role === "supervisor" || isTemporaryWorker
-                  ? (
+              {jobstatus === "IN_PROGRESS" &&
+                !isTechnician &&
+                !isTemporaryWorker && (
+                  <div className="job-actions-row">
+                    <button
+                      className="job-btn job-btn-pause"
+                      onClick={() => updateStatus("PAUSED")}
+                    >
+                      Pause
+                    </button>
+
                     <button
                       className="job-btn job-btn-complete"
-                      onClick={submitForApproval}
+                      disabled={hasPendingVisits}
+                      onClick={() => updateStatus("COMPLETED")}
                     >
-                      Submit for Approval
+                      Complete
                     </button>
-                  ) : (
-                    <div className="job-actions-row">
-                      <button
-                        className="job-btn job-btn-pause"
-                        onClick={() => updateStatus("PAUSED")}
-                      >
-                        Pause
-                      </button>
-                      <button
-                        className="job-btn job-btn-complete"
-                        disabled={hasPendingVisits}
-                        onClick={() => updateStatus("COMPLETED")}
-                      >
-                        Complete
-                      </button>
 
-                      {hasPendingVisits && (
-                        <div style={{ color: "red", fontSize: 12 }}>
-                          Cannot complete job until all visits are finished
-                        </div>
-                      )}
-                    </div>
-                  )
-              )}
+                    {hasPendingVisits && (
+                      <div style={{ color: "red", fontSize: 12 }}>
+                        Cannot complete job until all visits are finished
+                      </div>
+                    )}
+                  </div>
+                )}
 
-              {jobstatus === "PAUSED" && !awaitingApproval && (
-                isTechnician || role === "supervisor" || isTemporaryWorker ? (
-                  <button
-                    className="job-btn job-btn-complete"
-                    onClick={submitForApproval}
-                  >
-                    Submit for Approval
-                  </button>
-                ) : (
+              {jobstatus === "PAUSED" &&
+                !isTechnician &&
+                !isTemporaryWorker && (
                   <div className="job-actions-row">
                     <button
                       className="job-btn job-btn-resume"
@@ -1117,30 +1085,25 @@ const missedVisits = visibleVisits.filter(
                     >
                       Resume
                     </button>
+
                     <button
                       className="job-btn job-btn-complete"
+                      disabled={hasPendingVisits}
                       onClick={() => updateStatus("COMPLETED")}
                     >
                       Complete
                     </button>
-                  </div>
-                )
-              )}
 
-              {awaitingApproval && (
-                isTechnician || isTemporaryWorker ? (
-                  <div className="job-actions-info">
-                    Awaiting supervisor approval
+                    {hasPendingVisits && (
+                      <div style={{ color: "red", fontSize: 12 }}>
+                        Cannot complete job until all visits are finished
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    className="job-btn job-btn-complete"
-                    onClick={() => updateStatus("COMPLETED")}
-                  >
-                    Approve & Complete
-                  </button>
-                )
-              )}
+                )}
+
+
+
 
               {jobstatus === "COMPLETED" && (
                 <div className="job-actions-success">
@@ -1194,7 +1157,7 @@ const missedVisits = visibleVisits.filter(
               </>
             )}
 
-            
+
 
             {/* EMPTY */}
             {visibleVisits.length === 0 && (
