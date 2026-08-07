@@ -211,6 +211,7 @@ model jobs {
   address                 String?                 @db.Text
   branch_id               String?                 @db.Char(36)
   location_id             String?                 @db.Char(36)
+  is_archived             Boolean                 @default(false)
   job_ticket_links        job_ticket_links[]
   job_visits              job_visits[]
   branches                branches?               @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_jobs_branch")
@@ -239,7 +240,7 @@ model locations {
   created_at        DateTime @default(now()) @db.DateTime(0)
   updated_at        DateTime @default(now()) @updatedAt @db.DateTime(0)
   jobs              jobs[]
-  sites            sites[]
+  sites             sites[]
 }
 
 model notifications {
@@ -306,25 +307,21 @@ model sequences {
 }
 
 model sites {
-  id         String     @id @db.Char(36)
-  company_id String?    @db.Char(36)
-  branch_id  String?    @db.Char(36)
-
-  location_id String?   @db.Char(36)
-
-  address    String?    @db.Text
-  city       String?    @db.VarChar(100)
-  state      String?    @db.VarChar(100)
-  is_active  Boolean?   @default(true)
-  created_at DateTime?  @default(now()) @db.DateTime(0)
-  updated_at DateTime?  @default(now()) @db.DateTime(0)
-  name       String?    @unique(map: "uniq_companies_code_site") @db.VarChar(255)
-
-  contacts   contacts[]
-  jobs       jobs[]
-  branches   branches?  @relation(fields: [branch_id], references: [id], map: "fk_companies_branch")
-
-  location   locations? @relation(fields: [location_id], references: [id])
+  id          String     @id @db.Char(36)
+  company_id  String?    @db.Char(36)
+  branch_id   String?    @db.Char(36)
+  address     String?    @db.Text
+  city        String?    @db.VarChar(100)
+  state       String?    @db.VarChar(100)
+  is_active   Boolean?   @default(true)
+  created_at  DateTime?  @default(now()) @db.DateTime(0)
+  updated_at  DateTime?  @default(now()) @db.DateTime(0)
+  name        String?    @unique(map: "uniq_companies_code_site") @db.VarChar(255)
+  location_id String?    @db.Char(36)
+  contacts    contacts[]
+  jobs        jobs[]
+  branches    branches?  @relation(fields: [branch_id], references: [id], map: "fk_companies_branch")
+  location    locations? @relation(fields: [location_id], references: [id])
 
   @@unique([company_id, name], map: "uniq_sites_company_name")
   @@index([branch_id], map: "fk_companies_branch")
@@ -396,6 +393,7 @@ model users {
   job_tickets                                                        job_tickets[]
   supervisor_technicians_supervisor_technicians_supervisor_idTousers supervisor_technicians[] @relation("supervisor_technicians_supervisor_idTousers")
   supervisor_technicians_supervisor_technicians_technician_idTousers supervisor_technicians?  @relation("supervisor_technicians_technician_idTousers")
+  technician_shifts                                                  technician_shifts[]
   temporary_access                                                   temporary_access[]
   user_scopes                                                        user_scopes[]
   branches                                                           branches?                @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_users_branch")
@@ -448,6 +446,40 @@ model visit_temporary_access {
   @@unique([visit_id, temp_access_id], map: "uniq_visit_temp_access")
   @@index([visit_id], map: "idx_visit_temp_access_visit")
   @@index([temp_access_id], map: "idx_visit_temp_access_temp")
+}
+
+model technician_location_history {
+  id            BigInt                              @id @default(autoincrement())
+  shift_id      String                              @db.Char(36)
+  technician_id Int
+  latitude      Decimal                             @db.Decimal(10, 7)
+  longitude     Decimal                             @db.Decimal(10, 7)
+  accuracy      Decimal?                            @db.Decimal(8, 2)
+  speed         Decimal?                            @db.Decimal(8, 2)
+  heading       Decimal?                            @db.Decimal(8, 2)
+  source        technician_location_history_source? @default(SHIFT)
+  recorded_at   DateTime                            @default(now()) @db.DateTime(0)
+
+  @@index([shift_id, recorded_at], map: "idx_shift_time")
+  @@index([technician_id, recorded_at], map: "idx_technician_time")
+}
+
+model technician_shifts {
+  id              String                   @id @db.Char(36)
+  technician_id   BigInt
+  started_at      DateTime                 @db.DateTime(0)
+  ended_at        DateTime?                @db.DateTime(0)
+  start_latitude  Decimal?                 @db.Decimal(10, 7)
+  start_longitude Decimal?                 @db.Decimal(10, 7)
+  end_latitude    Decimal?                 @db.Decimal(10, 7)
+  end_longitude   Decimal?                 @db.Decimal(10, 7)
+  status          technician_shifts_status @default(ACTIVE)
+  created_at      DateTime?                @default(now()) @db.DateTime(0)
+  updated_at      DateTime?                @default(now()) @db.Timestamp(0)
+  users           users                    @relation(fields: [technician_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_shift_technician")
+
+  @@index([status], map: "idx_status")
+  @@index([technician_id], map: "idx_technician")
 }
 
 enum job_tickets_status {
@@ -533,4 +565,14 @@ enum jobs_approval_status {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum technician_location_history_source {
+  SHIFT
+  VISIT
+}
+
+enum technician_shifts_status {
+  ACTIVE
+  ENDED
 }
