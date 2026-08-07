@@ -75,6 +75,15 @@ const PERMISSION_CATEGORIES = {
       { name: "DELETE_BRANCH_ADMIN", desc: "Remove branch admins" },
     ],
   },
+  shifts: {
+    label: "Shifts",
+    icon: "🕒",
+    permissions: [
+      { name: "START_SHIFT", desc: "Start own work shift" },
+      { name: "END_SHIFT", desc: "End own work shift" },
+      { name: "VIEW_OWN_SHIFT", desc: "View own current shift" },
+    ],
+  },
   analytics: {
     label: "Analytics",
     icon: "📊",
@@ -174,8 +183,8 @@ export default function RolesTab({
     setEditPermissions(
       Array.isArray(selectedRole.permissions)
         ? selectedRole.permissions.map((permission) =>
-            typeof permission === "string" ? permission : permission.name
-          )
+          typeof permission === "string" ? permission : permission.name
+        )
         : []
     );
   }, [selectedRole]);

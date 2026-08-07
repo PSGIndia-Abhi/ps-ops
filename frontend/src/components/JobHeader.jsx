@@ -21,11 +21,7 @@ export default function JobHeader({ job, setIsAssignOpen }) {
 
   const displayStatus = job.display_status || status || "";
 
-  const companyName =
-    job.companyname ||
-    job.requestedBy?.company?.name ||
-    job.requestedBy?.company ||
-    "-";
+  const companyName = job.requestedBy?.company?.site ?? "-";
 
   return (
     <div className="job-header">

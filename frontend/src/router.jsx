@@ -29,6 +29,7 @@ import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
 import ContactsPage from "./pages/ContactsPage";
 import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
+import TrackingHistory from "./pages/TrackingHistory";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -75,7 +76,8 @@ const router = createBrowserRouter([
       { path: "tickets", element: <AdminTickets /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "contacts", element: <ContactsPage /> },
-      { path: "contacts/:contactId", element: <ContactsPage /> }
+      { path: "contacts/:contactId", element: <ContactsPage /> },
+      { path: "tracking/history/:technicianId", element: <TrackingHistory />}
     ],
   },
 

@@ -32,10 +32,16 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
         co.type AS company_type,
         co.gst_number AS company_gst_number,
         g.id AS group_id,
-        g.name AS group_name
+        g.name AS group_name,
+        l.latitude,
+        l.longitude,
+        l.provider_place_id,
+        l.postal_code,
+        l.country
       FROM sites s
       LEFT JOIN companies co ON co.id = s.company_id
       LEFT JOIN ${groupRef} g ON g.id = co.group_id
+      LEFT JOIN locations l ON s.location_id = l.id
     `;
 
     const params = [];
@@ -78,12 +84,23 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
 // POST /api/sites
 router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req, res) => {
   const {
-    company_id,
-    name,
-    address,
-    city,
-    state
-  } = req.body || {};
+  company_id,
+  name,
+  address,
+  city,
+  state,
+  postal_code,
+  country,
+  latitude,
+  longitude,
+  place_id,
+} = req.body || {};
+
+const trimmedPostalCode =
+  typeof postal_code === "string" ? postal_code.trim() : "";
+
+const trimmedCountry =
+  typeof country === "string" ? country.trim() : "";
 
   const [[me]] = await pool.query(
     "SELECT branch_id FROM users WHERE id = ?",
@@ -125,18 +142,60 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
     }
 
     const id = uuid();
+    const locationId = uuid();
+
+await pool.query(
+  `
+  INSERT INTO locations (
+    id,
+    provider,
+    provider_place_id,
+    formatted_address,
+    latitude,
+    longitude,
+    city,
+    state,
+    postal_code,
+    country
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  [
+    locationId,
+    "google",
+    place_id || null,
+    trimmedAddress || null,
+    latitude || null,
+    longitude || null,
+    trimmedCity || null,
+    trimmedState || null,
+    trimmedPostalCode || null,
+    trimmedCountry || null,
+  ]
+);
     await pool.query(
       `INSERT INTO sites
-  (id, company_id, branch_id, name, address, city, state, is_active)
-  VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+(
+  id,
+  company_id,
+  branch_id,
+  location_id,
+  name,
+  address,
+  city,
+  state,
+  is_active
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
-        id,
-        company_id,
-        me.branch_id, // ✅ correct position
-        trimmedName,
-        trimmedAddress || null,
-        trimmedCity || null,
-        trimmedState || null
+          id,
+  company_id,
+  me.branch_id,
+  locationId,
+  trimmedName,
+  trimmedAddress || null,
+  trimmedCity || null,
+  trimmedState || null,
       ]
     );
     const groupTable = await resolveGroupTable(pool);

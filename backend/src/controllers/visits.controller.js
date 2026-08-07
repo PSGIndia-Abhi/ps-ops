@@ -1,5 +1,6 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
+const { redis } = require("../utils/redis");
 const { createVisit } = require("../services/Visit.service");
 const {
   notifyVisitCreated,
@@ -45,6 +46,144 @@ function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
   }
 
   return null;
+}
+
+const VISIT_GEOFENCE_RADIUS_METERS = 100;
+
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+
+  const toRad = (value) => (value * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+
+  const c = 2 * Math.atan2(
+    Math.sqrt(a),
+    Math.sqrt(1 - a)
+  );
+
+  return R * c;
+}
+
+async function checkVisitGeofence(
+  visitId,
+  technicianId,
+  currentLocation = null,
+  conn = pool
+) {
+  // Get visit + job site location
+const [[visit]] = await conn.query(
+  `
+  SELECT
+    jv.id AS visit_id,
+    jv.job_id,
+    s.id AS site_id,
+    s.location_id,
+    l.latitude,
+    l.longitude
+
+  FROM job_visits jv
+
+  JOIN jobs j
+    ON j.id = jv.job_id
+
+  LEFT JOIN sites s
+    ON s.id = j.company_id
+
+  LEFT JOIN locations l
+    ON l.id = s.location_id
+
+  WHERE jv.id = ?
+  LIMIT 1
+  `,
+  [visitId]
+);
+
+  // Actual visit does not exist
+  if (!visit) {
+    return {
+      allowed: false,
+      status: 404,
+      error: "Visit not found",
+    };
+  }
+
+  // Visit exists but location isn't configured
+ if (
+  visit.latitude == null ||
+  visit.longitude == null
+) {
+  console.log("Missing job location:", {
+    visitId,
+    jobId: visit.job_id,
+    siteId: visit.site_id,
+    locationId: visit.location_id,
+  });
+
+  return {
+    allowed: false,
+    status: 400,
+    error: "Job location is not configured",
+  };
+}
+
+  let technicianLocation = currentLocation;
+
+  if (
+    !technicianLocation ||
+    technicianLocation.latitude == null ||
+    technicianLocation.longitude == null
+  ) {
+    const key = `technician:location:${technicianId}`;
+    const rawLocation = await redis.get(key);
+
+    if (!rawLocation) {
+      return {
+        allowed: false,
+        status: 400,
+        error: "Current technician location is unavailable",
+      };
+    }
+
+    technicianLocation = JSON.parse(rawLocation);
+  }
+
+  const distanceMeters = calculateDistanceMeters(
+    Number(technicianLocation.latitude),
+    Number(technicianLocation.longitude),
+    Number(visit.latitude),
+    Number(visit.longitude)
+  );
+
+  console.log("GEOFENCE CHECK:", {
+    technicianId,
+    visitId,
+    technician: {
+      latitude: technicianLocation.latitude,
+      longitude: technicianLocation.longitude,
+    },
+    job: {
+      latitude: visit.latitude,
+      longitude: visit.longitude,
+    },
+    distanceMeters: Math.round(distanceMeters),
+  });
+
+  return {
+    allowed:
+      distanceMeters <= VISIT_GEOFENCE_RADIUS_METERS,
+
+    distanceMeters: Math.round(distanceMeters),
+
+    radiusMeters: VISIT_GEOFENCE_RADIUS_METERS,
+  };
 }
 
 async function createVisitController(req, res) {
@@ -366,105 +505,239 @@ async function cancelVisit(req, res) {
 
 async function startVisit(req, res) {
   const { visitId } = req.params;
+  const technicianId = req.user?.id;
+  const {
+    latitude,
+    longitude,
+    accuracy,
+    speed,
+    heading,
+  } = req.body || {};
 
   try {
+    const currentLocation =
+      latitude != null && longitude != null
+        ? {
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            accuracy:
+              accuracy != null ? Number(accuracy) : null,
+            speed: speed != null ? Number(speed) : null,
+            heading:
+              heading != null ? Number(heading) : null,
+            updatedAt: new Date().toISOString(),
+          }
+        : null;
+
+    const geofence = await checkVisitGeofence(
+      visitId,
+      technicianId,
+      currentLocation
+    );
+
+    if (geofence.error) {
+      return res
+        .status(geofence.status)
+        .json(geofence);
+    }
+
+    if (!geofence.allowed) {
+      return res.status(403).json({
+        error: "You are outside the job location",
+        code: "OUTSIDE_GEOFENCE",
+        distanceMeters: geofence.distanceMeters,
+        radiusMeters: geofence.radiusMeters,
+      });
+    }
 
     await pool.query(
-      `UPDATE job_visits
-       SET status = 'IN_PROGRESS',
-           started_at = NOW(),
-           updated_at = NOW()
-       WHERE id = ?`,
+      `
+      UPDATE job_visits
+      SET
+        status = 'IN_PROGRESS',
+        started_at = NOW(),
+        updated_at = NOW()
+      WHERE id = ?
+      `,
       [visitId]
     );
 
     await pool.query(
-      `UPDATE jobs
-   SET status = 'IN_PROGRESS',
-       updated_at = NOW()
-   WHERE id = (
-     SELECT job_id FROM job_visits WHERE id = ?
-   )
-   AND status = 'NOT_STARTED'`,
+      `
+      UPDATE jobs
+      SET
+        status = 'IN_PROGRESS',
+        updated_at = NOW()
+      WHERE id = (
+        SELECT job_id
+        FROM job_visits
+        WHERE id = ?
+      )
+      AND status = 'NOT_STARTED'
+      `,
       [visitId]
     );
 
-    res.json({ success: true });
+    if (currentLocation) {
+      await redis.set(
+        `technician:location:${technicianId}`,
+        JSON.stringify({
+          technicianId,
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+          accuracy: currentLocation.accuracy,
+          speed: currentLocation.speed,
+          heading: currentLocation.heading,
+          updatedAt: currentLocation.updatedAt,
+        }),
+        { EX: 3600 }
+      );
+    }
+
+    return res.json({
+      success: true,
+      distanceMeters: geofence.distanceMeters,
+    });
 
   } catch (err) {
     console.error("Start visit failed:", err);
-    res.status(500).json({ error: "Failed to start visit" });
+
+    return res.status(500).json({
+      error: "Failed to start visit",
+    });
   }
 }
 
 async function startVisitAnyway(req, res) {
   const { visitId } = req.params;
   const userId = req.user?.id;
+  const {
+    latitude,
+    longitude,
+    accuracy,
+    speed,
+    heading,
+  } = req.body || {};
 
   const conn = await pool.getConnection();
 
   try {
     await conn.beginTransaction();
 
-    // 1. get original visit
+    // 1. Get original missed visit
     const [[visit]] = await conn.query(
       `SELECT * FROM job_visits WHERE id = ?`,
       [visitId]
     );
 
     if (!visit) {
-      return res.status(404).json({ error: "Visit not found" });
+      await conn.rollback();
+      return res.status(404).json({
+        error: "Visit not found",
+      });
+    }
+
+    const currentLocation =
+      latitude != null && longitude != null
+        ? {
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            accuracy:
+              accuracy != null ? Number(accuracy) : null,
+            speed: speed != null ? Number(speed) : null,
+            heading:
+              heading != null ? Number(heading) : null,
+            updatedAt: new Date().toISOString(),
+          }
+        : null;
+
+    // 2. GEOFENCE CHECK
+    const geofence = await checkVisitGeofence(
+      visitId,
+      userId,
+      currentLocation,
+      conn
+    );
+
+    if (geofence.error) {
+      await conn.rollback();
+
+      return res
+        .status(geofence.status)
+        .json(geofence);
+    }
+
+    if (!geofence.allowed) {
+      await conn.rollback();
+
+      return res.status(403).json({
+        error: "You are outside the job location",
+        code: "OUTSIDE_GEOFENCE",
+        distanceMeters: geofence.distanceMeters,
+        radiusMeters: geofence.radiusMeters,
+      });
     }
 
     const now = new Date();
 
-    // 2. block if active visit exists
+    // 3. Block if active visit exists
     const [[active]] = await conn.query(
-      `SELECT id FROM job_visits
+      `SELECT id
+       FROM job_visits
        WHERE job_id = ?
        AND status = 'IN_PROGRESS'`,
       [visit.job_id]
     );
 
     if (active) {
+      await conn.rollback();
+
       return res.status(400).json({
         error: "Another visit already in progress",
       });
     }
 
-    // 3. get next visit number
+    // 4. Get next visit number
     const [[row]] = await conn.query(
-      `SELECT COALESCE(MAX(visit_number),0) + 1 AS nextVisit
+      `SELECT COALESCE(MAX(visit_number), 0) + 1 AS nextVisit
        FROM job_visits
        WHERE job_id = ?`,
       [visit.job_id]
     );
 
-    await pool.query(
+    // 5. Update job
+    await conn.query(
       `UPDATE jobs
-   SET status = 'IN_PROGRESS',
-       updated_at = NOW()
-   WHERE id = (
-     SELECT job_id FROM job_visits WHERE id = ?
-   )
-   AND status = 'NOT_STARTED'`,
-      [visitId]
+       SET status = 'IN_PROGRESS',
+           updated_at = NOW()
+       WHERE id = ?
+       AND status = 'NOT_STARTED'`,
+      [visit.job_id]
     );
 
     const newVisitId = uuid();
 
-    // 3.5 Mark old visit as Canceled (could also do "MISSED" but that would require more frontend changes)
+    // 6. Cancel old missed visit
     await conn.query(
       `UPDATE job_visits
-   SET status = 'CANCELED', updated_at = NOW()
-   WHERE id = ?`,
+       SET status = 'CANCELED',
+           updated_at = NOW()
+       WHERE id = ?`,
       [visitId]
     );
 
-    // 4. create new visit
+    // 7. Create new visit
     await conn.query(
       `INSERT INTO job_visits
-       (id, job_id, visit_number, scheduled_date, status, started_at, created_by_user_id)
+       (
+         id,
+         job_id,
+         visit_number,
+         scheduled_date,
+         status,
+         started_at,
+         created_by_user_id
+       )
        VALUES (?, ?, ?, ?, 'IN_PROGRESS', NOW(), ?)`,
       [
         newVisitId,
@@ -475,23 +748,27 @@ async function startVisitAnyway(req, res) {
       ]
     );
 
-    // 5. copy technicians
+    // 8. Copy technicians
     const [techs] = await conn.query(
-      `SELECT technician_id FROM visit_technicians WHERE visit_id = ?`,
+      `SELECT technician_id
+       FROM visit_technicians
+       WHERE visit_id = ?`,
       [visitId]
     );
 
-    for (const t of techs) {
+    for (const tech of techs) {
       await conn.query(
-        `INSERT INTO visit_technicians (id, visit_id, technician_id)
+        `INSERT INTO visit_technicians
+         (id, visit_id, technician_id)
          VALUES (?, ?, ?)`,
-        [uuid(), newVisitId, t.technician_id]
+        [uuid(), newVisitId, tech.technician_id]
       );
     }
 
-    // 6. add system comment
+    // 9. Add system comment
     await conn.query(
-      `INSERT INTO job_comments (id, job_id, comment, type)
+      `INSERT INTO job_comments
+       (id, job_id, comment, type)
        VALUES (?, ?, ?, 'SYSTEM')`,
       [
         uuid(),
@@ -502,15 +779,37 @@ async function startVisitAnyway(req, res) {
 
     await conn.commit();
 
-    res.json({
+    if (currentLocation) {
+      await redis.set(
+        `technician:location:${userId}`,
+        JSON.stringify({
+          technicianId: userId,
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+          accuracy: currentLocation.accuracy,
+          speed: currentLocation.speed,
+          heading: currentLocation.heading,
+          updatedAt: currentLocation.updatedAt,
+        }),
+        { EX: 3600 }
+      );
+    }
+
+    return res.json({
       success: true,
       visit_id: newVisitId,
+      distanceMeters: geofence.distanceMeters,
     });
 
   } catch (err) {
     await conn.rollback();
+
     console.error("Start anyway failed:", err);
-    res.status(500).json({ error: "Failed to start visit anyway" });
+
+    return res.status(500).json({
+      error: "Failed to start visit anyway",
+    });
+
   } finally {
     conn.release();
   }
@@ -644,8 +943,7 @@ LEFT JOIN companies c
 -- ✅ FIX ENDS HERE
 
 WHERE vt.technician_id = ?
-AND v.status IN ('SCHEDULED', 'IN_PROGRESS', 'AWAITING_APPROVAL')
-
+AND v.status NOT IN ('COMPLETED', 'CANCELED')
 ORDER BY v.scheduled_date ASC;
     `, [technicianId]);
 

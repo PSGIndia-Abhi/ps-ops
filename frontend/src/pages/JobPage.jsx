@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useOutletContext, useParams } from "react-router-dom";
 import JobHeader from "../components/JobHeader";
 import JobUpdateComposer from "../components/JobUpdateComposer";
 import JobTimeline from "../components/JobTimeline";
 import "./jobpage.css";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import { apiFetch } from "../api";
+import { AdvancedMarker } from "@vis.gl/react-google-maps";
 import {
   compareDateValues,
   formatDate,
@@ -13,7 +14,7 @@ import {
   toDateInputValue,
   toTimeInputValue,
 } from "../utils/date";
-
+import Map from "../components/maps";
 
 
 
@@ -21,6 +22,8 @@ import {
 
 export default function JobPage() {
   const { jobId } = useParams();
+  const { activeVisit, setActiveVisit } =
+    useOutletContext() || {};
   const [isAssignOpen, setIsAssignOpen] = useState(false);
   const [job, setJob] = useState(null);
   const [history, setHistory] = useState([]);
@@ -266,35 +269,135 @@ export default function JobPage() {
 
 
   //visits status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
+  function getCurrentLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(
+          new Error(
+            "Location services are not supported on this device."
+          )
+        );
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const {
+            latitude,
+            longitude,
+            accuracy,
+            speed,
+            heading,
+          } = position.coords;
+
+          resolve({
+            latitude,
+            longitude,
+            accuracy,
+            speed,
+            heading,
+          });
+        },
+        () => {
+          reject(
+            new Error(
+              "Current location is required to start this visit."
+            )
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        }
+      );
+    });
+  }
+
   async function startVisit(visitId) {
     try {
-
+      const location = await getCurrentLocation();
       const res = await apiFetch(`/api/visits/${visitId}/start`, {
-        method: "PATCH"
+        method: "PATCH",
+        body: JSON.stringify(location),
       });
 
-      if (!res.ok) throw new Error("Start visit failed");
+      const data = await res.json();
 
-      await loadVisits();   // refresh UI
+      if (!res.ok) {
+        if (data.code === "OUTSIDE_GEOFENCE") {
+          const distance =
+            data.distanceMeters >= 1000
+              ? `${(data.distanceMeters / 1000).toFixed(1)} km`
+              : `${data.distanceMeters} metres`;
 
+          alert(
+            `You are ${distance} away from the job location. ` +
+              `You must be within ${data.radiusMeters} metres to start this visit.`
+          );
+        } else {
+          alert(data.error || "Unable to start visit");
+        }
+
+        return;
+      }
+
+      setActiveVisit?.({
+        id: visitId,
+        started_at: new Date().toISOString(),
+      });
+      await loadVisits();
     } catch (err) {
-      console.error(err);
+      console.error("Start visit failed:", err);
+      alert(err.message || "Unable to start visit. Please try again.");
     }
   }
 
   async function startVisitAnyway(visitId) {
     try {
-      const res = await apiFetch(`/api/visits/${visitId}/start-anyway`, {
-        method: "POST",
+      const location = await getCurrentLocation();
+      const res = await apiFetch(
+        `/api/visits/${visitId}/start-anyway`,
+        {
+          method: "POST",
+          body: JSON.stringify(location),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.code === "OUTSIDE_GEOFENCE") {
+          const distance =
+            data.distanceMeters >= 1000
+              ? `${(data.distanceMeters / 1000).toFixed(1)} km`
+              : `${data.distanceMeters} metres`;
+
+          alert(
+            `You are ${distance} away from the job location. ` +
+              `You must be within ${data.radiusMeters} metres to start this visit.`
+          );
+        } else {
+          alert(data.error || "Unable to start this visit");
+        }
+
+        return;
+      }
+
+      setActiveVisit?.({
+        id: data.visit_id || visitId,
+        started_at: new Date().toISOString(),
       });
-
-      if (!res.ok) throw new Error("Start anyway failed");
-
       await loadVisits();
     } catch (err) {
-      console.error(err);
+      console.error("Start anyway failed:", err);
+      alert(
+        err.message ||
+          "Unable to start this visit. Please try again."
+      );
     }
   }
+
 
   async function submitVisit(visitId) {
     try {
@@ -304,6 +407,10 @@ export default function JobPage() {
       });
 
       if (!res.ok) throw new Error("Submit failed");
+
+      if (activeVisit?.id === visitId) {
+        setActiveVisit?.(null);
+      }
 
       await loadVisits();
 
@@ -436,6 +543,7 @@ export default function JobPage() {
         await startVisit(visit.id);
       }
     }
+    const site = job.requestedBy?.company;
 
 
 
@@ -451,6 +559,7 @@ export default function JobPage() {
 
         <div className="job-visit-schedule">
           <div>{formatDate(visit.scheduled_date)}</div>
+
           <div>{formatTime(visit.scheduled_date)}</div>
         </div>
 
@@ -773,6 +882,15 @@ export default function JobPage() {
       console.error("Assignment failed", err);
     }
   }
+
+  console.log(job.requestedBy.company);
+
+console.log(
+  Number(job.requestedBy.company.latitude),
+  Number(job.requestedBy.company.longitude)
+);
+
+console.log("Map ID:", import.meta.env.VITE_GOOGLE_MAP_ID);
   return (
     <div className="job-page">
       <div className="job-page-layout">
@@ -1121,6 +1239,21 @@ export default function JobPage() {
 
 
 
+<Map
+  center={{
+    lat: Number(job.requestedBy.company.latitude),
+    lng: Number(job.requestedBy.company.longitude),
+  }}
+  zoom={16}
+  markers={[
+    {
+      id: "site",
+      lat: job.requestedBy.company.latitude,
+      lng: job.requestedBy.company.longitude,
+      title: job.requestedBy.company.site,
+    },
+  ]}
+/>
 
           {/* Visits------------------------------------------------------------------------------------------------------------------------------------- */}
 

@@ -162,6 +162,28 @@
   font-weight: 600;
 }
 
+
+/* site style */
+
+.site-layout {
+    display: grid;
+    grid-template-columns: 1fr 450px;
+    gap: 24px;
+    align-items: start;
+}
+
+.site-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.site-map {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
 @media (max-width: 768px) {
 
   .companies-row-header {

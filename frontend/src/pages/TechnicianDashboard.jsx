@@ -9,33 +9,42 @@ export default function TechnicianDashboard() {
   const [searchParams] = useSearchParams();
 
   let tab = (searchParams.get("tab") || "pending").toLowerCase();
-  if (tab === "tomorrow") tab = "pending";
+
 
   // ✅ FILTER LOGIC (visit-based)
-  const filteredVisits = useMemo(() => {
-    if (!Array.isArray(visits)) return [];
+const filteredVisits = useMemo(() => {
+  if (!Array.isArray(visits)) return [];
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-    const toDate = (d) => {
-      const x = new Date(d);
-      x.setHours(0, 0, 0, 0);
-      return x;
-    };
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
 
-    if (tab === "today") {
+  const toDate = (d) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+
+  switch (tab) {
+    case "today":
       return visits.filter(
         (v) => toDate(v.scheduled_date).getTime() === today.getTime()
       );
-    }
 
-    // pending = past visits
-    return visits.filter(
-      (v) => toDate(v.scheduled_date) < today
-    );
-  }, [visits, tab]);
+    case "tomorrow":
+      return visits.filter(
+        (v) => toDate(v.scheduled_date).getTime() === tomorrow.getTime()
+      );
 
+    case "pending":
+    default:
+      return visits.filter(
+        (v) => toDate(v.scheduled_date) < today
+      );
+  }
+}, [visits, tab]);
   // ✅ FETCH VISITS
   async function fetchMyVisits() {
     setLoading(true);

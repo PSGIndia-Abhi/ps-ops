@@ -210,13 +210,36 @@ model jobs {
   company_id              String?                 @db.Char(36)
   address                 String?                 @db.Text
   branch_id               String?                 @db.Char(36)
+  location_id             String?                 @db.Char(36)
   job_ticket_links        job_ticket_links[]
   job_visits              job_visits[]
   branches                branches?               @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_jobs_branch")
   sites                   sites?                  @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_jobs_company")
+  location                locations?              @relation(fields: [location_id], references: [id])
 
   @@index([company_id], map: "fk_jobs_company")
   @@index([branch_id], map: "idx_jobs_branch_id")
+  @@index([location_id], map: "idx_jobs_location")
+}
+
+model locations {
+  id                String   @id @default(uuid()) @db.Char(36)
+  provider          String?  @default("google") @db.VarChar(50)
+  provider_place_id String?  @db.VarChar(255)
+  formatted_address String?  @db.Text
+  address_line_1    String?  @db.VarChar(255)
+  address_line_2    String?  @db.VarChar(255)
+  latitude          Decimal  @db.Decimal(10, 8)
+  longitude         Decimal  @db.Decimal(11, 8)
+  plus_code         String?  @db.VarChar(50)
+  city              String?  @db.VarChar(100)
+  state             String?  @db.VarChar(100)
+  postal_code       String?  @db.VarChar(20)
+  country           String?  @db.VarChar(100)
+  created_at        DateTime @default(now()) @db.DateTime(0)
+  updated_at        DateTime @default(now()) @updatedAt @db.DateTime(0)
+  jobs              jobs[]
+  sites            sites[]
 }
 
 model notifications {
@@ -273,8 +296,8 @@ model roles {
   name             String?            @db.VarChar(255)
   created_at       DateTime?          @default(now()) @db.Timestamp(0)
   role_permissions role_permissions[]
-  users            users[]
   temporary_access temporary_access[]
+  users            users[]
 }
 
 model sequences {
@@ -286,6 +309,9 @@ model sites {
   id         String     @id @db.Char(36)
   company_id String?    @db.Char(36)
   branch_id  String?    @db.Char(36)
+
+  location_id String?   @db.Char(36)
+
   address    String?    @db.Text
   city       String?    @db.VarChar(100)
   state      String?    @db.VarChar(100)
@@ -293,13 +319,17 @@ model sites {
   created_at DateTime?  @default(now()) @db.DateTime(0)
   updated_at DateTime?  @default(now()) @db.DateTime(0)
   name       String?    @unique(map: "uniq_companies_code_site") @db.VarChar(255)
+
   contacts   contacts[]
   jobs       jobs[]
   branches   branches?  @relation(fields: [branch_id], references: [id], map: "fk_companies_branch")
 
+  location   locations? @relation(fields: [location_id], references: [id])
+
   @@unique([company_id, name], map: "uniq_sites_company_name")
   @@index([branch_id], map: "fk_companies_branch")
   @@index([company_id], map: "idx_sites_company_id")
+  @@index([location_id], map: "idx_sites_location")
 }
 
 model supervisor_technicians {
@@ -366,8 +396,8 @@ model users {
   job_tickets                                                        job_tickets[]
   supervisor_technicians_supervisor_technicians_supervisor_idTousers supervisor_technicians[] @relation("supervisor_technicians_supervisor_idTousers")
   supervisor_technicians_supervisor_technicians_technician_idTousers supervisor_technicians?  @relation("supervisor_technicians_technician_idTousers")
-  user_scopes                                                        user_scopes[]
   temporary_access                                                   temporary_access[]
+  user_scopes                                                        user_scopes[]
   branches                                                           branches?                @relation(fields: [branch_id], references: [id], onUpdate: NoAction, map: "fk_users_branch")
   roles                                                              roles                    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_users_role")
 
@@ -386,31 +416,25 @@ model visit_technicians {
 }
 
 model temporary_access {
-  id String @id @default(uuid()) @db.Char(36)
-
-  job_id             String @db.Char(36)
-  created_by_user_id BigInt
-  role_id            Int
-
-  worker_name  String? @db.VarChar(255)
-  phone_number String? @db.VarChar(20)
-
-  otp_hash String @db.VarChar(255)
-
-  expires_at DateTime @db.DateTime(0)
-
-  used_at    DateTime? @db.DateTime(0)
-  revoked_at DateTime? @db.DateTime(0)
-
-  created_at DateTime @default(now()) @db.DateTime(0)
-
-  created_by_user users @relation(fields: [created_by_user_id], references: [id], onDelete: Cascade)
-
-  roles                  roles                    @relation(fields: [role_id], references: [id], onDelete: Restrict)
+  id                     String                   @id @default(uuid()) @db.Char(36)
+  job_id                 String                   @db.Char(36)
+  created_by_user_id     BigInt
+  role_id                Int
+  worker_name            String?                  @db.VarChar(255)
+  phone_number           String?                  @db.VarChar(20)
+  otp_hash               String                   @db.VarChar(255)
+  expires_at             DateTime                 @db.DateTime(0)
+  used_at                DateTime?                @db.DateTime(0)
+  revoked_at             DateTime?                @db.DateTime(0)
+  created_at             DateTime                 @default(now()) @db.DateTime(0)
+  created_by_user        users                    @relation(fields: [created_by_user_id], references: [id], onDelete: Cascade)
+  roles                  roles                    @relation(fields: [role_id], references: [id])
   visit_temporary_access visit_temporary_access[]
 
   @@index([job_id], map: "idx_temp_job")
   @@index([phone_number], map: "idx_temp_phone")
+  @@index([created_by_user_id], map: "temporary_access_created_by_user_id_fkey")
+  @@index([role_id], map: "temporary_access_role_id_fkey")
 }
 
 model visit_temporary_access {
@@ -418,8 +442,8 @@ model visit_temporary_access {
   visit_id         String           @db.Char(36)
   temp_access_id   String           @db.Char(36)
   created_at       DateTime         @default(now()) @db.DateTime(0)
-  job_visits       job_visits       @relation(fields: [visit_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_visit_temp_access_visit")
-  temporary_access temporary_access @relation(fields: [temp_access_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "fk_visit_temp_access_temp_access")
+  temporary_access temporary_access @relation(fields: [temp_access_id], references: [id], onDelete: Cascade, map: "fk_visit_temp_access_temp_access")
+  job_visits       job_visits       @relation(fields: [visit_id], references: [id], onDelete: Cascade, map: "fk_visit_temp_access_visit")
 
   @@unique([visit_id, temp_access_id], map: "uniq_visit_temp_access")
   @@index([visit_id], map: "idx_visit_temp_access_visit")

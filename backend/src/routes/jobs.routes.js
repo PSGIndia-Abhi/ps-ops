@@ -498,57 +498,85 @@ router.get(
     }
   }
 );
-// GET single job by ID
+// GET single job by ID - updated with geo location and address components
 router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req, res) => {
   const { jobId } = req.params;
 
   try {
     if (!(await ensureJobAccess(req, res, pool, jobId))) return;
 
-    const [rows] = await pool.query(
-      `
-      SELECT
-        j.*,
-        CASE
-          WHEN j.approval_status = 'PENDING'
-            AND j.status IN ('IN_PROGRESS', 'PAUSED')
-            THEN 'AWAITING_APPROVAL'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            AND (
-              YEAR(j.start_date) < YEAR(NOW())
-              OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
-            )
-            THEN 'LOST'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            THEN 'PENDING'
-          ELSE j.status
-        END AS display_status,
-        u.name AS supervisor_name,
-        c.id   AS contact_id,
-        c.name AS contact_name,
-        c.phone AS contact_phone,
-        c.email AS contact_email,
-        s.id    AS company_id,
-        co.name  AS company_name,
-        co.code AS company_code,
-        co.type AS company_type,
-        s.name  AS company_site,
-        b.code  AS booking_code
-      FROM jobs j
-      LEFT JOIN bookings b ON b.id = j.booking_id
-      LEFT JOIN users u ON j.supervisor_id = u.id
-      LEFT JOIN contacts c ON j.requested_by_contact_id = c.id
-      LEFT JOIN sites s ON c.company_id = s.id
-      LEFT JOIN companies co ON s.company_id = co.id
-      WHERE j.id = ?
-      LIMIT 1
-      `,
-      [jobId]
-    );
+  const [rows] = await pool.query(
+  `
+  SELECT
+    j.*,
+    CASE
+      WHEN j.approval_status = 'PENDING'
+        AND j.status IN ('IN_PROGRESS', 'PAUSED')
+        THEN 'AWAITING_APPROVAL'
+      WHEN j.status = 'NOT_STARTED'
+        AND j.start_date IS NOT NULL
+        AND j.start_date < NOW()
+        AND (
+          YEAR(j.start_date) < YEAR(NOW())
+          OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
+        )
+        THEN 'LOST'
+      WHEN j.status = 'NOT_STARTED'
+        AND j.start_date IS NOT NULL
+        AND j.start_date < NOW()
+        THEN 'PENDING'
+      ELSE j.status
+    END AS display_status,
+
+    u.name AS supervisor_name,
+
+    c.id    AS contact_id,
+    c.name  AS contact_name,
+    c.phone AS contact_phone,
+    c.email AS contact_email,
+
+    s.id    AS company_id,
+    s.name  AS company_site,
+
+    l.formatted_address AS site_address,
+    l.latitude          AS site_latitude,
+    l.longitude         AS site_longitude,
+    l.provider_place_id AS site_place_id,
+    l.city              AS site_city,
+    l.state             AS site_state,
+    l.postal_code       AS site_postal_code,
+    l.country           AS site_country,
+
+    co.name AS company_name,
+    co.code AS company_code,
+    co.type AS company_type,
+
+    b.code AS booking_code
+
+  FROM jobs j
+  LEFT JOIN bookings b
+    ON b.id = j.booking_id
+
+  LEFT JOIN users u
+    ON j.supervisor_id = u.id
+
+  LEFT JOIN contacts c
+    ON j.requested_by_contact_id = c.id
+
+  LEFT JOIN sites s
+    ON c.company_id = s.id
+
+  LEFT JOIN locations l
+    ON s.location_id = l.id
+
+  LEFT JOIN companies co
+    ON s.company_id = co.id
+
+  WHERE j.id = ?
+  LIMIT 1
+  `,
+  [jobId]
+);
 
     if (!rows.length) {
       return res.status(404).json({ error: "Job not found" });
@@ -638,8 +666,7 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
       notes: job.notes,
       start_date: job.start_date,
       dueDate: job.due_date,
-      address: job.address,
-
+      
       supervisor: job.supervisor_id
         ? { id: job.supervisor_id, name: job.supervisor_name }
         : null,
@@ -653,14 +680,21 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
             phone: job.contact_phone,
             email: job.contact_email,
             company: job.company_id
-              ? {
-                id: job.company_id,
-                code: job.company_code,
-                name: job.company_name,
-                type: job.company_type,
-                site: job.company_site || null,
-              }
-              : null,
+  ? {
+      id: job.company_id,
+      code: job.company_code,
+      name: job.company_name,
+      type: job.company_type,
+      site: job.company_site,
+
+      address: job.site_address,
+      latitude: job.site_latitude,
+      longitude: job.site_longitude,
+      place_id: job.site_place_id,
+      postal_code: job.site_postal_code,
+      country: job.site_country,
+    }
+  : null,
           }
           : null,
 

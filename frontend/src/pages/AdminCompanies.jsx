@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import "./AdminCompanies.css";
-
+import PlaceAutocomplete from "../components/maps/PlaceAutocomplete";
+import {
+  Map,
+  AdvancedMarker,
+  useMap
+} from "@vis.gl/react-google-maps";
 const defaultGroupForm = { name: "" };
 const defaultCompanyForm = {
   group_id: "",
@@ -10,15 +15,24 @@ const defaultCompanyForm = {
   gst_number: "",
   type: "CORPORATE",
 };
+
+//Site Form details Var 
 const defaultSiteForm = {
   company_id: "",
   name: "",
   address: "",
   city: "",
   state: "",
+  location_id: "",
+  place_id: "",
+  latitude: null,
+  longitude: null,
+  postal_code: "",
+  country: "",
 };
 
 export default function AdminCompanies() {
+  // State variables
   const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -33,20 +47,25 @@ export default function AdminCompanies() {
   const [groupForm, setGroupForm] = useState(defaultGroupForm);
   const [companyForm, setCompanyForm] = useState(defaultCompanyForm);
   const [siteForm, setSiteForm] = useState(defaultSiteForm);
+
+
   const [companyLogoFile, setCompanyLogoFile] = useState(null);
   const [fileInputKey, setFileInputKey] = useState(Date.now());
 
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  // Effect to handle window resize for responsive design
   useEffect(() => {
     function handleResize() {
       setIsMobile(window.innerWidth < 768);
     }
-
+    // Add event listener for window resize
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+
+  // Function to load all groups, companies, and sites
   const loadAll = async () => {
     try {
       setLoading(true);
@@ -78,10 +97,12 @@ export default function AdminCompanies() {
     }
   };
 
+  //mounting effect to load data on component mount
   useEffect(() => {
     loadAll();
   }, []);
 
+  // Memoized filtered sites based on search query - search box
   const filteredSites = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return sites;
@@ -101,6 +122,7 @@ export default function AdminCompanies() {
     });
   }, [sites, search]);
 
+
   const updateGroup = (key, value) => {
     setGroupForm((prev) => ({ ...prev, [key]: value }));
   };
@@ -111,6 +133,17 @@ export default function AdminCompanies() {
 
   const updateSite = (key, value) => {
     setSiteForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handlePlaceSelected = (place) => {
+    updateSite("address", place.address);
+    updateSite("city", place.city);
+    updateSite("state", place.state);
+    updateSite("postal_code", place.postalCode);
+    updateSite("country", place.country);
+    updateSite("place_id", place.placeId);
+    updateSite("latitude", place.latitude);
+    updateSite("longitude", place.longitude);
   };
 
   const handleCreateGroup = async () => {
@@ -186,7 +219,7 @@ export default function AdminCompanies() {
     } finally {
       setSavingCompany(false);
     }
-    setFileInputKey(Date.now()); 
+    setFileInputKey(Date.now());
   };
 
   const handleCreateSite = async () => {
@@ -206,12 +239,20 @@ export default function AdminCompanies() {
     try {
       setSavingSite(true);
       const payload = {
-        company_id: siteForm.company_id,
-        name: siteForm.name.trim(),
-        address: siteForm.address.trim(),
-        city: siteForm.city.trim() || null,
-        state: siteForm.state.trim() || null,
-      };
+  company_id: siteForm.company_id,
+  name: siteForm.name,
+  address: siteForm.address,
+  city: siteForm.city,
+  state: siteForm.state,
+  postal_code: siteForm.postal_code,
+  country: siteForm.country,
+  latitude: siteForm.latitude,
+  longitude: siteForm.longitude,
+  place_id: siteForm.place_id,
+};
+
+console.log("Site payload:", payload);
+
 
       const res = await apiFetch("/api/sites", {
         method: "POST",
@@ -230,6 +271,59 @@ export default function AdminCompanies() {
     } finally {
       setSavingSite(false);
     }
+  };
+
+
+
+  //map stuff
+
+  const reverseGeocode = (lat, lng) => {
+    console.log("Reverse geocode:", lat, lng);
+
+    const geocoder = new google.maps.Geocoder();
+
+    geocoder.geocode(
+      { location: { lat, lng } },
+      (results, status) => {
+        console.log("Status:", status);
+        console.log("Results:", results);
+
+        if (status !== "OK" || !results?.length) return;
+
+        const place = results[0];
+
+        console.log("Formatted:", place.formatted_address);
+        let city = "";
+        let state = "";
+        let postalCode = "";
+        let country = "";
+
+        place.address_components.forEach((component) => {
+          if (component.types.includes("locality"))
+            city = component.long_name;
+
+          if (component.types.includes("administrative_area_level_1"))
+            state = component.long_name;
+
+          if (component.types.includes("postal_code"))
+            postalCode = component.long_name;
+
+          if (component.types.includes("country"))
+            country = component.long_name;
+        });
+
+        setSiteForm((prev) => ({
+          ...prev,
+          address: place.formatted_address,
+          city,
+          state,
+          postal_code: postalCode,
+          country,
+          latitude: lat,
+          longitude: lng,
+        }));
+      }
+    );
   };
 
   return (
@@ -303,9 +397,7 @@ export default function AdminCompanies() {
             />
           </div>
 
-          <div className="company-field">
 
-          </div>
 
           <div className="company-field">
             <label>GST Number</label>
@@ -354,60 +446,98 @@ export default function AdminCompanies() {
 
         {error && <div className="companies-error">{error}</div>}
 
-        <div className="company-form">
-          <div className="company-field">
-            <label>Company *</label>
-            <select
-              value={siteForm.company_id}
-              onChange={(e) => updateSite("company_id", e.target.value)}
-            >
-              <option value="">Select Company</option>
-              {companies.map((company) => (
-                <option key={company.id} value={company.id}>
-                  {company.name}
-                </option>
-              ))}
-            </select>
+        <div className="site-layout">
+
+          <div className="site-form">
+            {/* select company  */}
+            <div className="company-field">
+              <label>Company *</label>
+              <select
+                value={siteForm.company_id}
+                onChange={(e) => updateSite("company_id", e.target.value)}
+              >
+                <option value="">Select Company</option>
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="company-field">
+              <label>Site Name *</label>
+              <input
+                value={siteForm.name}
+                onChange={(e) => updateSite("name", e.target.value)}
+                placeholder="e.g. Hebbal"
+              />
+            </div>
+
+
+            <div className="company-field">
+              <label>Address *</label>
+
+              <PlaceAutocomplete
+                value={siteForm.address}
+                onPlaceSelected={handlePlaceSelected}
+              />
+
+              <button
+                className="primary"
+                onClick={handleCreateSite}
+                disabled={savingSite}
+                style={{ marginTop: 16 }}
+              >
+                {savingSite ? "Saving..." : "Add Site"}
+              </button>
+            </div>
           </div>
 
-          <div className="company-field">
-            <label>Site Name *</label>
-            <input
-              value={siteForm.name}
-              onChange={(e) => updateSite("name", e.target.value)}
-              placeholder="e.g. Hebbal"
-            />
+          <div className="site-map">
+
+            <div style={{ width: 400 }}>
+              <div
+                style={{
+                  width: "400px",
+                  height: "300px",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                }}
+              >
+                <Map
+                  mapId={import.meta.env.VITE_GOOGLE_MAP_ID}
+                  defaultZoom={15}
+                  center={{
+                    lat: siteForm.latitude || 12.9716,
+                    lng: siteForm.longitude || 77.5946,
+                  }}
+                  gestureHandling="greedy"
+                  disableDefaultUI={false}
+                >
+                  {siteForm.latitude && (
+                    <AdvancedMarker
+                      draggable
+                      position={{
+                        lat: siteForm.latitude,
+                        lng: siteForm.longitude,
+                      }}
+                      onDragEnd={(e) => {
+                        console.log("Dragged!");
+                        console.log(e);
+
+                        const lat = e.latLng?.lat();
+                        const lng = e.latLng?.lng();
+                        reverseGeocode(lat, lng);
+
+                        console.log(lat, lng);
+                      }}
+                    />
+                  )}
+                </Map>
+              </div>
+            </div>
           </div>
 
-          <div className="company-field">
-            <label>Address *</label>
-            <input
-              value={siteForm.address}
-              onChange={(e) => updateSite("address", e.target.value)}
-              placeholder="Street, building, area"
-            />
-          </div>
-
-          <div className="company-field">
-            <label>City</label>
-            <input
-              value={siteForm.city}
-              onChange={(e) => updateSite("city", e.target.value)}
-              placeholder="City"
-            />
-          </div>
-
-          <div className="company-field">
-            <label>State</label>
-            <input
-              value={siteForm.state}
-              onChange={(e) => updateSite("state", e.target.value)}
-              placeholder="State"
-            />
-          </div>
-          <button className="primary" onClick={handleCreateSite} disabled={savingSite}>
-            {savingSite ? "Saving..." : "Add Site"}
-          </button>
         </div>
       </div>
 

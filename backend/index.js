@@ -27,6 +27,8 @@ const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
+const shiftRoutes = require("./src/routes/shifts.routes");
+const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
 
@@ -68,6 +70,7 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
+app.use("/api/shifts", shiftRoutes);
 
 
 
@@ -79,6 +82,11 @@ const PORT = process.env.PORT || 3000;
   try {
     await testConnection();
     console.log('MySQL connected successfully');
+
+    //connect redis
+    await connectRedis();
+    console.log("Redis connected successfully");
+
     startRecurringScheduler(pool);
     startVisitMissedCron();
   } catch (err) {
