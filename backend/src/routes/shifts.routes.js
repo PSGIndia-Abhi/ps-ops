@@ -428,7 +428,13 @@ router.get(
           u.id,
           u.name
         FROM users u
-        WHERE u.role = 'TECHNICIAN'
+        LEFT JOIN roles r
+          ON r.id = u.role_id
+        WHERE u.is_active = 1
+          AND (
+            LOWER(r.name) = 'technician'
+            OR LOWER(u.role) = 'technician'
+          )
         ORDER BY u.name ASC
       `);
 
