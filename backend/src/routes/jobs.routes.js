@@ -1,6 +1,7 @@
 
 const express = require("express");
 const router = express.Router();
+const sharp = require("sharp");
 const { pool } = require("../../db");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
@@ -505,8 +506,8 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
   try {
     if (!(await ensureJobAccess(req, res, pool, jobId))) return;
 
-  const [rows] = await pool.query(
-  `
+    const [rows] = await pool.query(
+      `
   SELECT
     j.*,
     CASE
@@ -575,8 +576,8 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
   WHERE j.id = ?
   LIMIT 1
   `,
-  [jobId]
-);
+      [jobId]
+    );
 
     if (!rows.length) {
       return res.status(404).json({ error: "Job not found" });
@@ -666,7 +667,7 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
       notes: job.notes,
       start_date: job.start_date,
       dueDate: job.due_date,
-      
+
       supervisor: job.supervisor_id
         ? { id: job.supervisor_id, name: job.supervisor_name }
         : null,
@@ -680,21 +681,21 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
             phone: job.contact_phone,
             email: job.contact_email,
             company: job.company_id
-  ? {
-      id: job.company_id,
-      code: job.company_code,
-      name: job.company_name,
-      type: job.company_type,
-      site: job.company_site,
+              ? {
+                id: job.company_id,
+                code: job.company_code,
+                name: job.company_name,
+                type: job.company_type,
+                site: job.company_site,
 
-      address: job.site_address,
-      latitude: job.site_latitude,
-      longitude: job.site_longitude,
-      place_id: job.site_place_id,
-      postal_code: job.site_postal_code,
-      country: job.site_country,
-    }
-  : null,
+                address: job.site_address,
+                latitude: job.site_latitude,
+                longitude: job.site_longitude,
+                place_id: job.site_place_id,
+                postal_code: job.site_postal_code,
+                country: job.site_country,
+              }
+              : null,
           }
           : null,
 
@@ -2031,18 +2032,52 @@ router.post("/:jobId/attachments/upload",
         });
       }
 
-      // 2️⃣ Generate object key
-      const ext = file.originalname.split(".").pop();
+      // // 2️⃣ Generate object key
+      // const ext = file.originalname.split(".").pop();
+      // const objectKey = `jobs/${jobId}/${history_id}/${uuid()}.${ext}`;
+
+      // // 3️⃣ Upload to MinIO
+      // await minioClient.putObject(
+      //   process.env.MINIO_BUCKET,
+      //   objectKey,
+      //   file.buffer,
+      //   file.size,
+      //   {
+      //     "Content-Type": file.mimetype,
+      //   }
+      // );
+
+      //optimized for Apple [heic] format
+      let buffer = file.buffer;
+      let fileType = file.mimetype;
+      let fileName = file.originalname;
+      let ext = file.originalname.split(".").pop().toLowerCase();
+
+      const isHEIC =
+        file.mimetype === "image/heic" ||
+        file.mimetype === "image/heif" ||
+        ext === "heic" ||
+        ext === "heif";
+
+      if (isHEIC) {
+        buffer = await sharp(file.buffer)
+          .jpeg({ quality: 90 })
+          .toBuffer();
+
+        fileType = "image/jpeg";
+        fileName = file.originalname.replace(/\.(heic|heif)$/i, ".jpg");
+        ext = "jpg";
+      }
+
       const objectKey = `jobs/${jobId}/${history_id}/${uuid()}.${ext}`;
 
-      // 3️⃣ Upload to MinIO
       await minioClient.putObject(
         process.env.MINIO_BUCKET,
         objectKey,
-        file.buffer,
-        file.size,
+        buffer,
+        buffer.length,
         {
-          "Content-Type": file.mimetype,
+          "Content-Type": fileType,
         }
       );
 
