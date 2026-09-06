@@ -593,6 +593,13 @@ console.log("Site payload:", payload);
                     >
                       Show Contacts
                     </button>
+                         <button
+                      onClick={() =>
+                        navigate(`/admin/sites/${site.id}/contacts`)
+                      }
+                    >
+                      Show Contacts
+                    </button>
                   </div>
                 </div>
               );

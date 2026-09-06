@@ -183,6 +183,7 @@ model job_visits {
   @@index([status], map: "idx_visits_status")
 }
 
+
 model jobs {
   id                      String                  @id @db.Char(36)
   code                    String                  @db.VarChar(50)

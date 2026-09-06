@@ -120,10 +120,17 @@ export default function AdminLayout() {
 
             <nav className="nav">
               <button
-                className={`nav-btn ${isActive("/admin") ? "active" : ""}`}
+                className={`nav-btn ${isActive("/admin") && !isActive("/admin/analysis") ? "active" : ""}`}
                 onClick={() => navigate("/admin")}
               >
                 Dashboard
+              </button>
+
+              <button
+                className={`nav-btn ${isActive("/admin/analysis") ? "active" : ""}`}
+                onClick={() => navigate("/admin/analysis")}
+              >
+                Analysis
               </button>
 
               <button
@@ -197,6 +204,14 @@ export default function AdminLayout() {
 
       {isMobile && mobilePanel === "menu" && (
         <div className="mobile-panel mobile-panel-menu">
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/analysis");
+            }}
+          >
+            Analysis
+          </button>
           <button
             onClick={() => {
               setMobilePanel(null);

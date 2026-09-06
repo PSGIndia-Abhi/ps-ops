@@ -74,8 +74,6 @@ app.use("/api/shifts", shiftRoutes);
 
 
 
-
-
 const PORT = process.env.PORT || 3000;
 
 (async () => {
