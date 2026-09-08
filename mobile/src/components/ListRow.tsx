@@ -10,16 +10,22 @@ interface ListRowProps {
   trailing?: React.ReactNode;
   onPress?: () => void;
   leadingInitial?: string;
+  /** An icon glyph instead of an initial-letter avatar - takes precedence when both are given. */
+  leadingIcon?: React.ReactNode;
 }
 
 /** A compact, reusable row for people/booking lists - name, subtitle, trailing detail. */
-export function ListRow({ title, subtitle, trailing, onPress, leadingInitial }: ListRowProps) {
+export function ListRow({ title, subtitle, trailing, onPress, leadingInitial, leadingIcon }: ListRowProps) {
   const content = (
     <>
-      {!!leadingInitial && (
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{leadingInitial}</Text>
-        </View>
+      {leadingIcon ? (
+        <View style={styles.avatar}>{leadingIcon}</View>
+      ) : (
+        !!leadingInitial && (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{leadingInitial}</Text>
+          </View>
+        )
       )}
       <View style={styles.textBlock}>
         <Text style={styles.title} numberOfLines={1}>

@@ -3,17 +3,15 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandMark } from './BrandMark';
-import { BellIcon, MenuIcon, PersonIcon } from './icons';
+import { AvatarIcon, BellIcon } from './icons';
 import { notificationsApi } from '../api';
-import { colors, radii, spacing, typography } from '../theme';
+import { colors, radii, shadows, spacing, typography } from '../theme';
 
 interface AppHeaderProps {
   userName: string;
   roleLabel: string;
   onProfilePress?: () => void;
   onNotificationsPress?: () => void;
-  /** Optional left-side entry point into the role's secondary-options menu (the "More" tab). */
-  onMorePress?: () => void;
 }
 
 /**
@@ -22,21 +20,21 @@ interface AppHeaderProps {
  * entry point - deliberately compact, it should never dominate the screen
  * the way the login intro does.
  *
- * No fake avatar photo: without a real profile picture the brief asks for a
- * professional person icon instead of a generic initials circle, so that's
- * what this renders.
+ * No left-side menu button anymore - it used to open the same secondary-
+ * options screen the bottom tab bar's own "More" tab already opens, which
+ * was a redundant second way to reach an identical destination. The bottom
+ * tab is the one entry point now.
+ *
+ * No fake avatar photo: without a real profile picture, this renders a
+ * fixed avatar glyph (not initials text) on the brand-colored circle - a
+ * stable, recognizable "this is your profile" icon rather than text that
+ * changes per account.
  *
  * The unread count refetches every time this screen regains focus (not just
  * on mount) - so the badge updates correctly after visiting Notifications
  * and reading something there, without any cross-component state plumbing.
  */
-export function AppHeader({
-  userName,
-  roleLabel,
-  onProfilePress,
-  onNotificationsPress,
-  onMorePress,
-}: AppHeaderProps) {
+export function AppHeader({ userName, roleLabel, onProfilePress, onNotificationsPress }: AppHeaderProps) {
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
 
@@ -60,18 +58,6 @@ export function AppHeader({
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
-      {!!onMorePress && (
-        <Pressable
-          onPress={onMorePress}
-          hitSlop={8}
-          style={({ pressed }) => [styles.iconButton, styles.moreButton, pressed && styles.avatarPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="More options"
-        >
-          <MenuIcon size={18} color={colors.textSecondary} />
-        </Pressable>
-      )}
-
       <View style={styles.identity}>
         <BrandMark size={32} />
         <View style={styles.textBlock}>
@@ -92,7 +78,7 @@ export function AppHeader({
           accessibilityRole="button"
           accessibilityLabel={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
         >
-          <BellIcon size={19} color={colors.textSecondary} />
+          <BellIcon size={19} color={colors.primary} />
           {!!unreadCount && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
@@ -107,7 +93,7 @@ export function AppHeader({
           accessibilityRole="button"
           accessibilityLabel="Profile"
         >
-          <PersonIcon size={18} color={colors.textSecondary} />
+          <AvatarIcon size={19} color={colors.textOnPrimary} />
         </Pressable>
       </View>
     </View>
@@ -124,6 +110,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    ...shadows.card,
   },
   identity: {
     flexDirection: 'row',
@@ -160,12 +147,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radii.pill,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.primarySoftBg,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  moreButton: {
-    marginRight: spacing.sm,
   },
   badge: {
     position: 'absolute',
@@ -190,7 +174,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radii.pill,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

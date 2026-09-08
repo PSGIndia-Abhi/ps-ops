@@ -85,7 +85,6 @@ export function AdminDashboardScreen() {
         roleLabel={role ? roleLabel(role) : ''}
         onProfilePress={() => navigation.navigate('Profile')}
         onNotificationsPress={() => navigation.navigate('Notifications')}
-        onMorePress={() => navigation.navigate('More')}
       />
       <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing}>
         <Text style={styles.greeting}>

@@ -11,7 +11,6 @@ import { CreateBookingScreen } from '../screens/bookings/CreateBookingScreen';
 import { NotificationsScreen } from '../screens/notifications/NotificationsScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { ChangePasswordScreen } from '../screens/profile/ChangePasswordScreen';
-import { MyPerformanceScreen } from '../screens/technician/MyPerformanceScreen';
 import { colors } from '../theme';
 import type { AuthenticatedStackParamList } from './types';
 
@@ -34,7 +33,8 @@ export function AuthenticatedNavigator() {
       }}
     >
       <Stack.Screen name="Tabs" component={RoleTabs} options={{ headerShown: false }} />
-      <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ title: 'Job details' }} />
+      {/* Own custom gradient header (back button + title, built into the hero) - see JobDetailScreen. */}
+      <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="TeamOverview"
         component={TeamOverviewScreen}
@@ -67,11 +67,6 @@ export function AuthenticatedNavigator() {
         name="ChangePassword"
         component={ChangePasswordScreen}
         options={{ title: 'Change password' }}
-      />
-      <Stack.Screen
-        name="MyPerformance"
-        component={MyPerformanceScreen}
-        options={{ title: 'My Performance' }}
       />
     </Stack.Navigator>
   );

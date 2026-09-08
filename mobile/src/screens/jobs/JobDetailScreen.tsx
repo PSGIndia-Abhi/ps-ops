@@ -4,6 +4,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { StatusBadge } from '../../components/StatusBadge';
+import { GradientCard } from '../../components/GradientCard';
+import { Card } from '../../components/Card';
+import { ArrowButton } from '../../components/ArrowButton';
 import { Banner, type BannerVariant } from '../../components/Banner';
 import { Skeleton } from '../../components/Skeleton';
 import { Button } from '../../components/Button';
@@ -13,13 +16,27 @@ import { RescheduleVisitSheet } from '../../components/RescheduleVisitSheet';
 import { TechnicianPickerSheet } from '../../components/TechnicianPickerSheet';
 import { CommentComposer, type ComposerPhoto } from '../../components/CommentComposer';
 import { AttachmentImage } from '../../components/AttachmentImage';
-import { BriefcaseIcon, CheckCircleIcon, ClockIcon, PinIcon } from '../../components/icons';
+import {
+  BriefcaseIcon,
+  CalendarIcon,
+  CheckCircleIcon,
+  ChevronLeftIcon,
+  ClockIcon,
+  ExternalLinkIcon,
+  PersonIcon,
+  PhoneIcon,
+  PinIcon,
+  PlayIcon,
+  TagIcon,
+  UsersIcon,
+} from '../../components/icons';
 import { jobsApi, visitsApi, ApiError } from '../../api';
 import type { ReassignScope } from '../../api/jobs';
 import { useAuth } from '../../auth/AuthContext';
 import { useUserRole } from '../../auth/role';
 import { getCurrentLocation, LocationError, type DeviceLocation } from '../../utils/location';
 import { formatDate, formatTime } from '../../utils/date';
+import { initialsFor } from '../../utils/name';
 import { colors, radii, spacing, typography } from '../../theme';
 import type { JobDetail, JobHistoryEntry, JobStatus } from '../../types/job';
 import { JOB_STATUS_TRANSITIONS } from '../../types/job';
@@ -67,10 +84,11 @@ function formatDistance(meters: number): string {
  * "Start Job" button shown to a technician (the real web app doesn't
  * show one either - see the Phase 4 report).
  */
-export function JobDetailScreen({ route }: Props) {
+export function JobDetailScreen({ route, navigation }: Props) {
   const { jobId } = route.params;
   const { user } = useAuth();
   const role = useUserRole();
+  const insets = useSafeAreaInsets();
   const isTechnician = role === 'technician';
   const canManageStatus = !isTechnician;
   const canReassign = !isTechnician;
@@ -86,6 +104,15 @@ export function JobDetailScreen({ route }: Props) {
   const [confirmComplete, setConfirmComplete] = useState(false);
 
   const [visitActionId, setVisitActionId] = useState<string | null>(null);
+  // Narrates what "Start Visit" is actually doing right now instead of just
+  // a spinner - 'locating' while the device acquires a GPS fix (up to ~8s,
+  // see utils/location.ts), 'verifying' while the one backend call that does
+  // both geofence-check-and-start is in flight. Deliberately never claims
+  // "location verified" before the server actually confirms it (the geofence
+  // check happens server-side, inside that same call) - narrating an
+  // unconfirmed success would be exactly the kind of fake-good-news state
+  // this app avoids elsewhere.
+  const [locationPhase, setLocationPhase] = useState<'locating' | 'verifying' | null>(null);
 
   const [reassignVisible, setReassignVisible] = useState(false);
   const [reassignSubmitting, setReassignSubmitting] = useState(false);
@@ -163,8 +190,10 @@ export function JobDetailScreen({ route }: Props) {
     // see utils/location.ts's doc comment on why a "you're far away" result
     // can come from a genuinely imprecise fix, not a wrong geofence.
     let location: DeviceLocation | null = null;
+    setLocationPhase('locating');
     try {
       location = await getCurrentLocation();
+      setLocationPhase('verifying');
       const isMissed = visit.status === 'MISSED';
       await (isMissed
         ? visitsApi.startVisitAnyway(visit.id, location)
@@ -194,6 +223,7 @@ export function JobDetailScreen({ route }: Props) {
       }
     } finally {
       setVisitActionId(null);
+      setLocationPhase(null);
     }
   }
 
@@ -314,15 +344,23 @@ export function JobDetailScreen({ route }: Props) {
 
   if (!job && !error) {
     return (
-      <ScreenContainer edges={['bottom']}>
-        <Skeleton height={28} width="60%" style={styles.skeletonGap} />
-        <Skeleton height={18} width="40%" style={styles.skeletonGap} />
-        <Skeleton height={140} radius={16} style={styles.skeletonGap} />
-      </ScreenContainer>
+      <View style={styles.screenFlex}>
+        <View style={[styles.plainBackRow, { paddingTop: insets.top + spacing.sm }]}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.plainBackButton}>
+            <ChevronLeftIcon size={20} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+        <ScreenContainer edges={['bottom']}>
+          <Skeleton height={28} width="60%" style={styles.skeletonGap} />
+          <Skeleton height={18} width="40%" style={styles.skeletonGap} />
+          <Skeleton height={140} radius={16} style={styles.skeletonGap} />
+        </ScreenContainer>
+      </View>
     );
   }
 
   const company = job?.requestedBy?.company;
+  const supervisor = job?.supervisor;
   const allowedNext = job ? JOB_STATUS_TRANSITIONS[job.status] : [];
 
   // The technician's single "what do I do next" visit for this job, if any -
@@ -346,20 +384,73 @@ export function JobDetailScreen({ route }: Props) {
       refreshing={refreshing}
       edges={primaryVisit ? [] : ['bottom']}
     >
-      {!!error && <Banner message={error} variant="error" />}
-      {!!feedback && <Banner message={feedback.message} variant={feedback.variant} />}
+      {/* A load failure (job never arrived) has no hero to anchor to - still
+          needs its own back button + top clearance, since the native header
+          is hidden for this whole screen now. */}
+      {!job && !!error && (
+        <View style={[styles.plainBackRow, { paddingTop: insets.top + spacing.sm }]}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.plainBackButton}>
+            <ChevronLeftIcon size={20} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+      )}
+      {!job && !!error && <Banner message={error} variant="error" />}
 
       {job && (
         <>
-          <View style={styles.headerRow}>
-            <Text style={styles.code}>{job.code}</Text>
-            <StatusBadge status={job.display_status || job.status} />
-          </View>
-          <View style={styles.heroTitleRow}>
-            <BriefcaseIcon size={20} color={colors.textMuted} />
-            <Text style={styles.title}>{job.title}</Text>
-          </View>
-          <Text style={styles.serviceType}>{job.service_type}</Text>
+          <GradientCard color={colors.primary} style={styles.hero}>
+            <View style={[styles.heroNavRow, { paddingTop: insets.top + spacing.sm }]}>
+              <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.heroIconButton}>
+                <ChevronLeftIcon size={20} color={colors.textOnPrimary} />
+              </Pressable>
+              <Text style={styles.heroNavTitle}>Job Details</Text>
+              {/* Invisible - exists only to balance the back button so the
+                  title above stays visually centered, not a second action. */}
+              <View style={styles.heroIconSpacer} />
+            </View>
+
+            <View style={styles.heroStatusRow}>
+              <StatusBadge status={job.display_status || job.status} />
+            </View>
+
+            <View style={styles.heroIconBadge}>
+              <BriefcaseIcon size={22} color={colors.primary} />
+            </View>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {job.title}
+            </Text>
+            {!!company?.name && (
+              <Text style={styles.heroSubtitle} numberOfLines={1}>
+                {company.name}
+              </Text>
+            )}
+            <Text style={styles.heroCode}>Job ID: {job.code}</Text>
+          </GradientCard>
+
+          <Card style={styles.factsCard}>
+            <View style={styles.factsRow}>
+              <FactItem
+                icon={<CalendarIcon size={16} color={colors.primary} />}
+                value={formatDate(job.start_date)}
+                label="Start date"
+              />
+              <View style={styles.factsDivider} />
+              <FactItem
+                icon={<CalendarIcon size={16} color={colors.primary} />}
+                value={formatDate(job.dueDate)}
+                label="Due date"
+              />
+              <View style={styles.factsDivider} />
+              <FactItem icon={<TagIcon size={16} color={colors.primary} />} value={job.service_type} label="Category" />
+            </View>
+          </Card>
+
+          {/* Below the hero/facts, not above them - with the native header
+              hidden for this screen's full-bleed gradient, a banner at the
+              very top of the content would render right under the status
+              bar instead of somewhere the technician is actually looking. */}
+          {!!error && <Banner message={error} variant="error" />}
+          {!!feedback && <Banner message={feedback.message} variant={feedback.variant} />}
 
           {/* Job status actions - admin/supervisor/branch_admin only */}
           {canManageStatus && allowedNext.length > 0 && (
@@ -411,13 +502,22 @@ export function JobDetailScreen({ route }: Props) {
             </View>
           )}
 
-          <Section title="Schedule">
-            <Row label="Start date" value={formatDate(job.start_date)} />
-            <Row label="Due date" value={formatDate(job.dueDate)} />
-          </Section>
-
           {(company?.site || company?.address || company?.name) && (
-            <Section title="Location">
+            <Section
+              title="Location"
+              titleIcon={<PinIcon size={15} color={colors.textMuted} />}
+              iconAction={
+                company?.latitude != null && company?.longitude != null
+                  ? {
+                      icon: <ExternalLinkIcon size={15} color={colors.primary} />,
+                      onPress: () =>
+                        Linking.openURL(
+                          `https://www.google.com/maps/search/?api=1&query=${company.latitude},${company.longitude}`,
+                        ),
+                    }
+                  : undefined
+              }
+            >
               {!!company?.name && <Row label="Company" value={company.name} />}
               {!!company?.site && <Row label="Site" value={company.site} />}
               {!!company?.address && <Row label="Address" value={company.address} />}
@@ -438,15 +538,31 @@ export function JobDetailScreen({ route }: Props) {
             </Section>
           )}
 
-          {!!job.supervisor && (
-            <Section title="Supervisor">
-              <Row label="Name" value={job.supervisor.name} />
-              {!!job.supervisor.phone && <Row label="Phone" value={job.supervisor.phone} />}
+          {!!supervisor && (
+            <Section title="Supervisor" titleIcon={<PersonIcon size={15} color={colors.textMuted} />}>
+              <PersonRow
+                name={supervisor.name}
+                accentColor={colors.crestBlue}
+                trailing={
+                  supervisor.phone ? (
+                    <Pressable
+                      onPress={() => Linking.openURL(`tel:${supervisor.phone}`)}
+                      style={styles.callButton}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Call ${supervisor.name}`}
+                    >
+                      <PhoneIcon size={16} color={colors.primary} />
+                    </Pressable>
+                  ) : undefined
+                }
+              />
             </Section>
           )}
 
           <Section
             title="Assigned team"
+            titleIcon={<UsersIcon size={15} color={colors.textMuted} />}
             action={
               canReassign
                 ? { label: 'Change', onPress: () => setReassignVisible(true) }
@@ -454,7 +570,9 @@ export function JobDetailScreen({ route }: Props) {
             }
           >
             {job.team.length > 0 ? (
-              job.team.map((member) => <Row key={member.id} label={member.name} value="" />)
+              job.team.map((member) => (
+                <PersonRow key={member.id} name={member.name} accentColor={colors.success} />
+              ))
             ) : (
               <Text style={styles.emptyText}>No technicians assigned yet.</Text>
             )}
@@ -484,6 +602,7 @@ export function JobDetailScreen({ route }: Props) {
                   isMine={visit.technicians.some((t) => String(t.id) === String(user?.id))}
                   actionLoading={visitActionId === visit.id}
                   anyActionLoading={!!visitActionId}
+                  locationPhase={visitActionId === visit.id ? locationPhase : null}
                   onStart={() => handleStartVisit(visit)}
                   onSubmit={() => handleSubmitVisit(visit)}
                   onApprove={() => handleApproveVisit(visit)}
@@ -570,6 +689,7 @@ export function JobDetailScreen({ route }: Props) {
       <TechnicianActionBar
         visit={primaryVisit}
         loading={visitActionId === primaryVisit.id}
+        locationPhase={visitActionId === primaryVisit.id ? locationPhase : null}
         onStart={() => handleStartVisit(primaryVisit)}
         onSubmit={() => handleSubmitVisit(primaryVisit)}
       />
@@ -585,6 +705,8 @@ interface VisitRowProps {
   isMine: boolean;
   actionLoading: boolean;
   anyActionLoading: boolean;
+  /** Set only while *this* visit's Start Visit is in flight - narrates what's actually happening instead of a bare spinner. */
+  locationPhase: 'locating' | 'verifying' | null;
   onStart: () => void;
   onSubmit: () => void;
   onApprove: () => void;
@@ -595,6 +717,22 @@ interface VisitRowProps {
 
 const TERMINAL_VISIT_STATUSES: VisitStatus[] = ['COMPLETED', 'CANCELED'];
 
+const LOCATION_PHASE_LABEL: Record<'locating' | 'verifying', string> = {
+  locating: 'Checking your location...',
+  verifying: "Verifying you're at the site...",
+};
+
+/** The one "what Start Visit is doing right now" caption, shared by the inline VisitRow button and the docked TechnicianActionBar. */
+function LocationPhaseNote({ phase }: { phase: 'locating' | 'verifying' | null }) {
+  if (!phase) return null;
+  return (
+    <View style={styles.locationPhaseRow}>
+      <ClockIcon size={13} color={colors.textMuted} />
+      <Text style={styles.locationPhaseText}>{LOCATION_PHASE_LABEL[phase]}</Text>
+    </View>
+  );
+}
+
 function VisitRow({
   visit,
   isTechnician,
@@ -602,6 +740,7 @@ function VisitRow({
   isMine,
   actionLoading,
   anyActionLoading,
+  locationPhase,
   onStart,
   onSubmit,
   onApprove,
@@ -665,6 +804,7 @@ function VisitRow({
           )}
         </View>
       )}
+      {showStart && <LocationPhaseNote phase={locationPhase} />}
 
       {showManageRow && (
         <View style={styles.visitManageRow}>
@@ -686,6 +826,7 @@ function VisitRow({
 interface TechnicianActionBarProps {
   visit: JobVisit;
   loading: boolean;
+  locationPhase: 'locating' | 'verifying' | null;
   onStart: () => void;
   onSubmit: () => void;
 }
@@ -697,7 +838,10 @@ interface TechnicianActionBarProps {
  * states (awaiting approval / completed) render as a plain status strip, not
  * a disabled-looking dead button.
  */
-function TechnicianActionBar({ visit, loading, onStart, onSubmit }: TechnicianActionBarProps) {
+/** Defined once at module scope, not inline in the render below - an inline arrow function passed as a prop gets a new identity every render, which is exactly what `react/no-unstable-nested-components` flags. */
+const renderPlayIcon = (color: string) => <PlayIcon size={16} color={color} />;
+
+function TechnicianActionBar({ visit, loading, locationPhase, onStart, onSubmit }: TechnicianActionBarProps) {
   const insets = useSafeAreaInsets();
   const containerStyle = [styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm }];
 
@@ -727,21 +871,19 @@ function TechnicianActionBar({ visit, loading, onStart, onSubmit }: TechnicianAc
 
   const isMissed = visit.status === 'MISSED';
 
+  const isSubmit = visit.status === 'IN_PROGRESS';
+
   return (
     <View style={containerStyle}>
-      <Button
-        label={
-          visit.status === 'IN_PROGRESS'
-            ? 'Submit for Approval'
-            : isMissed
-              ? 'Start Anyway'
-              : 'Start Visit'
-        }
-        onPress={visit.status === 'IN_PROGRESS' ? onSubmit : onStart}
+      <ArrowButton
+        label={isSubmit ? 'Submit for Approval' : isMissed ? 'Start Anyway' : 'Start Visit'}
+        onPress={isSubmit ? onSubmit : onStart}
         loading={loading}
         disabled={loading}
         style={styles.bottomBarButton}
+        icon={isSubmit ? undefined : renderPlayIcon}
       />
+      {!isSubmit && <LocationPhaseNote phase={locationPhase} />}
     </View>
   );
 }
@@ -832,22 +974,66 @@ function Section({
   title,
   children,
   action,
+  titleIcon,
+  iconAction,
 }: {
   title: string;
   children: React.ReactNode;
   action?: { label: string; onPress: () => void };
+  /** Small icon rendered before the title - matches the small utility icons every section now carries (location pin, person, team). */
+  titleIcon?: React.ReactNode;
+  /** A compact icon-only shortcut on the right (e.g. "open in maps") - distinct from `action`'s text link, and the two are mutually exclusive per section in practice. */
+  iconAction?: { icon: React.ReactNode; onPress: () => void };
 }) {
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.sectionTitleRow}>
+          {titleIcon}
+          <Text style={styles.sectionTitle}>{title}</Text>
+        </View>
         {!!action && (
           <Pressable onPress={action.onPress} hitSlop={8}>
             <Text style={styles.sectionAction}>{action.label}</Text>
           </Pressable>
         )}
+        {!!iconAction && (
+          <Pressable onPress={iconAction.onPress} hitSlop={8} style={styles.iconActionButton} accessibilityRole="button">
+            {iconAction.icon}
+          </Pressable>
+        )}
       </View>
       <View style={styles.sectionCard}>{children}</View>
+    </View>
+  );
+}
+
+/** One person (supervisor, team member) as an avatar-initial + name row, with an optional trailing action (e.g. a call button). */
+function PersonRow({ name, accentColor = colors.primary, trailing }: { name: string; accentColor?: string; trailing?: React.ReactNode }) {
+  return (
+    <View style={styles.personRow}>
+      <View style={[styles.personAvatar, { backgroundColor: `${accentColor}1A` }]}>
+        <Text style={[styles.personAvatarText, { color: accentColor }]}>{initialsFor(name)}</Text>
+      </View>
+      <Text style={styles.personName} numberOfLines={1}>
+        {name}
+      </Text>
+      {trailing}
+    </View>
+  );
+}
+
+/** One of the hero's quick-facts columns (start date / due date / category). */
+function FactItem({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
+  return (
+    <View style={styles.factItem}>
+      <View style={styles.factIconWrap}>{icon}</View>
+      <Text style={styles.factValue} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.factLabel} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -878,8 +1064,23 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   bottomBarButton: {
-    width: '100%',
+    // Half-width and centered, not a full-bleed bar - it's a single
+    // deliberate action, not a form submit that needs the whole width.
+    width: '50%',
+    minWidth: 180,
+    alignSelf: 'center',
     minHeight: 52,
+  },
+  locationPhaseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xxs,
+    marginTop: spacing.xs,
+  },
+  locationPhaseText: {
+    ...typography.caption,
+    color: colors.textMuted,
   },
   bottomBarStatus: {
     flexDirection: 'row',
@@ -903,32 +1104,142 @@ const styles = StyleSheet.create({
   skeletonGap: {
     marginBottom: spacing.md,
   },
-  headerRow: {
+  plainBackRow: {
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background,
+  },
+  plainBackButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  hero: {
+    // Bleeds past ScreenContainer's own padding to reach the true screen
+    // edges (and the very top, behind the status bar) - see the header/hero
+    // structural comment above for why this screen hides the native header.
+    marginTop: -spacing.lg,
+    marginHorizontal: -spacing.lg,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxxl,
+  },
+  heroNavRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.xxs,
   },
-  code: {
-    ...typography.overline,
-    color: colors.textMuted,
+  heroIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  heroTitleRow: {
+  heroIconSpacer: {
+    width: 36,
+    height: 36,
+  },
+  heroNavTitle: {
+    ...typography.bodyMedium,
+    color: colors.textOnPrimary,
+  },
+  heroStatusRow: {
+    alignItems: 'flex-end',
+    marginTop: spacing.md,
+  },
+  heroIconBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.lg,
+    backgroundColor: colors.textOnPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  heroTitle: {
+    ...typography.title,
+    color: colors.textOnPrimary,
+  },
+  heroSubtitle: {
+    ...typography.body,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 2,
+  },
+  heroCode: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: spacing.xs,
+  },
+  factsCard: {
+    marginTop: -spacing.xxl,
+    marginBottom: spacing.lg,
+  },
+  factsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.xxs,
   },
-  title: {
-    ...typography.title,
+  factsDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: colors.border,
+  },
+  factItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  factIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    backgroundColor: colors.primarySoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xxs,
+  },
+  factValue: {
+    ...typography.bodyMedium,
     color: colors.textPrimary,
-    flexShrink: 1,
   },
-  serviceType: {
-    ...typography.body,
+  factLabel: {
+    ...typography.caption,
     color: colors.textMuted,
-    marginTop: 2,
-    marginBottom: spacing.lg,
+    marginTop: 1,
+  },
+  personRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  personAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarText: {
+    ...typography.captionMedium,
+  },
+  personName: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  callButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primarySoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionsCard: {
     backgroundColor: colors.surface,
@@ -953,6 +1264,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.xs,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+  },
+  iconActionButton: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    backgroundColor: colors.primarySoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
     ...typography.captionMedium,

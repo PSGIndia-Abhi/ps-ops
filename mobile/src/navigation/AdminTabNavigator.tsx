@@ -5,14 +5,15 @@ import { JobsListScreen } from '../screens/jobs/JobsListScreen';
 import { BookingsListScreen } from '../screens/bookings/BookingsListScreen';
 import { MoreScreen } from '../screens/profile/MoreScreen';
 import { bookingsTabIcon, homeTabIcon, jobsTabIcon, moreTabIcon } from './tabIcons';
-import { sharedTabScreenOptions } from './tabBarOptions';
+import { useSharedTabScreenOptions } from './tabBarOptions';
 import type { AdminTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<AdminTabParamList>();
 
 export function AdminTabNavigator() {
+  const screenOptions = useSharedTabScreenOptions();
   return (
-    <Tab.Navigator screenOptions={sharedTabScreenOptions}>
+    <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={AdminDashboardScreen} options={{ tabBarIcon: homeTabIcon }} />
       <Tab.Screen name="Jobs" component={JobsListScreen} options={{ tabBarIcon: jobsTabIcon }} />
       <Tab.Screen

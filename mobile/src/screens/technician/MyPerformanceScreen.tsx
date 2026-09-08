@@ -53,8 +53,11 @@ export function MyPerformanceScreen() {
   const inProgressCount = todaysVisits?.filter((v) => v.status === 'IN_PROGRESS').length ?? 0;
   const pendingCount = todaysVisits ? todaysVisits.length - inProgressCount : 0;
 
+  // 'top' included - this is now a bottom-tab screen (see
+  // TechnicianTabNavigator), not a stack push, so there's no native header
+  // above it to already consume that space.
   return (
-    <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing} edges={['bottom']}>
+    <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing} edges={['top', 'bottom']}>
       <Text style={styles.title}>My Performance</Text>
       <Text style={styles.subtitle}>Your assigned work, at a glance.</Text>
 
@@ -115,13 +118,13 @@ export function MyPerformanceScreen() {
         </>
       )}
 
-      <View style={styles.noteCard}>
+      {/* <View style={styles.noteCard}>
         <Text style={styles.noteText}>
           A weekly or "completed today" breakdown isn't shown here because the backend doesn't record
           when a visit was completed relative to today - these numbers only show what's genuinely
           available right now.
         </Text>
-      </View>
+      </View> */}
     </ScreenContainer>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
@@ -93,7 +93,6 @@ export function SupervisorDashboardScreen() {
         roleLabel={role ? roleLabel(role) : ''}
         onProfilePress={() => navigation.navigate('Profile')}
         onNotificationsPress={() => navigation.navigate('Notifications')}
-        onMorePress={() => navigation.navigate('More')}
       />
       <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing}>
         <Text style={styles.greeting}>
@@ -131,6 +130,7 @@ export function SupervisorDashboardScreen() {
               isLoading={!summary}
               icon={<BriefcaseIcon size={16} color={colors.primary} />}
               accentColor={colors.primary}
+              onPress={() => navigation.navigate('Jobs', { filter: 'all' })}
             />
             <StatCard
               label="In progress"
@@ -138,6 +138,7 @@ export function SupervisorDashboardScreen() {
               isLoading={!summary}
               icon={<ClockIcon size={16} color={colors.info} />}
               accentColor={colors.info}
+              onPress={() => navigation.navigate('Jobs', { filter: 'inProgress' })}
             />
           </View>
           <View style={styles.statRow}>
@@ -147,6 +148,7 @@ export function SupervisorDashboardScreen() {
               isLoading={!summary}
               icon={<CheckCircleIcon size={16} color={colors.success} />}
               accentColor={colors.success}
+              onPress={() => navigation.navigate('Jobs', { filter: 'completed' })}
             />
             <StatCard
               label="Overdue"
@@ -154,6 +156,7 @@ export function SupervisorDashboardScreen() {
               isLoading={!summary}
               icon={<AlertTriangleIcon size={16} color={colors.danger} />}
               accentColor={colors.danger}
+              onPress={() => navigation.navigate('Jobs', { filter: 'overdue' })}
             />
           </View>
         </View>
@@ -163,16 +166,22 @@ export function SupervisorDashboardScreen() {
             <Text style={styles.sectionTitle}>Needs attention</Text>
             <View style={styles.attentionRow}>
               {overdue > 0 && (
-                <View style={[styles.attentionCard, { backgroundColor: colors.dangerBg }]}>
+                <Pressable
+                  style={[styles.attentionCard, { backgroundColor: colors.dangerBg }]}
+                  onPress={() => navigation.navigate('Jobs', { filter: 'overdue' })}
+                >
                   <Text style={[styles.attentionValue, { color: colors.dangerText }]}>{overdue}</Text>
                   <Text style={[styles.attentionLabel, { color: colors.dangerText }]}>Overdue jobs</Text>
-                </View>
+                </Pressable>
               )}
               {pendingWork > 0 && (
-                <View style={[styles.attentionCard, { backgroundColor: colors.warningBg }]}>
+                <Pressable
+                  style={[styles.attentionCard, { backgroundColor: colors.warningBg }]}
+                  onPress={() => navigation.navigate('Jobs', { filter: 'created' })}
+                >
                   <Text style={[styles.attentionValue, { color: colors.warningText }]}>{pendingWork}</Text>
                   <Text style={[styles.attentionLabel, { color: colors.warningText }]}>Pending work</Text>
-                </View>
+                </Pressable>
               )}
             </View>
           </>

@@ -11,12 +11,13 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BrandMark } from '../../components/BrandMark';
+import { BackgroundWash } from '../../components/BackgroundWash';
+import { DecorativeSkyline } from '../../components/DecorativeSkyline';
 import { Banner } from '../../components/Banner';
-import { Button } from '../../components/Button';
+import { ArrowButton } from '../../components/ArrowButton';
 import { TextField } from '../../components/TextField';
 import { LockIcon, PersonIcon } from '../../components/icons';
 import { useAuth } from '../../auth/AuthContext';
@@ -62,25 +63,6 @@ function useResponsiveLoginSizing() {
   }, [height, width]);
 }
 
-/**
- * Decorative header only - purely presentational, absolutely positioned
- * behind the scroll content so it never affects layout/scroll height on
- * small screens or with the keyboard open. Two soft, low-opacity curves in
- * the existing brand blue/red tokens (no new colors) rather than the
- * reference's bold solid banner - "subtle" per the brief.
- */
-function BrandCurve() {
-  return (
-    <View style={styles.curveWrap} pointerEvents="none">
-      <Svg width="100%" height="100%" viewBox="0 0 400 220" preserveAspectRatio="xMidYMin slice">
-        <Circle cx={35} cy={-45} r={190} fill={colors.primarySoft} opacity={0.55} />
-        <Circle cx={395} cy={-5} r={160} fill={colors.crestRed} opacity={0.08} />
-        <Circle cx={355} cy={-25} r={105} fill={colors.crestBlue} opacity={0.12} />
-      </Svg>
-    </View>
-  );
-}
-
 export function LoginScreen({ navigation }: Props) {
   const { login, status } = useAuth();
   const sizing = useResponsiveLoginSizing();
@@ -92,6 +74,11 @@ export function LoginScreen({ navigation }: Props) {
   const [formErrorVariant, setFormErrorVariant] = useState<'error' | 'network'>('error');
   const [submitting, setSubmitting] = useState(false);
   const [introDone, setIntroDone] = useState(false);
+  // Drives the Sign In button's badge sliding left -> right (see
+  // ArrowButton's `confirmSwipe`) - set the moment credentials pass
+  // validation, reset back to false on a failed attempt so the button is
+  // visually ready for a retry rather than stuck on the right.
+  const [confirmSwipe, setConfirmSwipe] = useState(false);
 
   const isBusy = submitting || status === 'signingIn';
 
@@ -172,11 +159,16 @@ export function LoginScreen({ navigation }: Props) {
     setFormError(null);
     if (!validate()) return;
 
+    // Credentials look valid - play the confirm swipe right away, in
+    // parallel with the actual request, rather than waiting for the server
+    // to respond before showing any reaction to the tap.
+    setConfirmSwipe(true);
     setSubmitting(true);
     try {
       await login(email, password);
       // Navigation away from Login happens automatically in RootNavigator
-      // once auth status becomes 'signedIn'.
+      // once auth status becomes 'signedIn' - confirmSwipe is left true,
+      // since this screen unmounts before it would ever need to reset.
     } catch (err) {
       if (err instanceof ApiError && err.isNetworkError) {
         setFormErrorVariant('network');
@@ -188,6 +180,9 @@ export function LoginScreen({ navigation }: Props) {
         setFormErrorVariant('error');
         setFormError(INVALID_CREDENTIALS_MESSAGE);
       }
+      // Failed - slide the badge back to the left so the button looks
+      // ready for another attempt, not stuck mid-"confirmed".
+      setConfirmSwipe(false);
     } finally {
       setSubmitting(false);
     }
@@ -195,7 +190,21 @@ export function LoginScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <BrandCurve />
+      <BackgroundWash />
+      <DecorativeSkyline />
+
+      {/* <Animated.View
+        style={[styles.sideCaption, { top: insets.top + spacing.sm, opacity: logoOpacity }]}
+        pointerEvents="none"
+      >
+        <Text style={styles.sideCaptionText}>SAFER</Text>
+        <Text style={styles.sideCaptionText}>CLEANER</Text>
+        <Text style={styles.sideCaptionText}>HAPPIER</Text>
+        <Text style={styles.sideCaptionText}>SPACES</Text>
+        <View style={styles.sideCaptionUnderline} />
+      </Animated.View> */}
+      
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -219,25 +228,24 @@ export function LoginScreen({ navigation }: Props) {
               <BrandMark size={sizing.logoSize} />
             </Animated.View>
 
-            {!sizing.isCompact && (
-              <Animated.Text
-                style={[
-                  styles.tagline,
-                  { opacity: taglineOpacity, transform: [{ translateY: taglineTranslateY }] },
-                ]}
+            {/* {!sizing.isCompact && (
+              <Animated.View
+                style={{ opacity: taglineOpacity, transform: [{ translateY: taglineTranslateY }] }}
               >
-                Protecting spaces. Empowering teams.
-              </Animated.Text>
-            )}
+                <Text style={styles.tagline}>Protecting spaces.</Text>
+                <Text style={[styles.tagline, styles.taglineAccent]}>Empowering teams.</Text>
+              </Animated.View>
+            )} */}
 
-            <Animated.Text
+            <Animated.View
               style={[
-                styles.supportText,
+                styles.supportGroup,
                 { opacity: supportOpacity, transform: [{ translateY: supportTranslateY }] },
               ]}
             >
-              {/* Pest Control Operations */}
-            </Animated.Text>
+              <Text style={styles.supportText}>PEOPLE  |  PLACES  |  A CLEANER TOMORROW</Text>
+              <View style={styles.supportUnderline} />
+            </Animated.View>
           </Animated.View>
 
           <Animated.View
@@ -302,13 +310,25 @@ export function LoginScreen({ navigation }: Props) {
               <Text style={styles.forgotLinkText}>Forgot password?</Text>
             </Pressable>
 
-            <Button
+            <ArrowButton
               label="SIGN IN"
+              color={colors.crestRed}
               onPress={handleSubmit}
               loading={isBusy}
+              arrowSide="left"
+              confirmSwipe={confirmSwipe}
               style={[styles.submit, { minHeight: sizing.buttonHeight }]}
               testID="login-submit"
             />
+          </Animated.View>
+
+          <Animated.Text style={[styles.contactAdmin, { opacity: formOpacity }]}>
+            New here? Contact your administrator.
+          </Animated.Text>
+
+          <Animated.View style={[styles.bottomCaption, { opacity: formOpacity }]}>
+            <Text style={styles.bottomCaptionText}>CARING FOR EVERY SPACE</Text>
+            <View style={styles.bottomCaptionUnderline} />
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -321,13 +341,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  curveWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
-  },
   flex: {
     flex: 1,
   },
@@ -338,16 +351,46 @@ const styles = StyleSheet.create({
   brandGroup: {
     alignItems: 'center',
   },
+  sideCaption: {
+    position: 'absolute',
+    right: spacing.lg,
+    alignItems: 'flex-end',
+  },
+  sideCaptionText: {
+    ...typography.overline,
+    color: colors.textMuted,
+    lineHeight: 13,
+  },
+  sideCaptionUnderline: {
+    width: 22,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.crestRed,
+    marginTop: spacing.xxs,
+  },
   tagline: {
-    ...typography.subtitle,
+    ...typography.title,
     color: colors.textPrimary,
     textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  taglineAccent: {
+    color: colors.crestRed,
+  },
+  supportGroup: {
+    alignItems: 'center',
     marginTop: spacing.sm,
   },
   supportText: {
     ...typography.overline,
     color: colors.textMuted,
     textAlign: 'center',
+  },
+  supportUnderline: {
+    width: 28,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.crestRed,
     marginTop: spacing.xxs,
   },
   form: {
@@ -379,5 +422,26 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: radii.xl,
     ...shadows.raised,
+  },
+  contactAdmin: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.lg,
+  },
+  bottomCaption: {
+    alignItems: 'center',
+    marginTop: spacing.xxl,
+  },
+  bottomCaptionText: {
+    ...typography.overline,
+    color: colors.textMuted,
+  },
+  bottomCaptionUnderline: {
+    width: 28,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.crestRed,
+    marginTop: spacing.xxs,
   },
 });

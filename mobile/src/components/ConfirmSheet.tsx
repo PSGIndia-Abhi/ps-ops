@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './Button';
 import { colors, radii, spacing, typography } from '../theme';
 
@@ -29,10 +30,14 @@ export function ConfirmSheet({
   loading,
   destructive,
 }: ConfirmSheetProps) {
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <Pressable style={styles.overlay} onPress={loading ? undefined : onCancel}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: spacing.xl + insets.bottom }]}
+          onPress={(e) => e.stopPropagation()}
+        >
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.description}>{description}</Text>
@@ -64,7 +69,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    // paddingBottom is set inline (spacing.xl + the device's actual bottom
+    // safe-area inset) - a fixed value here would sit flush against, or
+    // underneath, a 3-button Android nav bar's physical buttons.
   },
   handle: {
     width: 40,

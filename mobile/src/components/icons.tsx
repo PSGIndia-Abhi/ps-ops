@@ -205,6 +205,63 @@ export function ChevronRightIcon({ size = 20, color = '#6B7280' }: IconProps) {
   );
 }
 
+export function ChevronLeftIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M15 5l-7 7 7 7"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function TagIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M11.6 3.5h-5a1.5 1.5 0 00-1.06.44l-1.6 1.6A1.5 1.5 0 003.5 6.6v5c0 .4.16.78.44 1.06l8.4 8.4a1.5 1.5 0 002.12 0l6-6a1.5 1.5 0 000-2.12l-8.4-8.4a1.5 1.5 0 00-1.06-.44z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Circle cx={8.5} cy={8.5} r={1.3} fill={color} />
+    </Svg>
+  );
+}
+
+export function PlayIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M6.5 4.8v14.4a.9.9 0 001.36.77l11.5-7.2a.9.9 0 000-1.54l-11.5-7.2A.9.9 0 006.5 4.8z" fill={color} />
+    </Svg>
+  );
+}
+
+export function ExternalLinkIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9.5 5H6.5A1.5 1.5 0 005 6.5v11A1.5 1.5 0 006.5 19h11a1.5 1.5 0 001.5-1.5v-3"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M14.5 5H19v4.5M19 5l-8 8"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 export function PinIcon({ size = 20, color = '#6B7280' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -249,22 +306,46 @@ export function PersonIcon({ size = 20, color = '#6B7280' }: IconProps) {
   );
 }
 
+export function SettingsIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.8} />
+      <Path
+        d="M12 3.5v1.8M12 18.7v1.8M20.5 12h-1.8M5.3 12H3.5M17.8 6.2l-1.3 1.3M7.5 16.5l-1.3 1.3M17.8 17.8l-1.3-1.3M7.5 7.5L6.2 6.2"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** A solid/filled bell (not just an outline) - reads clearly at the small sizes the header actually uses it at, unlike a thin stroke. */
 export function BellIcon({ size = 20, color = '#6B7280' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M6 10.5a6 6 0 1112 0c0 3.4 1 5 1.8 5.9H4.2c.8-.9 1.8-2.5 1.8-5.9z"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M12 2.3a1.3 1.3 0 011.3 1.3v.62a6.6 6.6 0 015.3 6.47v2.98c0 1.24.53 2.42 1.46 3.24l.1.1c.62.53.24 1.54-.57 1.54H4.41c-.81 0-1.19-1.01-.57-1.54l.1-.1a4.4 4.4 0 001.46-3.24v-2.98a6.6 6.6 0 015.3-6.47v-.62A1.3 1.3 0 0112 2.3z"
+        fill={color}
       />
       <Path
-        d="M9.7 19.4a2.4 2.4 0 004.6 0"
+        d="M9.4 19.7a2.7 2.7 0 005.2 0"
         stroke={color}
         strokeWidth={1.8}
         strokeLinecap="round"
-        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** A solid avatar glyph (head + shoulders, filled) - used as the header's profile entry point instead of initials text, and instead of a thin person outline. */
+export function AvatarIcon({ size = 20, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={8.3} r={3.7} fill={color} />
+      <Path
+        d="M4.3 20.1C5.3 16.2 8.4 14 12 14s6.7 2.2 7.7 6.1a1.05 1.05 0 01-1.02 1.3H5.32a1.05 1.05 0 01-1.02-1.3z"
+        fill={color}
       />
     </Svg>
   );
@@ -411,6 +492,26 @@ export function InboxIcon({ size = 40, color = '#9CA3AF' }: IconProps) {
         d="M4 12.5h4.4l1.2 2.2h4.8l1.2-2.2H20V18a1.6 1.6 0 01-1.6 1.6H5.6A1.6 1.6 0 014 18v-5.5z"
         stroke={color}
         strokeWidth={1.6}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function ShieldIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3.5l7 2.6v5.4c0 4.4-3 8.2-7 9.5-4-1.3-7-5.1-7-9.5V6.1l7-2.6z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8.7 12.2l2.3 2.3 4.3-4.6"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </Svg>

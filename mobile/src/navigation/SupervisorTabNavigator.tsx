@@ -5,14 +5,15 @@ import { JobsListScreen } from '../screens/jobs/JobsListScreen';
 import { TeamScreen } from '../screens/supervisor/TeamScreen';
 import { MoreScreen } from '../screens/profile/MoreScreen';
 import { homeTabIcon, jobsTabIcon, moreTabIcon, teamTabIcon } from './tabIcons';
-import { sharedTabScreenOptions } from './tabBarOptions';
+import { useSharedTabScreenOptions } from './tabBarOptions';
 import type { SupervisorTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<SupervisorTabParamList>();
 
 export function SupervisorTabNavigator() {
+  const screenOptions = useSharedTabScreenOptions();
   return (
-    <Tab.Navigator screenOptions={sharedTabScreenOptions}>
+    <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen
         name="Home"
         component={SupervisorDashboardScreen}

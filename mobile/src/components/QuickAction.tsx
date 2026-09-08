@@ -6,17 +6,19 @@ interface QuickActionProps {
   label: string;
   icon: React.ReactNode;
   onPress: () => void;
+  /** Icon-wrap accent color - defaults to primary blue, but a row of several tiles reads better with each one distinct. */
+  accentColor?: string;
 }
 
 /** A compact icon+label action - not a giant button, several sit in a row. */
-export function QuickAction({ label, icon, onPress }: QuickActionProps) {
+export function QuickAction({ label, icon, onPress, accentColor = colors.primary }: QuickActionProps) {
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.container, pressed && styles.pressed]}
       accessibilityRole="button"
     >
-      <View style={styles.iconWrap}>{icon}</View>
+      <View style={[styles.iconWrap, { backgroundColor: `${accentColor}1A` }]}>{icon}</View>
       <Text style={styles.label} numberOfLines={1}>
         {label}
       </Text>

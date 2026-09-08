@@ -1,14 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { EmptyState } from '../../components/EmptyState';
+import { SectionHeader } from '../../components/SectionHeader';
 import { Banner } from '../../components/Banner';
 import { Skeleton } from '../../components/Skeleton';
 import { BellIcon } from '../../components/icons';
 import { notificationsApi, ApiError } from '../../api';
-import { formatDate, formatTime } from '../../utils/date';
+import { formatDate, formatTime, isToday } from '../../utils/date';
 import { colors, radii, spacing, typography } from '../../theme';
 import type { AppNotification } from '../../types/notification';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
@@ -45,15 +46,30 @@ export function NotificationsScreen() {
   }, [load]);
 
   async function handleOpen(notification: AppNotification) {
-    // Mark read first (best-effort - if this fails, still let the user
-    // navigate; a stale "unread" flag on one item isn't worth blocking on).
+    // Mirrors the web app's exact order (frontend/src/hooks/useNotifications.js
+    // markAsRead + components/NotificationsMenu.jsx handleNotificationClick):
+    // mark-as-read is awaited BEFORE navigating, and local state only ever
+    // flips to read once the backend actually confirms it - never
+    // optimistically before that, since this account's role may not have
+    // permission to update it (see notificationsApi.markNotificationRead's
+    // doc comment) and showing "read" for something that didn't actually
+    // persist would be exactly the kind of fake success this app avoids
+    // elsewhere. A failure here (permission or network) still lets the
+    // technician open the job - not being able to view their job because a
+    // notification couldn't be marked read would be a worse outcome than a
+    // notification staying (correctly) unread.
     if (!notification.is_read) {
-      setNotifications((prev) =>
-        prev ? prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n)) : prev,
-      );
-      notificationsApi.markNotificationRead(notification.id).catch(() => {
-        // swallow - the list will show the correct state again on next load
-      });
+      try {
+        await notificationsApi.markNotificationRead(notification.id);
+        setNotifications((prev) =>
+          prev ? prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n)) : prev,
+        );
+      } catch {
+        // Leave it unread - the list already reflects the real backend
+        // state, and a toast here would just be noise on every tap for an
+        // account without permission (see the "Mark all as read" banner,
+        // which does surface this once explicitly instead).
+      }
     }
 
     if (notification.entity_type === 'job' && notification.entity_id) {
@@ -67,13 +83,27 @@ export function NotificationsScreen() {
       await notificationsApi.markAllNotificationsRead();
       setNotifications((prev) => (prev ? prev.map((n) => ({ ...n, is_read: true })) : prev));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to mark notifications as read.');
+      if (err instanceof ApiError && err.status === 403) {
+        setError("Your account doesn't have permission to do this yet. Contact your admin.");
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Unable to mark notifications as read.');
+      }
     } finally {
       setMarkingAllRead(false);
     }
   }
 
   const hasUnread = !!notifications?.some((n) => !n.is_read);
+
+  // Real, already-available data (created_at) grouped by calendar day -
+  // purely a presentation grouping, not a second fetch or a new field.
+  const { todayGroup, earlierGroup } = useMemo(() => {
+    if (!notifications) return { todayGroup: [], earlierGroup: [] };
+    const t: AppNotification[] = [];
+    const e: AppNotification[] = [];
+    for (const n of notifications) (isToday(n.created_at) ? t : e).push(n);
+    return { todayGroup: t, earlierGroup: e };
+  }, [notifications]);
 
   return (
     <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing} edges={['bottom']}>
@@ -86,7 +116,12 @@ export function NotificationsScreen() {
         )}
       </View>
 
-      {!!error && <Banner message={error} variant={error.includes('session') ? 'permission' : 'error'} />}
+      {!!error && (
+        <Banner
+          message={error}
+          variant={error.includes('session') || error.includes('permission') ? 'permission' : 'error'}
+        />
+      )}
 
       {!notifications && !error ? (
         <View>
@@ -101,34 +136,60 @@ export function NotificationsScreen() {
           subtitle="You're all caught up. New updates will appear here."
         />
       ) : (
-        notifications.map((notification) => (
-          <Pressable
-            key={notification.id}
-            onPress={() => handleOpen(notification)}
-            style={({ pressed }) => [
-              styles.row,
-              !notification.is_read && styles.rowUnread,
-              pressed && styles.rowPressed,
-            ]}
-          >
-            {!notification.is_read && <View style={styles.unreadDot} />}
-            <View style={styles.rowContent}>
-              <Text style={[styles.rowTitle, !notification.is_read && styles.rowTitleUnread]} numberOfLines={2}>
-                {notification.title || 'Notification'}
-              </Text>
-              {!!notification.message && (
-                <Text style={styles.rowMessage} numberOfLines={3}>
-                  {notification.message}
-                </Text>
-              )}
-              <Text style={styles.rowTime}>
-                {formatDate(notification.created_at)} · {formatTime(notification.created_at)}
-              </Text>
-            </View>
-          </Pressable>
-        ))
+        <>
+          {todayGroup.length > 0 && (
+            <>
+              <SectionHeader title="Today" />
+              {todayGroup.map((n) => (
+                <NotificationRow key={n.id} notification={n} onPress={() => handleOpen(n)} />
+              ))}
+            </>
+          )}
+          {earlierGroup.length > 0 && (
+            <>
+              <SectionHeader title="Earlier" />
+              {earlierGroup.map((n) => (
+                <NotificationRow key={n.id} notification={n} onPress={() => handleOpen(n)} />
+              ))}
+            </>
+          )}
+        </>
       )}
     </ScreenContainer>
+  );
+}
+
+function NotificationRow({
+  notification,
+  onPress,
+}: {
+  notification: AppNotification;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        !notification.is_read && styles.rowUnread,
+        pressed && styles.rowPressed,
+      ]}
+    >
+      {!notification.is_read && <View style={styles.unreadDot} />}
+      <View style={styles.rowContent}>
+        <Text style={[styles.rowTitle, !notification.is_read && styles.rowTitleUnread]} numberOfLines={2}>
+          {notification.title || 'Notification'}
+        </Text>
+        {!!notification.message && (
+          <Text style={styles.rowMessage} numberOfLines={3}>
+            {notification.message}
+          </Text>
+        )}
+        <Text style={styles.rowTime}>
+          {formatDate(notification.created_at)} · {formatTime(notification.created_at)}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 

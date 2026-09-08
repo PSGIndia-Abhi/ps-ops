@@ -40,7 +40,9 @@ export function ScheduleRow({
       accessibilityRole="button"
     >
       <View style={styles.timeColumn}>
-        <Text style={styles.time}>{time}</Text>
+        <Text style={styles.time} numberOfLines={1}>
+          {time}
+        </Text>
         <View style={styles.connector}>
           <View style={[styles.dot, { backgroundColor: meta.color }]} />
           {!isLast && <View style={styles.line} />}
@@ -83,7 +85,7 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   timeColumn: {
-    width: 56,
+    width: 66,
     alignItems: 'center',
   },
   time: {

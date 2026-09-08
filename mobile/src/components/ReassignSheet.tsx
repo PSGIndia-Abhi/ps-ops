@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './Button';
 import { Banner } from './Banner';
 import { TextField } from './TextField';
@@ -51,6 +52,7 @@ export function ReassignSheet({
   submitting,
   error,
 }: ReassignSheetProps) {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -143,7 +145,10 @@ export function ReassignSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={submitting ? undefined : onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: spacing.xl + insets.bottom }]}
+          onPress={(e) => e.stopPropagation()}
+        >
           <View style={styles.handle} />
           <Text style={styles.title}>Reassign this job</Text>
 
@@ -248,7 +253,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    // paddingBottom set inline (see below) - a fixed value here would sit
+    // flush against, or underneath, a 3-button Android nav bar.
     maxHeight: '85%',
   },
   handle: {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './Button';
 import { Banner } from './Banner';
 import { TextField } from './TextField';
@@ -23,6 +24,7 @@ const TIME_PATTERN = /^\d{2}:\d{2}$/;
  * 400.
  */
 export function RescheduleVisitSheet({ visible, onClose, onConfirm, submitting, error }: RescheduleVisitSheetProps) {
+  const insets = useSafeAreaInsets();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -50,7 +52,10 @@ export function RescheduleVisitSheet({ visible, onClose, onConfirm, submitting, 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={submitting ? undefined : onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: spacing.xl + insets.bottom }]}
+          onPress={(e) => e.stopPropagation()}
+        >
           <View style={styles.handle} />
           <Text style={styles.title}>Reschedule visit</Text>
 
@@ -81,7 +86,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    // paddingBottom set inline (see below) - a fixed value here would sit
+    // flush against, or underneath, a 3-button Android nav bar.
   },
   handle: {
     width: 40,

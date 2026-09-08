@@ -3,23 +3,23 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
-import { ListRow } from '../../components/ListRow';
+import { RichActionTile } from '../../components/RichActionTile';
 import { Banner } from '../../components/Banner';
-import { EmailIcon, PhoneIcon, LockIcon, LogoutIcon } from '../../components/icons';
+import {
+  AvatarIcon,
+  EmailIcon,
+  LockIcon,
+  LogoutIcon,
+  PersonIcon,
+  PhoneIcon,
+  SettingsIcon,
+} from '../../components/icons';
 import { useAuth } from '../../auth/AuthContext';
 import { useUserRole, normalizeRole, roleLabel } from '../../auth/role';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<AuthenticatedStackParamList>;
-
-function initialsFor(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  const first = parts[0][0] ?? '';
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
-  return (first + last).toUpperCase();
-}
 
 /**
  * Reached from AppHeader's avatar - a real identity/contact screen, not a
@@ -28,6 +28,16 @@ function initialsFor(name: string): string {
  * MoreScreen) - this screen is deliberately just: who am I, how do I get
  * contacted, and my account. Also the fallback for a signed-in user whose
  * role has no dedicated dashboard (client, telecaller).
+ *
+ * "Change password"/"Sign out" reuse `RichActionTile` (the same gradient-
+ * tile-with-ghost-icon treatment as the Technician dashboard's Quick
+ * Access) rather than the plain `ListRow` these used before - promoted to
+ * a shared component once a second screen wanted the identical look.
+ *
+ * No "Edit" on Contact yet - `PATCH /api/auth/me` already exists in
+ * `api/auth.ts` (updateProfile) but nothing calls it anywhere in the app.
+ * Wiring up a real edit sheet is a genuine small follow-up, not shown here
+ * to avoid a link that does nothing.
  */
 export function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -39,7 +49,7 @@ export function ProfileScreen() {
     <ScreenContainer edges={['top', 'bottom']}>
       <View style={styles.header}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initialsFor(name)}</Text>
+          <AvatarIcon size={34} color={colors.textOnPrimary} />
         </View>
         <Text style={styles.name}>{name}</Text>
         <View style={styles.rolePill}>
@@ -54,35 +64,74 @@ export function ProfileScreen() {
         />
       )}
 
-      <Text style={styles.sectionTitle}>Contact</Text>
+      <View style={styles.sectionHeaderRow}>
+        <PersonIcon size={14} color={colors.textMuted} />
+        <Text style={styles.sectionTitle}>Contact</Text>
+      </View>
       <View style={styles.contactCard}>
-        <View style={styles.contactRow}>
-          <EmailIcon size={17} color={colors.textMuted} />
-          <Text style={styles.contactText} numberOfLines={1}>
-            {user?.email ?? '—'}
-          </Text>
-        </View>
+        <ContactRow
+          icon={<EmailIcon size={17} color={colors.primary} />}
+          accentColor={colors.primary}
+          value={user?.email ?? '—'}
+          label="Email address"
+        />
         <View style={styles.contactDivider} />
-        <View style={styles.contactRow}>
-          <PhoneIcon size={17} color={colors.textMuted} />
-          <Text style={styles.contactText} numberOfLines={1}>
-            {user?.phone ?? '—'}
-          </Text>
-        </View>
+        <ContactRow
+          icon={<PhoneIcon size={17} color={colors.success} />}
+          accentColor={colors.success}
+          value={user?.phone ?? '—'}
+          label="Phone number"
+        />
       </View>
 
-      <Text style={styles.sectionTitle}>Account</Text>
-      <ListRow
+      <View style={styles.sectionHeaderRow}>
+        <SettingsIcon size={14} color={colors.textMuted} />
+        <Text style={styles.sectionTitle}>Account</Text>
+      </View>
+      <RichActionTile
         title="Change password"
-        trailing={<LockIcon size={18} color={colors.textMuted} />}
+        description="Keep your account secure"
+        icon={<LockIcon size={20} color={colors.textOnPrimary} />}
+        ghostIcon={<LockIcon size={56} color={colors.primary} />}
+        accentColor={colors.primary}
+        style={styles.accountTile}
         onPress={() => navigation.navigate('ChangePassword')}
       />
-      <ListRow
+      <RichActionTile
         title="Sign out"
-        trailing={<LogoutIcon size={18} color={colors.dangerText} />}
+        description="See you soon!"
+        icon={<LogoutIcon size={20} color={colors.textOnPrimary} />}
+        ghostIcon={<LogoutIcon size={56} color={colors.danger} />}
+        accentColor={colors.danger}
+        style={styles.accountTile}
         onPress={logout}
       />
     </ScreenContainer>
+  );
+}
+
+/** One Contact row - a colored icon circle + a two-line value/label stack, matching the reference exactly rather than the previous single-line icon+text. */
+function ContactRow({
+  icon,
+  accentColor,
+  value,
+  label,
+}: {
+  icon: React.ReactNode;
+  accentColor: string;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.contactRow}>
+      <View style={[styles.contactIconWrap, { backgroundColor: `${accentColor}1A` }]}>{icon}</View>
+      <View style={styles.contactTextCol}>
+        <Text style={styles.contactValue} numberOfLines={1}>
+          {value}
+        </Text>
+        <Text style={styles.contactLabel}>{label}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -106,10 +155,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadows.raised,
   },
-  avatarText: {
-    ...typography.title,
-    color: colors.textOnPrimary,
-  },
   name: {
     ...typography.title,
     color: colors.textPrimary,
@@ -128,12 +173,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.primaryPressed,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+    marginBottom: spacing.sm,
+  },
   sectionTitle: {
     ...typography.captionMedium,
     color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
-    marginBottom: spacing.sm,
   },
   contactCard: {
     backgroundColor: colors.surface,
@@ -150,13 +200,30 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.sm,
   },
+  contactIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactTextCol: {
+    flex: 1,
+  },
+  contactValue: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
+  },
+  contactLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
   contactDivider: {
     height: 1,
     backgroundColor: colors.border,
   },
-  contactText: {
-    ...typography.bodyMedium,
-    color: colors.textPrimary,
-    flexShrink: 1,
+  accountTile: {
+    marginBottom: spacing.sm,
   },
 });

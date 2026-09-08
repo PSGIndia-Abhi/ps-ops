@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { ListRow } from '../../components/ListRow';
+import { SectionHeader } from '../../components/SectionHeader';
 import { EmptyState } from '../../components/EmptyState';
 import { CheckCircleIcon } from '../../components/icons';
 import { useUserRole } from '../../auth/role';
@@ -14,59 +15,42 @@ type Nav = NativeStackNavigationProp<AuthenticatedStackParamList & TechnicianTab
 
 /**
  * The bottom-tab "More" destination - a real secondary-options menu, not a
- * second route to Profile (that's the header's avatar now - see AppHeader's
- * onMorePress vs onProfilePress). Content is role-aware: only rows that lead
+ * second route to Profile (that's the header's avatar - see AppHeader's
+ * onProfilePress). This is now the *only* entry point into this screen -
+ * AppHeader used to also have a left-side menu button that opened the exact
+ * same destination, which was just a redundant second way in; removed.
+ * Content is role-aware: only rows that lead
  * somewhere real are shown (no "Settings"/"Help" placeholders - nothing like
  * that exists in the app yet, and this project's own convention throughout
  * has been to never ship a screen-shaped dead end).
+ *
+ * Mobile is Technician/Supervisor only (see RoleTabs) - there is no
+ * Admin/branch_admin "Manage" section here anymore; that org-management
+ * surface stays on the web app. "My Performance" isn't listed here either -
+ * it's a first-class bottom tab now (see TechnicianTabNavigator), so a
+ * second row leading to the exact same screen would just be a redundant
+ * way in, the same reason the old header hamburger was removed.
  */
 export function MoreScreen() {
   const role = useUserRole();
   const navigation = useNavigation<Nav>();
   const isTechnician = role === 'technician';
-  const canManageOrg = role === 'admin' || role === 'branch_admin';
 
   return (
     <ScreenContainer edges={['top', 'bottom']}>
       <Text style={styles.title}>More</Text>
 
-      {isTechnician && (
+      {isTechnician ? (
         <>
-          <Text style={styles.sectionTitle}>Work</Text>
-          <ListRow
-            title="My Performance"
-            subtitle="Today's work and completed totals"
-            leadingInitial="P"
-            onPress={() => navigation.navigate('MyPerformance')}
-          />
+          <SectionHeader title="Work" />
           <ListRow
             title="Completed Jobs"
             subtitle="Jobs you've finished"
-            leadingInitial="C"
-            onPress={() => navigation.navigate('MyJobs', { initialTab: 'completed' })}
+            leadingIcon={<CheckCircleIcon size={18} color={colors.primaryPressed} />}
+            onPress={() => navigation.navigate('MyJobs', { filter: 'completed' })}
           />
         </>
-      )}
-
-      {canManageOrg && (
-        <>
-          <Text style={styles.sectionTitle}>Manage</Text>
-          <ListRow
-            title="Companies"
-            subtitle="Companies, sites, and groups"
-            leadingInitial="C"
-            onPress={() => navigation.navigate('Companies')}
-          />
-          <ListRow
-            title="Groups"
-            subtitle="Company organization groups"
-            leadingInitial="G"
-            onPress={() => navigation.navigate('Groups')}
-          />
-        </>
-      )}
-
-      {!isTechnician && !canManageOrg && (
+      ) : (
         <EmptyState
           icon={<CheckCircleIcon size={28} color={colors.textMuted} />}
           title="Nothing else here yet"
@@ -82,13 +66,5 @@ const styles = StyleSheet.create({
     ...typography.title,
     color: colors.textPrimary,
     marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    ...typography.captionMedium,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
   },
 });
