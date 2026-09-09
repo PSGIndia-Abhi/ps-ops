@@ -321,7 +321,7 @@ console.log("Site payload:", payload);
         <div className="companies-card-header">
           <div>
             <h3>Add Group</h3>
-            <p>Group = parent organization.</p>
+            <p>Parent organization that companies belong to.</p>
           </div>
 
         </div>
@@ -354,7 +354,7 @@ console.log("Site payload:", payload);
         <div className="companies-card-header">
           <div>
             <h3>Add Company (Legal Entity)</h3>
-            <p>Company = legal company name under a group.</p>
+            <p>Legal entity registered under a group.</p>
           </div>
 
         </div>
@@ -435,7 +435,7 @@ console.log("Site payload:", payload);
         <div className="companies-card-header">
           <div>
             <h3>Add Site</h3>
-            <p>Site = physical location under a company.</p>
+            <p>Physical location that belongs to a company.</p>
           </div>
 
         </div>

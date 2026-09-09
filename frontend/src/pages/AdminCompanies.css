@@ -90,6 +90,11 @@
 }
 
 .company-form > button {
+  /* Span the full row width so "justify-self: end" pushes it to the actual
+     right edge of the card — without this, a button that wraps to its own
+     row (e.g. Add Company, with 5 fields ahead of it) only spans the first
+     grid track and ends up stuck near the left instead. */
+  grid-column: 1 / -1;
   justify-self: end;
 }
 
