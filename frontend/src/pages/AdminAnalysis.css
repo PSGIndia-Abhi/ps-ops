@@ -1,5 +1,10 @@
 .analysis-page {
-  padding: 4px 2px 24px;
+  padding: 20px 20px 24px;
+  /* Backstop: whatever wide content sits inside (a table too wide for a
+     mobile card), the PAGE itself never scrolls horizontally — only the
+     specific .table-scroll containers below are allowed to, so swiping
+     over a wide table scrolls just that table, not the whole screen. */
+  overflow-x: hidden;
 }
 
 .analysis-header {
@@ -37,6 +42,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Each date field is its own "tab" — same border/padding box-model as
@@ -71,6 +77,51 @@
 
 .date-field input[type="date"]:focus {
   outline: none;
+}
+
+/* "From" field: the real <input type="date"> sits underneath, completely
+   unchanged (same value/onChange, same native calendar popup, same
+   keyboard behavior) — this wrapper only lets a dd/mm/yyyy overlay sit
+   exactly on top of it, independent of the browser's own locale-formatted
+   display. */
+.date-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Hides the native input's own rendered date text (Chromium/Edge/Safari
+   expose it through these shadow parts; the calendar-picker-indicator
+   icon is separate and stays fully visible/clickable). Best-effort in
+   Firefox, which doesn't expose the same shadow parts to style. */
+.date-input-wrap .date-input-native {
+  color: transparent;
+}
+
+.date-input-wrap .date-input-native::-webkit-datetime-edit-fields-wrapper,
+.date-input-wrap .date-input-native::-webkit-datetime-edit-text,
+.date-input-wrap .date-input-native::-webkit-datetime-edit-day-field,
+.date-input-wrap .date-input-native::-webkit-datetime-edit-month-field,
+.date-input-wrap .date-input-native::-webkit-datetime-edit-year-field {
+  color: transparent;
+}
+
+/* Painted over the input's own box (not the label) so it lines up
+   regardless of the input's intrinsic width; pointer-events: none lets
+   every click/keypress pass straight through to the real input beneath,
+   including on the calendar icon. */
+.date-field .date-input-wrap .date-display-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: #374151;
+  white-space: nowrap;
 }
 
 .filter-popover-root {
@@ -115,6 +166,9 @@
   top: calc(100% + 8px);
   right: 0;
   width: 240px;
+  /* Never wider than the viewport on a narrow phone, regardless of where
+     the toggle button that anchors it (right: 0) happens to sit. */
+  max-width: calc(100vw - 32px);
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
@@ -202,9 +256,18 @@
   }
 }
 
+@media (max-width: 420px) {
+  .analysis-tiles {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Color-blocked panel — background comes from each tile's own `color`
+   (inline style, see TILES/AdminAnalysis.jsx), not a white card, so text
+   and the icon badge below are styled for contrast against a solid
+   saturated background instead of the white one every other card uses. */
 .analysis-tile {
-  background: #fff;
-  border: 1px solid #eef0f4;
+  border: none;
   border-radius: 14px;
   padding: 16px;
   display: flex;
@@ -220,6 +283,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
 
@@ -233,20 +297,20 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .analysis-tile-value {
   font-size: 26px;
   font-weight: 700;
-  color: #111827;
+  color: #fff;
   line-height: 1.1;
   margin-top: 2px;
 }
 
 .analysis-tile-sub {
   font-size: 12px;
-  color: #9ca3af;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 /* =========================
@@ -256,8 +320,15 @@
 .analysis-widgets {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: 1fr;
-  gap: 16px;
+  /* Every card in a row stretches to match the tallest one (Service
+     Pipeline / Service Status / Customer Pending Services / Customers At
+     Risk, and Employee Performance / Trend / Workload / Upcoming below),
+     so borders line up whether the row is full of data or has a short
+     empty/error card in it. No card sets a fixed height itself — see
+     .widget-card's min-height: fit-content and .widget-view-all's
+     margin-top: auto for how each one fills that stretched height. */
+  align-items: stretch;
+  gap: 18px;
   margin-top: 20px;
 }
 
@@ -278,8 +349,8 @@
 .analysis-widgets-wide {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: 1fr;
-  gap: 16px;
+  align-items: stretch;
+  gap: 18px;
   margin-top: 20px;
 }
 
@@ -293,18 +364,47 @@
   background: #fff;
   border: 1px solid #eef0f4;
   border-radius: 14px;
-  padding: 18px;
+  padding: 16px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* Grid/flex items default to min-width: auto — meaning they refuse to
+     shrink below their content's intrinsic width. A wide table inside
+     (Overdue Services, Monthly Service Summary) would otherwise force
+     this whole card, and the grid track it sits in, wider than the
+     viewport on mobile — which is what was dragging the entire page
+     sideways instead of just scrolling the table inside .table-scroll. */
+  min-width: 0;
+  /* Fits its own content by default; a row using align-items: stretch (see
+     .analysis-widgets-wide) still grows it to match a taller sibling when
+     there is one — this just stops the card from *assuming* it needs that
+     extra height. */
+  min-height: fit-content;
+}
+
+/* Same red left-edge accent as .at-risk-card, applied to the other three
+   cards in that top row (Service Pipeline, Service Status, Customer
+   Pending Services) — no other card/row gets this. */
+.widget-card-accent {
+  border-left: 3px solid #ef4444;
 }
 
 .widget-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 14px;
   font-size: 14px;
   font-weight: 700;
   color: #111827;
+}
+
+.widget-title-icon {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #6b7280;
 }
 
 .widget-header-row {
@@ -313,16 +413,26 @@
   justify-content: space-between;
 }
 
+/* Compact, fixed-height zone for empty/no-data messaging — centered within
+   itself (icon/message/optional action), not within however tall the card
+   ends up once stretched to match a row sibling. */
 .widget-empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 13px;
   color: #9ca3af;
-  padding: 20px 0;
   text-align: center;
 }
 
 .widget-view-all {
+  /* Pins to the bottom of the card's flex column — since the row stretches
+     every card to match the tallest sibling, this is what keeps "View All"
+     aligned at the same bottom position across the row regardless of how
+     much (or little) content sits above it. */
   margin-top: auto;
-  align-self: flex-start;
+  align-self: center;
   background: none;
   border: none;
   color: #2f6fed;
@@ -347,134 +457,161 @@
 .pipeline-item {
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
 
 .pipeline-row {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
   background: #f9fafb;
 }
 
-.pipeline-label {
-  font-size: 13px;
-  font-weight: 600;
+/* Icon + label — shrinks/truncates first so the bar and value never get
+   squeezed out on a narrow card. */
+.pipeline-label-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.pipeline-value {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.pipeline-arrow {
-  color: #d1d5db;
+.pipeline-icon {
+  flex-shrink: 0;
   width: 16px;
   height: 16px;
-  margin: 2px 0;
+  display: flex;
 }
 
-.pipeline-arrow svg {
+.pipeline-icon svg {
   width: 100%;
   height: 100%;
 }
 
-.pipeline-flags {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.pipeline-label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.pipeline-flag {
-  background: transparent;
-  padding: 4px 10px;
+/* Mini progress bar, scaled against the top (Scheduled) stage's count.
+   Basis of 64px shrinks (not overflows) on a narrow card; never grows past
+   68px on a wide one. */
+.pipeline-bar-track {
+  flex: 0 1 64px;
+  min-width: 32px;
+  max-width: 68px;
+  height: 4px;
+  border-radius: 999px;
+  background: #eef0f4;
+  overflow: hidden;
 }
 
-/* ---- Donut ---- */
-
-.donut-wrap {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
+.pipeline-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 300ms ease-out;
 }
 
-.donut-chart {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
+.pipeline-value {
   flex-shrink: 0;
-}
-
-.donut-hole {
-  position: absolute;
-  inset: 18px;
-  background: #fff;
-  border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.donut-total {
-  font-size: 20px;
+  min-width: 22px;
+  text-align: right;
+  font-size: 14px;
   font-weight: 700;
   color: #111827;
-  line-height: 1.1;
 }
 
-.donut-total-label {
-  font-size: 10px;
-  color: #9ca3af;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+/* Drop-off line between two consecutive funnel stages, e.g. "↓ 120 -4%". */
+.pipeline-dropoff {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b91c1c;
+  opacity: 0.75;
+  padding: 3px 0;
 }
 
-.donut-legend {
+/* ---- Pending / Overdue — "needs attention", not funnel stages ---- */
+
+.pipeline-flags {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #eef0f4;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
-  min-width: 140px;
 }
 
-.donut-legend-row {
+.pipeline-flag-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
 }
 
-.donut-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.pipeline-flag-amber {
+  background: #fef3c7;
+}
+
+.pipeline-flag-red {
+  background: #fee2e2;
+}
+
+.pipeline-flag-icon {
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
 }
 
-.donut-legend-label {
-  color: #4b5563;
-  flex: 1;
+.pipeline-flag-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
-.donut-legend-value {
-  color: #111827;
+.pipeline-flag-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
   font-weight: 600;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+.pipeline-flag-value {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pipeline-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #eef0f4;
+  text-align: center;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Service Status donut styling now lives in components/ServiceStatusDonut.css
+   (used by <ServiceStatusDonut>). */
 
 /* ---- Customer Pending Services table ---- */
 
 .table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 .widget-table {
@@ -498,6 +635,42 @@
   padding: 10px 8px;
   border-bottom: 1px solid #f5f6f8;
   color: #111827;
+}
+
+/* Fixed layout: column widths come from each table's own <colgroup>
+   (percentages summing to 100%), so the table always fits the card's
+   width instead of overflowing into horizontal scroll — used by Customer
+   Pending Services, Employee Performance, and Monthly Service Summary.
+   A touch smaller than the default 13px since columns are narrower. */
+.widget-table-fixed {
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+/* Headers and cells never wrap here — a wrapped 2-line header (e.g.
+   "OLDEST DUE" breaking after "OLDEST") grows taller than its single-line
+   neighbors and, centered in that taller row, visually rides up over the
+   cell next to it; a wrapped date cell can get its second line clipped
+   the same way. Nowrap plus a touch more padding and tighter letter-
+   spacing than the default .widget-table th keeps every header/value on
+   one line within its assigned column width instead. */
+.widget-table-fixed th,
+.widget-table-fixed td {
+  white-space: nowrap;
+  padding: 8px 10px;
+}
+
+.widget-table-fixed th {
+  letter-spacing: 0.01em;
+}
+
+/* On a fixed-width column, long text (a customer/employee name) truncates
+   with an ellipsis instead of wrapping to a second line or forcing the
+   column wider than its assigned share. */
+.cell-truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-badge {
@@ -529,7 +702,7 @@
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background: #fff;
-  color: #6b7280;
+  color: #2f6fed;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -537,63 +710,88 @@
 }
 
 .row-action-btn:hover {
-  background: #f3f4f6;
+  background: #eaf1ff;
   color: #2f6fed;
-  border-color: #c7d2fe;
+  border-color: #2f6fed;
 }
 
 .row-action-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: block;
 }
 
 /* ---- Customers At Risk ---- */
 
+/* Header row (title + icon) uses the shared .widget-header-row/.widget-title
+   classes, same as every other card — no per-card override needed. */
+
+/* Small red accent on this card only — a subtle "needs attention" cue,
+   just a colored left edge over the shared .widget-card border rather
+   than a heavier treatment. Panel height itself is untouched — still
+   stretches to match its row siblings (align-items: stretch, unchanged).
+   justify-content: space-between spreads its own children (header, count
+   block, criteria, View All) evenly across whatever height that ends up
+   being, instead of everything packing to the top and leaving one dead
+   gap. Needs .widget-view-all's own margin-top: auto turned off just on
+   this card (below) — that auto margin would otherwise swallow all the
+   free space itself, leaving space-between nothing to distribute. */
 .at-risk-card {
-  align-items: flex-start;
+  border-left: 3px solid #ef4444;
+  justify-content: space-between;
+  position: relative;
 }
 
-.at-risk-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
+.at-risk-card .widget-view-all {
+  margin-top: 0;
 }
 
 .at-risk-count {
-  font-size: 32px;
+  font-size: 52px;
   font-weight: 700;
   color: #dc2626;
   line-height: 1;
 }
 
+/* Pulled out of the card's normal flow (it's no longer a flex child, so
+   it doesn't compete with justify-content: space-between above) and
+   centered on the card's vertical middle, right side — sitting in the
+   whitespace instead of leaving it blank. */
 .at-risk-icon {
-  width: 40px;
-  height: 40px;
+  position: absolute;
+  top: 50%;
+  right: 40px;
+  transform: translateY(-50%);
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
-  background: #fee2e2;
-  color: #dc2626;
+  background: #ef4444;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .at-risk-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 34px;
+  height: 34px;
 }
 
-.at-risk-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #374151;
+/* Small muted sub-label directly under the count — not the card's title. */
+.at-risk-sublabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: #9ca3af;
   margin-top: 4px;
 }
 
+/* Now that the card sizes to its own content (align-self: start above)
+   there's no leftover stretched height to fill — a plain compact block. */
 .at-risk-criteria {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f1f4;
+  margin-top: 10px;
+  padding-top: 8px;
   width: 100%;
 }
 
@@ -603,7 +801,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #9ca3af;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .at-risk-criteria-item {
@@ -612,7 +810,7 @@
   gap: 6px;
   font-size: 12px;
   color: #4b5563;
-  padding: 3px 0;
+  padding: 2px 0;
 }
 
 .at-risk-criteria-item svg {
@@ -643,71 +841,61 @@
 
 /* ---- On-Time Completion Trend ---- */
 
-.trend-range {
-  font-size: 11px;
-  color: #9ca3af;
+/* Pill-style dropdown: native <select>'s default arrow is replaced with a
+   small grey chevron so it matches the rounded-pill look, border and all. */
+.trend-range-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 3px 8px;
-}
-
-/* ---- On-Time Trend heatmap (years across, months down) ---- */
-
-.trend-heatmap {
-  width: 100%;
-  border-collapse: collapse;
+  border-radius: 999px;
+  padding: 6px 26px 6px 14px;
   font-size: 12px;
-}
-
-.trend-heatmap th {
-  font-size: 11px;
-  font-weight: 700;
-  color: #6b7280;
-  padding: 6px 8px;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.trend-heatmap thead th {
-  border-bottom: 1px solid #f0f1f4;
-}
-
-.trend-heatmap tbody th {
-  text-align: left;
-  color: #374151;
-}
-
-.trend-heatmap-corner {
-  background: transparent;
-}
-
-.trend-heatmap-cell {
-  text-align: center;
-  padding: 6px 10px;
-  border-radius: 6px;
   font-weight: 600;
-  color: #111827;
+  color: #374151;
+  background:
+    #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 12px center;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.heat-good {
-  background: #dcfce7;
-  color: #166534;
+/* Keeps this card's title from wrapping to a second line and pushing the
+   dropdown out of the header row on a narrow card. */
+.widget-title-nowrap {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.heat-warn {
-  background: #fef3c7;
-  color: #92400e;
+.trend-line-chart {
+  width: 100%;
+  height: 200px;
 }
 
-.heat-bad {
-  background: #fee2e2;
-  color: #991b1b;
+/* Horizontal gridlines only — no vertical ones are drawn at all. */
+.trend-gridline {
+  stroke: #eef0f4;
+  stroke-width: 1;
 }
 
-.heat-empty {
-  background: #f9fafb;
-  color: #d1d5db;
-  font-weight: 400;
+.trend-axis-label {
+  font-size: 11px;
+  fill: #9ca3af;
+  font-weight: 600;
+}
+
+.trend-line-path {
+  stroke: #16a34a;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Solid filled dot, no stroke/border. */
+.trend-line-dot {
+  fill: #16a34a;
 }
 
 /* ---- Employee Workload ---- */
@@ -782,4 +970,57 @@
   background: #eaf1ff;
   border-radius: 999px;
   padding: 2px 10px;
+}
+
+/* =========================
+   SMALL PHONES
+   ========================= */
+
+@media (max-width: 480px) {
+  .analysis-page {
+    /* Bottom padding raised to clear the fixed 64px mobile tab bar
+       (Jobs/Actions/Summary/Menu) — the last card's "View Full Report"
+       link was sitting right at/under it otherwise. */
+    padding: 4px 0 90px;
+  }
+
+  .analysis-header h1 {
+    font-size: 19px;
+  }
+
+  /* Date pickers/filter button stack to full width instead of squeezing
+     three controls onto one cramped row. */
+  .analysis-header-controls {
+    width: 100%;
+  }
+
+  .date-range-group {
+    width: 100%;
+  }
+
+  .date-field {
+    flex: 1 1 auto;
+  }
+
+  .filter-popover-root {
+    width: 100%;
+  }
+
+  .filter-toggle-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .widget-card {
+    padding: 14px;
+  }
+
+  .workload-row {
+    grid-template-columns: 64px 1fr 26px;
+    gap: 8px;
+  }
+
+  .at-risk-count {
+    font-size: 28px;
+  }
 }

@@ -79,9 +79,6 @@ const PORT = process.env.PORT || 3000;
 (async () => {
   try {
     await testConnection();
-    console.log('MySQL connected successfully');
-
-    //connect redis
     await connectRedis();
     console.log("Redis connected successfully");
 

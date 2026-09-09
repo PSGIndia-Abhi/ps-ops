@@ -27,11 +27,21 @@ services:
       MYSQL_DATABASE: ps_ops
       TZ: Asia/Kolkata
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p$$MYSQL_ROOT_PASSWORD",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,7 +59,7 @@ services:
       TZ: Asia/Kolkata
       command: --default-time-zone='+00:00
     ports:
-      - "8080:80" 
+      - "8080:80"
 
   redis:
     image: redis:alpine
@@ -71,7 +81,7 @@ services:
     volumes:
       - minio_data:/data
     restart: unless-stopped
-  
+
 volumes:
   mysql_data:
   minio_data:

@@ -12,8 +12,6 @@ import { filterJobs, getSupervisorOptions, getTechnicianOptions, getCompanyOptio
 
 
 
-
-
 export default function AdminDashboard() {
   const outletContext = useOutletContext();
   const setActionsConfig = outletContext?.setActionsConfig;

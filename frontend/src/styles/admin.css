@@ -26,6 +26,15 @@
   gap: 12px;
 }
 
+.header-left-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
 .logo {
   height: 34px;
 }

@@ -31,6 +31,8 @@ import ContactsPage from "./pages/ContactsPage";
 import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
 import TrackingHistory from "./pages/TrackingHistory";
 import AdminAnalysis from "./pages/AdminAnalysis";
+import AnalysisDataPage from "./pages/AnalysisDataPage";
+import UpcomingCalendarPage from "./pages/UpcomingCalendarPage";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -68,6 +70,8 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <AdminDashboard /> },
       { path: "analysis", element: <AdminAnalysis /> },
+      { path: "analysis/upcoming-calendar", element: <UpcomingCalendarPage /> },
+      { path: "analysis/:dataset", element: <AnalysisDataPage /> },
       { path: "team", element: <AdminTeamManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },

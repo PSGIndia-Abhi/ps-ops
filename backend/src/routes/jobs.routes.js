@@ -1077,8 +1077,8 @@ router.patch("/:id/status", auth, requirePermission(PERMISSIONS.UPDATE_JOB_STATU
       }
 
       await connection.query(
-        `UPDATE jobs 
-     SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), updated_at = NOW() 
+        `UPDATE jobs
+     SET status = ?, approval_status = 'APPROVED', approved_at = NOW(), completed_at = NOW(), updated_at = NOW()
      WHERE id = ?`,
         [newStatus, jobId]
       );

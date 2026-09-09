@@ -90,10 +90,14 @@ export default function AdminLayout() {
 
       {/* HEADER */}
       <header className="app-header">
-        <div className="header-left">
+        <button
+          type="button"
+          className="header-left header-left-btn"
+          onClick={() => navigate("/admin/analysis")}
+        >
           <img src={logo} alt="BestServe" className="logo" />
           <span className="header-title">Admin Panel</span>
-        </div>
+        </button>
 
         <div className="header-right">
           <NotificationsMenu />
