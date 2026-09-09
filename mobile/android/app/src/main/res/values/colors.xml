@@ -1,0 +1,6 @@
+<resources>
+    <!-- Matches src/theme/colors.ts `background` token, so the native cold-start
+         frame (before Metro/JS paints anything) doesn't flash white/black
+         ahead of the app's actual background. -->
+    <color name="app_background">#F6F7FB</color>
+</resources>
