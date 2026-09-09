@@ -1,0 +1,13 @@
+-- The Group -> Company -> Site hierarchy migration (20260402_company_hierarchy.sql)
+-- renamed the old `companies` table to `sites` and added the correct scoped
+-- uniqueness rule: `uniq_sites_company_name` on (company_id, name). But the
+-- table rename carried over the OLD table's unique index unchanged —
+-- `uniq_companies_code_site`, which uniquely constrains `name` alone across
+-- the whole table. That leftover index silently blocks any two different
+-- companies from ever having a same-named site (e.g. two companies each
+-- wanting a "Head Office" or "Jayanagar" site), and the app has no
+-- friendly handling for it, so violations surface as a raw 500.
+--
+-- Drop the legacy global constraint; the composite one already does the
+-- job the app's own duplicate-check logic expects (unique per company).
+ALTER TABLE sites DROP INDEX uniq_companies_code_site;

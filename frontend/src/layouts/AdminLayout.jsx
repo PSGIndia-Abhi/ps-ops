@@ -6,6 +6,11 @@ import { useState, useEffect } from "react";
 import DashboardActions from "../components/DashboardActions";
 import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
+import {
+  getPendingGroupManagementCounts,
+  getPendingGroupManagementTotal,
+  subscribePendingGroupManagementCounts,
+} from "../utils/groupManagementNotice";
 
 export default function AdminLayout() {
 
@@ -13,6 +18,17 @@ export default function AdminLayout() {
   const location = useLocation();
   const { user } = useMe();
   const role = localStorage.getItem("role");
+
+  /* ---------------- GROUP MANAGEMENT NOTIFICATION BADGE ---------------- */
+  const [groupMgmtCount, setGroupMgmtCount] = useState(() =>
+    getPendingGroupManagementTotal(getPendingGroupManagementCounts())
+  );
+
+  useEffect(() => {
+    return subscribePendingGroupManagementCounts((counts) =>
+      setGroupMgmtCount(getPendingGroupManagementTotal(counts))
+    );
+  }, []);
 
   /* ---------------- MOBILE DETECTION ---------------- */
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -163,6 +179,21 @@ export default function AdminLayout() {
               </button>
 
               <button
+                className={`nav-btn ${isActive("/admin/user-management") ? "active" : ""}`}
+                onClick={() => navigate("/admin/user-management")}
+              >
+                User Management
+              </button>
+
+              <button
+                className={`nav-btn ${isActive("/admin/group-management") ? "active" : ""}`}
+                onClick={() => navigate("/admin/group-management")}
+              >
+                Group Management
+                {groupMgmtCount > 0 && <span className="nav-badge">{groupMgmtCount}</span>}
+              </button>
+
+              <button
                 className={`nav-btn ${isActive("/admin/map") ? "active" : ""}`}
                 onClick={() => navigate("/admin/map")}
               >
@@ -238,6 +269,23 @@ export default function AdminLayout() {
             }}
           >
             Team Management
+          </button>
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/user-management");
+            }}
+          >
+            User Management
+          </button>
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/group-management");
+            }}
+          >
+            Group Management
+            {groupMgmtCount > 0 && <span className="nav-badge">{groupMgmtCount}</span>}
           </button>
           <button
             onClick={() => {

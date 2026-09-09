@@ -30,6 +30,8 @@ import AdminTickets from "./pages/AdminTickets";
 import ContactsPage from "./pages/ContactsPage";
 import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
 import TrackingHistory from "./pages/TrackingHistory";
+import AdminUserManagement from "./pages/AdminUserManagement";
+import AdminGroupManagement from "./pages/AdminGroupManagement";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -67,6 +69,8 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <AdminDashboard /> },
       { path: "team", element: <AdminTeamManagement /> },
+      { path: "user-management", element: <AdminUserManagement /> },
+      { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },
       { path: "map", element: <MapView /> },

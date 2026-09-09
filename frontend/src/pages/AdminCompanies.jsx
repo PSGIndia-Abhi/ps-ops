@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { apiFetch } from "../api";
+import { bumpPendingGroupManagementCount } from "../utils/groupManagementNotice";
+import StatusAlertModal from "../components/StatusAlertModal";
 import "./AdminCompanies.css";
 import PlaceAutocomplete from "../components/maps/PlaceAutocomplete";
 import {
@@ -33,16 +34,19 @@ const defaultSiteForm = {
 
 export default function AdminCompanies() {
   // State variables
-  const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [companies, setCompanies] = useState([]);
-  const [sites, setSites] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [savingGroup, setSavingGroup] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingSite, setSavingSite] = useState(false);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState("");
+  // Separate error per form — each only shows next to the field it belongs
+  // to, instead of one shared error bleeding into every card on the page.
+  const [groupError, setGroupError] = useState(null);
+  const [companyError, setCompanyError] = useState(null);
+  const [siteError, setSiteError] = useState(null);
+
+  // Center-of-screen "added successfully" popup, same as Group/User Management.
+  const [status, setStatus] = useState(null);
 
   const [groupForm, setGroupForm] = useState(defaultGroupForm);
   const [companyForm, setCompanyForm] = useState(defaultCompanyForm);
@@ -68,32 +72,26 @@ export default function AdminCompanies() {
   // Function to load all groups, companies, and sites
   const loadAll = async () => {
     try {
-      setLoading(true);
-      const [gRes, cRes, sRes] = await Promise.all([
+      const [gRes, cRes] = await Promise.all([
         apiFetch("/api/groups"),
         apiFetch("/api/companies"),
-        apiFetch("/api/sites"),
       ]);
 
-      if (!gRes?.ok || !cRes?.ok || !sRes?.ok) {
+      if (!gRes?.ok || !cRes?.ok) {
         throw new Error("Failed to load company data");
       }
 
-      const [gData, cData, sData] = await Promise.all([
-        gRes.json(),
-        cRes.json(),
-        sRes.json(),
-      ]);
+      const [gData, cData] = await Promise.all([gRes.json(), cRes.json()]);
 
       setGroups(Array.isArray(gData) ? gData : []);
       setCompanies(Array.isArray(cData) ? cData : []);
-      setSites(Array.isArray(sData) ? sData : []);
-      setError(null);
+      setGroupError(null);
+      setCompanyError(null);
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to load company data");
-    } finally {
-      setLoading(false);
+      const message = err.message || "Failed to load company data";
+      setGroupError(message);
+      setCompanyError(message);
     }
   };
 
@@ -101,27 +99,6 @@ export default function AdminCompanies() {
   useEffect(() => {
     loadAll();
   }, []);
-
-  // Memoized filtered sites based on search query - search box
-  const filteredSites = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return sites;
-    return sites.filter((site) => {
-      const values = [
-        site.group_name,
-        site.company_name,
-        site.name,
-        site.address,
-        site.city,
-        site.state,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return values.includes(query);
-    });
-  }, [sites, search]);
-
 
   const updateGroup = (key, value) => {
     setGroupForm((prev) => ({ ...prev, [key]: value }));
@@ -148,7 +125,7 @@ export default function AdminCompanies() {
 
   const handleCreateGroup = async () => {
     if (!groupForm.name.trim()) {
-      setError("Group name is required.");
+      setGroupError("Group name is required.");
       return;
     }
 
@@ -164,10 +141,12 @@ export default function AdminCompanies() {
       }
       setGroups((prev) => [data, ...prev]);
       setGroupForm(defaultGroupForm);
-      setError(null);
+      setGroupError(null);
+      setStatus({ type: "success", message: `Group "${data.name}" added successfully.` });
+      bumpPendingGroupManagementCount("groups");
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to create group");
+      setGroupError(err.message || "Failed to create group");
     } finally {
       setSavingGroup(false);
     }
@@ -175,7 +154,7 @@ export default function AdminCompanies() {
 
   const handleCreateCompany = async () => {
     if (!companyForm.name.trim()) {
-      setError("Company name is required.");
+      setCompanyError("Company name is required.");
       return;
     }
 
@@ -212,10 +191,12 @@ export default function AdminCompanies() {
       setCompanies((prev) => [data, ...prev]);
       setCompanyForm(defaultCompanyForm);
       setCompanyLogoFile(null);
-      setError(null);
+      setCompanyError(null);
+      setStatus({ type: "success", message: `Company "${data.name}" added successfully.` });
+      bumpPendingGroupManagementCount("companies");
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to create company");
+      setCompanyError(err.message || "Failed to create company");
     } finally {
       setSavingCompany(false);
     }
@@ -224,15 +205,15 @@ export default function AdminCompanies() {
 
   const handleCreateSite = async () => {
     if (!siteForm.company_id) {
-      setError("Company is required for a site.");
+      setSiteError("Company is required for a site.");
       return;
     }
     if (!siteForm.name.trim()) {
-      setError("Site name is required.");
+      setSiteError("Site name is required.");
       return;
     }
     if (!siteForm.address.trim()) {
-      setError("Address is required.");
+      setSiteError("Address is required.");
       return;
     }
 
@@ -262,12 +243,13 @@ console.log("Site payload:", payload);
       if (!res?.ok) {
         throw new Error(data?.error || "Failed to create site");
       }
-      setSites((prev) => [data, ...prev]);
       setSiteForm(defaultSiteForm);
-      setError(null);
+      setSiteError(null);
+      setStatus({ type: "success", message: `Site "${data.name}" added successfully.` });
+      bumpPendingGroupManagementCount("sites");
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to create site");
+      setSiteError(err.message || "Failed to create site");
     } finally {
       setSavingSite(false);
     }
@@ -344,7 +326,14 @@ console.log("Site payload:", payload);
 
         </div>
 
-        {error && <div className="companies-error">{error}</div>}
+        {groupError && (
+          <div className="companies-error">
+            <span>{groupError}</span>
+            <button type="button" onClick={() => setGroupError(null)} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="company-form">
           <div className="company-field">
@@ -370,7 +359,14 @@ console.log("Site payload:", payload);
 
         </div>
 
-        {error && <div className="companies-error">{error}</div>}
+        {companyError && (
+          <div className="companies-error">
+            <span>{companyError}</span>
+            <button type="button" onClick={() => setCompanyError(null)} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="company-form">
           <div className="company-field">
@@ -444,7 +440,14 @@ console.log("Site payload:", payload);
 
         </div>
 
-        {error && <div className="companies-error">{error}</div>}
+        {siteError && (
+          <div className="companies-error">
+            <span>{siteError}</span>
+            <button type="button" onClick={() => setSiteError(null)} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="site-layout">
 
@@ -541,65 +544,7 @@ console.log("Site payload:", payload);
         </div>
       </div>
 
-      <div className="companies-card">
-        <div className="companies-card-header">
-          <div>
-            <h3>Sites</h3>
-            <p>{filteredSites.length} total</p>
-          </div>
-          <input
-            className="company-search"
-            placeholder="Search by group, company, site, or city"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        {loading ? (
-          <div className="companies-loading">Loading sites...</div>
-        ) : (
-          <div className="companies-table">
-            {filteredSites.map((site) => {
-              const addressParts = [site.address, site.city, site.state].filter(Boolean);
-              return (
-                <div key={site.id} className="companies-row">
-                  <div className="company-mobile-card">
-                    <div className="company-row">
-                      <span className="label">Group</span>
-                      <span className="value">{site.group_name || "-"}</span>
-                    </div>
-
-                    <div className="company-row">
-                      <span className="label">Company</span>
-                      <span className="value">{site.company_name || "-"}</span>
-                    </div>
-
-                    <div className="company-row">
-                      <span className="label">Site</span>
-                      <span className="value">{site.name || "-"}</span>
-                    </div>
-
-                    <div className="company-row">
-                      <span className="label">Address</span>
-                      <span className="value">{addressParts.join(", ") || "-"}</span>
-                    </div>
-                  </div>
-
-                  <div className="status-cell">
-                    <button
-                      onClick={() =>
-                        navigate(`/admin/sites/${site.id}/contacts`)
-                      }
-                    >
-                      Show Contacts
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <StatusAlertModal status={status} onClose={() => setStatus(null)} />
     </div>
   );
 }

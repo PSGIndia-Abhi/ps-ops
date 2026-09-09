@@ -32,16 +32,18 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
         c.is_active,
         c.group_id,
         g.name AS group_name,
+        c.created_at,
         c.logo_object_key,
         c.logo_file_name,
         c.logo_file_type
       FROM companies c
       LEFT JOIN ${groupRef} g ON g.id = c.group_id
+      WHERE c.is_active = 1
     `;
 
     const params = [];
     if (group_id) {
-      sql += " WHERE c.group_id = ?";
+      sql += " AND c.group_id = ?";
       params.push(group_id);
     }
 
@@ -62,10 +64,12 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
             c.type,
             c.is_active,
             c.group_id,
-            g.name AS group_name
+            g.name AS group_name,
+            c.created_at
           FROM companies c
           LEFT JOIN ${groupRef} g ON g.id = c.group_id
-          ${group_id ? "WHERE c.group_id = ?" : ""}
+          WHERE c.is_active = 1
+          ${group_id ? "AND c.group_id = ?" : ""}
           ORDER BY c.name ASC
         `;
         const [fallbackRows] = await pool.query(
@@ -122,7 +126,7 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
     }
 
     const [existing] = await pool.query(
-      "SELECT id FROM companies WHERE name = ? AND (group_id <=> ?)",
+      "SELECT id FROM companies WHERE name = ? AND (group_id <=> ?) AND is_active = 1",
       [trimmedName, resolvedGroupId]
     );
     if (existing.length > 0) {
@@ -199,6 +203,138 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
   } catch (err) {
     console.error("Error creating company:", err);
     res.status(500).json({ error: "Failed to create company" });
+  }
+});
+
+// PUT /api/companies/:id — edit a company. Sites/contacts/jobs join to it live
+// by company_id/group, so a rename or group/type change shows up everywhere
+// that reads it (Sites list, Contacts, dashboards) with no denormalized copies.
+router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (req, res) => {
+  const { id } = req.params;
+  const { group_id, name, code, gst_number, type } = req.body || {};
+
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  const trimmedCode = typeof code === "string" ? code.trim().toUpperCase() : "";
+  const trimmedGst = typeof gst_number === "string" ? gst_number.trim() : "";
+  const normalizedType = typeof type === "string" ? type.trim().toUpperCase() : "";
+  const allowedTypes = new Set(["INDIVIDUAL", "CORPORATE", "RWA"]);
+
+  if (!trimmedName) {
+    return res.status(400).json({ error: "Company name is required" });
+  }
+  if (normalizedType && !allowedTypes.has(normalizedType)) {
+    return res.status(400).json({ error: "Invalid company type" });
+  }
+
+  try {
+    const groupRef = "`group_name`";
+
+    const [[existingCompany]] = await pool.query("SELECT id FROM companies WHERE id = ?", [id]);
+    if (!existingCompany) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    let resolvedGroupId = group_id || null;
+    if (resolvedGroupId) {
+      const [[group]] = await pool.query(`SELECT id FROM ${groupRef} WHERE id = ?`, [resolvedGroupId]);
+      if (!group) {
+        return res.status(400).json({ error: "Invalid group" });
+      }
+    }
+
+    const [duplicates] = await pool.query(
+      "SELECT id FROM companies WHERE name = ? AND (group_id <=> ?) AND id != ? AND is_active = 1",
+      [trimmedName, resolvedGroupId, id]
+    );
+    if (duplicates.length > 0) {
+      return res.status(409).json({ error: "Company already exists for this group" });
+    }
+
+    await pool.query(
+      `UPDATE companies
+       SET group_id = ?, name = ?, code = ?, gst_number = ?, type = ?
+       WHERE id = ?`,
+      [resolvedGroupId, trimmedName, trimmedCode || null, trimmedGst || null, normalizedType || null, id]
+    );
+
+    let updated = null;
+    try {
+      const [[row]] = await pool.query(
+        `
+        SELECT
+          c.id, c.name, c.code, c.gst_number, c.type, c.is_active,
+          c.group_id, g.name AS group_name, c.created_at,
+          c.logo_object_key, c.logo_file_name, c.logo_file_type
+        FROM companies c
+        LEFT JOIN ${groupRef} g ON g.id = c.group_id
+        WHERE c.id = ?
+        `,
+        [id]
+      );
+      updated = row;
+    } catch (err) {
+      if (err?.code === "ER_BAD_FIELD_ERROR") {
+        const [[row]] = await pool.query(
+          `
+          SELECT
+            c.id, c.name, c.code, c.gst_number, c.type, c.is_active,
+            c.group_id, g.name AS group_name, c.created_at
+          FROM companies c
+          LEFT JOIN ${groupRef} g ON g.id = c.group_id
+          WHERE c.id = ?
+          `,
+          [id]
+        );
+        updated = row;
+      } else {
+        throw err;
+      }
+    }
+
+    res.json({
+      ...updated,
+      logo_url: updated?.logo_object_key ? buildLogoUrl(updated.id) : null,
+    });
+  } catch (err) {
+    console.error("Error updating company:", err);
+    res.status(500).json({ error: "Failed to update company" });
+  }
+});
+
+// DELETE /api/companies/:id — soft delete. A company can only be removed
+// once it has no remaining *active* sites — soft-deleted sites don't count,
+// so deleting a company's last site (via the sites soft delete above)
+// unblocks this without needing a hard cascade. The company itself is never
+// hard-deleted either: this only flips is_active off, so it drops out of
+// GET / (and every dropdown built from it) while historical jobs/contacts
+// that joined through its sites keep resolving its name fine.
+router.delete("/:id", auth, requirePermission(PERMISSIONS.DELETE_CONTACT), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [[existingCompany]] = await pool.query("SELECT id FROM companies WHERE id = ?", [id]);
+    if (!existingCompany) {
+      return res.status(404).json({ error: "Company not found" });
+    }
+
+    const [[{ site_count }]] = await pool.query(
+      "SELECT COUNT(*) AS site_count FROM sites WHERE company_id = ? AND is_active = 1",
+      [id]
+    );
+
+    if (site_count > 0) {
+      return res.status(400).json({
+        error: `This company has ${site_count} site${site_count === 1 ? "" : "s"} assigned to it. Delete ${site_count === 1 ? "that site" : "those sites"} first, then delete the company.`,
+        active_sites: site_count,
+      });
+    }
+
+    await pool.query("UPDATE companies SET is_active = 0 WHERE id = ?", [id]);
+
+    res.json({ success: true, deleted: true });
+  } catch (err) {
+    console.error("Error deleting company:", err);
+    res.status(500).json({ error: "Failed to delete company" });
   }
 });
 
