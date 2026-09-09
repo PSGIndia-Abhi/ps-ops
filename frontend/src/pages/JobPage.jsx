@@ -1239,21 +1239,24 @@ console.log("Map ID:", import.meta.env.VITE_GOOGLE_MAP_ID);
 
 
 
-<Map
-  center={{
-    lat: Number(job.requestedBy.company.latitude),
-    lng: Number(job.requestedBy.company.longitude),
-  }}
-  zoom={16}
-  markers={[
-    {
-      id: "site",
-      lat: job.requestedBy.company.latitude,
-      lng: job.requestedBy.company.longitude,
-      title: job.requestedBy.company.site,
-    },
-  ]}
-/>
+{Number.isFinite(Number(job.requestedBy.company?.latitude)) &&
+  Number.isFinite(Number(job.requestedBy.company?.longitude)) && (
+    <Map
+      center={{
+        lat: Number(job.requestedBy.company.latitude),
+        lng: Number(job.requestedBy.company.longitude),
+      }}
+      zoom={16}
+      markers={[
+        {
+          id: "site",
+          lat: Number(job.requestedBy.company.latitude),
+          lng: Number(job.requestedBy.company.longitude),
+          title: job.requestedBy.company.site,
+        },
+      ]}
+    />
+  )}
 
           {/* Visits------------------------------------------------------------------------------------------------------------------------------------- */}
 

@@ -33,6 +33,8 @@ import TrackingHistory from "./pages/TrackingHistory";
 import AdminAnalysis from "./pages/AdminAnalysis";
 import AnalysisDataPage from "./pages/AnalysisDataPage";
 import UpcomingCalendarPage from "./pages/UpcomingCalendarPage";
+import AdminUserManagement from "./pages/AdminUserManagement";
+import AdminGroupManagement from "./pages/AdminGroupManagement";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -73,6 +75,8 @@ const router = createBrowserRouter([
       { path: "analysis/upcoming-calendar", element: <UpcomingCalendarPage /> },
       { path: "analysis/:dataset", element: <AnalysisDataPage /> },
       { path: "team", element: <AdminTeamManagement /> },
+      { path: "user-management", element: <AdminUserManagement /> },
+      { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },
       { path: "map", element: <MapView /> },

@@ -204,6 +204,10 @@ button:disabled{
 }
 
 .mobile-panel-menu button{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
   width:100%;
   text-align:left;
   background:#f3f4f6;

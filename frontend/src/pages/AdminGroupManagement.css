@@ -1,0 +1,386 @@
+.group-mgmt-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.group-mgmt-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.group-mgmt-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.group-mgmt-subtabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.group-mgmt-subtabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #374151;
+}
+
+.group-mgmt-subtabs button.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.group-mgmt-error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group-mgmt-error button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.group-mgmt-error button:hover {
+  opacity: 1;
+}
+
+.group-mgmt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.group-mgmt-search {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  background: #fff;
+}
+
+.group-mgmt-toolbar select {
+  min-width: 170px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  background: #fff;
+  color: #111827;
+}
+
+.group-mgmt-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.group-mgmt-row {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr 180px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.group-mgmt-row-companies {
+  grid-template-columns: 1.6fr 1.2fr 1fr 0.8fr 180px;
+}
+
+.group-mgmt-row-sites {
+  grid-template-columns: 1.2fr 1fr 1.2fr 1.6fr 230px;
+}
+
+/* Extra breathing room between the (often long) Address column and Actions. */
+.group-mgmt-address-cell {
+  padding-right: 20px;
+}
+
+/* Keep every row (Groups, Companies, Sites) the same single-line height,
+   regardless of content length — long values ellipsize instead of wrapping. */
+.group-mgmt-row > .group-mgmt-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-mgmt-row > .group-mgmt-actions {
+  overflow: visible;
+}
+
+.group-mgmt-row-header {
+  background: #f3f4f6;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: none;
+}
+
+.group-mgmt-loading,
+.group-mgmt-empty {
+  color: var(--muted);
+  padding: 12px;
+}
+
+.group-mgmt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.group-mgmt-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.group-mgmt-actions button:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.group-mgmt-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.group-mgmt-actions button.view {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.group-mgmt-actions button.view:hover:not(:disabled) {
+  background: #dbeafe;
+}
+
+.group-mgmt-actions button.edit {
+  border-color: #fde68a;
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.group-mgmt-actions button.edit:hover:not(:disabled) {
+  background: #fef3c7;
+}
+
+.group-mgmt-actions button.danger {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.group-mgmt-actions button.danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+/* Google Places dropdown is appended to <body> — keep it above our modal overlay. */
+.pac-container {
+  z-index: 10000 !important;
+}
+
+.group-mgmt-placeholder {
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-mgmt-placeholder h3 {
+  margin: 0;
+}
+
+.group-mgmt-placeholder p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.group-mgmt-placeholder .secondary {
+  margin-top: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ---------- Modal ---------- */
+
+.group-mgmt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 1000;
+}
+
+.group-mgmt-modal {
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.group-mgmt-modal h3 {
+  margin: 0;
+}
+
+.group-mgmt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.group-mgmt-field input,
+.group-mgmt-field select {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  background: #fff;
+  color: #111827;
+  font-weight: 400;
+}
+
+.group-mgmt-view-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.group-mgmt-view-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.group-mgmt-view-grid span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.group-mgmt-view-grid strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  word-break: break-word;
+}
+
+@media (max-width: 520px) {
+  .group-mgmt-view-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.group-mgmt-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.group-mgmt-modal-actions .primary {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.group-mgmt-modal-actions .secondary {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .group-mgmt-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .group-mgmt-row-header {
+    display: none;
+  }
+
+  .group-mgmt-row > .group-mgmt-cell {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .group-mgmt-cell::before {
+    content: attr(data-label) ": ";
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  .group-mgmt-actions {
+    justify-content: flex-start;
+  }
+}

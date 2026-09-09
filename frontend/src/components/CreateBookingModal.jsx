@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { apiFetch } from "../api";
 import CreateContactModal from "./CreateContactModal";
 import AssignWorkOrderModal from "./AssignWorkOrderModal";
+import StatusAlertModal from "./StatusAlertModal";
 
 
 
@@ -51,6 +52,11 @@ export default function CreateBookingModal({
   const [companies, setCompanies] = useState([]);
   const [contactSearch, setContactSearch] = useState("");
   const [useCompanyAddress, setUseCompanyAddress] = useState(false);
+
+  // In-app replacement for window.alert() — null | { type: "success" | "error", message }.
+  // Success closes this modal once dismissed; errors just stay open so the
+  // admin can fix the input and resubmit.
+  const [status, setStatus] = useState(null);
 
   useEffect(() => {
     async function loadContacts() {
@@ -285,14 +291,17 @@ const deepCleaningServices = [
 
   async function handleSubmit() {
     if (!form.contactId) {
-      alert(role === "client"
-        ? "Your contact profile is missing. Please contact support."
-        : "Please select who is requesting this booking");
+      setStatus({
+        type: "error",
+        message: role === "client"
+          ? "Your contact profile is missing. Please contact support."
+          : "Please select who is requesting this booking",
+      });
       return;
     }
 
     if (!form.subServices.length) {
-      alert("Please select at least one service");
+      setStatus({ type: "error", message: "Please select at least one service" });
       return;
     }
     const schedulePayload = {};
@@ -306,19 +315,19 @@ const deepCleaningServices = [
       const endDateValue = scheduleType === "single" ? "" : schedule.end_date;
 
       if (!startDateValue) {
-        alert(`Date of service is required for ${service}`);
+        setStatus({ type: "error", message: `Date of service is required for ${service}` });
         return;
       }
 
       if (scheduleType === "range") {
         if (!endDateValue) {
-          alert(`End date is required for ${service}`);
+          setStatus({ type: "error", message: `End date is required for ${service}` });
           return;
         }
         const start = new Date(`${startDateValue}T00:00:00`);
         const end = new Date(`${endDateValue}T00:00:00`);
         if (end < start) {
-          alert(`End date cannot be before start date for ${service}`);
+          setStatus({ type: "error", message: `End date cannot be before start date for ${service}` });
           return;
         }
       }
@@ -347,18 +356,18 @@ const deepCleaningServices = [
     let recurrence = null;
     if (recurrenceActive) {
       if (!startDateValue) {
-        alert("Start date is required for recurring bookings");
+        setStatus({ type: "error", message: "Start date is required for recurring bookings" });
         return;
       }
       if (!form.recurrenceEndDate) {
-        alert("End date is required for recurring bookings");
+        setStatus({ type: "error", message: "End date is required for recurring bookings" });
         return;
       }
       const recurrenceEndDate = form.recurrenceEndDate;
       const recurrenceEndObj = new Date(`${recurrenceEndDate}T00:00:00`);
       const recurrenceStartObj = new Date(`${startDateValue}T00:00:00`);
       if (recurrenceEndObj < recurrenceStartObj) {
-        alert("Recurring end date cannot be before start date");
+        setStatus({ type: "error", message: "Recurring end date cannot be before start date" });
         return;
       }
 
@@ -455,13 +464,13 @@ const deepCleaningServices = [
         supervisor_id: assignedSupervisorId,
         technician_ids: assignedTechnicianIds
       });
-      alert("Booking created successfully");
-
-      onClose(); // 👈 close modal if you have it
+      // Modal closes once the admin dismisses this (see the StatusAlertModal
+      // onClose handler below) instead of immediately like window.alert() did.
+      setStatus({ type: "success", message: "Booking created successfully" });
 
     } catch (err) {
       console.error("Create booking failed", err);
-      alert("Failed to create booking");
+      setStatus({ type: "error", message: "Failed to create booking" });
     }
   }
 
@@ -1112,6 +1121,15 @@ const deepCleaningServices = [
           setShowAssignModal(false);
         }}
 
+      />
+
+      <StatusAlertModal
+        status={status}
+        onClose={() => {
+          const wasSuccess = status?.type === "success";
+          setStatus(null);
+          if (wasSuccess) onClose();
+        }}
       />
     </div>
 

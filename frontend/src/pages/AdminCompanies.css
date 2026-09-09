@@ -5,6 +5,11 @@
   padding-bottom: 50px;
 }
 
+/* Google Places dropdown is appended to <body> — keep it above page chrome. */
+.pac-container {
+  z-index: 10000 !important;
+}
+
 .companies-header h2 {
   margin: 0 0 4px 0;
 }
@@ -56,6 +61,25 @@
   border: 1px solid #fecaca;
   border-radius: 10px;
   padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.companies-error button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.companies-error button:hover {
+  opacity: 1;
 }
 
 .company-form {
@@ -66,6 +90,11 @@
 }
 
 .company-form > button {
+  /* Span the full row width so "justify-self: end" pushes it to the actual
+     right edge of the card — without this, a button that wraps to its own
+     row (e.g. Add Company, with 5 fields ahead of it) only spans the first
+     grid track and ends up stuck near the left instead. */
+  grid-column: 1 / -1;
   justify-self: end;
 }
 
