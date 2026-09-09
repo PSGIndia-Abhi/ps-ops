@@ -11,6 +11,18 @@ export interface DeviceLocation {
 
 export class LocationError extends Error {}
 
+/**
+ * Specifically "the device's Location toggle is off" (not a permission
+ * problem, not a slow/poor GPS fix) - the native module's own Android
+ * source (`AndroidLocationManager.java`) emits `POSITION_UNAVAILABLE`
+ * immediately, synchronously, the moment neither the GPS nor network
+ * provider is enabled, rather than the usual "waited and never got a fix"
+ * path. Distinguishing this lets the caller show an actual "turn location
+ * on" action instead of a plain "try again" message the user can't act on
+ * without already knowing to dig through Settings themselves.
+ */
+export class LocationServicesDisabledError extends LocationError {}
+
 /** Below this, a fix is good enough to stop waiting for anything better. */
 const GOOD_ACCURACY_METERS = 25;
 /** How long we're willing to wait for a better-than-first fix before giving up and using the best one seen. */
@@ -83,14 +95,14 @@ export async function getCurrentLocation(): Promise<DeviceLocation> {
     let settled = false;
     let watchId: number | null = null;
 
-    const finish = (result: DeviceLocation | null) => {
+    const finish = (result: DeviceLocation | null, error?: LocationError) => {
       if (settled) return;
       settled = true;
       if (watchId !== null) Geolocation.clearWatch(watchId);
       if (result) {
         resolve(result);
       } else {
-        reject(new LocationError('Current location is required to start this visit.'));
+        reject(error ?? new LocationError('Current location is required to start this visit.'));
       }
     };
 
@@ -111,8 +123,21 @@ export async function getCurrentLocation(): Promise<DeviceLocation> {
           finish(best);
         }
       },
-      () => {
+      (error) => {
         clearTimeout(timeoutId);
+        // POSITION_UNAVAILABLE with no fix ever received means there was no
+        // provider to even try (Location toggled off), not just a bad/slow
+        // fix - `best` staying null in every other error case is still
+        // handled by the generic message above.
+        if (!best && error?.code === error?.POSITION_UNAVAILABLE) {
+          finish(
+            null,
+            new LocationServicesDisabledError(
+              'Location is turned off on this device. Turn it on to start this visit.',
+            ),
+          );
+          return;
+        }
         finish(best);
       },
       // distanceFilter must be 0: its default (100m) would suppress exactly

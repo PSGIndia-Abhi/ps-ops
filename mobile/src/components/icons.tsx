@@ -498,6 +498,45 @@ export function InboxIcon({ size = 40, color = '#9CA3AF' }: IconProps) {
   );
 }
 
+/** A filled sun - rayed circle, used on the Home greeting card only. */
+export function SunIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={5} fill={color} />
+      <Line x1={12} y1={1.5} x2={12} y2={4.3} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={12} y1={19.7} x2={12} y2={22.5} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={1.5} y1={12} x2={4.3} y2={12} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={19.7} y1={12} x2={22.5} y2={12} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={4.6} y1={4.6} x2={6.6} y2={6.6} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={17.4} y1={17.4} x2={19.4} y2={19.4} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={4.6} y1={19.4} x2={6.6} y2={17.4} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={17.4} y1={6.6} x2={19.4} y2={4.6} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** A plain "+" - the Technician tab bar's raised middle button glyph. */
+export function PlusIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1={12} y1={4} x2={12} y2={20} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Line x1={4} y1={12} x2={20} y2={12} stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** A small 4-point sparkle/twinkle accent - used on illustrated empty states, not a functional glyph anywhere. */
+export function SparkleIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 2.5c.5 3.7 1.3 5.6 3 7.3 1.7 1.7 3.6 2.5 7.3 3-3.7.5-5.6 1.3-7.3 3-1.7 1.7-2.5 3.6-3 7.3-.5-3.7-1.3-5.6-3-7.3-1.7-1.7-3.6-2.5-7.3-3 3.7-.5 5.6-1.3 7.3-3 1.7-1.7 2.5-3.6 3-7.3z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 export function ShieldIcon({ size = 20, color = '#6B7280' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

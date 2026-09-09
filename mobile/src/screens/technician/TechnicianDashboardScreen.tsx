@@ -10,14 +10,13 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { AppHeader } from '../../components/AppHeader';
+import { BackgroundWash } from '../../components/BackgroundWash';
 import { GradientCard } from '../../components/GradientCard';
-import { RichActionTile } from '../../components/RichActionTile';
 import { SectionHeader } from '../../components/SectionHeader';
 import { JobCard } from '../../components/JobCard';
-import { EmptyState } from '../../components/EmptyState';
 import { Banner } from '../../components/Banner';
 import { Skeleton } from '../../components/Skeleton';
 import {
@@ -29,6 +28,9 @@ import {
   ChevronRightIcon,
   ClockIcon,
   PinIcon,
+  SendIcon,
+  SparkleIcon,
+  SunIcon,
 } from '../../components/icons';
 import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useUserRole } from '../../auth/role';
@@ -136,40 +138,45 @@ export function TechnicianDashboardScreen() {
 
   return (
     <View style={styles.flex}>
+      {/* Same whisper-soft brand wash Login uses, not a new pattern - the
+          rest of the screen (AppHeader, cards) still sits on its own solid
+          surface, so this only ever shows in the gaps between them. Needs
+          ScreenContainer's `transparent` so its own solid fill doesn't cover
+          it. */}
+      <BackgroundWash />
       <AppHeader
         userName={user?.name ?? ''}
         roleLabel={role ? roleLabel(role) : ''}
         onProfilePress={() => navigation.navigate('Profile')}
         onNotificationsPress={() => navigation.navigate('Notifications')}
       />
-      <ScreenContainer onRefresh={() => load(true)} refreshing={refreshing}>
-        <View style={styles.greetingCol}>
-          <Text style={styles.greeting}>
-            {getGreeting()}, <Text style={styles.greetingName}>{firstName(user?.name)}</Text> 👋
-          </Text>
-          <Text style={styles.tagline}>Let's keep spaces safer together.</Text>
-          <View style={styles.taglineUnderline} />
-        </View>
+      <ScreenContainer transparent onRefresh={() => load(true)} refreshing={refreshing}>
+        {/* A touch more breathing room than the shared ScreenContainer's own
+            base padding gives every screen - local to Home only, not a
+            change to that shared component (which every other screen also
+            sits in). */}
+        <View style={styles.homePad}>
+        <GreetingCard name={firstName(user?.name)} />
 
         {!!error && <Banner message={error} variant="error" />}
 
         <View style={styles.dashStatRow}>
           <DashStat
-            icon={<BriefcaseIcon size={17} color={colors.primary} />}
+            icon={<BriefcaseIcon size={16} color={colors.textOnPrimary} />}
             value={todaysVisits?.length}
             label="Today's jobs"
             accentColor={colors.primary}
             onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
           />
           <DashStat
-            icon={<ClockIcon size={17} color={colors.warning} />}
+            icon={<ClockIcon size={16} color={colors.textOnPrimary} />}
             value={todaysVisits ? inProgressCount : undefined}
             label="In progress"
             accentColor={colors.warning}
             onPress={() => navigation.navigate('MyJobs', { filter: 'inProgress' })}
           />
           <DashStat
-            icon={<AlertCircleIcon size={17} color={colors.danger} />}
+            icon={<AlertCircleIcon size={16} color={colors.textOnPrimary} />}
             value={todaysVisits ? pendingCount : undefined}
             label="Pending today"
             accentColor={colors.danger}
@@ -197,7 +204,6 @@ export function TechnicianDashboardScreen() {
 
         <RichSectionHeader
           title="Today's Schedule"
-          subtitle="Here's what's coming up today"
           gradientUnderline
           actionLabel="View all"
           onAction={() => navigation.navigate('MyJobs', { filter: 'today' })}
@@ -208,11 +214,7 @@ export function TechnicianDashboardScreen() {
             <Skeleton height={64} radius={16} style={styles.skeletonCard} />
           </View>
         ) : todaysVisits === null ? null : todaysVisits.length === 0 ? (
-          <EmptyState
-            icon={<BriefcaseIcon size={32} color={colors.textMuted} />}
-            title="No jobs today"
-            subtitle="You're all caught up. New assignments will appear here."
-          />
+          <ScheduleEmptyCard />
         ) : schedulePreview.length === 0 ? null : (
           <View
             style={styles.scheduleCarouselWrap}
@@ -254,55 +256,34 @@ export function TechnicianDashboardScreen() {
 
         <RichSectionHeader
           title="Quick Access"
-          subtitle="Everything you need, at your fingertips."
           actionLabel="See all"
           onAction={() => navigation.navigate('More')}
         />
-        <View style={styles.quickActionGrid}>
-          <View style={styles.quickActionRow}>
-            <RichActionTile
-              title="My Jobs"
-              description="View and manage your jobs"
-              icon={<BriefcaseIcon size={22} color={colors.textOnPrimary} />}
-              ghostIcon={<CalendarIcon size={64} color={colors.primary} />}
-              accentColor={colors.primary}
-              badgeSize={56}
-              style={styles.qaGridTile}
-              onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
-            />
-            <RichActionTile
-              title="Schedule"
-              description="See your upcoming jobs"
-              icon={<CalendarIcon size={22} color={colors.textOnPrimary} />}
-              ghostIcon={<CalendarIcon size={64} color={colors.warning} />}
-              accentColor={colors.warning}
-              badgeSize={56}
-              style={styles.qaGridTile}
-              onPress={() => navigation.navigate('Schedule', { filter: 'tomorrow' })}
-            />
-          </View>
-          <View style={styles.quickActionRow}>
-            <RichActionTile
-              title="Performance"
-              description="Track your progress"
-              icon={<ChartIcon size={22} color={colors.textOnPrimary} />}
-              ghostIcon={<ChartIcon size={64} color={colors.danger} />}
-              accentColor={colors.danger}
-              badgeSize={56}
-              style={styles.qaGridTile}
-              onPress={() => navigation.navigate('Performance')}
-            />
-            <RichActionTile
-              title="Completed"
-              description="View finished jobs"
-              icon={<CheckCircleIcon size={22} color={colors.textOnPrimary} />}
-              ghostIcon={<CheckCircleIcon size={64} color={colors.success} />}
-              accentColor={colors.success}
-              badgeSize={56}
-              style={styles.qaGridTile}
-              onPress={() => navigation.navigate('MyJobs', { filter: 'completed' })}
-            />
-          </View>
+        <View style={styles.quickActionRow}>
+          <QuickAccessTile
+            label="My Jobs"
+            icon={<BriefcaseIcon size={20} color={colors.textOnPrimary} />}
+            accentColor={colors.primary}
+            onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
+          />
+          <QuickAccessTile
+            label="Schedule"
+            icon={<CalendarIcon size={20} color={colors.textOnPrimary} />}
+            accentColor={colors.warning}
+            onPress={() => navigation.navigate('Schedule', { filter: 'tomorrow' })}
+          />
+          <QuickAccessTile
+            label="Performance"
+            icon={<ChartIcon size={20} color={colors.textOnPrimary} />}
+            accentColor={colors.accent}
+            onPress={() => navigation.navigate('Performance')}
+          />
+          <QuickAccessTile
+            label="Completed"
+            icon={<CheckCircleIcon size={20} color={colors.textOnPrimary} />}
+            accentColor={colors.success}
+            onPress={() => navigation.navigate('MyJobs', { filter: 'completed' })}
+          />
         </View>
 
         <GradientCard color={colors.primary} style={styles.promoCard}>
@@ -311,6 +292,7 @@ export function TechnicianDashboardScreen() {
           <Text style={[styles.promoTitle, styles.promoTitleAccent]}>Safer Spaces</Text>
           <View style={styles.promoUnderline} />
         </GradientCard>
+        </View>
       </ScreenContainer>
     </View>
   );
@@ -332,7 +314,8 @@ function RichSectionHeader({
   gradientUnderline,
 }: {
   title: string;
-  subtitle: string;
+  /** Optional - the reference gives this header treatment no supporting sentence on either "Today's Schedule" or "Quick Access", just title + underline + action. */
+  subtitle?: string;
   actionLabel?: string;
   onAction?: () => void;
   /** "Today's Schedule" uses a genuine blue gradient bar; "Quick Access" uses a plain solid one (matching this screen's other underline accents) - both real per the reference, not the same asset reused. */
@@ -343,7 +326,7 @@ function RichSectionHeader({
     <View style={styles.richHeaderRow}>
       <View style={styles.richHeaderTextCol}>
         <Text style={styles.richHeaderTitle}>{title}</Text>
-        <Text style={styles.richHeaderSubtitle}>{subtitle}</Text>
+        {!!subtitle && <Text style={styles.richHeaderSubtitle}>{subtitle}</Text>}
         {gradientUnderline ? (
           <Svg width={64} height={4} style={styles.richHeaderUnderlineGap}>
             <Defs>
@@ -369,10 +352,11 @@ function RichSectionHeader({
 }
 
 /**
- * One of the three "today's work" numbers - a plain white card (not the
- * gradient hero this used to be) with its own colored icon chip and a thin
- * colored underline instead of a border, so each stat carries its own
- * identity at a glance the way the reference layout does.
+ * One of the three "today's work" numbers - the reference gives each its own
+ * tinted card (not a shared white card) with a solid-color icon circle, so
+ * this takes the icon element as-is and renders it in white on top of
+ * `accentColor` rather than the muted-outline-on-tint treatment used
+ * elsewhere in the app.
  */
 function DashStat({
   icon,
@@ -390,16 +374,15 @@ function DashStat({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.dashStatCard}
+      style={[styles.dashStatCard, { backgroundColor: `${accentColor}1F` }]}
       accessibilityRole="button"
       accessibilityLabel={`${label}, ${value ?? 'loading'}`}
     >
-      <View style={[styles.dashStatIconWrap, { backgroundColor: `${accentColor}1A` }]}>{icon}</View>
+      <View style={[styles.dashStatIconWrap, { backgroundColor: accentColor }]}>{icon}</View>
       <Text style={styles.dashStatValue}>{value ?? '–'}</Text>
       <Text style={styles.dashStatLabel} numberOfLines={1}>
         {label}
       </Text>
-      <View style={[styles.dashStatUnderline, { backgroundColor: accentColor }]} />
     </Pressable>
   );
 }
@@ -452,7 +435,7 @@ function TodayScheduleItem({
     >
       <View style={[styles.scheduleAccent, { backgroundColor: meta.color }]} />
       <View style={styles.scheduleGhostWrap}>
-        <CalendarIcon size={72} color={meta.color} />
+        <CalendarIcon size={80} color={meta.color} />
       </View>
 
       <View style={styles.scheduleTimeCol}>
@@ -494,6 +477,128 @@ function TodayScheduleItem({
   );
 }
 
+/**
+ * Home's greeting banner - a soft illustrated card (reference), not the
+ * previous plain text block: a sun glyph + italic tagline up top, a big
+ * two-line "Good morning, <name>" below, and a small skyline+trees
+ * illustration bleeding into the bottom-right corner. All pure decoration
+ * (the name is the only real data in it), same spirit as the "Together for
+ * Safer Spaces" promo card further down this same screen.
+ */
+function GreetingCard({ name }: { name: string }) {
+  return (
+    <GradientCard color={colors.primarySoft} style={styles.greetingCard}>
+      <View style={styles.greetingIllustration} pointerEvents="none">
+        <GreetingSkyline />
+      </View>
+      <View style={styles.greetingHeaderRow}>
+        <View style={styles.greetingSunWrap}>
+          <SunIcon size={19} color={colors.warning} />
+        </View>
+        <View style={styles.greetingTaglineCol}>
+          <Text style={styles.greetingTagline}>“Safer Spaces{'\n'}Together”</Text>
+          <View style={styles.greetingTaglineUnderline} />
+        </View>
+      </View>
+      <Text style={styles.greetingBig}>{getGreeting()},</Text>
+      <Text style={[styles.greetingBig, styles.greetingBigName]}>{name}</Text>
+    </GradientCard>
+  );
+}
+
+/** Small skyline+trees decoration for the greeting card's bottom-right corner - deliberately compact (unlike the full-bleed `DecorativeSkyline` on Login), and local to this one card rather than a shared component since nothing else needs this exact size/palette. */
+function GreetingSkyline() {
+  return (
+    <Svg width={132} height={92} viewBox="0 0 132 92">
+      <Circle cx={20} cy={78} r={13} fill={colors.success} opacity={0.55} />
+      <Circle cx={11} cy={70} r={10} fill={colors.success} opacity={0.5} />
+      <Rect x={17} y={80} width={4} height={10} fill={colors.crestRedDeep} opacity={0.3} />
+      <Circle cx={42} cy={82} r={9} fill={colors.success} opacity={0.45} />
+      <Rect x={39} y={88} width={3} height={7} fill={colors.crestRedDeep} opacity={0.25} />
+      <Rect x={62} y={38} width={26} height={54} rx={5} fill={colors.surface} opacity={0.55} />
+      <Rect x={69} y={48} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
+      <Rect x={78} y={48} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
+      <Rect x={69} y={58} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
+      <Rect x={78} y={58} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
+      <Rect x={96} y={16} width={24} height={76} rx={5} fill={colors.surface} opacity={0.75} />
+      <Rect x={106} y={4} width={2} height={14} fill={colors.surface} opacity={0.75} />
+      <Rect x={102} y={26} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+      <Rect x={111} y={26} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+      <Rect x={102} y={36} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+      <Rect x={111} y={36} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+      <Rect x={102} y={46} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+      <Rect x={111} y={46} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
+    </Svg>
+  );
+}
+
+/**
+ * "No jobs scheduled" for Today's Schedule when the technician has nothing
+ * today - a dashed path curving from a calendar+sparkle glyph to a paper
+ * plane (reusing `SendIcon`, the app's existing paper-plane glyph, rather
+ * than adding a near-duplicate icon), matching the reference illustration
+ * instead of the plain `EmptyState` used everywhere else in the app.
+ */
+function ScheduleEmptyCard() {
+  return (
+    <View style={styles.scheduleEmptyCard}>
+      <View style={styles.scheduleEmptyArt}>
+        <Svg width="100%" height={90} viewBox="0 0 280 90" preserveAspectRatio="none">
+          <Path
+            d="M46 24 C110 18 150 78 234 62"
+            stroke={colors.primarySoft}
+            strokeWidth={2}
+            strokeDasharray="6 7"
+            strokeLinecap="round"
+            fill="none"
+          />
+        </Svg>
+        <View style={styles.scheduleEmptyCalendarWrap}>
+          <CalendarIcon size={26} color={colors.primary} />
+          <View style={styles.scheduleEmptySparkle}>
+            <SparkleIcon size={14} color={colors.warning} />
+          </View>
+        </View>
+        <View style={styles.scheduleEmptyPlaneWrap}>
+          <SendIcon size={18} color={colors.primary} />
+        </View>
+      </View>
+      <Text style={styles.scheduleEmptyTitle}>No jobs scheduled</Text>
+    </View>
+  );
+}
+
+/** One "Quick Access" shortcut - a flat tinted tile with a solid icon circle and a label, matching the reference's single-row layout (no description/ghost-icon treatment - that's `RichActionTile`, still used on Profile). */
+function QuickAccessTile({
+  label,
+  icon,
+  accentColor,
+  onPress,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  accentColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quickTile,
+        { backgroundColor: `${accentColor}1F` },
+        pressed && styles.quickTilePressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View style={[styles.quickTileIconWrap, { backgroundColor: accentColor }]}>{icon}</View>
+      <Text style={styles.quickTileLabel} numberOfLines={1} adjustsFontSizeToFit>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function firstName(name: string | undefined): string {
   if (!name) return 'there';
   return name.trim().split(/\s+/)[0];
@@ -504,27 +609,61 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  greetingCol: {
+  homePad: {
+    paddingHorizontal: spacing.xs,
+    paddingTop: spacing.xs,
+  },
+  // No flat backgroundColor here anymore - GradientCard supplies its own
+  // diagonal light-to-deep fill built from the `color` passed to it (same
+  // pattern as the "Together for Safer Spaces" promo card further down this
+  // screen), giving the card real depth instead of one flat pale-blue tone.
+  greetingCard: {
+    borderRadius: radii.xl,
+    padding: spacing.lg,
     marginBottom: spacing.lg,
   },
-  greeting: {
-    ...typography.title,
-    color: colors.textPrimary,
+  greetingIllustration: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
   },
-  greetingName: {
-    color: colors.crestRed,
+  greetingHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.md,
   },
-  tagline: {
-    ...typography.body,
-    color: colors.textMuted,
-    marginTop: 2,
+  greetingSunWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: colors.warningBg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  taglineUnderline: {
-    width: 28,
+  greetingTaglineCol: {
+    alignItems: 'flex-end',
+  },
+  greetingTagline: {
+    ...typography.captionMedium,
+    fontStyle: 'italic',
+    color: colors.textSecondary,
+    textAlign: 'right',
+  },
+  greetingTaglineUnderline: {
+    width: 36,
     height: 2,
     borderRadius: 1,
     backgroundColor: colors.crestRed,
-    marginTop: spacing.xs,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  greetingBig: {
+    ...typography.display,
+    color: colors.textPrimary,
+  },
+  greetingBigName: {
+    color: colors.primary,
   },
   richHeaderRow: {
     flexDirection: 'row',
@@ -536,8 +675,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: spacing.sm,
   },
+  // Medium, not the full `typography.title` (22px) this used to borrow -
+  // "Today's Schedule"/"Quick Access" are section labels, not headline text.
   richHeaderTitle: {
-    ...typography.title,
+    ...typography.subtitle,
     color: colors.textPrimary,
   },
   richHeaderSubtitle: {
@@ -573,10 +714,7 @@ const styles = StyleSheet.create({
   dashStatCard: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
     paddingVertical: spacing.md,
   },
   dashStatIconWrap: {
@@ -595,12 +733,6 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
     marginTop: 1,
-  },
-  dashStatUnderline: {
-    width: 22,
-    height: 3,
-    borderRadius: 1.5,
-    marginTop: spacing.xs,
   },
   scheduleCarouselWrap: {
     marginBottom: spacing.xl,
@@ -628,7 +760,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     paddingRight: spacing.sm,
     overflow: 'hidden',
   },
@@ -652,11 +784,11 @@ const styles = StyleSheet.create({
   },
   scheduleTimeCol: {
     alignItems: 'center',
-    width: 68,
+    width: 76,
   },
   scheduleTimeIconWrap: {
-    width: 26,
-    height: 26,
+    width: 28,
+    height: 28,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -664,6 +796,7 @@ const styles = StyleSheet.create({
   },
   scheduleTimeHour: {
     ...typography.bodyMedium,
+    fontSize: 17,
     fontWeight: '700',
   },
   scheduleTimeMeridiem: {
@@ -688,11 +821,13 @@ const styles = StyleSheet.create({
   },
   scheduleSite: {
     ...typography.bodyMedium,
+    fontSize: 16,
     color: colors.textPrimary,
     flexShrink: 1,
   },
   scheduleJobType: {
     ...typography.caption,
+    fontSize: 14,
     color: colors.textSecondary,
   },
   scheduleStatusPill: {
@@ -710,8 +845,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   scheduleChevronBtn: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     borderRadius: 999,
     backgroundColor: colors.surface,
     alignItems: 'center',
@@ -729,16 +864,74 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: colors.textOnPrimary,
   },
-  quickActionGrid: {
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
   quickActionRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+    marginBottom: spacing.xl,
   },
-  qaGridTile: {
+  quickTile: {
     flex: 1,
+    alignItems: 'center',
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xxs,
+    gap: spacing.xs,
+  },
+  quickTilePressed: {
+    opacity: 0.85,
+  },
+  quickTileIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTileLabel: {
+    ...typography.captionMedium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  scheduleEmptyCard: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.lg,
+    marginBottom: spacing.xl,
+    ...shadows.card,
+  },
+  scheduleEmptyArt: {
+    width: '100%',
+    height: 90,
+    marginBottom: spacing.sm,
+  },
+  scheduleEmptyCalendarWrap: {
+    position: 'absolute',
+    left: 28,
+    top: 4,
+    width: 56,
+    height: 56,
+    borderRadius: 999,
+    backgroundColor: colors.primarySoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleEmptySparkle: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+  },
+  scheduleEmptyPlaneWrap: {
+    position: 'absolute',
+    right: 24,
+    bottom: 8,
+    transform: [{ rotate: '20deg' }],
+  },
+  scheduleEmptyTitle: {
+    ...typography.subtitle,
+    color: colors.textPrimary,
   },
   promoCard: {
     padding: spacing.lg,

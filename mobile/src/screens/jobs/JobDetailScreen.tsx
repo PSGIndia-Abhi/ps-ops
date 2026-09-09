@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
@@ -34,7 +34,12 @@ import { jobsApi, visitsApi, ApiError } from '../../api';
 import type { ReassignScope } from '../../api/jobs';
 import { useAuth } from '../../auth/AuthContext';
 import { useUserRole } from '../../auth/role';
-import { getCurrentLocation, LocationError, type DeviceLocation } from '../../utils/location';
+import {
+  getCurrentLocation,
+  LocationError,
+  LocationServicesDisabledError,
+  type DeviceLocation,
+} from '../../utils/location';
 import { formatDate, formatTime } from '../../utils/date';
 import { initialsFor } from '../../utils/name';
 import { colors, radii, spacing, typography } from '../../theme';
@@ -201,7 +206,25 @@ export function JobDetailScreen({ route, navigation }: Props) {
       setFeedback({ message: 'Visit started successfully', variant: 'success' });
       await load();
     } catch (err) {
-      if (err instanceof LocationError) {
+      if (err instanceof LocationServicesDisabledError) {
+        // An actual "ask" (per the reference this was built against), not
+        // just red text the technician has to already know to act on -
+        // "Open Settings" jumps straight to the Location toggle, no manual
+        // hunting through the OS Settings app required.
+        Alert.alert(err.message, 'You can turn it on now without leaving this screen.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              if (Platform.OS === 'android') {
+                Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
+              } else {
+                Linking.openURL('app-settings:');
+              }
+            },
+          },
+        ]);
+      } else if (err instanceof LocationError) {
         setFeedback({ message: err.message, variant: 'validation' });
       } else if (err instanceof ApiError && err.code === 'OUTSIDE_GEOFENCE') {
         const distance = Number(err.details?.distanceMeters ?? 0);
@@ -324,13 +347,32 @@ export function JobDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  async function handleAddComment(input: { message: string; photo: ComposerPhoto | null }) {
+  async function handleAddComment(input: { message: string; photos: ComposerPhoto[] }) {
     setCommentSubmitting(true);
     setFeedback(null);
     try {
       const { history_id } = await jobsApi.addJobComment(jobId, input.message);
-      if (input.photo) {
-        await jobsApi.uploadJobAttachment(jobId, history_id, input.photo);
+      // One upload call per photo, in sequence (not Promise.all) - each is
+      // its own multipart request against the same history_id. Sequential
+      // (not parallel) so a failure partway through reports honestly how
+      // many actually made it, instead of an ambiguous mixed batch result.
+      // The backend never needed a multi-file endpoint for this - see
+      // CommentComposer's own doc comment.
+      let uploaded = 0;
+      try {
+        for (const photo of input.photos) {
+          await jobsApi.uploadJobAttachment(jobId, history_id, photo);
+          uploaded += 1;
+        }
+      } catch (uploadErr) {
+        const remaining = input.photos.length - uploaded;
+        setFeedback({
+          message: `Update posted, but ${remaining} of ${input.photos.length} photo${remaining === 1 ? '' : 's'} failed to attach. ${feedbackFromError(uploadErr, 'Please try again.').message}`,
+          variant: 'validation',
+        });
+        const historyData = await jobsApi.getJobHistory(jobId);
+        setHistory(historyData);
+        return;
       }
       setFeedback({ message: 'Update posted successfully', variant: 'success' });
       const historyData = await jobsApi.getJobHistory(jobId);
@@ -1069,7 +1111,7 @@ const styles = StyleSheet.create({
     width: '50%',
     minWidth: 180,
     alignSelf: 'center',
-    minHeight: 52,
+    minHeight: 46,
   },
   locationPhaseRow: {
     flexDirection: 'row',

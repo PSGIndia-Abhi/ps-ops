@@ -57,7 +57,7 @@ function useResponsiveLoginSizing() {
       cardPadding: Math.round(clamp(height * 0.022, 14, 20)),
       headingSize: Math.round(clamp(height * 0.03, 20, 25)),
       headingGap: Math.round(clamp(height * 0.018, 10, 20)),
-      buttonHeight: Math.round(clamp(height * 0.06, 48, 54)),
+      buttonHeight: Math.round(clamp(height * 0.055, 42, 48)),
       isCompact,
     };
   }, [height, width]);
@@ -74,11 +74,6 @@ export function LoginScreen({ navigation }: Props) {
   const [formErrorVariant, setFormErrorVariant] = useState<'error' | 'network'>('error');
   const [submitting, setSubmitting] = useState(false);
   const [introDone, setIntroDone] = useState(false);
-  // Drives the Sign In button's badge sliding left -> right (see
-  // ArrowButton's `confirmSwipe`) - set the moment credentials pass
-  // validation, reset back to false on a failed attempt so the button is
-  // visually ready for a retry rather than stuck on the right.
-  const [confirmSwipe, setConfirmSwipe] = useState(false);
 
   const isBusy = submitting || status === 'signingIn';
 
@@ -159,16 +154,11 @@ export function LoginScreen({ navigation }: Props) {
     setFormError(null);
     if (!validate()) return;
 
-    // Credentials look valid - play the confirm swipe right away, in
-    // parallel with the actual request, rather than waiting for the server
-    // to respond before showing any reaction to the tap.
-    setConfirmSwipe(true);
     setSubmitting(true);
     try {
       await login(email, password);
       // Navigation away from Login happens automatically in RootNavigator
-      // once auth status becomes 'signedIn' - confirmSwipe is left true,
-      // since this screen unmounts before it would ever need to reset.
+      // once auth status becomes 'signedIn'.
     } catch (err) {
       if (err instanceof ApiError && err.isNetworkError) {
         setFormErrorVariant('network');
@@ -180,9 +170,6 @@ export function LoginScreen({ navigation }: Props) {
         setFormErrorVariant('error');
         setFormError(INVALID_CREDENTIALS_MESSAGE);
       }
-      // Failed - slide the badge back to the left so the button looks
-      // ready for another attempt, not stuck mid-"confirmed".
-      setConfirmSwipe(false);
     } finally {
       setSubmitting(false);
     }
@@ -310,13 +297,17 @@ export function LoginScreen({ navigation }: Props) {
               <Text style={styles.forgotLinkText}>Forgot password?</Text>
             </Pressable>
 
+            {/* Plain (non-slider) ArrowButton - same treatment as Job
+                Detail's "Start Visit": a real centered spinner replaces the
+                label the moment it's busy, then the screen just navigates
+                away on success. No sliding badge - that read as broken more
+                than it read as "confirmed" (see ArrowButton's own history). */}
             <ArrowButton
               label="SIGN IN"
               color={colors.crestRed}
               onPress={handleSubmit}
               loading={isBusy}
-              arrowSide="left"
-              confirmSwipe={confirmSwipe}
+              disabled={isBusy}
               style={[styles.submit, { minHeight: sizing.buttonHeight }]}
               testID="login-submit"
             />

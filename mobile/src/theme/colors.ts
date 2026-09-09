@@ -50,6 +50,13 @@ export const palette = {
 
   info700: '#0369A1',
   infoBg: '#E0F2FE',
+
+  // Accent — a fifth semantic color for things that aren't status/severity
+  // (Performance's Quick Access tile) so it doesn't have to borrow `danger`
+  // just to be visually distinct from the other three tiles' blue/amber/green.
+  accent600: '#7C3AED',
+  accent700: '#5B21B6',
+  accentBg: '#EDE9FE',
 } as const;
 
 export const colors = {
@@ -87,6 +94,10 @@ export const colors = {
 
   info: palette.info700,
   infoBg: palette.infoBg,
+
+  accent: palette.accent600,
+  accentText: palette.accent700,
+  accentBg: palette.accentBg,
 
   overlay: 'rgba(17, 24, 39, 0.45)',
   divider: palette.ink200,

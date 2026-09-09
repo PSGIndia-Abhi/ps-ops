@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { StatCard } from '../../components/StatCard';
 import { Banner } from '../../components/Banner';
+import { Skeleton } from '../../components/Skeleton';
 import { BriefcaseIcon, CheckCircleIcon, ClockIcon } from '../../components/icons';
 import { visitsApi, dashboardApi, ApiError } from '../../api';
 import { isToday } from '../../utils/date';
@@ -21,6 +22,12 @@ export function MyPerformanceScreen() {
   const [visits, setVisits] = useState<TechnicianVisit[] | null>(null);
   const [completedCount, setCompletedCount] = useState<number | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  // Distinct from `totalCount`/`completedCount` being null - that also means
+  // "the call finished but failed" (silently omitted below, by design), so
+  // it can't double as "still in flight" too. Without this, the "All time"
+  // section rendered nothing at all - not even a placeholder - for the
+  // entire time this fetch was in the air.
+  const [allTimeLoading, setAllTimeLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -35,6 +42,7 @@ export function MyPerformanceScreen() {
       setRefreshing(false);
     }
 
+    setAllTimeLoading(true);
     try {
       const summary = await dashboardApi.fetchDashboardSummary();
       setCompletedCount(summary.status.completed);
@@ -42,6 +50,8 @@ export function MyPerformanceScreen() {
     } catch {
       setCompletedCount(null);
       setTotalCount(null);
+    } finally {
+      setAllTimeLoading(false);
     }
   }, []);
 
@@ -92,26 +102,35 @@ export function MyPerformanceScreen() {
         </View>
       </View>
 
-      {(totalCount !== null || completedCount !== null) && (
+      {(allTimeLoading || totalCount !== null || completedCount !== null) && (
         <>
           <Text style={styles.sectionTitle}>All time</Text>
           <View style={styles.statGrid}>
             <View style={styles.statRow}>
-              {totalCount !== null && (
-                <StatCard
-                  label="Total assigned"
-                  value={totalCount}
-                  icon={<BriefcaseIcon size={16} color={colors.primary} />}
-                  accentColor={colors.primary}
-                />
-              )}
-              {completedCount !== null && (
-                <StatCard
-                  label="Completed"
-                  value={completedCount}
-                  icon={<CheckCircleIcon size={16} color={colors.success} />}
-                  accentColor={colors.success}
-                />
+              {allTimeLoading ? (
+                <>
+                  <Skeleton height={92} radius={16} style={styles.statSkeletonHalf} />
+                  <Skeleton height={92} radius={16} style={styles.statSkeletonHalf} />
+                </>
+              ) : (
+                <>
+                  {totalCount !== null && (
+                    <StatCard
+                      label="Total assigned"
+                      value={totalCount}
+                      icon={<BriefcaseIcon size={16} color={colors.primary} />}
+                      accentColor={colors.primary}
+                    />
+                  )}
+                  {completedCount !== null && (
+                    <StatCard
+                      label="Completed"
+                      value={completedCount}
+                      icon={<CheckCircleIcon size={16} color={colors.success} />}
+                      accentColor={colors.success}
+                    />
+                  )}
+                </>
               )}
             </View>
           </View>
@@ -154,6 +173,9 @@ const styles = StyleSheet.create({
   statRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  statSkeletonHalf: {
+    flex: 1,
   },
   noteCard: {
     backgroundColor: colors.surfaceAlt,

@@ -49,7 +49,7 @@ interface ArrowButtonProps {
 }
 
 /** The circular badge's own size/inset - shared by both the static (flex) and sliding (absolute) layouts so they line up pixel-for-pixel. */
-const BADGE_SIZE = 40;
+const BADGE_SIZE = 34;
 const BADGE_INSET = 4;
 
 /**
@@ -212,9 +212,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 56,
+    minHeight: 48,
     borderRadius: radii.pill,
-    paddingLeft: spacing.xl,
+    paddingLeft: spacing.lg,
     paddingRight: spacing.xs,
     overflow: 'hidden',
     // A glow tinted to the button's own color (set inline) reads as far more
@@ -239,6 +239,7 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.button,
+    fontSize: 15,
     color: colors.textOnPrimary,
     flex: 1,
     textAlign: 'center',

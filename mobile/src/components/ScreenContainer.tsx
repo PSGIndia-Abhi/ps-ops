@@ -8,6 +8,8 @@ interface ScreenContainerProps {
   onRefresh?: () => void;
   refreshing?: boolean;
   edges?: Edge[];
+  /** Opts out of this container's own solid background fill, so a screen-specific decoration rendered behind it (e.g. Technician Home's background wash) actually shows through instead of being covered. Every other screen leaves this unset and keeps the normal flat `colors.background`. */
+  transparent?: boolean;
 }
 
 /**
@@ -20,9 +22,10 @@ export function ScreenContainer({
   onRefresh,
   refreshing = false,
   edges = ['bottom'],
+  transparent = false,
 }: ScreenContainerProps) {
   return (
-    <SafeAreaView style={styles.screen} edges={edges}>
+    <SafeAreaView style={[styles.screen, transparent && styles.screenTransparent]} edges={edges}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -42,6 +45,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  screenTransparent: {
+    backgroundColor: 'transparent',
   },
   content: {
     flexGrow: 1,
