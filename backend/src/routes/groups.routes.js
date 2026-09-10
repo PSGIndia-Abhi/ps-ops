@@ -11,10 +11,15 @@ const { resolveGroupTable } = require("../utils/groupTable");
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, res) => {
   try {
     const groupTable = await resolveGroupTable(pool);
-    const tableRef ="`group_name`";
+    const tableRef = "`group_name`";
+
     const [rows] = await pool.query(
-      `SELECT id, name, created_at FROM ${tableRef} WHERE is_active = 1 ORDER BY name ASC`
+      `SELECT id, name, created_at
+       FROM ${tableRef}
+       WHERE is_active = 1
+       ORDER BY name ASC`
     );
+
     res.json(rows);
   } catch (err) {
     console.error("Error fetching groups:", err);
