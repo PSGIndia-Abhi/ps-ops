@@ -279,6 +279,19 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     return 0;
   }
 
+  if (rule.company_id) {
+    const [[siteRow]] = await connection.query(
+      `SELECT id FROM sites WHERE id = ?`,
+      [rule.company_id]
+    );
+    if (!siteRow) {
+      console.warn(
+        `Skipping recurring generation for booking ${rule.booking_id}: referenced site ${rule.company_id} no longer exists`
+      );
+      return 0;
+    }
+  }
+
   await connection.beginTransaction();
   try {
     let companyCode = null;
