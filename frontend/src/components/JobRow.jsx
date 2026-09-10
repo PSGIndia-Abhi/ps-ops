@@ -1,4 +1,5 @@
 import "./JobRow.css";
+//updated
 import { formatDate } from "../utils/date";
 
 export default function JobRow({
