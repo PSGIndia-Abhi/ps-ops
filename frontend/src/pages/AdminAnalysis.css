@@ -657,6 +657,12 @@
 .widget-table-fixed th,
 .widget-table-fixed td {
   white-space: nowrap;
+  /* Without this, a header/cell too wide for its narrow column (e.g. at a
+     medium desktop width where the 4-up grid isn't stacked but each card
+     is still fairly narrow) visually bleeds past its own boundary into
+     the next column instead of clipping — that's the overlap. */
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 8px 10px;
 }
 
