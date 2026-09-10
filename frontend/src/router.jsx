@@ -27,7 +27,7 @@ import ProfilePage from "./pages/ProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
-import ContactsPage from "./pages/ContactsPage";
+import ContactsPage from "./pages/contactsPage";
 import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
 import TrackingHistory from "./pages/TrackingHistory";
 import AdminAnalysis from "./pages/AdminAnalysis";
