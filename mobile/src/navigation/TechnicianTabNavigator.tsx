@@ -4,7 +4,7 @@ import { createBottomTabNavigator, type BottomTabBarButtonProps } from '@react-n
 import { TechnicianDashboardScreen } from '../screens/technician/TechnicianDashboardScreen';
 import { MyJobsScreen } from '../screens/technician/MyJobsScreen';
 import { MyPerformanceScreen } from '../screens/technician/MyPerformanceScreen';
-import { MoreScreen } from '../screens/profile/MoreScreen';
+import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { BriefcaseIcon } from '../components/icons';
 import { homeTabIcon, moreTabIcon, performanceTabIcon, scheduleTabIcon } from './tabIcons';
 import { useSharedTabScreenOptions } from './tabBarOptions';
@@ -110,7 +110,14 @@ export function TechnicianTabNavigator() {
         component={MyPerformanceScreen}
         options={{ tabBarIcon: performanceTabIcon }}
       />
-      <Tab.Screen name="More" component={MoreScreen} options={{ tabBarIcon: moreTabIcon }} />
+      {/* Renders the same Profile screen the header avatar pushes onto the
+          stack, not the old secondary-options menu (MoreScreen) - tapping
+          "More" here used to land on a near-empty screen (technician: just
+          a "Completed Jobs" row, already duplicated on Home's Quick Access;
+          supervisor: an empty state literally telling you to use the
+          avatar instead). Route name/tab label stay "More" - only what
+          renders underneath changed. */}
+      <Tab.Screen name="More" component={ProfileScreen} options={{ tabBarIcon: moreTabIcon }} />
     </Tab.Navigator>
   );
 }

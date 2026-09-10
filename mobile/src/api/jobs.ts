@@ -62,25 +62,27 @@ export async function addJobComment(
 /**
  * POST /api/jobs/:jobId/attachments/upload - requires ADD_JOB_COMMENT.
  * Multipart upload tied to an existing history_id (from addJobComment).
- * `type` mirrors the web app's convention exactly: "IMAGE" for photos,
- * "FILE" for anything else - this mobile flow only ever sends photos.
+ * `type` mirrors the web app's own convention exactly (JobPage.jsx:
+ * `file.type.startsWith("image") ? "IMAGE" : "FILE"`) - derived from the
+ * attachment's real mime type here too, now that this flow sends more than
+ * just photos (documents, voice-note recordings).
  */
 export async function uploadJobAttachment(
   jobId: string,
   historyId: string,
-  photo: { uri: string; name: string; type: string },
+  file: { uri: string; name: string; type: string },
 ): Promise<{ success: boolean; attachment: JobAttachment }> {
   const form = new FormData();
   // React Native's FormData accepts this {uri,name,type} shape directly -
   // it is not a real Blob/File, but RN's networking layer knows how to
   // stream it from the uri.
   form.append('file', {
-    uri: photo.uri,
-    name: photo.name,
-    type: photo.type,
+    uri: file.uri,
+    name: file.name,
+    type: file.type,
   } as unknown as Blob);
   form.append('history_id', historyId);
-  form.append('type', 'IMAGE');
+  form.append('type', file.type.startsWith('image') ? 'IMAGE' : 'FILE');
 
   const { data } = await httpClient.post(`/api/jobs/${jobId}/attachments/upload`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },

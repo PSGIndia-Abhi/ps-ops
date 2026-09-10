@@ -215,7 +215,10 @@ export function MyJobsScreen() {
       case 'tomorrow':
         return visits.filter((v) => isTomorrow(v.scheduled_date));
       case 'inProgress':
-        return visits.filter((v) => isToday(v.scheduled_date) && v.status === 'IN_PROGRESS');
+        // Not scoped to today - a visit started today but originally
+        // scheduled for an earlier date (overdue, then finally started)
+        // still counts as in progress; see Home's identical fix for why.
+        return visits.filter((v) => v.status === 'IN_PROGRESS');
       case 'pendingToday':
         return visits.filter((v) => isToday(v.scheduled_date) && v.status !== 'IN_PROGRESS');
       case 'all':
@@ -268,24 +271,30 @@ export function MyJobsScreen() {
     );
   }, [list, isCompletedView]);
 
-  // "Sort by Time" (default - earliest first, undated last) vs "Sort by
-  // Status" (active/actionable work first) - a real reorder of the same
-  // rows, not a second fetch or a different dataset.
+  // "Sort by Time" (default - earliest first, undated last, EXCEPT on the
+  // Completed view - see below) vs "Sort by Status" (active/actionable work
+  // first) - a real reorder of the same rows, not a second fetch or a
+  // different dataset.
   const sortedRows = useMemo(() => {
     if (!rows) return null;
     const copy = [...rows];
     if (sortBy === 'status') {
       copy.sort((a, b) => (STATUS_SORT_RANK[a.status ?? ''] ?? 9) - (STATUS_SORT_RANK[b.status ?? ''] ?? 9));
     } else {
+      // Completed is a history list, not an upcoming queue - the most
+      // recently completed job belongs at the top, so this one view sorts
+      // newest-first instead of the soonest-due-first order every other
+      // filter uses.
+      const direction = isCompletedView ? -1 : 1;
       copy.sort((a, b) => {
         if (!a.sortDate && !b.sortDate) return 0;
         if (!a.sortDate) return 1;
         if (!b.sortDate) return -1;
-        return new Date(a.sortDate).getTime() - new Date(b.sortDate).getTime();
+        return direction * (new Date(a.sortDate).getTime() - new Date(b.sortDate).getTime());
       });
     }
     return copy;
-  }, [rows, sortBy]);
+  }, [rows, sortBy, isCompletedView]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>

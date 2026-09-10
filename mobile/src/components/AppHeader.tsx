@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { BrandMark } from './BrandMark';
 import { AvatarIcon, BellIcon } from './icons';
 import { notificationsApi } from '../api';
@@ -34,9 +35,40 @@ interface AppHeaderProps {
  * on mount) - so the badge updates correctly after visiting Notifications
  * and reading something there, without any cross-component state plumbing.
  */
+/**
+ * A soft wave wash behind the brand mark - purely decorative (same spirit
+ * as `BackgroundWash`/`GradientCard`'s glow accents elsewhere), sized via
+ * onLayout rather than an SVG percentage string for the same reason every
+ * other gradient fill in this app is: react-native-svg has no reliable
+ * viewBox-less percentage sizing.
+ */
+function HeaderWave({ width, height }: { width: number; height: number }) {
+  const gradId = useRef(`headerWave${Math.round(Math.random() * 1e6)}`).current;
+  if (!width || !height) return null;
+  return (
+    <Svg style={StyleSheet.absoluteFill} width={width} height={height}>
+      <Defs>
+        <LinearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor={colors.primarySoft} stopOpacity={0.6} />
+          <Stop offset="1" stopColor={colors.primarySoft} stopOpacity={0} />
+        </LinearGradient>
+      </Defs>
+      <Path
+        d={`M0,0 L${width * 0.62},0 C${width * 0.48},${height * 0.55} ${width * 0.3},${height * 0.32} 0,${height} Z`}
+        fill={`url(#${gradId})`}
+      />
+    </Svg>
+  );
+}
+
 export function AppHeader({ userName, roleLabel, onProfilePress, onNotificationsPress }: AppHeaderProps) {
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const onLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -57,50 +89,64 @@ export function AppHeader({ userName, roleLabel, onProfilePress, onNotifications
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
-      <View style={styles.identity}>
-        <BrandMark size={32} />
-        <View style={styles.textBlock}>
-          <Text style={styles.name} numberOfLines={1}>
-            {userName}
-          </Text>
-          <View style={styles.rolePill}>
-            <Text style={styles.roleText}>{roleLabel}</Text>
+    <View style={[styles.outer, { marginTop: insets.top + spacing.xs }]}>
+      <View style={styles.container} onLayout={onLayout}>
+        {!!size && <HeaderWave width={size.width} height={size.height} />}
+        <View style={styles.identity}>
+          <BrandMark size={32} />
+          <View style={styles.textBlock}>
+            <Text style={styles.name} numberOfLines={1}>
+              {userName}
+            </Text>
+            <View style={styles.rolePill}>
+              <Text style={styles.roleText}>{roleLabel}</Text>
+            </View>
           </View>
         </View>
-      </View>
 
-      <View style={styles.actions}>
-        <Pressable
-          onPress={onNotificationsPress}
-          hitSlop={8}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.avatarPressed]}
-          accessibilityRole="button"
-          accessibilityLabel={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
-        >
-          <BellIcon size={19} color={colors.primary} />
-          {!!unreadCount && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-            </View>
-          )}
-        </Pressable>
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onNotificationsPress}
+            hitSlop={8}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.avatarPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+          >
+            <BellIcon size={19} color={colors.primary} />
+            {!!unreadCount && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
+          </Pressable>
 
-        <Pressable
-          onPress={onProfilePress}
-          hitSlop={8}
-          style={({ pressed }) => [styles.avatar, pressed && styles.avatarPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Profile"
-        >
-          <AvatarIcon size={19} color={colors.textOnPrimary} />
-        </Pressable>
+          <View style={styles.divider} />
+
+          <Pressable
+            onPress={onProfilePress}
+            hitSlop={8}
+            style={({ pressed }) => [styles.avatar, pressed && styles.avatarPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Profile"
+          >
+            <AvatarIcon size={19} color={colors.textOnPrimary} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // A floating rounded card (margin on every side, not edge-to-edge) rather
+  // than the previous flat bar with a bottom border - the safe-area inset
+  // is a margin here, not padding, specifically so the status bar area
+  // shows the screen's own background instead of the header bleeding
+  // behind it; that's what makes the top corners actually read as rounded
+  // instead of being a rounded shape sitting flush against the screen edge.
+  outer: {
+    marginHorizontal: spacing.md,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -108,9 +154,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    ...shadows.card,
+    borderRadius: radii.xl,
+    overflow: 'hidden',
+    ...shadows.raised,
   },
   identity: {
     flexDirection: 'row',
@@ -142,6 +188,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  divider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.border,
   },
   iconButton: {
     width: 36,

@@ -16,12 +16,14 @@ import { RescheduleVisitSheet } from '../../components/RescheduleVisitSheet';
 import { TechnicianPickerSheet } from '../../components/TechnicianPickerSheet';
 import { CommentComposer, type ComposerPhoto } from '../../components/CommentComposer';
 import { AttachmentImage } from '../../components/AttachmentImage';
+import { AttachmentAudio } from '../../components/AttachmentAudio';
 import {
   BriefcaseIcon,
   CalendarIcon,
   CheckCircleIcon,
   ChevronLeftIcon,
   ClockIcon,
+  DocumentIcon,
   ExternalLinkIcon,
   PersonIcon,
   PhoneIcon,
@@ -347,27 +349,27 @@ export function JobDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  async function handleAddComment(input: { message: string; photos: ComposerPhoto[] }) {
+  async function handleAddComment(input: { message: string; attachments: ComposerPhoto[] }) {
     setCommentSubmitting(true);
     setFeedback(null);
     try {
       const { history_id } = await jobsApi.addJobComment(jobId, input.message);
-      // One upload call per photo, in sequence (not Promise.all) - each is
-      // its own multipart request against the same history_id. Sequential
+      // One upload call per attachment, in sequence (not Promise.all) - each
+      // is its own multipart request against the same history_id. Sequential
       // (not parallel) so a failure partway through reports honestly how
       // many actually made it, instead of an ambiguous mixed batch result.
       // The backend never needed a multi-file endpoint for this - see
       // CommentComposer's own doc comment.
       let uploaded = 0;
       try {
-        for (const photo of input.photos) {
-          await jobsApi.uploadJobAttachment(jobId, history_id, photo);
+        for (const attachment of input.attachments) {
+          await jobsApi.uploadJobAttachment(jobId, history_id, attachment);
           uploaded += 1;
         }
       } catch (uploadErr) {
-        const remaining = input.photos.length - uploaded;
+        const remaining = input.attachments.length - uploaded;
         setFeedback({
-          message: `Update posted, but ${remaining} of ${input.photos.length} photo${remaining === 1 ? '' : 's'} failed to attach. ${feedbackFromError(uploadErr, 'Please try again.').message}`,
+          message: `Update posted, but ${remaining} of ${input.attachments.length} attachment${remaining === 1 ? '' : 's'} failed to upload. ${feedbackFromError(uploadErr, 'Please try again.').message}`,
           variant: 'validation',
         });
         const historyData = await jobsApi.getJobHistory(jobId);
@@ -642,6 +644,7 @@ export function JobDetailScreen({ route, navigation }: Props) {
                   isTechnician={isTechnician}
                   canManage={canReassign}
                   isMine={visit.technicians.some((t) => String(t.id) === String(user?.id))}
+                  isPrimaryVisit={isTechnician && visit.id === primaryVisit?.id}
                   actionLoading={visitActionId === visit.id}
                   anyActionLoading={!!visitActionId}
                   locationPhase={visitActionId === visit.id ? locationPhase : null}
@@ -658,7 +661,15 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Activity</Text>
-            <CommentComposer onSubmit={handleAddComment} submitting={commentSubmitting} />
+            {/* A technician whose own visit is already COMPLETED has nothing
+                left to report on this job - the composer (photos, files,
+                voice notes) is for work in progress, not a place to keep
+                attaching things after the fact. Supervisor/admin keep it
+                always, since they can still add follow-up notes after a
+                technician's work is done. */}
+            {!(isTechnician && primaryVisit?.status === 'COMPLETED') && (
+              <CommentComposer onSubmit={handleAddComment} submitting={commentSubmitting} />
+            )}
 
             <View style={styles.timeline}>
               {history === null ? (
@@ -745,6 +756,13 @@ interface VisitRowProps {
   isTechnician: boolean;
   canManage: boolean;
   isMine: boolean;
+  /** True for exactly the one visit `TechnicianActionBar` already docks at
+   * the bottom of the screen - its Start Visit/Submit for Approval button is
+   * the same handler as this row's own, so showing both was a literal
+   * duplicate of the same action, not two different ones. Never true for a
+   * supervisor/admin view (they get no docked bar at all), so their own
+   * Start/Submit access here is untouched. */
+  isPrimaryVisit: boolean;
   actionLoading: boolean;
   anyActionLoading: boolean;
   /** Set only while *this* visit's Start Visit is in flight - narrates what's actually happening instead of a bare spinner. */
@@ -780,6 +798,7 @@ function VisitRow({
   isTechnician,
   canManage,
   isMine,
+  isPrimaryVisit,
   actionLoading,
   anyActionLoading,
   locationPhase,
@@ -791,8 +810,8 @@ function VisitRow({
   onCancel,
 }: VisitRowProps) {
   const canAct = !isTechnician || isMine;
-  const showStart = canAct && (['SCHEDULED', 'MISSED'] as VisitStatus[]).includes(visit.status);
-  const showSubmit = canAct && visit.status === 'IN_PROGRESS';
+  const showStart = canAct && !isPrimaryVisit && (['SCHEDULED', 'MISSED'] as VisitStatus[]).includes(visit.status);
+  const showSubmit = canAct && !isPrimaryVisit && visit.status === 'IN_PROGRESS';
   const showApprove = !isTechnician && visit.status === 'AWAITING_APPROVAL';
   const showManageRow = canManage && !TERMINAL_VISIT_STATUSES.includes(visit.status);
 
@@ -1003,9 +1022,25 @@ function HistoryRow({ entry }: { entry: JobHistoryEntry }) {
       {!!label && <Text style={styles.historyMessage}>{label}</Text>}
       {entry.attachments.length > 0 && (
         <View style={styles.historyAttachments}>
-          {entry.attachments.map((a) => (
-            <AttachmentImage key={a.id} attachmentId={a.id} size={64} />
-          ))}
+          {entry.attachments.map((a) =>
+            a.type === 'IMAGE' ? (
+              <AttachmentImage key={a.id} attachmentId={a.id} size={64} />
+            ) : (a.file_type ?? '').startsWith('audio/') ? (
+              <AttachmentAudio key={a.id} attachmentId={a.id} fileName={a.file_name} />
+            ) : (
+              // A generic file (PDF, document, etc) - shown, not yet
+              // openable in place (no authenticated "open externally" path
+              // on mobile without another native dependency to write it to
+              // disk first - the web app's own "Download" link has the same
+              // shape problem solved differently, via a browser blob URL).
+              <View key={a.id} style={styles.historyFileChip}>
+                <DocumentIcon size={16} color={colors.textSecondary} />
+                <Text style={styles.historyFileName} numberOfLines={1}>
+                  {a.file_name || 'Attachment'}
+                </Text>
+              </View>
+            ),
+          )}
         </View>
       )}
     </View>
@@ -1496,7 +1531,23 @@ const styles = StyleSheet.create({
   },
   historyAttachments: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.xs,
     marginTop: spacing.sm,
+  },
+  historyFileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    maxWidth: 160,
+  },
+  historyFileName: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
 });

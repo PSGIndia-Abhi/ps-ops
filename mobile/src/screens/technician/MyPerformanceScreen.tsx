@@ -60,8 +60,12 @@ export function MyPerformanceScreen() {
   }, [load]);
 
   const todaysVisits = visits?.filter((v) => isToday(v.scheduled_date)) ?? null;
-  const inProgressCount = todaysVisits?.filter((v) => v.status === 'IN_PROGRESS').length ?? 0;
-  const pendingCount = todaysVisits ? todaysVisits.length - inProgressCount : 0;
+  // Not scoped to `todaysVisits` - see Home's identical fix (same file
+  // elsewhere, TechnicianDashboardScreen.tsx) for why: "in progress" is a
+  // real-time state, not a scheduling attribute, so a visit started today
+  // but originally scheduled for an earlier date still counts.
+  const inProgressCount = visits?.filter((v) => v.status === 'IN_PROGRESS').length ?? 0;
+  const pendingCount = todaysVisits ? todaysVisits.filter((v) => v.status !== 'IN_PROGRESS').length : 0;
 
   // 'top' included - this is now a bottom-tab screen (see
   // TechnicianTabNavigator), not a stack push, so there's no native header

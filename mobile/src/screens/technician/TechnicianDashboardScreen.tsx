@@ -119,13 +119,24 @@ export function TechnicianDashboardScreen() {
         (a, b) => new Date(a.scheduled_date ?? 0).getTime() - new Date(b.scheduled_date ?? 0).getTime(),
       )
     : null;
-  const inProgressVisits = todaysVisits?.filter((v) => v.status === 'IN_PROGRESS') ?? [];
+  // Deliberately NOT scoped to `todaysVisits` - "in progress" is a real-time
+  // state (a technician is on-site working right now), not a scheduling
+  // attribute, so a visit originally scheduled for an earlier day (overdue,
+  // then finally started today) still counts. Scoping this to today used to
+  // hide exactly that case: the backend correctly flips it to IN_PROGRESS
+  // the moment Start Visit succeeds, but it silently never showed up here
+  // since its `scheduled_date` wasn't today.
+  const inProgressVisits = visits?.filter((v) => v.status === 'IN_PROGRESS') ?? [];
   // Only the single most-relevant in-progress visit gets the spotlight card;
   // if a technician somehow has more than one active at once, the rest still
   // show up in the schedule preview below rather than being silently dropped.
   const inProgressVisit = inProgressVisits[0] ?? null;
   const inProgressCount = inProgressVisits.length;
-  const pendingCount = todaysVisits ? todaysVisits.length - inProgressCount : 0;
+  // "Pending today" = today's own schedule minus whichever of those are
+  // already in progress - not a raw subtraction against the (now
+  // day-independent) count above, which could include a visit that was
+  // never part of today's schedule at all.
+  const pendingCount = todaysVisits ? todaysVisits.filter((v) => v.status !== 'IN_PROGRESS').length : 0;
   const restOfToday = todaysVisits?.filter((v) => v.id !== inProgressVisit?.id) ?? [];
   const nextVisitId = restOfToday.find((v) => v.status !== 'IN_PROGRESS')?.id ?? restOfToday[0]?.id;
   const schedulePreview = restOfToday.slice(0, SCHEDULE_PREVIEW_LIMIT);
@@ -254,11 +265,14 @@ export function TechnicianDashboardScreen() {
           </View>
         )}
 
-        <RichSectionHeader
-          title="Quick Access"
-          actionLabel="See all"
-          onAction={() => navigation.navigate('More')}
-        />
+        {/* No "See all" here - the four tiles below already are all of
+            Quick Access. This used to point at the "More" tab back when
+            More was its own menu screen; now that More renders Profile
+            directly (see TechnicianTabNavigator), that link would just
+            dead-end on an unrelated account screen instead of showing more
+            shortcuts, so it's removed rather than repointed at a screen
+            that isn't about Quick Access. */}
+        <RichSectionHeader title="Quick Access" />
         <View style={styles.quickActionRow}>
           <QuickAccessTile
             label="My Jobs"

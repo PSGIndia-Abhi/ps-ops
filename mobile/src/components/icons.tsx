@@ -537,6 +537,57 @@ export function SparkleIcon({ size = 20, color = '#6B7280' }: IconProps) {
   );
 }
 
+/** A microphone - the "record voice note" glyph. */
+export function MicIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={9} y={2.5} width={6} height={11} rx={3} stroke={color} strokeWidth={1.8} />
+      <Path
+        d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M9 21h6"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** A filled square - the "stop recording/playback" glyph, paired with PlayIcon. */
+export function StopIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={5.5} y={5.5} width={13} height={13} rx={2.5} fill={color} />
+    </Svg>
+  );
+}
+
+/** Two vertical bars - pairs with PlayIcon as a play/pause toggle for voice-note playback. */
+export function PauseIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={6} y={4.5} width={4} height={15} rx={1} fill={color} />
+      <Rect x={14} y={4.5} width={4} height={15} rx={1} fill={color} />
+    </Svg>
+  );
+}
+
+/** A generic document/file - anything attached that isn't a photo (a picked PDF, spreadsheet, etc). */
+export function DocumentIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6.5 3h7.4L19 8.1V19.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 19.5v-15A1.5 1.5 0 016.5 3z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Path d="M13.5 3v4.6a1 1 0 001 1H19" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      <Line x1={8} y1={13} x2={16} y2={13} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+      <Line x1={8} y1={16.5} x2={13.5} y2={16.5} stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function ShieldIcon({ size = 20, color = '#6B7280' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

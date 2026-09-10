@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Image,
   PermissionsAndroid,
@@ -11,7 +11,9 @@ import {
   View,
 } from 'react-native';
 import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
-import { CameraIcon, CloseIcon, GalleryIcon, SendIcon } from './icons';
+import { pick, isErrorWithCode, errorCodes } from '@react-native-documents/picker';
+import { createSound, type RecordBackType } from 'react-native-nitro-sound';
+import { CameraIcon, CloseIcon, DocumentIcon, GalleryIcon, MicIcon, SendIcon, StopIcon } from './icons';
 import { colors, radii, spacing, typography } from '../theme';
 
 export interface ComposerPhoto {
@@ -21,7 +23,7 @@ export interface ComposerPhoto {
 }
 
 interface CommentComposerProps {
-  onSubmit: (input: { message: string; photos: ComposerPhoto[] }) => Promise<void> | void;
+  onSubmit: (input: { message: string; attachments: ComposerPhoto[] }) => Promise<void> | void;
   submitting?: boolean;
 }
 
@@ -32,32 +34,62 @@ const PICKER_OPTIONS = {
   maxHeight: 1600,
 };
 
-/** A generous cap, not a real backend limit (there isn't one - each photo is
- * its own upload call) - just keeps one update from turning into dozens of
- * sequential uploads by accident. */
-const MAX_PHOTOS = 10;
+/** A generous cap, not a real backend limit (there isn't one - each
+ * attachment is its own upload call) - just keeps one update from turning
+ * into dozens of sequential uploads by accident. */
+const MAX_ATTACHMENTS = 10;
+
+function isImageAttachment(type: string): boolean {
+  return type.startsWith('image/');
+}
+
+function isAudioAttachment(type: string): boolean {
+  return type.startsWith('audio/');
+}
+
+function formatSeconds(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 /**
- * The one "add an update" input for a job: a note plus optional photos,
+ * The one "add an update" input for a job: a note plus optional attachments,
  * submitted together - mirrors the existing web app's JobUpdateComposer
- * (frontend/src/components/JobUpdateComposer.jsx): a photo-only update
+ * (frontend/src/components/JobUpdateComposer.jsx), which already has all
+ * four of these exact capabilities (photo/camera, generic file picker, and
+ * microphone voice-note recording) - this brings mobile to parity with an
+ * existing feature, not inventing a new one. A photo/attachment-only update
  * still needs *some* message, so an empty caption defaults to "Attachment
  * added" (the web's own fallback text) rather than sending a message the
  * backend would reject as empty.
  *
- * More than one photo per update - the gallery picker supports multi-select
- * (`selectionLimit: 0`) and the camera can be tapped again to add another
- * shot; both append to the same list rather than replacing it. Nothing on
- * the backend needed to change for this: `POST .../attachments/upload`
- * already takes one file per call and just inserts a new row each time, so
- * multiple photos from one update are multiple sequential calls against the
- * same `history_id` (see JobDetailScreen's handleAddComment), not a new
- * multi-file endpoint.
+ * Every attachment kind normalizes to the same `{uri, name, type}` shape
+ * before it ever reaches state, and the backend's own `type` field for the
+ * upload call is derived the exact same way the web app already does it
+ * (`file.type.startsWith('image') ? 'IMAGE' : 'FILE'` - see
+ * JobDetailScreen's handleAddComment) - nothing new needed there either,
+ * `POST .../attachments/upload` already accepts any file, one per call.
  */
 export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) {
   const [message, setMessage] = useState('');
-  const [photos, setPhotos] = useState<Asset[]>([]);
+  const [attachments, setAttachments] = useState<ComposerPhoto[]>([]);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  // One instance for this composer's lifetime, not recreated per render -
+  // it owns a live native recorder/player session.
+  const recorderRef = useRef<ReturnType<typeof createSound> | null>(null);
+  if (!recorderRef.current) recorderRef.current = createSound();
+
+  function addAttachments(items: ComposerPhoto[]) {
+    if (!items.length) return;
+    setAttachments((prev) => [...prev, ...items].slice(0, MAX_ATTACHMENTS));
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
 
   function addAssets(response: { didCancel?: boolean; errorMessage?: string; assets?: Asset[] }) {
     setPickerError(null);
@@ -66,13 +98,14 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
       setPickerError('Unable to open camera/gallery. Please try again.');
       return;
     }
-    const assets = (response.assets ?? []).filter((a) => !!a.uri);
-    if (!assets.length) return;
-    setPhotos((prev) => [...prev, ...assets].slice(0, MAX_PHOTOS));
-  }
-
-  function removePhoto(index: number) {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
+    const assets = Object.values(response.assets ?? []).filter((a) => !!a.uri);
+    addAttachments(
+      assets.map((a, i) => ({
+        uri: a.uri as string,
+        name: a.fileName || `photo-${Date.now()}-${i}.jpg`,
+        type: a.type || 'image/jpeg',
+      })),
+    );
   }
 
   /**
@@ -91,7 +124,7 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
    * mismatch; its permission prompt is driven by Info.plist).
    */
   async function handleCamera() {
-    if (photos.length >= MAX_PHOTOS) return;
+    if (attachments.length >= MAX_ATTACHMENTS) return;
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, {
         title: 'Camera permission',
@@ -105,38 +138,90 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
       }
     }
     // One shot per tap (a real camera can't return more than one) - tapping
-    // again adds another on top of whatever's already picked, same as the
-    // gallery's multi-select does.
+    // again adds another on top of whatever's already picked.
     const response = await launchCamera(PICKER_OPTIONS);
     addAssets(response);
   }
 
   async function handleGallery() {
-    if (photos.length >= MAX_PHOTOS) return;
+    if (attachments.length >= MAX_ATTACHMENTS) return;
     const response = await launchImageLibrary({
       ...PICKER_OPTIONS,
-      selectionLimit: MAX_PHOTOS - photos.length,
+      selectionLimit: MAX_ATTACHMENTS - attachments.length,
     });
     addAssets(response);
   }
 
-  const canSubmit = (message.trim().length > 0 || photos.length > 0) && !submitting;
+  /** The generic "Attach Files & Photos" equivalent - any file type, not
+   * just images (a PDF, a spreadsheet, anything) - matching the web app's
+   * own plain `<input type="file">` picker exactly. */
+  async function handleDocument() {
+    if (attachments.length >= MAX_ATTACHMENTS) return;
+    setPickerError(null);
+    try {
+      const results = await pick({ allowMultiSelection: true });
+      addAttachments(
+        results.map((r, i) => ({
+          uri: r.uri,
+          name: r.name || `file-${Date.now()}-${i}`,
+          type: r.type || 'application/octet-stream',
+        })),
+      );
+    } catch (err) {
+      if (isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED) return;
+      setPickerError('Unable to open file picker. Please try again.');
+    }
+  }
+
+  /** Tap to start, tap again to stop - the recorded file is appended as a
+   * normal attachment the instant recording stops, same as any other pick. */
+  async function handleVoiceNote() {
+    const recorder = recorderRef.current!;
+    if (isRecording) {
+      const uri = await recorder.stopRecorder();
+      recorder.removeRecordBackListener();
+      setIsRecording(false);
+      const seconds = recordSeconds;
+      setRecordSeconds(0);
+      addAttachments([
+        { uri, name: `voice-note-${Date.now()}-${formatSeconds(seconds)}.m4a`, type: 'audio/m4a' },
+      ]);
+      return;
+    }
+
+    if (attachments.length >= MAX_ATTACHMENTS) return;
+    setPickerError(null);
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
+        title: 'Microphone permission',
+        message: 'BestServe needs microphone access to record a voice note for this job update.',
+        buttonPositive: 'Allow',
+        buttonNegative: 'Deny',
+      });
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        setPickerError('Microphone permission was denied. Enable it in Settings to record a voice note.');
+        return;
+      }
+    }
+    try {
+      await recorder.startRecorder();
+      recorder.addRecordBackListener((e: RecordBackType) =>
+        setRecordSeconds(Math.floor(e.currentPosition / 1000)),
+      );
+      setIsRecording(true);
+    } catch {
+      setPickerError('Unable to start recording. Please try again.');
+    }
+  }
+
+  const canSubmit = (message.trim().length > 0 || attachments.length > 0) && !submitting && !isRecording;
 
   async function handleSubmit() {
     if (!canSubmit) return;
     const trimmed = message.trim();
-    await onSubmit({
-      message: trimmed || 'Attachment added',
-      photos: photos
-        .filter((p) => !!p.uri)
-        .map((p, i) => ({
-          uri: p.uri as string,
-          name: p.fileName || `photo-${Date.now()}-${i}.jpg`,
-          type: p.type || 'image/jpeg',
-        })),
-    });
+    await onSubmit({ message: trimmed || 'Attachment added', attachments });
     setMessage('');
-    setPhotos([]);
+    setAttachments([]);
   }
 
   return (
@@ -151,19 +236,32 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
         editable={!submitting}
       />
 
-      {photos.length > 0 && (
+      {attachments.length > 0 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.previewRow}
           contentContainerStyle={styles.previewRowContent}
         >
-          {photos.map((p, index) => (
-            <View key={p.uri ?? index} style={styles.previewWrap}>
-              <Image source={{ uri: p.uri }} style={styles.previewImage} />
+          {attachments.map((a, index) => (
+            <View key={`${a.uri}-${index}`} style={styles.previewWrap}>
+              {isImageAttachment(a.type) ? (
+                <Image source={{ uri: a.uri }} style={styles.previewImage} />
+              ) : (
+                <View style={styles.previewChip}>
+                  {isAudioAttachment(a.type) ? (
+                    <MicIcon size={20} color={colors.primary} />
+                  ) : (
+                    <DocumentIcon size={20} color={colors.primary} />
+                  )}
+                  <Text style={styles.previewChipText} numberOfLines={2}>
+                    {a.name}
+                  </Text>
+                </View>
+              )}
               <Pressable
                 style={styles.removePhoto}
-                onPress={() => removePhoto(index)}
+                onPress={() => removeAttachment(index)}
                 hitSlop={8}
                 disabled={submitting}
               >
@@ -174,6 +272,13 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
         </ScrollView>
       )}
 
+      {isRecording && (
+        <View style={styles.recordingRow}>
+          <View style={styles.recordingDot} />
+          <Text style={styles.recordingText}>Recording... {formatSeconds(recordSeconds)}</Text>
+        </View>
+      )}
+
       {!!pickerError && <Text style={styles.errorText}>{pickerError}</Text>}
 
       <View style={styles.actionsRow}>
@@ -181,7 +286,7 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
           <Pressable
             style={styles.iconButton}
             onPress={handleCamera}
-            disabled={submitting}
+            disabled={submitting || isRecording}
             accessibilityRole="button"
             accessibilityLabel="Take photo"
           >
@@ -190,16 +295,36 @@ export function CommentComposer({ onSubmit, submitting }: CommentComposerProps) 
           <Pressable
             style={styles.iconButton}
             onPress={handleGallery}
-            disabled={submitting}
+            disabled={submitting || isRecording}
             accessibilityRole="button"
             accessibilityLabel="Choose from gallery"
           >
             <GalleryIcon size={18} color={colors.textSecondary} />
           </Pressable>
-          {photos.length > 0 && (
-            <Text style={styles.photoCount}>
-              {photos.length} photo{photos.length === 1 ? '' : 's'}
-            </Text>
+          <Pressable
+            style={styles.iconButton}
+            onPress={handleDocument}
+            disabled={submitting || isRecording}
+            accessibilityRole="button"
+            accessibilityLabel="Attach a file"
+          >
+            <DocumentIcon size={18} color={colors.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={[styles.iconButton, isRecording && styles.iconButtonRecording]}
+            onPress={handleVoiceNote}
+            disabled={submitting}
+            accessibilityRole="button"
+            accessibilityLabel={isRecording ? 'Stop recording' : 'Record voice note'}
+          >
+            {isRecording ? (
+              <StopIcon size={16} color={colors.danger} />
+            ) : (
+              <MicIcon size={18} color={colors.textSecondary} />
+            )}
+          </Pressable>
+          {attachments.length > 0 && (
+            <Text style={styles.attachmentCount}>{attachments.length}</Text>
           )}
         </View>
 
@@ -246,6 +371,22 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.surfaceAlt,
   },
+  previewChip: {
+    width: 84,
+    height: 72,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xxs,
+    gap: 2,
+  },
+  previewChipText: {
+    ...typography.caption,
+    fontSize: 10,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
   removePhoto: {
     position: 'absolute',
     top: -6,
@@ -256,6 +397,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.textSecondary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  recordingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.danger,
+  },
+  recordingText: {
+    ...typography.captionMedium,
+    color: colors.danger,
   },
   errorText: {
     ...typography.caption,
@@ -284,7 +441,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  photoCount: {
+  iconButtonRecording: {
+    backgroundColor: colors.dangerBg,
+  },
+  attachmentCount: {
     ...typography.caption,
     color: colors.textMuted,
     marginLeft: spacing.xxs,

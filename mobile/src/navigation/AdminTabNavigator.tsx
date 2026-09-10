@@ -3,7 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { AdminDashboardScreen } from '../screens/admin/AdminDashboardScreen';
 import { JobsListScreen } from '../screens/jobs/JobsListScreen';
 import { BookingsListScreen } from '../screens/bookings/BookingsListScreen';
-import { MoreScreen } from '../screens/profile/MoreScreen';
+import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { bookingsTabIcon, homeTabIcon, jobsTabIcon, moreTabIcon } from './tabIcons';
 import { useSharedTabScreenOptions } from './tabBarOptions';
 import type { AdminTabParamList } from './types';
@@ -21,7 +21,11 @@ export function AdminTabNavigator() {
         component={BookingsListScreen}
         options={{ tabBarIcon: bookingsTabIcon }}
       />
-      <Tab.Screen name="More" component={MoreScreen} options={{ tabBarIcon: moreTabIcon }} />
+      {/* Same fix as TechnicianTabNavigator/SupervisorTabNavigator - see
+          there for why. (Note: RoleTabs never actually routes to this
+          navigator today - admin stays on the web app - but kept
+          consistent with the other two rather than left stale.) */}
+      <Tab.Screen name="More" component={ProfileScreen} options={{ tabBarIcon: moreTabIcon }} />
     </Tab.Navigator>
   );
 }

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@react-native-community/geolocation": "^3.4.0",
+    "@react-native-documents/picker": "^12.0.2",
     "@react-native/new-app-screen": "0.87.1",
     "@react-navigation/bottom-tabs": "^7.18.18",
     "@react-navigation/native": "^7.3.18",
@@ -21,6 +22,8 @@
     "react-native-gesture-handler": "^3.2.1",
     "react-native-image-picker": "^8.2.1",
     "react-native-keychain": "^10.0.0",
+    "react-native-nitro-modules": "^0.37.1",
+    "react-native-nitro-sound": "^0.2.20",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.27.0",
     "react-native-svg": "^15.15.5"
