@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import "./jobrow.css";
+import "./JobRow.css";
 import { API_BASE, apiFetch } from "../api";
 import { formatDateTime } from "../utils/date";
 

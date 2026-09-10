@@ -3,7 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import JobRow from "../components/JobRow";
 import JobDetails from "../components/JobDetails";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
-import "../components/jobrow.css";
+import "../components/JobRow.css";
 import { apiFetch } from "../api";
 import JobFilters from "../components/JobFilters";
 import { filterJobs, getTechnicianOptions, getCompanyOptions } from "../utils/jobFilters";

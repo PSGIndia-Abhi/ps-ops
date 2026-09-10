@@ -1,4 +1,4 @@
-import "./jobrow.css";
+import "./JobRow.css";
 import { useState } from "react";
 import RequesterPopover from "./RequesterPopover";
 
