@@ -218,7 +218,7 @@ export default function AdminUserManagement() {
           : await apiFetch("/api/users", {
               method: "POST",
               body: JSON.stringify(payload),
-            });
+            }); 
 
       const data = await safeJson(res);
       if (!res?.ok) {
