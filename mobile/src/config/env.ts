@@ -16,33 +16,25 @@
  * localhost via 10.0.2.2, not 127.0.0.1 - update this to your machine's LAN
  * IP (e.g. http://192.168.1.20:3000) when testing on a physical device.
  *
- * PROD_API_BASE_URL: confirmed live, not guessed - verified directly against
- * the real production server before setting this. This is the same domain
- * the existing Capacitor app's WebView loads (frontend/capacitor.config.json).
- * The other domain found in the backend's env (bestserve.in, used only for
- * SMTP/email branding) was checked too and does NOT serve the API (404 on
- * the same checks) - not used here.
- *
- * IMPORTANT - this base URL includes a trailing `/api`, unlike
- * DEV_API_BASE_URL below, even though every call site already passes its
- * own full path including `/api/...` (e.g. `httpClient.get('/api/
- * notifications')`). That looks like it should double up to `/api/api/...`
- * and it does - but that doubled path is the actual, verified contract of
- * this production deployment, not a mistake:
- *   curl https://bestserve.co.in/api/auth/login       -> 404 (Express's own
- *     "Cannot POST /auth/login" - the request reached Node with the /api
- *     prefix already stripped by production's reverse proxy)
- *   curl https://bestserve.co.in/api/api/auth/login   -> 401 "Invalid
+ * PROD_API_BASE_URL: confirmed live, not guessed - verified directly with
+ * curl against the real production server (2026-09-11). No trailing `/api`
+ * here - every call site already passes its own full path including
+ * `/api/...` (e.g. `httpClient.post('/api/auth/login', ...)`), and that
+ * single `/api` prefix is the real, currently-working route:
+ *   curl https://bestserve.co.in/api/auth/login       -> 401 "Invalid
  *     credentials" (the real route, reached correctly)
- * Confirmed the same way on a second, unrelated endpoint
- * (/api/notifications/unread-count: 404 vs 401 "No token provided").
- * Whatever server-side routing produces this, mobile has to match the real
- * deployed behavior, not the theoretically-clean one - hence the trailing
- * `/api` here despite every call site already having its own.
+ *   curl https://bestserve.co.in/api/api/auth/login   -> 404 "Cannot POST
+ *     /api/api/auth/login" (doubled prefix, does not exist)
+ * An earlier version of this comment claimed the opposite (a doubled
+ * `/api/api` was required) and set this constant with a trailing `/api` to
+ * match - that was true at some earlier point but is no longer accurate
+ * against the server as of the date above; production's routing evidently
+ * changed. Re-verify with the same two curl commands before trusting either
+ * version of this comment again - do not take it on faith.
  */
 
 const DEV_API_BASE_URL = 'http://10.0.2.2:3000';
-const PROD_API_BASE_URL = 'https://bestserve.co.in/api';
+const PROD_API_BASE_URL = 'https://bestserve.co.in';
 
 export const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : PROD_API_BASE_URL;
 

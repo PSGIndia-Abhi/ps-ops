@@ -79,6 +79,8 @@ export function ChangePasswordScreen() {
         }}
         error={fieldErrors.current}
         secureToggle
+        autoCapitalize="none"
+        autoCorrect={false}
         textContentType="password"
         returnKeyType="next"
         editable={!submitting}
@@ -94,6 +96,8 @@ export function ChangePasswordScreen() {
         }}
         error={fieldErrors.next}
         secureToggle
+        autoCapitalize="none"
+        autoCorrect={false}
         textContentType="newPassword"
         returnKeyType="next"
         editable={!submitting}
@@ -109,6 +113,8 @@ export function ChangePasswordScreen() {
         }}
         error={fieldErrors.confirm}
         secureToggle
+        autoCapitalize="none"
+        autoCorrect={false}
         textContentType="newPassword"
         returnKeyType="done"
         onSubmitEditing={handleSubmit}

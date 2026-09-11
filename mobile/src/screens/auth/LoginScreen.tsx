@@ -280,6 +280,8 @@ export function LoginScreen({ navigation }: Props) {
               }}
               error={fieldErrors.password}
               secureToggle
+              autoCapitalize="none"
+              autoCorrect={false}
               textContentType="password"
               autoComplete="password"
               placeholder="••••••••"

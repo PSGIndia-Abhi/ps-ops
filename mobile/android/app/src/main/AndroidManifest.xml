@@ -17,6 +17,19 @@
     <!-- Job update voice notes: microphone recording. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Declaring CAMERA/ACCESS_FINE_LOCATION above makes Android's manifest
+         merger auto-add these as required="true" hardware features unless
+         overridden here - which would make Play Store reject the app as
+         "incompatible" on any phone whose camera lacks autofocus or that
+         has no dedicated GPS chip (network-based location still works fine
+         for this app's needs), even though nothing here actually requires
+         either capability specifically. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
