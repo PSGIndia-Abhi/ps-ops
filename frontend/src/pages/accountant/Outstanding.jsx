@@ -1,19 +1,19 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiBell, FiDownload, FiPlusCircle } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiBell, FiBellOff, FiCalendar, FiClock, FiDownload, FiFileText, FiList, FiPlusCircle, FiSearch } from "react-icons/fi";
 import SetReminderModal from "../../components/accountant/SetReminderModal";
-import { DataError, EmptyRow, Pager } from "./ui";
+import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { createReminder, daysOverdue, followUpsByInvoice, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 
 const CHIPS = [
-  { key: "ALL", label: "All Unpaid", test: () => true },
-  { key: "OVERDUE", label: "Overdue", test: (i) => (daysOverdue(i.due_date) ?? -1) > 0 },
-  { key: "TODAY", label: "Due Today", test: (i) => daysOverdue(i.due_date) === 0 },
-  { key: "WEEK", label: "Due This Week", test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; } },
-  { key: "MONTH", label: "Due This Month", test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -30; } },
-  { key: "NOFOLLOW", label: "No Follow-up Set", test: (i) => !i.next_follow_up },
+  { key: "ALL", label: "All Unpaid", icon: <FiList />, test: () => true },
+  { key: "OVERDUE", label: "Overdue", icon: <FiAlertTriangle />, test: (i) => (daysOverdue(i.due_date) ?? -1) > 0 },
+  { key: "TODAY", label: "Due Today", icon: <FiClock />, test: (i) => daysOverdue(i.due_date) === 0 },
+  { key: "WEEK", label: "Due This Week", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; } },
+  { key: "MONTH", label: "Due This Month", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -30; } },
+  { key: "NOFOLLOW", label: "No Follow-up Set", icon: <FiBellOff />, test: (i) => !i.next_follow_up },
 ];
 
 const BUCKETS = [
@@ -85,11 +85,11 @@ export default function Outstanding() {
   const hasData = unpaid.length > 0;
 
   const cards = [
-    { key: "orange", label: "Total Outstanding", value: money(sum(unpaid, "pending_amount")) },
-    { key: "red", label: "Overdue Amount", value: money(sum(overdueList, "pending_amount")) },
-    { key: "purple", label: "Due This Week", value: money(sum(weekList, "pending_amount")) },
-    { key: "blue", label: "Unpaid Invoices", value: unpaid.length },
-    { key: "light", label: "Avg. Days Overdue", value: avgDays == null ? "—" : `${avgDays} days` },
+    { key: "orange", icon: <FiClock />, label: "Total Outstanding", value: money(sum(unpaid, "pending_amount")) },
+    { key: "red", icon: <FiAlertTriangle />, label: "Overdue Amount", value: money(sum(overdueList, "pending_amount")) },
+    { key: "purple", icon: <FiCalendar />, label: "Due This Week", value: money(sum(weekList, "pending_amount")) },
+    { key: "blue", icon: <FiFileText />, label: "Unpaid Invoices", value: unpaid.length },
+    { key: "light", icon: <FiActivity />, label: "Avg. Days Overdue", value: avgDays == null ? "—" : `${avgDays} days` },
   ];
 
   const allChecked = pageRows.length > 0 && pageRows.every((r) => selected.includes(r.id));
@@ -136,7 +136,7 @@ export default function Outstanding() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <h2 className="ac-title">Outstanding</h2>
+          <h2 className="ac-title ac-title-icon"><FiClock /> Outstanding</h2>
           <p className="ac-sub">Unpaid invoices to collect, most overdue first</p>
         </div>
         <button type="button" className="ac-btn" onClick={exportRows} disabled={!rows.length}><FiDownload /> Export</button>
@@ -147,8 +147,9 @@ export default function Outstanding() {
       <div className="ac-kpis" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         {cards.map((c) => (
           <div key={c.label} className={`ac-kpi ${c.key}`}>
+            <span className="ac-kpi-icon" aria-hidden="true">{c.icon}</span>
             <div className="ac-kpi-label">{c.label}</div>
-            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{hasData ? c.value : "—"}</div>
+            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{loading ? <Skeleton width="60%" height={22} /> : hasData ? c.value : "—"}</div>
           </div>
         ))}
       </div>
@@ -157,13 +158,13 @@ export default function Outstanding() {
         <div className="ac-chips" style={{ marginBottom: 14 }}>
           {CHIPS.map((c) => (
             <button key={c.key} type="button" className={`ac-chip ${chip === c.key ? "active" : ""}`} onClick={() => { setChip(c.key); setPage(0); }}>
-              {c.label} ({unpaid.filter(c.test).length})
+              <span className="ac-tab-icon">{c.icon}</span>{c.label} ({unpaid.filter(c.test).length})
             </button>
           ))}
         </div>
 
         <div className="ac-filters-6" style={{ marginBottom: 14 }}>
-          <input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={filterChange(setSearch)} />
+          <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={filterChange(setSearch)} /></div>
           <select className="ac-select" value={customer} onChange={filterChange(setCustomer)}>
             <option value="">All Customers</option>
             {customers.map((c) => <option key={c}>{c}</option>)}
@@ -189,7 +190,7 @@ export default function Outstanding() {
         )}
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th><input type="checkbox" aria-label="Select all on this page" checked={allChecked} onChange={toggleAll} /></th>
@@ -227,7 +228,7 @@ export default function Outstanding() {
                     </td>
                   </tr>
                 );
-              }) : <EmptyRow cols={10} text={loading ? "Loading…" : "No outstanding invoices"} />}
+              }) : <EmptyRow cols={10} loading={loading} text="No outstanding invoices" />}
             </tbody>
             <tfoot>
               <tr>

@@ -33,6 +33,7 @@ import PaymentTracking from "./pages/accountant/PaymentTracking";
 import Outstanding from "./pages/accountant/Outstanding";
 import PaymentList from "./pages/accountant/PaymentList";
 import CustomerOutstanding from "./pages/accountant/CustomerOutstanding";
+import TdsSettings from "./pages/accountant/TdsSettings";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
 import ClientTickets from "./pages/ClientTickets";
@@ -193,7 +194,7 @@ const router = createBrowserRouter([
       { path: "payments/pending", element: <AccountantPlaceholder title="Payment Pending" /> },
       { path: "payments/customer-outstanding", element: <CustomerOutstanding /> },
       { path: "tasks", element: <TaskManagement /> },
-      { path: "settings", element: <AccountantPlaceholder title="Settings" /> },
+      { path: "settings", element: <TdsSettings /> },
     ],
   },
 

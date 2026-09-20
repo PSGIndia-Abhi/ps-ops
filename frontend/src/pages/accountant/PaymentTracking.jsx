@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiBell, FiDownload, FiPlusCircle } from "react-icons/fi";
 import SetReminderModal from "../../components/accountant/SetReminderModal";
-import { Badge, DataError, EmptyRow, Pager } from "./ui";
+import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { createReminder, daysOverdue, followUpsByInvoice, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
@@ -118,7 +118,7 @@ export default function PaymentTracking() {
         {cards.map((c) => (
           <div key={c.label} className={`ac-kpi ${c.key}`}>
             <div className="ac-kpi-label">{c.label}</div>
-            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{hasData ? c.value : "—"}</div>
+            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{loading ? <Skeleton width="60%" height={22} /> : hasData ? c.value : "—"}</div>
           </div>
         ))}
       </div>
@@ -178,7 +178,7 @@ export default function PaymentTracking() {
         </div>
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th>Invoice No</th><th>Customer</th><th>Due Date</th><th>Payment Progress</th>
@@ -218,7 +218,7 @@ export default function PaymentTracking() {
                     </td>
                   </tr>
                 );
-              }) : <EmptyRow cols={9} text={loading ? "Loading…" : "No invoices to track yet"} />}
+              }) : <EmptyRow cols={9} loading={loading} text="No invoices to track yet" />}
             </tbody>
           </table>
         </div>

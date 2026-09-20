@@ -1,17 +1,17 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiDownload, FiEye, FiUpload } from "react-icons/fi";
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiUpload } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 
 const TABS = [
-  { key: "ALL", label: "All Invoices" },
-  { key: "PENDING", label: "Pending" },
-  { key: "OVERDUE", label: "Overdue" },
-  { key: "PARTIAL", label: "Partially Paid" },
-  { key: "PAID", label: "Paid" },
+  { key: "ALL", label: "All Invoices", icon: <FiList /> },
+  { key: "PENDING", label: "Pending", icon: <FiClock /> },
+  { key: "OVERDUE", label: "Overdue", icon: <FiAlertTriangle /> },
+  { key: "PARTIAL", label: "Partially Paid", icon: <FiPieChart /> },
+  { key: "PAID", label: "Paid", icon: <FiCheckCircle /> },
 ];
 
 export default function InvoiceList() {
@@ -52,7 +52,7 @@ export default function InvoiceList() {
   return (
     <div className="ac-page">
       <div className="ac-head">
-        <h2 className="ac-title">Invoices</h2>
+        <h2 className="ac-title ac-title-icon"><FiFileText /> Invoices</h2>
         <div className="ac-actions">
           <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/invoices/upload")}>
             <FiUpload /> Upload Invoice
@@ -67,13 +67,13 @@ export default function InvoiceList() {
         <div className="ac-tabs" style={{ marginBottom: 14 }}>
           {TABS.map((t) => (
             <button key={t.key} type="button" className={`ac-tab ${tab === t.key ? "active" : ""}`} onClick={() => { setTab(t.key); setPage(0); }}>
-              {t.label}
+              <span className="ac-tab-icon">{t.icon}</span>{t.label}
             </button>
           ))}
         </div>
 
         <div className="ac-filters" style={{ marginBottom: 14 }}>
-          <input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
+          <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div>
           <select className="ac-select" value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(0); }}>
             <option value="">All Customers</option>
             {customers.map((c) => <option key={c}>{c}</option>)}
@@ -90,7 +90,7 @@ export default function InvoiceList() {
         </div>
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th>Invoice No</th><th>Date</th><th>Due Date</th><th>Customer</th>
@@ -115,7 +115,7 @@ export default function InvoiceList() {
                     </button>
                   </td>
                 </tr>
-              )) : <EmptyRow cols={9} text={loading ? "Loading…" : "No invoices found"} />}
+              )) : <EmptyRow cols={9} loading={loading} text="No invoices found" />}
             </tbody>
           </table>
         </div>

@@ -19,9 +19,9 @@ import {
 } from "recharts";
 import useMe from "../../hooks/useMe";
 import DateInput from "../../components/accountant/DateInput";
-import { DataError, EmptyRow } from "./ui";
+import { DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { daysOverdue, groupByCustomer, showDate, ymd, useAccountantData } from "./data";
+import { daysOverdue, groupByCustomer, showDate, todayYmd, ymd, useAccountantData } from "./data";
 
 // Y-axis labels in lakhs (1L = 1,00,000), e.g. 500000 -> "5L".
 const lakhs = (v) => (v === 0 ? "0" : `${Number((v / 100000).toFixed(1))}L`);
@@ -68,11 +68,17 @@ function greeting() {
   return "Good Evening";
 }
 
+// The dashboard opens on the current month: the 1st up to today.
+const defaultRange = () => {
+  const today = todayYmd();
+  return { from: `${today.slice(0, 8)}01`, to: today };
+};
+
 export default function AccountantDashboard() {
   const navigate = useNavigate();
   const { user } = useMe();
   const { invoices, payments, tasks, loading, error, reload } = useAccountantData();
-  const [range, setRange] = useState({ from: "", to: "" });
+  const [range, setRange] = useState(defaultRange);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const filterRef = useRef(null);
@@ -94,7 +100,8 @@ export default function AccountantDashboard() {
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
   // The count on the Filters button counts only the choices inside the menu, not the two date boxes.
   const activeFilters = Object.values(filters).filter(Boolean).length;
-  const canReset = activeFilters > 0 || Boolean(range.from || range.to);
+  const isDefaultRange = range.from === defaultRange().from && range.to === defaultRange().to;
+  const canReset = activeFilters > 0 || !isDefaultRange;
 
   const customerOptions = useMemo(() => uniq([...invoices, ...payments], "customer_name"), [invoices, payments]);
   const siteOptions = useMemo(() => uniq(invoices, "site_name"), [invoices]);
@@ -227,7 +234,7 @@ export default function AccountantDashboard() {
                 </div>
                 <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="ac-btn" disabled={!canReset}
-                    onClick={() => { setFilters(EMPTY_FILTERS); setRange({ from: "", to: "" }); }}>
+                    onClick={() => { setFilters(EMPTY_FILTERS); setRange(defaultRange()); }}>
                     Reset
                   </button>
                   <button type="button" className="ac-btn ac-btn-primary" onClick={() => setShowFilters(false)}>Done</button>
@@ -245,7 +252,7 @@ export default function AccountantDashboard() {
           <div key={k.label} className={`ac-kpi ${k.key}`}>
             <span className="ac-kpi-icon" aria-hidden="true"><k.icon /></span>
             <div className="ac-kpi-label">{k.label}</div>
-            <div className="ac-kpi-value">{hasData ? k.value : "—"}</div>
+            <div className="ac-kpi-value">{loading ? <Skeleton width="60%" height={26} /> : hasData ? k.value : "—"}</div>
             <div className="ac-kpi-note">{k.note}</div>
           </div>
         ))}
@@ -322,7 +329,7 @@ export default function AccountantDashboard() {
               <tbody>
                 {upcoming.length ? upcoming.map((u) => (
                   <tr key={u.id}><td>{showDate(u.date) || "—"}</td><td>{u.customer}<div style={{ color: "#64748b", fontSize: 12 }}>{u.task}</div></td><td>{u.invoice}</td></tr>
-                )) : <EmptyRow cols={3} text={loading ? "Loading…" : "No upcoming reminders"} />}
+                )) : <EmptyRow cols={3} loading={loading} text="No upcoming reminders" />}
               </tbody>
             </table>
           </div>
@@ -347,7 +354,7 @@ export default function AccountantDashboard() {
                     <td className="ac-num" style={{ color: "#dc2626", fontWeight: 600 }}>{money(c.outstanding)}</td>
                     <td className="ac-num">{c.days_overdue || "—"}</td>
                   </tr>
-                )) : <EmptyRow cols={5} text={loading ? "Loading…" : "No outstanding customers"} />}
+                )) : <EmptyRow cols={5} loading={loading} text="No outstanding customers" />}
               </tbody>
             </table>
           </div>
@@ -369,7 +376,7 @@ export default function AccountantDashboard() {
                     <td>{showDate(p.date)}</td><td>{p.customer}</td><td>{p.payment_no}</td><td className="ac-num">{money(p.amount)}</td>
                     <td>{MODE_LABEL[p.mode] || p.mode}</td>
                   </tr>
-                )) : <EmptyRow cols={5} text={loading ? "Loading…" : "No payments yet"} />}
+                )) : <EmptyRow cols={5} loading={loading} text="No payments yet" />}
               </tbody>
             </table>
           </div>

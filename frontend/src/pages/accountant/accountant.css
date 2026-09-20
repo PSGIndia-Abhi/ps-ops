@@ -127,7 +127,7 @@
 /* record payment */
 .ac-section-title { margin: 0 0 12px; font-size: 16px; font-weight: 700; color: #0f172a; }
 .ac-rp-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; align-items: start; }
-.ac-rp-main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.ac-rp-main { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
 .ac-mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .ac-mini-label { font-size: 12.5px; color: #64748b; }
 .ac-mini-value { font-size: 18px; font-weight: 700; margin-top: 2px; }
@@ -265,9 +265,10 @@
 /* dd/mm/yyyy date box */
 .ac-date { position: relative; display: inline-block; width: 150px; }
 .ac-date-text { padding-right: 34px; }
-.ac-date-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #475569; font-size: 16px; cursor: pointer; }
-.ac-date-btn:hover { background: #f1f5f9; }
-.ac-date-native { position: absolute; left: 0; bottom: 0; width: 100%; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.ac-date-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: #475569; font-size: 16px; pointer-events: none; }
+.ac-date-native { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: 0; margin: 0; opacity: 0; overflow: hidden; cursor: pointer; }
+.ac-date-native::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; cursor: pointer; }
+.ac-date-text.invalid { border-color: #f59e0b; }
 
 /* icon in the dashboard summary cards */
 .ac-kpi { position: relative; }
@@ -279,3 +280,67 @@
 
 /* "From" / "To" text beside a date box */
 .ac-date-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #475569; }
+
+/* Icons on titles, tabs, chips and search boxes */
+.ac-title-icon { display: flex; align-items: center; gap: 10px; }
+.ac-title-icon svg { color: #2563eb; }
+.ac-tab-icon { display: inline-flex; vertical-align: -2px; margin-right: 6px; }
+.ac-chip .ac-tab-icon { margin-right: 5px; }
+.ac-search { position: relative; }
+.ac-search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+.ac-search .ac-input { padding-left: 36px; }
+.ac-kpi-icon + .ac-kpi-label { padding-right: 38px; }
+.ac-sec-ic, .ac-lab-ic { display: inline-flex; vertical-align: -3px; margin-right: 6px; }
+.ac-sec-ic { color: #2563eb; }
+.ac-lab-ic { color: #64748b; vertical-align: -2px; margin-right: 5px; }
+
+/* Phones: main tables become cards, one per row. Labels come from the column headings (useStackedTables). */
+@media (max-width: 640px) {
+  .ac-table.ac-stack, .ac-rp-main .ac-table.ac-stack { min-width: 0; }
+  .ac-table.ac-stack, .ac-table.ac-stack tbody { display: block; }
+  .ac-table.ac-stack thead { display: none; }
+  .ac-table.ac-stack tr { display: block; margin-bottom: 10px; padding: 6px 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; }
+  .ac-table.ac-stack td { display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr); align-items: center; column-gap: 14px; padding: 6px 0; border: 0; text-align: right; justify-items: end; }
+  .ac-table.ac-stack td::before { content: attr(data-label); grid-row: 1 / span 3; justify-self: start; text-align: left; font-size: 12px; font-weight: 600; color: #64748b; }
+  .ac-table.ac-stack td[data-label=""]::before { content: none; }
+  .ac-table.ac-stack td[data-label=""] { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+  .ac-table.ac-stack td[colspan] { display: block; text-align: left; }
+  .ac-table.ac-stack td.ac-empty { text-align: center; }
+  .ac-table.ac-stack .ac-num { text-align: right; }
+  .ac-table.ac-stack .ac-alloc-input { width: 120px; }
+  .ac-table.ac-stack + .ac-pager, .ac-pager { flex-wrap: wrap; gap: 8px; }
+  .ac-modal .ac-table { min-width: 460px; }
+}
+/* Tablets and small laptops: keep table columns readable and let the wrapper scroll sideways */
+@media (max-width: 1024px) {
+  .ac-table { min-width: 640px; }
+  .ac-rp-main .ac-table { min-width: 860px; }
+}
+
+/* Loading placeholders */
+.ac-skel { display: block; background: rgba(15, 23, 42, 0.09); border-radius: 6px; animation: ac-skel-pulse 1.5s ease-in-out 0.5s infinite; }
+.ac-skel.rect { border-radius: 8px; }
+.ac-skel.circular { border-radius: 50%; }
+.ac-kpi:not(.light) .ac-skel { background: rgba(255, 255, 255, 0.4); }
+.ac-skel-row td { padding-top: 15px; padding-bottom: 15px; }
+@keyframes ac-skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .ac-skel { animation: none; } }
+
+/* Record Payment: tidy tools row and a calmer disabled button */
+.ac-rp-tools { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.ac-rp-tools-row { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+.ac-prev-tds:disabled { background: #f1f5f9; border-color: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+/* Record Payment invoice table: a little tighter so all TDS columns fit on laptop screens */
+@media (min-width: 1025px) {
+  .ac-rp-main .ac-table th, .ac-rp-main .ac-table td { padding: 10px 6px; }
+  .ac-rp-main .ac-alloc-input { width: 78px; padding: 7px 8px; }
+  .ac-rp-main .ac-table td[colspan="2"] { white-space: nowrap; }
+}
+
+/* Record Payment: on mid-size screens the invoice table sits in a narrow column, so the lower-priority columns are hidden to keep Cash and TDS in view */
+@media (min-width: 1301px) and (max-width: 1750px) {
+  .ac-rp-main .ac-col-lo { display: none; }
+}
+@media (max-width: 640px) {
+  .ac-table.ac-stack td:empty { display: none; }
+}

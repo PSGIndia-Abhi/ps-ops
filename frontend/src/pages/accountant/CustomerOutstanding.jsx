@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiChevronDown, FiChevronRight, FiDownload, FiPlusCircle } from "react-icons/fi";
-import { DataError, EmptyRow, Pager } from "./ui";
+import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
@@ -92,7 +92,7 @@ export default function CustomerOutstanding() {
         {cards.map((c) => (
           <div key={c.label} className={`ac-kpi ${c.key}`}>
             <div className="ac-kpi-label">{c.label}</div>
-            <div className="ac-kpi-value" style={{ fontSize: 20, overflowWrap: "anywhere" }}>{hasData ? c.value : "—"}</div>
+            <div className="ac-kpi-value" style={{ fontSize: 20, overflowWrap: "anywhere" }}>{loading ? <Skeleton width="60%" height={22} /> : hasData ? c.value : "—"}</div>
             {hasData && c.note && <div className="ac-kpi-note">{c.note}</div>}
           </div>
         ))}
@@ -113,7 +113,7 @@ export default function CustomerOutstanding() {
         </div>
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th />
@@ -186,7 +186,7 @@ export default function CustomerOutstanding() {
                     )}
                   </Fragment>
                 );
-              }) : <EmptyRow cols={10} text={loading ? "Loading…" : "No customers with outstanding amounts"} />}
+              }) : <EmptyRow cols={10} loading={loading} text="No customers with outstanding amounts" />}
             </tbody>
             <tfoot>
               <tr>

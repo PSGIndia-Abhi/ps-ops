@@ -39,12 +39,14 @@ export default function InvoiceDetails() {
   const paid = Number(invoice?.paid_amount) || 0;
   const pending = Number(invoice?.pending_amount) || 0;
   const status = invoice?.display_status || invoice?.status;
+  const tds = invoice?.tds;
 
   // Payment history comes from the payments applied to this invoice.
   const payments = (invoice?.allocations || []).map((a) => ({
     id: a.id,
     date: ymd(a.payment_date),
     amount: Number(a.allocated_amount) || 0,
+    tds: Number(a.tds_amount) || 0,
     mode: MODE_LABEL[a.payment_mode] || a.payment_mode,
     reference: a.reference_number || "",
     received_by: a.received_by || "",
@@ -119,17 +121,47 @@ export default function InvoiceDetails() {
             <h3 className="ac-card-title">Payment History</h3>
             <div className="ac-table-wrap">
               <table className="ac-table">
-                <thead><tr><th>Date</th><th className="ac-num">Amount</th><th>Mode</th><th>UTR No</th><th>Received By</th></tr></thead>
+                <thead><tr><th>Date</th><th className="ac-num">Cash</th><th className="ac-num">TDS</th><th>Mode</th><th>UTR No</th><th>Received By</th></tr></thead>
                 <tbody>
                   {payments.length ? payments.map((p) => (
                     <tr key={p.id}>
-                      <td>{showDate(p.date)}</td><td className="ac-num">{money(p.amount)}</td><td>{p.mode}</td>
+                      <td>{showDate(p.date)}</td><td className="ac-num">{money(p.amount)}</td><td className="ac-num">{money(p.tds)}</td><td>{p.mode}</td>
                       <td>{dash(p.reference)}</td><td>{dash(p.received_by)}</td>
                     </tr>
-                  )) : <EmptyRow cols={5} text="No payments recorded" />}
+                  )) : <EmptyRow cols={6} text="No payments recorded" />}
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="ac-card">
+            <h3 className="ac-card-title">TDS Information</h3>
+            {tds && tds.tds_applicable ? (
+              <>
+                <div className="ac-mini-stats" style={{ marginBottom: 12 }}>
+                  <div><div className="ac-mini-label">TDS Rate</div><div className="ac-mini-value">{Number(tds.tds_rate)}%</div></div>
+                  <div><div className="ac-mini-label">Expected TDS</div><div className="ac-mini-value">{money(tds.expected_tds)}</div></div>
+                  <div><div className="ac-mini-label">Deducted TDS</div><div className="ac-mini-value green">{money(tds.deducted_tds)}</div></div>
+                  <div><div className="ac-mini-label">Pending TDS</div><div className="ac-mini-value red">{money(tds.pending_tds)}</div></div>
+                  <div><div className="ac-mini-label">Status</div><div className="ac-mini-value"><Badge value={tds.status} /></div></div>
+                </div>
+                <div className="ac-table-wrap">
+                  <table className="ac-table">
+                    <thead><tr><th>Date</th><th>Payment No</th><th className="ac-num">Amount</th><th>Type</th><th>Remarks</th></tr></thead>
+                    <tbody>
+                      {(invoice.tds_history || []).length ? invoice.tds_history.map((h) => (
+                        <tr key={h.id}>
+                          <td>{showDate(h.payment_date)}</td><td>{h.payment_number}</td><td className="ac-num">{money(h.tds_amount)}</td>
+                          <td>{h.tds_type === "PREVIOUS" ? "Previous" : "Current"}</td><td>{dash(h.remarks)}</td>
+                        </tr>
+                      )) : <EmptyRow cols={5} text="No TDS deducted yet" />}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <p className="ac-sub">TDS is not applicable for this invoice.</p>
+            )}
           </div>
 
           <div className="ac-card">

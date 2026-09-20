@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiChevronDown, FiChevronRight, FiDownload, FiPlusCircle } from "react-icons/fi";
-import { Badge, DataError, EmptyRow, Pager } from "./ui";
+import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard, FiDollarSign, FiDownload, FiPlusCircle, FiSearch, FiXCircle } from "react-icons/fi";
+import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { fetchPayment, num, showDate, todayYmd, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
@@ -39,11 +39,11 @@ export default function PaymentList() {
   const hasData = payments.length > 0;
 
   const cards = [
-    { key: "green", label: "Total Received", value: money(sum(posted, "received_amount")) },
-    { key: "blue", label: "Received This Month", value: money(sum(thisMonth, "received_amount")) },
-    { key: "purple", label: "Payments", value: posted.length },
-    { key: "orange", label: "Unallocated (Advance)", value: money(sum(posted, "received_amount") - sum(posted, "allocated_amount")) },
-    { key: "red", label: "Cancelled", value: payments.length - posted.length },
+    { key: "green", icon: <FiCheckCircle />, label: "Total Received", value: money(sum(posted, "received_amount")) },
+    { key: "blue", icon: <FiCalendar />, label: "Received This Month", value: money(sum(thisMonth, "received_amount")) },
+    { key: "purple", icon: <FiCreditCard />, label: "Payments", value: posted.length },
+    { key: "orange", icon: <FiDollarSign />, label: "Unallocated (Advance)", value: money(sum(posted, "received_amount") - sum(posted, "allocated_amount")) },
+    { key: "red", icon: <FiXCircle />, label: "Cancelled", value: payments.length - posted.length },
   ];
 
   const rows = payments.filter((p) => {
@@ -95,7 +95,7 @@ export default function PaymentList() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <h2 className="ac-title">Payment List</h2>
+          <h2 className="ac-title ac-title-icon"><FiCreditCard /> Payment List</h2>
           <p className="ac-sub">All payments received from customers</p>
         </div>
         <div className="ac-actions">
@@ -111,15 +111,16 @@ export default function PaymentList() {
       <div className="ac-kpis" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         {cards.map((c) => (
           <div key={c.label} className={`ac-kpi ${c.key}`}>
+            <span className="ac-kpi-icon" aria-hidden="true">{c.icon}</span>
             <div className="ac-kpi-label">{c.label}</div>
-            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{hasData ? c.value : "—"}</div>
+            <div className="ac-kpi-value" style={{ fontSize: 20 }}>{loading ? <Skeleton width="60%" height={22} /> : hasData ? c.value : "—"}</div>
           </div>
         ))}
       </div>
 
       <div className="ac-card">
         <div className="ac-filters-pl" style={{ marginBottom: 14 }}>
-          <input className="ac-input" placeholder="Search payment no, customer or UTR no" value={search} onChange={filterChange(setSearch)} />
+          <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search payment no, customer or UTR no" value={search} onChange={filterChange(setSearch)} /></div>
           <select className="ac-select" value={customer} onChange={filterChange(setCustomer)}>
             <option value="">All Customers</option>
             {customers.map((c) => <option key={c}>{c}</option>)}
@@ -140,7 +141,7 @@ export default function PaymentList() {
         </div>
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th />
@@ -207,7 +208,7 @@ export default function PaymentList() {
                     )}
                   </Fragment>
                 );
-              }) : <EmptyRow cols={11} text={loading ? "Loading…" : "No payments found"} />}
+              }) : <EmptyRow cols={11} loading={loading} text="No payments found" />}
             </tbody>
             <tfoot>
               <tr>

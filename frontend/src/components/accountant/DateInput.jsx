@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { FiCalendar } from "react-icons/fi";
 import "../../pages/accountant/accountant.css";
 
@@ -31,7 +31,6 @@ function mask(raw) {
 
 export default function DateInput({ value = "", onChange, ariaLabel, style }) {
   const [draft, setDraft] = useState(null); // what the user is typing, until it is a complete valid date
-  const pickerRef = useRef(null);
 
   function type(e) {
     const text = mask(e.target.value);
@@ -45,40 +44,24 @@ export default function DateInput({ value = "", onChange, ariaLabel, style }) {
     }
   }
 
-  function openCalendar() {
-    const el = pickerRef.current;
-    if (!el) return;
-    try {
-      el.showPicker();
-    } catch {
-      el.focus();
-      el.click();
-    }
-  }
-
   return (
     <div className="ac-date" style={style}>
       <input
-        className="ac-input ac-date-text"
+        className={`ac-input ac-date-text${draft ? " invalid" : ""}`}
         type="text"
         inputMode="numeric"
         placeholder="dd/mm/yyyy"
         maxLength={10}
         value={draft ?? toDisplay(value)}
         onChange={type}
-        onBlur={() => setDraft(null)}
         aria-label={ariaLabel}
       />
-      <button type="button" className="ac-date-btn" onClick={openCalendar} aria-label={`${ariaLabel || "Date"}: open calendar`}>
-        <FiCalendar />
-      </button>
-      {/* The browser's own calendar, kept out of sight; it only supplies the picker */}
+      <span className="ac-date-btn" aria-hidden="true"><FiCalendar /></span>
+      {/* The browser's own calendar sits invisibly over the icon, so a click opens it directly */}
       <input
-        ref={pickerRef}
         className="ac-date-native"
         type="date"
-        tabIndex={-1}
-        aria-hidden="true"
+        aria-label={`${ariaLabel || "Date"}: open calendar`}
         value={value}
         onChange={(e) => { setDraft(null); onChange(e.target.value); }}
       />

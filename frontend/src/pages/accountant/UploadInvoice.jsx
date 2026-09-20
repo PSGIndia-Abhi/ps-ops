@@ -75,8 +75,8 @@ It has not been imported yet, so its records will be discarded.`;
     setMessage(null);
   }
 
-  // Sends the file to be checked, saves the valid rows as invoices, then opens the Review & Validate tab
-  // to show the result. Rows with errors are not saved; their reasons are shown there.
+  // Sends the file to be checked, then opens the Review & Validate tab. Nothing is saved yet:
+  // the accountant reviews the rows there and clicks Submit to save the valid ones.
   async function upload() {
     setBusy(true);
     setMessage(null);
@@ -91,16 +91,8 @@ It has not been imported yet, so its records will be discarded.`;
       }
       rememberImportId(data.import_id);
 
-      let importError = "";
-      if (data.valid > 0) {
-        const confirmRes = await apiFetch(`/api/invoices/import/${data.import_id}/confirm`, { method: "POST" });
-        if (!confirmRes?.ok) {
-          const detail = confirmRes ? (await safeJson(confirmRes))?.error : "";
-          importError = `The file was checked, but the invoices could not be saved. ${detail || "Please click Import on the next screen."}`;
-        }
-      }
       window.dispatchEvent(new Event("focus")); // makes the Notifications bell refresh right away
-      navigate(`/accountant/invoices/review?import=${data.import_id}`, { state: { uploaded: true, importError } });
+      navigate(`/accountant/invoices/review?import=${data.import_id}`, { state: { uploaded: true } });
     } catch {
       setMessage({ text: "Network problem. Please check your connection and try again." });
     } finally {
@@ -165,8 +157,8 @@ It has not been imported yet, so its records will be discarded.`;
         <div className="ac-info" style={{ marginTop: 16 }}>
           <FiInfo style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
-            Use the template: each row needs Invoice No, Customer, Site, Invoice Date and Amount. Valid rows are saved as
-            invoices as soon as you upload. Rows with errors are not saved; you can see the reason for each on the next screen.
+            Use the template: each row needs Invoice No, Customer, Site, Invoice Date and Amount. The file is checked
+            first and nothing is saved yet. On the next screen you can review every row, then click Submit to save the valid ones. Rows with errors are not saved; you can see the reason for each there.
           </span>
         </div>
 

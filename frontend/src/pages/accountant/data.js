@@ -65,6 +65,13 @@ function cleanInvoice(row) {
     last_payment_date: ymd(row.last_payment_date),
     remarks: row.remarks || "",
     file_name: row.invoice_file_name || "",
+    // TDS snapshot taken when the invoice was created. Invoice status and TDS status are independent.
+    tds_applicable: Boolean(row.tds_applicable),
+    tds_rate: row.tds_rate == null ? null : num(row.tds_rate),
+    expected_tds: num(row.expected_tds),
+    deducted_tds: num(row.deducted_tds),
+    pending_tds: num(row.pending_tds),
+    tds_status: row.tds_status || "NOT_APPLICABLE",
   };
 }
 
@@ -76,6 +83,7 @@ function cleanPayment(row) {
     customer_id: row.customer_id,
     customer_name: row.customer_name,
     received_amount: num(row.received_amount),
+    tds_amount: num(row.tds_amount),
     allocated_amount: num(row.allocated_amount),
     payment_mode: row.payment_mode,
     reference_number: row.reference_number || "",
@@ -202,6 +210,8 @@ export const savePayment = (payment) => send("POST", "/api/payments", payment);
 export const completeTask = (id) => send("PUT", `/api/tasks/${id}`, { status: "COMPLETED" });
 export const fetchPayment = (id) => getJson(`/api/payments/${id}`);
 export const fetchInvoice = (id) => getJson(`/api/invoices/${id}`);
+export const fetchTdsSettings = () => getJson("/api/invoices/tds-settings");
+export const saveTdsSettings = (customerId, body) => send("PUT", `/api/invoices/tds-settings/${customerId}`, body);
 
 // Creates a reminder task on an invoice from the Set Reminder dialog's values.
 export function createReminder(form, invoice) {

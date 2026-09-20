@@ -16,9 +16,11 @@ const STATUS_CLASS = {
   LOW: "low",
   NORMAL: "normal",
   HIGH: "high",
+  CLEARED: "paid",
+  NOT_APPLICABLE: "cancelled",
 };
 
-const LABELS = { PARTIAL: "Partially Paid" };
+const LABELS = { PARTIAL: "Partially Paid", NOT_APPLICABLE: "Not applicable" };
 
 export function Badge({ value }) {
   const key = String(value || "").toUpperCase();
@@ -26,8 +28,36 @@ export function Badge({ value }) {
   return <span className={`ac-badge ${STATUS_CLASS[key] || "normal"}`}>{label}</span>;
 }
 
-// A full-width "no data" row for tables.
-export function EmptyRow({ cols, text = "No data to show yet" }) {
+// Grey pulsing placeholder shown while data loads (same look as MUI's Skeleton).
+//   width/height: any CSS size. variant: "text" (default), "rect" or "circular".
+export function Skeleton({ width = "100%", height, variant = "text", style }) {
+  const size = height ?? (variant === "text" ? 14 : 24);
+  return (
+    <span
+      className={`ac-skel ${variant}`}
+      aria-hidden="true"
+      style={{ width: variant === "circular" ? size : width, height: size, ...style }}
+    />
+  );
+}
+
+const SKELETON_WIDTHS = [62, 84, 72, 90, 55, 78, 68, 88];
+
+// A full-width "no data" row for tables. With loading, shows placeholder rows instead.
+export function EmptyRow({ cols, text = "No data to show yet", loading = false, rows = 5 }) {
+  if (loading) {
+    return (
+      <>
+        {Array.from({ length: rows }, (_, r) => (
+          <tr key={r} className="ac-skel-row" aria-hidden="true">
+            {Array.from({ length: cols }, (_, c) => (
+              <td key={c}><Skeleton width={`${SKELETON_WIDTHS[(r + c) % SKELETON_WIDTHS.length]}%`} /></td>
+            ))}
+          </tr>
+        ))}
+      </>
+    );
+  }
   return (
     <tr>
       <td className="ac-empty" colSpan={cols}>{text}</td>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   FiActivity,
@@ -14,12 +14,13 @@ import {
   FiGrid,
   FiList,
   FiMenu,
-  FiSettings,
+  FiPercent,
   FiUploadCloud,
   FiUsers,
 } from "react-icons/fi";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
+import useStackedTables from "../hooks/useStackedTables";
 import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
 import "./AccountantLayout.css";
@@ -50,13 +51,16 @@ const NAV_ITEMS = [
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell },
-  { label: "Settings", path: "/accountant/settings", icon: FiSettings },
+  { label: "TDS", path: "/accountant/settings", icon: FiPercent },
 ];
 
 export default function AccountantLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useMe();
+
+  const mainRef = useRef(null);
+  useStackedTables(mainRef);
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -166,7 +170,7 @@ export default function AccountantLayout() {
         </button>
 
         <div className="header-right">
-          <NotificationsMenu />
+          <NotificationsMenu iconOnly />
           <UserMenu user={user} onLogout={logout} actions={[]} />
         </div>
       </header>
@@ -175,7 +179,7 @@ export default function AccountantLayout() {
       <div className="app-body">
         {!isMobile && <aside className="sidebar acc-sidebar">{nav}</aside>}
 
-        <main className="main-content">
+        <main className="main-content" ref={mainRef}>
           {/* The sidebar is hidden on phones, so offer the same menu above the page */}
           {isMobile && (
             <>

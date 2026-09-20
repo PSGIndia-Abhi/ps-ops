@@ -158,6 +158,26 @@
   color: #111827;
 }
 
+.notifications-trigger.icon-only {
+  position: relative;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 20px;
+}
+
+.notifications-trigger.icon-only .notifications-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
 .notifications-badge {
   min-width: 20px;
   height: 20px;

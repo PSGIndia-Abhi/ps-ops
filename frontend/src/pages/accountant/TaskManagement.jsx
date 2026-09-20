@@ -156,7 +156,7 @@ export default function TaskManagement() {
         </div>
 
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr><th>Due Date</th><th>Customer / Reference</th><th>Task Type</th><th>Priority</th><th>Status</th><th>Actions</th></tr>
             </thead>
@@ -175,7 +175,7 @@ export default function TaskManagement() {
                     ) : "—"}
                   </td>
                 </tr>
-              )) : <EmptyRow cols={6} text={loading ? "Loading…" : "No tasks found"} />}
+              )) : <EmptyRow cols={6} loading={loading} text="No tasks found" />}
             </tbody>
           </table>
         </div>
