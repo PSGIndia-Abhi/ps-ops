@@ -11,6 +11,7 @@ import * as sitesApi from './sites';
 import * as groupsApi from './groups';
 import * as usersApi from './users';
 import * as contactsApi from './contacts';
+import * as crmApi from './crm';
 export {
   authApi,
   jobsApi,
@@ -24,4 +25,5 @@ export {
   groupsApi,
   usersApi,
   contactsApi,
+  crmApi,
 };

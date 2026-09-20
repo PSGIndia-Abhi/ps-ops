@@ -54,3 +54,8 @@ jest.mock('react-native-nitro-sound', () => ({
   createSound: jest.fn(() => mockSound()),
   Sound: mockSound(),
 }));
+
+jest.mock('react-native-razorpay', () => ({
+  __esModule: true,
+  default: { open: jest.fn(() => Promise.reject({ code: 0, description: 'Payment Cancelled' })) },
+}));

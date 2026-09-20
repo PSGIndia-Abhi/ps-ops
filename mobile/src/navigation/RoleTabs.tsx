@@ -1,5 +1,6 @@
 import React from 'react';
 import { useUserRole } from '../auth/role';
+import { CrmNavigator } from './CrmNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
@@ -29,6 +30,10 @@ export function RoleTabs() {
       return <SupervisorTabNavigator />;
     case 'technician':
       return <TechnicianTabNavigator />;
+    // Sales and Marketing get the CRM app instead of the field-service tabs.
+    case 'sales':
+    case 'marketing':
+      return <CrmNavigator />;
     default:
       return <UnsupportedRoleScreen />;
   }
