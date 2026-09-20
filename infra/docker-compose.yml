@@ -40,7 +40,7 @@ services:
           "localhost",
           "-u",
           "root",
-          "-p$$MYSQL_ROOT_PASSWORD",
+          "-p$$MYSQL_ROOT_PASSWORD"
         ]
       interval: 10s
       timeout: 5s
@@ -48,18 +48,19 @@ services:
     restart: unless-stopped
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin
+    image: phpmyadmin:latest
     container_name: ps-phpmyadmin
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
       PMA_HOST: mysql
       PMA_USER: root
       PMA_PASSWORD: root
       TZ: Asia/Kolkata
-      command: --default-time-zone='+00:00
     ports:
       - "8080:80"
+    restart: unless-stopped
 
   redis:
     image: redis:alpine
@@ -69,7 +70,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio:latest
     container_name: ps-minio
     command: server /data --console-address ":9001"
     environment:

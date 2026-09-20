@@ -31,6 +31,10 @@ function formatNotificationType(type) {
 function resolveNotificationPath(notification, role) {
   const basePath = roleBasePath(role);
 
+  if (notification.entity_type === "invoice_import" && notification.entity_id) {
+    return `/accountant/invoices/review?import=${notification.entity_id}`;
+  }
+
   if (notification.entity_type === "job" && notification.entity_id) {
     return role === "client"
       ? `/client/jobs/${notification.entity_id}`

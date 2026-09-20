@@ -519,6 +519,22 @@ async function notifyVisitApproved({ visitId, actorUserId = null }) {
   );
 }
 
+// Tells the person who uploaded an invoice file what happened to it.
+async function notifyInvoiceImport({ userId, importId, fileName, total, imported, errors }) {
+  const nothing = imported === 0;
+  const message = nothing
+    ? `All ${total} row(s) had errors. Open Review & Validate to see the reason for each.`
+    : `${imported} invoice(s) were imported.${errors > 0 ? ` ${errors} row(s) had errors and were not imported.` : ""}`;
+
+  return insertNotifications(pool, [userId], {
+    type: "INVOICE_IMPORT",
+    title: nothing ? `Nothing imported: ${fileName}` : `Invoices imported: ${fileName}`,
+    message,
+    entityType: "invoice_import",
+    entityId: importId,
+  });
+}
+
 module.exports = {
   listNotificationsForUser,
   getUnreadNotificationCount,
@@ -533,4 +549,5 @@ module.exports = {
   notifyVisitSubmitted,
   notifyVisitMissed,
   notifyVisitApproved,
+  notifyInvoiceImport,
 };

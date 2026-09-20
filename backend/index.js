@@ -28,6 +28,9 @@ const notificationsRoutes = require("./src/routes/notifications.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
+const invoicesRoutes = require("./src/routes/invoices.routes");
+const paymentsRoutes = require("./src/routes/payments.routes");
+const tasksRoutes = require("./src/routes/tasks.routes");
 const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
@@ -71,6 +74,9 @@ app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 app.use("/api/shifts", shiftRoutes);
+app.use("/api/invoices", invoicesRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/tasks", tasksRoutes);
 
 
 
