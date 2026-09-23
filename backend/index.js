@@ -27,6 +27,7 @@ const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
+const { startShiftAutoEndCron } = require("./src/jobs/shiftAutoEnd.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
 const designationsRoutes = require("./src/routes/designations.routes");
 const orgUnitsRoutes = require("./src/routes/org-units.routes");
@@ -97,6 +98,7 @@ const PORT = process.env.PORT || 3000;
 
     startRecurringScheduler(pool);
     startVisitMissedCron();
+    startShiftAutoEndCron();
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);

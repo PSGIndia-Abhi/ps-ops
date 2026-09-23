@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { GradientCard } from '../../components/GradientCard';
 import { CheckIcon } from '../../crm/ui/crmIcons';
@@ -76,8 +77,12 @@ function Journey({ completed, replayKey }: { completed: number; replayKey: numbe
   const target = (index + (level.next ? level.percent / 100 : 0)) / (LEVELS.length - 1);
   const sweep = useSweep(replayKey, completed);
 
+  // This lives on a bottom tab, kept mounted by React Navigation while another tab is open -
+  // gated on focus so the loop doesn't keep animating (and re-rendering) forever off-screen.
+  const isFocused = useIsFocused();
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    if (!isFocused) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
@@ -86,7 +91,7 @@ function Journey({ completed, replayKey }: { completed: number; replayKey: numbe
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [isFocused, pulse]);
 
   return (
     <View style={styles.card}>

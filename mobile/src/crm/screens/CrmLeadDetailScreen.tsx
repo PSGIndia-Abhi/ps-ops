@@ -130,9 +130,9 @@ const factory = (t: CrmTheme) => ({
   },
   contact: { flex: 1, alignItems: 'center' as const, gap: spacing.xs },
   contactCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     ...t.cardShadow,
@@ -380,7 +380,7 @@ export function CrmLeadDetailScreen() {
             testID="contact-call"
           >
             <View style={[styles.contactCircle, styles.contactCall]}>
-              <PhoneIcon size={24} color="#FFFFFF" />
+              <PhoneIcon size={18} color="#FFFFFF" />
             </View>
             <Text style={styles.contactLabel}>Call</Text>
           </Pressable>
@@ -400,7 +400,7 @@ export function CrmLeadDetailScreen() {
             testID="contact-whatsapp"
           >
             <View style={[styles.contactCircle, styles.contactWhatsApp]}>
-              <WhatsAppIcon size={26} color="#FFFFFF" />
+              <WhatsAppIcon size={20} color="#FFFFFF" />
             </View>
             <Text style={styles.contactLabel}>WhatsApp</Text>
           </Pressable>
@@ -423,7 +423,7 @@ export function CrmLeadDetailScreen() {
             testID="contact-email"
           >
             <View style={[styles.contactCircle, styles.contactEmail]}>
-              <EmailIcon size={24} color="#FFFFFF" />
+              <EmailIcon size={18} color="#FFFFFF" />
             </View>
             <Text style={styles.contactLabel}>Email</Text>
           </Pressable>

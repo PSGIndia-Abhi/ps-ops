@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { Banner } from '../../components/Banner';
@@ -19,8 +19,10 @@ import { formatShiftClock, formatWorked } from './shiftTime';
 
 type Nav = NativeStackNavigationProp<AuthenticatedStackParamList & TechnicianTabParamList>;
 
-/** A shift running longer than this was almost certainly forgotten (nobody works 14 hours straight). */
-const STALE_SHIFT_MS = 14 * 60 * 60 * 1000;
+/** A shift running longer than this was almost certainly forgotten (nobody works 11 hours
+ * straight). The server auto-ends any shift still active at 12h, so this warns an hour ahead
+ * of that - see backend/src/jobs/shiftAutoEnd.cron.js. */
+const STALE_SHIFT_MS = 11 * 60 * 60 * 1000;
 
 const FACE = 224;
 const CENTER = FACE / 2;
@@ -80,6 +82,7 @@ function ClockFace({ litSeconds, running }: { litSeconds: number; running: boole
  */
 export function ShiftScreen() {
   const navigation = useNavigation<Nav>();
+  const isFocused = useIsFocused();
   const [current, setCurrent] = useState<CurrentShift | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'start' | 'end' | null>(null);
@@ -109,17 +112,21 @@ export function ShiftScreen() {
   );
 
   const active = !!current?.active && !!current.shift;
+  // Gated on focus too, not just `active`: this is a bottom-tab screen, so React Navigation
+  // keeps it mounted when another tab is open. Without the focus check, a shift left running
+  // for hours would tick this every second - and run the glow loop below - the whole time,
+  // entirely off-screen.
   useEffect(() => {
-    if (!active) return;
+    if (!active || !isFocused) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [active]);
+  }, [active, isFocused]);
 
-  // A soft glow that breathes around the face while the shift is running.
+  // A soft glow that breathes around the face while the shift is running (and this tab is visible).
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!active) {
+    if (!active || !isFocused) {
       pulse.setValue(0);
       return;
     }
@@ -131,7 +138,7 @@ export function ShiftScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, [active, pulse]);
+  }, [active, isFocused, pulse]);
 
   async function startShift() {
     setBusy('start');
@@ -233,7 +240,8 @@ export function ShiftScreen() {
           <View style={styles.staleText}>
             <Text style={styles.staleTitle}>This shift has been running for {formatWorked(elapsed)}</Text>
             <Text style={styles.staleBody}>
-              It looks like it was not ended. End it now, then start today's shift. Ending it records the end time as right now.
+              It looks like it was not ended. End it now, then start today's shift - otherwise it
+              will be ended automatically once it reaches 12 hours.
             </Text>
           </View>
         </View>

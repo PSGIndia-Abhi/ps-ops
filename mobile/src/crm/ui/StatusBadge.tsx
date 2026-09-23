@@ -10,7 +10,7 @@ import {
 import { radii, spacing, typography } from '../../theme';
 import { StarIcon } from './crmIcons';
 import { useCrmStyles, type CrmTheme } from '../theme';
-import type { LeadStatus, PaymentStatus } from '../types';
+import type { LeadSource, LeadStatus, PaymentStatus } from '../types';
 
 export type Tone =
   | 'success'
@@ -58,6 +58,20 @@ export const LEAD_STATUS_META: Record<
   lost: { label: 'Lost', tone: 'danger' },
 };
 
+/** Emoji read as a real, recognisable glyph per channel - a website/apartment/referral icon,
+ * not another abstract shape - with no new asset weight. */
+const LEAD_SOURCE_META: Record<
+  LeadSource,
+  { label: string; tone: Tone; emoji: string }
+> = {
+  website: { label: 'Website', tone: 'info', emoji: '🌐' },
+  apartment: { label: 'Apartment', tone: 'accent', emoji: '🏢' },
+  referral: { label: 'Referral', tone: 'success', emoji: '🤝' },
+  social_media: { label: 'Social Media', tone: 'warning', emoji: '📱' },
+  other: { label: 'Other', tone: 'neutral', emoji: '🏷️' },
+};
+const UNKNOWN_SOURCE_META = { label: 'Source not set', tone: 'neutral' as Tone, emoji: '🏷️' };
+
 const factory = (_t: CrmTheme) => ({
   badge: {
     flexDirection: 'row' as const,
@@ -83,6 +97,7 @@ const factory = (_t: CrmTheme) => ({
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
+  sourceEmoji: { fontSize: 16, lineHeight: 19 },
 });
 
 interface StatusBadgeProps {
@@ -168,6 +183,19 @@ export function LeadStatusIcon({ status }: { status: LeadStatus }) {
           <CloseIcon size={16} color={c} />
         )
       }
+    </IconBadge>
+  );
+}
+
+/** Icon-only lead source: where this lead actually came from (website/apartment/referral/...),
+ * shown instead of the pipeline status - the payment icon right next to it already covers
+ * "paid or not", so this slot is more useful surfacing the channel than the stage. */
+export function LeadSourceIcon({ source }: { source: LeadSource | null }) {
+  const { styles } = useCrmStyles(factory);
+  const meta = source ? LEAD_SOURCE_META[source] : UNKNOWN_SOURCE_META;
+  return (
+    <IconBadge tone={meta.tone} label={meta.label}>
+      {() => <Text style={styles.sourceEmoji}>{meta.emoji}</Text>}
     </IconBadge>
   );
 }

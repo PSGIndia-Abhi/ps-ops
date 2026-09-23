@@ -7,7 +7,7 @@ import { useCrmStyles, type CrmTheme } from '../theme';
 import type { Lead } from '../types';
 import { ContactActions } from './ContactActions';
 import { PestIcon } from './PestIcon';
-import { LeadStatusIcon, PaymentStatusIcon } from './StatusBadge';
+import { LeadSourceIcon, PaymentStatusIcon } from './StatusBadge';
 
 const factory = (t: CrmTheme) => ({
   card: {
@@ -112,7 +112,7 @@ export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
           </View>
           <View style={styles.status}>
             <PaymentStatusIcon status={lead.paymentStatus} />
-            <LeadStatusIcon status={lead.leadStatus} />
+            <LeadSourceIcon source={lead.source} />
           </View>
         </Pressable>
 

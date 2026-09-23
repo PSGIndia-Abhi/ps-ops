@@ -130,19 +130,20 @@ export function CheckIcon({ size = 18, color = '#6B7280' }: IconProps) {
   );
 }
 
-export function WhatsAppIcon({ size = 20, color = '#6B7280' }: IconProps) {
+/** Solid badge glyph (filled bubble + a cut-through accent), not a thin outline - reads as a real
+ * logo mark at a glance instead of an abstract line drawing. The accent is fixed to WhatsApp's own
+ * brand green: every place this is used sets `color` to white on top of that exact green circle
+ * (see ContactActions/CrmLeadDetailScreen's WHATSAPP constant), so it shows through as a cutout. */
+export function WhatsAppIcon({ size = 20, color = '#FFFFFF' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
         d="M12 3a9 9 0 00-7.8 13.5L3 21l4.6-1.2A9 9 0 1012 3z"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fill={color}
       />
       <Path
         d="M9.2 8.4c-.3.6-.3 1.4.4 2.6.9 1.5 2.2 2.6 3.6 3.1.9.3 1.5.1 1.9-.5l.3-.7-1.7-.9-.7.6c-.9-.4-1.7-1.2-2.1-2.1l.6-.7-.8-1.8-.8.4z"
-        fill={color}
+        fill="#25D366"
       />
     </Svg>
   );

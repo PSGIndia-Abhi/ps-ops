@@ -33,7 +33,7 @@
  * version of this comment again - do not take it on faith.
  */
 
-const DEV_API_BASE_URL = 'http://10.0.2.2:3000';
+const DEV_API_BASE_URL = 'http://localhost:3000';
 const PROD_API_BASE_URL = 'https://bestserve.co.in';
 
 export const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : PROD_API_BASE_URL;
