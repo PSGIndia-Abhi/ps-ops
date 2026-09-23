@@ -257,6 +257,12 @@ export default function AdminLayout() {
                 Tickets
               </button>
 
+              <button
+                className={`nav-btn ${isActive("/admin/tasks") ? "active" : ""}`}
+                onClick={() => navigate("/admin/tasks")}
+              >
+                Tasks
+              </button>
 
             </nav>
           </aside>
@@ -381,6 +387,14 @@ export default function AdminLayout() {
             Tickets
           </button>
 
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/tasks");
+            }}
+          >
+            Tasks
+          </button>
 
           <button
             onClick={() => {

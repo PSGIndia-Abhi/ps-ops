@@ -3,6 +3,13 @@ const router = express.Router();
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
+// Notifications always belong to the logged-in user. Besides the job permissions, a user who works with
+// invoices (the accountant) may use them too.
+const allowNotifications = (jobPermission) => (req, res, next) =>
+  req.user?.permissions?.includes(PERMISSIONS.VIEW_INVOICE)
+    ? next()
+    : requirePermission(jobPermission)(req, res, next);
+
 const {
   listNotificationsForUser,
   getUnreadNotificationCount,
@@ -13,7 +20,7 @@ const {
 router.get(
   "/",
   auth,
-  requirePermission(PERMISSIONS.VIEW_JOB),
+  allowNotifications(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     try {
       const notifications = await listNotificationsForUser(req.user.id, {
@@ -31,7 +38,7 @@ router.get(
 router.get(
   "/unread-count",
   auth,
-  requirePermission(PERMISSIONS.VIEW_JOB),
+  allowNotifications(PERMISSIONS.VIEW_JOB),
   async (req, res) => {
     try {
       const count = await getUnreadNotificationCount(req.user.id);
@@ -46,7 +53,7 @@ router.get(
 router.patch(
   "/:id/read",
   auth,
-  requirePermission(PERMISSIONS.UPDATE_JOB),
+  allowNotifications(PERMISSIONS.UPDATE_JOB),
   async (req, res) => {
     try {
       const updated = await markNotificationRead(req.user.id, req.params.id);
@@ -64,7 +71,7 @@ router.patch(
 router.post(
   "/read-all",
   auth,
-  requirePermission(PERMISSIONS.UPDATE_JOB),
+  allowNotifications(PERMISSIONS.UPDATE_JOB),
   async (req, res) => {
     try {
       const updated = await markAllNotificationsRead(req.user.id);

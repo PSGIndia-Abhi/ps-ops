@@ -1,0 +1,119 @@
+/* Light sidebar with black text used by the accountant panel */
+
+.sidebar.acc-sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  padding: 16px 12px;
+  justify-content: flex-start;
+}
+
+.acc-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.acc-item,
+.acc-parent,
+.acc-child {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.acc-item:hover,
+.acc-parent:hover,
+.acc-child:hover {
+  background: #f1f5f9;
+  color: #000;
+}
+
+.acc-item.active,
+.acc-parent.active {
+  color: #000;
+  font-weight: 600;
+}
+
+.acc-parent.active {
+  background: #f1f5f9;
+}
+
+.acc-item.active {
+  background: #f1f5f9;
+}
+
+.acc-icon {
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.acc-label {
+  flex: 1;
+}
+
+.acc-chevron {
+  font-size: 16px;
+  opacity: 0.8;
+}
+
+.acc-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding-left: 12px;
+}
+
+.acc-child {
+  padding: 10px 14px;
+  font-size: 13.5px;
+  color: #0f172a;
+}
+
+.acc-child .acc-icon {
+  font-size: 16px;
+}
+
+.acc-child.active {
+  background: #f1f5f9;
+  color: #000;
+  font-weight: 600;
+}
+
+/* Mobile: light panel above the page, toggled by a button */
+.acc-mobile-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.acc-mobile-panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+/* Square corners for the Notifications dropdown in the accountant panel only */
+.acc-square .notifications-popover,
+.acc-square .notifications-mark-all {
+  border-radius: 0;
+}

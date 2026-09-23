@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FiBell } from "react-icons/fi";
 import { roleBasePath } from "../auth/roleBasePath";
 import useNotifications from "../hooks/useNotifications";
 
@@ -31,6 +32,10 @@ function formatNotificationType(type) {
 function resolveNotificationPath(notification, role) {
   const basePath = roleBasePath(role);
 
+  if (notification.entity_type === "invoice_import" && notification.entity_id) {
+    return `/accountant/invoices/review?import=${notification.entity_id}`;
+  }
+
   if (notification.entity_type === "job" && notification.entity_id) {
     return role === "client"
       ? `/client/jobs/${notification.entity_id}`
@@ -51,7 +56,8 @@ function resolveNotificationPath(notification, role) {
   return basePath;
 }
 
-export default function NotificationsMenu() {
+// iconOnly shows a bell instead of the word "Notifications".
+export default function NotificationsMenu({ iconOnly = false }) {
   const navigate = useNavigate();
   const role = localStorage.getItem("role") || "";
   const menuRef = useRef(null);
@@ -105,10 +111,11 @@ export default function NotificationsMenu() {
     <div className="notifications-root" ref={menuRef}>
       <button
         type="button"
-        className="notifications-trigger"
+        className={`notifications-trigger${iconOnly ? " icon-only" : ""}`}
         onClick={handleOpenToggle}
+        aria-label={iconOnly ? (unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications") : undefined}
       >
-        <span>Notifications</span>
+        {iconOnly ? <FiBell aria-hidden="true" /> : <span>Notifications</span>}
         {unreadCount > 0 && (
           <span className="notifications-badge">
             {unreadCount > 99 ? "99+" : unreadCount}

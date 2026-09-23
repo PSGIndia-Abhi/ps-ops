@@ -27,8 +27,12 @@ const ticketsRoutes = require("./src/routes/tickets.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
+const { startInvoiceStatusCron } = require("./src/jobs/invoiceStatus.cron");
 const { startShiftAutoEndCron } = require("./src/jobs/shiftAutoEnd.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
+const invoicesRoutes = require("./src/routes/invoices.routes");
+const paymentsRoutes = require("./src/routes/payments.routes");
+const tasksRoutes = require("./src/routes/tasks.routes");
 const designationsRoutes = require("./src/routes/designations.routes");
 const orgUnitsRoutes = require("./src/routes/org-units.routes");
 const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
@@ -41,7 +45,11 @@ const { connectRedis } = require("./src/utils/redis");
 
 
 app.use(cors());
-app.use(express.json());  
+// Raised from Express's 100kb default: confirming an invoice import now sends the whole
+// checked file's rows back in one request (nothing is persisted until that point), which
+// can be a few hundred KB for a large file. Every other route just gets a higher ceiling,
+// nothing about how it parses JSON changes.
+app.use(express.json({ limit: "3mb" }));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -78,13 +86,6 @@ app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 app.use("/api/shifts", shiftRoutes);
-app.use("/api/designations", designationsRoutes);
-app.use("/api/org-units", orgUnitsRoutes);
-// After usersRoutes (mounted above): adds /api/users/:id/org-unit etc.
-app.use("/api/users", userHierarchyRoutes);
-app.use("/api/hierarchy", hierarchyRoutes);
-app.use("/api/crm", crmRoutes);
-app.use("/api/public", crmPublicRoutes);
 
 
 
@@ -98,7 +99,6 @@ const PORT = process.env.PORT || 3000;
 
     startRecurringScheduler(pool);
     startVisitMissedCron();
-    startShiftAutoEndCron();
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);

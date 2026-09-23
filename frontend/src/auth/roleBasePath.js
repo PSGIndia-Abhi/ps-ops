@@ -17,4 +17,24 @@ export const ROLE_HOME = {
   staff: "/staff",
 };
 
-export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";
+export const roleBasePath = (role) => {
+  switch (role) {
+    case "admin":
+      return "/admin";
+    case "supervisor":
+      return "/supervisor";
+    case "technician":
+      return "/technician";
+    case "branch_admin":
+      return "/admin";
+    case "accountant":
+      return "/accountant";
+    case "client":
+      return "/client";
+    case "temporary_worker":
+      return "/temp";
+    default:
+      return "/login";
+  }
+};
+// export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";
