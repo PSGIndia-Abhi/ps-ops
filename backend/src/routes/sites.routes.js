@@ -186,7 +186,11 @@ const trimmedCountry =
       return res.status(409).json({ error: "Site already exists for this company" });
     }
 
-    const id = uuid();
+    // Sites get a short, readable id (SITE1, SITE2, ...) instead of a UUID.
+    const [[nextSite]] = await pool.query(
+      "SELECT COALESCE(MAX(CAST(SUBSTRING(id, 5) AS UNSIGNED)), 0) + 1 AS next FROM sites WHERE id LIKE 'SITE%'"
+    );
+    const id = `SITE${nextSite.next}`;
     const locationId = uuid();
 
 await pool.query(

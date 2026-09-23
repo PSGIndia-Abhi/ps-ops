@@ -85,7 +85,6 @@ export default function InvoiceList() {
             <option value="PARTIAL">Partially Paid</option>
             <option value="PAID">Paid</option>
             <option value="OVERDUE">Overdue</option>
-            <option value="CANCELLED">Cancelled</option>
           </select>
         </div>
 

@@ -37,11 +37,12 @@ export default function RecordPayment() {
   const [showPaid, setShowPaid] = useState(false);
   const [selected, setSelected] = useState([]); // invoice ids, in the order they were ticked
   const [cash, setCash] = useState({}); // { [invoiceId]: string }
-  const [tds, setTds] = useState({}); // { [invoiceId]: string }
+  const [tds, setTds] = useState({}); // { [invoiceId]: string } -- the TDS column: how much TDS is being deducted on this row
   const [prevOpen, setPrevOpen] = useState(false);
-  const [form, setForm] = useState({ date: todayYmd(), mode: "BANK_TRANSFER", reference: "", received: "", remarks: "" });
+  const [form, setForm] = useState({ date: todayYmd(), mode: "NEFT", reference: "", received: "", remarks: "" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false); // true once a payment has been saved; stays on this page until the accountant chooses what to do next
 
   // Customers the accountant can record payments for: the ones that have invoices in their branch.
   const customers = useMemo(
@@ -70,11 +71,45 @@ export default function RecordPayment() {
   const selectedInvoices = selected.map((id) => allInvoices.find((i) => i.id === id)).filter(Boolean);
   const cashTotal = r2(selectedInvoices.reduce((s, i) => s + amt(cash[i.id]), 0));
   const tdsTotal = r2(selectedInvoices.reduce((s, i) => s + amt(tds[i.id]), 0));
+  const balanceTotal = r2(selectedInvoices.reduce((s, i) => s + (Number(i.pending_amount) - amt(tds[i.id]) - amt(cash[i.id])), 0));
   const settlement = r2(cashTotal + tdsTotal);
   const unallocated = r2(received - cashTotal);
   const allocatedCount = selectedInvoices.filter((i) => amt(cash[i.id]) + amt(tds[i.id]) > 0).length;
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  // Typing (or clearing) a per-invoice Cash Amount box keeps Cash Received in exact step with it: Cash
+  // Received always mirrors the sum of what is currently in the Cash Amount boxes of the ticked invoices,
+  // whether that total just went up or down. This only runs from the box itself, not when ticking an
+  // invoice pre-fills its amount — so typing one total up front and ticking several invoices to auto-split
+  // it across them (see toggleInvoice/toggleAll) still works.
+  // `cap` (when given) is the most this row can take before its Balance would go
+  // negative -- typing more than that is simply not accepted, it's held at the cap.
+  function changeCashAmount(invId, value, cap) {
+    const capped = cap != null && amt(value) > cap ? (cap > 0 ? String(cap) : "") : value;
+    const nextCash = { ...cash, [invId]: capped };
+    setCash(nextCash);
+    const total = r2(selectedInvoices.reduce((s, i) => s + amt(nextCash[i.id]), 0));
+    setForm((f) => ({ ...f, received: total ? String(total) : "" }));
+  }
+
+  // The other direction: once the user finishes typing Cash Received (leaves the box, or presses Enter),
+  // the Cash Amount boxes of the ticked invoices are recalculated to fit inside it, oldest first, replacing
+  // whatever was there before — so reducing or clearing Cash Received reduces or clears them too, not just
+  // raises them. This runs on blur, not on every keystroke, so a partly typed number (e.g. "5" on the way
+  // to "5000") never gets allocated as if it were the final amount.
+  function fillCashFromReceived() {
+    let room = received;
+    const next = {};
+    for (const inv of selectedInvoices) {
+      if (!isOpen(inv)) { next[inv.id] = ""; continue; } // a fully paid invoice never takes cash, only previous TDS
+      const roomForThis = Math.max(0, r2(inv.pending_amount - amt(tds[inv.id])));
+      const give = Math.min(roomForThis, Math.max(0, room));
+      next[inv.id] = give ? String(give) : "";
+      room = r2(room - give);
+    }
+    setCash((s) => ({ ...s, ...next }));
+  }
 
   function changeCustomer(id) {
     setCustomerId(id);
@@ -82,6 +117,21 @@ export default function RecordPayment() {
     setCash({});
     setTds({});
     setSaveError("");
+    setSaved(false);
+  }
+
+  // Typing a TDS amount for a row recalculates that row's Amount Received to
+  // whatever is left of the pending amount (pending - TDS) -- e.g. a 10,000
+  // invoice with 200 TDS suggests 9,800 received. The accountant can still
+  // type over that suggestion (a partial payment); Balance is always just
+  // whatever that leaves unpaid (pending - TDS - Amount Received), so it
+  // never needs to be typed by hand.
+  function changeTdsAmount(inv, value) {
+    const tdsCap = Math.max(0, r2(Math.min(inv.pending_tds, inv.pending_amount)));
+    const capped = amt(value) > tdsCap ? (tdsCap > 0 ? String(tdsCap) : "") : value;
+    setTds((s) => ({ ...s, [inv.id]: capped }));
+    const suggestedCash = Math.max(0, r2(inv.pending_amount - amt(capped)));
+    changeCashAmount(inv.id, suggestedCash ? String(suggestedCash) : "");
   }
 
   // Suggested cash and TDS for an invoice: the customer's usual TDS, then as much cash as is left.
@@ -189,12 +239,26 @@ export default function RecordPayment() {
           }))
           .filter((a) => a.cash_amount > 0 || a.tds_amount > 0),
       });
-      navigate("/accountant/payments/list");
+      // Stay on this page -- no automatic redirect. The accountant chooses what to
+      // do next from the confirmation below (record another, or go to Payment List).
+      await reload();
+      setSaved(true);
     } catch (err) {
       setSaveError(err.message || "The payment could not be saved. Please try again.");
     } finally {
       setSaving(false);
     }
+  }
+
+  // Clears everything so the accountant can record a fresh payment on this same page.
+  function recordAnother() {
+    setCustomerId("");
+    setSelected([]);
+    setCash({});
+    setTds({});
+    setForm({ date: todayYmd(), mode: "NEFT", reference: "", received: "", remarks: "" });
+    setSaveError("");
+    setSaved(false);
   }
 
   return (
@@ -207,6 +271,16 @@ export default function RecordPayment() {
       </div>
 
       <DataError error={error} onRetry={reload} />
+
+      {saved && (
+        <div className="ac-info ok" style={{ marginBottom: 16, justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <span><FiCheckCircle style={{ marginRight: 6 }} />Payment saved successfully.</span>
+          <div className="ac-actions">
+            <button type="button" className="ac-btn" onClick={recordAnother}>Record Another Payment</button>
+            <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/payments/list")}>Go to Payment List</button>
+          </div>
+        </div>
+      )}
 
       {/* 1. Customer */}
       <div className="ac-card">
@@ -231,7 +305,6 @@ export default function RecordPayment() {
             {customer ? (
               <>
                 <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4 }}>{customer.name}</div>
-                <div className="ac-cust-line">Customer code: {customer.code || "—"}</div>
                 <div className="ac-cust-line">Unpaid invoices: {customer.unpaid_count}</div>
               </>
             ) : (
@@ -251,17 +324,17 @@ export default function RecordPayment() {
       </div>
 
       <div className="ac-rp-main">
-        {/* 2. Invoices */}
-        <div className="ac-card ac-grow" style={{ minWidth: 0 }}>
-          <h3 className="ac-section-title"><span className="ac-sec-ic"><FiFileText /></span>2. Select Invoices to Apply Payment</h3>
+        {/* 3. Invoices -- placed second visually (order: 2 below), so Payment Details comes first */}
+        <div className="ac-card ac-grow" style={{ minWidth: 0, order: 2 }}>
+          <h3 className="ac-section-title"><span className="ac-sec-ic"><FiFileText /></span>3. Select Invoices to Apply Payment</h3>
           <div className="ac-rp-tools">
             <span className="ac-note"><FiInfo /> Invoices are listed from oldest to newest. You can edit cash and TDS for each invoice.</span>
             <div className="ac-rp-tools-row">
               <label className="ac-checkline">
                 <input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} /> Show fully paid invoices
               </label>
-              <button type="button" className="ac-btn ac-btn-primary ac-prev-tds" disabled={!tdsOn || !previousCandidates.length} onClick={() => setPrevOpen(true)}
-                title={!tdsOn ? "TDS is not applicable for this customer" : previousCandidates.length ? "" : "No earlier invoice has pending TDS"}>
+              <button type="button" className="ac-btn ac-btn-primary ac-prev-tds" disabled={!tdsOn} onClick={() => setPrevOpen(true)}
+                title={tdsOn ? "" : "TDS is not applicable for this customer"}>
                 <FiPlus /> Add Previous TDS
               </button>
             </div>
@@ -274,9 +347,9 @@ export default function RecordPayment() {
                     checked={pickable.length > 0 && pickable.every((i) => selected.includes(i.id))} onChange={toggleAll} /></th>
                   <th>Invoice No</th><th className="ac-col-lo">Invoice Date</th><th>Due Date</th>
                   <th className="ac-num">Invoice Amount</th><th className="ac-num">Pending Amount</th>
-                  {tdsOn && <><th className="ac-num ac-col-lo">TDS Rate</th><th className="ac-num">TDS Pending</th></>}
-                  <th className="ac-num">Cash Amount</th>
-                  {tdsOn && <><th className="ac-num">TDS Amount</th><th className="ac-num ac-col-lo">Total Allocation</th></>}
+                  {tdsOn && <><th className="ac-num ac-col-lo">TDS Rate</th><th className="ac-num">TDS</th></>}
+                  <th className="ac-num">Amount Received</th>
+                  {tdsOn && <><th className="ac-num">Balance</th><th className="ac-num ac-col-lo">Total Allocation</th></>}
                   <th className="ac-col-lo">Status</th>
                 </tr>
               </thead>
@@ -299,20 +372,26 @@ export default function RecordPayment() {
                       {tdsOn && (
                         <>
                           <td className="ac-num ac-col-lo">{inv.tds_applicable ? `${inv.tds_rate}%` : "—"}</td>
-                          <td className="ac-num">{inv.tds_applicable ? money(inv.pending_tds) : "—"}</td>
+                          <td className="ac-num">
+                            {inv.tds_applicable ? (
+                              <input className="ac-alloc-input" type="number" min="0" aria-label={`TDS for ${inv.invoice_number}`}
+                                disabled={!on} value={on ? tds[inv.id] ?? "" : ""}
+                                onChange={(e) => changeTdsAmount(inv, e.target.value)} />
+                            ) : "—"}
+                          </td>
                         </>
                       )}
                       <td className="ac-num">
-                        <input className="ac-alloc-input" type="number" min="0" aria-label={`Cash for ${inv.invoice_number}`}
+                        <input className="ac-alloc-input" type="number" min="0" aria-label={`Amount received for ${inv.invoice_number}`}
                           disabled={!on || !isOpen(inv)} value={on ? cash[inv.id] ?? "" : ""}
-                          onChange={(e) => setCash((s) => ({ ...s, [inv.id]: e.target.value }))} />
+                          onChange={(e) => changeCashAmount(inv.id, e.target.value, Math.max(0, r2(inv.pending_amount - t)))} />
                       </td>
                       {tdsOn && (
                         <>
-                          <td className="ac-num">
-                            <input className="ac-alloc-input" type="number" min="0" aria-label={`TDS for ${inv.invoice_number}`}
-                              disabled={!on || !inv.tds_applicable} value={on ? tds[inv.id] ?? "" : ""}
-                              onChange={(e) => setTds((s) => ({ ...s, [inv.id]: e.target.value }))} />
+                          {/* Balance is never typed -- it's just what's left of the invoice once TDS and the
+                              amount received are taken out (pending - TDS - Amount Received). */}
+                          <td className={`ac-num ${r2(inv.pending_amount - t - c) < -0.005 ? "ac-money-red" : ""}`}>
+                            {money(r2(inv.pending_amount - t - c))}
                           </td>
                           <td className="ac-num ac-col-lo">{on ? inr(r2(c + t)) : "0"}</td>
                         </>
@@ -331,13 +410,13 @@ export default function RecordPayment() {
                     {tdsOn && (
                       <>
                         <td className="ac-col-lo" />
-                        <td />
+                        <td className="ac-num" style={{ fontWeight: 700 }}>{money(tdsTotal)}</td>
                       </>
                     )}
                     <td className="ac-num" style={{ fontWeight: 700 }}>{money(cashTotal)}</td>
                     {tdsOn && (
                       <>
-                        <td className="ac-num" style={{ fontWeight: 700 }}>{money(tdsTotal)}</td>
+                        <td className={`ac-num ${balanceTotal < -0.005 ? "ac-money-red" : ""}`} style={{ fontWeight: 700 }}>{money(balanceTotal)}</td>
                         <td className="ac-num ac-col-lo" style={{ fontWeight: 700 }}>{money(settlement)}</td>
                       </>
                     )}
@@ -349,9 +428,9 @@ export default function RecordPayment() {
           </div>
         </div>
 
-        {/* 3. Payment details */}
-        <div className="ac-card">
-          <h3 className="ac-section-title"><span className="ac-sec-ic"><FiCreditCard /></span>3. Payment Details</h3>
+        {/* 2. Payment details -- placed first visually (order: 1) */}
+        <div className="ac-card" style={{ order: 1 }}>
+          <h3 className="ac-section-title"><span className="ac-sec-ic"><FiCreditCard /></span>2. Payment Details</h3>
           <div className="ac-fields-3" style={{ marginBottom: 14 }}>
             <div className="ac-field"><label><span className="ac-lab-ic"><FiCalendar /></span>Payment Date *</label><input className="ac-input" type="date" value={form.date} onChange={set("date")} /></div>
             <div className="ac-field">
@@ -360,12 +439,13 @@ export default function RecordPayment() {
                 {MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
-            <div className="ac-field"><label><span className="ac-lab-ic"><FiHash /></span>Reference No</label><input className="ac-input" value={form.reference} onChange={set("reference")} placeholder="UTR / cheque no" /></div>
+            <div className="ac-field"><label><span className="ac-lab-ic"><FiHash /></span>UTR No</label><input className="ac-input" value={form.reference} onChange={set("reference")} placeholder="Enter UTR number" /></div>
           </div>
           <div className="ac-grid-2" style={{ alignItems: "end", marginBottom: 14 }}>
             <div className="ac-field">
-              <label><span className="ac-lab-ic"><FiDollarSign /></span>Cash Received (₹) *</label>
-              <input className="ac-input" type="number" min="0" value={form.received} onChange={set("received")} placeholder="0" />
+              <label><span className="ac-lab-ic"><FiDollarSign /></span>Amount Received (₹) *</label>
+              <input className="ac-input" type="number" min="0" value={form.received} onChange={set("received")}
+                onBlur={fillCashFromReceived} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} placeholder="0" />
             </div>
             {received > 0 && (
               <div className="ac-note ok">
@@ -389,7 +469,7 @@ export default function RecordPayment() {
           )}
           <div className="ac-rp-foot">
             <button type="button" className="ac-btn" onClick={() => navigate("/accountant/payments/list")} disabled={saving}>Cancel</button>
-            <button type="button" className="ac-btn ac-btn-primary" onClick={save} disabled={saving}><FiCheck /> {saving ? "Saving…" : "Save Payment"}</button>
+            <button type="button" className="ac-btn ac-btn-primary" onClick={save} disabled={saving || saved}><FiCheck /> {saving ? "Saving…" : saved ? "Saved" : "Save Payment"}</button>
           </div>
         </div>
       </div>
@@ -405,7 +485,7 @@ export default function RecordPayment() {
           ))}
         </div>
         <div className="ac-sum-grid">
-          <div><div className="ac-mini-label"><span className="ac-lab-ic"><FiDollarSign /></span>Cash Received</div><div className="ac-sum-value">{money(received)}</div></div>
+          <div><div className="ac-mini-label"><span className="ac-lab-ic"><FiDollarSign /></span>Amount Received</div><div className="ac-sum-value">{money(received)}</div></div>
           <div><div className="ac-mini-label"><span className="ac-lab-ic"><FiShield /></span>Total TDS Deducted</div><div className="ac-sum-value">{money(tdsTotal)}</div></div>
           <div><div className="ac-mini-label"><span className="ac-lab-ic"><FiCheckCircle /></span>Total Settlement</div><div className="ac-sum-value">{money(settlement)}</div></div>
           <div><div className="ac-mini-label"><span className="ac-lab-ic"><FiFileText /></span>Invoices Allocated</div><div className="ac-sum-value">{allocatedCount}</div></div>
@@ -424,7 +504,7 @@ export default function RecordPayment() {
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack">
             <thead>
-              <tr><th>Date</th><th>Reference No</th><th className="ac-num">Cash (₹)</th><th className="ac-num">TDS (₹)</th><th>Mode</th><th className="ac-num">Allocated Cash (₹)</th><th>Remarks</th><th>Created By</th></tr>
+              <tr><th>Date</th><th>UTR No</th><th className="ac-num">Cash (₹)</th><th className="ac-num">TDS (₹)</th><th>Mode</th><th className="ac-num">Allocated Cash (₹)</th><th>Remarks</th><th>Created By</th></tr>
             </thead>
             <tbody>
               {history.length ? history.map((p) => (
@@ -464,7 +544,7 @@ function PreviousTdsModal({ invoices, current, onClose, onApply }) {
       if (!(a > 0)) return setError(`Enter the amount to deduct for ${inv.invoice_number}.`);
       if (a > inv.pending_tds + 0.005) return setError(`The amount for ${inv.invoice_number} is more than its pending TDS.`);
     }
-    if (!chosen.length) return setError("Tick at least one invoice.");
+    if (!chosen.length) return setError(invoices.length ? "Tick at least one invoice." : "This customer has no earlier invoice with pending TDS yet.");
     onApply(chosen.map((i) => ({ id: i.id, amount: amt(rows[i.id].amount) })));
   }
 
@@ -480,7 +560,7 @@ function PreviousTdsModal({ invoices, current, onClose, onApply }) {
           <table className="ac-table">
             <thead><tr><th /><th>Invoice No</th><th>Invoice Date</th><th className="ac-num">Pending TDS</th><th className="ac-num">Amount to Deduct</th></tr></thead>
             <tbody>
-              {invoices.map((inv) => (
+              {invoices.length ? invoices.map((inv) => (
                 <tr key={inv.id}>
                   <td><input type="checkbox" aria-label={`Select ${inv.invoice_number}`} checked={Boolean(rows[inv.id]?.on)} onChange={(e) => patch(inv.id, { on: e.target.checked })} /></td>
                   <td>{inv.invoice_number}</td>
@@ -491,15 +571,17 @@ function PreviousTdsModal({ invoices, current, onClose, onApply }) {
                       value={rows[inv.id]?.amount ?? ""} onChange={(e) => patch(inv.id, { amount: e.target.value })} />
                   </td>
                 </tr>
-              ))}
-              <tr><td colSpan={4} style={{ fontWeight: 700 }}>Total Previous TDS</td><td className="ac-num" style={{ fontWeight: 700 }}>{money(total)}</td></tr>
+              )) : <EmptyRow cols={5} text="This customer has no earlier invoice with pending TDS yet." />}
+              {invoices.length > 0 && (
+                <tr><td colSpan={4} style={{ fontWeight: 700 }}>Total Previous TDS</td><td className="ac-num" style={{ fontWeight: 700 }}>{money(total)}</td></tr>
+              )}
             </tbody>
           </table>
         </div>
         {error && <div className="ac-info error" style={{ marginTop: 12 }} role="alert"><FiAlertCircle /><span>{error}</span></div>}
         <div className="ac-modal-foot">
           <button type="button" className="ac-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="ac-btn ac-btn-primary" onClick={apply}>Apply</button>
+          <button type="button" className="ac-btn ac-btn-primary" disabled={!invoices.length} onClick={apply}>Apply</button>
         </div>
       </div>
     </div>

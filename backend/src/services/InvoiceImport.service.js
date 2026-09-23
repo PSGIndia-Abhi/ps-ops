@@ -4,6 +4,7 @@ const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { notifyInvoiceImport } = require("./notifications.service");
 const { insertInvoiceTds } = require("./Tds.service");
+const { syncInvoiceStatusesSafely } = require("./InvoiceStatus.service");
 
 const MAX_ROWS = 5000;
 const MAX_AMOUNT = 9999999999999.99;
@@ -20,8 +21,8 @@ function withStatus(message, status = 400) {
 // ---------------------------------------------------------------------------
 const COLUMNS = {
   invoice_number: { label: "Invoice No", required: true, aliases: ["invoiceno", "invoicenumber", "invoice", "invno"] },
-  customer: { label: "Customer", required: true, aliases: ["customer", "customername", "customercode", "company"] },
-  site: { label: "Site", required: true, aliases: ["site", "sitename"] },
+  customer: { label: "Customer", required: true, aliases: ["customer", "customername", "customerid", "customercode", "companyid", "company"] },
+  site: { label: "Site", required: true, aliases: ["site", "sitename", "siteid"] },
   invoice_date: { label: "Invoice Date", required: true, aliases: ["invoicedate", "date"] },
   due_date: { label: "Due Date", required: false, aliases: ["duedate"] },
   amount: { label: "Amount", required: true, aliases: ["amount", "invoiceamount", "total"] },
@@ -121,42 +122,80 @@ const DATE_HINT = "use DD/MM/YYYY or YYYY-MM-DD";
 // ---------------------------------------------------------------------------
 async function validateRows(rows, user) {
   const lower = (v) => String(v).trim().toLowerCase();
+  const upper = (v) => String(v).trim().toUpperCase();
 
-  // customers
-  const names = [...new Set(rows.map((r) => lower(r.customer)).filter(Boolean))];
-  const customersByKey = new Map(); // lower(name or code) -> [customer]
-  if (names.length) {
+  // customers -- matched by name/code (as before) OR by id (COMP1, COMP2,
+  // ...), whichever the row has. The id is unambiguous, so it's the safer
+  // choice for anyone unsure of the exact customer name; the name still
+  // works for people who already know it.
+  const typedCustomers = [...new Set(rows.map((r) => String(r.customer || "").trim()).filter(Boolean))];
+  const customersById = new Map(); // upper(id) -> customer
+  const customersByNameKey = new Map(); // lower(name or code) -> [customer]
+  if (typedCustomers.length) {
+    const lowerVals = typedCustomers.map(lower);
+    const upperVals = typedCustomers.map(upper);
     const [customers] = await pool.query(
-      `SELECT id, name, code, is_active FROM companies WHERE LOWER(name) IN (?) OR LOWER(code) IN (?)`,
-      [names, names]
+      `SELECT id, name, code, is_active FROM companies WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(code) IN (?)`,
+      [upperVals, lowerVals, lowerVals]
     );
     for (const c of customers) {
+      customersById.set(upper(c.id), c);
       for (const key of new Set([lower(c.name), lower(c.code || "")])) {
         if (!key) continue;
-        if (!customersByKey.has(key)) customersByKey.set(key, []);
-        customersByKey.get(key).push(c);
+        if (!customersByNameKey.has(key)) customersByNameKey.set(key, []);
+        customersByNameKey.get(key).push(c);
       }
     }
   }
 
-  // sites of those customers
-  const customerIds = [...new Set([...customersByKey.values()].flat().map((c) => c.id))];
-  const sitesByCustomer = new Map();
-  if (customerIds.length) {
-    const [sites] = await pool.query(`SELECT id, company_id, name, branch_id, is_active FROM sites WHERE company_id IN (?)`, [customerIds]);
+  function resolveCustomer(typed) {
+    const byId = customersById.get(upper(typed));
+    if (byId) return { customer: byId };
+    const matches = customersByNameKey.get(lower(typed)) || [];
+    const unique = [...new Map(matches.map((c) => [c.id, c])).values()];
+    if (unique.length === 0) return { error: `Customer "${typed}" was not found` };
+    if (unique.length > 1) return { error: "More than one customer has this name. Please use the Customer ID instead." };
+    return { customer: unique[0] };
+  }
+
+  // sites -- same idea: matched by id (global, checked against the row's
+  // customer afterwards) or by name (scoped to that customer, like before).
+  const typedSites = [...new Set(rows.map((r) => String(r.site || "").trim()).filter(Boolean))];
+  const sitesById = new Map(); // upper(id) -> site
+  const sitesByNameKey = new Map(); // lower(name) -> [site]
+  if (typedSites.length) {
+    const lowerVals = typedSites.map(lower);
+    const upperVals = typedSites.map(upper);
+    const [sites] = await pool.query(
+      `SELECT id, company_id, name, branch_id, is_active FROM sites WHERE UPPER(id) IN (?) OR LOWER(name) IN (?)`,
+      [upperVals, lowerVals]
+    );
     for (const s of sites) {
-      if (!sitesByCustomer.has(s.company_id)) sitesByCustomer.set(s.company_id, []);
-      sitesByCustomer.get(s.company_id).push(s);
+      sitesById.set(upper(s.id), s);
+      const key = lower(s.name);
+      if (!sitesByNameKey.has(key)) sitesByNameKey.set(key, []);
+      sitesByNameKey.get(key).push(s);
     }
+  }
+
+  function resolveSite(typed, customerId) {
+    const byId = sitesById.get(upper(typed));
+    if (byId) return { site: byId, byId: true };
+    if (!customerId) return { error: `Site "${typed}" was not found` };
+    const matches = (sitesByNameKey.get(lower(typed)) || []).filter((s) => s.company_id === customerId);
+    if (matches.length === 0) return { error: `Site "${typed}" was not found for this customer` };
+    if (matches.length > 1) return { error: "More than one site of this customer has this name. Please use the Site ID instead." };
+    return { site: matches[0] };
   }
 
   // invoice numbers that already exist
   const existing = new Set();
   const numbers = [...new Set(rows.map((r) => r.invoice_number).filter(Boolean))];
-  if (customerIds.length && numbers.length) {
+  const allCustomerIds = [...new Set([...customersById.values(), ...[...customersByNameKey.values()].flat()].map((c) => c.id))];
+  if (allCustomerIds.length && numbers.length) {
     const [found] = await pool.query(
       `SELECT customer_id, invoice_number FROM invoices WHERE customer_id IN (?) AND invoice_number IN (?)`,
-      [customerIds, numbers]
+      [allCustomerIds, numbers]
     );
     for (const f of found) existing.add(`${f.customer_id}|${lower(f.invoice_number)}`);
   }
@@ -203,29 +242,36 @@ async function validateRows(rows, user) {
       }
     }
 
-    // customer
+    // customer -- resolved from either the name/code or the id typed on the row
     let customer = null;
     if (row.customer) {
-      const matches = customersByKey.get(lower(row.customer)) || [];
-      const unique = [...new Map(matches.map((c) => [c.id, c])).values()];
-      if (unique.length === 0) errors.push("Customer not found in the system");
-      else if (unique.length > 1) errors.push("More than one customer has this name. Please use the customer code");
-      else if (!unique[0].is_active) errors.push("Customer is inactive");
-      else customer = unique[0];
+      const resolved = resolveCustomer(row.customer);
+      if (resolved.error) errors.push(resolved.error);
+      else if (!resolved.customer.is_active) errors.push("Customer is inactive");
+      else customer = resolved.customer;
     }
+    result.customer_display = customer ? customer.name : row.customer;
 
-    // site
-    if (customer && row.site) {
-      const sites = (sitesByCustomer.get(customer.id) || []).filter((s) => lower(s.name) === lower(row.site));
-      if (sites.length === 0) errors.push("Site not found for this customer");
-      else if (sites.length > 1) errors.push("More than one site of this customer has this name");
-      else if (!sites[0].is_active) errors.push("Site is inactive");
-      else if (user.role !== "admin" && (!userBranchId || sites[0].branch_id !== userBranchId)) {
+    // site -- resolved from either the name (scoped to this row's customer)
+    // or the id (checked against this row's customer afterwards, so a valid
+    // site id from a different customer is still an error).
+    let site = null;
+    if (row.site) {
+      const resolved = resolveSite(row.site, customer?.id || null);
+      if (resolved.error) {
+        errors.push(resolved.error);
+      } else if (resolved.byId && customer && resolved.site.company_id !== customer.id) {
+        errors.push(`Site "${row.site}" does not belong to this customer`);
+      } else if (!resolved.site.is_active) {
+        errors.push("Site is inactive");
+      } else if (user.role !== "admin" && (!userBranchId || resolved.site.branch_id !== userBranchId)) {
         errors.push("This site belongs to another branch, so you cannot create invoices for it");
       } else {
-        result.matched_site_id = sites[0].id;
+        site = resolved.site;
+        result.matched_site_id = site.id;
       }
     }
+    result.site_display = site ? site.name : row.site;
 
     // duplicates
     if (customer && row.invoice_number) {
@@ -263,8 +309,13 @@ async function createPreview(file, user) {
 
     const values = validated.map((r) => [
       uuid(), importId, r.rowNumber,
-      JSON.stringify({ invoice_number: r.invoice_number, customer: r.customer, site: r.site, invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks }),
-      r.customer || null, r.matched_customer_id, r.site || null, r.matched_site_id,
+      JSON.stringify({
+        invoice_number: r.invoice_number,
+        customer: r.customer_display, customer_id: r.customer,
+        site: r.site_display, site_id: r.site,
+        invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks,
+      }),
+      r.customer_display || null, r.matched_customer_id, r.site_display || null, r.matched_site_id,
       r.invoice_number || null, r.parsed_invoice_date, r.parsed_due_date, r.parsed_amount,
       r.errors.length === 0 ? 1 : 0, joinErrors(r.errors),
     ]);
@@ -426,6 +477,7 @@ async function confirmImport(importId, user) {
       [Number(counts.valid_rows) || 0, Number(counts.error_rows) || 0, importId]
     );
     await connection.commit();
+    await syncInvoiceStatusesSafely(); // invoices imported with a past due date are stored as OVERDUE right away
   } catch (err) {
     await connection.rollback();
     throw err;

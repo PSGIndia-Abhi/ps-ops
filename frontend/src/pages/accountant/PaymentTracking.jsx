@@ -171,7 +171,6 @@ export default function PaymentTracking() {
           <select className="ac-select" value={status} onChange={filterChange(setStatus)}>
             <option value="">All Status</option>
             {PIPELINE.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            <option value="CANCELLED">Cancelled</option>
           </select>
           <input className="ac-input" type="date" value={from} onChange={filterChange(setFrom)} aria-label="Due from" />
           <input className="ac-input" type="date" value={to} onChange={filterChange(setTo)} aria-label="Due to" />

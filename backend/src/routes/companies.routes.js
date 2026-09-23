@@ -133,7 +133,11 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
       return res.status(409).json({ error: "Company already exists for this group" });
     }
 
-    const id = uuid();
+    // Customers get a short, readable id (COMP1, COMP2, ...) instead of a UUID.
+    const [[nextCompany]] = await pool.query(
+      "SELECT COALESCE(MAX(CAST(SUBSTRING(id, 5) AS UNSIGNED)), 0) + 1 AS next FROM companies WHERE id LIKE 'COMP%'"
+    );
+    const id = `COMP${nextCompany.next}`;
     await pool.query(
       `INSERT INTO companies
       (id, group_id, name, code, gst_number, type, is_active, created_at)

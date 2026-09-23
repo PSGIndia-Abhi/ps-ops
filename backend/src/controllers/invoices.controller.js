@@ -1,6 +1,7 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { insertInvoiceTds } = require("../services/Tds.service");
+const { syncInvoiceStatusesSafely } = require("../services/InvoiceStatus.service");
 
 function withStatus(message, status = 400) {
   const err = new Error(message);
@@ -176,6 +177,7 @@ async function createInvoice(req, res) {
     );
     await insertInvoiceTds(connection, id, customer, invoice_amount);
     await connection.commit();
+    await syncInvoiceStatusesSafely();
 
     res.json({ success: true, id });
   } catch (err) {
@@ -231,6 +233,7 @@ async function updateInvoice(req, res) {
         id,
       ]
     );
+    await syncInvoiceStatusesSafely(); // the due date may have moved, so re-check the stored status
 
     res.json({ success: true });
   } catch (err) {

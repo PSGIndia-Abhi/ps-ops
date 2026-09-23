@@ -26,11 +26,25 @@ import { daysOverdue, groupByCustomer, showDate, todayYmd, ymd, useAccountantDat
 // Y-axis labels in lakhs (1L = 1,00,000), e.g. 500000 -> "5L".
 const lakhs = (v) => (v === 0 ? "0" : `${Number((v / 100000).toFixed(1))}L`);
 
-// With no data the chart still draws its axes and legend: the last 6 month names, all at zero.
-function lastMonths(count = 6) {
-  const now = new Date();
+// The trend chart's month columns: up to `maxCount` months, ending at the selected "To" date and
+// reaching back only as far as the selected "From" date. A narrow filter (e.g. one month) shows just
+// that month instead of padding the chart with months outside what was asked for; a wide filter (the
+// default, which can run back years) is capped at `maxCount` so the chart stays readable — anything
+// invoiced or collected further back than that will not have a column and so will not show here, even
+// though it is still counted in every other total on the page. With no data the axes and legend still
+// draw, all at zero.
+function trendMonths(fromYmd, toYmd, maxCount = 6) {
+  const to = toYmd ? new Date(`${toYmd}T00:00:00`) : new Date();
+  const toMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+  let count = maxCount;
+  if (fromYmd) {
+    const from = new Date(`${fromYmd}T00:00:00`);
+    const fromMonth = new Date(from.getFullYear(), from.getMonth(), 1);
+    const span = (toMonth.getFullYear() - fromMonth.getFullYear()) * 12 + (toMonth.getMonth() - fromMonth.getMonth()) + 1;
+    count = Math.min(Math.max(1, span), maxCount);
+  }
   return Array.from({ length: count }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (count - 1 - i), 1);
+    const d = new Date(toMonth.getFullYear(), toMonth.getMonth() - (count - 1 - i), 1);
     return { key: ymd(d).slice(0, 7), month: d.toLocaleString("en-US", { month: "short" }), invoiced: 0, collected: 0 };
   });
 }
@@ -68,20 +82,36 @@ function greeting() {
   return "Good Evening";
 }
 
-// The dashboard opens on the current month: the 1st up to today.
-const defaultRange = () => {
+// What the date range shows before the accountant changes anything: "From" is the oldest unpaid
+// invoice's own invoice date, so nothing outstanding is hidden by default; "To" is always today.
+// This uses invoice_date rather than due_date because every list below filters invoices by their
+// invoice_date — using the due date here instead could put "From" after that same invoice's own
+// invoice_date, silently excluding the very invoice the default was set to include. Before the
+// invoices have loaded there is nothing to look at yet, so "From" falls back to the 1st of the
+// current month. This is a plain function of the data, not stored state, so it stays correct if the
+// invoices are reloaded — and Reset returns to it.
+function computeRangeDefault(invoices) {
   const today = todayYmd();
-  return { from: `${today.slice(0, 8)}01`, to: today };
-};
+  const oldest = invoices
+    .filter((i) => i.status !== "CANCELLED" && i.pending_amount > 0)
+    .map((i) => i.invoice_date)
+    .filter(Boolean)
+    .sort()[0];
+  return { from: oldest || `${today.slice(0, 8)}01`, to: today };
+}
 
 export default function AccountantDashboard() {
   const navigate = useNavigate();
   const { user } = useMe();
   const { invoices, payments, tasks, loading, error, reload } = useAccountantData();
-  const [range, setRange] = useState(defaultRange);
+  // null = the accountant has not picked a date themselves yet, so the computed default is shown.
+  const [range, setRange] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const filterRef = useRef(null);
+
+  const rangeDefault = useMemo(() => computeRangeDefault(invoices), [invoices]);
+  const effectiveRange = range || rangeDefault;
 
   // Close the dropdown when the user clicks outside it or presses Escape.
   useEffect(() => {
@@ -98,16 +128,23 @@ export default function AccountantDashboard() {
 
   const firstName = (user?.name || "").split(" ")[0];
   const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  // Picking a customer narrows the Site list to that customer's own sites; a
+  // previously chosen site that doesn't belong to them is cleared so the two
+  // filters never disagree with each other.
+  const setCustomerFilter = (e) => setFilters((f) => ({ ...f, customer: e.target.value, site: "" }));
   // The count on the Filters button counts only the choices inside the menu, not the two date boxes.
   const activeFilters = Object.values(filters).filter(Boolean).length;
-  const isDefaultRange = range.from === defaultRange().from && range.to === defaultRange().to;
+  const isDefaultRange = range === null;
   const canReset = activeFilters > 0 || !isDefaultRange;
 
   const customerOptions = useMemo(() => uniq([...invoices, ...payments], "customer_name"), [invoices, payments]);
-  const siteOptions = useMemo(() => uniq(invoices, "site_name"), [invoices]);
+  const siteOptions = useMemo(
+    () => uniq(invoices.filter((i) => !filters.customer || i.customer_name === filters.customer), "site_name"),
+    [invoices, filters.customer]
+  );
 
   // ---- apply the filters to each list --------------------------------------------------------
-  const inRange = (date) => (!range.from || (date && date >= range.from)) && (!range.to || (date && date <= range.to));
+  const inRange = (date) => (!effectiveRange.from || (date && date >= effectiveRange.from)) && (!effectiveRange.to || (date && date <= effectiveRange.to));
 
   const fInvoices = invoices.filter((i) =>
     (!filters.customer || i.customer_name === filters.customer) &&
@@ -145,9 +182,9 @@ export default function AccountantDashboard() {
     { key: "light", icon: FiBell, label: "Today's Follow-ups", value: followupsToday, note: "Tasks due today" },
   ];
 
-  // Trend: invoiced and collected per month for the last 6 months.
+  // Trend: invoiced and collected per month, following the selected From/To dates (see trendMonths).
   const trend = (() => {
-    const months = lastMonths(6);
+    const months = trendMonths(effectiveRange.from, effectiveRange.to, 6);
     const byKey = new Map(months.map((m) => [m.key, m]));
     for (const i of live) {
       const m = byKey.get(i.invoice_date.slice(0, 7));
@@ -188,15 +225,15 @@ export default function AccountantDashboard() {
   const viewAllLabel = (all) => (all.length > PREVIEW_ROWS ? `View All (${all.length})` : "View All");
 
   return (
-    <div className="ac-page">
+    <div className="ac-page ac-dashboard">
       <div className="ac-head">
         <div>
           <h2 className="ac-title">{greeting()}{firstName ? `, ${firstName}` : ""}</h2>
           <p className="ac-sub">Here's your collection overview</p>
         </div>
         <div className="ac-actions">
-          <div className="ac-date-field"><span>From</span><DateInput value={range.from} onChange={(v) => setRange((r) => ({ ...r, from: v }))} ariaLabel="From date" /></div>
-          <div className="ac-date-field"><span>To</span><DateInput value={range.to} onChange={(v) => setRange((r) => ({ ...r, to: v }))} ariaLabel="To date" /></div>
+          <div className="ac-date-field"><span>From</span><DateInput value={effectiveRange.from} onChange={(v) => setRange({ ...effectiveRange, from: v })} ariaLabel="From date" /></div>
+          <div className="ac-date-field"><span>To</span><DateInput value={effectiveRange.to} onChange={(v) => setRange({ ...effectiveRange, to: v })} ariaLabel="To date" /></div>
           <div className="ac-dropdown-wrap" ref={filterRef}>
             <button type="button" className={`ac-btn ${showFilters ? "ac-btn-primary" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters} aria-haspopup="true">
               Filters{activeFilters > 0 ? ` (${activeFilters})` : ""} <FiChevronDown />
@@ -206,7 +243,7 @@ export default function AccountantDashboard() {
               <div className="ac-dropdown" role="dialog" aria-label="Filters">
                 <div className="ac-field">
                   <label>Customer</label>
-                  <select className="ac-select" value={filters.customer} onChange={setFilter("customer")}>
+                  <select className="ac-select" value={filters.customer} onChange={setCustomerFilter}>
                     <option value="">All customers</option>
                     {customerOptions.map((c) => <option key={c}>{c}</option>)}
                   </select>
@@ -234,7 +271,7 @@ export default function AccountantDashboard() {
                 </div>
                 <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="ac-btn" disabled={!canReset}
-                    onClick={() => { setFilters(EMPTY_FILTERS); setRange(defaultRange()); }}>
+                    onClick={() => { setFilters(EMPTY_FILTERS); setRange(null); }}>
                     Reset
                   </button>
                   <button type="button" className="ac-btn ac-btn-primary" onClick={() => setShowFilters(false)}>Done</button>

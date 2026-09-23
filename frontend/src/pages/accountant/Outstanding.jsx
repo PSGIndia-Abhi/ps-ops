@@ -58,7 +58,12 @@ export default function Outstanding() {
   );
 
   const customers = useMemo(() => [...new Set(unpaid.map((i) => i.customer_name))].sort(), [unpaid]);
-  const sites = useMemo(() => [...new Set(unpaid.map((i) => i.site_name).filter(Boolean))].sort(), [unpaid]);
+  // Narrowed to the selected customer's own sites, so the Site dropdown never
+  // offers a site that belongs to someone else.
+  const sites = useMemo(
+    () => [...new Set(unpaid.filter((i) => !customer || i.customer_name === customer).map((i) => i.site_name).filter(Boolean))].sort(),
+    [unpaid, customer]
+  );
 
   const activeChip = CHIPS.find((c) => c.key === chip);
   const activeBucket = BUCKETS.find((b) => b.key === bucket);
@@ -77,18 +82,20 @@ export default function Outstanding() {
   });
   const { pageRows, page, setPage, pageSize } = usePaged(rows);
 
-  const overdueList = unpaid.filter((i) => (daysOverdue(i.due_date) ?? -1) > 0);
-  const weekList = unpaid.filter((i) => CHIPS[3].test(i));
-  const avgDays = overdueList.length
-    ? Math.round(overdueList.reduce((s, i) => s + daysOverdue(i.due_date), 0) / overdueList.length)
+  // The 5 tiles reflect whatever is currently filtered (chip, search, customer,
+  // site, ageing bucket, min. pending) -- the same set the table below shows.
+  const overdueRows = rows.filter((i) => (daysOverdue(i.due_date) ?? -1) > 0);
+  const weekRows = rows.filter((i) => CHIPS[3].test(i));
+  const avgDays = overdueRows.length
+    ? Math.round(overdueRows.reduce((s, i) => s + daysOverdue(i.due_date), 0) / overdueRows.length)
     : null;
   const hasData = unpaid.length > 0;
 
   const cards = [
-    { key: "orange", icon: <FiClock />, label: "Total Outstanding", value: money(sum(unpaid, "pending_amount")) },
-    { key: "red", icon: <FiAlertTriangle />, label: "Overdue Amount", value: money(sum(overdueList, "pending_amount")) },
-    { key: "purple", icon: <FiCalendar />, label: "Due This Week", value: money(sum(weekList, "pending_amount")) },
-    { key: "blue", icon: <FiFileText />, label: "Unpaid Invoices", value: unpaid.length },
+    { key: "orange", icon: <FiClock />, label: "Total Outstanding", value: money(sum(rows, "pending_amount")) },
+    { key: "red", icon: <FiAlertTriangle />, label: "Overdue Amount", value: money(sum(overdueRows, "pending_amount")) },
+    { key: "purple", icon: <FiCalendar />, label: "Due This Week", value: money(sum(weekRows, "pending_amount")) },
+    { key: "blue", icon: <FiFileText />, label: "Unpaid Invoices", value: rows.length },
     { key: "light", icon: <FiActivity />, label: "Avg. Days Overdue", value: avgDays == null ? "—" : `${avgDays} days` },
   ];
 
@@ -104,6 +111,8 @@ export default function Outstanding() {
   }
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
+  // Changing the customer clears any site pick that no longer applies.
+  const changeCustomer = (e) => { setCustomer(e.target.value); setSite(""); setPage(0); };
 
   function exportRows() {
     exportCsv("outstanding-invoices.csv", [
@@ -133,7 +142,7 @@ export default function Outstanding() {
   }
 
   return (
-    <div className="ac-page">
+    <div className="ac-page ac-outstanding">
       <div className="ac-head">
         <div>
           <h2 className="ac-title ac-title-icon"><FiClock /> Outstanding</h2>
@@ -165,7 +174,7 @@ export default function Outstanding() {
 
         <div className="ac-filters-6" style={{ marginBottom: 14 }}>
           <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={filterChange(setSearch)} /></div>
-          <select className="ac-select" value={customer} onChange={filterChange(setCustomer)}>
+          <select className="ac-select" value={customer} onChange={changeCustomer}>
             <option value="">All Customers</option>
             {customers.map((c) => <option key={c}>{c}</option>)}
           </select>

@@ -80,6 +80,7 @@ function cleanPayment(row) {
     id: row.id,
     payment_number: row.payment_number,
     payment_date: ymd(row.payment_date),
+    updated_at: ymd(row.updated_at),
     customer_id: row.customer_id,
     customer_name: row.customer_name,
     received_amount: num(row.received_amount),

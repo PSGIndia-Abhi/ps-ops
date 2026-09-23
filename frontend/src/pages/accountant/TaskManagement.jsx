@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiCheck, FiChevronDown, FiPlus } from "react-icons/fi";
+import { FiCheckCircle, FiChevronDown, FiPlus } from "react-icons/fi";
 import SetReminderModal from "../../components/accountant/SetReminderModal";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { completeTask, createReminder, showDate, useAccountantData, usePaged } from "./data";
@@ -170,9 +170,9 @@ export default function TaskManagement() {
                   <td><Badge value={t.display_status} /></td>
                   <td>
                     {t.status === "OPEN" ? (
-                      <button type="button" className="ac-link" title="Mark as done" aria-label="Mark as done"
-                        disabled={completing === t.id} onClick={() => markDone(t.id)}><FiCheck /></button>
-                    ) : "—"}
+                      <button type="button" className="ac-task-done" title="Mark as done" aria-label="Mark as done"
+                        disabled={completing === t.id} onClick={() => markDone(t.id)}><FiCheckCircle /></button>
+                    ) : <span className="ac-task-none">—</span>}
                   </td>
                 </tr>
               )) : <EmptyRow cols={6} loading={loading} text="No tasks found" />}

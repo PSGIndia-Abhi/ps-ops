@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { FiAlertCircle, FiArrowLeft, FiCheckCircle, FiClipboard, FiDownload, FiFileText, FiList, FiRefreshCw, FiSend, FiUploadCloud, FiX } from "react-icons/fi";
+import {
+  FiAlertCircle, FiArrowLeft, FiCheckCircle, FiChevronLeft, FiChevronRight, FiClipboard,
+  FiDownload, FiFileText, FiList, FiRefreshCw, FiSend, FiUploadCloud, FiX,
+} from "react-icons/fi";
 import { apiFetch, safeJson } from "../../api";
 import { money } from "./format";
 import { EmptyRow, Skeleton } from "./ui";
@@ -9,25 +12,11 @@ import "./accountant.css";
 
 const PAGE_SIZE = 50;
 
-// Page title with a clipboard icon.
-function Title() {
-  return (
-    <h2 className="ac-title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <FiClipboard style={{ color: "#2563eb" }} /> Review &amp; Validate Import
-    </h2>
-  );
-}
-
-// A stat tile label with its icon.
-const StatLabel = ({ icon, children }) => (
-  <div className="ac-stat-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>{icon} {children}</div>
-);
-
 // The reason(s) a row failed, exactly as returned by the server.
 function Reasons({ errors, big }) {
   if (!errors.length) return null;
   return (
-    <ul className={`ac-reason ${errors.length > 1 ? "many" : ""} ${big ? "big" : ""}`}>
+    <ul className={`rv-reasons ${big ? "big" : ""}`}>
       {errors.map((e) => <li key={e}>{e}</li>)}
     </ul>
   );
@@ -95,7 +84,7 @@ export default function ReviewImport() {
     if (!notice) return undefined;
     // Forget the "just uploaded" flag so a page refresh does not show the notification again.
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
-    const timer = setTimeout(() => setNotice(false), 8000);
+    const timer = setTimeout(() => setNotice(false), 7000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -137,13 +126,28 @@ export default function ReviewImport() {
 
   if (loading) {
     return (
-      <div className="ac-page" aria-busy="true">
-        <Skeleton width={280} height={28} />
-        <div className="ac-stats-3">
-          {[0, 1, 2].map((i) => <div key={i} className="ac-stat"><Skeleton width="50%" /><Skeleton width="35%" height={26} style={{ marginTop: 10 }} /></div>)}
+      <div className="ac-page rv-page" aria-busy="true">
+        <div className="rv-head">
+          <div className="rv-head-left">
+            <span className="rv-back" aria-hidden="true"><FiArrowLeft /></span>
+            <div className="rv-head-text"><Skeleton width={260} height={24} /></div>
+          </div>
         </div>
-        <div className="ac-card">
-          <table className="ac-table"><tbody><EmptyRow cols={7} loading rows={6} /></tbody></table>
+        <div className="rv-summary">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rv-summary-item">
+              <Skeleton variant="circular" width={40} height={40} />
+              <div style={{ flex: 1 }}>
+                <Skeleton width="55%" height={22} />
+                <Skeleton width="40%" style={{ marginTop: 6 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="rv-body">
+          <div className="rv-table-wrap">
+            <table className="rv-table"><tbody><EmptyRow cols={7} loading rows={6} /></tbody></table>
+          </div>
         </div>
       </div>
     );
@@ -151,18 +155,24 @@ export default function ReviewImport() {
 
   if (!review) {
     return (
-      <div className="ac-page">
-        <Title />
+      <div className="ac-page rv-page">
+        <div className="rv-head">
+          <div className="rv-head-left">
+            <div className="rv-head-text">
+              <h2 className="rv-title"><FiClipboard /> Review &amp; Validate Import</h2>
+            </div>
+          </div>
+        </div>
         {message && (
           <div className="ac-info error"><FiAlertCircle style={{ flexShrink: 0, marginTop: 2 }} /><span>{message.text}</span></div>
         )}
-        <div className="ac-card" style={{ textAlign: "center", padding: 40 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 72, height: 72, borderRadius: "50%", background: "#eff6ff", color: "#2563eb", fontSize: 32 }}>
-            <FiFileText />
-          </span>
-          <p className="ac-drop-title">Nothing to review yet</p>
-          <p className="ac-drop-hint">Upload an Excel file (.xlsx) first. Its rows are checked and shown here.</p>
-          <button type="button" className="ac-btn ac-btn-primary" onClick={backToUpload}><FiUploadCloud /> Go to Invoice Upload</button>
+        <div className="rv-body">
+          <div className="rv-empty-state">
+            <span className="rv-empty-icon"><FiFileText /></span>
+            <p className="rv-empty-title">Nothing to review yet</p>
+            <p className="rv-empty-hint">Upload an Excel file (.xlsx) first. Its rows are checked and shown here.</p>
+            <button type="button" className="ac-btn ac-btn-primary" onClick={backToUpload}><FiUploadCloud /> Go to Invoice Upload</button>
+          </div>
         </div>
       </div>
     );
@@ -173,7 +183,6 @@ export default function ReviewImport() {
   const current = Math.min(page, pages - 1);
   const visible = rows.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
   const imported = review.status === "CONFIRMED";
-  const importedCount = review.rows.filter((r) => r.imported).length;
   const tabs = [
     ["all", `All (${review.total})`, <FiList />],
     ["valid", `Valid (${review.valid})`, <FiCheckCircle />],
@@ -181,31 +190,49 @@ export default function ReviewImport() {
   ];
 
   return (
-    <div className="ac-page">
-      <div className="ac-review-head">
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <button type="button" className="ac-back" onClick={backToUpload} aria-label="Back to upload"><FiArrowLeft /></button>
-          <Title />
+    <div className="ac-page rv-page">
+      <div className="rv-head">
+        <div className="rv-head-left">
+          <button type="button" className="rv-back" onClick={backToUpload} aria-label="Back to upload"><FiArrowLeft /></button>
+          <div className="rv-head-text">
+            <h2 className="rv-title"><FiClipboard /> Review &amp; Validate Import</h2>
+            <p className="rv-subtitle">
+              <FiFileText /> <strong>{review.file_name}</strong> · {review.total} record{review.total === 1 ? "" : "s"} checked
+            </p>
+          </div>
         </div>
-        <div className="ac-actions">
-          <span className="ac-filechip" style={{ marginTop: 0 }}><FiFileText /> {review.file_name}</span>
+        <div className="rv-actions">
           <button type="button" className="ac-btn" onClick={backToUpload}><FiRefreshCw /> Replace</button>
+          {/* Submit stays in the header so it is never pushed below the visible screen (or under the taskbar) */}
+          {/* Even a single error row blocks Submit -- everything must be valid before anything is imported. */}
+          <button
+            type="button"
+            className="ac-btn ac-btn-primary"
+            disabled={!review.valid || review.errors > 0 || imported || busy}
+            title={review.errors > 0 ? `Fix ${review.errors} error row${review.errors === 1 ? "" : "s"} before you can submit` : ""}
+            onClick={importValid}
+          >
+            <FiSend /> {busy ? "Submitting…" : imported ? "Submitted" : review.errors > 0 ? "Fix Errors to Submit" : `Submit ${review.valid} Record${review.valid === 1 ? "" : "s"}`}
+          </button>
         </div>
       </div>
 
+      {/* Pop-up shown once, right after a file is uploaded; it closes by itself */}
       {notice && (
-        <div className="ac-info ok" role="status">
-          <FiCheckCircle style={{ flexShrink: 0, marginTop: 2 }} />
-          <span style={{ flex: 1 }}>
-            <strong>{review.file_name}</strong> uploaded. {review.total} record{review.total === 1 ? "" : "s"} checked.{" "}
-            {importedCount > 0
-              ? `${importedCount} invoice${importedCount === 1 ? "" : "s"} imported.`
-              : review.valid > 0
-                ? `Review the rows, then click Submit to save the ${review.valid} valid invoice${review.valid === 1 ? "" : "s"}.`
-                : "No invoices can be imported from this file."}
-            {review.errors > 0 && ` ${review.errors} row${review.errors === 1 ? "" : "s"} with errors will not be imported.`}
-          </span>
-          <button type="button" className="ac-remove" onClick={() => setNotice(false)} aria-label="Dismiss notification"><FiX /></button>
+        <div className={`ac-toast ${review.valid > 0 ? "ok" : "warn"}`} role="status" aria-live="polite">
+          {review.valid > 0 ? <FiCheckCircle className="ac-toast-icon" /> : <FiAlertCircle className="ac-toast-icon" />}
+          <div className="ac-toast-body">
+            <strong>{review.valid > 0 ? "Successfully uploaded" : "Uploaded, but nothing can be imported"}</strong>
+            <span>{review.file_name}</span>
+            <span>
+              {review.total} record{review.total === 1 ? "" : "s"} checked: {review.valid} valid
+              {review.errors > 0 ? `, ${review.errors} with errors` : ""}.
+              {review.errors > 0
+                ? ` Fix all ${review.errors} error row${review.errors === 1 ? "" : "s"} before you can submit.`
+                : review.valid > 0 ? " Review the rows, then click Submit." : ""}
+            </span>
+          </div>
+          <button type="button" className="ac-toast-close" onClick={() => setNotice(false)} aria-label="Close notification"><FiX /></button>
         </div>
       )}
 
@@ -216,24 +243,42 @@ export default function ReviewImport() {
         </div>
       )}
 
-      <div className="ac-stats-3">
-        <div className="ac-stat blue"><StatLabel icon={<FiList />}>Total Records</StatLabel><div className="ac-stat-value">{review.total}</div></div>
-        <div className="ac-stat green"><StatLabel icon={<FiCheckCircle />}>Valid</StatLabel><div className="ac-stat-value">{review.valid}</div></div>
-        <div className="ac-stat red"><StatLabel icon={<FiAlertCircle />}>Errors</StatLabel><div className="ac-stat-value">{review.errors}</div></div>
+      <div className="rv-summary">
+        <div className="rv-summary-item total">
+          <span className="rv-summary-icon"><FiList /></span>
+          <div>
+            <div className="rv-summary-value">{review.total}</div>
+            <div className="rv-summary-label">Total Records</div>
+          </div>
+        </div>
+        <div className="rv-summary-item valid">
+          <span className="rv-summary-icon"><FiCheckCircle /></span>
+          <div>
+            <div className="rv-summary-value">{review.valid}</div>
+            <div className="rv-summary-label">Valid</div>
+          </div>
+        </div>
+        <div className="rv-summary-item error">
+          <span className="rv-summary-icon"><FiAlertCircle /></span>
+          <div>
+            <div className="rv-summary-value">{review.errors}</div>
+            <div className="rv-summary-label">Errors</div>
+          </div>
+        </div>
       </div>
 
-      <div className="ac-card">
-        <div className="ac-tabs" style={{ marginBottom: 14 }}>
+      <div className="rv-body">
+        <div className="rv-tabs">
           {tabs.map(([key, label, icon]) => (
-            <button key={key} type="button" className={`ac-tab ${tab === key ? "active" : ""}`}
+            <button key={key} type="button" className={`rv-tab ${tab === key ? "active" : ""}`}
               onClick={() => { setTab(key); setPage(0); }}>
-              <span style={{ verticalAlign: "-2px", marginRight: 6, display: "inline-flex" }}>{icon}</span>{label}
+              {icon} {label}
             </button>
           ))}
         </div>
 
-        <div className="ac-table-wrap ac-scroll-y">
-          <table className="ac-table">
+        <div className="rv-table-wrap">
+          <table className="rv-table">
             <thead>
               <tr>
                 <th>#</th><th>Invoice No</th><th>Customer</th><th>Site</th><th className="ac-num">Amount</th>
@@ -242,21 +287,21 @@ export default function ReviewImport() {
             </thead>
             <tbody>
               {visible.length ? visible.map((r) => (
-                <tr key={r.rowNumber} className={r.status === "error" ? "ac-row-error" : ""}>
-                  <td>{r.rowNumber}</td>
+                <tr key={r.rowNumber} className={r.status === "error" ? "rv-row-error" : ""}>
+                  <td className="rv-row-no">{r.rowNumber}</td>
                   <td>{r.invoiceNo || "—"}</td>
                   <td>{r.customer || "—"}</td>
                   <td>{r.site || "—"}</td>
                   <td className="ac-num">{typeof r.amount === "number" ? money(r.amount) : r.amount || "—"}</td>
                   <td>
                     {r.status === "valid"
-                      ? <span className="ac-status-pill valid"><FiCheckCircle /> Valid</span>
-                      : <span className="ac-status-pill error"><FiAlertCircle /> Error</span>}
+                      ? <span className="rv-pill valid"><FiCheckCircle /> Valid</span>
+                      : <span className="rv-pill error"><FiAlertCircle /> Error</span>}
                   </td>
                   <td><Reasons errors={r.errors} big={tab === "error"} /></td>
                 </tr>
               )) : (
-                <tr><td className="ac-empty" colSpan={7}>
+                <tr><td className="rv-empty" colSpan={7}>
                   {tab === "error" ? "No errors found" : tab === "valid" ? "No valid records" : "No records"}
                 </td></tr>
               )}
@@ -264,21 +309,18 @@ export default function ReviewImport() {
           </table>
         </div>
 
-        <div className="ac-pager">
-          <span>Showing {rows.length ? current * PAGE_SIZE + 1 : 0} to {Math.min(rows.length, (current + 1) * PAGE_SIZE)} of {rows.length}</span>
-          <div className="ac-pager-btns">
-            <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>&lsaquo;</button>
-            <button type="button" className="active">{current + 1}</button>
-            <button type="button" disabled={current >= pages - 1} onClick={() => setPage(current + 1)}>&rsaquo;</button>
+        <div className="rv-footer">
+          <span className="rv-pageinfo">Showing {rows.length ? current * PAGE_SIZE + 1 : 0}–{Math.min(rows.length, (current + 1) * PAGE_SIZE)} of {rows.length}</span>
+          <div className="rv-pagenav">
+            <button type="button" className="rv-pagebtn" disabled={current === 0} onClick={() => setPage(current - 1)} aria-label="Previous page"><FiChevronLeft /></button>
+            <span className="rv-pagecurrent">Page {current + 1} of {pages}</span>
+            <button type="button" className="rv-pagebtn" disabled={current >= pages - 1} onClick={() => setPage(current + 1)} aria-label="Next page"><FiChevronRight /></button>
           </div>
         </div>
 
-        <div className="ac-actions" style={{ justifyContent: "space-between", marginTop: 16 }}>
+        <div className="ac-actions" style={{ marginTop: 16 }}>
           <button type="button" className="ac-btn" disabled={!review.errors} onClick={downloadErrors}>
             <FiDownload /> Download Error Rows
-          </button>
-          <button type="button" className="ac-btn ac-btn-primary" disabled={!review.valid || imported || busy} onClick={importValid}>
-            <FiSend /> {busy ? "Submitting…" : imported ? "Submitted" : `Submit ${review.valid} Record${review.valid === 1 ? "" : "s"}`}
           </button>
         </div>
       </div>
