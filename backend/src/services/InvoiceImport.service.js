@@ -135,7 +135,7 @@ async function validateRows(rows, user) {
     const lowerVals = typedCustomers.map(lower);
     const upperVals = typedCustomers.map(upper);
     const [customers] = await pool.query(
-      `SELECT id, name, code, is_active FROM companies WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(code) IN (?)`,
+      `SELECT id, name, display_name, code, is_active FROM companies WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(code) IN (?)`,
       [upperVals, lowerVals, lowerVals]
     );
     for (const c of customers) {
@@ -250,7 +250,7 @@ async function validateRows(rows, user) {
       else if (!resolved.customer.is_active) errors.push("Customer is inactive");
       else customer = resolved.customer;
     }
-    result.customer_display = customer ? customer.name : row.customer;
+    result.customer_display = customer ? (customer.display_name || customer.name) : row.customer;
 
     // site -- resolved from either the name (scoped to this row's customer)
     // or the id (checked against this row's customer afterwards, so a valid
@@ -292,59 +292,41 @@ async function validateRows(rows, user) {
 const joinErrors = (errors) => (errors.length ? errors.join("\n").slice(0, 500) : null);
 const splitErrors = (text) => (text ? text.split("\n").filter(Boolean) : []);
 
+// Checks the file and hands back what it found -- nothing is written to the
+// database at this point. The rows (raw, as typed) travel back to the browser
+// and are sent again with confirmImport() if the accountant clicks Submit;
+// only a submitted, re-validated import is ever persisted.
 async function createPreview(file, user) {
   const parsed = await parseFile(file);
   const validated = await validateRows(parsed, user);
-
-  const importId = uuid();
   const valid = validated.filter((r) => r.errors.length === 0).length;
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    await connection.query(
-      `INSERT INTO invoice_imports (id, file_name, status, total_rows, valid_rows, error_rows, created_by)
-       VALUES (?, ?, 'PREVIEWED', ?, ?, ?, ?)`,
-      [importId, String(file.originalname).slice(0, 255), validated.length, valid, validated.length - valid, user.id]
-    );
 
-    const values = validated.map((r) => [
-      uuid(), importId, r.rowNumber,
-      JSON.stringify({
-        invoice_number: r.invoice_number,
-        customer: r.customer_display, customer_id: r.customer,
-        site: r.site_display, site_id: r.site,
+  return {
+    file_name: String(file.originalname).slice(0, 255),
+    status: "DRAFT",
+    total: validated.length,
+    valid,
+    errors: validated.length - valid,
+    rows: validated.map((r) => ({
+      rowNumber: r.rowNumber,
+      invoiceNo: r.invoice_number || "",
+      customer: r.customer_display || "",
+      site: r.site_display || "",
+      invoiceDate: r.invoice_date || "",
+      dueDate: r.due_date || "",
+      amount: r.parsed_amount ?? r.amount ?? "",
+      remarks: r.remarks || "",
+      status: r.errors.length === 0 ? "valid" : "error",
+      imported: false,
+      errors: r.errors,
+      // The exact raw values typed in the file, sent back unchanged on Submit so the
+      // row can be re-checked from scratch rather than trusting anything the browser sends.
+      raw: {
+        invoice_number: r.invoice_number, customer: r.customer, site: r.site,
         invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks,
-      }),
-      r.customer_display || null, r.matched_customer_id, r.site_display || null, r.matched_site_id,
-      r.invoice_number || null, r.parsed_invoice_date, r.parsed_due_date, r.parsed_amount,
-      r.errors.length === 0 ? 1 : 0, joinErrors(r.errors),
-    ]);
-    for (let i = 0; i < values.length; i += 500) {
-      await connection.query(
-        `INSERT INTO invoice_import_rows
-         (id, import_id, \`row_number\`, raw_data, customer_name, matched_customer_id, site_name, matched_site_id,
-          invoice_number, invoice_date, due_date, invoice_amount, is_valid, error_message)
-         VALUES ?`,
-        [values.slice(i, i + 500)]
-      );
-    }
-    await connection.commit();
-  } catch (err) {
-    await connection.rollback();
-    throw err;
-  } finally {
-    connection.release();
-  }
-
-  // Nothing can be imported from this file, so tell the user now. (Otherwise they are told after the import.)
-  if (valid === 0) {
-    notifyInvoiceImport({
-      userId: user.id, importId, fileName: String(file.originalname).slice(0, 255),
-      total: validated.length, imported: 0, errors: validated.length,
-    }).catch((err) => console.error("Invoice import notification failed:", err));
-  }
-
-  return getImport(importId, user);
+      },
+    })),
+  };
 }
 
 async function loadImport(importId, user) {
@@ -396,7 +378,7 @@ async function getImport(importId, user) {
 async function listImports(user) {
   const [rows] = await pool.query(
     `SELECT id, file_name, status, total_rows, valid_rows, error_rows, created_at, confirmed_at
-     FROM invoice_imports WHERE created_by = ? ORDER BY created_at DESC LIMIT 20`,
+     FROM invoice_imports WHERE created_by = ? AND status = 'CONFIRMED' ORDER BY created_at DESC LIMIT 20`,
     [user.id]
   );
   return rows.map((r) => ({
@@ -418,16 +400,19 @@ async function deleteImport(importId, user) {
   return { success: true };
 }
 
-async function confirmImport(importId, user) {
-  const imp = await loadImport(importId, user);
-  if (imp.status === "CONFIRMED") throw withStatus("This import has already been imported.", 409);
+// Re-checks the rows the browser sends back (never trusting its "valid"/"matched" claims)
+// and, only now, writes anything to the database: the invoice_imports record, one
+// invoice_import_rows row per line (for the audit trail), and the invoices themselves.
+// This is the only place any of this data is ever persisted.
+async function confirmImport(fileName, submittedRows, user) {
+  if (!Array.isArray(submittedRows) || !submittedRows.length) throw withStatus("There is nothing to submit.");
 
-  const [rows] = await pool.query(
-    "SELECT * FROM invoice_import_rows WHERE import_id = ? AND is_valid = 1 AND created_invoice_id IS NULL ORDER BY `row_number`",
-    [importId]
-  );
-  if (!rows.length) throw withStatus("There are no valid records to import.");
+  const rawRows = submittedRows.map((r, i) => ({ rowNumber: Number(r.rowNumber) || i + 2, ...(r.raw || {}) }));
+  const validated = await validateRows(rawRows, user);
+  if (!validated.some((r) => r.errors.length === 0)) throw withStatus("There are no valid records to import.");
 
+  const importId = uuid();
+  const safeFileName = String(fileName || "invoices.xlsx").slice(0, 255);
   const connection = await pool.getConnection();
   let imported = 0;
   const skipped = [];
@@ -435,47 +420,71 @@ async function confirmImport(importId, user) {
     await connection.beginTransaction();
 
     // The customers' TDS settings, copied onto each new invoice.
-    const customerIds = [...new Set(rows.map((r) => r.matched_customer_id).filter(Boolean))];
+    const customerIds = [...new Set(validated.map((r) => r.matched_customer_id).filter(Boolean))];
     const [companies] = customerIds.length
       ? await connection.query("SELECT id, tds_applicable, tds_rate FROM companies WHERE id IN (?)", [customerIds])
       : [[]];
     const companyById = new Map(companies.map((c) => [c.id, c]));
 
-    for (const r of rows) {
-      const invoiceId = uuid();
-      try {
-        await connection.query(
-          `INSERT INTO invoices
-           (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, pending_amount, status, remarks, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
-          [
-            invoiceId, r.invoice_number, r.matched_customer_id, r.matched_site_id, r.invoice_date, r.due_date,
-            r.invoice_amount, r.invoice_amount,
-            (typeof r.raw_data === "string" ? JSON.parse(r.raw_data) : r.raw_data)?.remarks || null,
-            user.id,
-          ]
-        );
-      } catch (err) {
-        if (err.code !== "ER_DUP_ENTRY") throw err;
-        // Someone created the same invoice after the preview: keep the row, but show why it was skipped.
-        const reason = "Duplicate invoice number: this customer already has this invoice";
-        await connection.query("UPDATE invoice_import_rows SET is_valid = 0, error_message = ? WHERE id = ?", [reason, r.id]);
-        skipped.push({ rowNumber: r.row_number, invoiceNo: r.invoice_number, errors: [reason] });
-        continue;
+    const rowValues = [];
+    for (const r of validated) {
+      let createdInvoiceId = null;
+      let isValid = r.errors.length === 0;
+      let errorMessage = joinErrors(r.errors);
+
+      if (isValid) {
+        const invoiceId = uuid();
+        try {
+          await connection.query(
+            `INSERT INTO invoices
+             (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, pending_amount, status, remarks, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+            [
+              invoiceId, r.invoice_number, r.matched_customer_id, r.matched_site_id, r.parsed_invoice_date, r.parsed_due_date,
+              r.parsed_amount, r.parsed_amount, r.remarks || null, user.id,
+            ]
+          );
+          await insertInvoiceTds(connection, invoiceId, companyById.get(r.matched_customer_id), r.parsed_amount);
+          createdInvoiceId = invoiceId;
+          imported += 1;
+        } catch (err) {
+          if (err.code !== "ER_DUP_ENTRY") throw err;
+          // Someone created the same invoice after the file was checked: keep the row, but show why it was skipped.
+          isValid = false;
+          errorMessage = "Duplicate invoice number: this customer already has this invoice";
+          skipped.push({ rowNumber: r.rowNumber, invoiceNo: r.invoice_number, errors: [errorMessage] });
+        }
       }
-      await insertInvoiceTds(connection, invoiceId, companyById.get(r.matched_customer_id), r.invoice_amount);
-      await connection.query("UPDATE invoice_import_rows SET created_invoice_id = ? WHERE id = ?", [invoiceId, r.id]);
-      imported += 1;
+
+      rowValues.push([
+        uuid(), importId, r.rowNumber,
+        JSON.stringify({
+          invoice_number: r.invoice_number,
+          customer: r.customer_display, customer_id: r.customer,
+          site: r.site_display, site_id: r.site,
+          invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks,
+        }),
+        r.customer_display || null, r.matched_customer_id, r.site_display || null, r.matched_site_id,
+        r.invoice_number || null, r.parsed_invoice_date, r.parsed_due_date, r.parsed_amount,
+        isValid ? 1 : 0, errorMessage, createdInvoiceId,
+      ]);
     }
 
-    const [[counts]] = await connection.query(
-      "SELECT SUM(is_valid = 1) AS valid_rows, SUM(is_valid = 0) AS error_rows FROM invoice_import_rows WHERE import_id = ?",
-      [importId]
-    );
     await connection.query(
-      "UPDATE invoice_imports SET status = 'CONFIRMED', confirmed_at = NOW(), valid_rows = ?, error_rows = ? WHERE id = ?",
-      [Number(counts.valid_rows) || 0, Number(counts.error_rows) || 0, importId]
+      `INSERT INTO invoice_imports (id, file_name, status, total_rows, valid_rows, error_rows, created_by, confirmed_at)
+       VALUES (?, ?, 'CONFIRMED', ?, ?, ?, ?, NOW())`,
+      [importId, safeFileName, validated.length, imported, validated.length - imported, user.id]
     );
+    for (let i = 0; i < rowValues.length; i += 500) {
+      await connection.query(
+        `INSERT INTO invoice_import_rows
+         (id, import_id, \`row_number\`, raw_data, customer_name, matched_customer_id, site_name, matched_site_id,
+          invoice_number, invoice_date, due_date, invoice_amount, is_valid, error_message, created_invoice_id)
+         VALUES ?`,
+        [rowValues.slice(i, i + 500)]
+      );
+    }
+
     await connection.commit();
     await syncInvoiceStatusesSafely(); // invoices imported with a past due date are stored as OVERDUE right away
   } catch (err) {
@@ -486,11 +495,11 @@ async function confirmImport(importId, user) {
   }
 
   notifyInvoiceImport({
-    userId: user.id, importId, fileName: imp.file_name,
-    total: imp.total_rows, imported, errors: imp.total_rows - imported,
+    userId: user.id, importId, fileName: safeFileName,
+    total: validated.length, imported, errors: validated.length - imported,
   }).catch((err) => console.error("Invoice import notification failed:", err));
 
-  return { success: true, imported, skipped };
+  return { success: true, imported, skipped, import_id: importId };
 }
 
 // ---------------------------------------------------------------------------

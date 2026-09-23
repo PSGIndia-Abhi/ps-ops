@@ -36,7 +36,7 @@ router.post("/import/preview", auth, requirePermission(PERMISSIONS.CREATE_INVOIC
 router.get("/import/:id", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), getImportPreview);
 router.get("/import/:id/error-rows", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), downloadErrorRows);
 router.delete("/import/:id", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), removeImport);
-router.post("/import/:id/confirm", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), confirmInvoiceImport);
+router.post("/import/confirm", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), confirmInvoiceImport);
 
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), listInvoices);
 router.get("/:id", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), getInvoice);

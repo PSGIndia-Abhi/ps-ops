@@ -24,10 +24,10 @@ async function listTdsSettings(req, res) {
     if (!filter) return res.status(403).json({ error: "Branch not assigned" });
 
     const [rows] = await connection.query(
-      `SELECT c.id, c.name, c.code, c.tds_applicable, c.tds_rate
+      `SELECT c.id, COALESCE(c.display_name, c.name) AS name, c.code, c.tds_applicable, c.tds_rate
        FROM companies c
        WHERE c.is_active = 1 ${filter.where}
-       ORDER BY c.name ASC`,
+       ORDER BY COALESCE(c.display_name, c.name) ASC`,
       filter.params
     );
     res.json(rows.map((r) => ({ ...r, tds_applicable: Boolean(r.tds_applicable), tds_rate: r.tds_rate == null ? null : Number(r.tds_rate) })));

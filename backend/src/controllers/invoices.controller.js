@@ -57,7 +57,7 @@ async function listInvoices(req, res) {
     }
 
     const [rows] = await connection.query(
-      `SELECT i.*, co.name AS customer_name, co.code AS customer_code, s.name AS site_name,
+      `SELECT i.*, COALESCE(co.display_name, co.name) AS customer_name, co.code AS customer_code, s.name AS site_name,
               (SELECT MAX(p.payment_date) FROM payment_allocations pa
                  JOIN payments p ON p.id = pa.payment_id AND p.status = 'POSTED'
                 WHERE pa.invoice_id = i.id) AS last_payment_date,
@@ -86,7 +86,7 @@ async function getInvoice(req, res) {
   const connection = await pool.getConnection();
   try {
     const [[invoice]] = await connection.query(
-      `SELECT i.*, co.name AS customer_name, co.code AS customer_code, s.name AS site_name
+      `SELECT i.*, COALESCE(co.display_name, co.name) AS customer_name, co.code AS customer_code, s.name AS site_name
        FROM invoices i
        JOIN companies co ON co.id = i.customer_id
        LEFT JOIN sites s ON s.id = i.site_id

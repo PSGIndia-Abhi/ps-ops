@@ -22,19 +22,57 @@ function Reasons({ errors, big }) {
   );
 }
 
+// Builds the same error-rows CSV the server builds for a submitted import, but for a
+// draft that hasn't been submitted yet -- there's nothing saved server-side to ask for.
+function csvCell(v) {
+  let text = String(v ?? "");
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadDraftErrorsCsv(review) {
+  const header = ["Row", "Invoice No", "Customer", "Site", "Invoice Date", "Due Date", "Amount", "Error Reason"];
+  const lines = [header.map(csvCell).join(",")];
+  for (const r of review.rows.filter((row) => row.status === "error")) {
+    lines.push(
+      [r.rowNumber, r.invoiceNo, r.customer, r.site, r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
+        .map(csvCell)
+        .join(",")
+    );
+  }
+  const content = `${String.fromCharCode(0xfeff)}${lines.join("\r\n")}\r\n`;
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `${review.file_name.replace(/\.[^.]+$/, "")}-errors.csv`;
+  link.click();
+  URL.revokeObjectURL(href);
+}
+
 export default function ReviewImport() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const location = useLocation();
+  // A file was just checked and handed to us directly (nothing saved to the database yet).
+  const draftReview = location.state?.review || null;
   // Set when we arrive straight after an upload: show a "file uploaded" notification.
   const [notice, setNotice] = useState(Boolean(location.state?.uploaded));
-  // The upload to show: the one in the address, else the last one opened, else (below) the most recent upload.
-  const requestedId = params.get("import") || recallImportId();
+
+  const [review, setReview] = useState(draftReview); // response of the import preview/confirm API
+  // True until this review has actually been submitted -- it lives only in this tab until then.
+  const [isDraft, setIsDraft] = useState(Boolean(draftReview));
+  const [loading, setLoading] = useState(!draftReview);
+
+  // The upload to show when we're NOT holding a fresh draft: the one in the address, else the
+  // last one opened, else (below) the most recent upload. These only ever point at a submitted
+  // (CONFIRMED) import, since that's the only kind that's ever saved.
+  // isDraft (state, not draftReview) gates this: clearing location.state right after mount
+  // (below, so a refresh doesn't replay the toast) must not make this recompute and start
+  // fetching an old confirmed import out from under the draft we're already showing.
+  const requestedId = isDraft ? "" : params.get("import") || recallImportId();
   const [latestId, setLatestId] = useState("");
   const importId = requestedId || latestId;
-
-  const [review, setReview] = useState(null); // response of the import preview API
-  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(
     location.state?.importError ? { type: "error", text: location.state.importError } : null
   ); // { type: "error" | "ok", text }
@@ -52,12 +90,13 @@ export default function ReviewImport() {
       return;
     }
     rememberImportId(id);
+    setIsDraft(false);
     setReview(data);
   }, []);
 
   // Nothing specific was asked for: open the user's most recent upload, if they have one.
   useEffect(() => {
-    if (requestedId) return undefined;
+    if (isDraft || requestedId) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -71,13 +110,15 @@ export default function ReviewImport() {
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedId]);
 
   useEffect(() => {
-    if (!importId) return undefined;
+    if (isDraft || !importId) return undefined;
     let cancelled = false;
     loadReview(importId).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importId, loadReview]);
 
   useEffect(() => {
@@ -95,6 +136,10 @@ export default function ReviewImport() {
   }
 
   async function downloadErrors() {
+    if (isDraft) {
+      downloadDraftErrorsCsv(review);
+      return;
+    }
     const error = await downloadFile(`/api/invoices/import/${review.import_id}/error-rows`, "invoice-import-errors.csv");
     if (error) setMessage({ type: "error", text: error });
   }
@@ -103,7 +148,12 @@ export default function ReviewImport() {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await apiFetch(`/api/invoices/import/${review.import_id}/confirm`, { method: "POST" });
+      // Nothing about this file exists in the database yet -- Submit sends the whole checked
+      // file back so it can be re-checked from scratch and, only now, actually saved.
+      const res = await apiFetch("/api/invoices/import/confirm", {
+        method: "POST",
+        body: JSON.stringify({ file_name: review.file_name, rows: review.rows }),
+      });
       const data = res ? await safeJson(res) : null;
       if (!res?.ok || !data) {
         setMessage({ type: "error", text: data?.error || "The invoices could not be submitted. Please try again." });
@@ -111,7 +161,7 @@ export default function ReviewImport() {
       }
       if (data.skipped?.length) {
         // Some rows were skipped at the last moment: show the updated list with the reason for each.
-        await loadReview(review.import_id);
+        await loadReview(data.import_id);
         setMessage({ type: "ok", text: `${data.imported} invoice(s) submitted. ${data.skipped.length} row(s) were skipped, see the reasons below.` });
         return;
       }

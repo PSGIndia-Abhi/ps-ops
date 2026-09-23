@@ -80,7 +80,7 @@ async function downloadErrorRows(req, res) {
 
 async function confirmInvoiceImport(req, res) {
   try {
-    res.json(await confirmImport(req.params.id, req.user));
+    res.json(await confirmImport(req.body?.file_name, req.body?.rows, req.user));
   } catch (err) {
     fail(res, err, "Failed to import the invoices");
   }

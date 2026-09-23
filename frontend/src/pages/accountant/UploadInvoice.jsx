@@ -32,14 +32,11 @@ export default function UploadInvoice() {
   }, []);
 
   // Removes one upload from the history. Invoices already imported from it stay.
+  // (Recent Uploads only ever lists submitted imports -- anything not submitted was never saved.)
   async function removeUpload(item) {
-    const text = item.status === "CONFIRMED"
-      ? `Remove "${item.file_name}" from the history?
+    const text = `Remove "${item.file_name}" from the history?
 
-The invoices already imported from it will stay.`
-      : `Remove "${item.file_name}"?
-
-It has not been imported yet, so its records will be discarded.`;
+The invoices already imported from it will stay.`;
     if (!window.confirm(text)) return;
     setRemoving(item.import_id);
     try {
@@ -75,8 +72,9 @@ It has not been imported yet, so its records will be discarded.`;
     setMessage(null);
   }
 
-  // Sends the file to be checked, then opens the Review & Validate tab. Nothing is saved yet:
-  // the accountant reviews the rows there and clicks Submit to save the valid ones.
+  // Sends the file to be checked, then opens the Review & Validate tab. Nothing is saved to the
+  // database yet -- the checked rows travel to that page in memory, and only clicking Submit there
+  // (which re-checks and saves them) ever writes anything.
   async function upload() {
     setBusy(true);
     setMessage(null);
@@ -89,10 +87,7 @@ It has not been imported yet, so its records will be discarded.`;
         setMessage({ text: data?.error || "The file could not be checked. Please try again." });
         return;
       }
-      rememberImportId(data.import_id);
-
-      window.dispatchEvent(new Event("focus")); // makes the Notifications bell refresh right away
-      navigate(`/accountant/invoices/review?import=${data.import_id}`, { state: { uploaded: true } });
+      navigate("/accountant/invoices/review", { state: { uploaded: true, review: data } });
     } catch {
       setMessage({ text: "Network problem. Please check your connection and try again." });
     } finally {
@@ -175,7 +170,7 @@ It has not been imported yet, so its records will be discarded.`;
         {history?.length === 0 && <p className="ac-sub">No uploads yet</p>}
         {history?.length > 0 && (
           <ul className="ac-recent-list">
-            {history.map((h) => (
+            {history.slice(0, 5).map((h) => (
               <li key={h.import_id} className="ac-recent-item">
                 <FiFileText className="ac-recent-icon" />
                 <button type="button" className="ac-link ac-recent-name" title={h.file_name}

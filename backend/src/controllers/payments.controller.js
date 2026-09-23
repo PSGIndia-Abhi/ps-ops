@@ -38,7 +38,7 @@ async function listPayments(req, res) {
     }
 
     const [rows] = await connection.query(
-      `SELECT p.*, co.name AS customer_name, co.code AS customer_code, u.name AS created_by_name,
+      `SELECT p.*, COALESCE(co.display_name, co.name) AS customer_name, co.code AS customer_code, u.name AS created_by_name,
               (SELECT COALESCE(SUM(pa.allocated_amount), 0) FROM payment_allocations pa WHERE pa.payment_id = p.id) AS allocated_amount
        FROM payments p
        JOIN companies co ON co.id = p.customer_id
@@ -63,7 +63,7 @@ async function getPayment(req, res) {
   const connection = await pool.getConnection();
   try {
     const [[payment]] = await connection.query(
-      `SELECT p.*, co.name AS customer_name, co.code AS customer_code
+      `SELECT p.*, COALESCE(co.display_name, co.name) AS customer_name, co.code AS customer_code
        FROM payments p
        JOIN companies co ON co.id = p.customer_id
        WHERE p.id = ?`,
