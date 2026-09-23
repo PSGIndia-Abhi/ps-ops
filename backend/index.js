@@ -86,6 +86,16 @@ app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 app.use("/api/shifts", shiftRoutes);
+app.use("/api/invoices", invoicesRoutes);
+app.use("/api/payments", paymentsRoutes);
+app.use("/api/tasks", tasksRoutes);
+app.use("/api/designations", designationsRoutes);
+app.use("/api/org-units", orgUnitsRoutes);
+// After usersRoutes (mounted above): adds /api/users/:id/org-unit etc.
+app.use("/api/users", userHierarchyRoutes);
+app.use("/api/hierarchy", hierarchyRoutes);
+app.use("/api/crm", crmRoutes);
+app.use("/api/public", crmPublicRoutes);
 
 
 
@@ -99,6 +109,8 @@ const PORT = process.env.PORT || 3000;
 
     startRecurringScheduler(pool);
     startVisitMissedCron();
+    startInvoiceStatusCron();
+    startShiftAutoEndCron();
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);
@@ -108,4 +120,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 });
-
