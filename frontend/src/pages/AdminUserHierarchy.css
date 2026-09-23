@@ -1,0 +1,1059 @@
+/* NOTE: index.css gives every <button> `padding: 10px 14px`. Each button style
+   below sets its own padding so that icon-only and compact buttons aren't squeezed. */
+
+.uh-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 40px;
+}
+
+/* ---------- header ---------- */
+
+.uh-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.uh-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.uh-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.uh-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.uh-header-actions .uh-add-person {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.uh-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.uh-error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.uh-error button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.uh-error button:hover {
+  opacity: 1;
+}
+
+/* ---------- summary cards ---------- */
+
+.uh-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.uh-stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.uh-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.uh-stat-icon.blue { background: #dbeafe; color: #1d4ed8; }
+.uh-stat-icon.indigo { background: #e0e7ff; color: #4338ca; }
+.uh-stat-icon.green { background: #dcfce7; color: #15803d; }
+.uh-stat-icon.purple { background: #f3e8ff; color: #7e22ce; }
+.uh-stat-icon.orange { background: #ffedd5; color: #c2410c; }
+.uh-stat-icon.teal { background: #ccfbf1; color: #0f766e; }
+
+.uh-stat-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.uh-stat-text strong {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.uh-stat-text span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- layout + panels ---------- */
+
+.uh-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.uh-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.uh-panel h3 {
+  margin: 0;
+}
+
+.uh-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: #6b7280;
+}
+
+.uh-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 10px 0;
+  font-size: 14px;
+  background: transparent;
+}
+
+.uh-search.small input {
+  padding: 8px 0;
+}
+
+/* ---------- org tree ---------- */
+
+.uh-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+.uh-unit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.uh-unit-head:hover {
+  background: #f8fafc;
+}
+
+.uh-unit-head.static {
+  padding-left: 8px;
+}
+
+.uh-unit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.uh-unit-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.uh-unit-icon.muted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.uh-unit-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uh-unit-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1d4ed8;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.uh-unit-add:hover {
+  background: #eff6ff;
+}
+
+.uh-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Indented children with a thin guide line, like an org tree. */
+.uh-nest {
+  margin-left: 16px;
+  padding-left: 8px;
+  border-left: 1px solid #e5e7eb;
+}
+
+.uh-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.uh-person:hover {
+  background: #f8fafc;
+}
+
+.uh-person.selected {
+  background: #e3eeff;
+}
+
+.uh-person-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.uh-person-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.uh-person-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.uh-person-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.uh-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.uh-avatar.lg { width: 44px; height: 44px; font-size: 15px; }
+.uh-avatar.xl { width: 64px; height: 64px; font-size: 22px; }
+
+.uh-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.uh-badge.head {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.uh-badge.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.uh-badge.big {
+  font-size: 13px;
+  padding: 4px 12px;
+}
+
+/* ⋮ row menu */
+
+.uh-kebab-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.uh-kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.uh-kebab:hover {
+  background: #e5e7eb;
+}
+
+.uh-menu {
+  position: fixed; /* top/right are set inline from the ⋮ button's screen position */
+  z-index: 60;
+  min-width: 170px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.uh-menu button {
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.uh-menu button:hover {
+  background: #f3f4f6;
+}
+
+.uh-empty {
+  color: var(--muted);
+  padding: 10px;
+  font-size: 14px;
+}
+
+/* ---------- details panel ---------- */
+
+.uh-details-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.uh-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid #93c5fd;
+  background: #fff;
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.uh-edit:hover {
+  background: #eff6ff;
+}
+
+.uh-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.uh-person-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.uh-person-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.uh-person-heading {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.uh-muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.uh-muted.small {
+  font-size: 12px;
+}
+
+.uh-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.uh-contact svg {
+  color: #6b7280;
+}
+
+.uh-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.uh-tabs button {
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4b5563;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.uh-tabs button.active {
+  color: #1d4ed8;
+  border-bottom-color: #2563eb;
+}
+
+.uh-tabs.drawer {
+  margin: 0 20px;
+}
+
+.uh-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.uh-block h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+/* Vertical connector down the Hierarchy tab, like the mockup. */
+.uh-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-left: 2px solid #e5e7eb;
+  margin-left: 6px;
+  padding-left: 18px;
+}
+
+.uh-timeline .uh-block {
+  position: relative;
+}
+
+.uh-timeline .uh-block::before {
+  content: "";
+  position: absolute;
+  left: -24px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #93c5fd;
+}
+
+.uh-link-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.uh-link-row:hover {
+  background: #f8fafc;
+}
+
+.uh-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.uh-crumbs {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.uh-inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #1d4ed8;
+  cursor: pointer;
+}
+
+.uh-history-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 14px;
+}
+
+.uh-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  color: #14532d;
+  font-size: 14px;
+}
+
+.uh-summary svg {
+  font-size: 22px;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.uh-fact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 20px;
+}
+
+.uh-fact-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.uh-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.uh-fact span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.uh-fact strong {
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.uh-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 16px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 14px;
+}
+
+.uh-empty-state svg {
+  font-size: 32px;
+  color: #9ca3af;
+}
+
+.uh-empty-state strong {
+  color: #111827;
+}
+
+/* ---------- assign / update drawer ---------- */
+
+/* No dark backdrop on purpose — the drawer docks against the right edge as
+   its own panel (shadow only) while the sidebar/header stay fully visible,
+   rather than dimming the whole app like a page-covering modal. This element
+   still spans the body area so a click outside the drawer closes it.
+   `top: 64px` (the .app-header's own fixed height) keeps it clear of the
+   header entirely — inset:0 previously reached all the way to the viewport
+   top, so the drawer's own panel sat over the same corner as the
+   Notifications/profile controls. */
+.uh-drawer-overlay {
+  position: fixed;
+  top: 64px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: transparent;
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+}
+
+.uh-drawer {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  /* Same 14px radius as .uh-panel/.uh-stat — only on the left, since the
+     top/right/bottom edges sit flush against the body area's real edges
+     (there's nothing beyond them for a rounded corner to reveal). */
+  border-radius: 14px 0 0 14px;
+  width: 100%;
+  max-width: 470px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 30px rgba(15, 23, 42, 0.2);
+}
+
+.uh-drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 20px 12px;
+}
+
+.uh-drawer-head h3 {
+  margin: 0;
+}
+
+.uh-drawer-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: none;
+  background: none;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.uh-drawer-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 20px 14px;
+}
+
+.uh-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.uh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.uh-field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Every field in this drawer (text/email/password/date inputs and selects)
+   gets the same look. Scoped this way rather than a bare `input` rule so it
+   doesn't bleed into .uh-search's borderless input. */
+.uh-field input,
+.uh-field select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  background: #fff;
+  width: 100%;
+}
+
+.uh-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.uh-selected-manager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.uh-selected-chevron {
+  margin-left: auto;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.uh-manager-tree {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.uh-manager-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: #f8fafc;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.uh-manager-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 8px 26px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.uh-manager-row.chosen {
+  background: #eaf2ff;
+}
+
+.uh-manager-row > label:first-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.uh-manager-row > label:first-child input {
+  margin-left: auto;
+}
+
+.uh-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3730a3;
+  white-space: nowrap;
+}
+
+.uh-note {
+  display: flex;
+  gap: 8px;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.uh-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #6b7280;
+}
+
+/* ---------- create-person basics + confirmation ---------- */
+
+.uh-create-basics {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.uh-password-row {
+  display: flex;
+  gap: 8px;
+}
+
+.uh-password-row input {
+  flex: 1;
+}
+
+.uh-generate {
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.uh-generate:hover {
+  background: #f3f4f6;
+}
+
+.uh-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0 2px;
+}
+
+.uh-created {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding-top: 8px;
+}
+
+.uh-created-icon {
+  font-size: 40px;
+  color: #16a34a;
+}
+
+.uh-created h4 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.uh-created-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f9fafb;
+  text-align: left;
+}
+
+.uh-created-row span {
+  color: var(--muted);
+  font-size: 12px;
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.uh-created-row strong {
+  flex: 1;
+  word-break: break-word;
+}
+
+.uh-created-password {
+  font-family: monospace;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+}
+
+.uh-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.uh-copy:hover {
+  background: #f3f4f6;
+}
+
+.uh-created .uh-note {
+  text-align: left;
+  max-width: 340px;
+}
+
+.uh-created .uh-error {
+  max-width: 340px;
+}
+
+.uh-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px 20px 0;
+  border-top: 1px solid var(--border);
+}
+
+.uh-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+}
+
+.uh-drawer-actions button {
+  padding: 10px 22px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.uh-drawer-actions .primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.uh-drawer-actions .secondary {
+  background: #fff;
+  color: #111827;
+  border-color: var(--border);
+}
+
+@media (max-width: 900px) {
+  .uh-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .uh-tree {
+    max-height: 45vh;
+  }
+
+  .uh-fact-grid {
+    grid-template-columns: 1fr;
+  }
+}

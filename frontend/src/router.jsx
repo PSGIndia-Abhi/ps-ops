@@ -35,6 +35,10 @@ import AnalysisDataPage from "./pages/AnalysisDataPage";
 import UpcomingCalendarPage from "./pages/UpcomingCalendarPage";
 import AdminUserManagement from "./pages/AdminUserManagement";
 import AdminGroupManagement from "./pages/AdminGroupManagement";
+import AdminUserHierarchy from "./pages/AdminUserHierarchy";
+import AdminDepartments from "./pages/AdminDepartments";
+import StaffLayout from "./layouts/StaffLayout";
+import StaffHome from "./pages/StaffHome";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -76,6 +80,8 @@ const router = createBrowserRouter([
       { path: "analysis/:dataset", element: <AnalysisDataPage /> },
       { path: "team", element: <AdminTeamManagement /> },
       { path: "user-management", element: <AdminUserManagement /> },
+      { path: "user-hierarchy", element: <AdminUserHierarchy /> },
+      { path: "departments", element: <AdminDepartments /> },
       { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },
@@ -147,6 +153,26 @@ const router = createBrowserRouter([
       { path: "tickets", element: <ClientTickets /> },
       { path: "profile", element: <ProfilePage /> }
     ]
+  },
+
+  // -------------------------
+  // STAFF ROUTES — the generic panel for people placed in the org hierarchy
+  // under any role that has no dedicated panel of its own (roles are
+  // admin-configurable via Roles & Permissions, so this can be any name —
+  // "Marketing Executive", "Tech Lead", the seeded "staff" role, ...).
+  // allowedRoles={["*"]} is ProtectedRoute's catch-all for exactly that.
+  // -------------------------
+  {
+    path: "/staff",
+    element: (
+      <ProtectedRoute allowedRoles={["*"]}>
+        <StaffLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <StaffHome /> },
+      { path: "profile", element: <ProfilePage /> },
+    ],
   },
 
   {

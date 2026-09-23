@@ -28,6 +28,10 @@ const notificationsRoutes = require("./src/routes/notifications.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
+const designationsRoutes = require("./src/routes/designations.routes");
+const orgUnitsRoutes = require("./src/routes/org-units.routes");
+const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
+const hierarchyRoutes = require("./src/routes/hierarchy.routes");
 const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
@@ -71,6 +75,11 @@ app.use("/api/roles", rolesRoutes);
 app.use("/api", clientInviteRoutes);
 app.use("/api/invite", inviteAcceptRoutes);
 app.use("/api/shifts", shiftRoutes);
+app.use("/api/designations", designationsRoutes);
+app.use("/api/org-units", orgUnitsRoutes);
+// After usersRoutes (mounted above): adds /api/users/:id/org-unit etc.
+app.use("/api/users", userHierarchyRoutes);
+app.use("/api/hierarchy", hierarchyRoutes);
 
 
 
