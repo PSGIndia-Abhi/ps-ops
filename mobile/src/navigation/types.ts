@@ -73,8 +73,8 @@ export type TechnicianTabParamList = {
   Home: undefined;
   /** Defaults to 'today' when absent (see MyJobsScreen) - reused for both the bottom tab and every Home stat-card drill-down rather than creating separate screens. */
   MyJobs: { filter?: TechnicianWorkQueueFilter } | undefined;
-  /** Same MyJobsScreen component as "MyJobs", mounted as its own tab with a different `initialParams` default ('tomorrow') - a distinct destination for the bottom bar, not a separate screen to build/maintain. */
-  Schedule: { filter?: TechnicianWorkQueueFilter } | undefined;
+  /** Start / end the working day (GET|POST /api/shifts/*). Replaced the old "Schedule" tab - tomorrow's jobs are still one tap away on the "Tomorrow" tile inside My Jobs. */
+  Shift: undefined;
   /** Was reached only via the More menu and Home's Quick Access tile; now a first-class tab (see TechnicianTabNavigator) - Home's tile still links here directly, More's now-redundant row was removed. */
   Performance: undefined;
   More: undefined;

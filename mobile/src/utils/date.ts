@@ -65,11 +65,13 @@ export function isBeforeToday(value: string | null | undefined): boolean {
 }
 
 /** "Good morning" / "Good afternoon" / "Good evening" from the device clock. */
-export function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
+/** Morning 5-11:59, afternoon 12-4:59 PM, evening 5-8:59 PM, night 9 PM-4:59 AM. */
+export function getGreeting(now: Date = new Date()): string {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 17) return 'Good afternoon';
+  if (hour >= 17 && hour < 21) return 'Good evening';
+  return 'Good night';
 }
 
 /** e.g. "Tuesday, 8 September" - today's real date, for a dashboard's context line. */

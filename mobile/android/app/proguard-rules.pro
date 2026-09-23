@@ -8,3 +8,17 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# Razorpay checkout (react-native-razorpay): keep its SDK and its WebView JS bridge, or release
+# builds (R8 minification) break the payment screen even though debug builds work.
+-keepattributes JavascriptInterface
+-keepattributes *Annotation*
+-dontwarn com.razorpay.**
+-keep class com.razorpay.** {*;}
+-optimizations !method/inlining/*
+-keepclasseswithmembers class * {
+  public void onPayment*(...);
+}
+-keepclassmembers class * {
+  @android.webkit.JavascriptInterface <methods>;
+}

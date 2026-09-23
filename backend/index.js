@@ -32,6 +32,8 @@ const designationsRoutes = require("./src/routes/designations.routes");
 const orgUnitsRoutes = require("./src/routes/org-units.routes");
 const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
 const hierarchyRoutes = require("./src/routes/hierarchy.routes");
+const crmRoutes = require("./src/routes/crm.routes");
+const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
@@ -80,6 +82,8 @@ app.use("/api/org-units", orgUnitsRoutes);
 // After usersRoutes (mounted above): adds /api/users/:id/org-unit etc.
 app.use("/api/users", userHierarchyRoutes);
 app.use("/api/hierarchy", hierarchyRoutes);
+app.use("/api/crm", crmRoutes);
+app.use("/api/public", crmPublicRoutes);
 
 
 

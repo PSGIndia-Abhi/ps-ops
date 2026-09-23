@@ -14,6 +14,9 @@
       android:name="android.permission.READ_EXTERNAL_STORAGE"
       android:maxSdkVersion="32" />
 
+    <!-- CRM New Lead: "pick a number from contacts" (read-only; nothing is written to contacts). -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <!-- Job update voice notes: microphone recording. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 

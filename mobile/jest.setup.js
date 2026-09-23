@@ -54,3 +54,23 @@ jest.mock('react-native-nitro-sound', () => ({
   createSound: jest.fn(() => mockSound()),
   Sound: mockSound(),
 }));
+
+// This app's own native module (android/.../locationenabler) - not a package, so it's mocked via
+// NativeModules directly rather than jest.mock('some-package').
+require('react-native').NativeModules.LocationEnabler = {
+  promptForEnableLocationIfNeeded: jest.fn(() => Promise.resolve('already-enabled')),
+};
+
+jest.mock('react-native-contacts', () => ({
+  __esModule: true,
+  default: {
+    checkPermission: jest.fn(() => Promise.resolve('denied')),
+    requestPermission: jest.fn(() => Promise.resolve('denied')),
+    getAllWithoutPhotos: jest.fn(() => Promise.resolve([])),
+  },
+}));
+
+jest.mock('react-native-razorpay', () => ({
+  __esModule: true,
+  default: { open: jest.fn(() => Promise.reject({ code: 0, description: 'Payment Cancelled' })) },
+}));

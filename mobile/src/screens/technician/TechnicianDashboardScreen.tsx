@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { AppHeader } from '../../components/AppHeader';
 import { BackgroundWash } from '../../components/BackgroundWash';
@@ -30,12 +30,13 @@ import {
   PinIcon,
   SendIcon,
   SparkleIcon,
-  SunIcon,
 } from '../../components/icons';
 import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useUserRole } from '../../auth/role';
-import { visitsApi, ApiError } from '../../api';
-import { formatTime, getGreeting, isToday } from '../../utils/date';
+import { visitsApi, jobsApi, ApiError } from '../../api';
+import { AchievementCard } from '../../components/AchievementCard';
+import { computeTechnicianAchievements, type TechnicianAchievements } from './achievements';
+import { formatTime, isToday } from '../../utils/date';
 import { getStatusMeta } from '../../utils/statusMeta';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { TechnicianVisit } from '../../types/visit';
@@ -78,10 +79,15 @@ export function TechnicianDashboardScreen() {
   const navigation = useNavigation<Nav>();
   const { user } = useAuth();
   const role = useUserRole();
+  const userId = user?.id;
 
   const [visits, setVisits] = useState<TechnicianVisit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // All-time numbers for the achievements card, from the technician's own job list. `undefined` = still
+  // loading, `null` = the call failed (the card is then simply left out rather than showing guesses).
+  const [achievements, setAchievements] = useState<TechnicianAchievements | null | undefined>(undefined);
+  const [replay, setReplay] = useState(0);
   // Today's Schedule is a horizontal slider (one card at a time, swipeable)
   // rather than a stacked vertical list - `scheduleWidth` is measured via
   // onLayout (not assumed) so each card/page is sized to the actual
@@ -93,14 +99,26 @@ export function TechnicianDashboardScreen() {
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     setError(null);
+    const summaryCall = jobsApi
+      .listJobs()
+      .then(jobs => setAchievements(userId ? computeTechnicianAchievements(jobs, userId) : null))
+      .catch(() => setAchievements(null));
     try {
       setVisits(await visitsApi.listMyVisits());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     } finally {
+      await summaryCall;
       setRefreshing(false);
     }
-  }, []);
+  }, [userId]);
+
+  // Play the ring's sweep every time Home is shown and whenever a pull-to-refresh finishes.
+  const wasRefreshing = useRef(false);
+  useEffect(() => {
+    if (wasRefreshing.current && !refreshing) setReplay(k => k + 1);
+    wasRefreshing.current = refreshing;
+  }, [refreshing]);
 
   // Refetch every time Home regains focus (returning from JobDetail after
   // Start Visit, switching tabs and back, etc.) rather than only once on
@@ -110,6 +128,7 @@ export function TechnicianDashboardScreen() {
   // runs when the user is actually looking at this screen again.
   useFocusEffect(
     useCallback(() => {
+      setReplay(k => k + 1);
       load();
     }, [load]),
   );
@@ -167,7 +186,25 @@ export function TechnicianDashboardScreen() {
             change to that shared component (which every other screen also
             sits in). */}
         <View style={styles.homePad}>
-        <GreetingCard name={firstName(user?.name)} />
+        {achievements === undefined ? (
+          <Skeleton height={168} radius={24} style={styles.skeletonCard} />
+        ) : achievements === null ? null : (
+          <AchievementCard
+            title="Your Achievements"
+            chip="All time"
+            percent={achievements.completionPercent}
+            centerPrimary={achievements.counted > 0 ? `${achievements.completed} done` : undefined}
+            centerSecondary={achievements.counted > 0 ? `of ${achievements.counted} jobs` : undefined}
+            centerEmpty={achievements.counted > 0 ? undefined : 'no jobs yet'}
+            tiles={[
+              { value: `${achievements.completed} completed`, label: 'jobs' },
+              { value: `${achievements.open} open`, label: 'to do' },
+              { value: `${achievements.overdue} overdue`, label: 'late' },
+            ]}
+            accessibilityLabel={`${achievements.completionPercent} percent of your jobs completed`}
+            replayKey={replay}
+          />
+        )}
 
         {!!error && <Banner message={error} variant="error" />}
 
@@ -281,10 +318,10 @@ export function TechnicianDashboardScreen() {
             onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
           />
           <QuickAccessTile
-            label="Schedule"
-            icon={<CalendarIcon size={20} color={colors.textOnPrimary} />}
+            label="My Shift"
+            icon={<ClockIcon size={20} color={colors.textOnPrimary} />}
             accentColor={colors.warning}
-            onPress={() => navigation.navigate('Schedule', { filter: 'tomorrow' })}
+            onPress={() => navigation.navigate('Shift')}
           />
           <QuickAccessTile
             label="Performance"
@@ -449,7 +486,7 @@ function TodayScheduleItem({
     >
       <View style={[styles.scheduleAccent, { backgroundColor: meta.color }]} />
       <View style={styles.scheduleGhostWrap}>
-        <CalendarIcon size={80} color={meta.color} />
+        <CalendarIcon size={64} color={meta.color} />
       </View>
 
       <View style={styles.scheduleTimeCol}>
@@ -488,61 +525,6 @@ function TodayScheduleItem({
         <ChevronRightIcon size={16} color={meta.color} />
       </View>
     </Pressable>
-  );
-}
-
-/**
- * Home's greeting banner - a soft illustrated card (reference), not the
- * previous plain text block: a sun glyph + italic tagline up top, a big
- * two-line "Good morning, <name>" below, and a small skyline+trees
- * illustration bleeding into the bottom-right corner. All pure decoration
- * (the name is the only real data in it), same spirit as the "Together for
- * Safer Spaces" promo card further down this same screen.
- */
-function GreetingCard({ name }: { name: string }) {
-  return (
-    <GradientCard color={colors.primarySoft} style={styles.greetingCard}>
-      <View style={styles.greetingIllustration} pointerEvents="none">
-        <GreetingSkyline />
-      </View>
-      <View style={styles.greetingHeaderRow}>
-        <View style={styles.greetingSunWrap}>
-          <SunIcon size={19} color={colors.warning} />
-        </View>
-        <View style={styles.greetingTaglineCol}>
-          <Text style={styles.greetingTagline}>“Safer Spaces{'\n'}Together”</Text>
-          <View style={styles.greetingTaglineUnderline} />
-        </View>
-      </View>
-      <Text style={styles.greetingBig}>{getGreeting()},</Text>
-      <Text style={[styles.greetingBig, styles.greetingBigName]}>{name}</Text>
-    </GradientCard>
-  );
-}
-
-/** Small skyline+trees decoration for the greeting card's bottom-right corner - deliberately compact (unlike the full-bleed `DecorativeSkyline` on Login), and local to this one card rather than a shared component since nothing else needs this exact size/palette. */
-function GreetingSkyline() {
-  return (
-    <Svg width={132} height={92} viewBox="0 0 132 92">
-      <Circle cx={20} cy={78} r={13} fill={colors.success} opacity={0.55} />
-      <Circle cx={11} cy={70} r={10} fill={colors.success} opacity={0.5} />
-      <Rect x={17} y={80} width={4} height={10} fill={colors.crestRedDeep} opacity={0.3} />
-      <Circle cx={42} cy={82} r={9} fill={colors.success} opacity={0.45} />
-      <Rect x={39} y={88} width={3} height={7} fill={colors.crestRedDeep} opacity={0.25} />
-      <Rect x={62} y={38} width={26} height={54} rx={5} fill={colors.surface} opacity={0.55} />
-      <Rect x={69} y={48} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
-      <Rect x={78} y={48} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
-      <Rect x={69} y={58} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
-      <Rect x={78} y={58} width={4} height={4} rx={1} fill={colors.primary} opacity={0.4} />
-      <Rect x={96} y={16} width={24} height={76} rx={5} fill={colors.surface} opacity={0.75} />
-      <Rect x={106} y={4} width={2} height={14} fill={colors.surface} opacity={0.75} />
-      <Rect x={102} y={26} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-      <Rect x={111} y={26} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-      <Rect x={102} y={36} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-      <Rect x={111} y={36} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-      <Rect x={102} y={46} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-      <Rect x={111} y={46} width={4} height={4} rx={1} fill={colors.primary} opacity={0.45} />
-    </Svg>
   );
 }
 
@@ -613,10 +595,6 @@ function QuickAccessTile({
   );
 }
 
-function firstName(name: string | undefined): string {
-  if (!name) return 'there';
-  return name.trim().split(/\s+/)[0];
-}
 
 const styles = StyleSheet.create({
   flex: {
@@ -631,54 +609,6 @@ const styles = StyleSheet.create({
   // diagonal light-to-deep fill built from the `color` passed to it (same
   // pattern as the "Together for Safer Spaces" promo card further down this
   // screen), giving the card real depth instead of one flat pale-blue tone.
-  greetingCard: {
-    borderRadius: radii.xl,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  greetingIllustration: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-  },
-  greetingHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.md,
-  },
-  greetingSunWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
-    backgroundColor: colors.warningBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  greetingTaglineCol: {
-    alignItems: 'flex-end',
-  },
-  greetingTagline: {
-    ...typography.captionMedium,
-    fontStyle: 'italic',
-    color: colors.textSecondary,
-    textAlign: 'right',
-  },
-  greetingTaglineUnderline: {
-    width: 36,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: colors.crestRed,
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  greetingBig: {
-    ...typography.display,
-    color: colors.textPrimary,
-  },
-  greetingBigName: {
-    color: colors.primary,
-  },
   richHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -729,11 +659,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     borderRadius: radii.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
   },
   dashStatIconWrap: {
-    width: 34,
-    height: 34,
+    width: 30,
+    height: 30,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -774,7 +704,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     paddingRight: spacing.sm,
     overflow: 'hidden',
   },
@@ -792,13 +722,13 @@ const styles = StyleSheet.create({
   },
   scheduleGhostWrap: {
     position: 'absolute',
-    top: -14,
-    right: -10,
-    opacity: 0.16,
+    top: -10,
+    right: -8,
+    opacity: 0.14,
   },
   scheduleTimeCol: {
     alignItems: 'center',
-    width: 76,
+    width: 72,
   },
   scheduleTimeIconWrap: {
     width: 28,
@@ -810,7 +740,7 @@ const styles = StyleSheet.create({
   },
   scheduleTimeHour: {
     ...typography.bodyMedium,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
   },
   scheduleTimeMeridiem: {
@@ -835,13 +765,13 @@ const styles = StyleSheet.create({
   },
   scheduleSite: {
     ...typography.bodyMedium,
-    fontSize: 16,
+    fontSize: 15,
     color: colors.textPrimary,
     flexShrink: 1,
   },
   scheduleJobType: {
     ...typography.caption,
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textSecondary,
   },
   scheduleStatusPill: {
@@ -851,8 +781,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: radii.pill,
     paddingHorizontal: spacing.xs,
-    paddingVertical: 3,
-    marginTop: 3,
+    paddingVertical: 2,
+    marginTop: 2,
   },
   scheduleStatusText: {
     ...typography.captionMedium,

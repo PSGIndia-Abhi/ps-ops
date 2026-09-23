@@ -112,8 +112,8 @@ android {
         applicationId "com.bestserve.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.3"
+        versionCode 6
+        versionName "1.5"
     }
     signingConfigs {
         debug {
@@ -147,6 +147,13 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // Same artifact/version @react-native-community/geolocation already ships as its own (non-exposed)
+    // `implementation` dependency - declared here directly only so LocationEnablerModule.kt (this app's
+    // own native module, android/app/src/main/java/com/bestserve/mobile/locationenabler) can reference
+    // Play Services' SettingsClient/ResolvableApiException classes. Not a new capability, just making an
+    // already-bundled one visible to app-level code.
+    implementation("com.google.android.gms:play-services-location:21.0.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

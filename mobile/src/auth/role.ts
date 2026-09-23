@@ -5,9 +5,27 @@ import { useAuth } from './AuthContext';
  * (client, telecaller, or a future role) falls back to the generic Profile
  * screen rather than crashing or guessing - see RootNavigator.
  */
-export type AppRole = 'admin' | 'branch_admin' | 'supervisor' | 'technician';
+export type AppRole =
+  | 'admin'
+  | 'branch_admin'
+  | 'supervisor'
+  | 'technician'
+  | 'sales'
+  | 'marketing';
 
-const KNOWN_ROLES: AppRole[] = ['admin', 'branch_admin', 'supervisor', 'technician'];
+const KNOWN_ROLES: AppRole[] = [
+  'admin',
+  'branch_admin',
+  'supervisor',
+  'technician',
+  'sales',
+  'marketing',
+];
+
+/** The two roles that get the CRM app instead of the field-service tabs. */
+export function isCrmRole(role: AppRole | null): boolean {
+  return role === 'sales' || role === 'marketing';
+}
 
 export function normalizeRole(role: string | null | undefined): AppRole | null {
   if (!role) return null;
@@ -37,6 +55,10 @@ export function roleLabel(role: AppRole): string {
       return 'Supervisor';
     case 'technician':
       return 'Technician';
+    case 'sales':
+      return 'Sales';
+    case 'marketing':
+      return 'Marketing';
     default:
       return role;
   }

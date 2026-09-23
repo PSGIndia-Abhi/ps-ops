@@ -16,7 +16,8 @@ interface BannerProps {
   variant?: BannerVariant;
 }
 
-const VARIANT_STYLE: Record<
+/** Exported so Toast (a screen-fixed, non-scrolling twin of this same banner) can reuse the identical colors/icons per variant instead of redefining them. */
+export const BANNER_VARIANT_STYLE: Record<
   BannerVariant,
   { bg: string; text: string; icon?: (color: string) => React.ReactNode }
 > = {
@@ -58,7 +59,7 @@ const VARIANT_STYLE: Record<
  * meanings - callers only choose a `variant`, never a raw color.
  */
 export function Banner({ message, variant = 'error' }: BannerProps) {
-  const style = VARIANT_STYLE[variant];
+  const style = BANNER_VARIANT_STYLE[variant];
 
   return (
     <View style={[styles.container, { backgroundColor: style.bg }]}>

@@ -16,6 +16,11 @@ export async function login(email: string, password: string): Promise<LoginRespo
   const { data } = await httpClient.post<LoginResponse>('/api/auth/login', {
     email,
     password,
+    // Tells the backend this is the phone app, not the website - it then issues a much longer-lived
+    // token (30 days instead of the website's 8 hours), since a technician expects to stay signed in
+    // rather than being silently logged out overnight. The web app sends no such field, so its own
+    // session length is completely unaffected.
+    client: 'mobile',
   });
   return data;
 }
