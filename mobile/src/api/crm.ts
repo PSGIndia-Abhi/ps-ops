@@ -64,8 +64,9 @@ export async function listLeads(): Promise<Lead[]> {
 }
 
 /** POST /api/crm/leads - the server re-checks the price list and forces Online payments to "pending". */
-export async function createLead(input: NewLeadInput): Promise<Lead> {
+export async function createLead(input: NewLeadInput, clientRef?: string): Promise<Lead> {
   const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
+    client_ref: clientRef,
     customer_name: input.customerName,
     phone: input.phone,
     email: input.email,
@@ -96,18 +97,6 @@ export async function listServiceMaster(): Promise<ServiceMasterRow[]> {
       price: p.price,
     })),
   );
-}
-
-export interface Coupon {
-  code: string;
-  /** Percent off the list price. */
-  percentage: number;
-}
-
-/** GET /api/crm/coupons/:code - throws ApiError("This coupon is not valid or has expired") when unusable. */
-export async function validateCoupon(code: string): Promise<Coupon> {
-  const { data } = await httpClient.get<Coupon>(`/api/crm/coupons/${encodeURIComponent(code.trim())}`);
-  return data;
 }
 
 export interface PaymentOrder {

@@ -12,6 +12,7 @@ import { LeadsProvider } from '../crm/LeadsContext';
 import type { CrmStackParamList, CrmTabParamList } from '../crm/navigation';
 import { CrmHomeScreen } from '../crm/screens/CrmHomeScreen';
 import { CrmLeadDetailScreen } from '../crm/screens/CrmLeadDetailScreen';
+import { CrmLeadSavedScreen } from '../crm/screens/CrmLeadSavedScreen';
 import { CrmLeadsScreen } from '../crm/screens/CrmLeadsScreen';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
 import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
@@ -124,6 +125,7 @@ export function CrmNavigator() {
         <Stack.Screen name="CrmTabs" component={CrmTabs} />
         <Stack.Screen name="CrmNewLead" component={CrmNewLeadScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />
+        <Stack.Screen name="CrmLeadSaved" component={CrmLeadSavedScreen} options={{ gestureEnabled: false }} />
       </Stack.Navigator>
     </LeadsProvider>
   );

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BriefcaseIcon,
   CalendarIcon,
+  ClockIcon,
   ChartIcon,
   HomeIcon,
   MoreHorizontalIcon,
@@ -24,9 +25,7 @@ export const jobsTabIcon = ({ color, size }: TabIconProps) => (
 export const bookingsTabIcon = ({ color, size }: TabIconProps) => (
   <CalendarIcon size={size} color={color} />
 );
-export const scheduleTabIcon = ({ color, size }: TabIconProps) => (
-  <CalendarIcon size={size} color={color} />
-);
+export const shiftTabIcon = ({ color, size }: TabIconProps) => <ClockIcon size={size} color={color} />;
 export const performanceTabIcon = ({ color, size }: TabIconProps) => (
   <ChartIcon size={size} color={color} />
 );

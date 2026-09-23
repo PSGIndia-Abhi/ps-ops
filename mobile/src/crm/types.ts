@@ -24,9 +24,13 @@ export interface Lead {
   leadStatus: LeadStatus;
   /** ISO timestamp. */
   createdAt: string;
+  /** True while the lead is only saved on this phone, waiting for a connection to be sent. */
+  pendingSync?: boolean;
+  /** Set when the server refused a queued lead (it will not be retried automatically). */
+  syncError?: string;
 }
 
-export type NewLeadInput = Omit<Lead, 'id' | 'createdAt'>;
+export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError'>;
 
 export interface Option<T extends string> {
   value: T;

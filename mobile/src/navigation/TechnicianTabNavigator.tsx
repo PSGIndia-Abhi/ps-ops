@@ -4,9 +4,10 @@ import { createBottomTabNavigator, type BottomTabBarButtonProps } from '@react-n
 import { TechnicianDashboardScreen } from '../screens/technician/TechnicianDashboardScreen';
 import { MyJobsScreen } from '../screens/technician/MyJobsScreen';
 import { MyPerformanceScreen } from '../screens/technician/MyPerformanceScreen';
+import { ShiftScreen } from '../screens/technician/ShiftScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { BriefcaseIcon } from '../components/icons';
-import { homeTabIcon, moreTabIcon, performanceTabIcon, scheduleTabIcon } from './tabIcons';
+import { homeTabIcon, moreTabIcon, performanceTabIcon, shiftTabIcon } from './tabIcons';
 import { useSharedTabScreenOptions } from './tabBarOptions';
 import { colors, radii, shadows } from '../theme';
 import type { TechnicianTabParamList } from './types';
@@ -76,12 +77,7 @@ export function TechnicianTabNavigator() {
         component={TechnicianDashboardScreen}
         options={{ tabBarIcon: homeTabIcon }}
       />
-      <Tab.Screen
-        name="Schedule"
-        component={MyJobsScreen}
-        initialParams={{ filter: 'tomorrow' }}
-        options={{ tabBarIcon: scheduleTabIcon }}
-      />
+      <Tab.Screen name="Shift" component={ShiftScreen} options={{ tabBarIcon: shiftTabIcon }} />
       <Tab.Screen
         name="MyJobs"
         component={MyJobsScreen}

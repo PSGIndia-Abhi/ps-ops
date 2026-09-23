@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
-import { ClockIcon } from '../../components/icons';
+import { AlertCircleIcon, ClockIcon } from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
@@ -46,8 +46,14 @@ const factory = (t: CrmTheme) => ({
     borderTopWidth: 1,
     borderTopColor: t.border,
   },
-  whenRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  whenRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
   when: { ...typography.caption, color: t.textMuted },
+  waiting: { ...typography.captionMedium, color: t.warningText },
+  failed: { ...typography.captionMedium, color: t.dangerText },
 });
 
 interface LeadCardProps {
@@ -62,7 +68,9 @@ const STAGGER_LIMIT = 8;
 export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
   const { styles, theme } = useCrmStyles(factory);
   const paid = lead.paymentStatus === 'paid';
-  const enter = useRef(new Animated.Value(index < STAGGER_LIMIT ? 0 : 1)).current;
+  const enter = useRef(
+    new Animated.Value(index < STAGGER_LIMIT ? 0 : 1),
+  ).current;
 
   useEffect(() => {
     if (index >= STAGGER_LIMIT) return;
@@ -75,7 +83,10 @@ export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
     }).start();
   }, [enter, index]);
 
-  const translateY = enter.interpolate({ inputRange: [0, 1], outputRange: [22, 0] });
+  const translateY = enter.interpolate({
+    inputRange: [0, 1],
+    outputRange: [22, 0],
+  });
 
   return (
     <Animated.View style={{ opacity: enter, transform: [{ translateY }] }}>
@@ -83,9 +94,9 @@ export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={`${lead.customerName}, ${lead.service}, ${formatINR(lead.amount)}, ${
-            paid ? 'paid' : 'payment pending'
-          }`}
+          accessibilityLabel={`${lead.customerName}, ${
+            lead.service
+          }, ${formatINR(lead.amount)}, ${paid ? 'paid' : 'payment pending'}`}
           style={({ pressed }) => [styles.topRow, pressed && styles.pressed]}
         >
           <View style={styles.pestTile}>
@@ -107,8 +118,29 @@ export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
 
         <View style={styles.footer}>
           <View style={styles.whenRow}>
-            <ClockIcon size={13} color={theme.textMuted} />
-            <Text style={styles.when}>{formatLeadWhen(lead.createdAt)}</Text>
+            {lead.syncError ? (
+              <AlertCircleIcon size={13} color={theme.dangerText} />
+            ) : (
+              <ClockIcon
+                size={13}
+                color={lead.pendingSync ? theme.warningText : theme.textMuted}
+              />
+            )}
+            <Text
+              style={
+                lead.syncError
+                  ? styles.failed
+                  : lead.pendingSync
+                  ? styles.waiting
+                  : styles.when
+              }
+            >
+              {lead.syncError
+                ? "Couldn't send"
+                : lead.pendingSync
+                ? 'Waiting to send'
+                : formatLeadWhen(lead.createdAt)}
+            </Text>
           </View>
           <ContactActions lead={lead} />
         </View>

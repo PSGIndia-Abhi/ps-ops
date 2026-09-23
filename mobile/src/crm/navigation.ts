@@ -18,6 +18,8 @@ export type CrmStackParamList = {
   CrmTabs: NavigatorScreenParams<CrmTabParamList> | undefined;
   CrmNewLead: undefined;
   CrmLeadDetail: { leadId: string };
+  /** Shown right after saving; `note` explains anything the rep should still do (e.g. payment pending). */
+  CrmLeadSaved: { leadId: string; note?: string };
 };
 
 /** Navigation prop for a tab screen that can also push the CRM stack's screens. */

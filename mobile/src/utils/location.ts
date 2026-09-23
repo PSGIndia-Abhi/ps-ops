@@ -1,5 +1,14 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
+
+/**
+ * This app's own small native module (android/app/src/main/java/com/bestserve/mobile/locationenabler) -
+ * not a published package. See its doc comment for why: the one published library for this
+ * (react-native-android-location-enabler) doesn't compile against this project's RN/Kotlin toolchain.
+ */
+const { LocationEnabler } = NativeModules as {
+  LocationEnabler?: { promptForEnableLocationIfNeeded(): Promise<'enabled' | 'already-enabled'> };
+};
 
 export interface DeviceLocation {
   latitude: number;
@@ -64,6 +73,31 @@ function toDeviceLocation(coords: {
 }
 
 /**
+ * A fresh-enough cached fix is exactly as good as a brand-new one for this purpose - if the OS (Play
+ * Services' fused location) already has one this recent sitting in memory (very common: Maps/navigation
+ * open a few minutes ago, or the chip never fully spun down), using it is not a lower bar, just a faster
+ * way to clear the exact same GOOD_ACCURACY_METERS bar below.
+ */
+const CACHED_FIX_MAX_AGE_MS = 15000;
+/** How long the fast cached-fix check is allowed to take before falling through to the full watch below. */
+const CACHED_FIX_TIMEOUT_MS = 2000;
+
+/** A single quick, cheap attempt: resolves fast when the device already has a good-enough fix sitting in memory; resolves `null` (never rejects) otherwise, so the caller always falls through to the thorough watch. */
+function getCachedFixIfGoodEnough(): Promise<DeviceLocation | null> {
+  return new Promise((resolve) => {
+    Geolocation.getCurrentPosition(
+      (position) => {
+        const candidate = toDeviceLocation(position.coords);
+        const accuracy = candidate.accuracy ?? Number.POSITIVE_INFINITY;
+        resolve(accuracy <= GOOD_ACCURACY_METERS ? candidate : null);
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, maximumAge: CACHED_FIX_MAX_AGE_MS, timeout: CACHED_FIX_TIMEOUT_MS },
+    );
+  });
+}
+
+/**
  * Reads the current device location for a geofence check.
  *
  * GPS gotcha this specifically works around: a single `getCurrentPosition`
@@ -83,12 +117,37 @@ function toDeviceLocation(coords: {
  * than waiting out the full window. The watch is always cleared on every
  * exit path (resolve, reject, or timeout) so nothing keeps the GPS radio
  * running after this call returns.
+ *
+ * Two speed-ups on top of that, neither loosening the same GOOD_ACCURACY_METERS bar:
+ *  1. A quick check (<=2s) for an already-good cached fix before ever starting the slower watch - the
+ *     common case (technician's phone already has a recent fix from having just navigated here) then
+ *     resolves almost instantly instead of waiting out a multi-second acquisition every single time.
+ *  2. On Android, a location-services-off check that can fix itself in place: if the device's Location
+ *     toggle is off, this shows Android's own "Turn on Location?" dialog right over this screen (Google
+ *     Play Services - identical on every phone, unlike an OEM's own Settings app) instead of only
+ *     discovering the problem after a slow, doomed-to-fail wait. If the technician accepts it, location
+ *     turns on immediately and the read proceeds normally in the same call - no navigating away and back.
  */
 export async function getCurrentLocation(): Promise<DeviceLocation> {
   const hasPermission = await ensureLocationPermission();
   if (!hasPermission) {
     throw new LocationError('Location permission is required to start this visit.');
   }
+
+  if (Platform.OS === 'android' && LocationEnabler) {
+    try {
+      // Resolves near-instantly with no dialog at all when location is already on - this call is not
+      // itself the slow part, it just short-circuits a doomed multi-second wait when it's off.
+      await LocationEnabler.promptForEnableLocationIfNeeded();
+    } catch {
+      throw new LocationServicesDisabledError(
+        'Location is turned off on this device. Turn it on to start this visit.',
+      );
+    }
+  }
+
+  const cached = await getCachedFixIfGoodEnough();
+  if (cached) return cached;
 
   return new Promise<DeviceLocation>((resolve, reject) => {
     let best: DeviceLocation | null = null;
@@ -126,9 +185,10 @@ export async function getCurrentLocation(): Promise<DeviceLocation> {
       (error) => {
         clearTimeout(timeoutId);
         // POSITION_UNAVAILABLE with no fix ever received means there was no
-        // provider to even try (Location toggled off), not just a bad/slow
-        // fix - `best` staying null in every other error case is still
-        // handled by the generic message above.
+        // provider to even try (Location toggled off - the check above
+        // normally catches this first, but a provider can still drop out
+        // mid-read), not just a bad/slow fix - `best` staying null in every
+        // other error case is still handled by the generic message above.
         if (!best && error?.code === error?.POSITION_UNAVAILABLE) {
           finish(
             null,

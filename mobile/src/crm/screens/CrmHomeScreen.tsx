@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -7,8 +7,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useNavigation, type NavigationProp } from '@react-navigation/native';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useUserRole } from '../../auth/role';
 import { GradientCard } from '../../components/GradientCard';
@@ -19,17 +19,17 @@ import {
   PlusIcon,
   SendIcon,
   SparkleIcon,
-  SunIcon,
 } from '../../components/icons';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
-import { getGreeting } from '../../utils/date';
 import { formatINR, formatLeadWhen } from '../format';
 import { useLeads } from '../LeadsContext';
+import { computeMonthlyAchievements } from '../stats';
 import type { CrmTabScreenNav } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import type { Lead } from '../types';
 import { ClipboardListIcon, RupeeIcon, TrendUpIcon, WalletIcon } from '../ui/crmIcons';
+import { AchievementCard } from '../ui/AchievementCard';
 import { CrmBackgroundWash } from '../ui/CrmBackgroundWash';
 import { CrmHeader } from '../ui/CrmHeader';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner } from '../ui/CrmScreen';
@@ -43,39 +43,6 @@ const factory = (t: CrmTheme) => ({
   homePad: { paddingHorizontal: spacing.xs, paddingTop: spacing.xs },
 
   // Greeting hero
-  greetingCard: { borderRadius: radii.xl, padding: spacing.lg, marginBottom: spacing.lg },
-  greetingIllustration: { position: 'absolute' as const, right: 0, bottom: 0 },
-  greetingHeaderRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'flex-start' as const,
-    marginBottom: spacing.md,
-  },
-  greetingSunWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
-    backgroundColor: t.warningBg,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  greetingTaglineCol: { alignItems: 'flex-end' as const },
-  greetingTagline: {
-    ...typography.captionMedium,
-    fontStyle: 'italic' as const,
-    color: t.textSecondary,
-    textAlign: 'right' as const,
-  },
-  greetingTaglineUnderline: {
-    width: 36,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: t.crestRed,
-    marginTop: 4,
-    alignSelf: 'flex-end' as const,
-  },
-  greetingBig: { ...typography.display, color: t.textPrimary },
-  greetingBigName: { color: t.isDark ? t.primaryPressed : t.primary },
 
   // Stat tiles
   dashStatRow: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.xl },
@@ -136,15 +103,15 @@ const factory = (t: CrmTheme) => ({
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: t.border,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     paddingRight: spacing.sm,
     overflow: 'hidden' as const,
   },
   leadItemNew: { borderColor: t.primary },
   leadItemPressed: { opacity: 0.85 },
   leadAccent: { width: 4, alignSelf: 'stretch' as const, marginRight: spacing.sm },
-  leadGhostWrap: { position: 'absolute' as const, top: -14, right: -10, opacity: 0.16 },
-  leadAmountCol: { alignItems: 'center' as const, width: 76 },
+  leadGhostWrap: { position: 'absolute' as const, top: -10, right: -8, opacity: 0.14 },
+  leadAmountCol: { alignItems: 'center' as const, width: 72 },
   leadAmountIconWrap: {
     width: 28,
     height: 28,
@@ -153,13 +120,13 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
     marginBottom: 3,
   },
-  leadAmount: { ...typography.bodyMedium, fontSize: 16, fontWeight: '700' as const, maxWidth: 72 },
+  leadAmount: { ...typography.bodyMedium, fontSize: 15, fontWeight: '700' as const, maxWidth: 68 },
   leadMethod: { ...typography.caption, color: t.textMuted, marginTop: -2 },
   leadDivider: { width: 1, alignSelf: 'stretch' as const, marginVertical: spacing.xs, marginRight: spacing.sm },
-  leadBody: { flex: 1, gap: 2 },
+  leadBody: { flex: 1, gap: 1 },
   leadTopRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs },
-  leadName: { ...typography.bodyMedium, fontSize: 16, color: t.textPrimary, flexShrink: 1 },
-  leadService: { ...typography.caption, fontSize: 14, color: t.textSecondary },
+  leadName: { ...typography.bodyMedium, fontSize: 15, color: t.textPrimary, flexShrink: 1 },
+  leadService: { ...typography.caption, fontSize: 13, color: t.textSecondary },
   leadMeta: { ...typography.caption, color: t.textMuted },
   leadPill: {
     flexDirection: 'row' as const,
@@ -168,9 +135,9 @@ const factory = (t: CrmTheme) => ({
     alignSelf: 'flex-start' as const,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.xs,
-    paddingVertical: 3,
-    marginTop: 3,
+    paddingVertical: 2,
   },
+  leadBottom: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: 2 },
   leadPillText: { ...typography.captionMedium, fontSize: 11 },
   leadChevron: {
     width: 36,
@@ -261,64 +228,6 @@ const factory = (t: CrmTheme) => ({
     marginTop: spacing.sm,
   },
 });
-
-function firstName(name: string | undefined): string {
-  if (!name) return 'there';
-  return name.trim().split(/\s+/)[0];
-}
-
-/** Small skyline + trees for the greeting card's corner, tinted per theme (translucent white buildings on light, soft blue on dark). */
-function GreetingSkyline() {
-  const { theme } = useCrmStyles(factory);
-  const building = theme.isDark ? '#9DB7E0' : colors.surface;
-  const windowColor = theme.isDark ? theme.primaryPressed : colors.primary;
-  const boost = theme.isDark ? 0.55 : 1;
-  return (
-    <Svg width={132} height={92} viewBox="0 0 132 92">
-      <Circle cx={20} cy={78} r={13} fill={colors.success} opacity={0.55} />
-      <Circle cx={11} cy={70} r={10} fill={colors.success} opacity={0.5} />
-      <Rect x={17} y={80} width={4} height={10} fill={colors.crestRedDeep} opacity={0.3} />
-      <Circle cx={42} cy={82} r={9} fill={colors.success} opacity={0.45} />
-      <Rect x={39} y={88} width={3} height={7} fill={colors.crestRedDeep} opacity={0.25} />
-      <Rect x={62} y={38} width={26} height={54} rx={5} fill={building} opacity={0.55 * boost} />
-      <Rect x={69} y={48} width={4} height={4} rx={1} fill={windowColor} opacity={0.4} />
-      <Rect x={78} y={48} width={4} height={4} rx={1} fill={windowColor} opacity={0.4} />
-      <Rect x={69} y={58} width={4} height={4} rx={1} fill={windowColor} opacity={0.4} />
-      <Rect x={78} y={58} width={4} height={4} rx={1} fill={windowColor} opacity={0.4} />
-      <Rect x={96} y={16} width={24} height={76} rx={5} fill={building} opacity={0.75 * boost} />
-      <Rect x={106} y={4} width={2} height={14} fill={building} opacity={0.75 * boost} />
-      <Rect x={102} y={26} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-      <Rect x={111} y={26} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-      <Rect x={102} y={36} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-      <Rect x={111} y={36} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-      <Rect x={102} y={46} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-      <Rect x={111} y={46} width={4} height={4} rx={1} fill={windowColor} opacity={0.45} />
-    </Svg>
-  );
-}
-
-/** Home's greeting banner: sun glyph + tagline up top, a big two-line "Good evening, <name>", skyline in the corner. */
-function GreetingCard({ name }: { name: string }) {
-  const { styles, theme } = useCrmStyles(factory);
-  return (
-    <GradientCard color={theme.isDark ? '#24406F' : colors.primarySoft} style={styles.greetingCard}>
-      <View style={styles.greetingIllustration} pointerEvents="none">
-        <GreetingSkyline />
-      </View>
-      <View style={styles.greetingHeaderRow}>
-        <View style={styles.greetingSunWrap}>
-          <SunIcon size={19} color={theme.warning} />
-        </View>
-        <View style={styles.greetingTaglineCol}>
-          <Text style={styles.greetingTagline}>“Safer Spaces{'\n'}Together”</Text>
-          <View style={styles.greetingTaglineUnderline} />
-        </View>
-      </View>
-      <Text style={styles.greetingBig}>{getGreeting()},</Text>
-      <Text style={[styles.greetingBig, styles.greetingBigName]}>{name}</Text>
-    </GradientCard>
-  );
-}
 
 function RichSectionHeader({
   title,
@@ -419,7 +328,7 @@ function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) 
     >
       <View style={[styles.leadAccent, { backgroundColor: color }]} />
       <View style={styles.leadGhostWrap}>
-        <RupeeIcon size={80} color={color} />
+        <RupeeIcon size={64} color={color} />
       </View>
 
       <View style={styles.leadAmountCol}>
@@ -445,15 +354,17 @@ function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) 
             </View>
           )}
         </View>
-        <Text style={styles.leadService} numberOfLines={2}>
-          {lead.service} · {lead.plan}
+        <Text style={styles.leadService} numberOfLines={1}>
+          {lead.service}
         </Text>
-        <Text style={styles.leadMeta} numberOfLines={1}>
-          {lead.phone} · {formatLeadWhen(lead.createdAt)}
-        </Text>
-        <View style={[styles.leadPill, { backgroundColor: pillBg }]}>
-          {paid ? <CheckCircleIcon size={12} color={pillText} /> : <ClockIcon size={12} color={pillText} />}
-          <Text style={[styles.leadPillText, { color: pillText }]}>{paid ? 'Paid' : 'Payment Pending'}</Text>
+        <View style={styles.leadBottom}>
+          <View style={[styles.leadPill, { backgroundColor: pillBg }]}>
+            {paid ? <CheckCircleIcon size={12} color={pillText} /> : <ClockIcon size={12} color={pillText} />}
+            <Text style={[styles.leadPillText, { color: pillText }]}>{paid ? 'Paid' : 'Pending'}</Text>
+          </View>
+          <Text style={styles.leadMeta} numberOfLines={1}>
+            {formatLeadWhen(lead.createdAt)}
+          </Text>
         </View>
       </View>
 
@@ -543,9 +454,24 @@ export function CrmHomeScreen() {
 
   // The slider width is measured (not assumed) so each card is exactly one page wide.
   const [sliderWidth, setSliderWidth] = useState(0);
+
+  // Replays the achievements ring: every time Home comes into view, and when a pull-to-refresh finishes.
+  const [replay, setReplay] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setReplay(k => k + 1);
+    }, []),
+  );
+  const wasRefreshing = useRef(false);
+  useEffect(() => {
+    if (wasRefreshing.current && !refreshing) setReplay(k => k + 1);
+    wasRefreshing.current = refreshing;
+  }, [refreshing]);
   const [sliderIndex, setSliderIndex] = useState(0);
 
   const recent = leads.slice(0, RECENT_LIMIT);
+  const achievements = useMemo(() => computeMonthlyAchievements(leads), [leads]);
+  const monthLabel = new Date().toLocaleString('en-IN', { month: 'long' });
 
   function handleSliderEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
     if (!sliderWidth) return;
@@ -564,7 +490,7 @@ export function CrmHomeScreen() {
       />
       <CrmScreen transparent edges={[]} refreshing={refreshing} onRefresh={refresh}>
         <View style={styles.homePad}>
-          <GreetingCard name={firstName(user?.name)} />
+          <AchievementCard achievements={achievements} monthLabel={monthLabel} replayKey={replay} />
 
           <NoticeBanner message={notice} tone={noticeTone} onDismiss={dismissNotice} />
           <CrmErrorBanner message={error} onRetry={refresh} />

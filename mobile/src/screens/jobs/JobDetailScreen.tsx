@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../../components/ScreenContainer';
@@ -8,6 +8,7 @@ import { GradientCard } from '../../components/GradientCard';
 import { Card } from '../../components/Card';
 import { ArrowButton } from '../../components/ArrowButton';
 import { Banner, type BannerVariant } from '../../components/Banner';
+import { Toast } from '../../components/Toast';
 import { Skeleton } from '../../components/Skeleton';
 import { Button } from '../../components/Button';
 import { ConfirmSheet } from '../../components/ConfirmSheet';
@@ -24,6 +25,7 @@ import {
   ChevronLeftIcon,
   ClockIcon,
   DocumentIcon,
+  LockIcon,
   ExternalLinkIcon,
   PersonIcon,
   PhoneIcon,
@@ -208,25 +210,11 @@ export function JobDetailScreen({ route, navigation }: Props) {
       setFeedback({ message: 'Visit started successfully', variant: 'success' });
       await load();
     } catch (err) {
-      if (err instanceof LocationServicesDisabledError) {
-        // An actual "ask" (per the reference this was built against), not
-        // just red text the technician has to already know to act on -
-        // "Open Settings" jumps straight to the Location toggle, no manual
-        // hunting through the OS Settings app required.
-        Alert.alert(err.message, 'You can turn it on now without leaving this screen.', [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Open Settings',
-            onPress: () => {
-              if (Platform.OS === 'android') {
-                Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
-              } else {
-                Linking.openURL('app-settings:');
-              }
-            },
-          },
-        ]);
-      } else if (err instanceof LocationError) {
+      if (err instanceof LocationServicesDisabledError || err instanceof LocationError) {
+        // getCurrentLocation() already tried Android's own in-app "Turn on Location?" dialog before
+        // ever getting here (see utils/location.ts) - by the time this branch runs, the technician
+        // either dismissed that dialog or something else went wrong, so there is nothing left for a
+        // second popup to add. Just say so, the same way any other location problem is reported.
         setFeedback({ message: err.message, variant: 'validation' });
       } else if (err instanceof ApiError && err.code === 'OUTSIDE_GEOFENCE') {
         const distance = Number(err.details?.distanceMeters ?? 0);
@@ -423,6 +411,7 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.screenFlex}>
+    <Toast toast={feedback} onDismiss={() => setFeedback(null)} />
     <ScreenContainer
       onRefresh={() => load(true)}
       refreshing={refreshing}
@@ -494,7 +483,6 @@ export function JobDetailScreen({ route, navigation }: Props) {
               very top of the content would render right under the status
               bar instead of somewhere the technician is actually looking. */}
           {!!error && <Banner message={error} variant="error" />}
-          {!!feedback && <Banner message={feedback.message} variant={feedback.variant} />}
 
           {/* Job status actions - admin/supervisor/branch_admin only */}
           {canManageStatus && allowedNext.length > 0 && (
@@ -661,13 +649,24 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Activity</Text>
-            {/* A technician whose own visit is already COMPLETED has nothing
-                left to report on this job - the composer (photos, files,
-                voice notes) is for work in progress, not a place to keep
-                attaching things after the fact. Supervisor/admin keep it
-                always, since they can still add follow-up notes after a
-                technician's work is done. */}
-            {!(isTechnician && primaryVisit?.status === 'COMPLETED') && (
+            {/* A technician can only post updates/photos while their own visit is actually underway
+                (IN_PROGRESS) or already submitted (AWAITING_APPROVAL) - never before they've tapped
+                Start Visit, and never again once it's COMPLETED. Attaching "proof of work" photos to a
+                visit that was never started would be exactly backwards. Supervisor/admin keep the
+                composer always, since they can still add follow-up notes after a technician's work is
+                done and aren't gated by any visit of their own. */}
+            {isTechnician && primaryVisit?.status !== 'IN_PROGRESS' && primaryVisit?.status !== 'AWAITING_APPROVAL' ? (
+              <View style={styles.composerLocked}>
+                <View style={styles.composerLockedIcon}>
+                  <LockIcon size={18} color={colors.textMuted} />
+                </View>
+                <Text style={styles.composerLockedText}>
+                  {primaryVisit?.status === 'COMPLETED'
+                    ? 'This visit is complete - no further updates needed.'
+                    : 'Start your visit to post updates and attach photos.'}
+                </Text>
+              </View>
+            ) : (
               <CommentComposer onSubmit={handleAddComment} submitting={commentSubmitting} />
             )}
 
@@ -1412,6 +1411,28 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  composerLocked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  composerLockedIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  composerLockedText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    flex: 1,
   },
   visitRow: {
     paddingVertical: spacing.sm,

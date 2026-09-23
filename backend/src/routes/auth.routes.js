@@ -31,8 +31,15 @@ async function ensureTemporaryAccessIssuerCanManageJob(req, job) {
 // --------------------
 // LOGIN 
 // --------------------
+// Web keeps its existing 8h session untouched; the mobile app sends `client: "mobile"` (see
+// mobile/src/api/auth.ts) and gets a much longer-lived token instead, since a technician typically
+// logs in once and expects to stay signed in - an 8h expiry meant anyone who didn't reopen the app
+// within the same working day was silently signed back out to the login screen.
+const WEB_TOKEN_TTL = "8h";
+const MOBILE_TOKEN_TTL = "30d";
+
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, client } = req.body;
 
   try {
 
@@ -87,7 +94,7 @@ LIMIT 1
         branch_id: user.branch_id
       },
       process.env.JWT_SECRET,
-      { expiresIn: "8h" }
+      { expiresIn: client === "mobile" ? MOBILE_TOKEN_TTL : WEB_TOKEN_TTL }
     );
 
     res.json({

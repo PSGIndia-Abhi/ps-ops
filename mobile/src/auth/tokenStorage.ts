@@ -38,13 +38,17 @@ export async function saveSession(session: AuthSession): Promise<void> {
 export async function loadSession(): Promise<AuthSession | null> {
   if (cachedSession !== undefined) return cachedSession;
 
-  const result = await Keychain.getGenericPassword({ service: SERVICE });
-  if (!result) {
-    cachedSession = null;
-    return null;
-  }
-
+  // Keychain.getGenericPassword can throw (not just return false) - e.g. "Key permanently invalidated"
+  // after the device's screen lock/biometrics are reset, which invalidates Android Keystore-backed
+  // entries outright. Previously uncaught, this left AuthContext's bootstrap effect's promise rejected
+  // and the app stuck on its splash screen forever instead of cleanly falling through to the login
+  // screen - which is what a technician reporting "logs out" from a stuck-on-launch app would describe.
   try {
+    const result = await Keychain.getGenericPassword({ service: SERVICE });
+    if (!result) {
+      cachedSession = null;
+      return null;
+    }
     cachedSession = JSON.parse(result.password) as AuthSession;
   } catch {
     cachedSession = null;

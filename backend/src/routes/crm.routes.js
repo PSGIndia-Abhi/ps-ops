@@ -7,6 +7,16 @@ const router = express.Router();
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
+const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
+
+// Never let the company-hand-off break the lead flow it rides along with - log and move on.
+async function handleNewCustomer(customerName) {
+  try {
+    await createCompanyForPaidLead(pool, customerName);
+  } catch (err) {
+    console.error("CRM lead -> companies hand-off error:", err);
+  }
+}
 
 // CRM (Sales & Marketing) - Phase 1: service price list, create a lead, list leads.
 // Every route needs a logged-in user holding the matching CRM_* permission
@@ -147,6 +157,10 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
   const email = typeof body.email === "string" ? body.email.trim() : "";
   const referenceBy = typeof body.reference_by === "string" ? body.reference_by.trim() : "";
+  // Sent by the mobile app with every save. If a save is retried (poor network: the first attempt
+  // reached us but the reply was lost), the same reference returns the lead we already made.
+  const clientRef =
+    typeof body.client_ref === "string" && /^APP-[A-Za-z0-9-]{8,36}$/.test(body.client_ref) ? body.client_ref : null;
   const leadSource = body.lead_source || null;
   const paymentMethod = body.payment_method;
   const leadStatus = body.lead_status || "new";
@@ -194,13 +208,21 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
       return res.status(400).json({ error: "That service, house type and plan combination is not in the price list" });
     }
 
+    if (clientRef) {
+      const [[already]] = await pool.query(
+        `SELECT * FROM crm_leads WHERE external_ref = ? AND created_by_user_id = ? LIMIT 1`,
+        [clientRef, req.user.id]
+      );
+      if (already) return res.status(200).json(toLead(already));
+    }
+
     const id = uuid();
     await pool.query(
       `INSERT INTO crm_leads
         (id, customer_name, phone, customer_email, house_type, service_name, plan_type,
          standard_amount, amount, coupon_code, location, lead_source, reference_by, notes,
-         payment_method, payment_status, lead_status, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         payment_method, payment_status, lead_status, created_by_user_id, external_ref)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         customerName,
@@ -220,12 +242,26 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
         paymentStatus,
         leadStatus,
         req.user.id,
+        clientRef,
       ]
     );
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    if (paymentStatus === "paid") await handleNewCustomer(customerName);
     res.status(201).json(toLead(created));
   } catch (err) {
+    if (err && err.code === "ER_DUP_ENTRY" && clientRef) {
+      // Two copies of the same save arrived at once: the other one won, so return its lead.
+      try {
+        const [[winner]] = await pool.query(
+          `SELECT * FROM crm_leads WHERE external_ref = ? AND created_by_user_id = ? LIMIT 1`,
+          [clientRef, req.user.id]
+        );
+        if (winner) return res.status(200).json(toLead(winner));
+      } catch (lookupErr) {
+        console.error("CRM lead duplicate lookup error:", lookupErr);
+      }
+    }
     console.error("CRM lead create error:", err);
     res.status(500).json({ error: "Failed to save lead" });
   }
@@ -344,6 +380,7 @@ router.post("/leads/:id/payment-verify", auth, requirePermission("CRM_COLLECT_PA
          WHERE id = ? AND payment_status <> 'paid'`,
         [paymentId, lead.id]
       );
+      await handleNewCustomer(lead.customer_name);
     }
 
     const [[updated]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ? LIMIT 1`, [lead.id]);

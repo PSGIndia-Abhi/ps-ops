@@ -58,6 +58,8 @@ const factory = (t: CrmTheme) => ({
   optionSelected: { backgroundColor: t.primarySoftBg },
   optionLabel: { flex: 1, ...typography.body, color: t.textPrimary },
   optionLabelSelected: { color: t.primary, fontWeight: '700' as const },
+  fieldIcon: { marginRight: spacing.sm },
+  fieldText: { flex: 1 },
 });
 
 interface SelectFieldProps<T extends string> {
@@ -70,6 +72,8 @@ interface SelectFieldProps<T extends string> {
   disabled?: boolean;
   /** Shown as the sheet title; defaults to the field label. */
   sheetTitle?: string;
+  /** Drawn at the left of the field, like the icons in the text fields. */
+  icon?: React.ReactNode;
 }
 
 /** A dropdown that opens a bottom sheet - the touch-friendly way to pick from a list on a phone. */
@@ -82,6 +86,7 @@ export function SelectField<T extends string>({
   error,
   disabled = false,
   sheetTitle,
+  icon,
 }: SelectFieldProps<T>) {
   const { styles, theme } = useCrmStyles(factory);
   const insets = useSafeAreaInsets();
@@ -99,7 +104,8 @@ export function SelectField<T extends string>({
         accessibilityState={{ disabled }}
         style={[styles.field, !!error && styles.fieldError, disabled && styles.fieldDisabled]}
       >
-        <Text style={selected ? styles.value : styles.placeholder} numberOfLines={1}>
+        {!!icon && <View style={styles.fieldIcon}>{icon}</View>}
+        <Text style={[selected ? styles.value : styles.placeholder, styles.fieldText]} numberOfLines={1}>
           {selected ? selected.label : placeholder}
         </Text>
         <ChevronDownIcon size={18} color={theme.textMuted} />

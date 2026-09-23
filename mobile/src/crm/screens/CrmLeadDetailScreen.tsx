@@ -30,7 +30,7 @@ import {
   type PaymentMethod,
 } from '../types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
-import { PaymentSuccessOverlay } from '../ui/Celebration';
+import { PaymentFailedOverlay, PaymentSuccessOverlay } from '../ui/Celebration';
 import { RupeeIcon, WalletIcon, WhatsAppIcon } from '../ui/crmIcons';
 import { PestIcon } from '../ui/PestIcon';
 import { PrimaryButton } from '../ui/PrimaryButton';
@@ -140,7 +140,6 @@ const factory = (t: CrmTheme) => ({
   contactCall: { backgroundColor: t.primary },
   contactWhatsApp: { backgroundColor: WHATSAPP },
   contactEmail: { backgroundColor: t.crestRed },
-  contactOff: { opacity: 0.35 },
   contactPressed: { opacity: 0.8, transform: [{ scale: 0.95 }] },
   contactLabel: { ...typography.captionMedium, color: t.textSecondary },
 
@@ -178,6 +177,16 @@ const factory = (t: CrmTheme) => ({
   infoValue: { ...typography.bodyMedium, color: t.textPrimary, marginTop: 1 },
   notes: { ...typography.body, color: t.textSecondary, lineHeight: 22 },
   payBlock: { marginTop: spacing.sm },
+  syncBanner: {
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    backgroundColor: t.warningBg,
+  },
+  syncBannerFailed: { backgroundColor: t.dangerBg },
+  syncText: { ...typography.captionMedium, color: t.warningText },
+  syncTextFailed: { color: t.dangerText },
+  syncDiscard: { ...typography.captionMedium, color: t.dangerText, marginTop: spacing.xs },
   shrink: { flexShrink: 1 },
 });
 
@@ -214,10 +223,11 @@ export function CrmLeadDetailScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmLeadDetail'>>();
-  const { getLead, replaceLead, showNotice } = useLeads();
+  const { getLead, replaceLead, showNotice, discardQueued } = useLeads();
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [failedReason, setFailedReason] = useState<string | null>(null);
   const { styles, theme } = useCrmStyles(factory);
   const lead = getLead(route.params.leadId);
 
@@ -241,7 +251,17 @@ export function CrmLeadDetailScreen() {
       setShowSuccess(true);
     } else if (outcome.status === 'failed') {
       setPayError(outcome.message);
+      setFailedReason(outcome.message);
+    } else {
+      // Cancelled: the customer backed out of checkout - nothing went wrong, just unfinished.
+      const reason = 'Payment is still pending. You can try again whenever the customer is ready.';
+      setPayError(reason);
+      setFailedReason(reason);
     }
+  }
+
+  function dismissFailedPayment() {
+    setFailedReason(null);
   }
 
   if (!lead) {
@@ -324,6 +344,28 @@ export function CrmLeadDetailScreen() {
           </View>
         </View>
 
+        {lead.pendingSync && (
+          <View style={[styles.syncBanner, !!lead.syncError && styles.syncBannerFailed]}>
+            <Text style={[styles.syncText, !!lead.syncError && styles.syncTextFailed]}>
+              {lead.syncError
+                ? `This lead could not be sent: ${lead.syncError}`
+                : 'Saved on this phone. It will be sent automatically once you are online.'}
+            </Text>
+            {!!lead.syncError && (
+              <Pressable
+                onPress={() => {
+                  discardQueued(lead.id);
+                  navigation.goBack();
+                }}
+                accessibilityRole="button"
+                testID="discard-queued"
+              >
+                <Text style={styles.syncDiscard}>Discard this lead</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
         <View style={styles.contactRow}>
           <Pressable
             onPress={() =>
@@ -364,16 +406,18 @@ export function CrmLeadDetailScreen() {
           </Pressable>
           <Pressable
             onPress={() =>
-              open(`mailto:${lead.email}`, 'No email app found on this device.')
+              // No email on file yet: still open the mail app with a blank
+              // "to" field, so the rep can type the address themselves
+              // (e.g. one given over a call, after the lead was saved).
+              open(
+                hasEmail ? `mailto:${lead.email}` : 'mailto:',
+                'No email app found on this device.',
+              )
             }
-            disabled={!hasEmail}
             accessibilityRole="button"
-            accessibilityLabel={
-              hasEmail ? `Email ${lead.customerName}` : 'No email on this lead'
-            }
+            accessibilityLabel={`Email ${lead.customerName}`}
             style={({ pressed }) => [
               styles.contact,
-              !hasEmail && styles.contactOff,
               pressed && styles.contactPressed,
             ]}
             testID="contact-email"
@@ -381,9 +425,7 @@ export function CrmLeadDetailScreen() {
             <View style={[styles.contactCircle, styles.contactEmail]}>
               <EmailIcon size={24} color="#FFFFFF" />
             </View>
-            <Text style={styles.contactLabel}>
-              {hasEmail ? 'Email' : 'No email'}
-            </Text>
+            <Text style={styles.contactLabel}>Email</Text>
           </Pressable>
         </View>
 
@@ -435,7 +477,7 @@ export function CrmLeadDetailScreen() {
             label="Status"
             value={paid ? 'Paid' : 'Payment Pending'}
           />
-          {lead.paymentMethod === 'online' && !paid && (
+          {lead.paymentMethod === 'online' && !paid && !lead.pendingSync && (
             <View style={styles.payBlock}>
               <CrmErrorBanner message={payError} />
               <PrimaryButton
@@ -509,6 +551,11 @@ export function CrmLeadDetailScreen() {
         amount={lead.amount}
         customerName={lead.customerName}
         onDone={() => setShowSuccess(false)}
+      />
+      <PaymentFailedOverlay
+        visible={failedReason !== null}
+        reason={failedReason ?? ''}
+        onDone={dismissFailedPayment}
       />
     </CrmScreen>
   );

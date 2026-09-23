@@ -23,6 +23,7 @@ const factory = (t: CrmTheme) => ({
   segmentActive: {
     backgroundColor: t.primary,
   },
+  content: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6 },
   label: {
     ...typography.captionMedium,
     color: t.textSecondary,
@@ -37,10 +38,12 @@ interface SegmentedControlProps<T extends string> {
   options: Option<T>[];
   value: T;
   onChange: (value: T) => void;
+  /** Optional icon per option; `color` already matches the active / inactive label colour. */
+  renderIcon?: (value: T, color: string) => React.ReactNode;
 }
 
-export function SegmentedControl<T extends string>({ options, value, onChange }: SegmentedControlProps<T>) {
-  const { styles } = useCrmStyles(factory);
+export function SegmentedControl<T extends string>({ options, value, onChange, renderIcon }: SegmentedControlProps<T>) {
+  const { styles, theme } = useCrmStyles(factory);
   return (
     <View style={styles.track} accessibilityRole="tablist">
       {options.map((option) => {
@@ -53,9 +56,12 @@ export function SegmentedControl<T extends string>({ options, value, onChange }:
             accessibilityState={{ selected: active }}
             style={[styles.segment, active && styles.segmentActive]}
           >
-            <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
-              {option.label}
-            </Text>
+            <View style={styles.content}>
+              {renderIcon?.(option.value, active ? theme.textOnPrimary : theme.textSecondary)}
+              <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
+                {option.label}
+              </Text>
+            </View>
           </Pressable>
         );
       })}

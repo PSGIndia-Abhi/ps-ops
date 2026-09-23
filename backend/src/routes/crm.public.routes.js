@@ -5,6 +5,16 @@ const { v4: uuid } = require("uuid");
 const router = express.Router();
 
 const { pool } = require("../../db");
+const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
+
+// Never let the company-hand-off break the website's lead hand-off it rides along with.
+async function handleNewCustomer(customerName) {
+  try {
+    await createCompanyForPaidLead(pool, customerName);
+  } catch (err) {
+    console.error("CRM website lead -> companies hand-off error:", err);
+  }
+}
 
 // Website -> CRM hand-off. The bestserve.in server calls this (server to server) once a booking
 // is confirmed, and again from its Razorpay webhook. There is no user login here: every request
@@ -156,6 +166,7 @@ router.post("/leads", async (req, res) => {
       throw err;
     }
 
+    if (paid) await handleNewCustomer(name);
     res.status(201).json({ ok: true, lead_id: id, created: true });
   } catch (err) {
     console.error("CRM website lead error:", err);
@@ -183,6 +194,7 @@ async function updateExisting(lead, { emailOk, location, coupon, paid, razorpayO
        WHERE id = ? AND payment_status <> 'paid'`,
       [razorpayOrderId || null, razorpayPaymentId || null, lead.id]
     );
+    await handleNewCustomer(lead.customer_name);
   }
 }
 

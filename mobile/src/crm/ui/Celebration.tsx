@@ -161,6 +161,32 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
   },
   doneText: { ...typography.button, color: t.successText },
+  ringFail: {
+    position: 'absolute' as const,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 3,
+    borderColor: t.danger,
+  },
+  discFail: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: t.danger,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  doneFail: {
+    marginTop: spacing.lg,
+    alignSelf: 'stretch' as const,
+    minHeight: 48,
+    borderRadius: radii.lg,
+    backgroundColor: t.dangerBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  doneFailText: { ...typography.button, color: t.dangerText },
 });
 
 interface PaymentSuccessOverlayProps {
@@ -254,6 +280,93 @@ export function PaymentSuccessOverlay({ visible, amount, customerName, onDone }:
           </Pressable>
         </Animated.View>
         <ConfettiBurst burstKey={burstKey} originY={0.42} />
+      </Animated.View>
+    </Modal>
+  );
+}
+
+interface PaymentFailedOverlayProps {
+  visible: boolean;
+  /** Why it didn't go through, e.g. "Payment Cancelled" or a Razorpay error message. */
+  reason: string;
+  onDone: () => void;
+}
+
+/**
+ * The same full-screen, drawn-icon moment as PaymentSuccessOverlay - just red, with an X
+ * instead of a check, and no confetti. Doesn't auto-close: unlike a success moment, this one
+ * is worth making the rep actually read and dismiss. The lead itself is unaffected - it was
+ * already saved as pending before the payment was even attempted.
+ */
+export function PaymentFailedOverlay({ visible, reason, onDone }: PaymentFailedOverlayProps) {
+  const { styles: s } = useCrmStyles(factory);
+  const backdrop = useRef(new Animated.Value(0)).current;
+  const pop = useRef(new Animated.Value(0)).current;
+  const draw = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const text = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    backdrop.setValue(0);
+    pop.setValue(0);
+    draw.setValue(0);
+    pulse.setValue(0);
+    text.setValue(0);
+
+    const sequence = Animated.sequence([
+      Animated.timing(backdrop, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.spring(pop, { toValue: 1, friction: 5, tension: 90, useNativeDriver: true }),
+      Animated.parallel([
+        Animated.timing(draw, { toValue: 1, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(text, { toValue: 1, duration: 420, delay: 120, useNativeDriver: true }),
+      ]),
+    ]);
+    sequence.start();
+    return () => sequence.stop();
+  }, [visible, backdrop, pop, draw, pulse, text]);
+
+  const crossOffset = draw.interpolate({ inputRange: [0, 1], outputRange: [34, 0] });
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 0.7, 0] });
+  const textShift = text.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onDone}>
+      <Animated.View style={[styles.backdrop, { opacity: backdrop }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onDone} accessibilityLabel="Close" />
+        <Animated.View style={[s.card, { transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }]}>
+          <View style={s.ringWrap}>
+            <Animated.View style={[s.ringFail, { opacity: ringOpacity, transform: [{ scale: ringScale }] }]} />
+            <Animated.View style={[s.discFail, { transform: [{ scale: pop }] }]}>
+              <Svg width={56} height={56} viewBox="0 0 24 24" fill="none">
+                <AnimatedPath
+                  d="M6 6L18 18M18 6L6 18"
+                  stroke="#FFFFFF"
+                  strokeWidth={2.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeDasharray={34}
+                  strokeDashoffset={crossOffset}
+                />
+              </Svg>
+            </Animated.View>
+          </View>
+          <Animated.View style={{ ...s.textBlock, opacity: text, transform: [{ translateY: textShift }] }}>
+            <Text style={s.title}>Payment Not Completed</Text>
+            <Text style={s.sub}>{reason}</Text>
+            <Text style={s.sub}>The lead is saved - you can try the payment again anytime.</Text>
+          </Animated.View>
+          <Pressable
+            onPress={onDone}
+            accessibilityRole="button"
+            style={({ pressed }) => [s.doneFail, pressed && { opacity: 0.8 }]}
+            testID="payment-failed-done"
+          >
+            <Text style={s.doneFailText}>OK</Text>
+          </Pressable>
+        </Animated.View>
       </Animated.View>
     </Modal>
   );
