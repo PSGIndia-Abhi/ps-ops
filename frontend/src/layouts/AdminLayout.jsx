@@ -99,6 +99,14 @@ export default function AdminLayout() {
     && !isActionsOpen
     && mobilePanel === null;
 
+  /* ---------------- "USERS" SIDEBAR GROUP ---------------- */
+  // User Hierarchy and Departments are admin-only for now, like Branches:
+  // /api/auth/me doesn't expose permissions, and other roles don't hold the
+  // hierarchy permissions until an admin grants them.
+  const isAdmin = role?.trim() === "admin";
+  const inUsersGroup = ["/admin/user-management", "/admin/user-hierarchy", "/admin/departments"].some(isActive);
+  const [usersOpen, setUsersOpen] = useState(inUsersGroup);
+
 
 
   return (
@@ -190,11 +198,42 @@ export default function AdminLayout() {
               </button>
 
               <button
-                className={`nav-btn ${isActive("/admin/user-management") ? "active" : ""}`}
-                onClick={() => navigate("/admin/user-management")}
+                className={`nav-btn ${inUsersGroup ? "parent-active" : ""}`}
+                onClick={() => setUsersOpen((open) => !open)}
+                aria-expanded={usersOpen}
               >
-                User Management
+                Users
+                <span className="nav-chevron">{usersOpen ? "▾" : "▸"}</span>
               </button>
+
+              {usersOpen && (
+                <div className="nav-sub">
+                  <button
+                    className={`nav-btn nav-sub-btn ${isActive("/admin/user-management") ? "active" : ""}`}
+                    onClick={() => navigate("/admin/user-management")}
+                  >
+                    User Management
+                  </button>
+
+                  {isAdmin && (
+                    <>
+                      <button
+                        className={`nav-btn nav-sub-btn ${isActive("/admin/user-hierarchy") ? "active" : ""}`}
+                        onClick={() => navigate("/admin/user-hierarchy")}
+                      >
+                        User Hierarchy
+                      </button>
+
+                      <button
+                        className={`nav-btn nav-sub-btn ${isActive("/admin/departments") ? "active" : ""}`}
+                        onClick={() => navigate("/admin/departments")}
+                      >
+                        Departments
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
 
               <button
                 className={`nav-btn ${isActive("/admin/group-management") ? "active" : ""}`}
@@ -297,6 +336,26 @@ export default function AdminLayout() {
           >
             User Management
           </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => {
+                  setMobilePanel(null);
+                  navigate("/admin/user-hierarchy");
+                }}
+              >
+                User Hierarchy
+              </button>
+              <button
+                onClick={() => {
+                  setMobilePanel(null);
+                  navigate("/admin/departments");
+                }}
+              >
+                Departments
+              </button>
+            </>
+          )}
           <button
             onClick={() => {
               setMobilePanel(null);
