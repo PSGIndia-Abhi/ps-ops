@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Banner } from '../../components/Banner';
@@ -22,6 +22,10 @@ export function MyPerformanceScreen() {
   const [achievements, setAchievements] = useState<TechnicianAchievements | null | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [replay, setReplay] = useState(0);
+  /** So the entrance animations only ever replay on the first load or an explicit pull-to-refresh -
+   * not on every ordinary tab switch back to this screen, which used to restart all four sweeps
+   * (level ring, journey, medals, gauge) every time, fighting the tab-switch transition itself. */
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(
     async (isRefresh = false) => {
@@ -41,7 +45,10 @@ export function MyPerformanceScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setReplay(k => k + 1);
+      if (!hasLoadedOnce.current) {
+        hasLoadedOnce.current = true;
+        setReplay(k => k + 1);
+      }
       load();
     }, [load]),
   );

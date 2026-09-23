@@ -29,7 +29,7 @@ import {
   PAYMENT_METHODS,
   type PaymentMethod,
 } from '../types';
-import { CrmEmptyState, CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
+import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../ui/CrmScreen';
 import { PaymentFailedOverlay, PaymentSuccessOverlay } from '../ui/Celebration';
 import { RupeeIcon, WalletIcon, WhatsAppIcon } from '../ui/crmIcons';
 import { PestIcon } from '../ui/PestIcon';
@@ -43,6 +43,13 @@ const PENDING_ON_WHITE = '#B45309';
 
 const factory = (t: CrmTheme) => ({
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  skeletonGap: { marginBottom: spacing.md },
+  skeletonContactRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.lg,
+    marginBottom: spacing.md,
+  },
 
   hero: {
     backgroundColor: t.primary,
@@ -223,7 +230,7 @@ export function CrmLeadDetailScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmLeadDetail'>>();
-  const { getLead, replaceLead, showNotice, discardQueued } = useLeads();
+  const { getLead, replaceLead, showNotice, discardQueued, loading } = useLeads();
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -265,6 +272,26 @@ export function CrmLeadDetailScreen() {
   }
 
   if (!lead) {
+    // `getLead` is a lookup against the shared leads list, not its own fetch - so when that list
+    // is still loading (a fresh app open, or a slow connection), this looks identical to a lead
+    // that genuinely doesn't exist. Only show "not found" once loading has actually finished.
+    if (loading) {
+      return (
+        <CrmScreen scroll={false} edges={['top', 'bottom']}>
+          <TopBar title="Lead Details" onBack={() => navigation.goBack()} />
+          <ScrollView contentContainerStyle={styles.scroll}>
+            <CrmSkeleton height={190} radius={radii.xl} style={styles.skeletonGap} />
+            <View style={styles.skeletonContactRow}>
+              <CrmSkeleton width={44} height={44} radius={22} />
+              <CrmSkeleton width={44} height={44} radius={22} />
+              <CrmSkeleton width={44} height={44} radius={22} />
+            </View>
+            <CrmSkeleton height={160} radius={radii.lg} style={styles.skeletonGap} />
+            <CrmSkeleton height={120} radius={radii.lg} />
+          </ScrollView>
+        </CrmScreen>
+      );
+    }
     return (
       <CrmScreen scroll={false} edges={['top', 'bottom']}>
         <TopBar title="Lead" onBack={() => navigation.goBack()} />
