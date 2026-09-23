@@ -26,24 +26,6 @@ export default function ProtectedRoute({ children, allowedRoles }) {
   // since they're already signed in
   if (!allowedRoles.includes(role)) {
     return <Navigate to={(roleIsKnown && ROLE_HOME[role]) || "/staff"} replace />;
-    switch (role) {
-      case "admin":
-        return <Navigate to="/admin" replace />;
-      case "supervisor":
-        return <Navigate to="/supervisor" replace />;
-      case "technician":
-        return <Navigate to="/technician" replace />;
-      case "accountant":
-        return <Navigate to="/accountant" replace />;
-      case "client":
-        return <Navigate to="/client" replace />;
-      case "branch_admin":
-        return <Navigate to="/admin" replace />;
-      case "temporary_worker":
-        return <Navigate to="/temp" replace />;
-      default:
-        return <Navigate to="/login" replace />;
-    }
   }
 
   return children;
