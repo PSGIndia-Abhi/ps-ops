@@ -7,12 +7,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Job update photos: camera capture and gallery selection. -->
+    <!-- Job update photos: camera capture. Gallery selection deliberately does NOT declare
+         READ_MEDIA_IMAGES/READ_EXTERNAL_STORAGE - react-native-image-picker's launchImageLibrary
+         (v8.x) already uses Android's system Photo Picker for this, which needs no storage
+         permission at all. Declaring those broad permissions when the picker satisfies the same
+         use case is exactly what Play Store's Photo and Video Permissions policy rejects apps
+         for ("use alternative system pickers for the photos/videos"). -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission
-      android:name="android.permission.READ_EXTERNAL_STORAGE"
-      android:maxSdkVersion="32" />
 
     <!-- CRM New Lead: "pick a number from contacts" (read-only; nothing is written to contacts). -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
