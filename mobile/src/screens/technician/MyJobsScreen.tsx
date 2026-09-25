@@ -541,7 +541,7 @@ const STAGGER_LIMIT = 8;
 
 /**
  * One work-queue entry: the visit's time (or a finished job's date) on the left in its status colour, then
- * the code and status, the job title, the customer and site, and the address; the chevron opens the job.
+ * the customer with the status, the service(s) below it, and the address; the chevron opens the job.
  */
 function WorkQueueCard({ row, index, onPress }: { row: JobQueueRow; index: number; onPress: () => void }) {
   const meta = getStatusMeta(row.status);
@@ -557,8 +557,6 @@ function WorkQueueCard({ row, index, onPress }: { row: JobQueueRow; index: numbe
       useNativeDriver: true,
     }).start();
   }, [enter, index]);
-
-  const who = [row.company, row.siteArea].filter(Boolean).join(' · ');
 
   return (
     <Animated.View style={{ opacity: enter, transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }] }}>
@@ -583,17 +581,14 @@ function WorkQueueCard({ row, index, onPress }: { row: JobQueueRow; index: numbe
 
         <View style={styles.cardBody}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.cardCode} numberOfLines={1}>
-              {row.code}
+            <Text style={styles.cardCustomer} numberOfLines={1}>
+              {row.company || row.title}
             </Text>
             <StatusBadge status={row.status} />
           </View>
-          <Text style={styles.cardTitle} numberOfLines={2}>
-            {row.title}
-          </Text>
-          {!!who && (
-            <Text style={styles.cardWho} numberOfLines={1}>
-              {who}
+          {!!row.company && (
+            <Text style={styles.cardService} numberOfLines={1}>
+              {row.title}
             </Text>
           )}
           {!!row.address && (
@@ -713,9 +708,8 @@ const styles = StyleSheet.create({
   cardDivider: { width: 1, alignSelf: 'stretch', marginVertical: spacing.sm },
   cardBody: { flex: 1, paddingVertical: spacing.sm + 2, paddingHorizontal: spacing.sm },
   cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
-  cardCode: { ...typography.overline, color: colors.textMuted, flexShrink: 1 },
-  cardTitle: { ...typography.bodyMedium, fontSize: 15, color: colors.textPrimary, marginTop: 2 },
-  cardWho: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
+  cardCustomer: { ...typography.bodyMedium, fontSize: 15, color: colors.textPrimary, flex: 1 },
+  cardService: { ...typography.caption, color: colors.textSecondary, marginTop: 1 },
   addressRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   addressText: { ...typography.caption, color: colors.textMuted, flexShrink: 1 },
   chevron: {
