@@ -4,11 +4,13 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
+const multer = require("multer");
 const minioClient = require("../lib/minio");
-const { getTeamUserIds } = require("../utils/hierarchy");
+const { getTeamUserIds, today: dbToday } = require("../utils/hierarchy");
 const {
-  TASK_COLUMNS_T, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
+  TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
 } = require("../utils/workTasks");
+const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate } = require("../utils/workTaskRecurrence");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -26,11 +28,8 @@ function parseId(value) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
-function isValidDate(value) {
-  return typeof value === "string" && DATE_RE.test(value) && !Number.isNaN(Date.parse(value));
-}
+const isValidDate = isRealDate;
 const PRIORITIES = ["LOW", "NORMAL", "HIGH"];
 
 // Temporary-worker tokens have no user id; this module is for real users only.
@@ -169,11 +168,13 @@ router.get("/", auth, requireRealUser, async (req, res) => {
   }
 });
 
-// POST /api/work-tasks -- create a one-time task. (Recurring tasks are a later step.)
+// POST /api/work-tasks -- create a one-time task (due_date), or a recurring
+// series (a `recurrence` object instead of due_date). A series creates the
+// occurrences already due (start_date up to today) right away.
 router.post("/", auth, requireRealUser, async (req, res) => {
   const body = req.body || {};
   try {
-    if (body.recurrence) throw new HttpError(400, "Recurring tasks are not supported yet");
+    const isRecurring = body.recurrence !== undefined && body.recurrence !== null;
 
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title) throw new HttpError(400, "Title is required");
@@ -182,9 +183,11 @@ router.post("/", auth, requireRealUser, async (req, res) => {
     const assignedTo = parseId(body.assigned_to);
     if (!assignedTo) throw new HttpError(400, "assigned_to is required");
 
-    if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD)");
-    if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
-    if (body.next_action_date && !isValidDate(body.next_action_date)) throw new HttpError(400, "next_action_date must be YYYY-MM-DD");
+    if (!isRecurring) {
+      if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD), or send a recurrence");
+      if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
+      if (body.next_action_date && !isValidDate(body.next_action_date)) throw new HttpError(400, "next_action_date must be YYYY-MM-DD");
+    }
 
     if (body.priority !== undefined && !PRIORITIES.includes(body.priority)) {
       throw new HttpError(400, "priority must be LOW, NORMAL or HIGH");
@@ -195,6 +198,42 @@ router.post("/", auth, requireRealUser, async (req, res) => {
     const [[assignee]] = await pool.query("SELECT id FROM users WHERE id = ? AND is_active = 1", [assignedTo]);
     if (!assignee) throw new HttpError(400, "Invalid assigned_to");
     if (!(await canAssignTo(req, assignedTo))) throw new HttpError(403, "You cannot assign tasks to this person");
+
+    if (isRecurring) {
+      const todayStr = await dbToday(pool);
+      const checked = validateRecurrence(body.recurrence, todayStr);
+      if (checked.error) throw new HttpError(400, checked.error);
+      const rec = checked.value;
+      const seriesId = uuid();
+
+      const created = await inTransaction(async (conn) => {
+        await conn.query(
+          `INSERT INTO work_task_series
+             (id, title, description, task_type, priority, source_module, source_id, assigned_to, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [seriesId, title, optionalText(body.description), taskType, body.priority || "NORMAL",
+           optionalText(body.source_module), optionalText(body.source_id), assignedTo, req.user.id]
+        );
+        await conn.query(
+          `INSERT INTO work_task_recurrence
+             (id, series_id, frequency, interval_value, days_of_week, day_of_month, use_last_day_of_month,
+              month_of_year, time_of_day, start_date, end_type, end_date, end_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuid(), seriesId, rec.frequency, rec.interval_value, rec.days_of_week ? JSON.stringify(rec.days_of_week) : null,
+           rec.day_of_month, rec.use_last_day_of_month, rec.month_of_year, rec.time_of_day, rec.start_date,
+           rec.end_type, rec.end_date, rec.end_count]
+        );
+        return generateDueOccurrences(conn, seriesId, todayStr);
+      });
+
+      const [tasks] = await pool.query(`SELECT ${TASK_COLUMNS} FROM work_tasks WHERE series_id = ? ORDER BY due_date ASC`, [seriesId]);
+      const nextDate = nextOccurrenceDate(
+        { status: "ACTIVE" },
+        { ...rec, occurrences_created: created, last_generated_until: tasks.length ? tasks[tasks.length - 1].due_date : null },
+        todayStr
+      );
+      return res.status(201).json({ success: true, series_id: seriesId, occurrences_created: created, next_occurrence_date: nextDate, tasks });
+    }
 
     const taskId = uuid();
     const conn = await pool.getConnection();
@@ -438,6 +477,32 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
   }
 });
 
+// POST /api/work-tasks/:id/skip -- cancel ONE occurrence of a recurring task
+// (e.g. a holiday). The schedule and every other occurrence are untouched.
+router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    if (!task.series_id) throw new HttpError(400, "Only an occurrence of a recurring task can be skipped");
+    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot skip this task");
+    assertNotFinished(task, "skip");
+    const reason = optionalText(req.body?.reason);
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        "UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ? AND status = ?",
+        [task.id, task.status]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
+      await logHistory(conn, task.id, "SKIP", {
+        fromStatus: task.status, toStatus: "CANCELLED", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id,
+      });
+    });
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to skip occurrence");
+  }
+});
+
 // DELETE /api/work-tasks/:id -- soft delete (status CANCELLED).
 //   Allowed: the assignee, the creator, DELETE_WORK_TASK holders, admin.
 //   A completed task can only be cancelled by admin.
@@ -491,6 +556,188 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     sendError(res, err, "Failed to delete task");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Comments -- anyone who can see the task can read and post.
+// ---------------------------------------------------------------------------
+const COMMENT_SQL = `SELECT c.id, c.comment, c.created_at, c.user_id, u.name AS user_name
+                       FROM work_task_comments c JOIN users u ON u.id = c.user_id`;
+
+// GET /api/work-tasks/:id/comments -- oldest first
+router.get("/:id/comments", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const [rows] = await pool.query(`${COMMENT_SQL} WHERE c.task_id = ? ORDER BY c.created_at ASC`, [task.id]);
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load comments");
+  }
+});
+
+// POST /api/work-tasks/:id/comments
+router.post("/:id/comments", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const comment = typeof req.body?.comment === "string" ? req.body.comment.trim() : "";
+    if (!comment) throw new HttpError(400, "comment is required");
+    if (comment.length > 5000) throw new HttpError(400, "comment is too long (max 5000 characters)");
+
+    const id = uuid();
+    await pool.query("INSERT INTO work_task_comments (id, task_id, user_id, comment) VALUES (?, ?, ?, ?)", [id, task.id, req.user.id, comment]);
+    const [[row]] = await pool.query(`${COMMENT_SQL} WHERE c.id = ?`, [id]);
+    res.status(201).json(row);
+  } catch (err) {
+    sendError(res, err, "Failed to add comment");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Attachments -- files live in MinIO (same bucket/pattern as job attachments);
+// the DB row is metadata only. Anyone who can see the task can list and open
+// files; uploading or removing needs the same rights as editing the task.
+// ---------------------------------------------------------------------------
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE_BYTES, files: 1 } });
+// Only these are shown in the browser; anything else (html, svg, ...) is always
+// downloaded, so an uploaded file can never run as a page on our origin.
+const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]);
+
+const ATTACHMENT_SQL = `SELECT a.id, a.file_name, a.file_type, a.file_size, a.created_at, a.uploaded_by, u.name AS uploaded_by_name
+                          FROM work_task_attachments a LEFT JOIN users u ON u.id = a.uploaded_by`;
+
+// Checks the task and the caller's rights BEFORE the upload body is read.
+async function precheckAttachmentWrite(req, res, next) {
+  try {
+    req.task = await loadVisibleTask(req, req.params.id);
+    if (!canManageTask(req, req.task)) throw new HttpError(403, "You cannot change attachments on this task");
+    next();
+  } catch (err) {
+    sendError(res, err, "Failed to check task");
+  }
+}
+
+function acceptFile(req, res, next) {
+  upload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "File is too large (max 10 MB)" });
+    return res.status(400).json({ error: "Invalid upload. Send one file in the 'file' field." });
+  });
+}
+
+// GET /api/work-tasks/:id/attachments
+router.get("/:id/attachments", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const [rows] = await pool.query(`${ATTACHMENT_SQL} WHERE a.task_id = ? ORDER BY a.created_at ASC`, [task.id]);
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load attachments");
+  }
+});
+
+// POST /api/work-tasks/:id/attachments -- multipart/form-data, one file in the "file" field
+router.post("/:id/attachments", auth, requireRealUser, precheckAttachmentWrite, acceptFile, async (req, res) => {
+  const task = req.task;
+  let objectKey = null;
+  try {
+    if (!req.file) throw new HttpError(400, "file is required");
+    // multer decodes filenames as latin1; restore the real UTF-8 name.
+    const fileName = Buffer.from(req.file.originalname, "latin1").toString("utf8").slice(0, 255);
+    const rawExt = (fileName.split(".").pop() || "").toLowerCase();
+    const ext = /^[a-z0-9]{1,10}$/.test(rawExt) ? rawExt : "bin";
+    const fileType = (req.file.mimetype || "application/octet-stream").slice(0, 100);
+    const id = uuid();
+    objectKey = `work-tasks/${task.id}/${uuid()}.${ext}`;
+
+    // Same lazy bucket creation the company-logo upload already does.
+    if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
+      await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+    }
+    await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.buffer.length, { "Content-Type": fileType });
+    await inTransaction(async (conn) => {
+      await conn.query(
+        `INSERT INTO work_task_attachments (id, task_id, object_key, file_name, file_type, file_size, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, task.id, objectKey, fileName, fileType, req.file.buffer.length, req.user.id]
+      );
+      await logHistory(conn, task.id, "ATTACH", { note: fileName.slice(0, 500), changedBy: req.user.id });
+    });
+    const [[row]] = await pool.query(`${ATTACHMENT_SQL} WHERE a.id = ?`, [id]);
+    res.status(201).json(row);
+  } catch (err) {
+    // DB failed after the file was stored: don't leave an orphan file behind.
+    if (objectKey) minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
+    sendError(res, err, "Failed to upload attachment");
+  }
+});
+
+// GET /api/work-tasks/:id/attachments/:attachmentId/view -- streams the file
+router.get("/:id/attachments/:attachmentId/view", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const [[att]] = await pool.query(
+      "SELECT object_key, file_type, file_name FROM work_task_attachments WHERE id = ? AND task_id = ?",
+      [req.params.attachmentId, task.id]
+    );
+    if (!att) throw new HttpError(404, "Attachment not found");
+
+    const stream = await minioClient.getObject(process.env.MINIO_BUCKET, att.object_key);
+    const inline = INLINE_TYPES.has(att.file_type);
+    res.setHeader("Content-Type", inline ? att.file_type : "application/octet-stream");
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(att.file_name)}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    stream.on("error", (err) => {
+      console.error("Attachment stream failed:", err.message);
+      res.destroy(err);
+    });
+    stream.pipe(res);
+  } catch (err) {
+    sendError(res, err, "Failed to load attachment");
+  }
+});
+
+// DELETE /api/work-tasks/:id/attachments/:attachmentId
+router.delete("/:id/attachments/:attachmentId", auth, requireRealUser, precheckAttachmentWrite, async (req, res) => {
+  try {
+    const task = req.task;
+    const [[att]] = await pool.query(
+      "SELECT object_key, file_name FROM work_task_attachments WHERE id = ? AND task_id = ?",
+      [req.params.attachmentId, task.id]
+    );
+    if (!att) throw new HttpError(404, "Attachment not found");
+
+    await inTransaction(async (conn) => {
+      await conn.query("DELETE FROM work_task_attachments WHERE id = ? AND task_id = ?", [req.params.attachmentId, task.id]);
+      await logHistory(conn, task.id, "DETACH", { note: att.file_name.slice(0, 500), changedBy: req.user.id });
+    });
+    try {
+      await minioClient.removeObject(process.env.MINIO_BUCKET, att.object_key);
+    } catch (err) {
+      console.error(`Failed to remove attachment file ${att.object_key}:`, err.message);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    sendError(res, err, "Failed to delete attachment");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// History -- the task's full audit trail, oldest first.
+// ---------------------------------------------------------------------------
+router.get("/:id/history", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const [rows] = await pool.query(
+      `SELECT h.id, h.action, h.from_status, h.to_status, h.note, h.changed_at, h.changed_by, u.name AS changed_by_name
+         FROM work_task_history h LEFT JOIN users u ON u.id = h.changed_by
+        WHERE h.task_id = ? ORDER BY h.id ASC`,
+      [task.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load history");
   }
 });
 

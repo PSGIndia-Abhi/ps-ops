@@ -26,6 +26,14 @@ const TASK_COLUMNS_T = `
   t.created_at, t.updated_at
 `;
 
+// 'YYYY-MM-DD' that is a real calendar date. Date.parse alone accepts things
+// like 2026-02-31, which MySQL then rejects with a 500.
+function isRealDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
 async function loadTask(executor, id) {
   const [[row]] = await executor.query(`SELECT ${TASK_COLUMNS} FROM work_tasks WHERE id = ?`, [id]);
   return row || null;
@@ -55,4 +63,4 @@ async function resolveVisibleUserIds(executor, req) {
   return [...ids];
 }
 
-module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, loadTask, logHistory, hasPerm, resolveVisibleUserIds };
+module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, loadTask, logHistory, hasPerm, resolveVisibleUserIds };
