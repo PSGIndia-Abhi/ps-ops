@@ -39,6 +39,7 @@ const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
 const hierarchyRoutes = require("./src/routes/hierarchy.routes");
 const crmRoutes = require("./src/routes/crm.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
+const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
@@ -96,6 +97,8 @@ app.use("/api/users", userHierarchyRoutes);
 app.use("/api/hierarchy", hierarchyRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/public", crmPublicRoutes);
+// Generic Task Management module -- separate from /api/tasks (Accountant module).
+app.use("/api/work-tasks", workTasksRoutes);
 
 
 

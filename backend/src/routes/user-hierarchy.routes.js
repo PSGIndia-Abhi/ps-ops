@@ -84,7 +84,7 @@ async function listLines(executor, userId, fromDate) {
     `SELECT l.id AS line_id, l.manager_user_id, m.name AS manager_name, l.is_primary,
             ${fmtDate("l.effective_from")} AS effective_from,
             ${fmtDate("l.effective_to")} AS effective_to
-       FROM user_reporting_lines l
+       FROM user_hierarchy l
        JOIN users m ON m.id = l.manager_user_id
       WHERE l.user_id = ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
       ORDER BY l.effective_from ASC, l.is_primary DESC, m.name ASC`,
@@ -139,7 +139,7 @@ async function buildUserHierarchy(userId) {
   const [managers] = await pool.query(
     `SELECT l.id AS line_id, l.manager_user_id, mu.name, l.is_primary,
             ${fmtDate("l.effective_from")} AS effective_from, ${fmtDate("l.effective_to")} AS effective_to
-       FROM user_reporting_lines l
+       FROM user_hierarchy l
        JOIN users mu ON mu.id = l.manager_user_id
       WHERE l.user_id = ? AND ${activeOn("l")}
       ORDER BY l.is_primary DESC, mu.name ASC`,
@@ -148,7 +148,7 @@ async function buildUserHierarchy(userId) {
 
   const [reports] = await pool.query(
     `SELECT l.id AS line_id, l.user_id, l.is_primary
-       FROM user_reporting_lines l
+       FROM user_hierarchy l
        JOIN users su ON su.id = l.user_id AND su.is_active = 1
       WHERE l.manager_user_id = ? AND ${activeOn("l")}`,
     [userId]
@@ -157,7 +157,7 @@ async function buildUserHierarchy(userId) {
   // Chain up via each person's PRIMARY line (what the org chart draws). Loops
   // are legitimate here, so stop as soon as someone repeats.
   const [primaryLines] = await pool.query(
-    `SELECT l.user_id, l.manager_user_id FROM user_reporting_lines l WHERE l.is_primary = 1 AND ${activeOn("l")}`
+    `SELECT l.user_id, l.manager_user_id FROM user_hierarchy l WHERE l.is_primary = 1 AND ${activeOn("l")}`
   );
   const primaryManagerOf = new Map(primaryLines.map((l) => [Number(l.user_id), Number(l.manager_user_id)]));
   const chainIds = [];
@@ -170,7 +170,7 @@ async function buildUserHierarchy(userId) {
   const [history] = await pool.query(
     `SELECT l.id AS line_id, l.manager_user_id, mu.name, l.is_primary,
             ${fmtDate("l.effective_from")} AS effective_from, ${fmtDate("l.effective_to")} AS effective_to
-       FROM user_reporting_lines l
+       FROM user_hierarchy l
        JOIN users mu ON mu.id = l.manager_user_id
       WHERE l.user_id = ?
       ORDER BY l.effective_from DESC, mu.name ASC`,
@@ -224,7 +224,7 @@ router.get("/me/team", auth, async (req, res) => {
     if (!req.user.id) return res.json({ members: [] });
     const teamIds = await getTeamUserIds(pool, req.user.id);
     const [directRows] = await pool.query(
-      `SELECT l.user_id FROM user_reporting_lines l WHERE l.manager_user_id = ? AND ${activeOn("l")}`,
+      `SELECT l.user_id FROM user_hierarchy l WHERE l.manager_user_id = ? AND ${activeOn("l")}`,
       [req.user.id]
     );
     const direct = new Set(directRows.map((r) => Number(r.user_id)));
@@ -431,7 +431,7 @@ router.put("/:id/reporting-lines", auth, requirePermission(PERMISSIONS.MANAGE_HI
       `SELECT id, manager_user_id, is_primary,
               ${fmtDate("effective_from")} AS effective_from,
               ${fmtDate("effective_to")} AS effective_to
-         FROM user_reporting_lines
+         FROM user_hierarchy
         WHERE user_id = ? AND (effective_to IS NULL OR effective_to >= ?)`,
       [userId, from]
     );
@@ -469,9 +469,9 @@ router.put("/:id/reporting-lines", auth, requirePermission(PERMISSIONS.MANAGE_HI
 
     for (const row of removed) {
       if (row.effective_from === from) {
-        await conn.query("DELETE FROM user_reporting_lines WHERE id = ?", [row.id]);
+        await conn.query("DELETE FROM user_hierarchy WHERE id = ?", [row.id]);
       } else {
-        await conn.query("UPDATE user_reporting_lines SET effective_to = ? WHERE id = ?", [endedOn, row.id]);
+        await conn.query("UPDATE user_hierarchy SET effective_to = ? WHERE id = ?", [endedOn, row.id]);
       }
       await logAudit(conn, {
         entityType: "REPORTING_LINE", entityId: row.id, action: "END",
@@ -486,7 +486,7 @@ router.put("/:id/reporting-lines", auth, requirePermission(PERMISSIONS.MANAGE_HI
       const wantPrimary = m.is_primary ? 1 : 0;
       if (existing) {
         if (Number(existing.is_primary) !== wantPrimary) {
-          await conn.query("UPDATE user_reporting_lines SET is_primary = ? WHERE id = ?", [wantPrimary, existing.id]);
+          await conn.query("UPDATE user_hierarchy SET is_primary = ? WHERE id = ?", [wantPrimary, existing.id]);
           await logAudit(conn, {
             entityType: "REPORTING_LINE", entityId: existing.id, action: "UPDATE",
             oldValue: { user_id: userId, manager_user_id: m.manager_user_id, is_primary: existing.is_primary },
@@ -498,7 +498,7 @@ router.put("/:id/reporting-lines", auth, requirePermission(PERMISSIONS.MANAGE_HI
       }
       const lineId = uuid();
       await conn.query(
-        `INSERT INTO user_reporting_lines
+        `INSERT INTO user_hierarchy
            (id, user_id, manager_user_id, is_primary, effective_from, effective_to, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [lineId, userId, m.manager_user_id, wantPrimary, from, to, req.user.id ?? null]

@@ -1,5 +1,5 @@
 // Shared helpers for the org hierarchy (org_units, user_org_units,
-// user_reporting_lines, designations, hierarchy_audit_log).
+// user_hierarchy, designations, hierarchy_audit_log).
 //
 // Dates: db.js does not use dateStrings, so mysql2 hands DATE columns back as
 // JS Dates (timezone-shifty). Everything here compares/does arithmetic on
@@ -64,12 +64,12 @@ async function getTeamUserIds(executor, userId, asOf = null) {
   const [rows] = await executor.query(
     `WITH RECURSIVE team AS (
        SELECT l.user_id
-         FROM user_reporting_lines l
+         FROM user_hierarchy l
         WHERE l.manager_user_id = ?
           AND l.effective_from <= ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
        UNION
        SELECT l.user_id
-         FROM user_reporting_lines l
+         FROM user_hierarchy l
          JOIN team t ON l.manager_user_id = t.user_id
         WHERE l.effective_from <= ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
      )
@@ -87,7 +87,7 @@ async function findLoopPath(executor, userId, managerId, asOf = null) {
   const date = asOf || (await today(executor));
   const [rows] = await executor.query(
     `SELECT user_id, manager_user_id
-       FROM user_reporting_lines
+       FROM user_hierarchy
       WHERE effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)`,
     [date, date]
   );

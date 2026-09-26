@@ -5,7 +5,7 @@ import { roleBasePath } from "./roleBasePath";
 export default function AuthRedirect() {
   const navigate = useNavigate();
 
-  useEffect(() => {
+  useEffect(() => { 
     const token = localStorage.getItem("token");
     const role = localStorage.getItem("role");
 

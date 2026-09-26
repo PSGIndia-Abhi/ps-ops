@@ -1,0 +1,11 @@
+-- Pure rename: user_reporting_lines -> user_hierarchy. No column, constraint,
+-- or behavior changes -- same effective_from/effective_to soft-delete model,
+-- same UNIQUE(user_id, manager_user_id, effective_from) (a line can be
+-- re-established after it ends), no hierarchy_level column (reporting loops
+-- like Operation Head <-> Quality Head remain supported).
+--
+-- Must be applied in the same deploy window as this commit's backend code
+-- (src/utils/hierarchy.js, src/routes/hierarchy.routes.js,
+-- src/routes/user-hierarchy.routes.js), since all three now query
+-- `user_hierarchy` directly by name.
+RENAME TABLE `user_reporting_lines` TO `user_hierarchy`;

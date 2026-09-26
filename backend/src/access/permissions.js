@@ -76,6 +76,13 @@ const PERMISSIONS = {
   VIEW_TASK: 'VIEW_TASK',
   CREATE_TASK: 'CREATE_TASK',
   UPDATE_TASK: 'UPDATE_TASK',
+
+  // Work Tasks (generic Task Management module, separate from the Payment
+  // Tracking tasks above). Acting on your own task needs no permission.
+  VIEW_TEAM_WORK_TASKS: 'VIEW_TEAM_WORK_TASKS',
+  MANAGE_TEAM_WORK_TASKS: 'MANAGE_TEAM_WORK_TASKS',
+  VIEW_ALL_WORK_TASKS: 'VIEW_ALL_WORK_TASKS',
+  DELETE_WORK_TASK: 'DELETE_WORK_TASK',
 };
 
 module.exports = PERMISSIONS;
