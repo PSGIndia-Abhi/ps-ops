@@ -32,10 +32,34 @@ export class LocationError extends Error {}
  */
 export class LocationServicesDisabledError extends LocationError {}
 
+/**
+ * Use Google Play Services' fused location (GPS + Wi-Fi + cell towers, the
+ * same source Google Maps uses) instead of the library's default plain
+ * Android LocationManager. With enableHighAccuracy the default provider is
+ * GPS-only, which inside a building usually never gets a fix at all - no
+ * matter how long we wait. Fused location runs on-device: no API key, no
+ * billing. Permission is still requested by ensureLocationPermission below.
+ */
+Geolocation.setRNConfiguration({
+  skipPermissionRequests: true,
+  locationProvider: 'playServices',
+  enableBackgroundLocationUpdates: false,
+});
+
 /** Below this, a fix is good enough to stop waiting for anything better. */
 const GOOD_ACCURACY_METERS = 25;
+/**
+ * Indoors (Wi-Fi based fixes) accuracy often settles around 30-50m and never
+ * reaches GOOD_ACCURACY_METERS. Once the device has had a few seconds to
+ * refine, a fix within this is accepted instead of waiting out the window.
+ */
+const ACCEPTABLE_ACCURACY_METERS = 50;
+const ACCEPTABLE_AFTER_MS = 4000;
 /** How long we're willing to wait for a better-than-first fix before giving up and using the best one seen. */
-const ACQUIRE_WINDOW_MS = 8000;
+const ACQUIRE_WINDOW_MS = 15000;
+/** Fused updates default to every 10s - ask for ~1/s so refinements actually arrive within the window. */
+const WATCH_INTERVAL_MS = 1000;
+const WATCH_FASTEST_INTERVAL_MS = 500;
 
 /**
  * Requests the Android runtime location permission if not already granted.
@@ -153,10 +177,15 @@ export async function getCurrentLocation(): Promise<DeviceLocation> {
     let best: DeviceLocation | null = null;
     let settled = false;
     let watchId: number | null = null;
+    const startedAt = Date.now();
+
+    const bestAccuracy = () => best?.accuracy ?? Number.POSITIVE_INFINITY;
 
     const finish = (result: DeviceLocation | null, error?: LocationError) => {
       if (settled) return;
       settled = true;
+      clearTimeout(windowTimeoutId);
+      clearTimeout(acceptableTimeoutId);
       if (watchId !== null) Geolocation.clearWatch(watchId);
       if (result) {
         resolve(result);
@@ -165,45 +194,50 @@ export async function getCurrentLocation(): Promise<DeviceLocation> {
       }
     };
 
-    const timeoutId = setTimeout(() => finish(best), ACQUIRE_WINDOW_MS);
+    const windowTimeoutId = setTimeout(() => finish(best), ACQUIRE_WINDOW_MS);
+    // An acceptable fix may have arrived before ACCEPTABLE_AFTER_MS with no
+    // further update after it - check once when that point is reached.
+    const acceptableTimeoutId = setTimeout(() => {
+      if (bestAccuracy() <= ACCEPTABLE_ACCURACY_METERS) finish(best);
+    }, ACCEPTABLE_AFTER_MS);
 
     watchId = Geolocation.watchPosition(
       (position) => {
         const candidate = toDeviceLocation(position.coords);
         const candidateAccuracy = candidate.accuracy ?? Number.POSITIVE_INFINITY;
-        const bestAccuracy = best?.accuracy ?? Number.POSITIVE_INFINITY;
 
-        if (candidateAccuracy < bestAccuracy) {
+        if (candidateAccuracy < bestAccuracy()) {
           best = candidate;
         }
 
-        if (candidateAccuracy <= GOOD_ACCURACY_METERS) {
-          clearTimeout(timeoutId);
+        const elapsed = Date.now() - startedAt;
+        if (
+          bestAccuracy() <= GOOD_ACCURACY_METERS ||
+          (bestAccuracy() <= ACCEPTABLE_ACCURACY_METERS && elapsed >= ACCEPTABLE_AFTER_MS)
+        ) {
           finish(best);
         }
       },
       (error) => {
-        clearTimeout(timeoutId);
-        // POSITION_UNAVAILABLE with no fix ever received means there was no
-        // provider to even try (Location toggled off - the check above
-        // normally catches this first, but a provider can still drop out
-        // mid-read), not just a bad/slow fix - `best` staying null in every
-        // other error case is still handled by the generic message above.
-        if (!best && error?.code === error?.POSITION_UNAVAILABLE) {
-          finish(
-            null,
-            new LocationServicesDisabledError(
-              'Location is turned off on this device. Turn it on to start this visit.',
-            ),
-          );
-          return;
+        // Only a permission loss is final. Fused location reports
+        // POSITION_UNAVAILABLE transiently while it is still acquiring
+        // (common indoors), and Location being switched off is already
+        // handled by the LocationEnabler check above - so any other error
+        // just lets the window run on, and the window timeout decides.
+        if (error?.code === error?.PERMISSION_DENIED) {
+          finish(null, new LocationError('Location permission is required to start this visit.'));
         }
-        finish(best);
       },
       // distanceFilter must be 0: its default (100m) would suppress exactly
       // the updates this is trying to catch - a chip refining its accuracy
       // without the device actually moving 100m still needs to be reported.
-      { enableHighAccuracy: true, maximumAge: 0, distanceFilter: 0 },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        distanceFilter: 0,
+        interval: WATCH_INTERVAL_MS,
+        fastestInterval: WATCH_FASTEST_INTERVAL_MS,
+      },
     );
   });
 }
