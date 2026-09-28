@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  FiArrowRight,
   FiBarChart2,
   FiBell,
   FiCalendar,
@@ -8,7 +9,6 @@ import {
   FiCheckSquare,
   FiChevronDown,
   FiClipboard,
-  FiClock,
   FiGrid,
   FiLayers,
   FiList,
@@ -22,24 +22,21 @@ import {
   FiArrowLeft,
 } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
-import { USERS } from "./data";
-import { LEVEL_LABEL, canCreateTasks, levelOf } from "./hierarchy";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import { countsFor, isOverdue } from "./selectors";
-import useVisibleTasks from "./useVisibleTasks";
+import { useTaskStore } from "./tasksApi";
 import ViewerProvider from "./ViewerProvider";
 import { useViewer } from "./viewerContext";
-import { dueInfo } from "./format";
-import useNow from "./useNow";
+import { dueInfo, fmtDateTime } from "./format";
 import { Avatar } from "./ui";
 import "./taskpro.css";
 
 const NAV = [
   { label: "Dashboard", to: TASKPRO_HOME, icon: FiGrid, end: true },
   { label: "My Tasks", to: `${TASKPRO_HOME}/my-tasks`, icon: FiClipboard },
-  { label: "Team Tasks", to: `${TASKPRO_HOME}/team-tasks`, icon: FiUsers, levels: ["top", "head"] },
-  { label: "All Tasks", to: `${TASKPRO_HOME}/all-tasks`, icon: FiList, levels: ["top"] },
+  { label: "Team Tasks", to: `${TASKPRO_HOME}/team-tasks`, icon: FiUsers },
+  { label: "All Tasks", to: `${TASKPRO_HOME}/all-tasks`, icon: FiList },
   { label: "Overdue", to: `${TASKPRO_HOME}/overdue`, icon: FiAlertCircle, badge: "overdue" },
   { label: "Upcoming", to: `${TASKPRO_HOME}/upcoming`, icon: FiCalendar },
   { label: "Completed", to: `${TASKPRO_HOME}/completed`, icon: FiCheckCircle },
@@ -74,8 +71,7 @@ function TaskProShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const viewer = useViewer();
-  const { tasks, ready } = useVisibleTasks();
-  const now = useNow(60000);
+  const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -104,18 +100,22 @@ function TaskProShell() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const counts = useMemo(() => countsFor(tasks, now, viewer.id), [tasks, now, viewer.id]);
-  const nav = useMemo(() => NAV.filter((item) => !item.levels || item.levels.includes(viewer.level)), [viewer.level]);
+  const counts = useMemo(() => countsFor(tasks, viewer.id), [tasks, viewer.id]);
 
   // Notifications = what needs attention: overdue, or due within a day.
-  const alerts = useMemo(
-    () =>
-      tasks
-        .filter((t) => isOverdue(t, now) || (t.status !== "COMPLETED" && t.status !== "CANCELLED" && t.dueAt && t.dueAt - now < 24 * 3600 * 1000 && t.dueAt > now))
-        .sort((a, b) => a.dueAt - b.dueAt)
-        .slice(0, 6),
-    [tasks, now],
-  );
+  // Grouped into two sections so the bell reads like a real notification
+  // center rather than one flat list — overdue first, then due-soon, each
+  // sorted soonest-first, each capped so the popover never runs away.
+  const { overdueAlerts, dueSoonAlerts, alertCount } = useMemo(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const cutoff = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const byDue = (a, b) => (a.due_date + (a.due_time || "")).localeCompare(b.due_date + (b.due_time || ""));
+    const relevant = tasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED" && t.due_date && (isOverdue(t) || t.due_date <= cutoff));
+    const overdue = relevant.filter((t) => isOverdue(t)).sort(byDue);
+    const dueSoon = relevant.filter((t) => !isOverdue(t)).sort(byDue);
+    return { overdueAlerts: overdue.slice(0, 5), dueSoonAlerts: dueSoon.slice(0, 5), alertCount: relevant.length };
+  }, [tasks]);
 
   function submitSearch(e) {
     e.preventDefault();
@@ -150,7 +150,7 @@ function TaskProShell() {
           </div>
 
           <nav className="tp-nav">
-            {nav.map((item, i) =>
+            {NAV.map((item, i) =>
               item.divider ? (
                 <hr key={`d${i}`} className="tp-nav-divider" />
               ) : (
@@ -194,63 +194,82 @@ function TaskProShell() {
               <kbd>/</kbd>
             </form>
 
-            <label className="tp-viewas" title="Sample data: pick a person to see the app the way they would">
-              <span>Viewing as</span>
-              <select
-                value={viewer.id}
-                onChange={(e) => {
-                  viewer.setViewerId(e.target.value);
-                  navigate(TASKPRO_HOME);
-                }}
-                aria-label="Viewing as"
-              >
-                {["top", "head", "employee"].map((lvl) => (
-                  <optgroup key={lvl} label={LEVEL_LABEL[lvl]}>
-                    {USERS.filter((u) => levelOf(u.id) === lvl).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} — {u.role}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-
-            {canCreateTasks(viewer.id) && (
-              <button type="button" className="tp-btn primary tp-new" onClick={() => setNewTask(true)}>
-                <FiPlus /> <span>New task</span>
-              </button>
-            )}
+            <button type="button" className="tp-btn primary tp-new" onClick={() => setNewTask(true)}>
+              <FiPlus /> <span>New task</span>
+            </button>
 
             <div className="tp-pop-root" ref={bellRef}>
               <button type="button" className="tp-icon-btn tp-bell" onClick={() => setBellOpen((o) => !o)} aria-label="Notifications">
                 <FiBell />
-                {alerts.length > 0 && <span className="tp-bell-badge">{alerts.length}</span>}
+                {alertCount > 0 && <span className="tp-bell-badge">{alertCount}</span>}
               </button>
               {bellOpen && (
                 <div className="tp-popover tp-bell-pop">
-                  <div className="tp-pop-head">Needs attention</div>
-                  {alerts.length === 0 && <p className="tp-pop-empty">You're all caught up.</p>}
-                  {alerts.map((t) => {
-                    const due = dueInfo(t.dueAt, now);
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className="tp-pop-row"
-                        onClick={() => {
-                          setBellOpen(false);
-                          navigate(`${TASKPRO_HOME}/tasks/${t.id}`);
-                        }}
-                      >
-                        <FiClock className={`tp-tone-${due.tone}`} />
-                        <span>
-                          <strong>{t.title}</strong>
-                          <small className={`tp-tone-${due.tone}`}>{due.text}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  <div className="tp-pop-head">
+                    <span>Notifications</span>
+                    {alertCount > 0 && <em>{alertCount}</em>}
+                  </div>
+
+                  {alertCount === 0 && (
+                    <div className="tp-pop-empty">
+                      <span className="tp-pop-empty-icon">
+                        <FiCheckCircle />
+                      </span>
+                      <strong>You're all caught up</strong>
+                      <small>Nothing overdue or due soon.</small>
+                    </div>
+                  )}
+
+                  {[
+                    { key: "overdue", label: "Overdue", rows: overdueAlerts, tone: "late" },
+                    { key: "soon", label: "Due soon", rows: dueSoonAlerts, tone: "soon" },
+                  ].map(
+                    (group) =>
+                      group.rows.length > 0 && (
+                        <div key={group.key}>
+                          <div className={`tp-pop-section tp-tone-${group.tone}`}>
+                            {group.label} · {group.rows.length}
+                          </div>
+                          {group.rows.map((t) => {
+                            const due = dueInfo(t.due_date, t.due_time, t.status);
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                className="tp-notif-row"
+                                onClick={() => {
+                                  setBellOpen(false);
+                                  navigate(`${TASKPRO_HOME}/tasks/${t.id}`);
+                                }}
+                              >
+                                <Avatar name={t.assigned_to_name} size={32} />
+                                <span className="tp-notif-text">
+                                  <strong>{t.title}</strong>
+                                  <small>{t.assigned_to_name}</small>
+                                </span>
+                                <span className="tp-notif-when">
+                                  <strong className={`tp-tone-${due.tone}`}>{due.text}</strong>
+                                  <small>{fmtDateTime(t.due_date, t.due_time)}</small>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ),
+                  )}
+
+                  {alertCount > 0 && (
+                    <button
+                      type="button"
+                      className="tp-pop-footer"
+                      onClick={() => {
+                        setBellOpen(false);
+                        navigate(`${TASKPRO_HOME}/${overdueAlerts.length > 0 ? "overdue" : "upcoming"}`);
+                      }}
+                    >
+                      {overdueAlerts.length > 0 ? "View all overdue tasks" : "View upcoming tasks"} <FiArrowRight />
+                    </button>
+                  )}
                 </div>
               )}
             </div>

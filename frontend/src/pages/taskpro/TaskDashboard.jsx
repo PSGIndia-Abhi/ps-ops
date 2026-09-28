@@ -2,19 +2,18 @@ import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FiAlertCircle, FiArrowRight, FiCheckCircle, FiClock, FiInbox, FiPlayCircle, FiSun } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
-import { STATUS, userById } from "./data";
+import { STATUS } from "./data";
 import { dueInfo, firstName, timeAgo } from "./format";
 import { isActive, isOverdue } from "./selectors";
+import { useTaskStore } from "./tasksApi";
 import useNow from "./useNow";
-import useVisibleTasks from "./useVisibleTasks";
 import { useViewer } from "./viewerContext";
 import { Avatar, CountUp, EmptyState, PriorityDot, Skeleton, StatusBadge } from "./ui";
 
-const DAY = 86400000;
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function greeting(now) {
-  const h = new Date(now).getHours();
+function greeting() {
+  const h = new Date().getHours();
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
@@ -58,46 +57,44 @@ function Donut({ segments, total }) {
 export default function TaskDashboard() {
   const viewer = useViewer();
   const navigate = useNavigate();
-  const { tasks, ready } = useVisibleTasks();
+  const { tasks, ready } = useTaskStore();
   const now = useNow(60000);
 
   const stats = useMemo(() => {
     const active = tasks.filter(isActive);
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
-    const weekAgo = now - 7 * DAY;
+    const weekAgo = now - 7 * 86400000;
     return {
       open: tasks.filter((t) => t.status === "OPEN").length,
       inProgress: tasks.filter((t) => t.status === "IN_PROGRESS").length,
-      overdue: active.filter((t) => isOverdue(t, now)).length,
-      doneWeek: tasks.filter((t) => t.status === "COMPLETED" && t.completedAt >= weekAgo).length,
-      mine: active.filter((t) => t.assignedTo === viewer.id).length,
+      overdue: active.filter((t) => isOverdue(t)).length,
+      doneWeek: tasks.filter((t) => t.status === "COMPLETED" && t.completed_at && new Date(t.completed_at).getTime() > weekAgo).length,
+      mine: active.filter((t) => t.assigned_to === viewer.id).length,
       total: tasks.length,
-      startOfToday: startOfToday.getTime(),
     };
-  }, [tasks, now, viewer.id]);
+  }, [tasks, viewer.id, now]);
 
   const attention = useMemo(
     () =>
       tasks
-        .filter((t) => isActive(t) && t.dueAt && (isOverdue(t, now) || t.dueAt - now < DAY * 1.5))
-        .sort((a, b) => a.dueAt - b.dueAt)
+        .filter((t) => isActive(t) && t.due_date && (isOverdue(t) || t.due_date <= (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + 1);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        })()))
+        .sort((a, b) => (a.due_date + (a.due_time || "")).localeCompare(b.due_date + (b.due_time || "")))
         .slice(0, 5),
-    [tasks, now],
+    [tasks],
   );
 
   const week = useMemo(() => {
-    const start = new Date(now);
+    const start = new Date();
     start.setHours(0, 0, 0, 0);
     return Array.from({ length: 7 }, (_, i) => {
-      const from = start.getTime() + i * DAY;
-      const day = new Date(from);
-      return {
-        label: i === 0 ? "Today" : WEEKDAYS[day.getDay()],
-        count: tasks.filter((t) => isActive(t) && t.dueAt >= from && t.dueAt < from + DAY).length,
-      };
+      const d = new Date(start.getTime() + i * 86400000);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return { label: i === 0 ? "Today" : WEEKDAYS[d.getDay()], count: tasks.filter((t) => isActive(t) && t.due_date === key).length };
     });
-  }, [tasks, now]);
+  }, [tasks]);
   const weekMax = Math.max(1, ...week.map((d) => d.count));
 
   const segments = useMemo(
@@ -108,20 +105,12 @@ export default function TaskDashboard() {
     [tasks],
   );
 
-  const recent = useMemo(
-    () =>
-      tasks
-        .flatMap((t) => t.activity.map((a) => ({ ...a, task: t })))
-        .sort((a, b) => b.at - a.at)
-        .slice(0, 6),
-    [tasks],
-  );
+  const recent = useMemo(() => [...tasks].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 6), [tasks]);
 
   const name = firstName(viewer.name);
-  const isEmployee = viewer.level === "employee";
   const kpis = [
-    { key: "open", label: "Open", value: stats.open, icon: FiInbox, tone: "blue", to: viewer.level === "top" ? "all-tasks" : "my-tasks", hint: "Waiting to be started" },
-    { key: "prog", label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "violet", to: isEmployee ? "my-tasks" : "team-tasks", hint: "Being worked on now" },
+    { key: "open", label: "Open", value: stats.open, icon: FiInbox, tone: "blue", to: "all-tasks", hint: "Waiting to be started" },
+    { key: "prog", label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "violet", to: "team-tasks", hint: "Being worked on now" },
     { key: "late", label: "Overdue", value: stats.overdue, icon: FiAlertCircle, tone: "red", to: "overdue", hint: "Needs attention" },
     { key: "done", label: "Completed", value: stats.doneWeek, icon: FiCheckCircle, tone: "green", to: "completed", hint: "In the last 7 days" },
   ];
@@ -131,10 +120,10 @@ export default function TaskDashboard() {
       <div className="tp-hero">
         <div>
           <span className="tp-hero-kicker">
-            <FiSun /> {new Date(now).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
+            <FiSun /> {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}
           </span>
           <h1>
-            {greeting(now)}, {name}
+            {greeting()}, {name}
           </h1>
           <p>
             {ready ? (
@@ -143,8 +132,7 @@ export default function TaskDashboard() {
                   You have <strong>{stats.mine} active {stats.mine === 1 ? "task" : "tasks"}</strong>
                   {stats.overdue > 0 && (
                     <>
-                      , and <strong className="tp-tone-late">{stats.overdue} overdue</strong>
-                      {isEmployee ? "" : " across your team"}
+                      , and <strong className="tp-tone-late">{stats.overdue} overdue</strong> across what you can see
                     </>
                   )}
                   .
@@ -164,13 +152,7 @@ export default function TaskDashboard() {
 
       <div className="tp-kpis">
         {kpis.map((k, i) => (
-          <button
-            key={k.key}
-            type="button"
-            className={`tp-kpi ${k.tone}`}
-            style={{ "--i": i }}
-            onClick={() => navigate(`${TASKPRO_HOME}/${k.to}`)}
-          >
+          <button key={k.key} type="button" className={`tp-kpi ${k.tone}`} style={{ "--i": i }} onClick={() => navigate(`${TASKPRO_HOME}/${k.to}`)}>
             <span className="tp-kpi-icon">
               <k.icon />
             </span>
@@ -194,13 +176,13 @@ export default function TaskDashboard() {
             {ready && attention.length === 0 && <EmptyState icon={FiCheckCircle} title="All clear" text="Nothing is overdue or due soon." />}
             {ready &&
               attention.map((t, i) => {
-                const due = dueInfo(t.dueAt, now);
+                const due = dueInfo(t.due_date, t.due_time, t.status);
                 return (
                   <Link key={t.id} to={`${TASKPRO_HOME}/tasks/${t.id}`} className="tp-att-row" style={{ "--i": i }}>
                     <PriorityDot priority={t.priority} />
                     <span className="tp-att-title">
                       <strong>{t.title}</strong>
-                      <small>{userById(t.assignedTo)?.name}</small>
+                      <small>{t.assigned_to_name}</small>
                     </span>
                     <span className={`tp-due tp-tone-${due.tone}`}>
                       <FiClock /> {due.text}
@@ -213,22 +195,25 @@ export default function TaskDashboard() {
 
           <section className="tp-card">
             <div className="tp-card-head">
-              <h3>Recent activity</h3>
+              <h3>Recently updated</h3>
             </div>
             {!ready && [0, 1, 2, 3].map((i) => <Skeleton key={i} height={38} style={{ marginBottom: 10 }} />)}
+            {ready && recent.length === 0 && <EmptyState icon={FiInbox} title="Nothing yet" text="Tasks you can see will show up here." />}
             {ready &&
-              recent.map((a, i) => (
-                <Link key={a.id} to={`${TASKPRO_HOME}/tasks/${a.task.id}`} className="tp-feed-row" style={{ "--i": i }}>
-                  <Avatar name={userById(a.task.assignedTo)?.name} size={28} />
+              recent.map((t, i) => (
+                <Link key={t.id} to={`${TASKPRO_HOME}/tasks/${t.id}`} className="tp-feed-row" style={{ "--i": i }}>
+                  <Avatar name={t.assigned_to_name} size={28} />
                   <span className="tp-feed-text">
-                    <strong>{a.title}</strong>
-                    <small>{a.task.title}</small>
+                    <strong>{t.title}</strong>
+                    <small>{t.assigned_to_name}</small>
                   </span>
-                  <em>{timeAgo(a.at, now)}</em>
+                  <StatusBadge status={t.status} />
+                  <em>{timeAgo(t.updated_at)}</em>
                 </Link>
               ))}
           </section>
         </div>
+
         <div className="tp-dash-col">
           <section className="tp-card">
             <div className="tp-card-head">
@@ -236,6 +221,8 @@ export default function TaskDashboard() {
             </div>
             {!ready ? (
               <Skeleton height={150} radius={16} />
+            ) : segments.length === 0 ? (
+              <EmptyState icon={FiInbox} title="No tasks yet" />
             ) : (
               <div className="tp-status-card">
                 <Donut segments={segments} total={stats.total} />
@@ -273,7 +260,6 @@ export default function TaskDashboard() {
               </div>
             )}
           </section>
-
         </div>
       </div>
     </>

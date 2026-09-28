@@ -16,6 +16,28 @@ export const ROLE_HOME = {
   client: "/client",
   temporary_worker: "/temp",
   staff: "/staff",
+
+  // The real org-hierarchy designations (see user_hierarchy / Roles &
+  // Permissions) land in Task Management. Deliberately NOT "supervisor" —
+  // that role name is shared with the existing, unrelated supervisor panel,
+  // and most supervisor accounts have nothing to do with this hierarchy.
+  "Managing Director": "/taskpro",
+  "Personal Assistant": "/taskpro",
+  "Technical Head": "/taskpro",
+  "Technical Lead": "/taskpro",
+  "Technical Team": "/taskpro",
+  "Marketing Head": "/taskpro",
+  "Marketing Executive": "/taskpro",
+  "Sales Head": "/taskpro",
+  "Sales Executive": "/taskpro",
+  "Operations Head": "/taskpro",
+  "Operations Manager": "/taskpro",
+  "Service Coordinator": "/taskpro",
+  "Quality Head": "/taskpro",
+  "Accounts Head": "/taskpro",
+  "Accounts Executive": "/taskpro",
+  "Collection Executive": "/taskpro",
+  "Admin Executive": "/taskpro",
 };
 
 export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";

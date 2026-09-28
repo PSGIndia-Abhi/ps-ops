@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const PERMISSIONS = require("../access/permissions");
-const { today: dbToday } = require("../utils/hierarchy");
+const { today: dbToday, getTeamUserIds } = require("../utils/hierarchy");
 const { hasPerm, resolveVisibleUserIds, isRealDate: isValidDate } = require("../utils/workTasks");
 const {
   DATE_FMT, REC_COLUMNS, addDays, maxStr, nextOccurrenceDate, generateDueOccurrences,
@@ -74,13 +74,20 @@ async function loadVisibleSeries(req, id) {
   }
   return series;
 }
-function canManageSeries(req, series) {
-  return (
-    req.user.role === "admin" ||
-    Number(series.created_by) === Number(req.user.id) ||
-    Number(series.assigned_to) === Number(req.user.id) ||
-    hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS)
-  );
+// Pausing/resuming/stopping the schedule itself is a "terms" change (same
+// category as reschedule/reassign on a single task, see canEditTerms in
+// work-tasks.routes.js) — being the assignee of the occurrences it produces
+// is deliberately not enough on its own; only the creator, an admin, or
+// someone who actually manages the assignee's real team may do these
+// (holding MANAGE_TEAM_WORK_TASKS alone isn't scoped to a person — see the
+// matching comment on canEditTerms).
+async function canManageSeries(req, series) {
+  if (req.user.role === "admin") return true;
+  if (Number(series.created_by) === Number(req.user.id)) return true;
+  if (!hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS)) return false;
+  if (Number(series.assigned_to) === Number(req.user.id)) return false;
+  const teamIds = await getTeamUserIds(pool, req.user.id);
+  return teamIds.includes(Number(series.assigned_to));
 }
 
 // GET /api/work-task-series -- schedules the requester may see.
@@ -148,7 +155,7 @@ router.get("/:id", auth, requireRealUser, async (req, res) => {
 router.post("/:id/pause", auth, requireRealUser, async (req, res) => {
   try {
     const series = await loadVisibleSeries(req, req.params.id);
-    if (!canManageSeries(req, series)) throw new HttpError(403, "You cannot pause this schedule");
+    if (!(await canManageSeries(req, series))) throw new HttpError(403, "You cannot pause this schedule");
     if (series.status !== "ACTIVE") throw new HttpError(400, `Cannot pause a schedule that is ${series.status}`);
 
     const { pause_from: from, pause_until: until } = req.body || {};
@@ -174,7 +181,7 @@ router.post("/:id/pause", auth, requireRealUser, async (req, res) => {
 router.post("/:id/resume", auth, requireRealUser, async (req, res) => {
   try {
     const series = await loadVisibleSeries(req, req.params.id);
-    if (!canManageSeries(req, series)) throw new HttpError(403, "You cannot resume this schedule");
+    if (!(await canManageSeries(req, series))) throw new HttpError(403, "You cannot resume this schedule");
     if (series.status !== "PAUSED") throw new HttpError(400, `Cannot resume a schedule that is ${series.status}`);
 
     const todayStr = await dbToday(pool);
@@ -203,7 +210,7 @@ router.post("/:id/resume", auth, requireRealUser, async (req, res) => {
 router.post("/:id/stop", auth, requireRealUser, async (req, res) => {
   try {
     const series = await loadVisibleSeries(req, req.params.id);
-    if (!canManageSeries(req, series)) throw new HttpError(403, "You cannot stop this schedule");
+    if (!(await canManageSeries(req, series))) throw new HttpError(403, "You cannot stop this schedule");
     if (series.status === "CANCELLED") return res.json({ success: true, already_stopped: true });
 
     await pool.query("UPDATE work_task_series SET status = 'CANCELLED', pause_from = NULL, pause_until = NULL WHERE id = ?", [series.id]);

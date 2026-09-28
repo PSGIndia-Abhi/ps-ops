@@ -65,6 +65,8 @@ async function loadVisibleTask(req, taskId) {
   return task;
 }
 
+// Attachments only: adding a file while doing the work isn't "changing the
+// task", so the assignee keeps this one alongside the creator/admin/manager.
 function canManageTask(req, task) {
   return (
     req.user.role === "admin" ||
@@ -72,6 +74,45 @@ function canManageTask(req, task) {
     Number(task.created_by) === Number(req.user.id) ||
     hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS)
   );
+}
+
+// Changing the task's own terms (title/description/type/priority, who it's
+// assigned to, its due date) or a recurring occurrence's fate (skip):
+// being the assignee is deliberately NOT enough on its own here — an
+// employee works a task (start/progress/complete/comment/attach), they
+// don't get to redefine it. Only its creator, an admin, or someone who
+// actually manages the ASSIGNEE's real team may do these.
+//
+// hasPerm(MANAGE_TEAM_WORK_TASKS) alone isn't enough either: it's a blanket
+// role permission, not scoped to a specific person. Without the team check
+// below, a head who was assigned a task BY THEIR OWN manager could edit it
+// just because their role manages other people — but nobody is "head of
+// themselves", so that task must still go through the same rule as anyone
+// else's: only the real hierarchy (getTeamUserIds) decides who's a manager
+// of whom, exactly as resolveVisibleUserIds already does for visibility.
+async function canEditTerms(req, task) {
+  if (req.user.role === "admin") return true;
+  if (Number(task.created_by) === Number(req.user.id)) return true;
+  if (!hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS)) return false;
+  if (Number(task.assigned_to) === Number(req.user.id)) return false;
+  const teamIds = await getTeamUserIds(pool, req.user.id);
+  return teamIds.includes(Number(task.assigned_to));
+}
+
+// Reassign is a narrower case of the same idea, but delegating your OWN work
+// down to someone you manage is normal and should stay allowed even though
+// editing/rescheduling that same task should not be (see canEditTerms) — a
+// manager who was handed a task directly by their own boss may still pass it
+// on to one of their people; they just can't otherwise redefine it. The
+// actual new assignee is still checked separately by canAssignTo (below), so
+// this only decides whether the CURRENT task may be reassigned at all.
+async function canReassignTask(req, task) {
+  if (req.user.role === "admin") return true;
+  if (Number(task.created_by) === Number(req.user.id)) return true;
+  if (!hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS)) return false;
+  if (Number(task.assigned_to) === Number(req.user.id)) return true;
+  const teamIds = await getTeamUserIds(pool, req.user.id);
+  return teamIds.includes(Number(task.assigned_to));
 }
 
 async function inTransaction(fn) {
@@ -289,7 +330,7 @@ router.get("/:id", auth, requireRealUser, async (req, res) => {
 router.put("/:id", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
-    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot edit this task");
+    if (!(await canEditTerms(req, task))) throw new HttpError(403, "You cannot edit this task");
     if (["COMPLETED", "CANCELLED"].includes(task.status)) {
       throw new HttpError(400, `Cannot edit a ${task.status.toLowerCase()} task`);
     }
@@ -424,7 +465,7 @@ router.post("/:id/complete", auth, requireRealUser, async (req, res) => {
 router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
-    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot reassign this task");
+    if (!(await canReassignTask(req, task))) throw new HttpError(403, "You cannot reassign this task");
     assertNotFinished(task, "reassign");
 
     const newAssignee = parseId(req.body?.assigned_to);
@@ -457,7 +498,7 @@ router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
 router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
-    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot reschedule this task");
+    if (!(await canEditTerms(req, task))) throw new HttpError(403, "You cannot reschedule this task");
     assertNotFinished(task, "reschedule");
 
     const body = req.body || {};
@@ -483,7 +524,7 @@ router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
     if (!task.series_id) throw new HttpError(400, "Only an occurrence of a recurring task can be skipped");
-    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot skip this task");
+    if (!(await canEditTerms(req, task))) throw new HttpError(403, "You cannot skip this task");
     assertNotFinished(task, "skip");
     const reason = optionalText(req.body?.reason);
 

@@ -1,8 +1,30 @@
 // Who may open the TaskPro (task management) area.
 //
-// Kept in one place on purpose: roles & permissions are decided later, and
-// then this list (and the login redirect in auth/roleBasePath.js) is the only
-// thing to change.
-export const TASKPRO_ROLES = ["admin", "branch_admin"];
+// This is only a client-side gate — it decides what the UI shows, never
+// what the server allows (the real work-tasks API enforces its own rules
+// regardless of this list). Kept in one place, and mirrored by ROLE_HOME
+// in auth/roleBasePath.js so a role that can open TaskPro also lands there
+// on login.
+export const TASKPRO_ROLES = [
+  "admin",
+  "branch_admin",
+  "Managing Director",
+  "Personal Assistant",
+  "Technical Head",
+  "Technical Lead",
+  "Technical Team",
+  "Marketing Head",
+  "Marketing Executive",
+  "Sales Head",
+  "Sales Executive",
+  "Operations Head",
+  "Operations Manager",
+  "Service Coordinator",
+  "Quality Head",
+  "Accounts Head",
+  "Accounts Executive",
+  "Collection Executive",
+  "Admin Executive",
+];
 
 export const TASKPRO_HOME = "/taskpro";

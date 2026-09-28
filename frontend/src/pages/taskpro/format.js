@@ -1,29 +1,58 @@
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n) => String(n).padStart(2, "0");
 
-export const fmtDate = (ts) => {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+// The API sends calendar dates as plain 'YYYY-MM-DD' strings and times as
+// 'HH:MM:SS' (or null) — see TASK_COLUMNS in backend/src/utils/workTasks.js.
+// Parsed as local time (not UTC) so "due today" means the viewer's today.
+
+export function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** due_date (+ optional due_time) -> a local Date, or null. A date with no
+ *  time is treated as end-of-day, so "Due in 2 days" reads naturally. */
+export function dueDateTime(due_date, due_time) {
+  if (!due_date) return null;
+  const [y, m, d] = due_date.split("-").map(Number);
+  if (due_time) {
+    const [hh, mm, ss = 0] = due_time.split(":").map(Number);
+    return new Date(y, m - 1, d, hh, mm, ss);
+  }
+  return new Date(y, m - 1, d, 23, 59, 59);
+}
+
+export const fmtDate = (due_date) => {
+  if (!due_date) return "—";
+  const [y, m, d] = due_date.split("-").map(Number);
+  return `${pad(d)} ${MONTHS[m - 1]} ${y}`;
 };
 
-export const fmtTime = (ts) => {
-  if (!ts) return "";
-  const d = new Date(ts);
+export const fmtTime = (due_time) => {
+  if (!due_time) return "";
+  const [hh, mm] = due_time.split(":").map(Number);
+  return `${pad(hh % 12 || 12)}:${pad(mm)} ${hh < 12 ? "AM" : "PM"}`;
+};
+
+export const fmtDateTime = (due_date, due_time) => {
+  if (!due_date) return "—";
+  const t = fmtTime(due_time);
+  return t ? `${fmtDate(due_date)}, ${t}` : fmtDate(due_date);
+};
+
+export const fmtTimestamp = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
   const h = d.getHours();
-  return `${pad(h % 12 || 12)}:${pad(d.getMinutes())} ${h < 12 ? "AM" : "PM"}`;
+  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${pad(h % 12 || 12)}:${pad(d.getMinutes())} ${h < 12 ? "AM" : "PM"}`;
 };
-
-export const fmtDateTime = (ts) => (ts ? `${fmtDate(ts)}, ${fmtTime(ts)}` : "—");
 
 export const fmtMoney = (n) => `₹ ${Number(n || 0).toLocaleString("en-IN")}`;
 
-export function fmtDuration(ms, withSeconds = false) {
+export function fmtDuration(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (withSeconds) return h ? `${h}h ${m}m ${pad(s)}s` : `${m}m ${pad(s)}s`;
   return `${h}h ${m}m`;
 }
 
@@ -37,30 +66,37 @@ export const initials = (name = "") =>
 
 export const firstName = (name = "") => name.split(/\s+/)[0] || "there";
 
+/** Day-granularity, same rule the server uses for `is_overdue`: a task is
+ *  overdue once its due DATE (not time) is in the past, regardless of
+ *  due_time — so this always agrees with the server's own flag. */
+export const isPastDue = (due_date) => !!due_date && due_date < todayStr();
+
 /** "Due in 2 days" / "Due today" / "Overdue by 1 day", with a tone for colouring. */
-export function dueInfo(dueAt, now, done = false) {
-  if (!dueAt) return { text: "No due date", tone: "muted" };
-  if (done) return { text: "Done", tone: "muted" };
-  const diff = dueAt - now;
-  const days = Math.round(diff / 86400000);
-  const sameDay = new Date(dueAt).toDateString() === new Date(now).toDateString();
-  if (diff < 0) {
-    const late = Math.max(1, Math.round(-diff / 86400000));
-    return { text: sameDay ? "Overdue today" : `Overdue by ${late} day${late === 1 ? "" : "s"}`, tone: "late" };
+export function dueInfo(due_date, due_time, status) {
+  if (!due_date) return { text: "No due date", tone: "muted" };
+  if (status === "COMPLETED" || status === "CANCELLED") return { text: "Done", tone: "muted" };
+  const today = todayStr();
+  if (due_date < today) {
+    const late = Math.round((dueDateTime(today) - dueDateTime(due_date)) / 86400000);
+    return { text: `Overdue by ${late} day${late === 1 ? "" : "s"}`, tone: "late" };
   }
-  if (sameDay) return { text: "Due today", tone: "soon" };
+  if (due_date === today) return { text: "Due today", tone: "soon" };
+  const days = Math.round((dueDateTime(due_date) - dueDateTime(today)) / 86400000);
   if (days === 1) return { text: "Due tomorrow", tone: "soon" };
   return { text: `Due in ${days} days`, tone: "ok" };
 }
 
-/** Value for <input type="datetime-local"> in local time. */
-export function toInputValue(ts) {
-  const d = new Date(ts || Date.now());
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** Value for <input type="date">. */
+export function toDateInput(due_date) {
+  return due_date || todayStr();
+}
+/** Value for <input type="time">. */
+export function toTimeInput(due_time) {
+  return due_time ? due_time.slice(0, 5) : "";
 }
 
-export function timeAgo(ts, now) {
-  const s = Math.max(0, Math.round((now - ts) / 1000));
+export function timeAgo(iso, now = Date.now()) {
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (s < 60) return "just now";
   const m = Math.round(s / 60);
   if (m < 60) return `${m} min ago`;

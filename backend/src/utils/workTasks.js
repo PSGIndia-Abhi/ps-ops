@@ -34,8 +34,22 @@ function isRealDate(value) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
+// Same shape everywhere a single task is returned (GET one, create, start,
+// progress, complete, reassign, reschedule, skip) — including the assignee's
+// and creator's names, exactly like the list endpoint already does, so the
+// UI never has to guess who "assigned_to: 209" is.
 async function loadTask(executor, id) {
-  const [[row]] = await executor.query(`SELECT ${TASK_COLUMNS} FROM work_tasks WHERE id = ?`, [id]);
+  // TASK_COLUMNS_T (t.-prefixed), not TASK_COLUMNS: the join brings in two
+  // more tables that also have an `id` column, so the bare names in
+  // TASK_COLUMNS would be ambiguous the moment they're joined in.
+  const [[row]] = await executor.query(
+    `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name
+       FROM work_tasks t
+       LEFT JOIN users ua ON ua.id = t.assigned_to
+       LEFT JOIN users uc ON uc.id = t.created_by
+      WHERE t.id = ?`,
+    [id]
+  );
   return row || null;
 }
 

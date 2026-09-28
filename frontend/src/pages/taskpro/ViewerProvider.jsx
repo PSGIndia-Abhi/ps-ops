@@ -1,47 +1,49 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { USERS, userById } from "./data";
-import { levelOf } from "./hierarchy";
-import { setActor } from "./tasksApi";
+import useMe from "../../hooks/useMe";
+import { apiFetch, safeJson } from "../../api";
 import { ViewerContext } from "./viewerContext";
 
-const KEY = "taskpro_viewer";
-const DEFAULT_VIEWER = "u5"; // the CEO, so the first look shows everything
-
-function initialViewer() {
-  try {
-    const saved = localStorage.getItem(KEY);
-    if (saved && USERS.some((u) => u.id === saved)) return saved;
-  } catch {
-    /* storage unavailable — fall back to the default */
-  }
-  return DEFAULT_VIEWER;
-}
-
 /**
- * Who is looking at TaskPro. On sample data this is chosen with the
- * "Viewing as" switcher so every role can be tried. With the real backend it
- * becomes the logged-in user and the switcher goes away.
+ * Loads the real logged-in user (useMe, same hook the rest of the app uses)
+ * plus their real team from the org hierarchy (GET /api/users/me/team — the
+ * endpoint the backend already built for exactly this: "Team Tasks and the
+ * assign-to picker read this"). No sample data, no per-session role
+ * switching — this is who is actually signed in.
  */
 export default function ViewerProvider({ children }) {
-  const [viewerId, setId] = useState(initialViewer);
+  const { user, loading: meLoading } = useMe();
+  const [team, setTeam] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(true);
 
-  useEffect(() => {
-    setActor(viewerId);
-  }, [viewerId]);
-
-  const setViewerId = useCallback((id) => {
-    setId(id);
+  const loadTeam = useCallback(async () => {
     try {
-      localStorage.setItem(KEY, id);
+      const res = await apiFetch("/api/users/me/team");
+      const data = await safeJson(res);
+      setTeam(res?.ok ? data?.members || [] : []);
     } catch {
-      /* ignore */
+      setTeam([]);
+    } finally {
+      setTeamLoading(false);
     }
   }, []);
 
+  useEffect(() => {
+    loadTeam();
+  }, [loadTeam]);
+
   const value = useMemo(() => {
-    const u = userById(viewerId);
-    return { id: viewerId, name: u.name, role: u.role, level: levelOf(viewerId), setViewerId };
-  }, [viewerId, setViewerId]);
+    const teamIds = new Set(team.map((m) => m.id));
+    return {
+      id: user?.id ?? null,
+      name: user?.name || "",
+      role: user?.role || "",
+      isAdmin: user?.role === "admin",
+      team,
+      teamIds,
+      ready: !meLoading && !teamLoading,
+      refreshTeam: loadTeam,
+    };
+  }, [user, meLoading, team, teamLoading, loadTeam]);
 
   return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;
 }

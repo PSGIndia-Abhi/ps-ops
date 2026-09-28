@@ -31,7 +31,7 @@ export function StatusBadge({ status, live = false }) {
 }
 
 export function PriorityBadge({ priority, long = false }) {
-  const p = PRIORITY[priority] || PRIORITY.MEDIUM;
+  const p = PRIORITY[priority] || PRIORITY.NORMAL;
   return (
     <span className="tp-badge" style={{ color: p.color, background: p.soft }}>
       {p.label}
@@ -41,8 +41,8 @@ export function PriorityBadge({ priority, long = false }) {
 }
 
 export function PriorityDot({ priority }) {
-  const p = PRIORITY[priority] || PRIORITY.MEDIUM;
-  return <span className="tp-pdot" style={{ background: priority === "URGENT" ? p.soft : p.color }} />;
+  const p = PRIORITY[priority] || PRIORITY.NORMAL;
+  return <span className="tp-pdot" style={{ background: p.color }} />;
 }
 
 export function Skeleton({ height = 16, width = "100%", radius = 8, style }) {

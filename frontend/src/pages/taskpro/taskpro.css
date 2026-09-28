@@ -143,12 +143,7 @@
     input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--tp-text); }
     kbd { font: inherit; font-size: 11px; padding: 1px 7px; border: 1px solid var(--tp-border); border-radius: 6px; background: #fff; color: var(--tp-soft); }
   }
-  .tp-viewas {
-    margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; border-radius: 10px;
-    background: #fff8e6; border: 1px dashed #f0c96a; color: #7a5a10; font-size: 12.5px; font-weight: 600; white-space: nowrap;
-    select { max-width: 210px; height: 28px; border: 0; border-radius: 7px; background: #fff; padding: 0 6px; font-weight: 600; color: var(--tp-text); outline: 0; cursor: pointer; }
-  }
-
+  .tp-new { margin-left: auto; }
   .tp-pop-root { position: relative; }
   .tp-bell-badge {
     position: absolute; top: 2px; right: 1px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
@@ -160,9 +155,37 @@
     background: #fff; border: 1px solid var(--tp-border); border-radius: 14px; box-shadow: var(--tp-shadow-lg);
     padding: 6px; transform-origin: top right; animation: tp-pop .2s var(--tp-ease);
   }
-  .tp-bell-pop { width: 340px; }
-  .tp-pop-head { padding: 8px 10px 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--tp-soft); }
-  .tp-pop-empty { padding: 14px 10px; color: var(--tp-muted); }
+  .tp-bell-pop { width: 380px; max-height: 70vh; overflow-y: auto; }
+  .tp-pop-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--tp-soft);
+    em { font-style: normal; padding: 0 6px; border-radius: 8px; background: #eef1f5; color: #475569; font-weight: 700; }
+  }
+  .tp-pop-section {
+    padding: 10px 10px 4px; font-size: 11.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    &.tp-tone-late { color: var(--tp-danger); } &.tp-tone-soon { color: var(--tp-warn); }
+  }
+  .tp-pop-empty { display: grid; justify-items: center; gap: 6px; padding: 26px 14px; text-align: center; color: var(--tp-muted); animation: tp-fade .3s both; }
+  .tp-pop-empty-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: #e2f7e9; color: var(--tp-success); font-size: 20px; margin-bottom: 2px; }
+  .tp-pop-empty strong { color: var(--tp-text); }
+  .tp-notif-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 10px; text-align: left;
+    animation: tp-fade-up .3s var(--tp-ease) both; transition: background .15s;
+    &:hover { background: #f3f6fb; }
+  }
+  .tp-notif-text { flex: 1; min-width: 0; display: grid; line-height: 1.25;
+    strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  .tp-notif-when { flex: none; display: grid; justify-items: end; text-align: right; line-height: 1.3;
+    strong { font-size: 12px; font-weight: 700; white-space: nowrap; }
+    small { font-size: 11px; color: var(--tp-soft); white-space: nowrap; }
+  }
+  .tp-pop-footer {
+    display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 4px; padding: 11px 10px;
+    border-top: 1px solid var(--tp-line); border-radius: 0 0 12px 12px; font-size: 13px; font-weight: 600; color: var(--tp-primary);
+    transition: background .15s;
+    &:hover { background: var(--tp-primary-soft); }
+  }
   .tp-pop-row {
     display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 10px;
     transition: background .15s;
@@ -246,6 +269,7 @@
   /* ---------- forms ---------- */
   .tp-form { display: grid; gap: 16px; }
   .tp-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tp-field-full { grid-column: 1 / -1; }
   .tp-field { display: grid; gap: 6px; align-content: start; }
   .tp-field > span { font-size: 13px; font-weight: 600; color: #334155; }
   .tp-field > span em { font-style: normal; font-weight: 400; color: var(--tp-soft); }
@@ -288,6 +312,19 @@
   .tp-switch input:checked + .tp-switch-track { background: var(--tp-primary); }
   .tp-switch input:checked + .tp-switch-track::after { transform: translateX(18px); }
   .tp-switch-text { display: grid; gap: 2px; strong { font-size: 13.5px; } }
+
+  /* ---------- recurrence form (New Task) ---------- */
+  .tp-duo { display: flex; gap: 8px; > * { flex: 1; min-width: 0; } }
+  .tp-unit { display: flex; align-items: center; padding: 0 4px; color: var(--tp-muted); font-size: 13px; white-space: nowrap; }
+  .tp-weekdays { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tp-weekdays button {
+    width: 42px; height: 36px; display: flex; align-items: center; justify-content: center; text-align: center;
+    border-radius: 10px; border: 1px solid var(--tp-border); background: #fff; font-weight: 600; color: #475569;
+    transition: background .18s, color .18s, border-color .18s;
+    &:hover { border-color: #bcd0fb; }
+    &.on { background: var(--tp-primary); border-color: var(--tp-primary); color: #fff; }
+  }
+  .tp-recurrence { display: grid; gap: 14px; padding: 14px 16px; border-radius: 12px; background: #fafcff; border: 1px dashed #cfdcf8; animation: tp-fade-up .3s var(--tp-ease) both; }
 
   /* ---------- modal ---------- */
   .tp-overlay {
@@ -457,7 +494,12 @@
   .tp-detail > *:nth-child(2) { animation-delay: .05s; } .tp-detail > *:nth-child(3) { animation-delay: .1s; } .tp-detail > *:nth-child(4) { animation-delay: .15s; } .tp-detail > *:nth-child(5) { animation-delay: .2s; }
   .tp-crumbs { display: flex; align-items: center; gap: 8px; color: var(--tp-muted); font-size: 13px; a:hover { color: var(--tp-primary); } span { color: var(--tp-text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
 
-  .tp-headcard { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  /* .tp-detail is a grid, so its direct children are grid items — z-index
+     works on them without `position` at all, and with none set (auto) they'd
+     stack by DOM order: .tp-stepcard (right after this one) would then paint
+     OVER the More menu's popover, hiding all but its top few pixels. Raising
+     this one keeps its popover on top of the cards below it. */
+  .tp-headcard { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
   .tp-head-left { display: flex; gap: 18px; align-items: center; min-width: 0; }
   .tp-head-tile { display: grid; place-items: center; flex: none; width: 60px; height: 60px; border-radius: 16px; color: #fff; font-size: 28px; box-shadow: 0 8px 18px rgba(239, 68, 68, .28); animation: tp-pop .5s var(--tp-ease) both; transition: background .4s; }
   .tp-head-titlerow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -497,6 +539,12 @@
   .tp-info-row { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--tp-line); > span { color: var(--tp-muted); } > div { font-weight: 500; min-width: 0; } }
   .tp-info-grid > div > .tp-info-row:last-child { border-bottom: 0; }
   .tp-person-inline { display: inline-flex; align-items: center; gap: 10px; }
+  .tp-person-btn {
+    border-radius: 10px; padding: 4px 8px 4px 4px; margin: -4px -8px -4px -4px; cursor: pointer; transition: background .15s;
+    small { color: var(--tp-primary); opacity: 0; transition: opacity .15s; }
+    &:hover { background: var(--tp-primary-soft); }
+    &:hover small { opacity: 1; }
+  }
   .tp-inline-text { display: grid; line-height: 1.2; }
   .tp-inline-icon { display: inline-flex; align-items: center; gap: 8px; color: var(--tp-muted); }
   .tp-desc { color: #334155; line-height: 1.6; &.muted { color: var(--tp-muted); } }
@@ -588,9 +636,6 @@
     .tp-topbar { padding: 0 14px; gap: 8px; }
     .tp-user-text, .tp-user-caret { display: none; }
     .tp-new span { display: none; }
-    .tp-viewas span { display: none; }
-    .tp-viewas { padding: 0 4px; min-width: 0; }
-    .tp-viewas select { max-width: 112px; }
     .tp-search { min-width: 0; flex: 1 1 60px; padding: 0 10px; gap: 6px; }
     .tp-search input { width: 100%; min-width: 0; }
     .tp-search kbd { display: none; }

@@ -2,43 +2,37 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { FiCalendar, FiChevronRight, FiClock, FiFilter, FiSearch, FiX } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
-import { PRIORITY, STATUS, userById } from "./data";
+import { PRIORITY, STATUS } from "./data";
 import { dueInfo, fmtDateTime } from "./format";
 import { LIST_MODES } from "./selectors";
-import useNow from "./useNow";
-import useVisibleTasks from "./useVisibleTasks";
+import { useTaskStore } from "./tasksApi";
 import { useViewer } from "./viewerContext";
-import { Avatar, EmptyState, PriorityBadge, PriorityDot, Skeleton, StatusBadge } from "./ui";
+import { Avatar, EmptyState, PriorityBadge, Skeleton, StatusBadge } from "./ui";
 
 const SORTS = {
-  due: { label: "Due date", fn: (a, b) => (a.dueAt || Infinity) - (b.dueAt || Infinity) },
+  due: { label: "Due date", fn: (a, b) => (a.due_date || "9999") + (a.due_time || "") < (b.due_date || "9999") + (b.due_time || "") ? -1 : 1 },
   priority: { label: "Priority", fn: (a, b) => PRIORITY[b.priority].rank - PRIORITY[a.priority].rank },
-  updated: { label: "Recently updated", fn: (a, b) => b.updatedAt - a.updatedAt },
+  updated: { label: "Recently updated", fn: (a, b) => new Date(b.updated_at) - new Date(a.updated_at) },
 };
 
-function TaskRow({ task, index, now, showAssignee }) {
-  const due = dueInfo(task.dueAt, now, task.status === "COMPLETED" || task.status === "CANCELLED");
-  const assignee = userById(task.assignedTo);
+function TaskRow({ task, index, showAssignee }) {
+  const due = dueInfo(task.due_date, task.due_time, task.status);
   return (
-    <Link
-      to={`${TASKPRO_HOME}/tasks/${task.id}`}
-      className="tp-task-row"
-      style={{ "--i": Math.min(index, 12) }}
-    >
-      <span className="tp-row-stripe" style={{ background: task.priority === "URGENT" ? PRIORITY.URGENT.soft : PRIORITY[task.priority].color }} />
+    <Link to={`${TASKPRO_HOME}/tasks/${task.id}`} className="tp-task-row" style={{ "--i": Math.min(index, 12) }}>
+      <span className="tp-row-stripe" style={{ background: PRIORITY[task.priority]?.color }} />
       <div className="tp-row-main">
         <div className="tp-row-top">
-          <span className="tp-row-no">{task.no}</span>
+          <span className="tp-row-no">{task.task_type || "Task"}</span>
           <PriorityBadge priority={task.priority} />
         </div>
         <h4 className="tp-row-title">{task.title}</h4>
         <div className="tp-row-meta">
-          {task.related && (
+          {task.source_module && (
             <span>
-              {task.related.type} {task.related.ref} · {task.related.customer}
+              {task.source_module} · {task.source_id}
             </span>
           )}
-          {!task.related && task.tags.length > 0 && <span>{task.tags.join(" · ")}</span>}
+          {task.series_id && <span>Recurring</span>}
         </div>
       </div>
 
@@ -47,16 +41,15 @@ function TaskRow({ task, index, now, showAssignee }) {
           <FiClock /> {due.text}
         </span>
         <small>
-          <FiCalendar /> {fmtDateTime(task.dueAt)}
+          <FiCalendar /> {fmtDateTime(task.due_date, task.due_time)}
         </small>
       </div>
 
-      {showAssignee && assignee && (
+      {showAssignee && (
         <div className="tp-row-who">
-          <Avatar name={assignee.name} size={28} />
+          <Avatar name={task.assigned_to_name} size={28} />
           <span className="tp-who-text">
-            <strong>{assignee.name}</strong>
-            <small>{assignee.role}</small>
+            <strong>{task.assigned_to_name}</strong>
           </span>
         </div>
       )}
@@ -69,9 +62,8 @@ function TaskRow({ task, index, now, showAssignee }) {
 
 export default function TaskList({ mode }) {
   const cfg = LIST_MODES[mode];
-  const { tasks, ready } = useVisibleTasks();
+  const { tasks, ready } = useTaskStore();
   const viewer = useViewer();
-  const now = useNow(60000);
   const [params, setParams] = useSearchParams();
 
   const q = params.get("q") || "";
@@ -79,7 +71,7 @@ export default function TaskList({ mode }) {
   const [priority, setPriority] = useState("ALL");
   const [sort, setSort] = useState("due");
 
-  const base = useMemo(() => tasks.filter((t) => cfg.match(t, now, viewer.id)), [tasks, cfg, now, viewer.id]);
+  const base = useMemo(() => tasks.filter((t) => cfg.match(t, viewer.id)), [tasks, cfg, viewer.id]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -88,7 +80,7 @@ export default function TaskList({ mode }) {
       .filter((t) => priority === "ALL" || t.priority === priority)
       .filter((t) => {
         if (!needle) return true;
-        const hay = [t.title, t.no, t.description, t.related?.customer, t.related?.ref, userById(t.assignedTo)?.name, ...t.tags]
+        const hay = [t.title, t.description, t.task_type, t.source_module, t.source_id, t.assigned_to_name]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -97,7 +89,6 @@ export default function TaskList({ mode }) {
       .sort(SORTS[sort].fn);
   }, [base, q, status, priority, sort]);
 
-  // Status chips only make sense where more than one status can appear.
   const statusChips = useMemo(() => {
     const present = new Set(base.map((t) => t.status));
     return ["ALL", ...Object.keys(STATUS).filter((s) => present.has(s))];
@@ -118,14 +109,7 @@ export default function TaskList({ mode }) {
       <div className="tp-toolbar">
         <div className="tp-chips" role="tablist" aria-label="Filter by status">
           {statusChips.map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="tab"
-              aria-selected={status === s}
-              className={`tp-chip ${status === s ? "on" : ""}`}
-              onClick={() => setStatus(s)}
-            >
+            <button key={s} type="button" role="tab" aria-selected={status === s} className={`tp-chip ${status === s ? "on" : ""}`} onClick={() => setStatus(s)}>
               {s === "ALL" ? "All" : STATUS[s].label}
               <span>{s === "ALL" ? base.length : base.filter((t) => t.status === s).length}</span>
             </button>
@@ -186,7 +170,7 @@ export default function TaskList({ mode }) {
       {ready && rows.length > 0 && (
         <div className="tp-list">
           {rows.map((t, i) => (
-            <TaskRow key={t.id} task={t} index={i} now={now} showAssignee={cfg.showAssignee} />
+            <TaskRow key={t.id} task={t} index={i} showAssignee={cfg.showAssignee} />
           ))}
         </div>
       )}
