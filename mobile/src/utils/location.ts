@@ -102,6 +102,7 @@ function toDeviceLocation(coords: {
  * open a few minutes ago, or the chip never fully spun down), using it is not a lower bar, just a faster
  * way to clear the exact same GOOD_ACCURACY_METERS bar below.
  */
+
 const CACHED_FIX_MAX_AGE_MS = 15000;
 /** How long the fast cached-fix check is allowed to take before falling through to the full watch below. */
 const CACHED_FIX_TIMEOUT_MS = 2000;
