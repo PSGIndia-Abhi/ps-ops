@@ -114,7 +114,7 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
   const [visitActionId, setVisitActionId] = useState<string | null>(null);
   // Narrates what "Start Visit" is actually doing right now instead of just
-  // a spinner - 'locating' while the device acquires a GPS fix (up to ~8s,
+  // a spinner - 'locating' while the device acquires a GPS fix (up to ~15s,
   // see utils/location.ts), 'verifying' while the one backend call that does
   // both geofence-check-and-start is in flight. Deliberately never claims
   // "location verified" before the server actually confirms it (the geofence

@@ -52,6 +52,13 @@ import AdminGroupManagement from "./pages/AdminGroupManagement";
 import AdminUserHierarchy from "./pages/AdminUserHierarchy";
 import AdminDepartments from "./pages/AdminDepartments";
 import StaffLayout from "./layouts/StaffLayout";
+// TaskPro (task management) — self-contained module, see pages/taskpro/
+import TaskProLayout from "./pages/taskpro/TaskProLayout";
+import TaskDashboard from "./pages/taskpro/TaskDashboard";
+import TaskList from "./pages/taskpro/TaskList";
+import TaskDetail from "./pages/taskpro/TaskDetail";
+import TaskProComingSoon from "./pages/taskpro/ComingSoon";
+import { TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
 import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
@@ -232,6 +239,30 @@ const router = createBrowserRouter([
       },
       { path: "tasks", element: <TaskManagement /> },
       { path: "settings", element: <TdsSettings /> },
+    ],
+  },
+
+  // TASKPRO — task management dashboard (protected; roles in pages/taskpro/access.js)
+  // -------------------------
+  {
+    path: TASKPRO_HOME,
+    element: (
+      <ProtectedRoute allowedRoles={TASKPRO_ROLES}>
+        <TaskProLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <TaskDashboard /> },
+      { path: "my-tasks", element: <TaskList mode="my" /> },
+      { path: "team-tasks", element: <TaskList mode="team" /> },
+      { path: "all-tasks", element: <TaskList mode="all" /> },
+      { path: "overdue", element: <TaskList mode="overdue" /> },
+      { path: "upcoming", element: <TaskList mode="upcoming" /> },
+      { path: "completed", element: <TaskList mode="completed" /> },
+      { path: "tasks/:id", element: <TaskDetail /> },
+      { path: "templates", element: <TaskProComingSoon page="templates" /> },
+      { path: "reports", element: <TaskProComingSoon page="reports" /> },
+      { path: "settings", element: <TaskProComingSoon page="settings" /> },
     ],
   },
 
