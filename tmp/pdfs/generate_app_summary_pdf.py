@@ -48,7 +48,7 @@ ARCHITECTURE = [
 ]
 
 RUN_STEPS = [
-    "Start services: `docker compose -f infra/Docker-compose.yml up -d`.",
+    "Start services: `docker compose -f infra/Docker- up -d`.",
     "Database bootstrap: import `ec2/ps_ops.sql`. Automated migration/seed command: Not found in repo.",
     "Backend (if not using the Compose backend): in `backend/`, run `npm install` and then `node index.js`.",
     "Frontend: in `frontend/`, run `npm install` and then `npm run dev`.",
