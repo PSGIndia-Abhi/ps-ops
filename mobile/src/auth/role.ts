@@ -27,6 +27,44 @@ export function isCrmRole(role: AppRole | null): boolean {
   return role === 'sales' || role === 'marketing';
 }
 
+/**
+ * The real org-hierarchy designations that land in Task Management - the
+ * exact list the web app routes to /taskpro on login (frontend/src/auth/
+ * roleBasePath.js ROLE_HOME, frontend/src/pages/taskpro/access.js). These
+ * are role names as stored (e.g. "Managing Director"), not AppRoles, so
+ * they're matched on the raw role string. Deliberately NOT "supervisor" -
+ * same reason as on the web (that name belongs to the field-service panel).
+ */
+const TASK_ROLES = [
+  'Managing Director',
+  'Personal Assistant',
+  'Technical Head',
+  'Technical Lead',
+  'Technical Team',
+  'Marketing Head',
+  'Marketing Executive',
+  'Sales Head',
+  'Sales Executive',
+  'Operations Head',
+  'Operations Manager',
+  'Service Coordinator',
+  'Quality Head',
+  'Accounts Head',
+  'Accounts Executive',
+  'Collection Executive',
+  'Admin Executive',
+].map((r) => r.toLowerCase());
+
+export function isTaskRole(role: string | null | undefined): boolean {
+  return !!role && TASK_ROLES.includes(role.toLowerCase().trim());
+}
+
+/** The signed-in user's role exactly as the backend sent it (no normalizing). */
+export function useRawRole(): string | null {
+  const { user, session } = useAuth();
+  return (user?.role ?? session?.role ?? null) as string | null;
+}
+
 export function normalizeRole(role: string | null | undefined): AppRole | null {
   if (!role) return null;
   const lower = role.toLowerCase().trim();

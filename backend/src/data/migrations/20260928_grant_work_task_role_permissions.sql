@@ -15,6 +15,7 @@
 -- role_permissions has no surrogate key (role_id, permission_id) IS the
 -- primary key, so INSERT IGNORE is enough to stay safely re-runnable.
 
+
 INSERT IGNORE INTO `role_permissions` (`role_id`, `permission_id`)
 SELECT r.id, p.id
   FROM `roles` r, `permissions` p
