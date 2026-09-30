@@ -50,8 +50,13 @@
   --tp-ease: cubic-bezier(.22, 1, .36, 1);
   --tp-side: 252px;
 
+  /* TaskPro fills the window and only its content area (.tp-main) scrolls —
+     so a drawer or dialog opening never has to hide or restore a page
+     scrollbar, and nothing behind it shifts. */
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--tp-bg);
   color: var(--tp-text);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -123,10 +128,12 @@
   &.collapsed .tp-brand-text, &.collapsed .tp-nav-label { opacity: 0; width: 0; overflow: hidden; }
   &.collapsed .tp-nav-badge { position: absolute; top: 4px; right: 6px; min-width: 18px; height: 18px; font-size: 10.5px; }
 
-  .tp-main { flex: 1; min-width: 0; margin-left: var(--tp-side); transition: margin .32s var(--tp-ease); display: flex; flex-direction: column; }
+  .tp-main { flex: 1; min-width: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain; margin-left: var(--tp-side); transition: margin .32s var(--tp-ease); display: flex; flex-direction: column; }
 
   .tp-topbar {
-    position: sticky; top: 0; z-index: 30; height: 66px;
+    /* flex: none — .tp-main is a fixed-height scrolling column, and without
+       this the browser shrinks the header to make room for the page. */
+    position: sticky; top: 0; z-index: 30; height: 66px; flex: none;
     display: flex; align-items: center; gap: 12px; padding: 0 24px;
     background: rgba(255, 255, 255, .86); backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--tp-border);
@@ -537,12 +544,23 @@
     &.unread:hover { background: #e9f0ff; }
     &.compact { padding: 9px 10px; gap: 10px; }
   }
+  /* read ones fade back; unread ones stay bright with a dot */
+  .tp-ev.read { .tp-ev-text, .tp-ev-note { color: var(--tp-soft); } .tp-ev-text strong { color: var(--tp-muted); font-weight: 500; } .tp-ev-avatar { opacity: .55; filter: grayscale(.4); } }
+  .tp-ev.read:hover { .tp-ev-text strong { color: var(--tp-text); } .tp-ev-avatar { opacity: 1; filter: none; } }
+  .tp-ev-markall {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--tp-primary);
+    transition: background .15s;
+    &:hover:not(:disabled) { background: var(--tp-primary-soft); }
+    &:disabled { color: var(--tp-soft); cursor: default; opacity: 1; }
+  }
+  .tp-page-head .tp-ev-markall { font-size: 13.5px; padding: 8px 12px; border: 1px solid var(--tp-border); background: #fff; }
   .tp-ev-avatar { position: relative; flex: none; }
   .tp-ev-kind {
     position: absolute; right: -7px; bottom: -6px; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%;
     border: 2px solid #fff; font-size: 11px; color: #fff; background: #64748b;
     &.blue { background: #2563eb; } &.green { background: #16a34a; } &.orange { background: #eb6834; }
-    &.amber { background: #d97706; } &.red { background: #dc2626; } &.gray { background: #64748b; }
+    &.amber { background: #d97706; } &.red { background: #dc2626; } &.gray { background: #64748b; } &.pink { background: #db2777; }
   }
   .tp-ev-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .tp-ev-text { font-size: 13.5px; line-height: 1.4; color: #334155; strong { color: var(--tp-text); font-weight: 600; } }
@@ -611,6 +629,13 @@
   .tp-req-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: #fdeec8; color: #b45309; font-size: 17px; }
   .tp-req-text { flex: 1; min-width: 220px; display: grid; gap: 2px; strong { font-size: 13.5px; font-weight: 600; color: #5b3d07; } small { color: #7a5a1c; } }
   .tp-req-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* banner on a paused task */
+  .tp-pause-banner {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px;
+    background: #fdf2f8; border: 1px solid #f9c6de; animation: tp-fade-up .35s var(--tp-ease) both;
+    .tp-req-text strong { color: #831843; } .tp-req-text small { color: #9d174d; }
+  }
+  .tp-pause-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: #fce7f3; color: #be185d; font-size: 17px; }
   /* "comments/files are closed" note in the task tabs */
   .tp-warn-note { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #fff8e6; border: 1px solid #fbe3a6; color: #5b3d07; font-size: 13px; line-height: 1.5; svg { flex: none; margin-top: 3px; color: #b45309; } }
   .tp-closed-note { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 12px; background: #f4f6fb; color: var(--tp-muted); font-size: 13px; svg { flex: none; color: var(--tp-soft); } }
@@ -990,6 +1015,8 @@
   }
   .tp-step.done .tp-step-dot { background: var(--tp-primary); border-color: var(--tp-primary); color: #fff; }
   .tp-step.active .tp-step-dot { border-color: var(--tp-primary); color: var(--tp-primary); background: var(--tp-primary-soft); transform: scale(1.12); box-shadow: 0 0 0 6px rgba(37, 99, 235, .12); }
+  .tp-step.paused .tp-step-dot { border-color: #db2777; color: #be185d; background: #fce7f3; box-shadow: 0 0 0 6px rgba(219, 39, 119, .12); }
+  .tp-step.paused strong { color: #be185d; }
   .tp-step.active strong, .tp-step.done strong { color: var(--tp-text); }
   .tp-stepper.cancelled .tp-step-dot { opacity: .6; }
 

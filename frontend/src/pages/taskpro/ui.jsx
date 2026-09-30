@@ -147,26 +147,12 @@ export function Drawer({ title, subtitle, onClose, children, footer }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closing]);
 
-  // While open, hide the page's scrollbar so the drawer reaches the screen
-  // edge (a fixed element can't cover the page scrollbar, which otherwise
-  // shows as a strip beside the drawer) — and pad the page by exactly the
-  // scrollbar's width, so the content behind keeps the same width and
-  // nothing jumps when the drawer opens or closes.
-  useEffect(() => {
-    const html = document.documentElement;
-    const scrollbar = window.innerWidth - html.clientWidth;
-    const prev = { overflow: html.style.overflow, paddingRight: html.style.paddingRight };
-    html.style.overflow = "hidden";
-    if (scrollbar > 0) html.style.paddingRight = `${scrollbar}px`;
-    return () => {
-      html.style.overflow = prev.overflow;
-      html.style.paddingRight = prev.paddingRight;
-    };
-  }, []);
-
-  // Touch devices can still scroll a page with overflow: hidden, so the
-  // overlay also swallows wheel / touch scrolling — except inside something
-  // in the drawer that can itself scroll that way (the form, a list, a textarea).
+  // Nothing on the page needs hiding or restoring while the drawer is open:
+  // in TaskPro only the content area scrolls, and the overlay sits over it
+  // (so there's no page scrollbar to leave a strip or to make things shift).
+  // The overlay just swallows wheel / touch scrolling, so the content behind
+  // stays put — except inside something in the drawer that can itself scroll
+  // that way (the form, a list, a textarea).
   const overlayRef = useRef(null);
   useEffect(() => {
     const overlay = overlayRef.current;

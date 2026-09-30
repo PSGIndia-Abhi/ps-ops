@@ -140,6 +140,7 @@ export default function TaskDashboard() {
     return {
       open: forStatus.filter((t) => t.status === "OPEN").length,
       inProgress: forStatus.filter((t) => t.status === "IN_PROGRESS").length,
+      paused: forStatus.filter((t) => t.status === "PAUSED").length,
       overdue: active.filter(isOverdue).length,
       doneWeek: forStatus.filter((t) => t.status === "COMPLETED" && t.completed_at && new Date(t.completed_at).getTime() > weekAgo).length,
       active: tasks.filter(isActive).length,
@@ -215,6 +216,7 @@ export default function TaskDashboard() {
       parts: [
         { key: "OPEN", label: "Open", color: STATUS.OPEN.color, value: list.filter((t) => t.status === "OPEN").length },
         { key: "IN_PROGRESS", label: "In progress", color: STATUS.IN_PROGRESS.color, value: list.filter((t) => t.status === "IN_PROGRESS").length },
+        { key: "PAUSED", label: "Paused", color: STATUS.PAUSED.color, value: list.filter((t) => t.status === "PAUSED").length },
       ],
     });
     const ranked = [...byPerson.values()].sort((a, b) => b.list.length - a.list.length || a.name.localeCompare(b.name));
@@ -290,7 +292,7 @@ export default function TaskDashboard() {
   };
   const kpis = [
     { key: "open", label: "Open", value: stats.open, icon: FiInbox, tone: "blue", hint: "Waiting to be started", to: kpiLink(scopePage, { status: "OPEN" }) },
-    { key: "prog", label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "orange", hint: "Being worked on now", to: kpiLink(scopePage, { status: "IN_PROGRESS" }) },
+    { key: "prog", label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "orange", hint: stats.paused ? `Being worked on · ${stats.paused} paused` : "Being worked on now", to: kpiLink(scopePage, { status: "IN_PROGRESS" }) },
     { key: "late", label: "Overdue", value: stats.overdue, icon: FiAlertCircle, tone: "red", hint: "Needs attention", to: kpiLink("overdue") },
     { key: "done", label: "Completed", value: stats.doneWeek, icon: FiCheckCircle, tone: "green", hint: "In the last 7 days", to: kpiLink("completed") },
   ];
@@ -307,6 +309,7 @@ export default function TaskDashboard() {
   const workloadLegend = [
     { label: "Open", color: STATUS.OPEN.color },
     { label: "In progress", color: STATUS.IN_PROGRESS.color },
+    { label: "Paused", color: STATUS.PAUSED.color },
   ];
 
   const table = (columns, rows) => ({ columns, rows });
@@ -372,8 +375,8 @@ export default function TaskDashboard() {
             types: ["bar", "column"],
             empty: workload.length === 0,
             table: table(
-              [{ key: "label", label: "Person" }, { key: "open", label: "Open", num: true }, { key: "prog", label: "In progress", num: true }, { key: "flag", label: "Overdue" }],
-              workload.map((r) => ({ key: r.key, label: r.label, open: r.parts[0].value, prog: r.parts[1].value, flag: r.flag || "—" })),
+              [{ key: "label", label: "Person" }, { key: "open", label: "Open", num: true }, { key: "prog", label: "In progress", num: true }, { key: "paused", label: "Paused", num: true }, { key: "flag", label: "Overdue" }],
+              workload.map((r) => ({ key: r.key, label: r.label, open: r.parts[0].value, prog: r.parts[1].value, paused: r.parts[2].value, flag: r.flag || "—" })),
             ),
             draw: (type) => <CategoryChart type={type} items={workload} selected={assignee || null} onSelect={pickFilter("assignee")} legend={workloadLegend} />,
           },
@@ -507,8 +510,8 @@ export default function TaskDashboard() {
             { icon: FiUsers, title: "My / Team / All", text: "Choose whose tasks the whole dashboard shows." },
             { icon: FiInbox, title: "Number cards", text: "Click one to open that list, e.g. all open tasks." },
             { icon: FiMousePointer, title: "Bars and slices", text: "Click to filter every chart by it. Click again to clear." },
-            { icon: FiBarChart2, title: "Chart icons", text: "Switch a chart between donut, pie, bars, line or a table." },
-            { icon: FiSliders, title: "Customize", text: "Show or hide charts. Your choice is remembered." },
+            // { icon: FiBarChart2, title: "Chart icons", text: "Switch a chart between donut, pie, bars, line or a table." },
+            // { icon: FiSliders, title: "Customize", text: "Show or hide charts. Your choice is remembered." },
           ]}
         />
         <CustomizeCharts charts={charts} hidden={hidden} onChange={saveHidden} />

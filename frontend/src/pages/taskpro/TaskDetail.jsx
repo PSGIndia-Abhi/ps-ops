@@ -37,7 +37,7 @@ import {
 import { TASKPRO_HOME } from "./access";
 import { PRIORITY, SERIES_STATUS, STATUS } from "./data";
 import { assignableUsers, personOf } from "./hierarchy";
-import { dueInfo, fmtDate, fmtDateTime, fmtDuration, fmtTimestamp, todayStr, toTimeInput } from "./format";
+import { dueInfo, fmtDate, fmtDateTime, fmtDuration, fmtTimestamp, timeAgo, todayStr, toTimeInput } from "./format";
 import {
   UNDO_MS,
   addComment,
@@ -54,12 +54,14 @@ import {
   listHistory,
   openAttachment,
   pauseSeries,
+  pauseTask,
   reassignTask,
   rejectRequest,
   reopenTask,
   requestReschedule,
   rescheduleTask,
   resumeSeries,
+  resumeTask,
   scheduleDelete,
   skipTask,
   startTask,
@@ -78,9 +80,17 @@ import { Avatar, CompletionBurst, Drawer, EmptyState, Modal, PriorityBadge, Skel
 
 /* ---------- small pieces ---------- */
 
-function LiveDuration({ startedAt }) {
+/** Time actually worked: from start to now (or to when it was paused),
+ *  minus the time spent in earlier pauses. */
+function workedMs(task, now) {
+  if (!task.started_at) return 0;
+  const end = task.status === "PAUSED" && task.paused_at ? new Date(task.paused_at).getTime() : now;
+  return Math.max(0, end - new Date(task.started_at).getTime() - (Number(task.paused_seconds) || 0) * 1000);
+}
+
+function LiveDuration({ task }) {
   const now = useNow(1000);
-  return <>{fmtDuration(now - new Date(startedAt).getTime())}</>;
+  return <>{fmtDuration(workedMs(task, now))}</>;
 }
 
 const STEPS = [
@@ -90,7 +100,8 @@ const STEPS = [
 ];
 
 function Stepper({ status }) {
-  const current = status === "COMPLETED" ? 2 : status === "IN_PROGRESS" ? 1 : 0;
+  const current = status === "COMPLETED" ? 2 : status === "IN_PROGRESS" || status === "PAUSED" ? 1 : 0;
+  const paused = status === "PAUSED";
   const cancelled = status === "CANCELLED";
   const fill = cancelled ? 0 : current * 50;
   return (
@@ -102,10 +113,10 @@ function Stepper({ status }) {
         const done = !cancelled && (i < current || (status === "COMPLETED" && i === 2));
         const active = !cancelled && i === current && status !== "COMPLETED";
         return (
-          <div key={s.key} className={`tp-step ${done ? "done" : ""} ${active ? "active" : ""}`}>
-            <span className="tp-step-dot">{done ? <FiCheck /> : i + 1}</span>
-            <strong>{s.label}</strong>
-            <small>{s.caption}</small>
+          <div key={s.key} className={`tp-step ${done ? "done" : ""} ${active ? "active" : ""} ${active && paused ? "paused" : ""}`}>
+            <span className="tp-step-dot">{done ? <FiCheck /> : active && paused ? <FiPause /> : i + 1}</span>
+            <strong>{active && paused ? "Paused" : s.label}</strong>
+            <small>{active && paused ? "On hold for now" : s.caption}</small>
           </div>
         );
       })}
@@ -150,13 +161,15 @@ const KIND = {
   ATTACH: { icon: FiPaperclip, color: "#2563eb", soft: "#e8f0ff", label: "File attached" },
   DETACH: { icon: FiX, color: "#64748b", soft: "#eef1f5", label: "File removed" },
   REOPEN: { icon: FiRotateCcw, color: "#c2410c", soft: "#fdeee6", label: "Task reopened" },
+  PAUSE: { icon: FiPause, color: "#be185d", soft: "#fce7f3", label: "Task paused" },
+  RESUME: { icon: FiPlay, color: "#c2410c", soft: "#fdeee6", label: "Task resumed" },
   RESCHEDULE_REQUEST: { icon: FiSend, color: "#2563eb", soft: "#e8f0ff", label: "Reschedule requested" },
   RESCHEDULE_REJECTED: { icon: FiSlash, color: "#64748b", soft: "#eef1f5", label: "Reschedule request rejected" },
 };
 
 const ACTIVITY_FILTERS = {
   all: { label: "All Activity", match: () => true },
-  status: { label: "Status changes", match: (a) => ["START", "COMPLETE", "REOPEN", "SKIP", "CANCEL"].includes(a.action) },
+  status: { label: "Status changes", match: (a) => ["START", "PAUSE", "RESUME", "COMPLETE", "REOPEN", "SKIP", "CANCEL"].includes(a.action) },
   changes: { label: "Edits", match: (a) => ["UPDATE", "REASSIGN", "RESCHEDULE", "RESCHEDULE_REQUEST", "RESCHEDULE_REJECTED"].includes(a.action) },
   files: { label: "Files", match: (a) => ["ATTACH", "DETACH"].includes(a.action) },
 };
@@ -558,6 +571,70 @@ function RescheduleDialog({ task, onClose, onSave, request = false }) {
   );
 }
 
+const PAUSE_REASONS = ["Waiting for customer", "Waiting for material / parts", "Waiting for approval", "Working on something urgent"];
+
+/** Pause a task in progress. A reason is required so the creator and the
+ *  manager can see why it's on hold. */
+function PauseDialog({ onClose, onPause }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState(false);
+  return (
+    <Modal title="Pause this task" onClose={onClose} size="sm">
+      {(close) => (
+        <div className="tp-form">
+          <p className="tp-desc muted">The timer stops until you resume. The due date doesn't change; ask for a reschedule if you'll need longer.</p>
+          <div className="tp-field">
+            <span>Why are you pausing it? *</span>
+            <div className="tp-nt-pills small">
+              {PAUSE_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={reason === r ? "on" : ""}
+                  onClick={() => {
+                    setReason(r);
+                    setError(false);
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <textarea
+              className={`tp-input ${error ? "invalid" : ""}`}
+              rows={2}
+              value={reason}
+              onChange={(e) => {
+                setReason(e.target.value);
+                setError(false);
+              }}
+              placeholder="Or write your own reason…"
+              autoFocus
+            />
+            {error && <em className="tp-error">Give a reason so others know why it's on hold.</em>}
+          </div>
+          <div className="tp-modal-actions">
+            <button type="button" className="tp-btn ghost" onClick={close}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="tp-btn primary"
+              onClick={() => {
+                if (!reason.trim()) return setError(true);
+                onPause(reason.trim());
+                close();
+              }}
+            >
+              <FiPause /> Pause task
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /** Reject a reschedule request, with an optional note back to the requester. */
 function RejectDialog({ request, onClose, onReject }) {
   const [note, setNote] = useState("");
@@ -836,7 +913,7 @@ function StartedPanel({ task, busy, onClose, onSaveProgress, onComplete }) {
         <div>
           <dt>Duration</dt>
           <dd className="tp-timer">
-            <LiveDuration startedAt={task.started_at} />
+            <LiveDuration task={task} />
           </dd>
         </div>
       </dl>
@@ -889,7 +966,7 @@ export default function TaskDetail() {
   const { task, ready, refresh } = useTask(id);
 
   const [tab, setTab] = useState("work");
-  const [dialog, setDialog] = useState(null); // start | edit | reassign | reschedule | request | reject | reopen | delete | duplicate | skip | complete | series
+  const [dialog, setDialog] = useState(null); // start | pause | edit | reassign | reschedule | request | reject | reopen | delete | duplicate | skip | complete | series
   const [whoId, setWhoId] = useState(null); // user id to show the "who do they report to" dialog for
   const [panelHidden, setPanelHidden] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -1072,6 +1149,18 @@ export default function TaskDetail() {
     navigate(window.history.length > 1 ? -1 : `${TASKPRO_HOME}/my-tasks`);
   }
 
+  async function doPause(reason) {
+    await run(() => pauseTask(task.id, reason), { title: "Task paused", text: reason });
+  }
+
+  async function doResume() {
+    setPanelHidden(false);
+    await run(() => resumeTask(task.id), { title: "Task resumed", text: "The timer is running again." });
+  }
+
+  // The reason given for the current pause, from the history.
+  const pauseReason = task.status === "PAUSED" ? [...history].reverse().find((h) => h.action === "PAUSE") : null;
+
   async function doReopen() {
     await run(() => reopenTask(task.id), { title: "Task reopened", text: "It's back in progress." });
     setPanelHidden(false);
@@ -1169,6 +1258,7 @@ export default function TaskDetail() {
     if (!canWork) return null;
     if (task.status === "OPEN") return { label: "Start Task", icon: FiPlay, onClick: () => setDialog("start") };
     if (task.status === "IN_PROGRESS") return { label: "Complete Task", icon: FiCheck, tone: "success", onClick: () => setDialog("complete") };
+    if (task.status === "PAUSED") return { label: "Resume Task", icon: FiPlay, onClick: doResume };
     return null;
   })();
 
@@ -1216,6 +1306,11 @@ export default function TaskDetail() {
             {primary && (
               <button type="button" className={`tp-btn ${primary.tone || "primary"}`} onClick={primary.onClick} disabled={busy}>
                 <primary.icon /> {primary.label}
+              </button>
+            )}
+            {canWork && task.status === "IN_PROGRESS" && (
+              <button type="button" className="tp-btn outline" onClick={() => setDialog("pause")} disabled={busy}>
+                <FiPause /> Pause
               </button>
             )}
             {canEditTerms && (
@@ -1321,6 +1416,26 @@ export default function TaskDetail() {
           </div>
         </div>
       </section>
+
+      {task.status === "PAUSED" && (
+        <div className="tp-pause-banner">
+          <span className="tp-pause-icon">
+            <FiPause />
+          </span>
+          <div className="tp-req-text">
+            <strong>
+              {isAssignee ? "You paused this task" : `${task.assigned_to_name} paused this task`}
+              {task.paused_at ? ` ${timeAgo(task.paused_at)}` : ""}.
+            </strong>
+            {pauseReason?.note && <small>Reason: {pauseReason.note}</small>}
+          </div>
+          {canWork && (
+            <button type="button" className="tp-btn primary" onClick={doResume} disabled={busy}>
+              <FiPlay /> Resume
+            </button>
+          )}
+        </div>
+      )}
 
       {pendingReq && !finished && (
         <div className="tp-req-banner">
@@ -1462,6 +1577,8 @@ export default function TaskDetail() {
                   <p className="tp-desc muted">This task is {STATUS[task.status].label.toLowerCase()}, so it can't take new progress updates.</p>
                 ) : !canWork ? (
                   <p className="tp-desc muted">Only {task.assigned_to_name} can add progress updates. You can still leave a comment on the Comments tab.</p>
+                ) : task.status === "PAUSED" ? (
+                  <p className="tp-desc muted">This task is paused. Resume it to add a progress update.</p>
                 ) : task.status !== "IN_PROGRESS" ? (
                   <p className="tp-desc muted">Start the task before adding a progress update.</p>
                 ) : (
@@ -1679,6 +1796,7 @@ export default function TaskDetail() {
           onConfirm={() => run(() => skipTask(task.id), { title: "Occurrence skipped" })}
         />
       )}
+      {dialog === "pause" && <PauseDialog onClose={() => setDialog(null)} onPause={doPause} />}
       {dialog === "request" && <RescheduleDialog request task={task} onClose={() => setDialog(null)} onSave={doRequest} />}
       {dialog === "reject" && pendingReq && <RejectDialog request={pendingReq} onClose={() => setDialog(null)} onReject={doReject} />}
       {dialog === "reopen" && (

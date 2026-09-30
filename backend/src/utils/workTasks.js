@@ -12,7 +12,7 @@ const TASK_COLUMNS = `
   source_module, source_id, assigned_to, created_by,
   DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date, due_time,
   next_action, DATE_FORMAT(next_action_date, '%Y-%m-%d') AS next_action_date,
-  started_at, started_by, completed_at, completed_by, completion_note,
+  started_at, started_by, paused_at, paused_seconds, completed_at, completed_by, completion_note,
   created_at, updated_at
 `;
 
@@ -22,7 +22,7 @@ const TASK_COLUMNS_T = `
   t.source_module, t.source_id, t.assigned_to, t.created_by,
   DATE_FORMAT(t.due_date, '%Y-%m-%d') AS due_date, t.due_time,
   t.next_action, DATE_FORMAT(t.next_action_date, '%Y-%m-%d') AS next_action_date,
-  t.started_at, t.started_by, t.completed_at, t.completed_by, t.completion_note,
+  t.started_at, t.started_by, t.paused_at, t.paused_seconds, t.completed_at, t.completed_by, t.completion_note,
   t.created_at, t.updated_at
 `;
 

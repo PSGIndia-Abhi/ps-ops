@@ -12,7 +12,27 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { API_BASE, apiFetch, safeJson } from "../../api";
 import { useViewer } from "./viewerContext";
 
-async function call(method, path, body) {
+// Identical GETs already on their way share one request instead of sending
+// another. Two screens (or React's development double-run of effects) asking
+// for the same thing at the same moment then cost one network call. Only
+// while in flight — nothing is cached here once it has answered.
+const inFlight = new Map();
+
+function call(method, path, body) {
+  if (method !== "GET" || body !== undefined) return send(method, path, body);
+  if (!inFlight.has(path)) {
+    inFlight.set(
+      path,
+      send(method, path).finally(() => inFlight.delete(path)),
+    );
+  }
+  return inFlight.get(path);
+}
+
+/** GET a JSON endpoint through the shared, de-duplicated path. */
+export const getJson = (path) => call("GET", path);
+
+async function send(method, path, body) {
   const isForm = body instanceof FormData;
   const res = await apiFetch(path, {
     method,
@@ -89,7 +109,9 @@ export function useTaskStore() {
   const viewer = useViewer();
   const snap = useSyncExternalStore(subscribe, getSnapshot);
   useEffect(() => {
-    loadTasks(viewer.id);
+    // Wait until we know who is signed in: loading with no id first and
+    // again once it arrives would fetch the whole list twice.
+    if (viewer.id) loadTasks(viewer.id);
   }, [viewer.id]);
   return snap;
 }
@@ -150,6 +172,20 @@ export async function updateTask(id, fields) {
 
 export async function startTask(id) {
   const data = await call("POST", `/api/work-tasks/${id}/start`);
+  patchList(data);
+  return data;
+}
+
+/** In progress -> Paused. A reason is required (the server enforces it too). */
+export async function pauseTask(id, reason) {
+  const data = await call("POST", `/api/work-tasks/${id}/pause`, { reason });
+  patchList(data);
+  return data;
+}
+
+/** Paused -> In progress. */
+export async function resumeTask(id) {
+  const data = await call("POST", `/api/work-tasks/${id}/resume`);
   patchList(data);
   return data;
 }
@@ -297,10 +333,11 @@ export function useIncomingRequests() {
 
 // ---- notifications (activity feed) ----------------------------------------
 // What other people did that concerns the viewer (GET /api/work-tasks/
-// notifications). "Unread" = newer than the last time this person opened the
-// bell or the Notifications page, remembered per person in this browser —
-// there's no read/unread table, so it isn't shared across devices.
-let ntf = { items: [], ready: false, seen: null, forId: null };
+// notifications). Read state is per notification: opening one marks it
+// read, "Mark all read" marks everything up to now. It is remembered per
+// person in this browser — there's no read/unread table, so it isn't shared
+// across devices.
+let ntf = { items: [], ready: false, forId: null, allReadAt: null, readIds: new Set() };
 const ntfListeners = new Set();
 function setNtf(next) {
   ntf = { ...ntf, ...next };
@@ -310,12 +347,23 @@ const subscribeNtf = (l) => {
   ntfListeners.add(l);
   return () => ntfListeners.delete(l);
 };
-const seenKey = (id) => `taskpro.notifications.seen.${id}`;
-function readSeen(id) {
+const readKey = (id) => `taskpro.notifications.read.${id}`;
+function loadRead(id) {
   try {
-    return localStorage.getItem(seenKey(id));
+    const saved = JSON.parse(localStorage.getItem(readKey(id)) || "null");
+    if (saved) return { allReadAt: saved.allReadAt || null, readIds: new Set(saved.ids || []) };
+    // Earlier versions only kept "last opened the bell"; treat that as read.
+    return { allReadAt: localStorage.getItem(`taskpro.notifications.seen.${id}`) || null, readIds: new Set() };
   } catch {
-    return null;
+    return { allReadAt: null, readIds: new Set() };
+  }
+}
+function saveRead() {
+  if (!ntf.forId) return;
+  try {
+    localStorage.setItem(readKey(ntf.forId), JSON.stringify({ allReadAt: ntf.allReadAt, ids: [...ntf.readIds].slice(-500) }));
+  } catch {
+    // Storage unavailable: read state just resets next visit.
   }
 }
 
@@ -331,15 +379,20 @@ export function refreshNotifications(limit = 100) {
   return ntfLoading;
 }
 
-/** Marks everything up to now as read for this viewer. */
-export function markNotificationsSeen(viewerId) {
-  const now = new Date().toISOString();
-  try {
-    localStorage.setItem(seenKey(viewerId), now);
-  } catch {
-    // Storage unavailable: unread just resets next visit.
-  }
-  setNtf({ seen: now });
+const readAlready = (e) => (ntf.allReadAt && new Date(e.at) <= new Date(ntf.allReadAt)) || ntf.readIds.has(e.id);
+
+/** Marks one notification read (when it's opened). */
+export function markNotificationRead(id) {
+  const e = ntf.items.find((x) => x.id === id);
+  if (!e || readAlready(e)) return;
+  setNtf({ readIds: new Set([...ntf.readIds, id]) });
+  saveRead();
+}
+
+/** Marks every notification up to now as read. */
+export function markAllNotificationsRead() {
+  setNtf({ allReadAt: new Date().toISOString(), readIds: new Set() });
+  saveRead();
 }
 
 /** { items, ready, unread, isUnread(e) } — refreshed on mount and every minute. */
@@ -348,12 +401,12 @@ export function useNotifications() {
   const snap = useSyncExternalStore(subscribeNtf, () => ntf);
   useEffect(() => {
     if (!viewer.id) return undefined;
-    if (ntf.forId !== viewer.id) setNtf({ items: [], ready: false, forId: viewer.id, seen: readSeen(viewer.id) });
+    if (ntf.forId !== viewer.id) setNtf({ items: [], ready: false, forId: viewer.id, ...loadRead(viewer.id) });
     refreshNotifications();
     const t = setInterval(refreshNotifications, 60000);
     return () => clearInterval(t);
   }, [viewer.id]);
-  const isUnread = (e) => !snap.seen || new Date(e.at) > new Date(snap.seen);
+  const isUnread = (e) => !((snap.allReadAt && new Date(e.at) <= new Date(snap.allReadAt)) || snap.readIds.has(e.id));
   return { ...snap, unread: snap.items.filter(isUnread).length, isUnread };
 }
 

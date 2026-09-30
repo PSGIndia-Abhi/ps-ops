@@ -8,6 +8,7 @@ import {
   FiEdit3,
   FiMessageSquare,
   FiPaperclip,
+  FiPause,
   FiPlay,
   FiRefreshCw,
   FiRotateCcw,
@@ -30,6 +31,8 @@ const KINDS = {
   cancelled: { icon: FiSlash, tone: "gray", text: () => ["cancelled", ""] },
   attached: { icon: FiPaperclip, tone: "gray", text: () => ["attached a file to", ""] },
   started: { icon: FiPlay, tone: "orange", text: () => ["started", ""] },
+  paused: { icon: FiPause, tone: "pink", text: () => ["paused", ""] },
+  resumed: { icon: FiPlay, tone: "orange", text: () => ["resumed", ""] },
   completed: { icon: FiCheckCircle, tone: "green", text: () => ["completed", ""] },
   commented: { icon: FiMessageSquare, tone: "blue", text: () => ["commented on", ""] },
   request_received: {

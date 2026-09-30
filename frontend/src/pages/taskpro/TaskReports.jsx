@@ -119,7 +119,7 @@ export default function TaskReports() {
     { label: "Tasks", value: stats.total, icon: FiList, tone: "blue", hint: subtitle.replace("Tasks due ", "Due ") },
     { label: "Completed", value: stats.completed, icon: FiCheckCircle, tone: "green", hint: stats.completionRate === null ? "—" : `${stats.completionRate}% of tasks` },
     { label: "On time", value: stats.onTime, icon: FiClock, tone: "blue", hint: stats.onTimeRate === null ? "—" : `${stats.onTimeRate}% of completed · ${stats.late} late` },
-    { label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "orange", hint: `${stats.open} not started yet` },
+    { label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "orange", hint: `${stats.paused ? `${stats.paused} paused · ` : ""}${stats.open} not started yet` },
     { label: "Overdue", value: stats.overdue, icon: FiAlertCircle, tone: "red", hint: "Still open, past the due date" },
   ];
 
@@ -213,6 +213,7 @@ export default function TaskReports() {
                   <th className="num">Completed</th>
                   <th className="num">On time</th>
                   <th className="num">In progress</th>
+                  <th className="num">Paused</th>
                   <th className="num">Open</th>
                   <th className="num">Overdue</th>
                   <th className="num">Completion</th>
@@ -234,6 +235,7 @@ export default function TaskReports() {
                     <td className="num">{g.stats.completed}</td>
                     <td className="num">{g.stats.onTimeRate === null ? "—" : `${g.stats.onTimeRate}%`}</td>
                     <td className="num">{g.stats.inProgress}</td>
+                    <td className="num">{g.stats.paused}</td>
                     <td className="num">{g.stats.open}</td>
                     <td className={`num ${g.stats.overdue ? "tp-tone-late" : ""}`}>{g.stats.overdue}</td>
                     <td className="num">
