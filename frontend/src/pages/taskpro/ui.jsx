@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FiInbox, FiX } from "react-icons/fi";
+import { FiHelpCircle, FiInbox, FiX } from "react-icons/fi";
 import { PRIORITY, STATUS } from "./data";
 import { initials } from "./format";
 
@@ -23,7 +23,7 @@ export function Avatar({ name, size = 32 }) {
 export function StatusBadge({ status, live = false }) {
   const s = STATUS[status] || STATUS.OPEN;
   return (
-    <span className="tp-badge" style={{ color: s.color, background: s.soft }}>
+    <span className="tp-badge" style={{ color: s.ink, background: s.soft }}>
       {live && status === "IN_PROGRESS" && <span className="tp-live-dot" style={{ background: s.color }} />}
       {s.label}
     </span>
@@ -108,6 +108,182 @@ export function Modal({ title, onClose, children, size = "md", hideHeader = fals
       </div>
     </div>,
     host,
+  );
+}
+
+/**
+ * Full-height panel that slides in from the right edge. Same contract as
+ * Modal: `children` may be a function receiving `close`. `footer` (same
+ * signature) stays pinned to the bottom while the body scrolls.
+ */
+export function Drawer({ title, subtitle, onClose, children, footer }) {
+  const [closing, setClosing] = useState(false);
+  // The panel starts sliding in straight away; its (heavier) form is built a
+  // frame later, so building it never freezes the slide.
+  const [bodyReady, setBodyReady] = useState(false);
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setBodyReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, []);
+
+  const close = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 220);
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
+
+  // While open, hide the page's scrollbar so the drawer reaches the screen
+  // edge (a fixed element can't cover the page scrollbar, which otherwise
+  // shows as a strip beside the drawer) — and pad the page by exactly the
+  // scrollbar's width, so the content behind keeps the same width and
+  // nothing jumps when the drawer opens or closes.
+  useEffect(() => {
+    const html = document.documentElement;
+    const scrollbar = window.innerWidth - html.clientWidth;
+    const prev = { overflow: html.style.overflow, paddingRight: html.style.paddingRight };
+    html.style.overflow = "hidden";
+    if (scrollbar > 0) html.style.paddingRight = `${scrollbar}px`;
+    return () => {
+      html.style.overflow = prev.overflow;
+      html.style.paddingRight = prev.paddingRight;
+    };
+  }, []);
+
+  // Touch devices can still scroll a page with overflow: hidden, so the
+  // overlay also swallows wheel / touch scrolling — except inside something
+  // in the drawer that can itself scroll that way (the form, a list, a textarea).
+  const overlayRef = useRef(null);
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return undefined;
+    const canScroll = (target, dy) => {
+      for (let el = target; el && el !== overlay; el = el.parentElement) {
+        const { overflowY } = getComputedStyle(el);
+        if ((overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight) {
+          if (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+        }
+      }
+      return false;
+    };
+    let lastY = 0;
+    const onWheel = (e) => {
+      if (!canScroll(e.target, e.deltaY)) e.preventDefault();
+    };
+    const onTouchStart = (e) => {
+      lastY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e) => {
+      const y = e.touches[0]?.clientY ?? lastY;
+      const dy = lastY - y;
+      lastY = y;
+      if (!canScroll(e.target, dy)) e.preventDefault();
+    };
+    overlay.addEventListener("wheel", onWheel, { passive: false });
+    overlay.addEventListener("touchstart", onTouchStart, { passive: true });
+    overlay.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      overlay.removeEventListener("wheel", onWheel);
+      overlay.removeEventListener("touchstart", onTouchStart);
+      overlay.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
+
+  const host = document.querySelector(".tp-root") || document.body;
+  const render = (node) => (typeof node === "function" ? node(close) : node);
+
+  return createPortal(
+    <div ref={overlayRef} className={`tp-drawer-overlay ${closing ? "closing" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <aside className="tp-drawer" role="dialog" aria-modal="true" aria-label={title}>
+        <header className="tp-drawer-head">
+          <div>
+            <h3>{title}</h3>
+            {subtitle && <small>{subtitle}</small>}
+          </div>
+          <button type="button" className="tp-icon-btn" onClick={close} aria-label="Close">
+            <FiX />
+          </button>
+        </header>
+        <div className="tp-drawer-body">{bodyReady ? render(children) : null}</div>
+        {footer && <footer className="tp-drawer-foot">{bodyReady ? render(footer) : null}</footer>}
+      </aside>
+    </div>,
+    host,
+  );
+}
+
+/**
+ * A "?" button that explains something. Hover (or keyboard focus) shows the
+ * tips; a click pins them open until you click elsewhere or press Escape.
+ * `items`: [{ icon, title, text }].
+ */
+export function HelpTip({ label = "How this works", title, items }) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const rootRef = useRef(null);
+  const open = hover || pinned;
+
+  useEffect(() => {
+    if (!pinned) return undefined;
+    const onDown = (e) => rootRef.current && !rootRef.current.contains(e.target) && setPinned(false);
+    const onKey = (e) => e.key === "Escape" && setPinned(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pinned]);
+
+  return (
+    <span className="tp-help" ref={rootRef} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <button
+        type="button"
+        className={`tp-help-btn ${open ? "on" : ""}`}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setPinned((p) => !p)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+      >
+        <FiHelpCircle />
+      </button>
+      {open && (
+        <div className="tp-help-pop" role="tooltip">
+          {title && <strong className="tp-help-title">{title}</strong>}
+          <ul>
+            {items.map((it) => {
+              const Icon = it.icon;
+              return (
+                <li key={it.title} className="tp-help-item">
+                  <span className="tp-help-icon">
+                    <Icon />
+                  </span>
+                  <span>
+                    <strong>{it.title}</strong>
+                    <small>{it.text}</small>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </span>
   );
 }
 

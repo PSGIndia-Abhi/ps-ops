@@ -143,6 +143,22 @@ function assertNotFinished(task, action) {
   }
 }
 
+// A task can't be moved to a date that has already gone (server's today).
+async function assertNotPast(dateStr, message = "The new due date can't be in the past") {
+  if (dateStr < (await dbToday(pool))) throw new HttpError(400, message);
+}
+
+// Comments and files are part of doing the work: closed once the task is
+// finished (reopen it to add more), and the assignee has to Start it first.
+// The creator / a manager may still add instructions while it is Open.
+function assertCanPost(req, task, what) {
+  if (task.status === "COMPLETED") throw new HttpError(400, `This task is completed, so ${what} are closed. Reopen it to add more.`);
+  if (task.status === "CANCELLED") throw new HttpError(400, `This task is cancelled, so ${what} are closed.`);
+  if (task.status === "OPEN" && Number(task.assigned_to) === Number(req.user.id) && req.user.role !== "admin") {
+    throw new HttpError(400, `Start the task before adding ${what}.`);
+  }
+}
+
 // GET /api/work-tasks/types -- distinct task_type values already used, for a
 // type-ahead dropdown. Must stay above "/:id".
 router.get("/types", auth, requireRealUser, async (req, res) => {
@@ -153,6 +169,243 @@ router.get("/types", auth, requireRealUser, async (req, res) => {
     res.json(rows.map((r) => r.task_type));
   } catch (err) {
     sendError(res, err, "Failed to load task types");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reschedule requests. An assignee who may not move a task's due date
+// (canEditTerms) asks instead; whoever canEditTerms on it -- the creator, a
+// manager of the assignee, admin -- approves or rejects. These routes must
+// stay above "/:id".
+// ---------------------------------------------------------------------------
+const REQUEST_SQL = `
+  SELECT r.id, r.task_id, r.requested_by, ur.name AS requested_by_name,
+         DATE_FORMAT(r.from_due_date, '%Y-%m-%d') AS from_due_date, r.from_due_time,
+         DATE_FORMAT(r.to_due_date, '%Y-%m-%d') AS to_due_date, r.to_due_time,
+         r.reason, r.status, r.decided_by, ud.name AS decided_by_name, r.decided_at, r.decision_note, r.created_at,
+         t.title AS task_title, t.status AS task_status, t.priority AS task_priority,
+         t.assigned_to, ua.name AS assigned_to_name, t.created_by AS task_created_by
+    FROM work_task_reschedule_requests r
+    JOIN work_tasks t ON t.id = r.task_id
+    LEFT JOIN users ur ON ur.id = r.requested_by
+    LEFT JOIN users ud ON ud.id = r.decided_by
+    LEFT JOIN users ua ON ua.id = t.assigned_to`;
+
+const fmtDue = (date, time) => `${date}${time ? ` ${String(time).slice(0, 5)}` : ""}`;
+
+// GET /api/work-tasks/reschedule-requests?box=incoming|mine[&status=PENDING]
+//   incoming: requests on active tasks this user may approve (default PENDING).
+//   mine:     requests this user made (every status unless ?status=).
+router.get("/reschedule-requests", auth, requireRealUser, async (req, res) => {
+  try {
+    const me = Number(req.user.id);
+    const box = req.query.box === "mine" ? "mine" : "incoming";
+    const where = [];
+    const params = [];
+    if (box === "mine") {
+      where.push("r.requested_by = ?");
+      params.push(me);
+      if (req.query.status) { where.push("r.status = ?"); params.push(String(req.query.status)); }
+    } else {
+      where.push("r.status = ?", "t.status IN ('OPEN','IN_PROGRESS')", "r.requested_by <> ?");
+      params.push(String(req.query.status || "PENDING"), me);
+      if (req.user.role !== "admin") {
+        // Same rule as canEditTerms: the creator, or a manager of the assignee.
+        const team = hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS) ? await getTeamUserIds(pool, me) : [];
+        where.push(team.length ? "(t.created_by = ? OR t.assigned_to IN (?))" : "t.created_by = ?");
+        params.push(me, ...(team.length ? [team] : []));
+      }
+    }
+    const [rows] = await pool.query(`${REQUEST_SQL} WHERE ${where.join(" AND ")} ORDER BY r.created_at DESC LIMIT 200`, params);
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load reschedule requests");
+  }
+});
+
+// Loads a request + its task, and checks the task is visible (404 otherwise).
+async function loadRequest(req, requestId) {
+  const [[request]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [requestId]);
+  if (!request) throw new HttpError(404, "Request not found");
+  const task = await loadVisibleTask(req, request.task_id);
+  return { request, task };
+}
+
+// POST /api/work-tasks/reschedule-requests/:rid/approve  body: { note? }
+// Applies the requested due date to the task.
+router.post("/reschedule-requests/:rid/approve", auth, requireRealUser, async (req, res) => {
+  try {
+    const { request, task } = await loadRequest(req, req.params.rid);
+    if (!(await canEditTerms(req, task))) throw new HttpError(403, "You cannot approve this request");
+    if (request.status !== "PENDING") throw new HttpError(400, `This request was already ${request.status.toLowerCase()}`);
+    assertNotFinished(task, "reschedule");
+    await assertNotPast(request.to_due_date, "The requested date has already passed. Reject it, or reschedule the task yourself.");
+    const note = optionalText(req.body?.note);
+    const historyNote =
+      `Due ${fmtDue(task.due_date, task.due_time)} moved to ${fmtDue(request.to_due_date, request.to_due_time)}` +
+      ` (requested by ${request.requested_by_name || "the assignee"}${request.reason ? `: ${request.reason}` : ""})${note ? `. ${note}` : ""}`;
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        "UPDATE work_task_reschedule_requests SET status = 'APPROVED', decided_by = ?, decided_at = NOW(), decision_note = ? WHERE id = ? AND status = 'PENDING'",
+        [req.user.id, note, request.id]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This request was just changed by someone else. Reload and try again.");
+      await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [request.to_due_date, request.to_due_time, task.id]);
+      await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
+    });
+    const [[row]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [request.id]);
+    res.json(row);
+  } catch (err) {
+    sendError(res, err, "Failed to approve request");
+  }
+});
+
+// POST /api/work-tasks/reschedule-requests/:rid/reject  body: { note? }
+router.post("/reschedule-requests/:rid/reject", auth, requireRealUser, async (req, res) => {
+  try {
+    const { request, task } = await loadRequest(req, req.params.rid);
+    if (!(await canEditTerms(req, task))) throw new HttpError(403, "You cannot reject this request");
+    if (request.status !== "PENDING") throw new HttpError(400, `This request was already ${request.status.toLowerCase()}`);
+    const note = optionalText(req.body?.note);
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        "UPDATE work_task_reschedule_requests SET status = 'REJECTED', decided_by = ?, decided_at = NOW(), decision_note = ? WHERE id = ? AND status = 'PENDING'",
+        [req.user.id, note, request.id]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This request was just changed by someone else. Reload and try again.");
+      await logHistory(conn, task.id, "RESCHEDULE_REJECTED", {
+        note: `Request to move the due date to ${fmtDue(request.to_due_date, request.to_due_time)} was rejected${note ? `: ${note}` : ""}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
+    });
+    const [[row]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [request.id]);
+    res.json(row);
+  } catch (err) {
+    sendError(res, err, "Failed to reject request");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/work-tasks/notifications?limit=30 -- what other people did that
+// concerns me, newest first, from the last 30 days. Read-only and built from
+// what is already stored (history, comments, reschedule requests), so no
+// table of its own. Nothing I did myself is ever included.
+//
+//   On tasks assigned to me:      assigned / reassigned to me, due date moved,
+//                                 edited, reopened, skipped, cancelled, file added
+//   On tasks I created (for others): started, completed, reopened, file added
+//   On either:                    comments and progress updates
+//   Reschedule requests:          someone asked me (I may approve it), or my
+//                                 own request was approved / rejected
+//
+// Left out on purpose: recurring occurrences being generated (daily noise),
+// a progress note's history row (its comment already covers it) and the
+// due-date change an approval makes (the "approved" event covers it).
+// Must stay above "/:id".
+// ---------------------------------------------------------------------------
+router.get("/notifications", auth, requireRealUser, async (req, res) => {
+  try {
+    const me = Number(req.user.id);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 30));
+    const since = "NOW() - INTERVAL 30 DAY";
+
+    const [history] = await pool.query(
+      `SELECT h.id, h.action, h.note, h.changed_at AS at, h.changed_by AS actor_id, u.name AS actor_name,
+              t.id AS task_id, t.title AS task_title, t.assigned_to, t.created_by
+         FROM work_task_history h
+         JOIN work_tasks t ON t.id = h.task_id
+         LEFT JOIN users u ON u.id = h.changed_by
+        WHERE h.changed_by IS NOT NULL AND h.changed_by <> ? AND h.changed_at >= ${since}
+          AND ((t.assigned_to = ? AND h.action IN ('CREATE','REASSIGN','RESCHEDULE','UPDATE','REOPEN','SKIP','CANCEL','ATTACH'))
+            OR (t.created_by = ? AND t.assigned_to <> ? AND h.action IN ('START','COMPLETE','REOPEN','ATTACH')))
+        ORDER BY h.changed_at DESC LIMIT ?`,
+      [me, me, me, me, limit * 2]
+    );
+
+    const [comments] = await pool.query(
+      `SELECT c.id, c.comment AS note, c.created_at AS at, c.user_id AS actor_id, u.name AS actor_name,
+              t.id AS task_id, t.title AS task_title
+         FROM work_task_comments c
+         JOIN work_tasks t ON t.id = c.task_id
+         LEFT JOIN users u ON u.id = c.user_id
+        WHERE c.user_id <> ? AND (t.assigned_to = ? OR t.created_by = ?) AND c.created_at >= ${since}
+        ORDER BY c.created_at DESC LIMIT ?`,
+      [me, me, me, limit]
+    );
+
+    const [decided] = await pool.query(
+      `${REQUEST_SQL}
+        WHERE r.requested_by = ? AND r.status IN ('APPROVED','REJECTED') AND r.decided_by IS NOT NULL AND r.decided_by <> ?
+          AND r.decided_at >= ${since}
+        ORDER BY r.decided_at DESC LIMIT ?`,
+      [me, me, limit]
+    );
+
+    // Requests I may decide on: same rule as the incoming box (creator, or a
+    // manager of the assignee with MANAGE_TEAM_WORK_TASKS; admin sees all).
+    const incomingWhere = ["r.requested_by <> ?", `r.created_at >= ${since}`];
+    const incomingParams = [me];
+    if (req.user.role !== "admin") {
+      const team = hasPerm(req, PERMISSIONS.MANAGE_TEAM_WORK_TASKS) ? await getTeamUserIds(pool, me) : [];
+      incomingWhere.push(team.length ? "(t.created_by = ? OR t.assigned_to IN (?))" : "t.created_by = ?");
+      incomingParams.push(me, ...(team.length ? [team] : []));
+    }
+    const [incoming] = await pool.query(
+      `${REQUEST_SQL} WHERE ${incomingWhere.join(" AND ")} ORDER BY r.created_at DESC LIMIT ?`,
+      [...incomingParams, limit]
+    );
+
+    const TYPE = {
+      CREATE: "assigned", REASSIGN: "reassigned", RESCHEDULE: "rescheduled", UPDATE: "edited", REOPEN: "reopened",
+      SKIP: "skipped", CANCEL: "cancelled", ATTACH: "attached", START: "started", COMPLETE: "completed",
+    };
+    const events = [
+      ...history
+        .filter((h) => !(h.action === "CREATE" && h.note === "Created from recurring schedule"))
+        .filter((h) => !(h.action === "UPDATE" && h.note)) // progress note: its comment is listed instead
+        .filter((h) => !(h.action === "RESCHEDULE" && String(h.note || "").includes("(requested by "))) // an approval
+        .map((h) => ({
+          id: `h${h.id}`, type: TYPE[h.action], at: h.at, task_id: h.task_id, task_title: h.task_title,
+          actor_id: h.actor_id, actor_name: h.actor_name, note: h.action === "UPDATE" ? null : h.note,
+          role: Number(h.assigned_to) === me ? "assignee" : "creator",
+        })),
+      ...comments.map((c) => ({
+        id: `c${c.id}`, type: "commented", at: c.at, task_id: c.task_id, task_title: c.task_title,
+        actor_id: c.actor_id, actor_name: c.actor_name, note: c.note,
+      })),
+      ...decided.map((r) => ({
+        id: `d${r.id}`, type: r.status === "APPROVED" ? "request_approved" : "request_rejected", at: r.decided_at,
+        task_id: r.task_id, task_title: r.task_title, actor_id: r.decided_by, actor_name: r.decided_by_name,
+        note: r.decision_note, to_due_date: r.to_due_date, to_due_time: r.to_due_time,
+      })),
+      ...incoming.map((r) => ({
+        id: `r${r.id}`, type: "request_received", at: r.created_at, task_id: r.task_id, task_title: r.task_title,
+        actor_id: r.requested_by, actor_name: r.requested_by_name, note: r.reason,
+        to_due_date: r.to_due_date, to_due_time: r.to_due_time, request_status: r.status,
+      })),
+    ]
+      .filter((e) => e.type)
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, limit);
+
+    res.json(events);
+  } catch (err) {
+    sendError(res, err, "Failed to load notifications");
+  }
+});
+
+// POST /api/work-tasks/reschedule-requests/:rid/withdraw -- the requester takes it back.
+router.post("/reschedule-requests/:rid/withdraw", auth, requireRealUser, async (req, res) => {
+  try {
+    const { request } = await loadRequest(req, req.params.rid);
+    if (Number(request.requested_by) !== Number(req.user.id)) throw new HttpError(403, "Only the person who asked can withdraw this request");
+    if (request.status !== "PENDING") throw new HttpError(400, `This request was already ${request.status.toLowerCase()}`);
+    await pool.query("UPDATE work_task_reschedule_requests SET status = 'WITHDRAWN', decided_at = NOW() WHERE id = ? AND status = 'PENDING'", [request.id]);
+    res.json({ success: true });
+  } catch (err) {
+    sendError(res, err, "Failed to withdraw request");
   }
 });
 
@@ -315,10 +568,12 @@ router.get("/:id", auth, requireRealUser, async (req, res) => {
               (SELECT COUNT(*) FROM work_task_attachments WHERE task_id = ?) AS attachment_count`,
       [task.id, task.id]
     );
+    const [[pending]] = await pool.query(`${REQUEST_SQL} WHERE r.task_id = ? AND r.status = 'PENDING' ORDER BY r.created_at DESC LIMIT 1`, [task.id]);
     res.json({
       ...task,
       comment_count: Number(counts.comment_count),
       attachment_count: Number(counts.attachment_count),
+      pending_reschedule_request: pending || null,
     });
   } catch (err) {
     sendError(res, err, "Failed to load task");
@@ -461,6 +716,78 @@ router.post("/:id/complete", auth, requireRealUser, async (req, res) => {
   }
 });
 
+// POST /api/work-tasks/:id/reopen -- COMPLETED -> IN_PROGRESS, for a task
+// completed by mistake. The assignee may reopen their own work; so may
+// whoever canEditTerms (creator, a manager of the assignee, admin).
+router.post("/:id/reopen", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    const isAssignee = Number(task.assigned_to) === Number(req.user.id);
+    if (!isAssignee && !(await canEditTerms(req, task))) throw new HttpError(403, "You cannot reopen this task");
+    if (task.status !== "COMPLETED") throw new HttpError(400, `Only a completed task can be reopened (this one is ${task.status})`);
+    const reason = optionalText(req.body?.reason);
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        `UPDATE work_tasks
+            SET status = 'IN_PROGRESS', completed_at = NULL, completed_by = NULL, completion_note = NULL,
+                started_at = COALESCE(started_at, NOW()), started_by = COALESCE(started_by, assigned_to)
+          WHERE id = ? AND status = 'COMPLETED'`,
+        [task.id]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
+      await logHistory(conn, task.id, "REOPEN", { fromStatus: "COMPLETED", toStatus: "IN_PROGRESS", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id });
+    });
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to reopen task");
+  }
+});
+
+// POST /api/work-tasks/:id/reschedule-requests -- the assignee asks to move
+// the due date. body: { due_date, due_time?, reason? }. One pending request
+// per task; someone who may reschedule directly should just do that.
+router.post("/:id/reschedule-requests", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    if (Number(task.assigned_to) !== Number(req.user.id)) throw new HttpError(403, "Only the assignee can ask to reschedule this task");
+    if (await canEditTerms(req, task)) throw new HttpError(400, "You can reschedule this task yourself");
+    assertNotFinished(task, "reschedule");
+
+    const body = req.body || {};
+    if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD)");
+    await assertNotPast(body.due_date);
+    if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
+    const dueTime = body.due_time || null;
+    if (body.due_date === task.due_date && String(dueTime || "").slice(0, 5) === String(task.due_time || "").slice(0, 5)) {
+      throw new HttpError(400, "That is already the due date");
+    }
+    const reason = optionalText(body.reason);
+    if (reason && reason.length > 500) throw new HttpError(400, "reason is too long (max 500 characters)");
+    const id = uuid();
+
+    await inTransaction(async (conn) => {
+      await conn.query("SELECT id FROM work_tasks WHERE id = ? FOR UPDATE", [task.id]);
+      const [[open]] = await conn.query("SELECT id FROM work_task_reschedule_requests WHERE task_id = ? AND status = 'PENDING' LIMIT 1", [task.id]);
+      if (open) throw new HttpError(400, "There is already a reschedule request waiting on this task");
+      await conn.query(
+        `INSERT INTO work_task_reschedule_requests
+           (id, task_id, requested_by, from_due_date, from_due_time, to_due_date, to_due_time, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, task.id, req.user.id, task.due_date, task.due_time, body.due_date, dueTime, reason]
+      );
+      await logHistory(conn, task.id, "RESCHEDULE_REQUEST", {
+        note: `Asked to move the due date to ${fmtDue(body.due_date, dueTime)}${reason ? `: ${reason}` : ""}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
+    });
+    const [[row]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [id]);
+    res.status(201).json(row);
+  } catch (err) {
+    sendError(res, err, "Failed to send reschedule request");
+  }
+});
+
 // POST /api/work-tasks/:id/reassign -- change the assignee.
 router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
   try {
@@ -503,6 +830,7 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
 
     const body = req.body || {};
     if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD)");
+    await assertNotPast(body.due_date);
     if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
     const dueTime = body.due_time !== undefined ? body.due_time || null : task.due_time;
     const reason = optionalText(body.reason);
@@ -510,6 +838,13 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
 
     await inTransaction(async (conn) => {
       await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [body.due_date, dueTime, task.id]);
+      // A request still waiting is answered by this direct change.
+      await conn.query(
+        `UPDATE work_task_reschedule_requests
+            SET status = 'REJECTED', decided_by = ?, decided_at = NOW(), decision_note = 'The due date was changed directly instead'
+          WHERE task_id = ? AND status = 'PENDING'`,
+        [req.user.id, task.id]
+      );
       await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
     });
     res.json(await loadTask(pool, task.id));
@@ -544,56 +879,35 @@ router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
   }
 });
 
-// DELETE /api/work-tasks/:id -- soft delete (status CANCELLED).
-//   Allowed: the assignee, the creator, DELETE_WORK_TASK holders, admin.
-//   A completed task can only be cancelled by admin.
-// DELETE /api/work-tasks/:id?permanent=true -- hard delete, admin only, and only
-//   for a task that is already CANCELLED. Removes its comments, attachments
-//   (rows and files) and history too.
+// DELETE /api/work-tasks/:id -- permanent delete, by the task's creator only
+// (a task someone else gave you can't be deleted by you). Removes the task
+// and everything hanging off it: comments, attachments (rows and files),
+// reschedule requests and history. The web app holds the call for a few
+// seconds so the user can Undo before it is sent.
 router.delete("/:id", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
-    const isAdmin = req.user.role === "admin";
-
-    if (req.query.permanent === "true") {
-      if (!isAdmin) throw new HttpError(403, "Only an admin can permanently delete a task");
-      if (task.status !== "CANCELLED") throw new HttpError(400, "Only a cancelled task can be permanently deleted. Delete it first.");
-
-      const [attachments] = await pool.query("SELECT object_key FROM work_task_attachments WHERE task_id = ?", [task.id]);
-      await inTransaction(async (conn) => {
-        await conn.query("DELETE FROM work_task_comments WHERE task_id = ?", [task.id]);
-        await conn.query("DELETE FROM work_task_attachments WHERE task_id = ?", [task.id]);
-        await conn.query("DELETE FROM work_task_history WHERE task_id = ?", [task.id]);
-        await conn.query("DELETE FROM work_tasks WHERE id = ?", [task.id]);
-      });
-      // Files go after the DB commit; a failed removal leaves an unreferenced file, never a broken task.
-      for (const { object_key } of attachments) {
-        try {
-          await minioClient.removeObject(process.env.MINIO_BUCKET, object_key);
-        } catch (err) {
-          console.error(`Failed to remove attachment file ${object_key}:`, err.message);
-        }
-      }
-      return res.json({ success: true, permanent: true });
+    if (Number(task.created_by) !== Number(req.user.id)) {
+      throw new HttpError(403, "Only the person who created this task can delete it");
     }
 
-    const canDelete =
-      isAdmin ||
-      Number(task.assigned_to) === Number(req.user.id) ||
-      Number(task.created_by) === Number(req.user.id) ||
-      hasPerm(req, PERMISSIONS.DELETE_WORK_TASK);
-    if (!canDelete) throw new HttpError(403, "You cannot delete this task");
-    if (task.status === "CANCELLED") return res.json({ success: true, already_cancelled: true });
-    if (task.status === "COMPLETED" && !isAdmin) throw new HttpError(400, "A completed task can only be deleted by an admin");
-
+    const [attachments] = await pool.query("SELECT object_key FROM work_task_attachments WHERE task_id = ?", [task.id]);
     await inTransaction(async (conn) => {
-      const [result] = await conn.query(
-        "UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ? AND status = ?",
-        [task.id, task.status]
-      );
-      if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
-      await logHistory(conn, task.id, "CANCEL", { fromStatus: task.status, toStatus: "CANCELLED", changedBy: req.user.id });
+      await conn.query("DELETE FROM work_task_comments WHERE task_id = ?", [task.id]);
+      await conn.query("DELETE FROM work_task_attachments WHERE task_id = ?", [task.id]);
+      await conn.query("DELETE FROM work_task_reschedule_requests WHERE task_id = ?", [task.id]);
+      await conn.query("DELETE FROM work_task_history WHERE task_id = ?", [task.id]);
+      const [result] = await conn.query("DELETE FROM work_tasks WHERE id = ?", [task.id]);
+      if (!result.affectedRows) throw new HttpError(404, "Task not found");
     });
+    // Files go after the DB commit; a failed removal leaves an unreferenced file, never a broken task.
+    for (const { object_key } of attachments) {
+      try {
+        await minioClient.removeObject(process.env.MINIO_BUCKET, object_key);
+      } catch (err) {
+        console.error(`Failed to remove attachment file ${object_key}:`, err.message);
+      }
+    }
     res.json({ success: true });
   } catch (err) {
     sendError(res, err, "Failed to delete task");
@@ -601,7 +915,8 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Comments -- anyone who can see the task can read and post.
+// Comments -- anyone who can see the task can read them; posting follows
+// assertCanPost (closed once finished; the assignee must Start first).
 // ---------------------------------------------------------------------------
 const COMMENT_SQL = `SELECT c.id, c.comment, c.created_at, c.user_id, u.name AS user_name
                        FROM work_task_comments c JOIN users u ON u.id = c.user_id`;
@@ -621,6 +936,7 @@ router.get("/:id/comments", auth, requireRealUser, async (req, res) => {
 router.post("/:id/comments", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
+    assertCanPost(req, task, "comments");
     const comment = typeof req.body?.comment === "string" ? req.body.comment.trim() : "";
     if (!comment) throw new HttpError(400, "comment is required");
     if (comment.length > 5000) throw new HttpError(400, "comment is too long (max 5000 characters)");
@@ -653,6 +969,7 @@ async function precheckAttachmentWrite(req, res, next) {
   try {
     req.task = await loadVisibleTask(req, req.params.id);
     if (!canManageTask(req, req.task)) throw new HttpError(403, "You cannot change attachments on this task");
+    assertCanPost(req, req.task, "files");
     next();
   } catch (err) {
     sendError(res, err, "Failed to check task");

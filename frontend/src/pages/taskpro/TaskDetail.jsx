@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  FiAlignLeft,
   FiArrowRight,
   FiCalendar,
   FiCheck,
@@ -11,6 +12,7 @@ import {
   FiEdit2,
   FiEdit3,
   FiFile,
+  FiFlag,
   FiInfo,
   FiLink,
   FiMessageSquare,
@@ -20,9 +22,12 @@ import {
   FiPlay,
   FiPlus,
   FiRepeat,
+  FiRotateCcw,
   FiSearch,
+  FiSend,
   FiSkipForward,
   FiSlash,
+  FiTag,
   FiTrash2,
   FiUploadCloud,
   FiUser,
@@ -31,15 +36,16 @@ import {
 } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
 import { PRIORITY, SERIES_STATUS, STATUS } from "./data";
-import { assignableUsers } from "./hierarchy";
-import { dueInfo, fmtDateTime, fmtDuration, fmtTimestamp, toDateInput, toTimeInput } from "./format";
+import { assignableUsers, personOf } from "./hierarchy";
+import { dueInfo, fmtDate, fmtDateTime, fmtDuration, fmtTimestamp, todayStr, toTimeInput } from "./format";
 import {
+  UNDO_MS,
   addComment,
-  cancelTask,
+  approveRequest,
   completeTask,
   addProgress,
   deleteAttachment,
-  duplicateTask,
+  fetchTaskTypes,
   fetchAllUsers,
   getSeries,
   getUserHierarchy,
@@ -49,19 +55,26 @@ import {
   openAttachment,
   pauseSeries,
   reassignTask,
+  rejectRequest,
+  reopenTask,
+  requestReschedule,
   rescheduleTask,
   resumeSeries,
+  scheduleDelete,
   skipTask,
   startTask,
   stopSeries,
+  undoDelete,
   updateTask,
   uploadAttachment,
   useTask,
+  withdrawRequest,
 } from "./tasksApi";
+import NewTaskModal from "./NewTaskModal";
 import { useToast } from "./toastContext";
 import useNow from "./useNow";
 import { useViewer } from "./viewerContext";
-import { Avatar, CompletionBurst, EmptyState, Modal, PriorityBadge, Skeleton, StatusBadge } from "./ui";
+import { Avatar, CompletionBurst, Drawer, EmptyState, Modal, PriorityBadge, Skeleton, StatusBadge } from "./ui";
 
 /* ---------- small pieces ---------- */
 
@@ -100,6 +113,22 @@ function Stepper({ status }) {
   );
 }
 
+/** A person in the info card: photo, name on one line, designation ·
+ *  department under it. Click opens their reporting line. */
+function PersonCell({ id, name, viewer, note, onOpen }) {
+  const card = personOf(viewer, id);
+  const sub = note || [card?.designation, card?.dept].filter(Boolean).join(" · ") || "See reporting line";
+  return (
+    <button type="button" className="tp-person-cell" onClick={() => onOpen(id)} title={`${name}: see who they report to`}>
+      <Avatar name={name} size={32} />
+      <span className="tp-person-cell-text">
+        <strong>{name}</strong>
+        <small>{sub}</small>
+      </span>
+    </button>
+  );
+}
+
 function InfoRow({ label, children }) {
   return (
     <div className="tp-info-row">
@@ -111,7 +140,7 @@ function InfoRow({ label, children }) {
 
 const KIND = {
   CREATE: { icon: FiPlus, color: "#16a34a", soft: "#e2f7e9", label: "Task created" },
-  START: { icon: FiPlay, color: "#7c3aed", soft: "#f0e9ff", label: "Task started" },
+  START: { icon: FiPlay, color: "#c2410c", soft: "#fdeee6", label: "Task started" },
   UPDATE: { icon: FiEdit3, color: "#d97706", soft: "#fff3dc", label: "Task updated" },
   COMPLETE: { icon: FiCheck, color: "#16a34a", soft: "#e2f7e9", label: "Task completed" },
   REASSIGN: { icon: FiUsers, color: "#2563eb", soft: "#e8f0ff", label: "Task reassigned" },
@@ -120,12 +149,15 @@ const KIND = {
   CANCEL: { icon: FiSlash, color: "#64748b", soft: "#eef1f5", label: "Task cancelled" },
   ATTACH: { icon: FiPaperclip, color: "#2563eb", soft: "#e8f0ff", label: "File attached" },
   DETACH: { icon: FiX, color: "#64748b", soft: "#eef1f5", label: "File removed" },
+  REOPEN: { icon: FiRotateCcw, color: "#c2410c", soft: "#fdeee6", label: "Task reopened" },
+  RESCHEDULE_REQUEST: { icon: FiSend, color: "#2563eb", soft: "#e8f0ff", label: "Reschedule requested" },
+  RESCHEDULE_REJECTED: { icon: FiSlash, color: "#64748b", soft: "#eef1f5", label: "Reschedule request rejected" },
 };
 
 const ACTIVITY_FILTERS = {
   all: { label: "All Activity", match: () => true },
-  status: { label: "Status changes", match: (a) => ["START", "COMPLETE", "SKIP", "CANCEL"].includes(a.action) },
-  changes: { label: "Edits", match: (a) => ["UPDATE", "REASSIGN", "RESCHEDULE"].includes(a.action) },
+  status: { label: "Status changes", match: (a) => ["START", "COMPLETE", "REOPEN", "SKIP", "CANCEL"].includes(a.action) },
+  changes: { label: "Edits", match: (a) => ["UPDATE", "REASSIGN", "RESCHEDULE", "RESCHEDULE_REQUEST", "RESCHEDULE_REJECTED"].includes(a.action) },
   files: { label: "Files", match: (a) => ["ATTACH", "DETACH"].includes(a.action) },
 };
 
@@ -239,6 +271,8 @@ function ConfirmDialog({ tone = "danger", icon, title, text, confirmLabel, onClo
   );
 }
 
+/** Edit the task's own terms, in the same right-side panel as New task. Due
+ *  date and assignee have their own actions (Reschedule / Reassign). */
 function EditDialog({ task, onClose, onSave }) {
   const [form, setForm] = useState({
     title: task.title,
@@ -247,79 +281,171 @@ function EditDialog({ task, onClose, onSave }) {
     priority: task.priority,
   });
   const [error, setError] = useState("");
+  const [types, setTypes] = useState([]);
+  useEffect(() => {
+    fetchTaskTypes().then(setTypes).catch(() => {});
+  }, []);
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const formId = "tp-edit-task-form";
+  const titleRef = useRef(null);
+  useEffect(() => {
+    titleRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  function submit(e, close) {
+    e.preventDefault();
+    if (!form.title.trim()) {
+      setError("The title can't be empty.");
+      return;
+    }
+    onSave({ ...form, title: form.title.trim() });
+    close();
+  }
+
   return (
-    <Modal title="Edit task" onClose={onClose} size="lg">
+    <Drawer
+      title="Edit task"
+      subtitle="Change the title, details, priority or type. Use Reschedule or Reassign for the due date and assignee."
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <span className="tp-nt-kbd">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+          </span>
+          <button type="button" className="tp-btn ghost" onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" form={formId} className="tp-btn primary">
+            <FiCheck /> Save changes
+          </button>
+        </>
+      )}
+    >
       {(close) => (
         <form
-          className="tp-form"
+          id={formId}
+          className="tp-nt"
           noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!form.title.trim()) return setError("The title can't be empty.");
-            onSave({ ...form, title: form.title.trim() });
-            close();
+          onSubmit={(e) => submit(e, close)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e, close);
           }}
         >
-          <label className="tp-field">
-            <span>Title *</span>
+          <div className="tp-nt-head">
             <input
-              className={`tp-input ${error ? "invalid" : ""}`}
+              ref={titleRef}
+              className={`tp-nt-title ${error ? "invalid" : ""}`}
               value={form.title}
               onChange={(e) => {
                 setError("");
-                setForm({ ...form, title: e.target.value });
+                set("title", e.target.value);
               }}
-              autoFocus
+              placeholder="Task title"
+              aria-label="Title"
+              maxLength={200}
             />
-            {error && <em className="tp-error">{error}</em>}
-          </label>
-          <label className="tp-field">
-            <span>Description</span>
-            <textarea className="tp-input" rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          </label>
-          <label className="tp-field">
-            <span>Type</span>
-            <input className="tp-input" value={form.task_type} onChange={(e) => setForm({ ...form, task_type: e.target.value })} />
-          </label>
-          <div className="tp-field">
-            <span>Priority</span>
-            <div className="tp-seg">
-              {Object.entries(PRIORITY).map(([k, p]) => (
-                <button key={k} type="button" className={form.priority === k ? "on" : ""} onClick={() => setForm({ ...form, priority: k })}>
-                  {p.label}
-                </button>
-              ))}
+            <label className="tp-nt-desc">
+              <FiAlignLeft />
+              <textarea rows={2} value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Add a description, context or links…" aria-label="Description" />
+            </label>
+          </div>
+
+          <div className="tp-nt-props">
+            <div className="tp-nt-prop">
+              <span className="tp-nt-prop-label">
+                <FiFlag /> Priority
+              </span>
+              <div className="tp-nt-prop-body">
+                <div className="tp-nt-prio" role="radiogroup" aria-label="Priority">
+                  {Object.entries(PRIORITY).map(([k, p]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={form.priority === k}
+                      className={form.priority === k ? "on" : ""}
+                      style={{ "--pc": p.color, "--ps": p.soft }}
+                      onClick={() => set("priority", k)}
+                    >
+                      <FiFlag /> {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="tp-nt-prop top">
+              <span className="tp-nt-prop-label">
+                <FiTag /> Type
+              </span>
+              <div className="tp-nt-prop-body">
+                <input className="tp-input" list="tp-edit-task-types" value={form.task_type} onChange={(e) => set("task_type", e.target.value)} placeholder="e.g. Follow-up, Site visit" />
+                <datalist id="tp-edit-task-types">
+                  {types.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+                {types.length > 0 && (
+                  <div className="tp-nt-pills small">
+                    {types.slice(0, 6).map((t) => (
+                      <button key={t} type="button" className={form.task_type === t ? "on" : ""} onClick={() => set("task_type", form.task_type === t ? "" : t)}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <div className="tp-modal-actions">
-            <button type="button" className="tp-btn ghost" onClick={close}>
-              Cancel
-            </button>
-            <button type="submit" className="tp-btn primary">
-              Save changes
-            </button>
-          </div>
+
+          {error && <em className="tp-error">{error}</em>}
         </form>
       )}
-    </Modal>
+    </Drawer>
   );
 }
 
-function ReassignDialog({ task, people, onClose, onSave }) {
+/** Pick who takes the task over: searchable by name, designation and department. */
+function ReassignDialog({ task, people, viewer, onClose, onSave }) {
   const [pick, setPick] = useState(task.assigned_to);
   const [note, setNote] = useState("");
+  const [query, setQuery] = useState("");
+  const rows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return people
+      .map((u) => {
+        const card = personOf(viewer, u.id);
+        return { ...u, designation: card?.designation || u.designation || u.role || "", dept: card?.dept || u.unit_name || "" };
+      })
+      .filter((u) => !needle || [u.name, u.designation, u.dept].filter(Boolean).join(" ").toLowerCase().includes(needle));
+  }, [people, query, viewer]);
+  const picked = people.find((u) => u.id === pick);
+
   return (
     <Modal title="Reassign task" onClose={onClose} size="md">
       {(close) => (
         <div className="tp-form">
+          <label className="tp-reassign-search">
+            <FiSearch />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, designation or department…" aria-label="Search people" autoFocus />
+            {query && (
+              <button type="button" onClick={() => setQuery("")} aria-label="Clear search">
+                <FiX />
+              </button>
+            )}
+          </label>
           <div className="tp-people">
-            {people.map((u) => (
+            {rows.length === 0 && <p className="tp-desc muted">Nobody matches “{query}”.</p>}
+            {rows.map((u) => (
               <button key={u.id} type="button" className={`tp-person ${pick === u.id ? "on" : ""}`} onClick={() => setPick(u.id)}>
                 <Avatar name={u.name} size={36} />
                 <span className="tp-person-text">
-                  <strong>{u.name}</strong>
-                  {u.role && <small>{u.role}</small>}
+                  <strong>
+                    {u.name}
+                    {u.id === viewer.id ? " (you)" : ""}
+                  </strong>
+                  <small>{[u.designation, u.dept].filter(Boolean).join(" · ") || "—"}</small>
                 </span>
+                {u.id === task.assigned_to && <em className="tp-reassign-current">Current</em>}
                 <FiCheck className="tp-person-check" />
               </button>
             ))}
@@ -343,7 +469,7 @@ function ReassignDialog({ task, people, onClose, onSave }) {
                 close();
               }}
             >
-              Reassign
+              {pick === task.assigned_to ? "Reassign" : `Reassign to ${picked?.name || "…"}`}
             </button>
           </div>
         </div>
@@ -352,26 +478,57 @@ function ReassignDialog({ task, people, onClose, onSave }) {
   );
 }
 
-function RescheduleDialog({ task, onClose, onSave }) {
-  const [date, setDate] = useState(toDateInput(task.due_date));
+/** Pick a new due date. Used both to reschedule directly and, for an
+ *  assignee who may not, to ask the creator / manager to (`request`). */
+function RescheduleDialog({ task, onClose, onSave, request = false }) {
+  const today = todayStr();
+  const [date, setDate] = useState(task.due_date && task.due_date >= today ? task.due_date : today);
   const [time, setTime] = useState(toTimeInput(task.due_time));
   const [reason, setReason] = useState("");
+  // For an occurrence of a recurring task: the schedule's next date, so we
+  // can warn before this one is moved onto (or past) it.
+  const [nextDate, setNextDate] = useState(null);
+  useEffect(() => {
+    if (!task.series_id) return undefined;
+    let live = true;
+    getSeries(task.series_id)
+      .then((s) => live && setNextDate(s.next_occurrence_date || null))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [task.series_id]);
+  const past = !!date && date < today;
+  const clash = !past && !!nextDate && !!date && date >= nextDate;
   return (
-    <Modal title="Reschedule task" onClose={onClose} size="sm">
+    <Modal title={request ? "Request a reschedule" : "Reschedule task"} onClose={onClose} size="sm">
       {(close) => (
         <div className="tp-form">
+          {request && (
+            <p className="tp-desc muted">
+              This task was given to you by {task.created_by_name || "someone else"}, so they (or your manager) decide on a new date. They'll see your request and can approve or reject it.
+            </p>
+          )}
           <label className="tp-field">
-            <span>New due date &amp; time</span>
+            <span>{request ? "Ask to move it to" : "New due date & time"}</span>
             <div className="tp-duo">
-              <input className="tp-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} autoFocus />
+              <input className="tp-input" type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} autoFocus />
               <input className="tp-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
+            {past && <em className="tp-error">Pick today or a later date.</em>}
           </label>
+          {clash && (
+            <p className="tp-warn-note">
+              <FiInfo /> This schedule already creates its next task on <strong>{fmtDate(nextDate)}</strong>. Moving this one to {fmtDate(date)} means two tasks from
+              the same schedule {date === nextDate ? "on that day" : "around then"}.{" "}
+              {request ? "Mention it in your reason if that's intended." : "If this one isn't needed any more, use More → Skip this occurrence instead."}
+            </p>
+          )}
           <label className="tp-field">
             <span>
-              Reason <em>(Optional)</em>
+              Reason {request ? "" : <em>(Optional)</em>}
             </span>
-            <input className="tp-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer asked to push" />
+            <input className="tp-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={request ? "e.g. Waiting for the customer's approval" : "e.g. Customer asked to push"} />
           </label>
           <div className="tp-modal-actions">
             <button type="button" className="tp-btn ghost" onClick={close}>
@@ -380,13 +537,56 @@ function RescheduleDialog({ task, onClose, onSave }) {
             <button
               type="button"
               className="tp-btn primary"
-              disabled={!date}
+              disabled={!date || past || (request && !reason.trim())}
               onClick={() => {
                 onSave({ due_date: date, due_time: time ? `${time}:00` : null, reason: reason.trim() || undefined });
                 close();
               }}
             >
-              Reschedule
+              {request ? (
+                <>
+                  <FiSend /> Send request
+                </>
+              ) : (
+                "Reschedule"
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Reject a reschedule request, with an optional note back to the requester. */
+function RejectDialog({ request, onClose, onReject }) {
+  const [note, setNote] = useState("");
+  return (
+    <Modal title="Reject reschedule request" onClose={onClose} size="sm">
+      {(close) => (
+        <div className="tp-form">
+          <p className="tp-desc muted">
+            {request.requested_by_name} asked to move this to <strong>{fmtDateTime(request.to_due_date, request.to_due_time)}</strong>. The due date stays as it is.
+          </p>
+          <label className="tp-field">
+            <span>
+              Note to {request.requested_by_name} <em>(Optional)</em>
+            </span>
+            <input className="tp-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. The customer needs it by Friday" autoFocus />
+          </label>
+          <div className="tp-modal-actions">
+            <button type="button" className="tp-btn ghost" onClick={close}>
+              Go back
+            </button>
+            <button
+              type="button"
+              className="tp-btn danger"
+              onClick={() => {
+                onReject(note.trim() || undefined);
+                close();
+              }}
+            >
+              Reject request
             </button>
           </div>
         </div>
@@ -689,7 +889,7 @@ export default function TaskDetail() {
   const { task, ready, refresh } = useTask(id);
 
   const [tab, setTab] = useState("work");
-  const [dialog, setDialog] = useState(null); // start | edit | reassign | reschedule | cancel | skip | complete | series
+  const [dialog, setDialog] = useState(null); // start | edit | reassign | reschedule | request | reject | reopen | delete | duplicate | skip | complete | series
   const [whoId, setWhoId] = useState(null); // user id to show the "who do they report to" dialog for
   const [panelHidden, setPanelHidden] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -820,6 +1020,79 @@ export default function TaskDetail() {
   const canReassign = !finished && reassignPeople.some((p) => p.id !== task.assigned_to);
   const showPanel = task.status === "IN_PROGRESS" && !panelHidden && canWork;
 
+  // The assignee's primary manager, from the org directory (display only).
+  const managerId = personOf(viewer, task.assigned_to)?.manager_id;
+  const manager = managerId ? personOf(viewer, managerId) : null;
+
+  // The rules below mirror the server (work-tasks.routes.js); it has the
+  // final word, a refusal comes back as a toast.
+  const isAssignee = task.assigned_to === viewer.id;
+  const isCreator = task.created_by === viewer.id;
+  // Creator, admin, or a manager of the assignee: may reschedule directly
+  // and decide on reschedule requests (server: canEditTerms).
+  const managesTask = isCreator || viewer.isAdmin || viewer.teamIds.has(task.assigned_to);
+  // Only the creator may delete — never a task someone else gave you.
+  const canDelete = isCreator;
+  // Completed by mistake: the assignee (or creator / their manager) reopens it.
+  const canReopen = task.status === "COMPLETED" && (isAssignee || managesTask);
+  // An assignee who can't move the date asks instead.
+  const pendingReq = task.pending_reschedule_request;
+  const canRequestReschedule = canWork && !canEditTerms;
+  const canDecideRequest = !!pendingReq && pendingReq.requested_by !== viewer.id && managesTask;
+  // Comments and files: closed once finished; the assignee must Start first.
+  const postBlock =
+    task.status === "COMPLETED"
+      ? "This task is completed, so comments and files are closed. Reopen it to add more."
+      : task.status === "CANCELLED"
+        ? "This task is cancelled, so comments and files are closed."
+        : task.status === "OPEN" && isAssignee && !viewer.isAdmin
+          ? "Start the task to add comments and files."
+          : null;
+
+  function doDelete() {
+    const snapshot = task;
+    scheduleDelete(snapshot, {
+      onError: (message) => toast.push({ type: "error", title: "Couldn't delete the task", text: message }),
+    });
+    toast.push({
+      type: "info",
+      title: "Task deleted",
+      text: snapshot.title,
+      duration: UNDO_MS,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (undoDelete(snapshot.id)) {
+            toast.push({ type: "success", title: "Delete undone" });
+            navigate(`${TASKPRO_HOME}/tasks/${snapshot.id}`);
+          }
+        },
+      },
+    });
+    navigate(window.history.length > 1 ? -1 : `${TASKPRO_HOME}/my-tasks`);
+  }
+
+  async function doReopen() {
+    await run(() => reopenTask(task.id), { title: "Task reopened", text: "It's back in progress." });
+    setPanelHidden(false);
+  }
+
+  async function doRequest(fields) {
+    await run(() => requestReschedule(task.id, fields), { title: "Reschedule requested", text: `Sent to ${task.created_by_name || "the task owner"}` });
+  }
+
+  async function doApprove() {
+    await run(() => approveRequest(pendingReq.id), { title: "Request approved", text: `Due date moved to ${fmtDateTime(pendingReq.to_due_date, pendingReq.to_due_time)}` });
+  }
+
+  async function doReject(note) {
+    await run(() => rejectRequest(pendingReq.id, note), { title: "Request rejected" });
+  }
+
+  async function doWithdraw() {
+    await run(() => withdrawRequest(pendingReq.id), { title: "Request withdrawn" });
+  }
+
   async function doStart() {
     setPanelHidden(false);
     await run(() => startTask(task.id), { title: "Task started", text: "The timer is running." });
@@ -892,6 +1165,7 @@ export default function TaskDetail() {
   }
 
   const primary = (() => {
+    if (canReopen) return { label: "Reopen Task", icon: FiRotateCcw, tone: "outline", onClick: () => setDialog("reopen") };
     if (!canWork) return null;
     if (task.status === "OPEN") return { label: "Start Task", icon: FiPlay, onClick: () => setDialog("start") };
     if (task.status === "IN_PROGRESS") return { label: "Complete Task", icon: FiCheck, tone: "success", onClick: () => setDialog("complete") };
@@ -959,6 +1233,17 @@ export default function TaskDetail() {
                 <FiCalendar /> Reschedule
               </button>
             )}
+            {canRequestReschedule && (
+              <button
+                type="button"
+                className="tp-btn outline"
+                onClick={() => setDialog("request")}
+                disabled={!!pendingReq}
+                title={pendingReq ? "Waiting for a decision on your request" : "Ask for a new due date"}
+              >
+                <FiCalendar /> {pendingReq ? "Reschedule requested" : "Request reschedule"}
+              </button>
+            )}
             {task.status === "IN_PROGRESS" && panelHidden && canWork && (
               <button type="button" className="tp-btn outline" onClick={() => setPanelHidden(false)}>
                 <FiClock /> Timer
@@ -987,15 +1272,9 @@ export default function TaskDetail() {
                     <button
                       type="button"
                       className="tp-pop-row"
-                      onClick={async () => {
+                      onClick={() => {
                         setMoreOpen(false);
-                        try {
-                          const copy = await duplicateTask(task);
-                          toast.push({ type: "success", title: "Task duplicated" });
-                          navigate(`${TASKPRO_HOME}/tasks/${copy.id}`);
-                        } catch (err) {
-                          toast.push({ type: "error", title: "Couldn't duplicate", text: err.message });
-                        }
+                        setDialog("duplicate");
                       }}
                     >
                       <FiCopy /> <span>Duplicate task</span>
@@ -1023,16 +1302,16 @@ export default function TaskDetail() {
                         <FiSkipForward /> <span>Skip this occurrence</span>
                       </button>
                     )}
-                    {!finished && (
+                    {canDelete && (
                       <button
                         type="button"
                         className="tp-pop-row danger"
                         onClick={() => {
                           setMoreOpen(false);
-                          setDialog("cancel");
+                          setDialog("delete");
                         }}
                       >
-                        <FiSlash /> <span>Cancel task</span>
+                        <FiTrash2 /> <span>Delete task</span>
                       </button>
                     )}
                   </div>
@@ -1042,6 +1321,48 @@ export default function TaskDetail() {
           </div>
         </div>
       </section>
+
+      {pendingReq && !finished && (
+        <div className="tp-req-banner">
+          <span className="tp-req-icon">
+            <FiCalendar />
+          </span>
+          <div className="tp-req-text">
+            {pendingReq.requested_by === viewer.id ? (
+              <strong>You asked to move this to {fmtDateTime(pendingReq.to_due_date, pendingReq.to_due_time)}. Waiting for {task.created_by_name || "the task owner"} or your manager.</strong>
+            ) : (
+              <strong>
+                {pendingReq.requested_by_name} asks to move the due date from {fmtDateTime(pendingReq.from_due_date, pendingReq.from_due_time)} to{" "}
+                {fmtDateTime(pendingReq.to_due_date, pendingReq.to_due_time)}.
+              </strong>
+            )}
+            {pendingReq.reason && <small>Reason: {pendingReq.reason}</small>}
+          </div>
+          <div className="tp-req-actions">
+            {pendingReq.requested_by === viewer.id && (
+              <button type="button" className="tp-btn ghost" onClick={doWithdraw} disabled={busy}>
+                Withdraw
+              </button>
+            )}
+            {canDecideRequest && (
+              <>
+                <button type="button" className="tp-btn ghost" onClick={() => setDialog("reject")} disabled={busy}>
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="tp-btn success"
+                  onClick={doApprove}
+                  disabled={busy || pendingReq.to_due_date < todayStr()}
+                  title={pendingReq.to_due_date < todayStr() ? "The requested date has passed — reject it or reschedule directly" : undefined}
+                >
+                  <FiCheck /> Approve
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {task.status === "CANCELLED" && (
         <div className="tp-banner">
@@ -1055,51 +1376,54 @@ export default function TaskDetail() {
 
       <div className="tp-detail-grid">
         <div className="tp-col">
-          <section className="tp-card">
+          <section className="tp-card tp-info-card">
             <div className="tp-card-head">
               <h3>Task Information</h3>
             </div>
             <div className="tp-info-grid">
               <div>
-                <InfoRow label="Task ID">
-                  <strong>{task.id.slice(0, 8).toUpperCase()}</strong>
-                </InfoRow>
-                <InfoRow label="Type">{task.task_type || "—"}</InfoRow>
-                <InfoRow label="Related To">{task.source_module ? `${task.source_module} · ${task.source_id}` : "—"}</InfoRow>
-                <InfoRow label="Priority">
-                  <PriorityBadge priority={task.priority} />
-                </InfoRow>
-                <InfoRow label="Status">
-                  <StatusBadge status={task.status} live />
-                </InfoRow>
-              </div>
-              <div>
                 <InfoRow label="Assigned To">
-                  <button type="button" className="tp-person-inline tp-person-btn" onClick={() => setWhoId(task.assigned_to)}>
-                    <Avatar name={task.assigned_to_name} size={30} />
-                    <span className="tp-inline-text">
-                      <strong>{task.assigned_to_name}</strong>
-                      <small>Who do they report to? →</small>
-                    </span>
-                  </button>
+                  <PersonCell id={task.assigned_to} name={task.assigned_to_name} viewer={viewer} onOpen={setWhoId} />
                 </InfoRow>
-                <InfoRow label="Schedule">{task.series_id ? "Recurring" : "One time"}</InfoRow>
-                <InfoRow label="Due Date & Time">
-                  <span className="tp-inline-icon">
-                    <FiCalendar /> {fmtDateTime(task.due_date, task.due_time)}
-                  </span>
-                </InfoRow>
+                {manager && (
+                  <InfoRow label="Reports To">
+                    <PersonCell id={manager.id} name={manager.name} viewer={viewer} onOpen={setWhoId} />
+                  </InfoRow>
+                )}
                 <InfoRow label="Created By">
                   {task.created_by_name ? (
-                    <button type="button" className="tp-link" onClick={() => setWhoId(task.created_by)}>
-                      {task.created_by_name}
-                    </button>
+                    <PersonCell
+                      id={task.created_by}
+                      name={task.created_by_name}
+                      viewer={viewer}
+                      note={task.created_by === task.assigned_to ? "Self-assigned" : undefined}
+                      onOpen={setWhoId}
+                    />
                   ) : (
                     "—"
                   )}
                 </InfoRow>
                 <InfoRow label="Created On">{fmtTimestamp(task.created_at)}</InfoRow>
                 <InfoRow label="Last Updated">{fmtTimestamp(task.updated_at)}</InfoRow>
+              </div>
+              <div>
+                <InfoRow label="Task ID">
+                  <strong>{task.id.slice(0, 8).toUpperCase()}</strong>
+                </InfoRow>
+                <InfoRow label="Status">
+                  <StatusBadge status={task.status} live />
+                </InfoRow>
+                <InfoRow label="Priority">
+                  <PriorityBadge priority={task.priority} />
+                </InfoRow>
+                <InfoRow label="Type">{task.task_type || "—"}</InfoRow>
+                <InfoRow label="Due">
+                  <span className="tp-inline-icon">
+                    <FiCalendar /> {fmtDateTime(task.due_date, task.due_time)}
+                  </span>
+                </InfoRow>
+                <InfoRow label="Schedule">{task.series_id ? "Recurring" : "One time"}</InfoRow>
+                {task.source_module && <InfoRow label="Related To">{`${task.source_module} · ${task.source_id}`}</InfoRow>}
               </div>
             </div>
           </section>
@@ -1190,17 +1514,28 @@ export default function TaskDetail() {
                       ))}
                     </ul>
                   )}
-                  <form className="tp-comment-form" onSubmit={postComment}>
-                    <input className="tp-input" placeholder="Write a comment…" value={comment} onChange={(e) => setComment(e.target.value)} />
-                    <button type="submit" className="tp-btn primary" disabled={!comment.trim()}>
-                      Post
-                    </button>
-                  </form>
+                  {postBlock ? (
+                    <p className="tp-closed-note">
+                      <FiInfo /> {postBlock}
+                    </p>
+                  ) : (
+                    <form className="tp-comment-form" onSubmit={postComment}>
+                      <input className="tp-input" placeholder="Write a comment…" value={comment} onChange={(e) => setComment(e.target.value)} />
+                      <button type="submit" className="tp-btn primary" disabled={!comment.trim()}>
+                        Post
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
 
               {tab === "files" && (
                 <div>
+                  {postBlock ? (
+                    <p className="tp-closed-note">
+                      <FiInfo /> {postBlock}
+                    </p>
+                  ) : (
                   <div
                     className="tp-drop"
                     onClick={() => fileRef.current?.click()}
@@ -1229,6 +1564,7 @@ export default function TaskDetail() {
                       }}
                     />
                   </div>
+                  )}
                   {!attachmentsReady && <Skeleton height={60} style={{ marginTop: 12 }} />}
                   {attachmentsReady && attachments.length === 0 && <p className="tp-desc muted" style={{ marginTop: 12 }}>No attachments yet.</p>}
                   {attachmentsReady && attachments.length > 0 && (
@@ -1242,7 +1578,7 @@ export default function TaskDetail() {
                             <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file_name}</strong>
                             <small>{(f.file_size / 1024).toFixed(0)} KB · {f.uploaded_by_name}</small>
                           </button>
-                          {!finished && (
+                          {!postBlock && (
                             <button type="button" className="tp-icon-btn" onClick={() => removeAttachment(f)} aria-label={`Remove ${f.file_name}`}>
                               <FiTrash2 />
                             </button>
@@ -1268,12 +1604,14 @@ export default function TaskDetail() {
               <h3>Shortcuts</h3>
             </div>
             <div className="tp-quick">
-              <button type="button" onClick={() => setTab("comments")}>
+              <button type="button" onClick={() => setTab("comments")} disabled={!!postBlock} title={postBlock || undefined}>
                 <FiMessageSquare />
                 <span>Add Comment</span>
               </button>
               <button
                 type="button"
+                disabled={!!postBlock}
+                title={postBlock || undefined}
                 onClick={() => {
                   setTab("files");
                   setTimeout(() => fileRef.current?.click(), 50);
@@ -1309,6 +1647,7 @@ export default function TaskDetail() {
         <ReassignDialog
           task={task}
           people={reassignPeople}
+          viewer={viewer}
           onClose={() => setDialog(null)}
           onSave={(uid, noteText) =>
             run(() => reassignTask(task.id, uid, noteText), { title: "Task reassigned", text: reassignPeople.find((p) => p.id === uid)?.name })
@@ -1340,16 +1679,32 @@ export default function TaskDetail() {
           onConfirm={() => run(() => skipTask(task.id), { title: "Occurrence skipped" })}
         />
       )}
-      {dialog === "cancel" && (
+      {dialog === "request" && <RescheduleDialog request task={task} onClose={() => setDialog(null)} onSave={doRequest} />}
+      {dialog === "reject" && pendingReq && <RejectDialog request={pendingReq} onClose={() => setDialog(null)} onReject={doReject} />}
+      {dialog === "reopen" && (
+        <ConfirmDialog
+          tone="success"
+          icon={FiRotateCcw}
+          title="Reopen this task?"
+          text="It goes back to In Progress, and editing, comments and files open up again."
+          confirmLabel="Reopen Task"
+          onClose={() => setDialog(null)}
+          onConfirm={doReopen}
+        />
+      )}
+      {dialog === "delete" && (
         <ConfirmDialog
           tone="danger"
-          icon={FiSlash}
-          title="Cancel this task?"
-          text="It will be closed and no further work can be recorded. This can't be undone."
-          confirmLabel="Cancel Task"
+          icon={FiTrash2}
+          title="Delete this task?"
+          text={`It will be deleted permanently, with its comments, files and history. You'll have ${UNDO_MS / 1000} seconds to undo.`}
+          confirmLabel="Delete Task"
           onClose={() => setDialog(null)}
-          onConfirm={() => run(() => cancelTask(task.id), { title: "Task cancelled" })}
+          onConfirm={doDelete}
         />
+      )}
+      {dialog === "duplicate" && (
+        <NewTaskModal copyFrom={task} onClose={() => setDialog(null)} onCreated={(copy) => navigate(`${TASKPRO_HOME}/tasks/${copy.id}`)} />
       )}
       {dialog === "series" && task.series_id && <SeriesDialog seriesId={task.series_id} allowManage={canEditTerms} onClose={() => setDialog(null)} onChanged={refresh} />}
       {whoId && <WhoDialog userId={whoId} onClose={() => setWhoId(null)} />}

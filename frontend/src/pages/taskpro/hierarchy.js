@@ -21,3 +21,20 @@ export function assignableUsers(viewer, allUsers) {
 
 /** Best-effort "is this one of my reports" hint — not an access check. */
 export const inMyTeam = (viewer, userId) => viewer?.teamIds?.has(Number(userId));
+
+/** A person's card from the org directory ({ name, designation, dept, ... }), or null. */
+export const personOf = (viewer, userId) => viewer?.directory?.get(Number(userId)) || null;
+
+/** A person's top-level department name, or null when unknown. */
+export const deptOf = (viewer, userId) => personOf(viewer, userId)?.dept || null;
+
+/** "Assigned by" wording for a task: "Self-assigned" or "By <name>". */
+export const assignedByText = (task) =>
+  task.created_by === task.assigned_to ? "Self-assigned" : `By ${task.created_by_name || "someone"}`;
+
+/** One-line "who" caption for a task row: for the viewer's own task, who
+ *  gave it to them; for anyone else's, the assignee and their department. */
+export function taskWhoLine(viewer, task) {
+  if (task.assigned_to === viewer.id) return assignedByText(task);
+  return [task.assigned_to_name, deptOf(viewer, task.assigned_to)].filter(Boolean).join(" · ");
+}

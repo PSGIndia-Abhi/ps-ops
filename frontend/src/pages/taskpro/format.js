@@ -5,9 +5,18 @@ const pad = (n) => String(n).padStart(2, "0");
 // 'HH:MM:SS' (or null) — see TASK_COLUMNS in backend/src/utils/workTasks.js.
 // Parsed as local time (not UTC) so "due today" means the viewer's today.
 
+/** A local Date -> 'YYYY-MM-DD'. */
+export const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
 export function todayStr() {
+  return dateKey(new Date());
+}
+
+/** 'YYYY-MM-DD' for `n` days from today (local). */
+export function daysFromToday(n) {
   const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  d.setDate(d.getDate() + n);
+  return dateKey(d);
 }
 
 /** due_date (+ optional due_time) -> a local Date, or null. A date with no
