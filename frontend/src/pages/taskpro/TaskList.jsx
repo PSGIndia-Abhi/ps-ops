@@ -194,8 +194,11 @@ export default function TaskList({ mode }) {
 
       {ready && hiddenOverdue > 0 && (
         <button type="button" className="tp-overdue-note" onClick={() => setParam("when", "overdue")}>
-          <FiAlertCircle /> You also have <strong>{hiddenOverdue} overdue</strong> {hiddenOverdue === 1 ? "task" : "tasks"} not shown here.
-          <span>
+          <FiAlertCircle />
+          <span className="tp-overdue-msg">
+            You also have <strong>{hiddenOverdue} overdue</strong> {hiddenOverdue === 1 ? "task" : "tasks"} not shown here.
+          </span>
+          <span className="tp-overdue-go">
             Show overdue <FiArrowRight />
           </span>
         </button>

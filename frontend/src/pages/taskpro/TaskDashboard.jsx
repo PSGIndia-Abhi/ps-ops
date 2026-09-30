@@ -164,7 +164,7 @@ export default function TaskDashboard() {
         color: SERIES_BLUE,
       };
     });
-    return [{ key: "overdue", label: "Overdue", sub: "Past due", tipLabel: "Overdue", value: late, color: OVERDUE_COLOR }, ...days];
+    return [{ key: "overdue", label: "Overdue", phone: "Late", sub: "Past due", tipLabel: "Overdue", value: late, color: OVERDUE_COLOR }, ...days];
   }, [forDue]);
 
   const priorityRows = useMemo(

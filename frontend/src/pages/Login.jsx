@@ -3,44 +3,23 @@ import { useNavigate } from "react-router-dom";
 import {
   FiAlertCircle,
   FiArrowLeft,
-  FiBriefcase,
+  FiArrowRight,
   FiCheckCircle,
-  FiCheckSquare,
-  FiEye,
-  FiEyeOff,
-  FiFileText,
   FiKey,
   FiLock,
+  FiLogIn,
   FiMail,
   FiUserPlus,
-  FiUsers,
 } from "react-icons/fi";
 import { API_BASE } from "../api";
-import "../assets/login.css";
-import logoMark from "../assets/logo.png";
+import AuthLayout, { AuthHeading, PasswordInput } from "../components/AuthLayout";
 
-// Full BestServe logo (served from /public).
-const LOGO_FULL = "/Bestserve-1-2-1024x402.png";
-
-const HIGHLIGHTS = [
-  { icon: FiBriefcase, title: "Jobs & site visits", text: "Plan visits, track technicians and every job's progress." },
-  { icon: FiCheckSquare, title: "Tasks & follow-ups", text: "Assign work across teams and see what's due." },
-  { icon: FiFileText, title: "Invoices & payments", text: "Keep billing, collections and TDS in one place." },
-  { icon: FiUsers, title: "Client portal", text: "Customers see their jobs, updates and tickets." },
-];
-
-/** A password field with a show / hide toggle. */
-function PasswordInput({ value, onChange, placeholder, autoComplete, id }) {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="bs-login-input">
-      <FiLock className="bs-login-input-icon" aria-hidden="true" />
-      <input id={id} type={show ? "text" : "password"} placeholder={placeholder} value={value} onChange={onChange} autoComplete={autoComplete} />
-      <button type="button" className="bs-login-eye" onClick={() => setShow((s) => !s)} aria-label={show ? "Hide password" : "Show password"}>
-        {show ? <FiEyeOff /> : <FiEye />}
-      </button>
-    </div>
-  );
+/** "Good morning" / "Good afternoon" / "Good evening" for the viewer's local time. */
+function greeting(date = new Date()) {
+  const h = date.getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function Login() {
@@ -173,57 +152,13 @@ export default function Login() {
   );
 
   return (
-    <div className="bs-login">
-      <div className="bs-login-box">
-      {/* ---------------- BRAND PANEL ---------------- */}
-      <aside className="bs-login-brand" aria-hidden="true">
-        <span className="bs-login-piece p1" />
-        <span className="bs-login-piece p2" />
-        <span className="bs-login-piece p3 blue" />
-
-        <div className="bs-login-brand-top">
-          <span className="bs-login-mark">
-            <img src={logoMark} alt="" />
-          </span>
-          <span className="bs-login-brand-name">
-            BESTserve
-            <small>Pest Management Pvt. Ltd.</small>
-          </span>
-        </div>
-
-        <div className="bs-login-brand-body">
-          <h2>Everything your team needs, in one place.</h2>
-          <p>One sign-in for staff, supervisors, technicians, accounts and clients. You'll land on the dashboard for your role.</p>
-          <ul className="bs-login-highlights">
-            {HIGHLIGHTS.map((h) => (
-              <li key={h.title}>
-                <span className="bs-login-hl-icon">
-                  <h.icon />
-                </span>
-                <span>
-                  <strong>{h.title}</strong>
-                  <small>{h.text}</small>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <p className="bs-login-tagline">“Here To Complete Rather Than Compete”</p>
-      </aside>
-
-      {/* ---------------- FORM PANEL ---------------- */}
-      <main className="bs-login-main">
-        <div className="bs-login-card">
-          <div className="bs-login-mobile-brand">
-            <img src={LOGO_FULL} alt="BestServe — Bestserve Pest Management Pvt. Ltd." />
-          </div>
-
+    <AuthLayout title="Everything your team needs, in one place.">
           {/* ---------------- LOGIN MODE ---------------- */}
           {mode === "login" && (
             <form onSubmit={handleLogin} noValidate>
-              <h1>Welcome back</h1>
-              <p className="bs-login-sub">Sign in to your BestServe account</p>
+              <AuthHeading icon={FiLogIn}  sub="Sign in to your BestServe account">
+                Welcome <em>back</em>
+              </AuthHeading>
 
               {messages}
 
@@ -267,12 +202,16 @@ export default function Login() {
 
               <div className="bs-login-alt">
                 <a href="/signup">
-                  <FiUserPlus />
+                  <span className="bs-login-alt-icon">
+                    <FiUserPlus />
+                  </span>
                   <span>
                     <strong>New here?</strong>
                     <small>Create an account</small>
                   </span>
+                  <FiArrowRight className="bs-login-alt-go" aria-hidden="true" />
                 </a>
+                {/* Temporary worker sign-in is hidden for now; the /temp-access page still works.
                 <a href="/temp-access">
                   <FiKey />
                   <span>
@@ -280,6 +219,7 @@ export default function Login() {
                     <small>Sign in with OTP</small>
                   </span>
                 </a>
+                */}
               </div>
             </form>
           )}
@@ -287,8 +227,9 @@ export default function Login() {
           {/* ---------------- ENTER EMAIL ---------------- */}
           {mode === "forgot-email" && (
             <form onSubmit={handleSendResetOtp} noValidate>
-              <h1>Reset your password</h1>
-              <p className="bs-login-sub">Enter your account email and we'll send you a one-time code.</p>
+              <AuthHeading icon={FiLock} eyebrow="Account help" sub="Enter your account email and we'll send you a one-time code.">
+                Reset your <em>password</em>
+              </AuthHeading>
 
               {messages}
 
@@ -314,8 +255,9 @@ export default function Login() {
           {/* ---------------- VERIFY OTP ---------------- */}
           {mode === "forgot-verify" && (
             <form onSubmit={handleResetPassword} noValidate>
-              <h1>Enter the code</h1>
-              <p className="bs-login-sub">Check your email for the one-time code, then choose a new password.</p>
+              <AuthHeading icon={FiKey} eyebrow="Almost there" sub="Check your email for the one-time code, then choose a new password.">
+                Enter the <em>code</em>
+              </AuthHeading>
 
               {messages}
 
@@ -343,10 +285,6 @@ export default function Login() {
             </form>
           )}
 
-          <p className="bs-login-foot">© {new Date().getFullYear()} Bestserve Pest Management Pvt. Ltd.</p>
-        </div>
-      </main>
-      </div>
-    </div>
+    </AuthLayout>
   );
 }

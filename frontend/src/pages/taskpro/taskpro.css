@@ -733,7 +733,8 @@
     background: #fdeaea; border: 1px solid #f8caca; color: #7f1d1d; font-size: 13px; animation: tp-fade-up .3s var(--tp-ease) both;
     transition: background .15s;
     > svg { color: var(--tp-danger); flex: none; }
-    span { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--tp-danger); white-space: nowrap; }
+    .tp-overdue-msg { text-align: left; }
+    .tp-overdue-go { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--tp-danger); white-space: nowrap; }
     &:hover { background: #fbdcdc; }
   }
   .tp-count-pill { white-space: nowrap; padding: 6px 14px; border-radius: 20px; background: #fff; border: 1px solid var(--tp-border); font-weight: 600; color: #475569; }
@@ -985,6 +986,7 @@
   .tp-vcol:hover .tp-vcol-bar { filter: brightness(1.12); }
   .tp-vcol-label { font-size: 12px; font-weight: 600; color: #475569; white-space: nowrap; }
   .tp-vcol-sub { font-size: 11px; color: var(--tp-soft); white-space: nowrap; }
+  .tp-vcol-short { display: none; }
 
   /* horizontal bars */
   .tp-bars-h { display: grid; gap: 2px; }
@@ -1216,6 +1218,38 @@
     .tp-step small { display: none; }
     .tp-related { grid-template-columns: auto 1fr; dl { grid-column: 1 / -1; text-align: left; div { justify-content: flex-start; } } }
     .tp-bell-pop { width: min(340px, calc(100vw - 24px)); position: fixed; right: 12px; left: 12px; width: auto; }
+
+    /* phones: short chart label where the full one would collide */
+    .tp-vcol-full { display: none; }
+    .tp-vcol-short { display: inline; }
+
+    /* dashboard lists: title on its own line, status underneath */
+    .tp-att-row, .tp-feed-row { flex-wrap: wrap; row-gap: 6px; }
+    .tp-att-title { flex: 1 1 calc(100% - 30px); }
+    .tp-att-row > .tp-due { margin-left: 20px; margin-right: auto; }
+    .tp-feed-text { flex: 1 1 calc(100% - 50px); }
+    .tp-feed-row > .tp-badge { margin-left: 40px; }
+    .tp-feed-row em { margin-left: auto; }
+    .tp-att-title strong, .tp-feed-row strong { white-space: normal; }
+
+    /* task lists: due date on one line, then assignee and status */
+    .tp-row-due { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+    .tp-row-who { flex: 1 1 0; min-width: 0; }
+    .tp-task-row > .tp-badge { min-width: 0; }
+
+    /* page header: time-window tabs use the full width */
+    .tp-head-right-row { width: 100%; justify-content: flex-start; }
+    .tp-when { display: flex; flex: 1 1 100%; button { flex: 1 1 0; padding: 7px 4px; white-space: nowrap; } }
+    .tp-overdue-note { flex-wrap: wrap; gap: 6px 8px; }
+
+    /* filters: two even columns */
+    .tp-filters > .tp-select, .tp-toolbar-right > .tp-select { flex: 1 1 calc(50% - 4px); min-width: 0; }
+    .tp-select select { flex: 1; min-width: 0; max-width: none; }
+
+    /* reports: two KPI cards per row, tables scroll sideways instead of squashing */
+    .tp-kpis.tp-rep-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tp-rep-table { min-width: 600px; }
+    .tp-rep-person strong { white-space: nowrap; }
   }
 
   /* An avatar is a fixed-size circle - no row layout may stretch it. */
