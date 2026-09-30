@@ -7,7 +7,7 @@ import { dateKey, fmtDate, fmtDateTime, fmtTimestamp } from "./format";
 import { buildXlsx } from "./xlsx";
 
 const localDay = (iso) => (iso ? dateKey(new Date(iso)) : null);
-const isActive = (t) => t.status === "OPEN" || t.status === "IN_PROGRESS";
+const isActive = (t) => t.status === "OPEN" || t.status === "IN_PROGRESS" || t.status === "PAUSED";
 
 /** How a task ended up: "On time" / "Late" (completed), "Overdue", or "". */
 export function outcome(t, today) {
@@ -21,13 +21,14 @@ export function outcome(t, today) {
 
 /** Counts and rates for a list of tasks. Cancelled tasks don't count towards rates. */
 export function statsFor(list, today) {
-  const s = { total: list.length, completed: 0, onTime: 0, late: 0, inProgress: 0, open: 0, overdue: 0, cancelled: 0 };
+  const s = { total: list.length, completed: 0, onTime: 0, late: 0, inProgress: 0, paused: 0, open: 0, overdue: 0, cancelled: 0 };
   for (const t of list) {
     if (t.status === "COMPLETED") {
       s.completed += 1;
       if (outcome(t, today) === "Late") s.late += 1;
       else s.onTime += 1;
     } else if (t.status === "IN_PROGRESS") s.inProgress += 1;
+    else if (t.status === "PAUSED") s.paused += 1;
     else if (t.status === "OPEN") s.open += 1;
     else if (t.status === "CANCELLED") s.cancelled += 1;
     if (outcome(t, today) === "Overdue") s.overdue += 1;
@@ -68,12 +69,12 @@ export function buildWorkbook({ groups, today }) {
     columns: [
       { label: "Employee", width: 26 }, { label: "Department", width: 18 }, { label: "Designation", width: 22 },
       { label: "Tasks", width: 8 }, { label: "Completed", width: 11 }, { label: "On time", width: 9 }, { label: "Late", width: 7 },
-      { label: "In progress", width: 11 }, { label: "Open", width: 7 }, { label: "Overdue", width: 9 },
+      { label: "In progress", width: 11 }, { label: "Paused", width: 8 }, { label: "Open", width: 7 }, { label: "Overdue", width: 9 },
       { label: "Completion", width: 11 }, { label: "On-time rate", width: 12 },
     ],
     rows: groups.map((g) => [
       { text: g.name, bold: true }, g.dept, g.designation, g.stats.total, g.stats.completed, g.stats.onTime, g.stats.late,
-      g.stats.inProgress, g.stats.open, g.stats.overdue,
+      g.stats.inProgress, g.stats.paused, g.stats.open, g.stats.overdue,
       { pct: g.stats.completionRate === null ? null : g.stats.completionRate / 100 },
       { pct: g.stats.onTimeRate === null ? null : g.stats.onTimeRate / 100 },
     ]),
@@ -104,7 +105,7 @@ export function buildWorkbook({ groups, today }) {
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-const STATUS_INK = { OPEN: "#1d4ed8", IN_PROGRESS: "#c2410c", COMPLETED: "#15803d", CANCELLED: "#475569" };
+const STATUS_INK = { OPEN: "#1d4ed8", IN_PROGRESS: "#c2410c", PAUSED: "#be185d", COMPLETED: "#15803d", CANCELLED: "#475569" };
 const RESULT_INK = { "On time": "#15803d", Late: "#b45309", Overdue: "#b91c1c" };
 
 function kpi(label, value, sub) {
@@ -140,13 +141,13 @@ export function buildReportHtml({ title, subtitle, filters, groups, stats, today
     ? `<h2>Summary by employee</h2>
        <table class="summary"><thead><tr>
          <th>Employee</th><th>Department</th><th class="num">Tasks</th><th class="num">Completed</th><th class="num">On time</th>
-         <th class="num">Late</th><th class="num">In progress</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Completion</th><th class="num">On-time rate</th>
+         <th class="num">Late</th><th class="num">In progress</th><th class="num">Paused</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Completion</th><th class="num">On-time rate</th>
        </tr></thead><tbody>
        ${groups
          .map(
            (g) => `<tr><td><strong>${esc(g.name)}</strong>${g.designation ? `<div class="muted">${esc(g.designation)}</div>` : ""}</td><td>${esc(g.dept || "—")}</td>
            <td class="num">${g.stats.total}</td><td class="num">${g.stats.completed}</td><td class="num">${g.stats.onTime}</td><td class="num">${g.stats.late}</td>
-           <td class="num">${g.stats.inProgress}</td><td class="num">${g.stats.open}</td><td class="num ${g.stats.overdue ? "bad" : ""}">${g.stats.overdue}</td>
+           <td class="num">${g.stats.inProgress}</td><td class="num">${g.stats.paused}</td><td class="num">${g.stats.open}</td><td class="num ${g.stats.overdue ? "bad" : ""}">${g.stats.overdue}</td>
            <td class="num">${pct(g.stats.completionRate)}</td><td class="num">${pct(g.stats.onTimeRate)}</td></tr>`,
          )
          .join("")}
@@ -218,7 +219,7 @@ export function buildReportHtml({ title, subtitle, filters, groups, stats, today
     ${kpi("Completed", stats.completed, `${pct(stats.completionRate)} of tasks`)}
     ${kpi("On time", stats.onTime, `${pct(stats.onTimeRate)} of completed`)}
     ${kpi("Late", stats.late)}
-    ${kpi("In progress", stats.inProgress)}
+    ${kpi("In progress", stats.inProgress, stats.paused ? `${stats.paused} paused` : "")}
     ${kpi("Overdue", stats.overdue, "still open, past due")}
   </div>
   ${groups.length ? summary + `<h2>Tasks by employee</h2>` + details : `<div class="empty">No tasks match this report.</div>`}

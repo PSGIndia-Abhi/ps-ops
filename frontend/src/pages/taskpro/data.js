@@ -11,6 +11,9 @@
 export const STATUS = {
   OPEN: { label: "Open", color: "#2563eb", ink: "#1d4ed8", soft: "#e8f0ff" },
   IN_PROGRESS: { label: "In Progress", color: "#eb6834", ink: "#c2410c", soft: "#fdeee6" },
+  // Pink: the one candidate that stays apart from blue / orange / green for
+  // colour-blind readers in the status chart (always shown with its label).
+  PAUSED: { label: "Paused", color: "#db2777", ink: "#be185d", soft: "#fce7f3" },
   COMPLETED: { label: "Completed", color: "#16a34a", ink: "#15803d", soft: "#e2f7e9" },
   CANCELLED: { label: "Cancelled", color: "#94a3b8", ink: "#475569", soft: "#eef1f5" },
 };

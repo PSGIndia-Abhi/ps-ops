@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import useMe from "../../hooks/useMe";
-import { apiFetch, safeJson } from "../../api";
+import { getJson } from "./tasksApi";
 import { ViewerContext } from "./viewerContext";
 
 /**
@@ -38,28 +37,42 @@ function buildDirectory(tree) {
 }
 
 /**
- * Loads the real logged-in user (useMe, same hook the rest of the app uses)
- * plus their real team from the org hierarchy (GET /api/users/me/team — the
- * endpoint the backend already built for exactly this: "Team Tasks and the
- * assign-to picker read this"). No sample data, no per-session role
- * switching — this is who is actually signed in.
+ * Loads the real logged-in user (GET /api/auth/me — the same endpoint the
+ * app's useMe hook reads) plus their real team from the org hierarchy
+ * (GET /api/users/me/team — "Team Tasks and the assign-to picker read
+ * this"). No sample data, no per-session role switching — this is who is
+ * actually signed in.
  *
  * Also loads a people directory (GET /api/hierarchy/tree, VIEW_HIERARCHY —
  * granted to every TaskPro role) so lists can show and filter by each
  * person's department without opening the task. Display-only: if it fails,
  * departments simply show as unknown.
+ *
+ * All three go through getJson, so a second identical request made while the
+ * first is still on its way (e.g. React's development double-run of effects)
+ * shares it instead of hitting the server again.
  */
 export default function ViewerProvider({ children }) {
-  const { user, loading: meLoading } = useMe();
+  const [user, setUser] = useState(null);
+  const [meLoading, setMeLoading] = useState(true);
   const [team, setTeam] = useState([]);
   const [teamLoading, setTeamLoading] = useState(true);
   const [directory, setDirectory] = useState(() => new Map());
 
+  const loadMe = useCallback(async () => {
+    try {
+      setUser(await getJson("/api/auth/me"));
+    } catch {
+      // Same as useMe: keep whatever we had; the app's auth redirect handles a 401.
+    } finally {
+      setMeLoading(false);
+    }
+  }, []);
+
   const loadTeam = useCallback(async () => {
     try {
-      const res = await apiFetch("/api/users/me/team");
-      const data = await safeJson(res);
-      setTeam(res?.ok ? data?.members || [] : []);
+      const data = await getJson("/api/users/me/team");
+      setTeam(data?.members || []);
     } catch {
       setTeam([]);
     } finally {
@@ -69,18 +82,20 @@ export default function ViewerProvider({ children }) {
 
   const loadDirectory = useCallback(async () => {
     try {
-      const res = await apiFetch("/api/hierarchy/tree");
-      const data = await safeJson(res);
-      if (res?.ok) setDirectory(buildDirectory(data));
+      setDirectory(buildDirectory(await getJson("/api/hierarchy/tree")));
     } catch {
       // Display-only; leave the directory empty.
     }
   }, []);
 
   useEffect(() => {
+    loadMe();
     loadTeam();
     loadDirectory();
-  }, [loadTeam, loadDirectory]);
+    // Same as useMe: the profile page fires this after saving changes.
+    window.addEventListener("profile-updated", loadMe);
+    return () => window.removeEventListener("profile-updated", loadMe);
+  }, [loadMe, loadTeam, loadDirectory]);
 
   const value = useMemo(() => {
     const teamIds = new Set(team.map((m) => m.id));

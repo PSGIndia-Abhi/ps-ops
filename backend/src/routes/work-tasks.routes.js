@@ -207,7 +207,7 @@ router.get("/reschedule-requests", auth, requireRealUser, async (req, res) => {
       params.push(me);
       if (req.query.status) { where.push("r.status = ?"); params.push(String(req.query.status)); }
     } else {
-      where.push("r.status = ?", "t.status IN ('OPEN','IN_PROGRESS')", "r.requested_by <> ?");
+      where.push("r.status = ?", "t.status IN ('OPEN','IN_PROGRESS','PAUSED')", "r.requested_by <> ?");
       params.push(String(req.query.status || "PENDING"), me);
       if (req.user.role !== "admin") {
         // Same rule as canEditTerms: the creator, or a manager of the assignee.
@@ -319,7 +319,7 @@ router.get("/notifications", auth, requireRealUser, async (req, res) => {
          LEFT JOIN users u ON u.id = h.changed_by
         WHERE h.changed_by IS NOT NULL AND h.changed_by <> ? AND h.changed_at >= ${since}
           AND ((t.assigned_to = ? AND h.action IN ('CREATE','REASSIGN','RESCHEDULE','UPDATE','REOPEN','SKIP','CANCEL','ATTACH'))
-            OR (t.created_by = ? AND t.assigned_to <> ? AND h.action IN ('START','COMPLETE','REOPEN','ATTACH')))
+            OR (t.created_by = ? AND t.assigned_to <> ? AND h.action IN ('START','PAUSE','RESUME','COMPLETE','REOPEN','ATTACH')))
         ORDER BY h.changed_at DESC LIMIT ?`,
       [me, me, me, me, limit * 2]
     );
@@ -360,6 +360,7 @@ router.get("/notifications", auth, requireRealUser, async (req, res) => {
     const TYPE = {
       CREATE: "assigned", REASSIGN: "reassigned", RESCHEDULE: "rescheduled", UPDATE: "edited", REOPEN: "reopened",
       SKIP: "skipped", CANCEL: "cancelled", ATTACH: "attached", START: "started", COMPLETE: "completed",
+      PAUSE: "paused", RESUME: "resumed",
     };
     const events = [
       ...history
@@ -448,7 +449,7 @@ router.get("/", auth, requireRealUser, async (req, res) => {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [rows] = await pool.query(
       `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
-              (t.status IN ('OPEN','IN_PROGRESS') AND t.due_date < CURDATE()) AS is_overdue
+              (t.status IN ('OPEN','IN_PROGRESS','PAUSED') AND t.due_date < CURDATE()) AS is_overdue
          FROM work_tasks t
          LEFT JOIN users ua ON ua.id = t.assigned_to
          LEFT JOIN users uc ON uc.id = t.created_by
@@ -660,12 +661,64 @@ router.post("/:id/start", auth, requireRealUser, async (req, res) => {
   }
 });
 
+// POST /api/work-tasks/:id/pause -- IN_PROGRESS -> PAUSED. body: { reason }
+// (required). Only the assignee; the clock stops until they resume.
+router.post("/:id/pause", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    requireAssignee(req, task, "pause");
+    if (task.status !== "IN_PROGRESS") throw new HttpError(400, `Only a task in progress can be paused (this one is ${task.status})`);
+    const reason = optionalText(req.body?.reason);
+    if (!reason) throw new HttpError(400, "Say why you're pausing it (reason is required)");
+    if (reason.length > 500) throw new HttpError(400, "reason is too long (max 500 characters)");
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        "UPDATE work_tasks SET status = 'PAUSED', paused_at = NOW() WHERE id = ? AND status = 'IN_PROGRESS'",
+        [task.id]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
+      await logHistory(conn, task.id, "PAUSE", { fromStatus: "IN_PROGRESS", toStatus: "PAUSED", note: reason, changedBy: req.user.id });
+    });
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to pause task");
+  }
+});
+
+// POST /api/work-tasks/:id/resume -- PAUSED -> IN_PROGRESS. The paused time
+// is added to paused_seconds so "time worked" leaves it out.
+router.post("/:id/resume", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    requireAssignee(req, task, "resume");
+    if (task.status !== "PAUSED") throw new HttpError(400, `Only a paused task can be resumed (this one is ${task.status})`);
+
+    await inTransaction(async (conn) => {
+      const [result] = await conn.query(
+        `UPDATE work_tasks
+            SET status = 'IN_PROGRESS',
+                paused_seconds = paused_seconds + GREATEST(0, TIMESTAMPDIFF(SECOND, COALESCE(paused_at, NOW()), NOW())),
+                paused_at = NULL
+          WHERE id = ? AND status = 'PAUSED'`,
+        [task.id]
+      );
+      if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
+      await logHistory(conn, task.id, "RESUME", { fromStatus: "PAUSED", toStatus: "IN_PROGRESS", changedBy: req.user.id });
+    });
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to resume task");
+  }
+});
+
 // POST /api/work-tasks/:id/progress -- add a progress note (kept as a comment)
 // and optionally set the next action. The task must be in progress.
 router.post("/:id/progress", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
     requireAssignee(req, task, "update");
+    if (task.status === "PAUSED") throw new HttpError(400, "Resume the task before adding an update");
     if (task.status !== "IN_PROGRESS") throw new HttpError(400, "Start the task before adding an update");
 
     const body = req.body || {};
@@ -699,6 +752,7 @@ router.post("/:id/complete", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
     requireAssignee(req, task, "complete");
+    if (task.status === "PAUSED") throw new HttpError(400, "Resume the task before completing it");
     if (!["OPEN", "IN_PROGRESS"].includes(task.status)) throw new HttpError(400, `Cannot complete a task that is ${task.status}`);
     const note = optionalText(req.body?.completion_note);
 
@@ -730,7 +784,7 @@ router.post("/:id/reopen", auth, requireRealUser, async (req, res) => {
     await inTransaction(async (conn) => {
       const [result] = await conn.query(
         `UPDATE work_tasks
-            SET status = 'IN_PROGRESS', completed_at = NULL, completed_by = NULL, completion_note = NULL,
+            SET status = 'IN_PROGRESS', completed_at = NULL, completed_by = NULL, completion_note = NULL, paused_at = NULL,
                 started_at = COALESCE(started_at, NOW()), started_by = COALESCE(started_by, assigned_to)
           WHERE id = ? AND status = 'COMPLETED'`,
         [task.id]
@@ -808,7 +862,7 @@ router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
 
     await inTransaction(async (conn) => {
       const [result] = await conn.query(
-        "UPDATE work_tasks SET assigned_to = ? WHERE id = ? AND assigned_to = ? AND status IN ('OPEN','IN_PROGRESS')",
+        "UPDATE work_tasks SET assigned_to = ? WHERE id = ? AND assigned_to = ? AND status IN ('OPEN','IN_PROGRESS','PAUSED')",
         [newAssignee, task.id, task.assigned_to]
       );
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");

@@ -1,7 +1,8 @@
 import { isPastDue, todayStr } from "./format";
 import { deptOf } from "./hierarchy";
 
-export const isActive = (t) => t.status === "OPEN" || t.status === "IN_PROGRESS";
+// Still to do: not started, being worked on, or paused.
+export const isActive = (t) => t.status === "OPEN" || t.status === "IN_PROGRESS" || t.status === "PAUSED";
 export const isOverdue = (t) => isActive(t) && isPastDue(t.due_date);
 
 /**

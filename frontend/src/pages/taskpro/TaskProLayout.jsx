@@ -24,8 +24,8 @@ import { TASKPRO_HOME } from "./access";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import { countsFor } from "./selectors";
-import { markNotificationsSeen, refreshNotifications, useIncomingRequests, useNotifications, useTaskStore } from "./tasksApi";
-import { NotificationRow } from "./Notifications";
+import { refreshNotifications, useIncomingRequests, useNotifications, useTaskStore } from "./tasksApi";
+import { MarkAllRead, NotificationRow } from "./Notifications";
 import ViewerProvider from "./ViewerProvider";
 import { useViewer } from "./viewerContext";
 import { Avatar } from "./ui";
@@ -89,6 +89,13 @@ function TaskProShell() {
   const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
 
+  // The content area is the scroller (see .tp-root / .tp-main in the CSS);
+  // start each page at the top.
+  const mainRef = useRef(null);
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+  }, [location.pathname]);
+
   const [collapsed, setCollapsed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [query, setQuery] = useState("");
@@ -118,17 +125,12 @@ function TaskProShell() {
   const counts = useMemo(() => ({ ...countsFor(tasks, viewer.id), requests: requests.length }), [tasks, viewer.id, requests.length]);
 
   // Notifications: what other people did that concerns me (activity feed).
-  // The bell previews the latest few; the page has the last 30 days. Opening
-  // the bell marks them read, but they stay highlighted while it's open.
+  // The bell previews the latest few and counts the unread ones; opening one
+  // marks it read, "Mark all read" clears the count. The page has 30 days.
   const { items: events, unread, isUnread } = useNotifications();
   const BELL_ROWS = 8;
-  const [bellUnread, setBellUnread] = useState(() => new Set());
   function toggleBell() {
-    if (!bellOpen) {
-      setBellUnread(new Set(events.filter(isUnread).map((e) => e.id)));
-      if (unread > 0) markNotificationsSeen(viewer.id);
-      refreshNotifications();
-    }
+    if (!bellOpen) refreshNotifications();
     setBellOpen((o) => !o);
   }
   const openAll = () => {
@@ -211,7 +213,7 @@ function TaskProShell() {
           </button>
         </aside>
 
-        <div className="tp-main">
+        <div className="tp-main" ref={mainRef}>
           <header className="tp-topbar">
             <button type="button" className="tp-icon-btn" onClick={toggleMenu} aria-label="Toggle menu">
               <FiMenu />
@@ -240,7 +242,8 @@ function TaskProShell() {
                 <div className="tp-popover tp-bell-pop">
                   <div className="tp-pop-head">
                     <span>Notifications</span>
-                    {bellUnread.size > 0 && <em>{bellUnread.size} new</em>}
+                    {unread > 0 && <em>{unread} unread</em>}
+                    <MarkAllRead unread={unread} />
                   </div>
 
                   {events.length === 0 && (
@@ -254,7 +257,7 @@ function TaskProShell() {
                   )}
 
                   {events.slice(0, BELL_ROWS).map((e) => (
-                    <NotificationRow key={e.id} e={e} unread={bellUnread.has(e.id)} compact onOpen={() => setBellOpen(false)} />
+                    <NotificationRow key={e.id} e={e} unread={isUnread(e)} compact onOpen={() => setBellOpen(false)} />
                   ))}
 
                   {events.length > 0 && (
