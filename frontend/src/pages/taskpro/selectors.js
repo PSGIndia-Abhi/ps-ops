@@ -85,6 +85,23 @@ export function withParam(params, key, value) {
   return next;
 }
 
+/**
+ * Periods for "Completed" (the dashboard card and the Completed list), by
+ * completion date. `since(at)` is the start of the period as of time `at`
+ * (null = all time).
+ */
+export const COMPLETED_PERIODS = {
+  week: { label: "Last 7 days", since: (at) => new Date(at - 7 * 86400000) },
+  month: { label: "This month", since: (at) => { const d = new Date(at); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  d30: { label: "Last 30 days", since: (at) => new Date(at - 30 * 86400000) },
+  year: { label: "This year", since: (at) => new Date(new Date(at).getFullYear(), 0, 1) },
+  all: { label: "All time", since: () => null },
+};
+export const completedIn = (period, at = Date.now()) => {
+  const since = (COMPLETED_PERIODS[period] || COMPLETED_PERIODS.all).since(at);
+  return (t) => t.status === "COMPLETED" && (!since || (!!t.completed_at && new Date(t.completed_at) >= since));
+};
+
 /** Sentinel for "people with no department" in the department filter. */
 export const NO_DEPT = "__none__";
 

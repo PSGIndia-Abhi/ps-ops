@@ -21,7 +21,6 @@ import {
 } from "./selectors";
 import { loadPrefs, updatePrefs } from "./prefs";
 import { useIncomingRequests, useTaskStore } from "./tasksApi";
-import useNow from "./useNow";
 import { useViewer } from "./viewerContext";
 import { Avatar, CountUp, EmptyState, HelpTip, PriorityDot, Skeleton, StatusBadge } from "./ui";
 
@@ -95,7 +94,6 @@ export default function TaskDashboard() {
   const navigate = useNavigate();
   const { tasks: allTasks, ready } = useTaskStore();
   const { incoming: requests } = useIncomingRequests();
-  const now = useNow(60000);
   const [params, setParams] = useSearchParams();
 
   // Whose tasks the dashboard covers. Defaults to the viewer's own; a
@@ -136,17 +134,16 @@ export default function TaskDashboard() {
   // --- KPIs (drawn without the status filter: they ARE the status split) --
   const stats = useMemo(() => {
     const active = forStatus.filter(isActive);
-    const weekAgo = now - 7 * 86400000;
     return {
       open: forStatus.filter((t) => t.status === "OPEN").length,
       inProgress: forStatus.filter((t) => t.status === "IN_PROGRESS").length,
       paused: forStatus.filter((t) => t.status === "PAUSED").length,
       overdue: active.filter(isOverdue).length,
-      doneWeek: forStatus.filter((t) => t.status === "COMPLETED" && t.completed_at && new Date(t.completed_at).getTime() > weekAgo).length,
+      done: forStatus.filter((t) => t.status === "COMPLETED").length,
       active: tasks.filter(isActive).length,
       overdueNow: tasks.filter(isOverdue).length,
     };
-  }, [forStatus, tasks, now]);
+  }, [forStatus, tasks]);
 
   // --- chart data -------------------------------------------------------
   const statusSegments = useMemo(
@@ -294,7 +291,7 @@ export default function TaskDashboard() {
     { key: "open", label: "Open", value: stats.open, icon: FiInbox, tone: "blue", hint: "Waiting to be started", to: kpiLink(scopePage, { status: "OPEN" }) },
     { key: "prog", label: "In progress", value: stats.inProgress, icon: FiPlayCircle, tone: "orange", hint: stats.paused ? `Being worked on · ${stats.paused} paused` : "Being worked on now", to: kpiLink(scopePage, { status: "IN_PROGRESS" }) },
     { key: "late", label: "Overdue", value: stats.overdue, icon: FiAlertCircle, tone: "red", hint: "Needs attention", to: kpiLink("overdue") },
-    { key: "done", label: "Completed", value: stats.doneWeek, icon: FiCheckCircle, tone: "green", hint: "In the last 7 days", to: kpiLink("completed") },
+    { key: "done", label: "Completed", value: stats.done, icon: FiCheckCircle, tone: "green", hint: "All time", to: kpiLink("completed") },
   ];
 
   // --- the chart cards ---------------------------------------------------
@@ -491,14 +488,16 @@ export default function TaskDashboard() {
 
       <div className="tp-kpis">
         {kpis.map((k, i) => (
-          <button key={k.key} type="button" className={`tp-kpi ${k.tone}`} style={{ "--i": i }} onClick={() => navigate(k.to)} title={`Open ${k.label.toLowerCase()} tasks`}>
+          <div key={k.key} className={`tp-kpi ${k.tone}`} style={{ "--i": i }}>
+            {/* the whole card opens its list */}
+            <button type="button" className="tp-kpi-hit" onClick={() => navigate(k.to)} aria-label={`Open ${k.label.toLowerCase()} tasks`} />
             <span className="tp-kpi-icon">
               <k.icon />
             </span>
             <span className="tp-kpi-num">{ready ? <CountUp value={k.value} /> : <Skeleton width={44} height={30} />}</span>
             <span className="tp-kpi-label">{k.label}</span>
             <small>{k.hint}</small>
-          </button>
+          </div>
         ))}
       </div>
 

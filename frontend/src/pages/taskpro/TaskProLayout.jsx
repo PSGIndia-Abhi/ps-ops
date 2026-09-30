@@ -181,7 +181,7 @@ function TaskProShell() {
               <FiCheckSquare />
             </span>
             <span className="tp-brand-text">
-              <strong>TaskPro</strong>
+              <strong>BestServe</strong>
               <small>Task Management</small>
             </span>
           </div>
