@@ -17,7 +17,7 @@ import type { TeamMember, WorkTask } from './types';
  * later feed events in through the same `ingest` path in TasksContext.
  */
 
-export type TaskNotificationKind = 'created' | 'completed';
+export type TaskNotificationKind = 'created' | 'completed' | 'started';
 
 export interface TaskNotification {
   key: string;
@@ -26,6 +26,8 @@ export interface TaskNotification {
   title: string;
   taskTitle: string;
   detail: string;
+  /** Who it came from, when known (assigner / person who started or finished it). */
+  by?: string | null;
   at: string;
   read: boolean;
 }
@@ -72,14 +74,17 @@ export function buildNotification(task: WorkTask, kind: TaskNotificationKind, by
     key: eventKey(task.id, kind),
     kind,
     taskId: task.id,
-    title: kind === 'created' ? 'New Task Created' : 'Task Completed',
+    title: kind === 'created' ? 'New Task Created' : kind === 'started' ? 'Task Started' : 'Task Completed',
     taskTitle: task.title,
     detail:
       kind === 'created'
         ? `Due: ${dueLabel(task.due_date, task.due_time)}`
-        : byName
-          ? `Completed by ${byName}.`
-          : 'has been completed successfully.',
+        : kind === 'started'
+          ? `Started by ${byName || task.assigned_to_name || 'the assignee'}.`
+          : byName
+            ? `Completed by ${byName}.`
+            : 'has been completed successfully.',
+    by: kind === 'created' ? task.created_by_name : byName ?? null,
     at: new Date().toISOString(),
     read: false,
   };
@@ -116,6 +121,8 @@ export function detectEvents(
 
     if (prev === undefined) {
       if (isCreatedForMe(x, me) && isActive(x)) events.push(buildNotification(x, 'created'));
+    } else if (prev === 'OPEN' && x.status === 'IN_PROGRESS' && x.started_by !== me && (x.created_by === me || directIds.has(x.assigned_to))) {
+      events.push(buildNotification(x, 'started', x.assigned_to_name));
     } else if (prev !== 'COMPLETED' && x.status === 'COMPLETED' && isCompletionForMe(x, me, directIds)) {
       const by = x.completed_by === x.assigned_to ? x.assigned_to_name : null;
       events.push(buildNotification(x, 'completed', by));

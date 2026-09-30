@@ -114,15 +114,36 @@ export function dueInfo(t: Pick<WorkTask, 'due_date' | 'status'>): { text: strin
   return { text: `Due in ${days} days`, tone: 'ok' };
 }
 
-export type ListMode = 'my' | 'team' | 'all' | 'overdue' | 'upcoming' | 'completed';
+export type ListMode =
+  | 'my'
+  | 'team'
+  | 'all'
+  | 'today'
+  | 'overdue'
+  | 'upcoming'
+  | 'completed'
+  | 'progress'
+  | 'high'
+  | 'delegated'
+  | 'recurring'
+  | 'tomorrow';
 
 export const LIST_MODES: Record<ListMode, { label: string; match: (t: WorkTask, me: number) => boolean }> = {
   my: { label: 'My Tasks', match: (t, me) => t.assigned_to === me && isActive(t) },
   team: { label: 'Team', match: (t, me) => t.assigned_to !== me && isActive(t) },
   all: { label: 'All', match: () => true },
+  // Only the viewer's own work (assigned to them) - not their team's, not tasks they created for others.
+  today: { label: 'Today', match: (t, me) => t.assigned_to === me && t.due_date === todayStr() && t.status !== 'CANCELLED' },
   overdue: { label: 'Overdue', match: (t) => isOverdue(t) },
   upcoming: { label: 'Upcoming', match: (t) => t.status === 'OPEN' && !!t.due_date && !isOverdue(t) },
   completed: { label: 'Completed', match: (t) => t.status === 'COMPLETED' },
+  // Reached from Home's Quick Actions.
+  progress: { label: 'In Progress', match: (t) => t.status === 'IN_PROGRESS' },
+  high: { label: 'High Priority', match: (t) => isActive(t) && t.priority === 'HIGH' },
+  delegated: { label: 'Assigned by Me', match: (t, me) => t.created_by === me && t.assigned_to !== me && isActive(t) },
+  recurring: { label: 'Recurring', match: (t) => !!t.series_id && isActive(t) },
+  // Reached from Notifications' "Due tomorrow".
+  tomorrow: { label: 'Tomorrow', match: (t) => isActive(t) && t.due_date === addDays(todayStr(), 1) },
 };
 
 /** Newest first - a freshly created/assigned task shows at the top. */

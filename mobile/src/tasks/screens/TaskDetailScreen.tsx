@@ -8,12 +8,11 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useNavigation,
   useRoute,
@@ -31,23 +30,30 @@ import {
   pick,
 } from '@react-native-documents/picker';
 import {
+  AlertCircleIcon,
   CalendarIcon,
   CameraIcon,
+  CheckCircleIcon,
   ClockIcon,
   CloseIcon,
   DocumentIcon,
   GalleryIcon,
-  SendIcon,
+  PersonIcon,
+  PlayIcon,
+  PlusIcon,
   TagIcon,
 } from '../../components/icons';
 import { getToken } from '../../auth/tokenStorage';
 import { API_BASE_URL } from '../../config/env';
+import { useCrmStyles, type CrmTheme } from '../../crm/theme';
+import { CrmEmptyState } from '../../crm/ui/CrmScreen';
+import { PrimaryButton } from '../../crm/ui/PrimaryButton';
+import { StatusBadge } from '../../crm/ui/StatusBadge';
+import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import {
-  dueInfo,
   fmtDateShort,
   fmtDateTime,
-  fmtTime,
   fmtTimestamp,
   formatBytes,
   isFinished,
@@ -57,39 +63,30 @@ import {
 } from '../format';
 import type { TaskStackParamList } from '../navigation';
 import { errorMessage, useTasks } from '../TasksContext';
-import { cardShadow, font, radius, STATUS_META, t, TONE_COLOR } from '../theme';
+import { STATE_META, taskState } from '../theme';
 import type {
   TaskAttachment,
   TaskComment,
   TaskHistoryEntry,
   TaskSeries,
-  TeamMember,
   WorkTask,
 } from '../types';
-import { Backdrop } from '../ui/Backdrop';
 import {
   Avatar,
-  CircleButton,
-  EmptyBlock,
-  PrimaryButton,
-  PriorityTag,
-  StatusPill,
-} from '../ui/primitives';
+  Card,
+  InfoRow,
+  inputStyle,
+  PriorityPill,
+  ScreenHeader,
+  TaskStatePill,
+  TaskSummaryCard,
+} from '../ui/parts';
+import { ActionSheet, Sheet, type SheetAction } from '../ui/sheets';
 import {
-  ActionSheet,
-  DateSheet,
-  PeopleSheet,
-  Sheet,
-  TimeSheet,
-  type SheetAction,
-} from '../ui/sheets';
-import {
-  ArrowLeftIcon,
   BanIcon,
   DotsIcon,
   EditIcon,
   HistoryIcon,
-  MessageIcon,
   PaperclipIcon,
   RepeatIcon,
   SkipIcon,
@@ -97,19 +94,13 @@ import {
   TrashIcon,
 } from '../ui/taskIcons';
 
-type Tab = 'comments' | 'files' | 'history';
+type Tab = 'details' | 'updates' | 'files' | 'history';
 type Dialog =
   | null
   | 'menu'
-  | 'start'
-  | 'complete'
+  | 'update'
   | 'cancel'
   | 'skip'
-  | 'reassign'
-  | 'reassignConfirm'
-  | 'reschedule'
-  | 'rsDate'
-  | 'rsTime'
   | 'series'
   | 'upload';
 
@@ -124,15 +115,195 @@ const HISTORY_LABEL: Record<string, string> = {
   SKIP: 'Skipped',
 };
 
+const factory = (t: CrmTheme) => ({
+  screen: { flex: 1, backgroundColor: t.background },
+  flex: { flex: 1 },
+  center: {
+    flex: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    padding: spacing.lg,
+  },
+  content: {
+    padding: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xxl,
+  },
+  tabs: {
+    flexDirection: 'row' as const,
+    borderBottomWidth: 1,
+    borderBottomColor: t.border,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+  },
+  tab: { flex: 1, alignItems: 'center' as const, paddingVertical: spacing.sm },
+  tabOn: {
+    borderBottomWidth: 2.5,
+    borderBottomColor: t.primary,
+    marginBottom: -1,
+  },
+  tabText: { ...typography.bodyMedium, color: t.textMuted },
+  tabTextOn: { color: t.primary },
+  infoText: { ...typography.bodyMedium, color: t.textPrimary },
+  link: { ...typography.bodyMedium, color: t.primary },
+  person: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+  },
+  descBox: {
+    backgroundColor: t.surfaceAlt,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  descTitle: {
+    ...typography.bodyMedium,
+    color: t.textPrimary,
+    marginBottom: spacing.xxs,
+  },
+  descText: { ...typography.body, color: t.textSecondary },
+  sectionCard: { marginBottom: spacing.md },
+  cardHead: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  cardTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  progress: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    backgroundColor: t.successBg,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  progressTitle: { ...typography.bodyMedium, color: t.successText },
+  progressSub: { ...typography.caption, color: t.successText },
+  update: {
+    flexDirection: 'row' as const,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  updateHead: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+  },
+  updateName: { ...typography.bodyMedium, color: t.textPrimary },
+  updateTime: { ...typography.caption, color: t.textMuted },
+  updateText: { ...typography.body, color: t.textSecondary, marginTop: 2 },
+  divider: { height: 1, backgroundColor: t.border, marginVertical: spacing.xs },
+  muted: {
+    ...typography.body,
+    color: t.textMuted,
+    textAlign: 'center' as const,
+    paddingVertical: spacing.md,
+  },
+  fileRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  fileMain: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+  },
+  thumb: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.sm,
+    backgroundColor: t.primarySoftBg,
+  },
+  fileIcon: {
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  fileName: { ...typography.bodyMedium, color: t.textPrimary },
+  fileMeta: { ...typography.caption, color: t.textMuted },
+  hRow: { flexDirection: 'row' as const, gap: spacing.sm },
+  hRail: { width: 14, alignItems: 'center' as const },
+  hDot: { width: 12, height: 12, borderRadius: 6, marginTop: 4 },
+  hLine: { width: 2, flex: 1, backgroundColor: t.border, marginTop: 4 },
+  hBody: { flex: 1, paddingBottom: spacing.md },
+  hTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  hNote: { ...typography.body, color: t.textSecondary, marginTop: 2 },
+  hTime: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  footer: {
+    backgroundColor: t.surface,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  actions: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-around' as const,
+    paddingVertical: spacing.sm,
+  },
+  action: {
+    alignItems: 'center' as const,
+    gap: 4,
+    minWidth: 64,
+    paddingVertical: 4,
+  },
+  actionText: { ...typography.caption, color: t.textSecondary },
+  input: { ...inputStyle(t), marginBottom: spacing.sm },
+  multi: {
+    minHeight: 90,
+    paddingTop: spacing.sm,
+    textAlignVertical: 'top' as const,
+  },
+  sheetText: {
+    ...typography.body,
+    color: t.textSecondary,
+    marginBottom: spacing.md,
+  },
+  sheetButtons: { flexDirection: 'row' as const, gap: spacing.sm },
+  seriesHead: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  occRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingVertical: spacing.xs,
+  },
+  previewWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center' as const,
+  },
+  previewImg: { width: '100%' as const, height: '80%' as const },
+  previewClose: {
+    position: 'absolute' as const,
+    right: spacing.lg,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: t.surface,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+});
+
 export function TaskDetailScreen() {
-  const insets = useSafeAreaInsets();
   const navigation =
     useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
   const { taskId } =
     useRoute<RouteProp<TaskStackParamList, 'TaskDetail'>>().params;
+  const { styles, theme } = useCrmStyles(factory);
   const {
     viewer,
     assignable,
+    tasks,
     patch,
     markCancelled,
     showToast,
@@ -145,19 +316,13 @@ export function TaskDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [tab, setTab] = useState<Tab>('comments');
-
+  const [tab, setTab] = useState<Tab>('details');
   const [comments, setComments] = useState<TaskComment[] | null>(null);
   const [files, setFiles] = useState<TaskAttachment[] | null>(null);
   const [history, setHistory] = useState<TaskHistoryEntry[] | null>(null);
-
-  const [comment, setComment] = useState('');
   const [note, setNote] = useState('');
   const [nextAction, setNextAction] = useState('');
-  const [dialogText, setDialogText] = useState('');
-  const [reassignTo, setReassignTo] = useState<TeamMember | null>(null);
-  const [rsDate, setRsDate] = useState(todayStr());
-  const [rsTime, setRsTime] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<TaskAttachment | null>(null);
   const [authHeader, setAuthHeader] = useState<string | null>(null);
 
@@ -171,7 +336,6 @@ export function TaskDetailScreen() {
       setLoadError(errorMessage(err));
     }
   }, [taskId, patch]);
-
   const loadComments = useCallback(
     () =>
       api
@@ -205,13 +369,25 @@ export function TaskDetailScreen() {
     getToken().then(tok => tok && setAuthHeader(`Bearer ${tok}`));
   }, [load, loadComments, loadFiles, loadHistory]);
 
+  // Coming back from Reassign / Reschedule / Complete: those screens patch the
+  // shared list, so pick up the newer copy (and its new history) from there.
+  const listCopy = tasks.find(x => x.id === taskId);
+  useEffect(() => {
+    if (listCopy && task && listCopy.updated_at !== task.updated_at) {
+      setTask({ ...task, ...listCopy });
+      loadHistory();
+      loadFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listCopy]);
+
   async function onRefresh() {
     setRefreshing(true);
     await Promise.all([load(), loadComments(), loadFiles(), loadHistory()]);
     setRefreshing(false);
   }
 
-  /** Runs one action; the server's answer (or refusal) is what the user sees. `success` null = the action shows its own notification. */
+  /** Runs one action; the server's answer (or refusal) is what the user sees. */
   async function run(
     fn: () => Promise<WorkTask | void>,
     success: string | null,
@@ -224,7 +400,7 @@ export function TaskDetailScreen() {
         patch(updated);
       }
       setDialog(null);
-      setDialogText('');
+      setReason('');
       if (success) showToast(success);
       loadHistory();
       return true;
@@ -238,24 +414,25 @@ export function TaskDetailScreen() {
 
   if (!task) {
     return (
-      <View style={[styles.flex, styles.center]}>
-        <Backdrop />
-        {loadError ? (
-          <View style={styles.pad}>
-            <EmptyBlock
+      <SafeAreaView style={styles.screen} edges={['top']}>
+        <ScreenHeader title="Task Details" onBack={() => navigation.goBack()} />
+        <View style={styles.center}>
+          {loadError ? (
+            <CrmEmptyState
               title="Task not found"
-              text={`${loadError}\nIt may have been removed, or you may not have access.`}
+              subtitle={`${loadError}\nIt may have been removed, or you may not have access.`}
+              action={
+                <PrimaryButton
+                  label="Go back"
+                  onPress={() => navigation.goBack()}
+                />
+              }
             />
-            <PrimaryButton
-              label="Go back"
-              onPress={() => navigation.goBack()}
-              style={styles.mtLg}
-            />
-          </View>
-        ) : (
-          <ActivityIndicator color={t.ink} size="large" />
-        )}
-      </View>
+          ) : (
+            <ActivityIndicator color={theme.primary} size="large" />
+          )}
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -269,54 +446,22 @@ export function TaskDetailScreen() {
   const canEditTerms = !isPlainAssignee && !finished;
   const canReassign =
     !finished && assignable.some(p => p.id !== task.assigned_to);
-  const due = dueInfo(task);
-  const status = STATUS_META[task.status];
+  const state = taskState(task);
+  const explainFinished = (what: string) =>
+    showToast(
+      `This task is ${
+        task.status === 'COMPLETED' ? 'completed' : 'cancelled'
+      }, so it can't be ${what}.`,
+      'validation',
+    );
 
   const menu: SheetAction[] = [
-    ...(canEditTerms
-      ? [
-          {
-            key: 'edit',
-            label: 'Edit task',
-            icon: <EditIcon size={18} color={t.ink} />,
-            onPress: () => navigation.navigate('NewTask', { editId: task.id }),
-          },
-        ]
-      : []),
-    ...(canReassign
-      ? [
-          {
-            key: 'reassign',
-            label: 'Reassign',
-            icon: <SwapIcon size={18} color={t.ink} />,
-            onPress: () => setDialog('reassign'),
-          },
-        ]
-      : []),
-    ...(canEditTerms
-      ? [
-          {
-            key: 'reschedule',
-            label: 'Reschedule',
-            icon: <CalendarIcon size={18} color={t.ink} />,
-            onPress: () => {
-              setRsDate(
-                task.due_date && task.due_date >= todayStr()
-                  ? task.due_date
-                  : todayStr(),
-              );
-              setRsTime(task.due_time ? task.due_time.slice(0, 5) : null);
-              setDialog('reschedule');
-            },
-          },
-        ]
-      : []),
     ...(task.series_id
       ? [
           {
             key: 'series',
             label: 'Recurring schedule',
-            icon: <RepeatIcon size={18} color={t.ink} />,
+            icon: <RepeatIcon size={18} color={theme.primary} />,
             onPress: () => setDialog('series'),
           },
         ]
@@ -324,7 +469,7 @@ export function TaskDetailScreen() {
     {
       key: 'dup',
       label: 'Duplicate',
-      icon: <PaperclipIcon size={18} color={t.ink} />,
+      icon: <PaperclipIcon size={18} color={theme.primary} />,
       onPress: () =>
         run(async () => {
           await api.createTask({
@@ -339,12 +484,18 @@ export function TaskDetailScreen() {
           await refreshList();
         }, 'Task duplicated'),
     },
+    {
+      key: 'files',
+      label: 'Attach a file',
+      icon: <PaperclipIcon size={18} color={theme.primary} />,
+      onPress: () => setDialog('upload'),
+    },
     ...(task.series_id && canEditTerms
       ? [
           {
             key: 'skip',
             label: 'Skip this occurrence',
-            icon: <SkipIcon size={18} color={t.danger} />,
+            icon: <SkipIcon size={18} color={theme.dangerText} />,
             danger: true,
             onPress: () => setDialog('skip'),
           },
@@ -355,7 +506,7 @@ export function TaskDetailScreen() {
           {
             key: 'cancel',
             label: 'Cancel task',
-            icon: <BanIcon size={18} color={t.danger} />,
+            icon: <BanIcon size={18} color={theme.dangerText} />,
             danger: true,
             onPress: () => setDialog('cancel'),
           },
@@ -363,27 +514,28 @@ export function TaskDetailScreen() {
       : []),
   ];
 
-  async function postComment() {
-    const text = comment.trim();
-    if (!text) return;
-    setComment('');
-    try {
-      const c = await api.addComment(task!.id, text);
-      setComments(list => [...(list || []), c]);
-    } catch (err) {
-      setComment(text);
-      showToast(errorMessage(err), 'error');
-    }
-  }
+  const fileSource = (f: TaskAttachment) => ({
+    uri: `${API_BASE_URL}${api.attachmentViewPath(task.id, f.id)}`,
+    headers: authHeader ? { Authorization: authHeader } : undefined,
+  });
+  const isImage = (f: TaskAttachment) =>
+    (f.file_type || '').startsWith('image/');
 
   async function saveUpdate() {
-    if (!note.trim())
-      return showToast('Write what you did before saving.', 'validation');
-    const ok = await run(
-      () =>
-        api.addProgress(task!.id, note.trim(), nextAction.trim() || undefined),
-      'Update saved',
-    );
+    const text = note.trim();
+    if (!text)
+      return showToast('Write the update before saving.', 'validation');
+    // The assignee of a started task records progress (with an optional next
+    // action); anyone else who can see the task leaves a comment.
+    const asProgress = canWork && task!.status === 'IN_PROGRESS';
+    const ok = asProgress
+      ? await run(
+          () => api.addProgress(task!.id, text, nextAction.trim() || undefined),
+          'Comment added',
+        )
+      : await run(async () => {
+          await api.addComment(task!.id, text);
+        }, 'Comment added');
     if (ok) {
       setNote('');
       setNextAction('');
@@ -407,7 +559,6 @@ export function TaskDetailScreen() {
       setBusy(false);
     }
   }
-
   const fromPicker = (res: ImagePickerResponse) => {
     const a = res.assets?.[0];
     return a?.uri
@@ -418,7 +569,6 @@ export function TaskDetailScreen() {
         }
       : null;
   };
-
   async function pickCamera() {
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(
@@ -464,7 +614,6 @@ export function TaskDetailScreen() {
         showToast('Could not open the file picker.', 'error');
     }
   }
-
   async function removeFile(f: TaskAttachment) {
     try {
       await api.deleteAttachment(task!.id, f.id);
@@ -475,198 +624,35 @@ export function TaskDetailScreen() {
     }
   }
 
-  const isImage = (f: TaskAttachment) =>
-    (f.file_type || '').startsWith('image/');
-  const fileSource = (f: TaskAttachment) => ({
-    uri: `${API_BASE_URL}${api.attachmentViewPath(task.id, f.id)}`,
-    headers: authHeader ? { Authorization: authHeader } : undefined,
-  });
+  const newestFirst = [...(comments || [])].reverse();
 
   return (
-    <View style={styles.flex}>
-      <Backdrop />
-      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <CircleButton
-          label="Back"
-          size={56}
-          onPress={() => navigation.goBack()}
-        >
-          <ArrowLeftIcon size={22} color={t.ink} />
-        </CircleButton>
-        <Text style={styles.headerTitle}>Task Details</Text>
-        <CircleButton
-          label="Task actions"
-          size={56}
-          onPress={() => setDialog('menu')}
-        >
-          <DotsIcon size={20} color={t.ink} />
-        </CircleButton>
-      </View>
+    <SafeAreaView style={styles.screen} edges={['top']}>
+      <ScreenHeader title="Task Details" onBack={() => navigation.goBack()} />
 
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: insets.bottom + (canWork ? 120 : 40) },
-        ]}
+        contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
         }
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.hero}>
-          <View style={styles.heroTop}>
-            <PriorityTag priority={task.priority} />
-            <StatusPill status={task.status} small />
-          </View>
-          <Text style={styles.title}>{task.title}</Text>
-          {!!task.description && (
-            <Text style={styles.desc}>{task.description}</Text>
-          )}
-          <View style={styles.dueRow}>
-            <View style={styles.dueBox}>
-              <CalendarIcon size={18} color={t.ink} />
-              <Text style={styles.dueText}>
-                {task.due_date ? fmtDateShort(task.due_date) : 'No date'}
-              </Text>
-            </View>
-            <View style={styles.dueBox}>
-              <ClockIcon size={18} color={t.ink} />
-              <Text style={styles.dueText}>
-                {task.due_time ? fmtTime(task.due_time) : 'Any time'}
-              </Text>
-            </View>
-          </View>
-          <Text style={[styles.dueInfo, { color: TONE_COLOR[due.tone] }]}>
-            {due.text}
-          </Text>
-          <View style={styles.track}>
-            <View
-              style={[
-                styles.trackFill,
-                {
-                  width:
-                    task.status === 'COMPLETED'
-                      ? '100%'
-                      : task.status === 'IN_PROGRESS'
-                      ? '55%'
-                      : task.status === 'OPEN'
-                      ? '8%'
-                      : '0%',
-                  backgroundColor: status.color,
-                },
-              ]}
-            />
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <InfoRow label="Assigned to">
-            <View style={styles.person}>
-              <Avatar
-                name={task.assigned_to_name}
-                id={task.assigned_to}
-                size={30}
-              />
-              <Text style={styles.infoValue}>
-                {task.assigned_to_name}
-                {task.assigned_to === viewer.id ? ' (you)' : ''}
-              </Text>
-            </View>
-          </InfoRow>
-          <InfoRow label="Created by">
-            <Text style={styles.infoValue}>
-              {task.created_by_name}
-              {task.created_by === viewer.id ? ' (you)' : ''}
-            </Text>
-          </InfoRow>
-          {!!task.task_type && (
-            <InfoRow label="Type">
-              <View style={styles.person}>
-                <TagIcon size={16} color={t.textSecondary} />
-                <Text style={styles.infoValue}>{task.task_type}</Text>
-              </View>
-            </InfoRow>
-          )}
-          <InfoRow label="Schedule">
-            {task.series_id ? (
-              <Pressable
-                onPress={() => setDialog('series')}
-                style={styles.person}
-              >
-                <RepeatIcon size={16} color={t.ink} />
-                <Text style={[styles.infoValue, styles.link]}>Recurring</Text>
-              </Pressable>
-            ) : (
-              <Text style={styles.infoValue}>One time</Text>
-            )}
-          </InfoRow>
-          {!!task.next_action && (
-            <InfoRow label="Next action">
-              <Text style={styles.infoValue}>
-                {task.next_action}
-                {task.next_action_date
-                  ? ` · ${fmtDateShort(task.next_action_date)}`
-                  : ''}
-              </Text>
-            </InfoRow>
-          )}
-          {!!task.started_at && (
-            <InfoRow label="Started">
-              <Text style={styles.infoValue}>
-                {fmtTimestamp(task.started_at)}
-              </Text>
-            </InfoRow>
-          )}
-          {!!task.completed_at && (
-            <InfoRow label="Completed">
-              <Text style={styles.infoValue}>
-                {fmtTimestamp(task.completed_at)}
-              </Text>
-            </InfoRow>
-          )}
-          {!!task.completion_note && (
-            <InfoRow label="Completion note" last>
-              <Text style={styles.infoValue}>{task.completion_note}</Text>
-            </InfoRow>
-          )}
-        </View>
-
-        {canWork && task.status === 'IN_PROGRESS' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Work update</Text>
-            <TextInput
-              value={note}
-              onChangeText={setNote}
-              placeholder="What did you do? (required)"
-              placeholderTextColor={t.textMuted}
-              style={[styles.input, styles.inputMulti]}
-              multiline
-            />
-            <TextInput
-              value={nextAction}
-              onChangeText={setNextAction}
-              placeholder="Next action (optional)"
-              placeholderTextColor={t.textMuted}
-              style={styles.input}
-              maxLength={255}
-            />
-            <PrimaryButton
-              label="Save update"
-              tone="lime"
-              onPress={saveUpdate}
-              busy={busy}
-            />
-          </View>
-        )}
+        <TaskSummaryCard task={task} right={<TaskStatePill task={task} />} />
 
         <View style={styles.tabs}>
           {(
             [
-              ['comments', 'Comments', MessageIcon, comments?.length],
-              ['files', 'Files', PaperclipIcon, files?.length],
-              ['history', 'History', HistoryIcon, undefined],
+              ['details', 'Details'],
+              ['updates', 'Comments'],
+              ['files', `Files${files?.length ? ` ${files.length}` : ''}`],
+              ['history', 'History'],
             ] as const
-          ).map(([key, label, Icon, n]) => {
+          ).map(([key, label]) => {
             const on = tab === key;
             return (
               <Pressable
@@ -676,77 +662,189 @@ export function TaskDetailScreen() {
                 accessibilityRole="tab"
                 accessibilityState={{ selected: on }}
               >
-                <Icon size={16} color={on ? t.onInk : t.ink} />
-                <Text style={[styles.tabText, on && { color: t.onInk }]}>
+                <Text style={[styles.tabText, on && styles.tabTextOn]}>
                   {label}
-                  {n ? ` ${n}` : ''}
                 </Text>
               </Pressable>
             );
           })}
         </View>
 
-        {tab === 'comments' && (
-          <View style={styles.card}>
-            {comments === null && <ActivityIndicator color={t.ink} />}
-            {comments?.length === 0 && (
-              <Text style={styles.muted}>
-                No comments yet. Start the conversation.
-              </Text>
+        {tab === 'details' && (
+          <Card>
+            <InfoRow
+              icon={<AlertCircleIcon size={18} color={theme.textMuted} />}
+              label="Status"
+            >
+              <StatusBadge
+                label={STATE_META[state].label}
+                tone={STATE_META[state].tone}
+                dot={false}
+              />
+            </InfoRow>
+            <InfoRow
+              icon={<AlertCircleIcon size={18} color={theme.textMuted} />}
+              label="Priority"
+            >
+              <PriorityPill priority={task.priority} />
+            </InfoRow>
+            {!!task.task_type && (
+              <InfoRow
+                icon={<TagIcon size={18} color={theme.textMuted} />}
+                label="Task Type"
+              >
+                {task.task_type}
+              </InfoRow>
             )}
-            {comments?.map(c => {
-              const mine = c.user_id === viewer.id;
-              return (
-                <View
-                  key={c.id}
-                  style={[styles.comment, mine && styles.commentMine]}
-                >
-                  {!mine && (
-                    <Avatar name={c.user_name} id={c.user_id} size={30} />
+            <InfoRow
+              icon={<PersonIcon size={18} color={theme.textMuted} />}
+              label="Assigned To"
+            >
+              <View style={styles.person}>
+                <Avatar
+                  name={task.assigned_to_name}
+                  id={task.assigned_to}
+                  size={26}
+                />
+                <Text style={styles.infoText} numberOfLines={1}>
+                  {task.assigned_to_name}
+                  {task.assigned_to === viewer.id ? ' (you)' : ''}
+                </Text>
+              </View>
+            </InfoRow>
+            <InfoRow
+              icon={<CalendarIcon size={18} color={theme.textMuted} />}
+              label="Due Date & Time"
+            >
+              {fmtDateTime(task.due_date, task.due_time)}
+            </InfoRow>
+            <InfoRow
+              icon={<PersonIcon size={18} color={theme.textMuted} />}
+              label="Created By"
+            >
+              {`${task.created_by_name ?? ''}${
+                task.created_by === viewer.id ? ' (you)' : ''
+              }`}
+            </InfoRow>
+            <InfoRow
+              icon={<ClockIcon size={18} color={theme.textMuted} />}
+              label="Created On"
+            >
+              {fmtTimestamp(task.created_at)}
+            </InfoRow>
+            <InfoRow
+              icon={<RepeatIcon size={18} color={theme.textMuted} />}
+              label="Schedule"
+            >
+              {task.series_id ? (
+                <Pressable onPress={() => setDialog('series')}>
+                  <Text style={styles.link}>Recurring</Text>
+                </Pressable>
+              ) : (
+                'One time'
+              )}
+            </InfoRow>
+            {!!task.completed_at && (
+              <InfoRow
+                icon={<CheckCircleIcon size={18} color={theme.textMuted} />}
+                label="Completed"
+              >
+                {fmtTimestamp(task.completed_at)}
+              </InfoRow>
+            )}
+            {!!(task.description || task.completion_note) && (
+              <View style={styles.descBox}>
+                {!!task.description && (
+                  <>
+                    <Text style={styles.descTitle}>Description</Text>
+                    <Text style={styles.descText}>{task.description}</Text>
+                  </>
+                )}
+                {!!task.completion_note && (
+                  <>
+                    <Text
+                      style={[
+                        styles.descTitle,
+                        !!task.description && { marginTop: spacing.sm },
+                      ]}
+                    >
+                      Completion note
+                    </Text>
+                    <Text style={styles.descText}>{task.completion_note}</Text>
+                  </>
+                )}
+              </View>
+            )}
+          </Card>
+        )}
+
+        {tab === 'updates' && (
+          <>
+            {task.status === 'IN_PROGRESS' && (
+              <View style={styles.progress}>
+                <PlayIcon size={20} color={theme.success} />
+                <View style={styles.flex}>
+                  <Text style={styles.progressTitle}>Task in Progress</Text>
+                  {!!task.started_at && (
+                    <Text style={styles.progressSub}>
+                      Started at {fmtTimestamp(task.started_at)}
+                    </Text>
                   )}
-                  <View style={[styles.bubble, mine && styles.bubbleMine]}>
-                    {!mine && (
-                      <Text style={styles.bubbleName}>{c.user_name}</Text>
-                    )}
-                    <Text
-                      style={[styles.bubbleText, mine && { color: t.onInk }]}
-                    >
-                      {c.comment}
-                    </Text>
-                    <Text
-                      style={[styles.bubbleTime, mine && { color: '#B8B8BE' }]}
-                    >
-                      {timeAgo(c.created_at)}
-                    </Text>
+                </View>
+              </View>
+            )}
+            {!!task.next_action && (
+              <Card style={styles.sectionCard}>
+                <View style={styles.cardHead}>
+                  <ClockIcon size={16} color={theme.primary} />
+                  <Text style={styles.cardTitle}>Next Action</Text>
+                </View>
+                <Text style={styles.descText}>
+                  {task.next_action}
+                  {task.next_action_date
+                    ? ` · ${fmtDateShort(task.next_action_date)}`
+                    : ''}
+                </Text>
+              </Card>
+            )}
+            <Card style={styles.sectionCard}>
+              <View style={styles.cardHead}>
+                <HistoryIcon size={16} color={theme.primary} />
+                <Text style={styles.cardTitle}>Comments</Text>
+              </View>
+              {comments === null && <ActivityIndicator color={theme.primary} />}
+              {comments?.length === 0 && (
+                <Text style={styles.muted}>No comments yet.</Text>
+              )}
+              {newestFirst.map((c, i) => (
+                <View key={c.id}>
+                  {i > 0 && <View style={styles.divider} />}
+                  <View style={styles.update}>
+                    <Avatar name={c.user_name} id={c.user_id} size={32} />
+                    <View style={styles.flex}>
+                      <View style={styles.updateHead}>
+                        <Text style={styles.updateName}>{c.user_name}</Text>
+                        <Text style={styles.updateTime}>
+                          {timeAgo(c.created_at)}
+                        </Text>
+                      </View>
+                      <Text style={styles.updateText}>{c.comment}</Text>
+                    </View>
                   </View>
                 </View>
-              );
-            })}
-            <View style={styles.composer}>
-              <TextInput
-                value={comment}
-                onChangeText={setComment}
-                placeholder="Write a comment"
-                placeholderTextColor={t.textMuted}
-                style={styles.composerInput}
-                multiline
-                maxLength={5000}
-              />
-              <CircleButton
-                dark
-                label="Send comment"
-                size={46}
-                onPress={postComment}
-              >
-                <SendIcon size={18} color={t.onInk} />
-              </CircleButton>
-            </View>
-          </View>
+              ))}
+            </Card>
+            <PrimaryButton
+              label="Add Comment"
+              icon={<PlusIcon size={18} color={theme.textOnPrimary} />}
+              onPress={() => setDialog('update')}
+            />
+          </>
         )}
 
         {tab === 'files' && (
-          <View style={styles.card}>
-            {files === null && <ActivityIndicator color={t.ink} />}
+          <Card>
+            {files === null && <ActivityIndicator color={theme.primary} />}
             {files?.length === 0 && (
               <Text style={styles.muted}>No files attached.</Text>
             )}
@@ -767,7 +865,7 @@ export function TaskDetailScreen() {
                     <Image source={fileSource(f)} style={styles.thumb} />
                   ) : (
                     <View style={[styles.thumb, styles.fileIcon]}>
-                      <DocumentIcon size={22} color={t.ink} />
+                      <DocumentIcon size={22} color={theme.primary} />
                     </View>
                   )}
                   <View style={styles.flex}>
@@ -789,39 +887,43 @@ export function TaskDetailScreen() {
                   onPress={() => removeFile(f)}
                   hitSlop={10}
                   accessibilityLabel={`Remove ${f.file_name}`}
-                  style={styles.fileDelete}
                 >
-                  <TrashIcon size={18} color={t.textMuted} />
+                  <TrashIcon size={18} color={theme.textMuted} />
                 </Pressable>
               </View>
             ))}
             <PrimaryButton
               label="Attach a file"
-              tone="outline"
+              variant="secondary"
               onPress={() => setDialog('upload')}
-              busy={busy}
-              style={styles.mt}
+              loading={busy}
+              style={{ marginTop: spacing.sm }}
             />
-          </View>
+          </Card>
         )}
 
         {tab === 'history' && (
-          <View style={styles.card}>
-            {history === null && <ActivityIndicator color={t.ink} />}
+          <Card>
+            {history === null && <ActivityIndicator color={theme.primary} />}
             {history?.map((h, i) => (
               <View key={h.id} style={styles.hRow}>
                 <View style={styles.hRail}>
                   <View
                     style={[
                       styles.hDot,
-                      h.to_status && {
-                        backgroundColor: STATUS_META[h.to_status].color,
+                      {
+                        backgroundColor:
+                          h.to_status === 'COMPLETED'
+                            ? theme.success
+                            : h.to_status === 'CANCELLED'
+                            ? theme.textMuted
+                            : theme.primary,
                       },
                     ]}
                   />
                   {i < history.length - 1 && <View style={styles.hLine} />}
                 </View>
-                <View style={[styles.flex, styles.hBody]}>
+                <View style={styles.hBody}>
                   <Text style={styles.hTitle}>
                     {HISTORY_LABEL[h.action] || h.action}
                     {h.changed_by_name ? ` by ${h.changed_by_name}` : ''}
@@ -831,80 +933,114 @@ export function TaskDetailScreen() {
                 </View>
               </View>
             ))}
-          </View>
+          </Card>
         )}
       </ScrollView>
 
-      {canWork && (task.status === 'OPEN' || task.status === 'IN_PROGRESS') && (
-        <View style={[styles.actionBar, { paddingBottom: insets.bottom + 14 }]}>
-          {task.status === 'OPEN' ? (
-            <PrimaryButton
-              label="Start Task"
-              onPress={() => setDialog('start')}
-              busy={busy}
-            />
-          ) : (
-            <PrimaryButton
-              label="Complete Task"
-              tone="lime"
-              onPress={() => setDialog('complete')}
-              busy={busy}
+      {/* Always shown (finished tasks keep just "More"); the header no longer has a ⋯ button. */}
+      <SafeAreaView edges={['bottom']} style={styles.footer}>
+        {canWork && task.status === 'OPEN' && (
+          <PrimaryButton
+            label="Start Task"
+            icon={<PlayIcon size={18} color={theme.textOnPrimary} />}
+            loading={busy}
+            onPress={() => run(() => api.startTask(task.id), 'Task started')}
+          />
+        )}
+        {canWork && task.status === 'IN_PROGRESS' && (
+          // One tap completes the task - no separate Complete screen.
+          <PrimaryButton
+            label="Completed"
+            icon={<CheckCircleIcon size={18} color={theme.textOnPrimary} />}
+            loading={busy}
+            onPress={() =>
+              run(async () => {
+                const done = await api.completeTask(task.id);
+                notifyLocal(done, 'completed');
+                return done;
+              }, null)
+            }
+          />
+        )}
+        <View style={styles.actions}>
+          {/* On a completed/cancelled task these stay visible but greyed
+              out - the server refuses them, so a tap just explains why. */}
+          {(canEditTerms || (finished && !isPlainAssignee)) && (
+            <ActionButton
+              icon={<EditIcon size={20} color={theme.primary} />}
+              label="Edit"
+              disabled={finished}
+              onPress={() =>
+                finished
+                  ? explainFinished('edited')
+                  : navigation.navigate('NewTask', { editId: task.id })
+              }
             />
           )}
+          {(canReassign || (finished && !isPlainAssignee)) && (
+            <ActionButton
+              icon={<SwapIcon size={20} color={theme.primary} />}
+              label="Reassign"
+              disabled={finished}
+              onPress={() =>
+                finished
+                  ? explainFinished('reassigned')
+                  : navigation.navigate('Reassign', { taskId: task.id })
+              }
+            />
+          )}
+          {(canEditTerms || (finished && !isPlainAssignee)) && (
+            <ActionButton
+              icon={<CalendarIcon size={20} color={theme.primary} />}
+              label="Reschedule"
+              disabled={finished}
+              onPress={() =>
+                finished
+                  ? explainFinished('rescheduled')
+                  : navigation.navigate('Reschedule', { taskId: task.id })
+              }
+            />
+          )}
+          <ActionButton
+            icon={<DotsIcon size={20} color={theme.primary} />}
+            label="More"
+            onPress={() => setDialog('menu')}
+          />
         </View>
-      )}
+      </SafeAreaView>
 
-      {/* ---- sheets ---- */}
       <ActionSheet
         visible={dialog === 'menu'}
         onClose={() => setDialog(null)}
-        title="Task actions"
+        title="More options"
         actions={menu}
       />
 
       <Sheet
-        visible={dialog === 'start'}
+        visible={dialog === 'update'}
         onClose={() => setDialog(null)}
-        title="Start this task?"
-      >
-        <Text style={styles.sheetText}>
-          It moves to In Progress and the start time is recorded.
-        </Text>
-        <PrimaryButton
-          label="Start now"
-          busy={busy}
-          onPress={() => run(() => api.startTask(task.id), 'Task started')}
-        />
-      </Sheet>
-
-      <Sheet
-        visible={dialog === 'complete'}
-        onClose={() => setDialog(null)}
-        title="Complete this task?"
+        title="Add Comment"
       >
         <TextInput
-          value={dialogText}
-          onChangeText={setDialogText}
-          placeholder="Completion note (optional)"
-          placeholderTextColor={t.textMuted}
-          style={[styles.input, styles.inputMulti]}
+          value={note}
+          onChangeText={setNote}
+          placeholder="Write a comment"
+          placeholderTextColor={theme.textMuted}
+          style={[styles.input, styles.multi]}
           multiline
+          maxLength={5000}
         />
-        <PrimaryButton
-          label="Mark as completed"
-          tone="lime"
-          busy={busy}
-          onPress={() =>
-            run(async () => {
-              const done = await api.completeTask(
-                task.id,
-                dialogText.trim() || undefined,
-              );
-              notifyLocal(done, 'completed');
-              return done;
-            }, null)
-          }
-        />
+        {canWork && task.status === 'IN_PROGRESS' && (
+          <TextInput
+            value={nextAction}
+            onChangeText={setNextAction}
+            placeholder="Next action (optional)"
+            placeholderTextColor={theme.textMuted}
+            style={styles.input}
+            maxLength={255}
+          />
+        )}
+        <PrimaryButton label="Save" loading={busy} onPress={saveUpdate} />
       </Sheet>
 
       <Sheet
@@ -918,15 +1054,15 @@ export function TaskDetailScreen() {
         <View style={styles.sheetButtons}>
           <PrimaryButton
             label="Keep it"
-            tone="outline"
+            variant="secondary"
             style={styles.flex}
             onPress={() => setDialog(null)}
           />
           <PrimaryButton
             label="Cancel task"
-            tone="danger"
+            variant="brand"
             style={styles.flex}
-            busy={busy}
+            loading={busy}
             onPress={() =>
               run(async () => {
                 await api.cancelTask(task.id);
@@ -948,122 +1084,24 @@ export function TaskDetailScreen() {
           stay as they are.
         </Text>
         <TextInput
-          value={dialogText}
-          onChangeText={setDialogText}
+          value={reason}
+          onChangeText={setReason}
           placeholder="Reason (optional)"
-          placeholderTextColor={t.textMuted}
+          placeholderTextColor={theme.textMuted}
           style={styles.input}
         />
         <PrimaryButton
           label="Skip occurrence"
-          tone="danger"
-          busy={busy}
+          variant="brand"
+          loading={busy}
           onPress={() =>
             run(
-              () => api.skipTask(task.id, dialogText.trim() || undefined),
+              () => api.skipTask(task.id, reason.trim() || undefined),
               'Occurrence skipped',
             )
           }
         />
       </Sheet>
-
-      <PeopleSheet
-        visible={dialog === 'reassign'}
-        onClose={() => setDialog(d => (d === 'reassign' ? null : d))}
-        people={assignable.filter(p => p.id !== task.assigned_to)}
-        selectedId={null}
-        meId={viewer.id}
-        title="Reassign to"
-        onPick={p => {
-          setReassignTo(p);
-          setTimeout(() => setDialog('reassignConfirm'), 250);
-        }}
-      />
-
-      <Sheet
-        visible={dialog === 'reassignConfirm'}
-        onClose={() => setDialog(null)}
-        title={`Reassign to ${reassignTo?.name ?? ''}?`}
-      >
-        <TextInput
-          value={dialogText}
-          onChangeText={setDialogText}
-          placeholder="Note for them (optional)"
-          placeholderTextColor={t.textMuted}
-          style={styles.input}
-        />
-        <PrimaryButton
-          label="Reassign"
-          busy={busy}
-          onPress={() =>
-            reassignTo &&
-            run(
-              () =>
-                api.reassignTask(
-                  task.id,
-                  reassignTo.id,
-                  dialogText.trim() || undefined,
-                ),
-              `Reassigned to ${reassignTo.name}`,
-            )
-          }
-        />
-      </Sheet>
-
-      <Sheet
-        visible={dialog === 'reschedule'}
-        onClose={() => setDialog(null)}
-        title="Reschedule"
-      >
-        <View style={styles.sheetButtons}>
-          <Pressable style={styles.pickBtn} onPress={() => setDialog('rsDate')}>
-            <CalendarIcon size={18} color={t.ink} />
-            <Text style={styles.pickText}>{fmtDateShort(rsDate)}</Text>
-          </Pressable>
-          <Pressable style={styles.pickBtn} onPress={() => setDialog('rsTime')}>
-            <ClockIcon size={18} color={t.ink} />
-            <Text style={styles.pickText}>
-              {rsTime ? fmtTime(rsTime) : 'Any time'}
-            </Text>
-          </Pressable>
-        </View>
-        <TextInput
-          value={dialogText}
-          onChangeText={setDialogText}
-          placeholder="Reason (optional)"
-          placeholderTextColor={t.textMuted}
-          style={styles.input}
-        />
-        <PrimaryButton
-          label="Save new date"
-          busy={busy}
-          onPress={() =>
-            run(
-              () =>
-                api.rescheduleTask(
-                  task.id,
-                  rsDate,
-                  rsTime ? `${rsTime}:00` : null,
-                  dialogText.trim() || undefined,
-                ),
-              `Moved to ${fmtDateTime(rsDate, rsTime)}`,
-            )
-          }
-        />
-      </Sheet>
-      <DateSheet
-        visible={dialog === 'rsDate'}
-        onClose={() => setDialog('reschedule')}
-        value={rsDate}
-        onPick={setRsDate}
-        minDate={todayStr()}
-      />
-      <TimeSheet
-        visible={dialog === 'rsTime'}
-        onClose={() => setDialog('reschedule')}
-        value={rsTime}
-        onPick={setRsTime}
-      />
 
       <ActionSheet
         visible={dialog === 'upload'}
@@ -1073,19 +1111,19 @@ export function TaskDetailScreen() {
           {
             key: 'cam',
             label: 'Take a photo',
-            icon: <CameraIcon size={18} color={t.ink} />,
+            icon: <CameraIcon size={18} color={theme.primary} />,
             onPress: pickCamera,
           },
           {
             key: 'gal',
             label: 'Choose from gallery',
-            icon: <GalleryIcon size={18} color={t.ink} />,
+            icon: <GalleryIcon size={18} color={theme.primary} />,
             onPress: pickGallery,
           },
           {
             key: 'doc',
             label: 'Pick a document',
-            icon: <DocumentIcon size={18} color={t.ink} />,
+            icon: <DocumentIcon size={18} color={theme.primary} />,
             onPress: pickDocument,
           },
         ]}
@@ -1108,7 +1146,7 @@ export function TaskDetailScreen() {
         onRequestClose={() => setPreview(null)}
         statusBarTranslucent
       >
-        <View style={styles.previewWrap}>
+        <SafeAreaView style={styles.previewWrap}>
           {preview && (
             <Image
               source={fileSource(preview)}
@@ -1116,34 +1154,47 @@ export function TaskDetailScreen() {
               resizeMode="contain"
             />
           )}
-          <CircleButton
-            label="Close preview"
-            size={52}
+          <Pressable
+            style={[styles.previewClose, { top: spacing.xxl }]}
             onPress={() => setPreview(null)}
-            style={[styles.previewClose, { top: insets.top + 16 }]}
+            accessibilityLabel="Close preview"
           >
-            <CloseIcon size={22} color={t.ink} />
-          </CircleButton>
-        </View>
+            <CloseIcon size={20} color={theme.textPrimary} />
+          </Pressable>
+        </SafeAreaView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
-function InfoRow({
+function ActionButton({
+  icon,
   label,
-  children,
-  last,
+  onPress,
+  disabled,
 }: {
+  icon: React.ReactNode;
   label: string;
-  children: React.ReactNode;
-  last?: boolean;
+  onPress: () => void;
+  /** Greyed out; still tappable so it can explain why it's unavailable. */
+  disabled?: boolean;
 }) {
+  const { styles } = useCrmStyles(factory);
   return (
-    <View style={[styles.infoRow, last && { borderBottomWidth: 0 }]}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <View style={styles.infoRight}>{children}</View>
-    </View>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.action,
+        disabled && { opacity: 0.35 },
+        pressed && { opacity: 0.6 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+    >
+      {icon}
+      <Text style={styles.actionText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -1160,6 +1211,7 @@ function SeriesSheet({
   allowManage: boolean;
   onChanged: () => void;
 }) {
+  const { styles, theme } = useCrmStyles(factory);
   const { showToast } = useTasks();
   const [series, setSeries] = useState<TaskSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1193,35 +1245,29 @@ function SeriesSheet({
     }
   }
 
-  const SERIES_LABEL = {
-    ACTIVE: ['Active', '#3D8B55'],
-    PAUSED: ['Paused', '#C7862B'],
-    CANCELLED: ['Stopped', '#6B7280'],
+  const LABEL = {
+    ACTIVE: ['Active', 'success'],
+    PAUSED: ['Paused', 'warning'],
+    CANCELLED: ['Stopped', 'neutral'],
   } as const;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Recurring schedule">
-      {!series && !err && <ActivityIndicator color={t.ink} />}
+      {!series && !err && <ActivityIndicator color={theme.primary} />}
       {err && <Text style={styles.sheetText}>{err}</Text>}
       {series && (
-        <ScrollView style={styles.seriesScroll}>
+        <ScrollView style={{ maxHeight: 520 }}>
           <View style={styles.seriesHead}>
             <View style={styles.flex}>
-              <Text style={styles.seriesTitle}>{series.title}</Text>
-              <Text style={styles.seriesRule}>
+              <Text style={styles.cardTitle}>{series.title}</Text>
+              <Text style={styles.fileMeta}>
                 {recurrenceSummary(series.recurrence)}
               </Text>
             </View>
-            <View
-              style={[
-                styles.seriesBadge,
-                { backgroundColor: SERIES_LABEL[series.status][1] },
-              ]}
-            >
-              <Text style={styles.seriesBadgeText}>
-                {SERIES_LABEL[series.status][0]}
-              </Text>
-            </View>
+            <StatusBadge
+              label={LABEL[series.status][0]}
+              tone={LABEL[series.status][1]}
+            />
           </View>
           {series.status === 'PAUSED' && series.pause_from && (
             <Text style={styles.sheetText}>
@@ -1240,20 +1286,36 @@ function SeriesSheet({
           <Text style={styles.cardTitle}>Recent occurrences</Text>
           {series.occurrences.slice(0, 6).map(o => (
             <View key={o.id} style={styles.occRow}>
-              <Text style={styles.occDate}>
+              <Text style={styles.descText}>
                 {fmtDateTime(o.due_date, o.due_time)}
               </Text>
-              <StatusPill status={o.status} small />
+              <StatusBadge
+                label={
+                  o.status === 'IN_PROGRESS'
+                    ? 'In Progress'
+                    : o.status.charAt(0) + o.status.slice(1).toLowerCase()
+                }
+                tone={
+                  o.status === 'COMPLETED'
+                    ? 'success'
+                    : o.status === 'CANCELLED'
+                    ? 'neutral'
+                    : o.status === 'IN_PROGRESS'
+                    ? 'accent'
+                    : 'info'
+                }
+                dot={false}
+              />
             </View>
           ))}
           {allowManage && series.status !== 'CANCELLED' && (
-            <View style={[styles.sheetButtons, styles.mtLg]}>
+            <View style={[styles.sheetButtons, { marginTop: spacing.lg }]}>
               {series.status === 'ACTIVE' && (
                 <PrimaryButton
                   label="Pause"
-                  tone="outline"
+                  variant="secondary"
                   style={styles.flex}
-                  busy={busy}
+                  loading={busy}
                   onPress={() =>
                     act(
                       () =>
@@ -1269,9 +1331,8 @@ function SeriesSheet({
               {series.status === 'PAUSED' && (
                 <PrimaryButton
                   label="Resume"
-                  tone="lime"
                   style={styles.flex}
-                  busy={busy}
+                  loading={busy}
                   onPress={() =>
                     act(() => api.resumeSeries(series.id), 'Schedule resumed')
                   }
@@ -1279,9 +1340,9 @@ function SeriesSheet({
               )}
               <PrimaryButton
                 label="Stop"
-                tone="danger"
+                variant="brand"
                 style={styles.flex}
-                busy={busy}
+                loading={busy}
                 onPress={() =>
                   act(() => api.stopSeries(series.id), 'Schedule stopped')
                 }
@@ -1293,260 +1354,3 @@ function SeriesSheet({
     </Sheet>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  pad: { padding: 20, alignSelf: 'stretch' },
-  mt: { marginTop: 12 },
-  mtLg: { marginTop: 20 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 20,
-    color: t.text,
-    fontFamily: font.regular,
-  },
-  content: { paddingHorizontal: 20, paddingTop: 6 },
-  hero: {
-    backgroundColor: t.surface,
-    borderRadius: radius.lg,
-    padding: 20,
-    ...cardShadow,
-  },
-  heroTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: 24,
-    lineHeight: 30,
-    color: t.text,
-    fontFamily: font.medium,
-    marginTop: 14,
-  },
-  desc: { fontSize: 14, lineHeight: 21, color: t.textSecondary, marginTop: 10 },
-  dueRow: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  dueBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#F4F3F6',
-    borderRadius: radius.pill,
-    paddingHorizontal: 16,
-    minHeight: 46,
-  },
-  dueText: { fontSize: 14, color: t.text },
-  dueInfo: { fontSize: 13, fontFamily: font.medium, marginTop: 12 },
-  track: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#EFEEF2',
-    marginTop: 12,
-    overflow: 'hidden',
-  },
-  trackFill: { height: 6, borderRadius: 3 },
-  card: {
-    backgroundColor: t.surface,
-    borderRadius: radius.lg,
-    padding: 18,
-    marginTop: 14,
-    ...cardShadow,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontFamily: font.medium,
-    color: t.text,
-    marginBottom: 12,
-    marginTop: 4,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F0F3',
-    gap: 12,
-  },
-  infoLabel: { fontSize: 13, color: t.textMuted },
-  infoRight: { flexShrink: 1, alignItems: 'flex-end' },
-  infoValue: {
-    fontSize: 14,
-    color: t.text,
-    fontFamily: font.medium,
-    textAlign: 'right',
-  },
-  link: { textDecorationLine: 'underline' },
-  person: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  input: {
-    backgroundColor: '#F4F3F6',
-    borderRadius: radius.md,
-    paddingHorizontal: 16,
-    minHeight: 50,
-    fontSize: 15,
-    color: t.text,
-    marginBottom: 12,
-  },
-  inputMulti: { minHeight: 90, paddingTop: 14, textAlignVertical: 'top' },
-  tabs: { flexDirection: 'row', gap: 8, marginTop: 20 },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    minHeight: 46,
-    borderRadius: radius.pill,
-    backgroundColor: t.surfaceGlass,
-  },
-  tabOn: { backgroundColor: t.ink },
-  tabText: { fontSize: 13, color: t.text, fontFamily: font.medium },
-  muted: {
-    color: t.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
-    paddingVertical: 12,
-  },
-  comment: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    marginBottom: 12,
-  },
-  commentMine: { justifyContent: 'flex-end' },
-  bubble: {
-    maxWidth: '82%',
-    backgroundColor: '#F4F3F6',
-    borderRadius: 18,
-    borderBottomLeftRadius: 6,
-    padding: 12,
-  },
-  bubbleMine: {
-    backgroundColor: t.ink,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 6,
-  },
-  bubbleName: {
-    fontSize: 12,
-    fontFamily: font.medium,
-    color: t.textSecondary,
-    marginBottom: 3,
-  },
-  bubbleText: { fontSize: 14, color: t.text, lineHeight: 20 },
-  bubbleTime: { fontSize: 11, color: t.textMuted, marginTop: 4 },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    marginTop: 6,
-  },
-  composerInput: {
-    flex: 1,
-    backgroundColor: '#F4F3F6',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 46,
-    maxHeight: 120,
-    fontSize: 15,
-    color: t.text,
-  },
-  fileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-  },
-  fileMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  thumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#F4F3F6',
-  },
-  fileIcon: { alignItems: 'center', justifyContent: 'center' },
-  fileName: { fontSize: 14, fontFamily: font.medium, color: t.text },
-  fileMeta: { fontSize: 12, color: t.textMuted, marginTop: 3 },
-  fileDelete: { padding: 8 },
-  hRow: { flexDirection: 'row', gap: 12 },
-  hRail: { width: 14, alignItems: 'center' },
-  hDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#C4C4CA',
-    marginTop: 4,
-  },
-  hLine: { width: 2, flex: 1, backgroundColor: '#EDECF0', marginTop: 4 },
-  hBody: { paddingBottom: 18 },
-  hTitle: { fontSize: 14, fontFamily: font.medium, color: t.text },
-  hNote: { fontSize: 13, color: t.textSecondary, marginTop: 4, lineHeight: 19 },
-  hTime: { fontSize: 12, color: t.textMuted, marginTop: 4 },
-  actionBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-  },
-  sheetText: {
-    fontSize: 14,
-    color: t.textSecondary,
-    lineHeight: 21,
-    marginBottom: 16,
-  },
-  sheetButtons: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  pickBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#F4F3F6',
-    borderRadius: radius.pill,
-    minHeight: 52,
-    paddingHorizontal: 16,
-  },
-  pickText: { fontSize: 15, color: t.text },
-  seriesScroll: { maxHeight: 520 },
-  seriesHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  seriesTitle: { fontSize: 16, fontFamily: font.medium, color: t.text },
-  seriesRule: { fontSize: 13, color: t.textSecondary, marginTop: 3 },
-  seriesBadge: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  seriesBadgeText: { color: t.onInk, fontSize: 12, fontFamily: font.medium },
-  occRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  occDate: { fontSize: 14, color: t.text },
-  previewWrap: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    justifyContent: 'center',
-  },
-  previewImg: { width: '100%', height: '80%' },
-  previewClose: { position: 'absolute', right: 20 },
-});

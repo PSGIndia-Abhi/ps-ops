@@ -1,47 +1,134 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
-import { CalendarIcon, PersonIcon, PlusIcon, SunIcon, UsersIcon } from '../../components/icons';
+import { CalendarIcon, PlusIcon, SunIcon } from '../../components/icons';
+import { useCrmStyles, type CrmTheme } from '../../crm/theme';
+import { CrmEmptyState } from '../../crm/ui/CrmScreen';
+import { radii, spacing, typography } from '../../theme';
 import { addDays, byDue, fmtDate, fmtTime, isOverdue, parseDate, todayStr, WEEKDAYS } from '../format';
 import type { TaskStackParamList } from '../navigation';
 import { useTasks } from '../TasksContext';
-import { cardShadow, font, PRIORITY_META, radius, t } from '../theme';
+import { PRIORITY_META, toneSolid } from '../theme';
 import type { WorkTask } from '../types';
-import { Backdrop } from '../ui/Backdrop';
-import { AvatarStack, Chip, CircleButton, EmptyBlock, StatusPill } from '../ui/primitives';
-import { ActionSheet, DateSheet } from '../ui/sheets';
-import { DotsIcon, MoonIcon, SunsetIcon } from '../ui/taskIcons';
+import { Avatar, TaskStatePill } from '../ui/parts';
+import { DateSheet } from '../ui/sheets';
+import { MoonIcon, SunsetIcon } from '../ui/taskIcons';
 
 type Filter = 'all' | 'mine' | 'team' | 'high';
-const DAY_W = 60;
+const DAY_W = 56;
 const RANGE_BEFORE = 21;
 const RANGE_AFTER = 60;
 
 const PERIODS = [
-  { key: 'morning', label: 'Morning', icon: SunIcon, match: (h: number | null) => h !== null && h < 12 },
-  { key: 'afternoon', label: 'Afternoon', icon: SunsetIcon, match: (h: number | null) => h !== null && h >= 12 && h < 17 },
-  { key: 'evening', label: 'Evening', icon: MoonIcon, match: (h: number | null) => h !== null && h >= 17 },
-  { key: 'any', label: 'Any time', icon: CalendarIcon, match: (h: number | null) => h === null },
+  { key: 'morning', label: 'Morning', Icon: SunIcon, match: (h: number | null) => h !== null && h < 12 },
+  { key: 'afternoon', label: 'Afternoon', Icon: SunsetIcon, match: (h: number | null) => h !== null && h >= 12 && h < 17 },
+  { key: 'evening', label: 'Evening', Icon: MoonIcon, match: (h: number | null) => h !== null && h >= 17 },
+  { key: 'any', label: 'Any time', Icon: CalendarIcon, match: (h: number | null) => h === null },
 ] as const;
 
+const factory = (t: CrmTheme) => ({
+  screen: { flex: 1, backgroundColor: t.background },
+  flex: { flex: 1 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  header: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginBottom: spacing.md },
+  headerText: { flex: 1 },
+  title: { ...typography.title, fontSize: 25, lineHeight: 31, fontWeight: '800' as const, color: t.textPrimary },
+  dateRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: 2 },
+  date: { ...typography.caption, fontSize: 13.5, color: t.textMuted },
+  todayPill: { backgroundColor: t.primarySoftBg, borderRadius: radii.pill, paddingHorizontal: spacing.xs, paddingVertical: 2 },
+  todayText: { ...typography.captionMedium, fontWeight: '700' as const, color: t.primary },
+  roundBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: radii.pill,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  roundBtnPrimary: {
+    backgroundColor: t.primary,
+    borderColor: t.primary,
+    elevation: 6,
+    shadowColor: t.primary,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  strip: { gap: spacing.xs, paddingBottom: spacing.xs },
+  day: {
+    width: DAY_W,
+    alignItems: 'center' as const,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.lg,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+  },
+  dayOn: { backgroundColor: t.primary, borderColor: t.primary },
+  dayToday: { borderColor: t.primary },
+  dayName: { ...typography.caption, color: t.textMuted },
+  dayNum: { ...typography.subtitle, color: t.textPrimary, marginTop: 2 },
+  onPrimary: { color: t.textOnPrimary },
+  busyDot: { width: 5, height: 5, borderRadius: 3, marginTop: 4 },
+  chips: { gap: spacing.xs, marginTop: spacing.md },
+  chip: { borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, backgroundColor: t.surfaceAlt },
+  chipOn: { backgroundColor: t.primary },
+  chipText: { ...typography.captionMedium, fontSize: 14, color: t.textSecondary },
+  overdue: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    backgroundColor: t.dangerBg,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.md,
+  },
+  overdueText: { ...typography.captionMedium, color: t.dangerText, flex: 1 },
+  overdueLink: { ...typography.captionMedium, color: t.dangerText, textDecorationLine: 'underline' as const },
+  periodHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.lg, marginBottom: spacing.sm },
+  periodText: { ...typography.subtitle, color: t.textPrimary },
+  card: {
+    flexDirection: 'row' as const,
+    gap: spacing.md,
+    backgroundColor: t.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    overflow: 'hidden' as const,
+    ...t.cardShadow,
+  },
+  accent: { position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: 4 },
+  time: { width: 56 },
+  timeText: { ...typography.subtitle, color: t.textPrimary },
+  ampm: { ...typography.caption, color: t.textMuted },
+  cardTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  cardDesc: { ...typography.caption, color: t.textSecondary, marginTop: 2 },
+  cardBottom: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.sm },
+  person: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, flexShrink: 1 },
+  personName: { ...typography.caption, color: t.textSecondary, flexShrink: 1 },
+  empty: { marginTop: spacing.lg },
+});
+
+/** Calendar tab - tasks for one day, grouped by time of day. */
 export function TaskScheduleScreen() {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<TaskStackParamList>>();
+  const { styles, theme } = useCrmStyles(factory);
   const { tasks, viewer, refresh, refreshing } = useTasks();
-  const [selected, setSelected] = useState(todayStr());
+  const today = todayStr();
+  const [selected, setSelected] = useState(today);
   const [filter, setFilter] = useState<Filter>('all');
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const stripRef = useRef<FlatList<string>>(null);
-  const today = todayStr();
 
-  // A strip anchored on the selected day's week, so jumping via the calendar re-centres it.
+  // A strip anchored on the selected day, so jumping via the calendar re-centres it.
   const [anchor, setAnchor] = useState(today);
-  const days = useMemo(
-    () => Array.from({ length: RANGE_BEFORE + RANGE_AFTER }, (_, i) => addDays(anchor, i - RANGE_BEFORE)),
-    [anchor],
-  );
+  const days = useMemo(() => Array.from({ length: RANGE_BEFORE + RANGE_AFTER }, (_, i) => addDays(anchor, i - RANGE_BEFORE)), [anchor]);
 
   useEffect(() => {
     const idx = days.indexOf(selected);
@@ -58,57 +145,53 @@ export function TaskScheduleScreen() {
     return s;
   }, [tasks]);
 
-  const dayTasks = useMemo(() => {
-    return tasks
-      .filter((x) => x.due_date === selected && x.status !== 'CANCELLED')
-      .filter((x) =>
-        filter === 'mine'
-          ? x.assigned_to === viewer.id
-          : filter === 'team'
-            ? x.assigned_to !== viewer.id
-            : filter === 'high'
-              ? x.priority === 'HIGH'
-              : true,
-      )
-      .sort(byDue);
-  }, [tasks, selected, filter, viewer.id]);
+  const dayTasks = useMemo(
+    () =>
+      tasks
+        .filter((x) => x.due_date === selected && x.status !== 'CANCELLED')
+        .filter((x) =>
+          filter === 'mine' ? x.assigned_to === viewer.id : filter === 'team' ? x.assigned_to !== viewer.id : filter === 'high' ? x.priority === 'HIGH' : true,
+        )
+        .sort(byDue),
+    [tasks, selected, filter, viewer.id],
+  );
 
   const overdueCount = useMemo(() => (selected === today ? tasks.filter(isOverdue).length : 0), [tasks, selected, today]);
-
-  const groups = PERIODS.map((p) => ({
-    ...p,
-    items: dayTasks.filter((x) => p.match(x.due_time ? Number(x.due_time.slice(0, 2)) : null)),
-  })).filter((g) => g.items.length > 0);
-
-  const d = parseDate(selected);
+  const groups = PERIODS.map((p) => ({ ...p, items: dayTasks.filter((x) => p.match(x.due_time ? Number(x.due_time.slice(0, 2)) : null)) })).filter(
+    (g) => g.items.length > 0,
+  );
+  const filters: [Filter, string][] = [
+    ['all', 'All'],
+    ['mine', 'Mine'],
+    ...(viewer.team.length > 0 ? ([['team', 'Team']] as [Filter, string][]) : []),
+    ['high', 'High priority'],
+  ];
 
   return (
-    <View style={styles.flex}>
-      <Backdrop />
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + 14 }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Text style={styles.headerDate}>
-            {WEEKDAYS[d.getDay()]}, {fmtDate(selected).split(', ')[1]}
-          </Text>
-          <CircleButton dark label="New task" size={56} onPress={() => navigation.navigate('NewTask', { date: selected })}>
-            <PlusIcon size={22} color={t.onInk} />
-          </CircleButton>
-          <CircleButton label="More options" size={56} onPress={() => setMenuOpen(true)}>
-            <DotsIcon size={20} color={t.ink} />
-          </CircleButton>
-        </View>
-
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>Task{'\n'}Schedule</Text>
-          <Pressable style={styles.calendarBtn} onPress={() => setCalendarOpen(true)} accessibilityRole="button">
-            <View style={styles.calendarIcon}>
-              <CalendarIcon size={20} color={t.ink} />
+          <View style={styles.headerText}>
+            <Text style={styles.title}>Task Schedule</Text>
+            <View style={styles.dateRow}>
+              <Text style={styles.date}>{fmtDate(selected)}</Text>
+              {/* Only while looking at another day - one tap back to today. */}
+              {selected !== today && (
+                <Pressable style={styles.todayPill} onPress={() => setSelected(today)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Go to today">
+                  <Text style={styles.todayText}>↺ Today</Text>
+                </Pressable>
+              )}
             </View>
-            <Text style={styles.calendarText}>Calendar</Text>
+          </View>
+          <Pressable style={[styles.roundBtn, styles.roundBtnPrimary]} onPress={() => navigation.navigate('NewTask', { date: selected })} accessibilityRole="button" accessibilityLabel="New task for this day">
+            <PlusIcon size={22} color={theme.textOnPrimary} />
+          </Pressable>
+          <Pressable style={styles.roundBtn} onPress={() => setCalendarOpen(true)} accessibilityRole="button" accessibilityLabel="Open month calendar">
+            <CalendarIcon size={20} color={theme.primary} />
           </Pressable>
         </View>
 
@@ -119,48 +202,32 @@ export function TaskScheduleScreen() {
           keyExtractor={(x) => x}
           showsHorizontalScrollIndicator={false}
           initialScrollIndex={Math.max(0, days.indexOf(selected) - 2)}
-          getItemLayout={(_, index) => ({ length: DAY_W + 8, offset: (DAY_W + 8) * index, index })}
+          getItemLayout={(_, index) => ({ length: DAY_W + spacing.xs, offset: (DAY_W + spacing.xs) * index, index })}
           onScrollToIndexFailed={() => {}}
           contentContainerStyle={styles.strip}
           renderItem={({ item }) => {
             const on = item === selected;
-            const dd = parseDate(item);
+            const d = parseDate(item);
             return (
-              <Pressable onPress={() => setSelected(item)} style={[styles.day, on && styles.dayOn]} accessibilityRole="button">
-                <Text style={styles.dayName}>{WEEKDAYS[dd.getDay()]}</Text>
-                <View style={[styles.dayNum, on && styles.dayNumOn, item === today && !on && styles.dayNumToday]}>
-                  <Text style={[styles.dayNumText, on && { color: t.onInk }]}>{dd.getDate()}</Text>
-                </View>
-                <View style={[styles.busyDot, { opacity: busyDays.has(item) ? 1 : 0 }]} />
+              <Pressable onPress={() => setSelected(item)} style={[styles.day, item === today && styles.dayToday, on && styles.dayOn]} accessibilityRole="button">
+                <Text style={[styles.dayName, on && styles.onPrimary]}>{WEEKDAYS[d.getDay()]}</Text>
+                <Text style={[styles.dayNum, on && styles.onPrimary]}>{d.getDate()}</Text>
+                <View style={[styles.busyDot, { backgroundColor: busyDays.has(item) ? (on ? theme.textOnPrimary : theme.primary) : 'transparent' }]} />
               </Pressable>
             );
           }}
         />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          <Chip label="All" active={filter === 'all'} onPress={() => setFilter('all')} />
-          <Chip
-            label="Mine"
-            icon={<PersonIcon size={18} color={filter === 'mine' ? t.onInk : t.ink} />}
-            active={filter === 'mine'}
-            onPress={() => setFilter('mine')}
-          />
-          {viewer.team.length > 0 && (
-            <Chip
-              label="Team"
-              icon={<UsersIcon size={18} color={filter === 'team' ? t.onInk : t.ink} />}
-              active={filter === 'team'}
-              onPress={() => setFilter('team')}
-            />
-          )}
-          <Chip label="High priority" active={filter === 'high'} onPress={() => setFilter('high')} />
+          {filters.map(([k, label]) => (
+            <Pressable key={k} onPress={() => setFilter(k)} style={[styles.chip, filter === k && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: filter === k }}>
+              <Text style={[styles.chipText, filter === k && styles.onPrimary]}>{label}</Text>
+            </Pressable>
+          ))}
         </ScrollView>
 
         {overdueCount > 0 && (
-          <Pressable
-            style={styles.overdueBanner}
-            onPress={() => navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode: 'overdue' } })}
-          >
+          <Pressable style={styles.overdue} onPress={() => navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode: 'overdue' } })}>
             <Text style={styles.overdueText}>
               {overdueCount} overdue task{overdueCount === 1 ? '' : 's'} from earlier days
             </Text>
@@ -169,11 +236,11 @@ export function TaskScheduleScreen() {
         )}
 
         {groups.length === 0 && (
-          <View style={styles.emptyWrap}>
-            <EmptyBlock
-              icon={<CalendarIcon size={32} color={t.textMuted} />}
+          <View style={styles.empty}>
+            <CrmEmptyState
               title="Nothing scheduled"
-              text={selected === today ? 'No tasks due today.' : `No tasks due on ${fmtDate(selected)}.`}
+              subtitle={selected === today ? 'No tasks due today.' : `No tasks due on ${fmtDate(selected)}.`}
+              icon={<CalendarIcon size={30} color={theme.textMuted} />}
             />
           </View>
         )}
@@ -181,11 +248,8 @@ export function TaskScheduleScreen() {
         {groups.map((g) => (
           <View key={g.key}>
             <View style={styles.periodHead}>
-              <View style={styles.periodLabel}>
-                <g.icon size={20} color={t.ink} />
-                <Text style={styles.periodText}>{g.label}</Text>
-              </View>
-              <Text style={styles.periodSide}>{selected === today ? 'Today' : ''}</Text>
+              <g.Icon size={20} color={theme.primary} />
+              <Text style={styles.periodText}>{g.label}</Text>
             </View>
             {g.items.map((x) => (
               <ScheduleCard key={x.id} task={x} onPress={() => navigation.navigate('TaskDetail', { taskId: x.id })} />
@@ -195,125 +259,40 @@ export function TaskScheduleScreen() {
       </ScrollView>
 
       <DateSheet visible={calendarOpen} onClose={() => setCalendarOpen(false)} value={selected} onPick={setSelected} title="Jump to date" />
-      <ActionSheet
-        visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        actions={[
-          { key: 'today', label: 'Go to today', icon: <CalendarIcon size={18} color={t.ink} />, onPress: () => setSelected(today) },
-        ]}
-      />
-    </View>
+    </SafeAreaView>
   );
 }
 
 function ScheduleCard({ task, onPress }: { task: WorkTask; onPress: () => void }) {
+  const { styles, theme } = useCrmStyles(factory);
   const time = fmtTime(task.due_time);
   const [hm, ampm] = time ? time.split(' ') : ['—', ''];
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.sCard, pressed && { opacity: 0.9 }]} accessibilityRole="button">
-      <View style={styles.sTime}>
-        <Text style={styles.sTimeText}>{hm}</Text>
-        <Text style={styles.sAmpm}>{ampm}</Text>
-        <View style={styles.sLineDot} />
-        <View style={styles.sLine} />
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]} accessibilityRole="button">
+      <View style={[styles.accent, { backgroundColor: toneSolid(theme, PRIORITY_META[task.priority].tone) }]} />
+      <View style={styles.time}>
+        <Text style={styles.timeText}>{hm}</Text>
+        <Text style={styles.ampm}>{ampm}</Text>
       </View>
       <View style={styles.flex}>
-        <View style={styles.sTitleRow}>
-          <View style={[styles.sPriority, { backgroundColor: PRIORITY_META[task.priority].color }]} />
-          <Text style={styles.sTitle} numberOfLines={2}>
-            {task.title}
-          </Text>
-        </View>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {task.title}
+        </Text>
         {!!task.description && (
-          <Text style={styles.sDesc} numberOfLines={2}>
+          <Text style={styles.cardDesc} numberOfLines={2}>
             {task.description}
           </Text>
         )}
-        <View style={styles.sBottom}>
-          <AvatarStack
-            size={34}
-            people={[
-              { id: task.assigned_to, name: task.assigned_to_name },
-              { id: task.created_by, name: task.created_by_name },
-            ]}
-          />
-          <StatusPill status={task.status} />
+        <View style={styles.cardBottom}>
+          <View style={styles.person}>
+            <Avatar name={task.assigned_to_name} id={task.assigned_to} size={24} />
+            <Text style={styles.personName} numberOfLines={1}>
+              {task.assigned_to_name}
+            </Text>
+          </View>
+          <TaskStatePill task={task} />
         </View>
       </View>
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 24 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerDate: { flex: 1, fontSize: 19, color: t.text, fontFamily: font.regular, marginLeft: 4 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 34, marginBottom: 24 },
-  title: { fontSize: 38, lineHeight: 46, color: t.text, fontFamily: font.regular, letterSpacing: -0.6 },
-  calendarBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: t.surface,
-    borderRadius: radius.pill,
-    paddingLeft: 6,
-    paddingRight: 20,
-    height: 58,
-  },
-  calendarIcon: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F2F1F4', alignItems: 'center', justifyContent: 'center' },
-  calendarText: { fontSize: 16, color: t.text, fontFamily: font.medium },
-  strip: { gap: 8, paddingRight: 20 },
-  day: {
-    width: DAY_W,
-    alignItems: 'center',
-    paddingTop: 14,
-    paddingBottom: 10,
-    borderRadius: 30,
-    backgroundColor: t.surfaceGlass,
-  },
-  dayOn: { backgroundColor: t.surface },
-  dayName: { fontSize: 13, color: t.text, fontFamily: font.medium, marginBottom: 10 },
-  dayNum: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ECEBEF', alignItems: 'center', justifyContent: 'center' },
-  dayNumOn: { backgroundColor: t.ink },
-  dayNumToday: { borderWidth: 1.5, borderColor: t.limeDeep },
-  dayNumText: { fontSize: 14, color: t.text, fontFamily: font.medium },
-  busyDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: t.limeDeep, marginTop: 6 },
-  chips: { gap: 10, marginTop: 20, paddingRight: 20 },
-  overdueBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: t.dangerSoft,
-    borderRadius: radius.md,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: 16,
-  },
-  overdueText: { color: t.danger, fontSize: 13, fontFamily: font.medium, flex: 1 },
-  overdueLink: { color: t.danger, fontSize: 13, fontFamily: font.medium, textDecorationLine: 'underline' },
-  emptyWrap: { marginTop: 24 },
-  periodHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 12 },
-  periodLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  periodText: { fontSize: 18, color: t.text, fontFamily: font.regular },
-  periodSide: { fontSize: 14, color: t.textMuted },
-  sCard: {
-    flexDirection: 'row',
-    gap: 16,
-    backgroundColor: t.surface,
-    borderRadius: radius.lg,
-    padding: 18,
-    marginBottom: 12,
-    ...cardShadow,
-  },
-  sTime: { width: 54, alignItems: 'flex-start' },
-  sTimeText: { fontSize: 19, color: t.text, fontFamily: font.regular },
-  sAmpm: { fontSize: 12, color: t.textSecondary, marginTop: 2 },
-  sLineDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#C4C4CA', marginTop: 12, marginLeft: 8 },
-  sLine: { width: 1, flex: 1, minHeight: 30, backgroundColor: '#D8D8DD', marginLeft: 10 },
-  sTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  sPriority: { width: 8, height: 8, borderRadius: 4, marginTop: 8 },
-  sTitle: { flex: 1, fontSize: 17, color: t.text, fontFamily: font.medium },
-  sDesc: { fontSize: 12, color: t.textSecondary, marginTop: 8, lineHeight: 17 },
-  sBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 },
-});

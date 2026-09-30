@@ -52,7 +52,7 @@ interface TasksContextValue {
   notifications: TaskNotification[];
   unreadCount: number;
   /** Announce an event this device caused itself (create / complete response). */
-  notifyLocal: (task: WorkTask, kind: TaskNotificationKind) => void;
+  notifyLocal: (task: WorkTask, kind: TaskNotificationKind, opts?: { toast?: boolean }) => void;
   openNotification: (n: TaskNotification) => void;
   markAllNotificationsRead: () => void;
   /** Called once by the task stack so notifications can open a task from anywhere. */
@@ -107,14 +107,14 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
 
   /** Single entry point for every event source; drops anything already shown. */
   const ingest = useCallback(
-    (events: TaskNotification[]) => {
+    (events: TaskNotification[], popup = true) => {
       const st = notifState.current;
       const fresh = events.filter((e) => !st.seen.includes(e.key));
       if (!fresh.length) return;
       st.seen = [...st.seen, ...fresh.map((e) => e.key)];
       st.items = [...fresh.slice().reverse(), ...st.items].slice(0, 30);
       setNotifications(st.items);
-      setQueue((q) => [...q, ...fresh]);
+      if (popup) setQueue((q) => [...q, ...fresh]);
       saveState(userId, st);
     },
     [userId],
@@ -169,9 +169,9 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
   }, [load]);
 
   const notifyLocal = useCallback(
-    (task: WorkTask, kind: TaskNotificationKind) => {
+    (task: WorkTask, kind: TaskNotificationKind, opts?: { toast?: boolean }) => {
       notifState.current.known[task.id] = task.status;
-      ingest([buildNotification(task, kind)]);
+      ingest([buildNotification(task, kind)], opts?.toast ?? true);
     },
     [ingest],
   );
@@ -281,6 +281,29 @@ export function useTasks(): TasksContextValue {
   const ctx = useContext(TasksContext);
   if (!ctx) throw new Error('useTasks must be used inside TasksProvider');
   return ctx;
+}
+
+/**
+ * One task by id: the shared list's copy (always the latest the app wrote or
+ * fetched), or a one-off GET when it isn't in the list yet.
+ */
+export function useTaskById(id: string): { task: WorkTask | null; error: string | null } {
+  const { tasks, patch } = useTasks();
+  const fromList = tasks.find((x) => x.id === id) ?? null;
+  const [fetched, setFetched] = useState<WorkTask | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (fromList) return;
+    api
+      .getTask(id)
+      .then((x) => {
+        setFetched(x);
+        patch(x);
+      })
+      .catch((err) => setError(errorMessage(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  return { task: fromList ?? fetched, error };
 }
 
 const styles = StyleSheet.create({ flex: { flex: 1 } });

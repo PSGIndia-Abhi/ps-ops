@@ -67,6 +67,20 @@ describe('task notifications', () => {
     expect(events[0].detail).toBe('Completed by Report.');
   });
 
+  it('my direct report starts a task -> "Task Started" naming them', () => {
+    const state = { ...emptyState(), known: { t3: 'OPEN' } };
+    const started = task({ id: 't3', assigned_to: REPORT, assigned_to_name: 'Report', status: 'IN_PROGRESS', started_by: REPORT });
+    const { events } = detectEvents([started], state, ME, team, false);
+    expect(events).toHaveLength(1);
+    expect(events[0].title).toBe('Task Started');
+    expect(events[0].by).toBe('Report');
+  });
+
+  it('does not announce my own start', () => {
+    const state = { ...emptyState(), known: { t1: 'OPEN' } };
+    expect(detectEvents([task({ status: 'IN_PROGRESS', started_by: ME })], state, ME, team, false).events).toHaveLength(0);
+  });
+
   it('does not announce my own completion from the list diff (the local path does)', () => {
     const state = { ...emptyState(), known: { t1: 'IN_PROGRESS' } };
     const done = task({ status: 'COMPLETED', completed_by: ME });

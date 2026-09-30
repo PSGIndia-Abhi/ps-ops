@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CloseIcon } from '../../components/icons';
 import type { TaskNotification } from '../notifications';
-import { font, radius, t } from '../theme';
+import { useCrmStyles, type CrmTheme } from '../../crm/theme';
+import { radii, spacing, typography } from '../../theme';
 import { CheckIcon, ClipboardIcon } from './taskIcons';
 
 const AUTO_HIDE_MS = 4500;
@@ -23,6 +24,7 @@ export function NotificationToast({
   onDismiss: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const { styles, theme } = useCrmStyles(factory);
   const anim = useRef(new Animated.Value(0)).current;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shown = useRef<TaskNotification | null>(null);
@@ -69,7 +71,7 @@ export function NotificationToast({
           accessibilityLabel={`${item.title}: ${item.taskTitle}. ${item.detail}. Open task`}
         >
           <View style={[styles.icon, done ? styles.iconDone : styles.iconNew]}>
-            {done ? <CheckIcon size={20} color={t.ink} /> : <ClipboardIcon size={19} color={t.onInk} />}
+            {done ? <CheckIcon size={20} color={theme.textOnPrimary} /> : <ClipboardIcon size={19} color={theme.textOnPrimary} />}
           </View>
           <View style={styles.text}>
             <Text style={styles.title}>{item.title}</Text>
@@ -82,40 +84,40 @@ export function NotificationToast({
           </View>
         </Pressable>
         <Pressable onPress={() => hide()} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Dismiss notification">
-          <CloseIcon size={16} color={t.textMuted} />
+          <CloseIcon size={16} color={theme.textMuted} />
         </Pressable>
-        <View style={[styles.accent, { backgroundColor: done ? t.lime : t.ink }]} />
+        <View style={[styles.accent, { backgroundColor: done ? theme.success : theme.primary }]} />
       </Animated.View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { position: 'absolute', right: 12, left: 48, alignItems: 'flex-end', zIndex: 60, elevation: 60 },
+const factory = (t: CrmTheme) => ({
+  wrap: { position: 'absolute' as const, right: spacing.sm, left: 48, alignItems: 'flex-end' as const, zIndex: 60, elevation: 60 },
   card: {
-    width: '100%',
+    width: '100%' as const,
     maxWidth: 380,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
     backgroundColor: t.surface,
-    borderRadius: radius.md + 2,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: t.border,
-    overflow: 'hidden',
+    overflow: 'hidden' as const,
     elevation: 12,
     shadowColor: '#000',
     shadowOpacity: 0.14,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
-  body: { flex: 1, flexDirection: 'row', gap: 12, padding: 14, paddingRight: 4 },
-  icon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  iconDone: { backgroundColor: t.lime },
-  iconNew: { backgroundColor: t.ink },
+  body: { flex: 1, flexDirection: 'row' as const, gap: spacing.sm, padding: spacing.md, paddingRight: 4 },
+  icon: { width: 40, height: 40, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
+  iconDone: { backgroundColor: t.success },
+  iconNew: { backgroundColor: t.primary },
   text: { flex: 1 },
-  title: { fontSize: 14, fontFamily: font.medium, fontWeight: '600', color: t.text },
-  task: { fontSize: 14, color: t.text, marginTop: 3, fontFamily: font.regular },
-  detail: { fontSize: 12, color: t.textSecondary, marginTop: 3 },
-  close: { padding: 12 },
-  accent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+  title: { ...typography.bodyMedium, fontWeight: '700' as const, color: t.textPrimary },
+  task: { ...typography.body, color: t.textPrimary, marginTop: 2 },
+  detail: { ...typography.caption, color: t.textSecondary, marginTop: 2 },
+  close: { padding: spacing.sm },
+  accent: { position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: 4 },
 });

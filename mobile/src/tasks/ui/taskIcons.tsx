@@ -23,6 +23,14 @@ export function CheckIcon({ size = 20, color = '#141416' }: IconProps) {
   );
 }
 
+export function FlagIcon({ size = 20, color = '#141416' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M5 21V4M5 4h11l-2 4 2 4H5" {...stroke(color)} />
+    </Svg>
+  );
+}
+
 export function ArrowLeftIcon({ size = 20, color = '#141416' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">

@@ -1,66 +1,79 @@
-import { Platform } from 'react-native';
-import type { TaskPriority, TaskStatus } from './types';
+import type { CrmTheme } from '../crm/theme';
+import type { Tone } from '../crm/ui/StatusBadge';
+import { isOverdue, todayStr } from './format';
+import type { TaskPriority, WorkTask } from './types';
 
 /**
- * Task Management look: soft pastel wash (pink -> lavender -> peach), white
- * rounded cards, near-black primary actions and a lime progress accent.
- * Its own module - like crm/theme.ts - so no existing screen is affected.
+ * Task Management uses the same look as the CRM and Technician screens: the
+ * CRM light/dark theme (crm/theme.ts, via useCrmStyles) and its components.
+ * This file only maps task states onto that theme's tones.
  */
-export const t = {
-  ink: '#141416',
-  inkSoft: '#2A2A2E',
-  text: '#141416',
-  textSecondary: '#55555C',
-  textMuted: '#8C8C94',
-  onInk: '#FFFFFF',
-  surface: '#FFFFFF',
-  surfaceGlass: 'rgba(255,255,255,0.72)',
-  border: '#ECEBEF',
-  lime: '#C9DE7E',
-  limeDeep: '#8FA73A',
-  limeSoft: '#EEF5D2',
-  danger: '#D64545',
-  dangerSoft: '#FCE8E8',
-  overlay: 'rgba(20,20,22,0.45)',
-  washPink: '#F6CFE0',
-  washLavender: '#DCC8F2',
-  washPeach: '#F8D9C8',
-  washBase: '#F5F3F6',
-} as const;
 
-export const radius = { sm: 12, md: 18, lg: 24, xl: 30, pill: 999 } as const;
-
-export const font = {
-  light: Platform.select({ android: 'sans-serif-light', default: undefined }),
-  regular: Platform.select({ android: 'sans-serif', default: undefined }),
-  medium: Platform.select({ android: 'sans-serif-medium', default: undefined }),
+export const PRIORITY_META: Record<TaskPriority, { label: string; tone: Tone }> = {
+  LOW: { label: 'Low', tone: 'success' },
+  NORMAL: { label: 'Normal', tone: 'info' },
+  HIGH: { label: 'High', tone: 'danger' },
 };
 
-export const cardShadow = Platform.select({
-  android: { elevation: 1 },
-  default: { shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-});
+export type TaskState = 'overdue' | 'progress' | 'today' | 'upcoming' | 'open' | 'done' | 'cancelled';
 
-export const STATUS_META: Record<TaskStatus, { label: string; color: string; soft: string }> = {
-  OPEN: { label: 'To Do', color: '#2F6FE4', soft: '#E6EEFD' },
-  IN_PROGRESS: { label: 'In Progress', color: '#9B6AF0', soft: '#EFE6FD' },
-  COMPLETED: { label: 'Completed', color: '#3D8B55', soft: '#E3F3E7' },
-  CANCELLED: { label: 'Cancelled', color: '#6B7280', soft: '#EEF0F3' },
+/** What a task "is" right now, for its colour and pill - same rules as the lists. */
+export function taskState(x: WorkTask): TaskState {
+  if (x.status === 'COMPLETED') return 'done';
+  if (x.status === 'CANCELLED') return 'cancelled';
+  if (isOverdue(x)) return 'overdue';
+  if (x.status === 'IN_PROGRESS') return 'progress';
+  if (x.due_date === todayStr()) return 'today';
+  if (x.due_date && x.due_date > todayStr()) return 'upcoming';
+  return 'open';
+}
+
+export const STATE_META: Record<TaskState, { label: string; tone: Tone }> = {
+  overdue: { label: 'Overdue', tone: 'danger' },
+  progress: { label: 'In Progress', tone: 'accent' },
+  today: { label: 'Open', tone: 'warning' },
+  upcoming: { label: 'Upcoming', tone: 'info' },
+  open: { label: 'Open', tone: 'info' },
+  done: { label: 'Completed', tone: 'success' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
 };
 
-export const PRIORITY_META: Record<TaskPriority, { label: string; color: string; soft: string; border: string }> = {
-  LOW: { label: 'Low', color: '#3D8B55', soft: '#E6F4EA', border: '#9BCFA9' },
-  NORMAL: { label: 'Normal', color: '#C7862B', soft: '#FDF1DE', border: '#F0C27B' },
-  HIGH: { label: 'High', color: '#D24545', soft: '#FBE5E5', border: '#F0A5A5' },
+/** Solid colour for a tone (icon squares, accents). */
+export function toneSolid(theme: CrmTheme, tone: Tone): string {
+  switch (tone) {
+    case 'success':
+      return theme.success;
+    case 'warning':
+      return theme.warning;
+    case 'danger':
+      return theme.danger;
+    case 'info':
+      return theme.primary;
+    case 'accent':
+      return theme.accent;
+    default:
+      return theme.textMuted;
+  }
+}
+
+/** Light -> deep pair per tone, for the gradient icon squares and tile circles. */
+export const TONE_GRADIENT: Record<Tone, [string, string]> = {
+  info: ['#60A5FA', '#2563EB'],
+  danger: ['#F87171', '#DC2626'],
+  success: ['#4ADE80', '#16A34A'],
+  warning: ['#FCD34D', '#F59E0B'],
+  accent: ['#A78BFA', '#7C3AED'],
+  neutral: ['#CBD5E1', '#94A3B8'],
 };
 
-export const TONE_COLOR = { late: '#D24545', soon: '#C7862B', ok: '#55555C', muted: '#8C8C94' } as const;
+/** Short, readable reference for a task (ids are UUIDs). */
+export const taskRef = (id: string) => `TSK-${id.slice(0, 8).toUpperCase()}`;
 
-/** Stable pastel per person, for avatar circles. */
-const AVATAR_COLORS = ['#F7B7C8', '#B9D7F7', '#C9DE7E', '#F6CF9A', '#CDB8F4', '#9FDCCB', '#F4A99A'];
+/** Stable colour per person, for avatar circles. */
+const AVATAR_COLORS = ['#2563EB', '#7C3AED', '#0891B2', '#16A34A', '#D97706', '#DB2777', '#4F46E5'];
 export function avatarColor(seed: string | number | null | undefined): string {
   const s = String(seed ?? '');
   let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003;
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
