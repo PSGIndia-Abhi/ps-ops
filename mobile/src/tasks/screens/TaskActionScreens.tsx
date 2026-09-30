@@ -7,7 +7,7 @@ import { CalendarIcon, ClockIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
-import { radii, spacing, typography } from '../../theme';
+import { spacing, typography } from '../../theme';
 import * as api from '../api';
 import { fmtDateShort, fmtDateTime, fmtTime, todayStr } from '../format';
 import type { TaskStackParamList } from '../navigation';

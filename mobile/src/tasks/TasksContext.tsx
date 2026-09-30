@@ -44,7 +44,8 @@ interface TasksContextValue {
   error: string | null;
   refresh: () => Promise<void>;
   patch: (task: WorkTask) => void;
-  markCancelled: (id: string) => void;
+  /** Drops a deleted task from the shared list. */
+  removeTask: (id: string) => void;
   /** Self + team (or everyone, for admin) - who this viewer may assign to. */
   assignable: TeamMember[];
   showToast: (message: string, variant?: ToastMessage['variant']) => void;
@@ -213,8 +214,8 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const markCancelled = useCallback((id: string) => {
-    setTasks((list) => list.map((x) => (x.id === id ? { ...x, status: 'CANCELLED' } : x)));
+  const removeTask = useCallback((id: string) => {
+    setTasks((list) => list.filter((x) => x.id !== id));
   }, []);
 
   const assignable = useMemo<TeamMember[]>(() => {
@@ -236,7 +237,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       error,
       refresh,
       patch,
-      markCancelled,
+      removeTask,
       assignable,
       showToast,
       notifications,
@@ -254,7 +255,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       error,
       refresh,
       patch,
-      markCancelled,
+      removeTask,
       assignable,
       showToast,
       notifications,

@@ -89,8 +89,12 @@ export async function skipTask(id: string, reason?: string): Promise<WorkTask> {
   return data;
 }
 
-/** Soft-cancel (the API never hard-deletes an active task from here). */
-export async function cancelTask(id: string): Promise<void> {
+/**
+ * Permanently deletes the task with its comments, files, reschedule requests
+ * and history (DELETE /api/work-tasks/:id). Only the task's creator may; the
+ * backend refuses anyone else. There is no undo.
+ */
+export async function deleteTask(id: string): Promise<void> {
   await httpClient.delete(`/api/work-tasks/${id}`);
 }
 

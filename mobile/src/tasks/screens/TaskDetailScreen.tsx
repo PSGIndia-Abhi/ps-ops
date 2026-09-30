@@ -83,7 +83,6 @@ import {
 } from '../ui/parts';
 import { ActionSheet, Sheet, type SheetAction } from '../ui/sheets';
 import {
-  BanIcon,
   DotsIcon,
   EditIcon,
   HistoryIcon,
@@ -99,7 +98,7 @@ type Dialog =
   | null
   | 'menu'
   | 'update'
-  | 'cancel'
+  | 'delete'
   | 'skip'
   | 'series'
   | 'upload';
@@ -144,7 +143,8 @@ const factory = (t: CrmTheme) => ({
   },
   tabText: { ...typography.bodyMedium, color: t.textMuted },
   tabTextOn: { color: t.primary },
-  infoText: { ...typography.bodyMedium, color: t.textPrimary },
+  // Shrinks and wraps next to the avatar instead of running past the card edge.
+  personName: { ...typography.bodyMedium, color: t.textPrimary, flexShrink: 1 },
   link: { ...typography.bodyMedium, color: t.primary },
   person: {
     flexDirection: 'row' as const,
@@ -305,7 +305,7 @@ export function TaskDetailScreen() {
     assignable,
     tasks,
     patch,
-    markCancelled,
+    removeTask,
     showToast,
     notifyLocal,
     refresh: refreshList,
@@ -501,14 +501,16 @@ export function TaskDetailScreen() {
           },
         ]
       : []),
-    ...(!finished
+    // Delete is permanent and only the task's creator may do it (the backend
+    // enforces this too), so it's only offered to them.
+    ...(task.created_by === viewer.id
       ? [
           {
-            key: 'cancel',
-            label: 'Cancel task',
-            icon: <BanIcon size={18} color={theme.dangerText} />,
+            key: 'delete',
+            label: 'Delete task',
+            icon: <TrashIcon size={18} color={theme.dangerText} />,
             danger: true,
-            onPress: () => setDialog('cancel'),
+            onPress: () => setDialog('delete'),
           },
         ]
       : []),
@@ -706,7 +708,7 @@ export function TaskDetailScreen() {
                   id={task.assigned_to}
                   size={26}
                 />
-                <Text style={styles.infoText} numberOfLines={1}>
+                <Text style={styles.personName}>
                   {task.assigned_to_name}
                   {task.assigned_to === viewer.id ? ' (you)' : ''}
                 </Text>
@@ -1044,12 +1046,13 @@ export function TaskDetailScreen() {
       </Sheet>
 
       <Sheet
-        visible={dialog === 'cancel'}
+        visible={dialog === 'delete'}
         onClose={() => setDialog(null)}
-        title="Cancel this task?"
+        title="Delete this task?"
       >
         <Text style={styles.sheetText}>
-          The task stays in history as Cancelled. This can’t be undone.
+          “{task.title}” will be permanently deleted with all its comments,
+          files and history. This can’t be undone.
         </Text>
         <View style={styles.sheetButtons}>
           <PrimaryButton
@@ -1059,17 +1062,19 @@ export function TaskDetailScreen() {
             onPress={() => setDialog(null)}
           />
           <PrimaryButton
-            label="Cancel task"
+            label="Delete"
             variant="brand"
             style={styles.flex}
             loading={busy}
-            onPress={() =>
-              run(async () => {
-                await api.cancelTask(task.id);
-                markCancelled(task.id);
-                setTask({ ...task, status: 'CANCELLED' });
-              }, 'Task cancelled')
-            }
+            onPress={async () => {
+              const ok = await run(async () => {
+                await api.deleteTask(task.id);
+              }, 'Task deleted');
+              if (ok) {
+                removeTask(task.id);
+                navigation.goBack();
+              }
+            }}
           />
         </View>
       </Sheet>
