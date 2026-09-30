@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 
 /**
- * { id, name, role, isAdmin, team, teamIds, ready, refreshTeam } — the
+ * { id, name, role, isAdmin, team, teamIds, directory, ready, refreshTeam } — the
  * logged-in person using TaskPro right now. See ViewerProvider.jsx.
  *
  * `team` is everyone below them in the real org hierarchy (from

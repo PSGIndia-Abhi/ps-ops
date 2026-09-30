@@ -101,9 +101,6 @@ function patchList(task) {
       : [task, ...state.tasks],
   });
 }
-function patchListFields(id, fields) {
-  set({ tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...fields } : t)) });
-}
 
 /** A single task's full detail (description, counts) — its own fetch, kept
  *  in sync with the shared list cache after every action. */
@@ -188,26 +185,194 @@ export async function skipTask(id, reason) {
   return data;
 }
 
-/** Soft-cancel (the API never hard-deletes from here). */
-export async function cancelTask(id) {
-  const data = await call("DELETE", `/api/work-tasks/${id}`);
-  patchListFields(id, { status: "CANCELLED" });
+export async function reopenTask(id, reason) {
+  const data = await call("POST", `/api/work-tasks/${id}/reopen`, reason ? { reason } : {});
+  patchList(data);
   return data;
 }
 
-export async function duplicateTask(task) {
-  return createTask({
-    title: `${task.title} (copy)`,
-    description: task.description,
-    task_type: task.task_type,
-    priority: task.priority,
-    assigned_to: task.assigned_to,
-    due_date: task.due_date,
-    due_time: task.due_time,
-    source_module: task.source_module,
-    source_id: task.source_id,
+// ---- delete with undo ------------------------------------------------------
+// Deleting is permanent on the server, so the request is held back for
+// UNDO_MS: the task leaves the list at once, and only if nobody presses Undo
+// is DELETE actually sent. If the tab is closed inside that window the
+// pending deletes are flushed with a keepalive request, so a delete the user
+// saw happen never silently doesn't.
+export const UNDO_MS = 5000;
+const pendingDeletes = new Map(); // id -> { timer, task, index }
+
+function sendDelete(id, keepalive = false) {
+  const token = localStorage.getItem("token");
+  return fetch(`${API_BASE}/api/work-tasks/${id}`, {
+    method: "DELETE",
+    keepalive,
+    headers: { Authorization: token ? `Bearer ${token}` : "" },
   });
 }
+
+/** Hides the task now and deletes it after UNDO_MS unless undone.
+ *  `onError(message)` runs if the server refuses — the task is put back. */
+export function scheduleDelete(task, { onError } = {}) {
+  const index = state.tasks.findIndex((t) => t.id === task.id);
+  set({ tasks: state.tasks.filter((t) => t.id !== task.id) });
+  const timer = setTimeout(async () => {
+    pendingDeletes.delete(task.id);
+    try {
+      const res = await sendDelete(task.id);
+      if (!res.ok) {
+        const data = await safeJson(res);
+        throw new Error(data?.error || `Delete failed (${res.status})`);
+      }
+    } catch (err) {
+      restore(task, index);
+      onError?.(err.message);
+    }
+  }, UNDO_MS);
+  pendingDeletes.set(task.id, { timer, task, index });
+}
+
+function restore(task, index) {
+  if (state.tasks.some((t) => t.id === task.id)) return;
+  const tasks = [...state.tasks];
+  tasks.splice(index < 0 ? 0 : Math.min(index, tasks.length), 0, task);
+  set({ tasks });
+}
+
+/** Cancels a scheduled delete and puts the task back. */
+export function undoDelete(id) {
+  const pending = pendingDeletes.get(id);
+  if (!pending) return false;
+  clearTimeout(pending.timer);
+  pendingDeletes.delete(id);
+  restore(pending.task, pending.index);
+  return true;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    for (const [id, { timer }] of pendingDeletes) {
+      clearTimeout(timer);
+      sendDelete(id, true).catch(() => {});
+    }
+    pendingDeletes.clear();
+  });
+}
+
+// ---- reschedule requests -------------------------------------------------
+// `incoming` = waiting for the signed-in user to approve; kept in a tiny
+// shared store so the sidebar badge, bell and dashboard agree.
+let reqState = { incoming: [], ready: false };
+const reqListeners = new Set();
+function setReq(next) {
+  reqState = { ...reqState, ...next };
+  reqListeners.forEach((l) => l());
+}
+const subscribeReq = (l) => {
+  reqListeners.add(l);
+  return () => reqListeners.delete(l);
+};
+let reqLoading = null;
+export function refreshIncomingRequests() {
+  if (reqLoading) return reqLoading;
+  reqLoading = call("GET", "/api/work-tasks/reschedule-requests?box=incoming")
+    .then((rows) => setReq({ incoming: Array.isArray(rows) ? rows : [], ready: true }))
+    .catch(() => setReq({ ready: true }))
+    .finally(() => {
+      reqLoading = null;
+    });
+  return reqLoading;
+}
+
+/** Pending reschedule requests waiting for this viewer; refreshed on mount and every minute. */
+export function useIncomingRequests() {
+  const viewer = useViewer();
+  const snap = useSyncExternalStore(subscribeReq, () => reqState);
+  useEffect(() => {
+    if (!viewer.id) return undefined;
+    refreshIncomingRequests();
+    const t = setInterval(refreshIncomingRequests, 60000);
+    return () => clearInterval(t);
+  }, [viewer.id]);
+  return snap;
+}
+
+// ---- notifications (activity feed) ----------------------------------------
+// What other people did that concerns the viewer (GET /api/work-tasks/
+// notifications). "Unread" = newer than the last time this person opened the
+// bell or the Notifications page, remembered per person in this browser —
+// there's no read/unread table, so it isn't shared across devices.
+let ntf = { items: [], ready: false, seen: null, forId: null };
+const ntfListeners = new Set();
+function setNtf(next) {
+  ntf = { ...ntf, ...next };
+  ntfListeners.forEach((l) => l());
+}
+const subscribeNtf = (l) => {
+  ntfListeners.add(l);
+  return () => ntfListeners.delete(l);
+};
+const seenKey = (id) => `taskpro.notifications.seen.${id}`;
+function readSeen(id) {
+  try {
+    return localStorage.getItem(seenKey(id));
+  } catch {
+    return null;
+  }
+}
+
+let ntfLoading = null;
+export function refreshNotifications(limit = 100) {
+  if (ntfLoading) return ntfLoading;
+  ntfLoading = call("GET", `/api/work-tasks/notifications?limit=${limit}`)
+    .then((items) => setNtf({ items: Array.isArray(items) ? items : [], ready: true }))
+    .catch(() => setNtf({ ready: true }))
+    .finally(() => {
+      ntfLoading = null;
+    });
+  return ntfLoading;
+}
+
+/** Marks everything up to now as read for this viewer. */
+export function markNotificationsSeen(viewerId) {
+  const now = new Date().toISOString();
+  try {
+    localStorage.setItem(seenKey(viewerId), now);
+  } catch {
+    // Storage unavailable: unread just resets next visit.
+  }
+  setNtf({ seen: now });
+}
+
+/** { items, ready, unread, isUnread(e) } — refreshed on mount and every minute. */
+export function useNotifications() {
+  const viewer = useViewer();
+  const snap = useSyncExternalStore(subscribeNtf, () => ntf);
+  useEffect(() => {
+    if (!viewer.id) return undefined;
+    if (ntf.forId !== viewer.id) setNtf({ items: [], ready: false, forId: viewer.id, seen: readSeen(viewer.id) });
+    refreshNotifications();
+    const t = setInterval(refreshNotifications, 60000);
+    return () => clearInterval(t);
+  }, [viewer.id]);
+  const isUnread = (e) => !snap.seen || new Date(e.at) > new Date(snap.seen);
+  return { ...snap, unread: snap.items.filter(isUnread).length, isUnread };
+}
+
+export const listMyRequests = () => call("GET", "/api/work-tasks/reschedule-requests?box=mine");
+export const listIncomingRequests = (status = "PENDING") => call("GET", `/api/work-tasks/reschedule-requests?box=incoming&status=${encodeURIComponent(status)}`);
+
+export async function requestReschedule(id, { due_date, due_time, reason }) {
+  return call("POST", `/api/work-tasks/${id}/reschedule-requests`, { due_date, due_time: due_time || undefined, reason: reason || undefined });
+}
+
+async function decide(requestId, action, note) {
+  const data = await call("POST", `/api/work-tasks/reschedule-requests/${requestId}/${action}`, note ? { note } : {});
+  await refreshIncomingRequests();
+  if (action === "approve") await refreshTasks();
+  return data;
+}
+export const approveRequest = (requestId, note) => decide(requestId, "approve", note);
+export const rejectRequest = (requestId, note) => decide(requestId, "reject", note);
+export const withdrawRequest = (requestId) => call("POST", `/api/work-tasks/reschedule-requests/${requestId}/withdraw`);
 
 export const fetchTaskTypes = () => call("GET", "/api/work-tasks/types");
 
@@ -260,6 +425,8 @@ export const listHistory = (id) => call("GET", `/api/work-tasks/${id}/history`);
 // Needs VIEW_HIERARCHY (granted to every task-management role — see
 // 20260928b_grant_view_hierarchy_to_task_roles.sql); admin always has it.
 export const getUserHierarchy = (userId) => call("GET", `/api/users/${userId}/hierarchy`);
+/** The signed-in person's own hierarchy card — open to every signed-in user. */
+export const getMyHierarchy = () => call("GET", "/api/users/me/hierarchy");
 
 // ---- recurring series --------------------------------------------------
 export const listSeries = (params) => call("GET", `/api/work-task-series${qs(params)}`);
