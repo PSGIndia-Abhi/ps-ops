@@ -45,6 +45,18 @@ export async function startTask(id: string): Promise<WorkTask> {
   return data;
 }
 
+/** IN_PROGRESS -> PAUSED. Only the assignee; a reason is required. */
+export async function pauseTask(id: string, reason: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/pause`, { reason });
+  return data;
+}
+
+/** PAUSED -> IN_PROGRESS. The paused time is kept out of "time worked". */
+export async function resumeTask(id: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/resume`);
+  return data;
+}
+
 export async function addProgress(id: string, note: string, nextAction?: string): Promise<WorkTask> {
   const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/progress`, {
     note,

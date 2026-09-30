@@ -227,11 +227,12 @@ export function NewTaskScreen() {
     useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
   const route = useRoute<RouteProp<TaskStackParamList, 'NewTask'>>();
   const editId = route.params?.editId;
+  const duplicateOf = route.params?.duplicateOf;
   const { styles, theme } = useCrmStyles(factory);
   const { viewer, assignable, patch, refresh, showToast, notifyLocal } =
     useTasks();
 
-  const [loadingEdit, setLoadingEdit] = useState(!!editId);
+  const [loadingEdit, setLoadingEdit] = useState(!!editId || !!duplicateOf);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [taskType, setTaskType] = useState('');
@@ -279,6 +280,25 @@ export function NewTaskScreen() {
       .catch(err => setError(errorMessage(err)))
       .finally(() => setLoadingEdit(false));
   }, [editId]);
+
+  // Duplicate: a brand-new task filled in from the original, which the user
+  // can change before tapping Create. A past due date moves up to today.
+  useEffect(() => {
+    if (!duplicateOf) return;
+    api
+      .getTask(duplicateOf)
+      .then(task => {
+        setTitle(`${task.title.replace(/( \(copy\))+$/, '')} (copy)`);
+        setDescription(task.description || '');
+        setTaskType(task.task_type || '');
+        setPriority(task.priority);
+        setAssignedTo(task.assigned_to);
+        setDueDate(task.due_date && task.due_date >= todayStr() ? task.due_date : todayStr());
+        setDueTime(task.due_time ? task.due_time.slice(0, 5) : null);
+      })
+      .catch(err => setError(errorMessage(err)))
+      .finally(() => setLoadingEdit(false));
+  }, [duplicateOf]);
 
   // Keep the selection valid once the team list arrives.
   useEffect(() => {
@@ -404,7 +424,7 @@ export function NewTaskScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={styles.flex} behavior="padding">
         <ScreenHeader
-          title={editId ? 'Edit Task' : 'Create Task'}
+          title={editId ? 'Edit Task' : duplicateOf ? 'Duplicate Task' : 'Create Task'}
           onBack={() => navigation.goBack()}
           large
         />

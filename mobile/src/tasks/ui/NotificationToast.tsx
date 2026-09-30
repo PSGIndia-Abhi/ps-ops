@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CloseIcon } from '../../components/icons';
+import { CloseIcon, PauseIcon } from '../../components/icons';
 import type { TaskNotification } from '../notifications';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { radii, spacing, typography } from '../../theme';
@@ -51,6 +51,7 @@ export function NotificationToast({
 
   if (!item) return null;
   const done = item.kind === 'completed';
+  const paused = item.kind === 'paused';
 
   return (
     <View style={[styles.wrap, { top: insets.top + 10 }]} pointerEvents="box-none">
@@ -70,8 +71,14 @@ export function NotificationToast({
           accessibilityRole="button"
           accessibilityLabel={`${item.title}: ${item.taskTitle}. ${item.detail}. Open task`}
         >
-          <View style={[styles.icon, done ? styles.iconDone : styles.iconNew]}>
-            {done ? <CheckIcon size={20} color={theme.textOnPrimary} /> : <ClipboardIcon size={19} color={theme.textOnPrimary} />}
+          <View style={[styles.icon, done ? styles.iconDone : styles.iconNew, paused && { backgroundColor: theme.warning }]}>
+            {done ? (
+              <CheckIcon size={20} color={theme.textOnPrimary} />
+            ) : paused ? (
+              <PauseIcon size={19} color={theme.textOnPrimary} />
+            ) : (
+              <ClipboardIcon size={19} color={theme.textOnPrimary} />
+            )}
           </View>
           <View style={styles.text}>
             <Text style={styles.title}>{item.title}</Text>
@@ -86,7 +93,7 @@ export function NotificationToast({
         <Pressable onPress={() => hide()} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Dismiss notification">
           <CloseIcon size={16} color={theme.textMuted} />
         </Pressable>
-        <View style={[styles.accent, { backgroundColor: done ? theme.success : theme.primary }]} />
+        <View style={[styles.accent, { backgroundColor: done ? theme.success : paused ? theme.warning : theme.primary }]} />
       </Animated.View>
     </View>
   );

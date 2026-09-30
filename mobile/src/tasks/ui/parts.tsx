@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { ChevronLeftIcon, ClockIcon, CloseIcon, PlayIcon } from '../../components/icons';
+import { ChevronLeftIcon, ClockIcon, CloseIcon, PauseIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
@@ -120,6 +120,8 @@ export function TaskIconSquare({ task, size = 44 }: { task: WorkTask; size?: num
         <CheckIcon size={glyph} color="#FFFFFF" />
       ) : state === 'progress' ? (
         <PlayIcon size={glyph} color="#FFFFFF" />
+      ) : state === 'paused' ? (
+        <PauseIcon size={glyph} color="#FFFFFF" />
       ) : (
         <ClipboardIcon size={glyph} color="#FFFFFF" />
       )}

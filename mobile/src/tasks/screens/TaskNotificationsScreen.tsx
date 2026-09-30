@@ -3,7 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type Lay
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { AlertTriangleIcon, BellIcon, ChevronLeftIcon, ClockIcon, PlayIcon } from '../../components/icons';
+import { AlertTriangleIcon, BellIcon, ChevronLeftIcon, ClockIcon, PauseIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
@@ -107,10 +107,12 @@ function AttentionBackground() {
   );
 }
 
-const KIND_LOOK: Record<TaskNotification['kind'], { tone: 'info' | 'success' | 'accent'; Icon: typeof ClipboardIcon }> = {
+const KIND_LOOK: Record<TaskNotification['kind'], { tone: 'info' | 'success' | 'accent' | 'warning'; Icon: typeof ClipboardIcon }> = {
   created: { tone: 'info', Icon: ClipboardIcon },
   completed: { tone: 'success', Icon: CheckIcon },
   started: { tone: 'accent', Icon: PlayIcon as typeof ClipboardIcon },
+  paused: { tone: 'warning', Icon: PauseIcon as typeof ClipboardIcon },
+  resumed: { tone: 'accent', Icon: PlayIcon as typeof ClipboardIcon },
 };
 
 /** "From Prashanth" / "By Rohan" / "Pavan" for the grey meta line. */

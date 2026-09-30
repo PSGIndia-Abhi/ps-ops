@@ -15,13 +15,14 @@ export const PRIORITY_META: Record<TaskPriority, { label: string; tone: Tone }> 
   HIGH: { label: 'High', tone: 'danger' },
 };
 
-export type TaskState = 'overdue' | 'progress' | 'today' | 'upcoming' | 'open' | 'done' | 'cancelled';
+export type TaskState = 'overdue' | 'progress' | 'paused' | 'today' | 'upcoming' | 'open' | 'done' | 'cancelled';
 
 /** What a task "is" right now, for its colour and pill - same rules as the lists. */
 export function taskState(x: WorkTask): TaskState {
   if (x.status === 'COMPLETED') return 'done';
   if (x.status === 'CANCELLED') return 'cancelled';
   if (isOverdue(x)) return 'overdue';
+  if (x.status === 'PAUSED') return 'paused';
   if (x.status === 'IN_PROGRESS') return 'progress';
   if (x.due_date === todayStr()) return 'today';
   if (x.due_date && x.due_date > todayStr()) return 'upcoming';
@@ -31,6 +32,7 @@ export function taskState(x: WorkTask): TaskState {
 export const STATE_META: Record<TaskState, { label: string; tone: Tone }> = {
   overdue: { label: 'Overdue', tone: 'danger' },
   progress: { label: 'In Progress', tone: 'accent' },
+  paused: { label: 'Paused', tone: 'warning' },
   today: { label: 'Open', tone: 'warning' },
   upcoming: { label: 'Upcoming', tone: 'info' },
   open: { label: 'Open', tone: 'info' },

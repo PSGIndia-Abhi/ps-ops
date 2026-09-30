@@ -39,6 +39,7 @@ import {
   DocumentIcon,
   GalleryIcon,
   PersonIcon,
+  PauseIcon,
   PlayIcon,
   PlusIcon,
   TagIcon,
@@ -100,6 +101,7 @@ type Dialog =
   | 'update'
   | 'delete'
   | 'skip'
+  | 'pause'
   | 'series'
   | 'upload';
 
@@ -112,6 +114,9 @@ const HISTORY_LABEL: Record<string, string> = {
   REASSIGN: 'Reassigned',
   RESCHEDULE: 'Rescheduled',
   SKIP: 'Skipped',
+  PAUSE: 'Paused',
+  RESUME: 'Resumed',
+  REOPEN: 'Reopened',
 };
 
 const factory = (t: CrmTheme) => ({
@@ -240,6 +245,7 @@ const factory = (t: CrmTheme) => ({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  footerRow: { flexDirection: 'row' as const, gap: spacing.sm },
   actions: {
     flexDirection: 'row' as const,
     justifyContent: 'space-around' as const,
@@ -470,19 +476,8 @@ export function TaskDetailScreen() {
       key: 'dup',
       label: 'Duplicate',
       icon: <PaperclipIcon size={18} color={theme.primary} />,
-      onPress: () =>
-        run(async () => {
-          await api.createTask({
-            title: `${task.title} (copy)`,
-            description: task.description || undefined,
-            task_type: task.task_type || undefined,
-            priority: task.priority,
-            assigned_to: task.assigned_to,
-            due_date: task.due_date || todayStr(),
-            due_time: task.due_time || undefined,
-          });
-          await refreshList();
-        }, 'Task duplicated'),
+      // Opens Create Task pre-filled from this task, so it can be changed before saving.
+      onPress: () => navigation.navigate('NewTask', { duplicateOf: task.id }),
     },
     {
       key: 'files',
@@ -746,6 +741,14 @@ export function TaskDetailScreen() {
                 'One time'
               )}
             </InfoRow>
+            {!!task.started_at && (
+              <InfoRow
+                icon={<ClockIcon size={18} color={theme.textMuted} />}
+                label="Time Worked"
+              >
+                {fmtWorked(timeWorkedMs(task))}
+              </InfoRow>
+            )}
             {!!task.completed_at && (
               <InfoRow
                 icon={<CheckCircleIcon size={18} color={theme.textMuted} />}
@@ -782,6 +785,19 @@ export function TaskDetailScreen() {
 
         {tab === 'updates' && (
           <>
+            {task.status === 'PAUSED' && (
+              <View style={[styles.progress, { backgroundColor: theme.warningBg }]}>
+                <PauseIcon size={20} color={theme.warningText} />
+                <View style={styles.flex}>
+                  <Text style={[styles.progressTitle, { color: theme.warningText }]}>Task paused</Text>
+                  {!!task.paused_at && (
+                    <Text style={[styles.progressSub, { color: theme.warningText }]}>
+                      On hold since {fmtTimestamp(task.paused_at)}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
             {task.status === 'IN_PROGRESS' && (
               <View style={styles.progress}>
                 <PlayIcon size={20} color={theme.success} />
@@ -950,18 +966,40 @@ export function TaskDetailScreen() {
           />
         )}
         {canWork && task.status === 'IN_PROGRESS' && (
-          // One tap completes the task - no separate Complete screen.
+          // Pause (asks for a reason) next to one-tap Completed.
+          <View style={styles.footerRow}>
+            <PrimaryButton
+              label="Pause"
+              variant="secondary"
+              icon={<PauseIcon size={18} color={theme.primary} />}
+              style={styles.flex}
+              onPress={() => {
+                setReason('');
+                setDialog('pause');
+              }}
+            />
+            <PrimaryButton
+              label="Completed"
+              icon={<CheckCircleIcon size={18} color={theme.textOnPrimary} />}
+              style={styles.flex}
+              loading={busy}
+              onPress={() =>
+                run(async () => {
+                  const done = await api.completeTask(task.id);
+                  notifyLocal(done, 'completed');
+                  return done;
+                }, null)
+              }
+            />
+          </View>
+        )}
+        {canWork && task.status === 'PAUSED' && (
+          // A paused task must be resumed before it can be completed (backend rule).
           <PrimaryButton
-            label="Completed"
-            icon={<CheckCircleIcon size={18} color={theme.textOnPrimary} />}
+            label="Resume"
+            icon={<PlayIcon size={18} color={theme.textOnPrimary} />}
             loading={busy}
-            onPress={() =>
-              run(async () => {
-                const done = await api.completeTask(task.id);
-                notifyLocal(done, 'completed');
-                return done;
-              }, null)
-            }
+            onPress={() => run(() => api.resumeTask(task.id), 'Task resumed')}
           />
         )}
         <View style={styles.actions}>
@@ -1077,6 +1115,32 @@ export function TaskDetailScreen() {
             }}
           />
         </View>
+      </Sheet>
+
+      <Sheet
+        visible={dialog === 'pause'}
+        onClose={() => setDialog(null)}
+        title="Pause this task?"
+      >
+        <Text style={styles.sheetText}>
+          The timer stops until you resume. The due date doesn’t change.
+        </Text>
+        <TextInput
+          value={reason}
+          onChangeText={setReason}
+          placeholder="Why are you pausing? (required)"
+          placeholderTextColor={theme.textMuted}
+          style={[styles.input, styles.multi]}
+          multiline
+          maxLength={500}
+        />
+        <PrimaryButton
+          label="Pause task"
+          icon={<PauseIcon size={18} color={theme.textOnPrimary} />}
+          loading={busy}
+          disabled={!reason.trim()}
+          onPress={() => run(() => api.pauseTask(task.id, reason.trim()), 'Task paused')}
+        />
       </Sheet>
 
       <Sheet
@@ -1358,4 +1422,24 @@ function SeriesSheet({
       )}
     </Sheet>
   );
+}
+
+/** Time actually worked: start -> now (or -> the pause / completion), minus earlier pauses. */
+function timeWorkedMs(t: WorkTask): number {
+  if (!t.started_at) return 0;
+  const end =
+    t.status === 'PAUSED' && t.paused_at
+      ? new Date(t.paused_at).getTime()
+      : t.completed_at
+        ? new Date(t.completed_at).getTime()
+        : Date.now();
+  return Math.max(0, end - new Date(t.started_at).getTime() - (Number(t.paused_seconds) || 0) * 1000);
+}
+
+function fmtWorked(ms: number): string {
+  const mins = Math.floor(ms / 60000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+  return h ? `${h}h ${m}m` : `${m}m`;
 }

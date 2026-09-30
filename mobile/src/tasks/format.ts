@@ -95,7 +95,8 @@ export const formatBytes = (n: number | null) => {
 
 // ---- selectors (same definitions as web selectors.js) ---------------------
 
-export const isActive = (t: WorkTask) => t.status === 'OPEN' || t.status === 'IN_PROGRESS';
+/** Not finished yet - a paused task is still open work (same as the backend's is_overdue rule). */
+export const isActive = (t: WorkTask) => t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'PAUSED';
 export const isFinished = (s: TaskStatus) => s === 'COMPLETED' || s === 'CANCELLED';
 
 /** Day-granularity, the same rule the server uses for `is_overdue`. */
@@ -138,7 +139,8 @@ export const LIST_MODES: Record<ListMode, { label: string; match: (t: WorkTask, 
   upcoming: { label: 'Upcoming', match: (t) => t.status === 'OPEN' && !!t.due_date && !isOverdue(t) },
   completed: { label: 'Completed', match: (t) => t.status === 'COMPLETED' },
   // Reached from Home's Quick Actions.
-  progress: { label: 'In Progress', match: (t) => t.status === 'IN_PROGRESS' },
+  // Started work, including tasks currently paused.
+  progress: { label: 'In Progress', match: (t) => t.status === 'IN_PROGRESS' || t.status === 'PAUSED' },
   high: { label: 'High Priority', match: (t) => isActive(t) && t.priority === 'HIGH' },
   delegated: { label: 'Assigned by Me', match: (t, me) => t.created_by === me && t.assigned_to !== me && isActive(t) },
   recurring: { label: 'Recurring', match: (t) => !!t.series_id && isActive(t) },

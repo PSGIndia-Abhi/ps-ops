@@ -5,7 +5,8 @@
  * Calendar dates are plain 'YYYY-MM-DD' strings, times 'HH:MM:SS' or null.
  */
 
-export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+/** PAUSED: the assignee put a started task on hold (with a reason); it must be resumed before completing. */
+export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'NORMAL' | 'HIGH';
 
 export interface WorkTask {
@@ -28,6 +29,10 @@ export interface WorkTask {
   next_action_date: string | null;
   started_at: string | null;
   started_by: number | null;
+  /** When the current pause began (null unless PAUSED). */
+  paused_at?: string | null;
+  /** Total seconds spent paused so far, left out of "time worked". */
+  paused_seconds?: number | null;
   completed_at: string | null;
   completed_by: number | null;
   completion_note: string | null;

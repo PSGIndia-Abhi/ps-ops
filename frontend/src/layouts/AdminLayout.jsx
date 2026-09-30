@@ -1,5 +1,4 @@
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import BookingSummary from "../components/BookingSummary";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import { useState, useEffect } from "react";
@@ -41,7 +40,7 @@ export default function AdminLayout() {
 
   /* ---------------- MOBILE PANELS ---------------- */
   const [mobilePanel, setMobilePanel] = useState(null);
-  // null | "summary" | "menu"
+  // null | "menu"
 
   /* ---------------- ACTION SHEET ---------------- */
   const [isActionsOpen, setIsActionsOpen] = useState(false);
@@ -61,11 +60,6 @@ export default function AdminLayout() {
     setMobilePanel(null);
     setIsActionsOpen(false);
     navigate("/admin");
-  }
-
-  function openSummary() {
-    setIsActionsOpen(false);
-    setMobilePanel("summary");
   }
 
   function openMenu() {
@@ -144,11 +138,9 @@ export default function AdminLayout() {
         {/* DESKTOP SIDEBAR */}
         {!isMobile && (
           <aside className="sidebar">
-            <BookingSummary />
-
             <nav className="nav">
               <button
-                className={`nav-btn ${isActive("/admin") && !isActive("/admin/analysis") ? "active" : ""}`}
+                className={`nav-btn ${location.pathname === "/admin" ? "active" : ""}`}
                 onClick={() => navigate("/admin")}
               >
                 Dashboard
@@ -275,12 +267,6 @@ export default function AdminLayout() {
       </div>
 
       {/* ---------- MOBILE PANELS ---------- */}
-
-      {isMobile && mobilePanel === "summary" && (
-        <div className="mobile-panel mobile-panel-summary">
-          <BookingSummary />
-        </div>
-      )}
 
       {isMobile && mobilePanel === "menu" && (
         <div className="mobile-panel mobile-panel-menu">
@@ -432,12 +418,6 @@ export default function AdminLayout() {
             className={isActionsOpen ? "active" : ""}
           >
             Actions
-          </button>
-          <button
-            onClick={openSummary}
-            className={mobilePanel === "summary" ? "active" : ""}
-          >
-            Summary
           </button>
           <button
             onClick={openMenu}

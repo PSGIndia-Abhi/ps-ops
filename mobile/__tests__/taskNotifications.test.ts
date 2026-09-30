@@ -1,5 +1,6 @@
 import { buildNotification, detectEvents, dueLabel, emptyState, eventKey } from '../src/tasks/notifications';
-import { todayStr } from '../src/tasks/format';
+import { isActive, isOverdue, todayStr } from '../src/tasks/format';
+import { taskState } from '../src/tasks/theme';
 import type { TeamMember, WorkTask } from '../src/tasks/types';
 
 const ME = 10;
@@ -74,6 +75,28 @@ describe('task notifications', () => {
     expect(events).toHaveLength(1);
     expect(events[0].title).toBe('Task Started');
     expect(events[0].by).toBe('Report');
+  });
+
+  it('my direct report pauses, then resumes -> "Task Paused" then "Task Resumed"', () => {
+    const inProgress = { ...emptyState(), known: { t4: 'IN_PROGRESS' } };
+    const paused = task({ id: 't4', assigned_to: REPORT, assigned_to_name: 'Report', status: 'PAUSED', updated_at: '2026-09-30T10:00:00Z' });
+    const p = detectEvents([paused], inProgress, ME, team, false).events;
+    expect(p).toHaveLength(1);
+    expect(p[0].title).toBe('Task Paused');
+
+    const resumed = { ...paused, status: 'IN_PROGRESS' as const, updated_at: '2026-09-30T11:00:00Z' };
+    const r = detectEvents([resumed], { ...emptyState(), known: { t4: 'PAUSED' } }, ME, team, false).events;
+    expect(r).toHaveLength(1);
+    expect(r[0].title).toBe('Task Resumed');
+    // A second pause later is a separate event, not swallowed by the first one's key.
+    const again = buildNotification({ ...paused, updated_at: '2026-09-30T12:00:00Z' }, 'paused');
+    expect(again.key).not.toBe(p[0].key);
+  });
+
+  it('a paused task is still active, and overdue once its date passes', () => {
+    expect(isActive(task({ status: 'PAUSED' }))).toBe(true);
+    expect(isOverdue(task({ status: 'PAUSED', due_date: '2020-01-01' }))).toBe(true);
+    expect(taskState(task({ status: 'PAUSED' }))).toBe('paused');
   });
 
   it('does not announce my own start', () => {

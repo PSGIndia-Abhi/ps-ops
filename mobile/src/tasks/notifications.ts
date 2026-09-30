@@ -17,7 +17,7 @@ import type { TeamMember, WorkTask } from './types';
  * later feed events in through the same `ingest` path in TasksContext.
  */
 
-export type TaskNotificationKind = 'created' | 'completed' | 'started';
+export type TaskNotificationKind = 'created' | 'completed' | 'started' | 'paused' | 'resumed';
 
 export interface TaskNotification {
   key: string;
@@ -59,7 +59,10 @@ export function saveState(userId: number, s: NotificationState): Promise<void> {
   });
 }
 
-export const eventKey = (taskId: string, kind: TaskNotificationKind) => `${taskId}:${kind}`;
+/** One key per event, for de-dup. Pause / resume can happen many times, so their
+ *  keys include when it happened (the task's updated_at). */
+export const eventKey = (taskId: string, kind: TaskNotificationKind, at?: string | null) =>
+  (kind === 'paused' || kind === 'resumed') && at ? `${taskId}:${kind}:${at}` : `${taskId}:${kind}`;
 
 /** "Today, 10:00 AM" / "Tomorrow" / "Oct 3, 2026, 9:00 AM" */
 export function dueLabel(date: string | null, time: string | null): string {
@@ -69,18 +72,26 @@ export function dueLabel(date: string | null, time: string | null): string {
   return tm ? `${day}, ${tm}` : day;
 }
 
+const TITLES: Record<TaskNotificationKind, string> = {
+  created: 'New Task Created',
+  started: 'Task Started',
+  paused: 'Task Paused',
+  resumed: 'Task Resumed',
+  completed: 'Task Completed',
+};
+
 export function buildNotification(task: WorkTask, kind: TaskNotificationKind, byName?: string | null): TaskNotification {
   return {
-    key: eventKey(task.id, kind),
+    key: eventKey(task.id, kind, task.updated_at),
     kind,
     taskId: task.id,
-    title: kind === 'created' ? 'New Task Created' : kind === 'started' ? 'Task Started' : 'Task Completed',
+    title: TITLES[kind],
     taskTitle: task.title,
     detail:
       kind === 'created'
         ? `Due: ${dueLabel(task.due_date, task.due_time)}`
-        : kind === 'started'
-          ? `Started by ${byName || task.assigned_to_name || 'the assignee'}.`
+        : kind === 'started' || kind === 'paused' || kind === 'resumed'
+          ? `${kind === 'started' ? 'Started' : kind === 'paused' ? 'Paused' : 'Resumed'} by ${byName || task.assigned_to_name || 'the assignee'}.`
           : byName
             ? `Completed by ${byName}.`
             : 'has been completed successfully.',
@@ -121,6 +132,21 @@ export function detectEvents(
 
     if (prev === undefined) {
       if (isCreatedForMe(x, me) && isActive(x)) events.push(buildNotification(x, 'created'));
+    } else if (
+      prev === 'IN_PROGRESS' &&
+      x.status === 'PAUSED' &&
+      x.assigned_to !== me &&
+      (x.created_by === me || directIds.has(x.assigned_to))
+    ) {
+      // Only the assignee can pause or resume, so "someone else" = assignee isn't me.
+      events.push(buildNotification(x, 'paused', x.assigned_to_name));
+    } else if (
+      prev === 'PAUSED' &&
+      x.status === 'IN_PROGRESS' &&
+      x.assigned_to !== me &&
+      (x.created_by === me || directIds.has(x.assigned_to))
+    ) {
+      events.push(buildNotification(x, 'resumed', x.assigned_to_name));
     } else if (prev === 'OPEN' && x.status === 'IN_PROGRESS' && x.started_by !== me && (x.created_by === me || directIds.has(x.assigned_to))) {
       events.push(buildNotification(x, 'started', x.assigned_to_name));
     } else if (prev !== 'COMPLETED' && x.status === 'COMPLETED' && isCompletionForMe(x, me, directIds)) {

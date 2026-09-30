@@ -14,8 +14,11 @@ export type TaskTabParamList = {
 export type TaskStackParamList = {
   TaskTabs: NavigatorScreenParams<TaskTabParamList> | undefined;
   TaskDetail: { taskId: string };
-  /** `editId` opens the form in edit mode; `date` pre-fills the due date (from Calendar). */
-  NewTask: { editId?: string; date?: string } | undefined;
+  /**
+   * `editId` opens the form in edit mode; `date` pre-fills the due date (from Calendar);
+   * `duplicateOf` opens a NEW task pre-filled from that task, to review before creating.
+   */
+  NewTask: { editId?: string; date?: string; duplicateOf?: string } | undefined;
   TaskCreated: { taskId: string; occurrences?: number };
   Reassign: { taskId: string };
   Reschedule: { taskId: string };
