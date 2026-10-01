@@ -57,7 +57,10 @@ import TaskProLayout from "./pages/taskpro/TaskProLayout";
 import TaskDashboard from "./pages/taskpro/TaskDashboard";
 import TaskList from "./pages/taskpro/TaskList";
 import TaskDetail from "./pages/taskpro/TaskDetail";
-import TaskProComingSoon from "./pages/taskpro/ComingSoon";
+import TaskProRequests from "./pages/taskpro/RescheduleRequests";
+import TaskProReports from "./pages/taskpro/TaskReports";
+import TaskProProfile from "./pages/taskpro/TaskProfile";
+import TaskProNotifications from "./pages/taskpro/Notifications";
 import { TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
 import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
@@ -260,9 +263,10 @@ const router = createBrowserRouter([
       { path: "upcoming", element: <TaskList mode="upcoming" /> },
       { path: "completed", element: <TaskList mode="completed" /> },
       { path: "tasks/:id", element: <TaskDetail /> },
-      { path: "templates", element: <TaskProComingSoon page="templates" /> },
-      { path: "reports", element: <TaskProComingSoon page="reports" /> },
-      { path: "settings", element: <TaskProComingSoon page="settings" /> },
+      { path: "requests", element: <TaskProRequests /> },
+      { path: "reports", element: <TaskProReports /> },
+      { path: "profile", element: <TaskProProfile /> },
+      { path: "notifications", element: <TaskProNotifications /> },
     ],
   },
 

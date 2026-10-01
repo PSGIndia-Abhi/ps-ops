@@ -33,21 +33,49 @@ const NAV_ITEMS = [
     label: "Invoices",
     icon: FiFileText,
     children: [
-      { label: "Invoice Upload", path: "/accountant/invoices/upload", icon: FiUploadCloud },
-      { label: "Review & Validate", path: "/accountant/invoices/review", icon: FiCheckSquare },
-      { label: "Invoice List", path: "/accountant/invoices/list", icon: FiFileText },
+      {
+        label: "Invoice Upload",
+        path: "/accountant/invoices/upload",
+        icon: FiUploadCloud,
+      },
+      {
+        label: "Review & Validate",
+        path: "/accountant/invoices/review",
+        icon: FiCheckSquare,
+      },
+      {
+        label: "Invoice List",
+        path: "/accountant/invoices/list",
+        icon: FiFileText,
+      },
       // { label: "Payment Tracking", path: "/accountant/invoices/tracking", icon: FiActivity },
-      { label: "Outstanding", path: "/accountant/invoices/outstanding", icon: FiAlertTriangle },
+      {
+        label: "Outstanding",
+        path: "/accountant/invoices/outstanding",
+        icon: FiAlertTriangle,
+      },
     ],
   },
   {
     label: "Payments",
     icon: FiCreditCard,
     children: [
-      { label: "Record Payment", path: "/accountant/payments/record", icon: FiEdit2 },
-      { label: "Payment List", path: "/accountant/payments/list", icon: FiList },
+      {
+        label: "Record Payment",
+        path: "/accountant/payments/record",
+        icon: FiEdit2,
+      },
+      {
+        label: "Payment List",
+        path: "/accountant/payments/list",
+        icon: FiList,
+      },
       // { label: "Payment Pending", path: "/accountant/payments/pending", icon: FiClock },
-      // { label: "Customer Outstanding", path: "/accountant/payments/customer-outstanding", icon: FiUsers },
+      {
+        label: "Customer Outstanding",
+        path: "/accountant/payments/customer-outstanding",
+        icon: FiUsers,
+      },
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell },
@@ -120,7 +148,9 @@ export default function AccountantLayout() {
         return (
           <div key={item.label}>
             <button
-              className={`acc-parent ${groupHasActiveChild(item) ? "active" : ""}`}
+              className={`acc-parent ${
+                groupHasActiveChild(item) ? "active" : ""
+              }`}
               onClick={() => toggleGroup(item)}
               aria-expanded={open}
             >
@@ -140,7 +170,9 @@ export default function AccountantLayout() {
                   return (
                     <button
                       key={child.path}
-                      className={`acc-child ${isPathActive(child) ? "active" : ""}`}
+                      className={`acc-child ${
+                        isPathActive(child) ? "active" : ""
+                      }`}
                       onClick={() => go(child.path)}
                     >
                       <ChildIcon className="acc-icon" />

@@ -127,20 +127,22 @@ async function validateRows(rows, user) {
   // customers -- matched by name/code (as before) OR by id (COMP1, COMP2,
   // ...), whichever the row has. The id is unambiguous, so it's the safer
   // choice for anyone unsure of the exact customer name; the name still
-  // works for people who already know it.
+  // works for people who already know it. The display name (the clean name
+  // set on the company) is accepted too.
   const typedCustomers = [...new Set(rows.map((r) => String(r.customer || "").trim()).filter(Boolean))];
   const customersById = new Map(); // upper(id) -> customer
-  const customersByNameKey = new Map(); // lower(name or code) -> [customer]
+  const customersByNameKey = new Map(); // lower(name, display name or code) -> [customer]
   if (typedCustomers.length) {
     const lowerVals = typedCustomers.map(lower);
     const upperVals = typedCustomers.map(upper);
     const [customers] = await pool.query(
-      `SELECT id, name, display_name, code, is_active FROM companies WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(code) IN (?)`,
-      [upperVals, lowerVals, lowerVals]
+      `SELECT id, name, display_name, code, is_active FROM companies
+       WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(display_name) IN (?) OR LOWER(code) IN (?)`,
+      [upperVals, lowerVals, lowerVals, lowerVals]
     );
     for (const c of customers) {
       customersById.set(upper(c.id), c);
-      for (const key of new Set([lower(c.name), lower(c.code || "")])) {
+      for (const key of new Set([lower(c.name), lower(c.display_name || ""), lower(c.code || "")])) {
         if (!key) continue;
         if (!customersByNameKey.has(key)) customersByNameKey.set(key, []);
         customersByNameKey.get(key).push(c);

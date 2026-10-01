@@ -1,12 +1,29 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  FiAlertCircle,
+  FiArrowLeft,
+  FiArrowRight,
+  FiCheckCircle,
+  FiKey,
+  FiLock,
+  FiLogIn,
+  FiMail,
+  FiUserPlus,
+} from "react-icons/fi";
 import { API_BASE } from "../api";
-import "../assets/auth.css";
-import logo from "../assets/logo.png";
+import AuthLayout, { AuthHeading, PasswordInput } from "../components/AuthLayout";
+
+/** "Good morning" / "Good afternoon" / "Good evening" for the viewer's local time. */
+function greeting(date = new Date()) {
+  const h = date.getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function Login() {
   const navigate = useNavigate();
-  
 
   const [mode, setMode] = useState("login");
   // login | forgot-email | forgot-verify
@@ -17,205 +34,257 @@ export default function Login() {
   const [newPassword, setNewPassword] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
 
-  // ---------------- LOGIN ----------------
-  const handleLogin = async () => {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
+  // Shown on the page instead of pop-up alerts; `busy` stops double submits.
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      alert(data.error || "Login failed");
-      return;
-    }
-    console.log("LOGIN RESPONSE:", data);
-
-    localStorage.setItem("token", data.token);
-    console.log("TOKEN SAVED:", data.token);
-
-    console.log("TOKEN IN STORAGE:", localStorage.getItem("token"));
-    localStorage.setItem("role", data.role);
-    if (data.user_id) {
-      localStorage.setItem("userId", String(data.user_id));
-    } else {
-      localStorage.removeItem("userId");
-    }
-    if (data.contact_id) {
-      localStorage.setItem("contactId", String(data.contact_id));
-    } else {
-      localStorage.removeItem("contactId");
-    }
-
-    navigate("/");
+  const switchMode = (next) => {
+    setError("");
+    setNotice("");
+    setMode(next);
   };
 
+  // Posts JSON and returns { res, data }; a network failure becomes an error message.
+  async function post(path, body) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  }
 
+  async function run(fn) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await fn();
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------------- LOGIN ----------------
+  const handleLogin = (e) => {
+    e?.preventDefault();
+    if (!acceptTerms) return;
+    run(async () => {
+      const { res, data } = await post("/api/auth/login", { email, password });
+
+      if (!res.ok) {
+        setError(data.error || "Login failed");
+        return;
+      }
+
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("role", data.role);
+      if (data.user_id) {
+        localStorage.setItem("userId", String(data.user_id));
+      } else {
+        localStorage.removeItem("userId");
+      }
+      if (data.contact_id) {
+        localStorage.setItem("contactId", String(data.contact_id));
+      } else {
+        localStorage.removeItem("contactId");
+      }
+
+      navigate("/");
+    });
+  };
 
   // ---------------- SEND RESET OTP ----------------
-  const handleSendResetOtp = async () => {
-    const res = await fetch(
-      `${API_BASE}/api/auth/forgot-password/send-otp`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+  const handleSendResetOtp = (e) => {
+    e?.preventDefault();
+    run(async () => {
+      const { res, data } = await post("/api/auth/forgot-password/send-otp", { email });
+
+      if (!res.ok) {
+        setError(data.error || "Failed to send OTP");
+        return;
       }
-    );
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      alert(data.error || "Failed to send OTP");
-      return;
-    }
-
-    setMode("forgot-verify");
+      setMode("forgot-verify");
+      setNotice(`We've sent a one-time code to ${email}.`);
+    });
   };
 
   // ---------------- VERIFY + RESET ----------------
-  const handleResetPassword = async () => {
-    const res = await fetch(
-      `${API_BASE}/api/auth/forgot-password/verify-otp`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          otp,
-          newPassword,
-        }),
+  const handleResetPassword = (e) => {
+    e?.preventDefault();
+    run(async () => {
+      const { res, data } = await post("/api/auth/forgot-password/verify-otp", {
+        email,
+        otp,
+        newPassword,
+      });
+
+      if (!res.ok) {
+        setError(data.error || "Reset failed");
+        return;
       }
-    );
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      alert(data.error || "Reset failed");
-      return;
-    }
-
-    alert("Password updated. Please login.");
-    setMode("login");
+      setMode("login");
+      setPassword("");
+      setNotice("Password updated. Please sign in with your new password.");
+    });
   };
 
+  const messages = (
+    <>
+      {error && (
+        <p className="bs-login-msg error" role="alert">
+          <FiAlertCircle /> {error}
+        </p>
+      )}
+      {notice && (
+        <p className="bs-login-msg ok" role="status">
+          <FiCheckCircle /> {notice}
+        </p>
+      )}
+    </>
+  );
+
   return (
-    <div className="auth-container">
-      <div className="auth-card">
+    <AuthLayout title="Everything your team needs, in one place.">
+          {/* ---------------- LOGIN MODE ---------------- */}
+          {mode === "login" && (
+            <form onSubmit={handleLogin} noValidate>
+              <AuthHeading icon={FiLogIn}  sub="Sign in to your BestServe account">
+                Welcome <em>back</em>
+              </AuthHeading>
 
-        {/* ---------------- LOGIN MODE ---------------- */}
-        {mode === "login" && (
-          <>
-            <img src={logo} alt="BestServe Logo" style={{
-              display: "block",
-              margin: "0 auto 18px",
-              width: "80px"
-            }} />
-            <h2>Login</h2>
+              {messages}
 
-            <input
-              type="username"
-              placeholder="Email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-            />
+              <label className="bs-login-field" htmlFor="bs-email">
+                <span>Email</span>
+                <div className="bs-login-input">
+                  <FiMail className="bs-login-input-icon" aria-hidden="true" />
+                  <input id="bs-email" type="text" inputMode="email" autoComplete="username" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+                </div>
+              </label>
 
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
+              <label className="bs-login-field" htmlFor="bs-password">
+                <span>Password</span>
+                <PasswordInput id="bs-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" autoComplete="current-password" />
+              </label>
+              <div className="bs-login-forgot">
+                <button type="button" className="bs-login-link" onClick={() => switchMode("forgot-email")}>
+                  Forgot password?
+                </button>
+              </div>
 
-            <label className="terms">
-              <input
-                type="checkbox"
-                checked={acceptTerms}
-                onChange={e => setAcceptTerms(e.target.checked)}
-              />
-              I agree to the Terms & Conditions
-            </label>
+              <label className="bs-login-terms">
+                <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
+                <span>
+                  I agree to the{" "}
+                  <a href="/terms" target="_blank" rel="noreferrer">
+                    Terms &amp; Conditions
+                  </a>
+                </span>
+              </label>
 
-            <button
-              onClick={handleLogin}
-              disabled={!acceptTerms}
-            >
-              Login
-            </button>
-            <div style={{ marginTop: "12px", fontSize: "14px" }}>
-              Don't have an account?{" "}
-              <a href="/signup" style={{ color: "#2563eb", fontWeight: 500 }}>
-                Sign up
-              </a>
-            </div>
-            <div style={{ marginTop: "8px", fontSize: "14px" }}>
-              Temporary worker?{" "}
-              <a href="/temp-access" style={{ color: "#2563eb", fontWeight: 500 }}>
-                Enter OTP
-              </a>
-            </div>
+              <button type="submit" className="bs-login-btn" disabled={!acceptTerms || busy}>
+                {busy ? <span className="bs-login-spin" aria-hidden="true" /> : null}
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+              {!acceptTerms && <p className="bs-login-hint">Tick the box above to continue.</p>}
 
-            <p
-              style={{ cursor: "pointer", marginTop: 10 }}
-              onClick={() => setMode("forgot-email")}
-            >
-              Forgot password?
-            </p>
-          </>
-        )}
+              <div className="bs-login-or">
+                <span>or</span>
+              </div>
 
-        {/* ---------------- ENTER EMAIL ---------------- */}
-        {mode === "forgot-email" && (
-          <>
-            <h2>Reset Password</h2>
+              <div className="bs-login-alt">
+                <a href="/signup">
+                  <span className="bs-login-alt-icon">
+                    <FiUserPlus />
+                  </span>
+                  <span>
+                    <strong>New here?</strong>
+                    <small>Create an account</small>
+                  </span>
+                  <FiArrowRight className="bs-login-alt-go" aria-hidden="true" />
+                </a>
+                {/* Temporary worker sign-in is hidden for now; the /temp-access page still works.
+                <a href="/temp-access">
+                  <FiKey />
+                  <span>
+                    <strong>Temporary worker?</strong>
+                    <small>Sign in with OTP</small>
+                  </span>
+                </a>
+                */}
+              </div>
+            </form>
+          )}
 
-            <input
-              type="username"
-              placeholder="Enter your email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-            />
+          {/* ---------------- ENTER EMAIL ---------------- */}
+          {mode === "forgot-email" && (
+            <form onSubmit={handleSendResetOtp} noValidate>
+              <AuthHeading icon={FiLock} eyebrow="Account help" sub="Enter your account email and we'll send you a one-time code.">
+                Reset your <em>password</em>
+              </AuthHeading>
 
-            <button onClick={handleSendResetOtp}>
-              Send OTP
-            </button>
+              {messages}
 
-            <p
-              style={{ cursor: "pointer", marginTop: 10 }}
-              onClick={() => setMode("login")}
-            >
-              Back to login
-            </p>
-          </>
-        )}
+              <label className="bs-login-field" htmlFor="bs-reset-email">
+                <span>Email</span>
+                <div className="bs-login-input">
+                  <FiMail className="bs-login-input-icon" aria-hidden="true" />
+                  <input id="bs-reset-email" type="text" inputMode="email" autoComplete="username" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+                </div>
+              </label>
 
-        {/* ---------------- VERIFY OTP ---------------- */}
-        {mode === "forgot-verify" && (
-          <>
-            <h2>Enter OTP</h2>
+              <button type="submit" className="bs-login-btn" disabled={busy || !email.trim()}>
+                {busy ? <span className="bs-login-spin" aria-hidden="true" /> : null}
+                {busy ? "Sending…" : "Send OTP"}
+              </button>
 
-            <input
-              placeholder="OTP"
-              value={otp}
-              onChange={e => setOtp(e.target.value)}
-            />
+              <button type="button" className="bs-login-back" onClick={() => switchMode("login")}>
+                <FiArrowLeft /> Back to sign in
+              </button>
+            </form>
+          )}
 
-            <input
-              type="password"
-              placeholder="New Password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-            />
+          {/* ---------------- VERIFY OTP ---------------- */}
+          {mode === "forgot-verify" && (
+            <form onSubmit={handleResetPassword} noValidate>
+              <AuthHeading icon={FiKey} eyebrow="Almost there" sub="Check your email for the one-time code, then choose a new password.">
+                Enter the <em>code</em>
+              </AuthHeading>
 
-            <button onClick={handleResetPassword}>
-              Reset Password
-            </button>
-          </>
-        )}
+              {messages}
 
-      </div>
-    </div>
+              <label className="bs-login-field" htmlFor="bs-otp">
+                <span>One-time code</span>
+                <div className="bs-login-input">
+                  <FiKey className="bs-login-input-icon" aria-hidden="true" />
+                  <input id="bs-otp" inputMode="numeric" autoComplete="one-time-code" placeholder="OTP" value={otp} onChange={(e) => setOtp(e.target.value)} autoFocus />
+                </div>
+              </label>
+
+              <label className="bs-login-field" htmlFor="bs-new-password">
+                <span>New password</span>
+                <PasswordInput id="bs-new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password" autoComplete="new-password" />
+              </label>
+
+              <button type="submit" className="bs-login-btn" disabled={busy || !otp.trim() || !newPassword}>
+                {busy ? <span className="bs-login-spin" aria-hidden="true" /> : null}
+                {busy ? "Updating…" : "Reset password"}
+              </button>
+
+              <button type="button" className="bs-login-back" onClick={() => switchMode("forgot-email")}>
+                <FiArrowLeft /> Use a different email
+              </button>
+            </form>
+          )}
+
+    </AuthLayout>
   );
 }

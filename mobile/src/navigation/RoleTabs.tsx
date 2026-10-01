@@ -1,6 +1,7 @@
 import React from 'react';
-import { useUserRole } from '../auth/role';
+import { isTaskRole, useRawRole, useUserRole } from '../auth/role';
 import { CrmNavigator } from './CrmNavigator';
+import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
@@ -24,6 +25,10 @@ import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
  */
 export function RoleTabs() {
   const role = useUserRole();
+  const rawRole = useRawRole();
+
+  // Org-hierarchy designations get Task Management - same login split as the web app.
+  if (isTaskRole(rawRole)) return <TaskNavigator />;
 
   switch (role) {
     case 'supervisor':

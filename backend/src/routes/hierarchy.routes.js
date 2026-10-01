@@ -27,11 +27,11 @@ router.get("/tree", auth, requirePermission(PERMISSIONS.VIEW_HIERARCHY), async (
     const [members] = await pool.query(
       `SELECT m.org_unit_id, us.id AS user_id, us.name, us.email, r.name AS role,
               d.name AS designation, m.is_head,
-              (SELECT l.manager_user_id FROM user_reporting_lines l
+              (SELECT l.manager_user_id FROM user_hierarchy l
                 WHERE l.user_id = us.id AND l.is_primary = 1 AND ${activeOn("l")} LIMIT 1) AS primary_manager_id,
-              (SELECT COUNT(*) FROM user_reporting_lines l
+              (SELECT COUNT(*) FROM user_hierarchy l
                 WHERE l.user_id = us.id AND ${activeOn("l")}) AS manager_count,
-              (SELECT COUNT(*) FROM user_reporting_lines l
+              (SELECT COUNT(*) FROM user_hierarchy l
                 WHERE l.manager_user_id = us.id AND ${activeOn("l")}) AS report_count
          FROM user_org_units m
          JOIN users us ON us.id = m.user_id AND us.is_active = 1
@@ -43,9 +43,9 @@ router.get("/tree", auth, requirePermission(PERMISSIONS.VIEW_HIERARCHY), async (
 
     const [unassigned] = await pool.query(
       `SELECT us.id AS user_id, us.name, us.email, r.name AS role,
-              (SELECT COUNT(*) FROM user_reporting_lines l
+              (SELECT COUNT(*) FROM user_hierarchy l
                 WHERE l.user_id = us.id AND ${activeOn("l")}) AS manager_count,
-              (SELECT COUNT(*) FROM user_reporting_lines l
+              (SELECT COUNT(*) FROM user_hierarchy l
                 WHERE l.manager_user_id = us.id AND ${activeOn("l")}) AS report_count
          FROM users us
          LEFT JOIN roles r ON r.id = us.role_id

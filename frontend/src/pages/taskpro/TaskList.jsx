@@ -1,44 +1,63 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { FiCalendar, FiChevronRight, FiClock, FiFilter, FiSearch, FiX } from "react-icons/fi";
+import { FiAlertCircle, FiArrowRight, FiCalendar, FiChevronRight, FiClock, FiFilter, FiRepeat, FiSearch, FiUserCheck, FiX } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
-import { PRIORITY, STATUS, userById } from "./data";
-import { dueInfo, fmtDateTime } from "./format";
-import { LIST_MODES } from "./selectors";
-import useNow from "./useNow";
-import useVisibleTasks from "./useVisibleTasks";
+import { PRIORITY, STATUS } from "./data";
+import PeopleFilters from "./Filters";
+import { daysFromToday, dueInfo, fmtDateTime, todayStr } from "./format";
+import { assignedByText, deptOf } from "./hierarchy";
+import { COMPLETED_PERIODS, completedIn, FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, readFilters, withParam } from "./selectors";
+import { useTaskStore } from "./tasksApi";
 import { useViewer } from "./viewerContext";
-import { Avatar, EmptyState, PriorityBadge, PriorityDot, Skeleton, StatusBadge } from "./ui";
+import { Avatar, EmptyState, PriorityBadge, Skeleton, StatusBadge } from "./ui";
 
 const SORTS = {
-  due: { label: "Due date", fn: (a, b) => (a.dueAt || Infinity) - (b.dueAt || Infinity) },
+  due: { label: "Due date", fn: (a, b) => (a.due_date || "9999") + (a.due_time || "") < (b.due_date || "9999") + (b.due_time || "") ? -1 : 1 },
   priority: { label: "Priority", fn: (a, b) => PRIORITY[b.priority].rank - PRIORITY[a.priority].rank },
-  updated: { label: "Recently updated", fn: (a, b) => b.updatedAt - a.updatedAt },
+  updated: { label: "Recently updated", fn: (a, b) => new Date(b.updated_at) - new Date(a.updated_at) },
 };
 
-function TaskRow({ task, index, now, showAssignee }) {
-  const due = dueInfo(task.dueAt, now, task.status === "COMPLETED" || task.status === "CANCELLED");
-  const assignee = userById(task.assignedTo);
+// Which people filters each screen offers. My Tasks is already "mine", so
+// only "assigned by" makes sense; Team Tasks is already scoped to the team.
+const FILTERS_FOR = {
+  my: ["creator"],
+  team: ["dept", "assignee", "creator"],
+};
+const DEFAULT_FILTERS = ["scope", "dept", "assignee", "creator"];
+
+// My Tasks opens on what is due today; these switch the time window.
+const WHEN = {
+  today: { label: "Today", empty: "Nothing due today", match: (t) => t.due_date === todayStr() },
+  overdue: { label: "Overdue", empty: "Nothing overdue", match: (t) => isOverdue(t) },
+  week: { label: "Next 7 days", empty: "Nothing due in the next 7 days", match: (t) => !!t.due_date && t.due_date >= todayStr() && t.due_date <= daysFromToday(6) },
+  all: { label: "All", empty: null, match: () => true },
+};
+
+function TaskRow({ task, index, showAssignee, dept }) {
+  const due = dueInfo(task.due_date, task.due_time, task.status);
   return (
-    <Link
-      to={`${TASKPRO_HOME}/tasks/${task.id}`}
-      className="tp-task-row"
-      style={{ "--i": Math.min(index, 12) }}
-    >
-      <span className="tp-row-stripe" style={{ background: task.priority === "URGENT" ? PRIORITY.URGENT.soft : PRIORITY[task.priority].color }} />
+    <Link to={`${TASKPRO_HOME}/tasks/${task.id}`} className="tp-task-row" style={{ "--i": Math.min(index, 12) }}>
+      <span className="tp-row-stripe" style={{ background: PRIORITY[task.priority]?.color }} />
       <div className="tp-row-main">
         <div className="tp-row-top">
-          <span className="tp-row-no">{task.no}</span>
+          <span className="tp-row-no">{task.task_type || "Task"}</span>
           <PriorityBadge priority={task.priority} />
         </div>
         <h4 className="tp-row-title">{task.title}</h4>
         <div className="tp-row-meta">
-          {task.related && (
-            <span>
-              {task.related.type} {task.related.ref} · {task.related.customer}
+          <span className="tp-meta-item">
+            <FiUserCheck /> {assignedByText(task)}
+          </span>
+          {task.source_module && (
+            <span className="tp-meta-item">
+              {task.source_module} · {task.source_id}
             </span>
           )}
-          {!task.related && task.tags.length > 0 && <span>{task.tags.join(" · ")}</span>}
+          {task.series_id && (
+            <span className="tp-meta-item">
+              <FiRepeat /> Recurring
+            </span>
+          )}
         </div>
       </div>
 
@@ -47,16 +66,16 @@ function TaskRow({ task, index, now, showAssignee }) {
           <FiClock /> {due.text}
         </span>
         <small>
-          <FiCalendar /> {fmtDateTime(task.dueAt)}
+          <FiCalendar /> {fmtDateTime(task.due_date, task.due_time)}
         </small>
       </div>
 
-      {showAssignee && assignee && (
+      {showAssignee && (
         <div className="tp-row-who">
-          <Avatar name={assignee.name} size={28} />
+          <Avatar name={task.assigned_to_name} size={30} />
           <span className="tp-who-text">
-            <strong>{assignee.name}</strong>
-            <small>{assignee.role}</small>
+            <strong>{task.assigned_to_name}</strong>
+            <small>{dept || "No department"}</small>
           </span>
         </div>
       )}
@@ -69,41 +88,76 @@ function TaskRow({ task, index, now, showAssignee }) {
 
 export default function TaskList({ mode }) {
   const cfg = LIST_MODES[mode];
-  const { tasks, ready } = useVisibleTasks();
+  const { tasks, ready } = useTaskStore();
   const viewer = useViewer();
-  const now = useNow(60000);
   const [params, setParams] = useSearchParams();
 
   const q = params.get("q") || "";
-  const [status, setStatus] = useState("ALL");
-  const [priority, setPriority] = useState("ALL");
+  const status = params.get("status") || "ALL";
+  const priority = params.get("priority") || "ALL";
   const [sort, setSort] = useState("due");
 
-  const base = useMemo(() => tasks.filter((t) => cfg.match(t, now, viewer.id)), [tasks, cfg, now, viewer.id]);
+  const shown = FILTERS_FOR[mode] || DEFAULT_FILTERS;
+  const hasWhen = mode === "my";
+  // Completed: by completion date, like the dashboard card (all time by default).
+  const hasPeriod = mode === "completed";
+  const period = hasPeriod && COMPLETED_PERIODS[params.get("completed")] ? params.get("completed") : "all";
+  const when = hasWhen ? (WHEN[params.get("when")] ? params.get("when") : "today") : "all";
+  const scopes = availableScopes(viewer);
+  const filters = readFilters(params);
+  // Only honour filters this screen actually offers (a stale ?assignee= on
+  // My Tasks, say, must not silently hide rows with no visible control).
+  const active = Object.fromEntries(FILTER_KEYS.map((k) => [k, shown.includes(k) ? filters[k] : ""]));
+  if (active.scope && !scopes.includes(active.scope)) active.scope = "";
+
+  const setParam = (key, value) => setParams(withParam(params, key, value), { replace: true });
+
+  // pool: this screen's tasks within the chosen scope — what the dropdowns list.
+  const pool = useMemo(
+    () => applyPeopleFilters(tasks.filter((t) => cfg.match(t, viewer.id)), { scope: active.scope }, viewer),
+    [tasks, cfg, viewer, active.scope],
+  );
+  const byPeople = useMemo(
+    () => applyPeopleFilters(pool, { dept: active.dept, assignee: active.assignee, creator: active.creator }, viewer),
+    [pool, active.dept, active.assignee, active.creator, viewer],
+  );
+  const base = useMemo(() => {
+    const inWindow = byPeople.filter(WHEN[when].match);
+    return hasPeriod ? inWindow.filter(completedIn(period)) : inWindow;
+  }, [byPeople, when, hasPeriod, period]);
+  // Overdue work hidden by the "Today" window — surfaced so it isn't missed.
+  const hiddenOverdue = when === "today" ? byPeople.filter(isOverdue).length : 0;
 
   const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    // "#93751632" and "93751632" both find the task whose ID starts with it.
+    const needle = q.trim().toLowerCase().replace(/^#/, "");
     return base
       .filter((t) => status === "ALL" || t.status === status)
       .filter((t) => priority === "ALL" || t.priority === priority)
       .filter((t) => {
         if (!needle) return true;
-        const hay = [t.title, t.no, t.description, t.related?.customer, t.related?.ref, userById(t.assignedTo)?.name, ...t.tags]
+        const hay = [t.id, t.title, t.description, t.task_type, t.source_module, t.source_id, t.assigned_to_name, t.created_by_name, deptOf(viewer, t.assigned_to)]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
         return hay.includes(needle);
       })
       .sort(SORTS[sort].fn);
-  }, [base, q, status, priority, sort]);
+  }, [base, q, status, priority, sort, viewer]);
 
-  // Status chips only make sense where more than one status can appear.
   const statusChips = useMemo(() => {
     const present = new Set(base.map((t) => t.status));
-    return ["ALL", ...Object.keys(STATUS).filter((s) => present.has(s))];
-  }, [base]);
+    return ["ALL", ...Object.keys(STATUS).filter((s) => present.has(s) || s === status)];
+  }, [base, status]);
 
-  const filtersActive = status !== "ALL" || priority !== "ALL" || q;
+  const peopleActive = shown.some((k) => active[k]);
+  const filtersActive = status !== "ALL" || priority !== "ALL" || q || peopleActive;
+
+  function clearPeople() {
+    let next = params;
+    for (const k of FILTER_KEYS) next = withParam(next, k, "");
+    setParams(next, { replace: true });
+  }
 
   return (
     <>
@@ -112,8 +166,43 @@ export default function TaskList({ mode }) {
           <h1>{cfg.title}</h1>
           <p>{cfg.subtitle}</p>
         </div>
-        <span className="tp-count-pill">{ready ? `${rows.length} ${rows.length === 1 ? "task" : "tasks"}` : "—"}</span>
+        <div className="tp-head-right-row">
+          {hasPeriod && (
+            <label className={`tp-select ${period !== "all" ? "on" : ""}`}>
+              <span>Completed</span>
+              <select value={period} onChange={(e) => setParam("completed", e.target.value === "all" ? "" : e.target.value)} aria-label="Completed in">
+                {Object.entries(COMPLETED_PERIODS).map(([key, p]) => (
+                  <option key={key} value={key}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {hasWhen && (
+            <div className="tp-seg tp-when" role="tablist" aria-label="Time window">
+              {Object.entries(WHEN).map(([k, w]) => (
+                <button key={k} type="button" role="tab" aria-selected={when === k} className={when === k ? "on" : ""} onClick={() => setParam("when", k === "today" ? "" : k)}>
+                  {w.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <span className="tp-count-pill">{ready ? `${rows.length} ${rows.length === 1 ? "task" : "tasks"}` : "—"}</span>
+        </div>
       </div>
+
+      {ready && hiddenOverdue > 0 && (
+        <button type="button" className="tp-overdue-note" onClick={() => setParam("when", "overdue")}>
+          <FiAlertCircle />
+          <span className="tp-overdue-msg">
+            You also have <strong>{hiddenOverdue} overdue</strong> {hiddenOverdue === 1 ? "task" : "tasks"} not shown here.
+          </span>
+          <span className="tp-overdue-go">
+            Show overdue <FiArrowRight />
+          </span>
+        </button>
+      )}
 
       <div className="tp-toolbar">
         <div className="tp-chips" role="tablist" aria-label="Filter by status">
@@ -124,7 +213,7 @@ export default function TaskList({ mode }) {
               role="tab"
               aria-selected={status === s}
               className={`tp-chip ${status === s ? "on" : ""}`}
-              onClick={() => setStatus(s)}
+              onClick={() => setParam("status", s === "ALL" ? "" : s)}
             >
               {s === "ALL" ? "All" : STATUS[s].label}
               <span>{s === "ALL" ? base.length : base.filter((t) => t.status === s).length}</span>
@@ -133,9 +222,9 @@ export default function TaskList({ mode }) {
         </div>
 
         <div className="tp-toolbar-right">
-          <label className="tp-select">
+          <label className={`tp-select ${priority !== "ALL" ? "on" : ""}`}>
             <FiFilter />
-            <select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="Filter by priority">
+            <select value={priority} onChange={(e) => setParam("priority", e.target.value === "ALL" ? "" : e.target.value)} aria-label="Filter by priority">
               <option value="ALL">All priorities</option>
               {Object.entries(PRIORITY).map(([k, p]) => (
                 <option key={k} value={k}>
@@ -157,10 +246,12 @@ export default function TaskList({ mode }) {
         </div>
       </div>
 
+      <PeopleFilters tasks={pool} values={active} onChange={setParam} onClear={clearPeople} show={shown} scopes={scopes} />
+
       {q && (
         <div className="tp-search-note">
           <FiSearch /> Results for <strong>“{q}”</strong>
-          <button type="button" onClick={() => setParams({})} aria-label="Clear search">
+          <button type="button" onClick={() => setParam("q", "")} aria-label="Clear search">
             <FiX />
           </button>
         </div>
@@ -186,7 +277,7 @@ export default function TaskList({ mode }) {
       {ready && rows.length > 0 && (
         <div className="tp-list">
           {rows.map((t, i) => (
-            <TaskRow key={t.id} task={t} index={i} now={now} showAssignee={cfg.showAssignee} />
+            <TaskRow key={t.id} task={t} index={i} showAssignee={cfg.showAssignee} dept={deptOf(viewer, t.assigned_to)} />
           ))}
         </div>
       )}
@@ -194,20 +285,17 @@ export default function TaskList({ mode }) {
       {ready && rows.length === 0 && (
         <EmptyState
           icon={FiSearch}
-          title={filtersActive ? "No tasks match your filters" : `Nothing in ${cfg.title.toLowerCase()}`}
+          title={filtersActive ? "No tasks match your filters" : WHEN[when].empty || `Nothing in ${cfg.title.toLowerCase()}`}
           text={filtersActive ? "Try clearing a filter or searching for something else." : "You're all caught up here."}
         >
           {filtersActive && (
-            <button
-              type="button"
-              className="tp-btn ghost"
-              onClick={() => {
-                setStatus("ALL");
-                setPriority("ALL");
-                setParams({});
-              }}
-            >
+            <button type="button" className="tp-btn ghost" onClick={() => setParams({}, { replace: true })}>
               Clear filters
+            </button>
+          )}
+          {!filtersActive && when !== "all" && (
+            <button type="button" className="tp-btn ghost" onClick={() => setParam("when", "all")}>
+              Show all my tasks
             </button>
           )}
         </EmptyState>

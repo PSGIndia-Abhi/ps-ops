@@ -1,0 +1,248 @@
+/* Main login page (pages/Login.jsx) — BestServe brand.
+ *
+ * Everything is scoped under .bs-login so it can't leak into other pages,
+ * and the app's global `button` rules (index.css) are reset inside it.
+ * auth.css is left untouched: Signup, Temporary Access and Terms still use it.
+ *
+ * Brand colours are taken from the BestServe logo: red #BB2025, blue #0A8CD2. */
+
+@keyframes bs-login-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes bs-login-spin { to { transform: rotate(360deg); } }
+@keyframes bs-login-float { 0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); } 50% { transform: translateY(-10px) rotate(var(--r, 0deg)); } }
+
+.bs-login {
+  --bs-red: #bb2025;
+  --bs-red-dark: #961a1e;
+  --bs-red-deep: #6f1316;
+  --bs-blue: #0a8cd2;
+  --bs-blue-dark: #0874ae;
+  --bs-text: #1b1f2a;
+  --bs-muted: #5f6675;
+  --bs-soft: #8a91a0;
+  --bs-line: #e4e7ee;
+  --bs-bg: #f6f7fa;
+
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: clamp(14px, 3.5vh, 44px) clamp(14px, 3vw, 40px);
+  background:
+    radial-gradient(900px 500px at 0% 0%, rgba(187, 32, 37, .07), transparent 60%),
+    radial-gradient(800px 480px at 100% 100%, rgba(10, 140, 210, .08), transparent 60%),
+    var(--bs-bg);
+  color: var(--bs-text);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+
+  * { box-sizing: border-box; }
+  h1, h2, p, ul { margin: 0; padding: 0; }
+  ul { list-style: none; }
+  /* undo the app's global button styles (index.css) inside this page */
+  button { font: inherit; color: inherit; background: none; border: 0; border-radius: 0; padding: 0; font-weight: inherit; cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  :focus-visible { outline: 3px solid rgba(10, 140, 210, .45); outline-offset: 2px; }
+
+  /* ---------------- the box ---------------- */
+  .bs-login-box {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    width: min(1080px, 100%);
+    min-height: min(620px, calc(100dvh - 2 * clamp(14px, 3.5vh, 44px)));
+    border-radius: 24px; overflow: hidden; background: #fff;
+    box-shadow: 0 1px 2px rgba(20, 24, 40, .06), 0 24px 60px rgba(20, 24, 40, .14);
+    animation: bs-login-rise .5s ease-out both;
+  }
+
+  /* ---------------- brand panel ---------------- */
+  .bs-login-brand {
+    position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: clamp(18px, 3.5vh, 32px);
+    padding: clamp(26px, 5vh, 44px) clamp(28px, 3.6vw, 48px); color: #fff;
+    background:
+      radial-gradient(1200px 500px at 110% -10%, rgba(255, 255, 255, .10), transparent 60%),
+      linear-gradient(150deg, var(--bs-red) 0%, var(--bs-red-dark) 55%, var(--bs-red-deep) 100%);
+    > *:not(.bs-login-piece) { position: relative; z-index: 1; }
+  }
+  /* soft puzzle pieces, echoing the logo */
+  .bs-login-piece {
+    position: absolute; width: 190px; height: 190px; border-radius: 26px; background: rgba(255, 255, 255, .07);
+    animation: bs-login-float 9s ease-in-out infinite;
+    &::before, &::after { content: ""; position: absolute; width: 64px; height: 64px; border-radius: 50%; background: inherit; }
+    &::before { top: -30px; left: 63px; }
+    &::after { right: -30px; top: 63px; }
+    &.p1 { --r: 12deg; right: -40px; top: 90px; }
+    &.p2 { --r: -18deg; width: 130px; height: 130px; left: -46px; bottom: 120px; animation-delay: -3s;
+      &::before, &::after { width: 44px; height: 44px; } &::before { top: -20px; left: 43px; } &::after { right: -20px; top: 43px; } }
+    &.p3 { --r: 28deg; width: 92px; height: 92px; right: 7%; bottom: 44px; animation-delay: -6s; border-radius: 16px;
+      &::before, &::after { width: 32px; height: 32px; } &::before { top: -15px; left: 30px; } &::after { right: -15px; top: 30px; } }
+    &.blue { background: rgba(10, 140, 210, .55); }
+  }
+
+  .bs-login-brand-top { display: flex; align-items: center; gap: 14px; }
+  .bs-login-mark {
+    display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: #fff;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .18);
+    img { width: 40px; height: auto; }
+  }
+  .bs-login-brand-name {
+    display: grid; font-family: Georgia, "Times New Roman", serif; font-size: 26px; font-weight: 700; letter-spacing: .5px; line-height: 1.05;
+    small { font-family: Inter, system-ui, sans-serif; font-size: 12.5px; font-weight: 500; letter-spacing: .2px; color: rgba(255, 255, 255, .78); margin-top: 4px; }
+  }
+
+  .bs-login-brand-body { max-width: 470px; animation: bs-login-rise .6s ease-out both; }
+  .bs-login-brand-body h2 { font-size: clamp(24px, 2.4vw, 32px); line-height: 1.15; letter-spacing: -.6px; font-weight: 750; }
+  .bs-login-highlights { display: grid; gap: clamp(10px, 1.8vh, 14px); margin-top: clamp(18px, 3.5vh, 28px);
+    li { display: flex; align-items: center; gap: 14px; }
+    strong { font-size: 15px; font-weight: 650; }
+  }
+  .bs-login-hl-icon {
+    display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 11px; font-size: 18px;
+    background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .18);
+  }
+  .bs-login-tagline { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 16px; color: rgba(255, 255, 255, .85); }
+
+  /* ---------------- form panel ---------------- */
+  /* form side: soft brand glows and a faint dot grid so it isn't flat white */
+  .bs-login-main {
+    position: relative; overflow: hidden; display: grid; place-items: center; padding: clamp(18px, 3.4vh, 40px) clamp(24px, 3.6vw, 52px);
+    background:
+      radial-gradient(420px 300px at 100% 0%, rgba(10, 140, 210, .09), transparent 70%),
+      radial-gradient(420px 300px at 0% 100%, rgba(187, 32, 37, .07), transparent 70%),
+      #fff;
+    &::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background-image: radial-gradient(rgba(27, 31, 42, .07) 1px, transparent 1.2px); background-size: 18px 18px;
+      -webkit-mask-image: radial-gradient(ellipse at 50% 40%, transparent 35%, #000 90%); mask-image: radial-gradient(ellipse at 50% 40%, transparent 35%, #000 90%);
+    }
+  }
+  .bs-login-card { position: relative; width: 100%; max-width: 380px; }
+
+  /* heading: brand icon tile, eyebrow, title with one coloured word */
+  .bs-login-head { display: grid; justify-items: center; text-align: center; animation: bs-login-rise .5s .1s ease-out both; }
+  .bs-login-head-icon {
+    display: grid; place-items: center; width: clamp(42px, 6.2vh, 52px); height: clamp(42px, 6.2vh, 52px); margin-bottom: clamp(8px, 1.5vh, 12px);
+    border-radius: 16px; font-size: clamp(20px, 3vh, 24px); color: #fff;
+    background: linear-gradient(140deg, #d63a3f 0%, var(--bs-red) 55%, var(--bs-red-dark) 100%);
+    box-shadow: 0 10px 22px rgba(187, 32, 37, .28), 0 0 0 6px rgba(187, 32, 37, .08);
+  }
+  .bs-login-eyebrow {
+    display: inline-flex; align-items: center; gap: 6px; margin-bottom: 6px; padding: 3px 10px; border-radius: 20px;
+    background: rgba(10, 140, 210, .09); color: var(--bs-blue-dark); font-size: 12px; font-weight: 650; letter-spacing: .3px;
+  }
+  .bs-login-head h1 em {
+    font-style: normal;
+    background: linear-gradient(90deg, var(--bs-red), #e0454a); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .bs-login-mobile-brand { display: none; }
+  .bs-login-card.wide { max-width: 460px; }
+  /* two fields side by side (signup), one column on phones */
+  .bs-login-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 12px; }
+  .bs-login-grid2 > .bs-login-field { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .bs-login-optional { font-style: normal; font-weight: 400; color: var(--bs-soft); }
+  .bs-login-switch { margin-top: clamp(14px, 2.6vh, 20px); text-align: center; font-size: 14px; color: var(--bs-muted); }
+  .bs-login-card h1 { font-size: clamp(24px, 2.2vw, 28px); letter-spacing: -.5px; font-weight: 750; text-align: center; }
+  .bs-login-sub { margin: 6px 0 clamp(14px, 2.5vh, 22px); color: var(--bs-muted); font-size: 15px; line-height: 1.5; text-align: center; }
+  .bs-login-card form { display: grid; }
+
+  .bs-login-field { display: grid; gap: 7px; margin-bottom: clamp(12px, 2.2vh, 16px);
+    > span { font-size: 13.5px; font-weight: 600; color: #394050; }
+  }
+  .bs-login-input {
+    position: relative; display: flex; align-items: center; height: 48px; border: 1.5px solid var(--bs-line); border-radius: 12px; background: #f8f9fc;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+    &:hover { border-color: #cfd4de; }
+    &:focus-within { border-color: var(--bs-blue); background: #fff; box-shadow: 0 0 0 4px rgba(10, 140, 210, .14); }
+    &:focus-within .bs-login-input-icon { color: var(--bs-blue); }
+    input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; padding: 0 12px 0 42px; font: inherit; font-size: 15px; color: var(--bs-text); }
+    input::placeholder { color: #a6acb8; }
+  }
+  .bs-login-input-icon { position: absolute; left: 14px; font-size: 18px; color: var(--bs-soft); pointer-events: none; }
+  .bs-login-eye { display: grid; place-items: center; width: 44px; height: 100%; font-size: 18px; color: var(--bs-soft); &:hover { color: var(--bs-text); } }
+
+  /* "Forgot password?" sits right under the password box */
+  .bs-login-forgot { display: flex; justify-content: flex-end; margin: -6px 0 12px; }
+  .bs-login-link { font-size: 13.5px; font-weight: 600; color: var(--bs-blue); &:hover { color: var(--bs-blue-dark); text-decoration: underline; } }
+
+  .bs-login-terms {
+    display: flex; align-items: center; gap: 10px; margin: 0 0 clamp(14px, 2.6vh, 20px); font-size: 14px; color: var(--bs-muted); cursor: pointer;
+    input { width: 18px; height: 18px; margin: 0; accent-color: var(--bs-red); cursor: pointer; }
+    a { color: var(--bs-blue); font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  }
+
+  .bs-login-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 50px; border-radius: 12px;
+    background: linear-gradient(135deg, #d63a3f 0%, var(--bs-red) 50%, var(--bs-red-dark) 100%); color: #fff; font-size: 16px; font-weight: 650;
+    box-shadow: 0 8px 20px rgba(187, 32, 37, .28);
+    transition: filter .15s, box-shadow .15s, transform .12s, opacity .15s;
+    &:hover:not(:disabled) { filter: brightness(.94); box-shadow: 0 10px 24px rgba(187, 32, 37, .34); transform: translateY(-1px); }
+    &:active:not(:disabled) { transform: scale(.985); }
+    &:disabled { opacity: .5; box-shadow: none; }
+  }
+  .bs-login-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .45); border-top-color: #fff; animation: bs-login-spin .7s linear infinite; }
+  .bs-login-hint { margin-top: 8px; font-size: 12.5px; color: var(--bs-soft); text-align: center; }
+
+  .bs-login-msg {
+    display: flex; align-items: flex-start; gap: 8px; margin-bottom: 18px; padding: 11px 13px; border-radius: 10px; font-size: 14px; line-height: 1.45;
+    svg { flex: none; margin-top: 2px; }
+    &.error { background: #fdecec; color: #8f1a1d; border: 1px solid #f6c9ca; }
+    &.ok { background: #e8f6ee; color: #15603a; border: 1px solid #bfe6cf; }
+  }
+
+  .bs-login-or { display: flex; align-items: center; gap: 12px; margin: clamp(10px, 1.9vh, 18px) 0 clamp(8px, 1.5vh, 14px); color: var(--bs-soft); font-size: 13px;
+    &::before, &::after { content: ""; flex: 1; height: 1px; background: var(--bs-line); }
+  }
+  .bs-login-alt { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    > :only-child { grid-column: 1 / -1; }
+    a {
+      display: flex; align-items: center; gap: 10px; padding: 12px; border: 1.5px solid var(--bs-line); border-radius: 12px; background: #fff;
+      color: var(--bs-text); text-decoration: none; transition: border-color .15s, background .15s, transform .15s;
+      > svg { flex: none; font-size: 18px; color: var(--bs-blue); }
+      span { display: grid; line-height: 1.3; }
+      .bs-login-alt-icon { place-items: center; flex: none; width: 38px; height: 38px; border-radius: 11px; font-size: 18px; color: var(--bs-blue); background: rgba(10, 140, 210, .1); }
+      .bs-login-alt-go { margin-left: auto; color: var(--bs-soft); transition: transform .15s, color .15s; }
+      &:hover .bs-login-alt-go { transform: translateX(3px); color: var(--bs-blue); }
+      strong { font-size: 13.5px; font-weight: 650; }
+      small { font-size: 12.5px; color: var(--bs-muted); }
+      &:hover { border-color: #bfdcee; background: #f2f9fd; }
+    }
+  }
+
+  .bs-login-back {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px; font-size: 14px; font-weight: 600; color: var(--bs-muted);
+    &:hover { color: var(--bs-text); }
+  }
+  .bs-login-foot { margin-top: clamp(12px, 2.4vh, 22px); font-size: 12.5px; color: var(--bs-soft); text-align: center; }
+
+  /* ---------------- smaller screens ---------------- */
+  /* narrower laptops: keep the blue piece clear of the highlight text */
+  @media (max-width: 1180px) { .bs-login-piece.p3 { width: 72px; height: 72px; right: 4%; bottom: 22px; } }
+  @media (max-width: 980px) { .bs-login-piece.p3 { display: none; } }
+  /* short windows (e.g. a 1366×768 laptop once the browser bars take their share): trim the extras so the box fits */
+  @media (max-height: 800px) and (min-width: 861px) {
+    .bs-login-hint { display: none; }
+  }
+  @media (max-height: 680px) and (min-width: 861px) {
+    .bs-login-head-icon { width: 40px; height: 40px; border-radius: 13px; font-size: 19px; margin-bottom: 8px; box-shadow: 0 8px 18px rgba(187, 32, 37, .26); }
+    .bs-login-or { display: none; }
+    .bs-login-alt { margin-top: 12px; }
+    .bs-login-card.wide .bs-login-head-icon { display: none; }
+  }
+  @media (max-height: 630px) and (min-width: 861px) {
+    .bs-login-head-icon { display: none; }
+  }
+  /* tablets and phones: just the form, with the logo on top */
+  @media (max-width: 860px) {
+    .bs-login-box { grid-template-columns: minmax(0, 1fr); width: min(460px, 100%); min-height: 0; }
+    .bs-login-brand { display: none; }
+    .bs-login-mobile-brand { display: block; margin: 0 auto clamp(18px, 3vh, 26px); text-align: center; img { display: inline-block; width: 190px; max-width: 70%; height: auto; } }
+  }
+  @media (max-width: 420px) {
+    padding: 0;
+    .bs-login-grid2 { grid-template-columns: minmax(0, 1fr); }
+    .bs-login-box { border-radius: 0; box-shadow: none; min-height: 100dvh; }
+    .bs-login-alt { grid-template-columns: 1fr; }
+    .bs-login-main { padding: 32px 18px; align-items: start; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+}

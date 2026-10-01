@@ -39,6 +39,9 @@ const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
 const hierarchyRoutes = require("./src/routes/hierarchy.routes");
 const crmRoutes = require("./src/routes/crm.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
+const workTasksRoutes = require("./src/routes/work-tasks.routes");
+const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
+const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
 // Middleware
@@ -96,6 +99,9 @@ app.use("/api/users", userHierarchyRoutes);
 app.use("/api/hierarchy", hierarchyRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/public", crmPublicRoutes);
+// Generic Task Management module -- separate from /api/tasks (Accountant module).
+app.use("/api/work-tasks", workTasksRoutes);
+app.use("/api/work-task-series", workTaskSeriesRoutes);
 
 
 
@@ -111,6 +117,7 @@ const PORT = process.env.PORT || 3000;
     startVisitMissedCron();
     startInvoiceStatusCron();
     startShiftAutoEndCron();
+    startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);
