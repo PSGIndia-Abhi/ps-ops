@@ -40,17 +40,7 @@ export default function CustomerOutstanding() {
   const customers = useMemo(() => groupByCustomer(invoices, payments), [invoices, payments]);
   const withDues = useMemo(() => customers.filter((c) => c.outstanding > 0), [customers]);
   const hasData = withDues.length > 0;
-  const top = [...withDues].sort(compare("OUTSTANDING"))[0];
-  const totalOutstanding = sum(withDues, "outstanding");
   const customerOptions = [...withDues].sort(compare("NAME"));
-
-  const cards = [
-    { key: "orange", label: "Total Outstanding", value: money(totalOutstanding) },
-    { key: "blue", label: "Customers With Dues", value: withDues.length },
-    { key: "red", label: "Overdue Amount", value: money(sum(withDues, "overdue_amount")) },
-    { key: "purple", label: "Avg. per Customer", value: money(withDues.length ? totalOutstanding / withDues.length : 0) },
-    { key: "light", label: "Highest Outstanding", value: top ? top.name : "—", note: top ? money(top.outstanding) : "" },
-  ];
 
   const rows = withDues
     .filter((c) => {
@@ -61,6 +51,18 @@ export default function CustomerOutstanding() {
     })
     .sort(compare(sort));
   const { pageRows, page, setPage, pageSize } = usePaged(rows);
+
+  // The cards reflect whatever is currently filtered/searched, not the whole list.
+  const top = [...rows].sort(compare("OUTSTANDING"))[0];
+  const totalOutstanding = sum(rows, "outstanding");
+
+  const cards = [
+    { key: "orange", label: "Total Outstanding", value: money(totalOutstanding) },
+    { key: "blue", label: "Customers With Dues", value: rows.length },
+    { key: "red", label: "Overdue Amount", value: money(sum(rows, "overdue_amount")) },
+    { key: "purple", label: "Avg. per Customer", value: money(rows.length ? totalOutstanding / rows.length : 0) },
+    { key: "light", label: "Highest Outstanding", value: top ? top.name : "—", note: top ? money(top.outstanding) : "" },
+  ];
 
   function exportRows() {
     exportCsv("customer-outstanding.csv", [
