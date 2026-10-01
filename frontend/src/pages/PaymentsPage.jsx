@@ -211,7 +211,7 @@ export default function PaymentsPage() {
                   <option value="">Select customer</option>
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} {c.code ? `(${c.code})` : ""}
+                      {c.display_name || c.name} {c.code ? `(${c.code})` : ""}
                     </option>
                   ))}
                 </select>
