@@ -32,7 +32,7 @@ export default function CustomerOutstanding() {
   const navigate = useNavigate();
   const { invoices, payments, loading, error, reload } = useAccountantData();
   const [search, setSearch] = useState("");
-  const [view, setView] = useState("");
+  const [customer, setCustomer] = useState("");
   const [sort, setSort] = useState("OUTSTANDING");
   const [minAmount, setMinAmount] = useState("");
   const [open, setOpen] = useState(null); // id of the expanded row
@@ -42,6 +42,7 @@ export default function CustomerOutstanding() {
   const hasData = withDues.length > 0;
   const top = [...withDues].sort(compare("OUTSTANDING"))[0];
   const totalOutstanding = sum(withDues, "outstanding");
+  const customerOptions = [...withDues].sort(compare("NAME"));
 
   const cards = [
     { key: "orange", label: "Total Outstanding", value: money(totalOutstanding) },
@@ -53,8 +54,7 @@ export default function CustomerOutstanding() {
 
   const rows = withDues
     .filter((c) => {
-      if (view === "OVERDUE" && !(Number(c.overdue_amount) > 0)) return false;
-      if (view === "CURRENT" && Number(c.overdue_amount) > 0) return false;
+      if (customer && String(c.id) !== customer) return false;
       if (minAmount && Number(c.outstanding) < Number(minAmount)) return false;
       const q = search.trim().toLowerCase();
       return !q || `${c.name} ${c.code || ""}`.toLowerCase().includes(q);
@@ -101,10 +101,9 @@ export default function CustomerOutstanding() {
       <div className="ac-card">
         <div className="ac-filters" style={{ marginBottom: 14 }}>
           <input className="ac-input" placeholder="Search customer name or code" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-          <select className="ac-select" value={view} onChange={(e) => { setView(e.target.value); setPage(0); }}>
+          <select className="ac-select" value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(0); }}>
             <option value="">All Customers</option>
-            <option value="OVERDUE">Has Overdue Invoices</option>
-            <option value="CURRENT">Not Yet Due</option>
+            {customerOptions.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
           </select>
           <select className="ac-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort by">
             {SORTS.map(([v, l]) => <option key={v} value={v}>Sort: {l}</option>)}
