@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FiBriefcase, FiGitBranch, FiMail, FiMapPin, FiPhone, FiShield, FiUsers } from "react-icons/fi";
+import OrgTree from "./OrgTree";
 import { getMyHierarchy } from "./tasksApi";
 import { useViewer } from "./viewerContext";
 import { Avatar, Skeleton } from "./ui";
@@ -166,7 +167,13 @@ export default function TaskProfile() {
         </section>
       </div>
 
-      {reports.length > 0 && (
+      {/* The whole organisation below this person, as a tree (needs the org
+          directory); falls back to the direct-report cards without it. */}
+      {viewer.team.length > 0 && viewer.directory.size > 0 && (
+        <OrgTree me={{ id: viewer.id, name: user.name, designation, dept }} team={viewer.team} directory={viewer.directory} />
+      )}
+
+      {reports.length > 0 && !(viewer.team.length > 0 && viewer.directory.size > 0) && (
         <section className="tp-card">
           <div className="tp-card-head">
             <h3>My team</h3>

@@ -155,7 +155,8 @@ export function ChartEmpty({ text = "Nothing to show for this selection." }) {
 
 /**
  * One set of categories drawn as any categorical type. `items`:
- * [{ key, label, short?, sub?, color, value | parts, flag?, clickable?, tipLabel? }]
+ * [{ key, label, short?, phone?, sub?, color, value | parts, flag?, clickable?, tipLabel? }]
+ * — `phone` is a shorter column label used only on phone-width screens.
  * — `parts` (stacked) is only used by the bar/column types.
  */
 export function CategoryChart({ type, items, selected, onSelect, legend, unit }) {
@@ -166,7 +167,7 @@ export function CategoryChart({ type, items, selected, onSelect, legend, unit })
   if (type === "column") {
     return (
       <ColumnChart
-        columns={withParts.map((i) => ({ key: i.key, label: i.short || i.label, sub: i.sub, tipLabel: i.tipLabel || i.label, parts: i.parts, clickable: i.clickable }))}
+        columns={withParts.map((i) => ({ key: i.key, label: i.short || i.label, phone: i.phone, sub: i.sub, tipLabel: i.tipLabel || i.label, parts: i.parts, clickable: i.clickable }))}
         selected={selected}
         onSelect={onSelect}
         legend={legend}
@@ -327,7 +328,16 @@ export function ColumnChart({ columns, selected, onSelect, legend, layout = "sta
                   </span>
                 )}
               </span>
-              <span className="tp-vcol-label">{i % labelEvery === (n - 1) % labelEvery ? c.label : " "}</span>
+              <span className="tp-vcol-label">
+                {i % labelEvery !== (n - 1) % labelEvery ? " " : c.phone ? (
+                  <>
+                    <span className="tp-vcol-full">{c.label}</span>
+                    <span className="tp-vcol-short">{c.phone}</span>
+                  </>
+                ) : (
+                  c.label
+                )}
+              </span>
               {c.sub && <small className="tp-vcol-sub">{c.sub}</small>}
             </Tag>
           );

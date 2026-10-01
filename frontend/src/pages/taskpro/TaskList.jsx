@@ -6,7 +6,7 @@ import { PRIORITY, STATUS } from "./data";
 import PeopleFilters from "./Filters";
 import { daysFromToday, dueInfo, fmtDateTime, todayStr } from "./format";
 import { assignedByText, deptOf } from "./hierarchy";
-import { FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, readFilters, withParam } from "./selectors";
+import { COMPLETED_PERIODS, completedIn, FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, readFilters, withParam } from "./selectors";
 import { useTaskStore } from "./tasksApi";
 import { useViewer } from "./viewerContext";
 import { Avatar, EmptyState, PriorityBadge, Skeleton, StatusBadge } from "./ui";
@@ -99,6 +99,9 @@ export default function TaskList({ mode }) {
 
   const shown = FILTERS_FOR[mode] || DEFAULT_FILTERS;
   const hasWhen = mode === "my";
+  // Completed: by completion date, like the dashboard card (all time by default).
+  const hasPeriod = mode === "completed";
+  const period = hasPeriod && COMPLETED_PERIODS[params.get("completed")] ? params.get("completed") : "all";
   const when = hasWhen ? (WHEN[params.get("when")] ? params.get("when") : "today") : "all";
   const scopes = availableScopes(viewer);
   const filters = readFilters(params);
@@ -118,7 +121,10 @@ export default function TaskList({ mode }) {
     () => applyPeopleFilters(pool, { dept: active.dept, assignee: active.assignee, creator: active.creator }, viewer),
     [pool, active.dept, active.assignee, active.creator, viewer],
   );
-  const base = useMemo(() => byPeople.filter(WHEN[when].match), [byPeople, when]);
+  const base = useMemo(() => {
+    const inWindow = byPeople.filter(WHEN[when].match);
+    return hasPeriod ? inWindow.filter(completedIn(period)) : inWindow;
+  }, [byPeople, when, hasPeriod, period]);
   // Overdue work hidden by the "Today" window — surfaced so it isn't missed.
   const hiddenOverdue = when === "today" ? byPeople.filter(isOverdue).length : 0;
 
@@ -161,6 +167,18 @@ export default function TaskList({ mode }) {
           <p>{cfg.subtitle}</p>
         </div>
         <div className="tp-head-right-row">
+          {hasPeriod && (
+            <label className={`tp-select ${period !== "all" ? "on" : ""}`}>
+              <span>Completed</span>
+              <select value={period} onChange={(e) => setParam("completed", e.target.value === "all" ? "" : e.target.value)} aria-label="Completed in">
+                {Object.entries(COMPLETED_PERIODS).map(([key, p]) => (
+                  <option key={key} value={key}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {hasWhen && (
             <div className="tp-seg tp-when" role="tablist" aria-label="Time window">
               {Object.entries(WHEN).map(([k, w]) => (
@@ -176,8 +194,11 @@ export default function TaskList({ mode }) {
 
       {ready && hiddenOverdue > 0 && (
         <button type="button" className="tp-overdue-note" onClick={() => setParam("when", "overdue")}>
-          <FiAlertCircle /> You also have <strong>{hiddenOverdue} overdue</strong> {hiddenOverdue === 1 ? "task" : "tasks"} not shown here.
-          <span>
+          <FiAlertCircle />
+          <span className="tp-overdue-msg">
+            You also have <strong>{hiddenOverdue} overdue</strong> {hiddenOverdue === 1 ? "task" : "tasks"} not shown here.
+          </span>
+          <span className="tp-overdue-go">
             Show overdue <FiArrowRight />
           </span>
         </button>
