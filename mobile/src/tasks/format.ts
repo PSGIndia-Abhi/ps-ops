@@ -12,6 +12,8 @@ export const MONTHS_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// "Last" always means the final occurrence that month, whether it's the 4th or 5th.
+const MONTH_WEEK_LABELS: Record<number, string> = { 1: 'first', 2: 'second', 3: 'third', 4: 'fourth', '-1': 'last' };
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export const toDateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -166,9 +168,19 @@ export function recurrenceSummary(r: TaskSeriesRecurrence | null): string {
     return `${every}week${plural} on ${(days as number[]).map((d) => WEEKDAYS[d]).join(', ')}`;
   }
   if (r.frequency === 'MONTHLY') {
+    const weeksArr = typeof r.month_week === 'string' ? JSON.parse(r.month_week) : r.month_week || [];
+    if ((weeksArr as number[]).length > 0) {
+      const weeks = (weeksArr as number[]).map((w) => MONTH_WEEK_LABELS[w]).join(', ');
+      const days = typeof r.days_of_week === 'string' ? JSON.parse(r.days_of_week) : r.days_of_week || [];
+      const wd = (days as number[]).map((d) => WEEKDAYS[d]).join(', ');
+      return `${every}month${plural} on the ${weeks} ${wd}`;
+    }
     return `${every}month${plural} on ${r.use_last_day_of_month ? 'the last day' : `day ${r.day_of_month}`}`;
   }
   return `${every}year${plural}`;
 }
 
-type TaskSeriesRecurrence = Omit<RecurrenceInput, 'days_of_week'> & { days_of_week?: number[] | string | null };
+type TaskSeriesRecurrence = Omit<RecurrenceInput, 'days_of_week' | 'month_week'> & {
+  days_of_week?: number[] | string | null;
+  month_week?: number[] | string | null;
+};

@@ -28,7 +28,7 @@ const POLL_MS = 60000;
  * GET /api/work-tasks to what this person may see, so every tab just filters
  * this one list; mutations patch it from what the server hands back.
  */
-interface Viewer {
+export interface Viewer {
   id: number;
   name: string;
   role: string;
@@ -129,8 +129,10 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
         setTasks(list);
         setError(null);
         await stateLoaded;
-        const { events, known } = detectEvents(list, notifState.current, userId, teamRef.current, baseline.current);
+        const { events, known, knownReq, knownDue } = detectEvents(list, notifState.current, userId, teamRef.current, baseline.current);
         notifState.current.known = known;
+        notifState.current.knownReq = knownReq;
+        notifState.current.knownDue = knownDue;
         if (baseline.current) {
           baseline.current = false;
           saveState(userId, notifState.current);

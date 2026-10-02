@@ -3,7 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type Lay
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { AlertTriangleIcon, BellIcon, ChevronLeftIcon, ClockIcon, PauseIcon, PlayIcon } from '../../components/icons';
+import { AlertTriangleIcon, BellIcon, CalendarIcon, ChevronLeftIcon, ClockIcon, PauseIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
@@ -14,7 +14,7 @@ import { useTasks } from '../TasksContext';
 import { TONE_GRADIENT } from '../theme';
 import type { WorkTask } from '../types';
 import { GradientBlock } from '../ui/parts';
-import { CheckIcon, ClipboardIcon } from '../ui/taskIcons';
+import { BanIcon, CheckIcon, ClipboardIcon } from '../ui/taskIcons';
 
 type Filter = 'all' | 'unread' | 'due';
 
@@ -113,6 +113,9 @@ const KIND_LOOK: Record<TaskNotification['kind'], { tone: 'info' | 'success' | '
   started: { tone: 'accent', Icon: PlayIcon as typeof ClipboardIcon },
   paused: { tone: 'warning', Icon: PauseIcon as typeof ClipboardIcon },
   resumed: { tone: 'accent', Icon: PlayIcon as typeof ClipboardIcon },
+  reschedule_requested: { tone: 'info', Icon: CalendarIcon as typeof ClipboardIcon },
+  reschedule_approved: { tone: 'success', Icon: CheckIcon },
+  reschedule_rejected: { tone: 'warning', Icon: BanIcon },
 };
 
 /** "From Prashanth" / "By Rohan" / "Pavan" for the grey meta line. */

@@ -4,7 +4,7 @@ import type { ListMode } from './format';
 export type TaskTabParamList = {
   Home: undefined;
   /** `q` pre-fills the search (e.g. a person's name from Insights' Team workload). */
-  Tasks: { mode?: ListMode; q?: string; at?: number } | undefined;
+  Tasks: { mode?: ListMode; q?: string; at?: number; teamScoped?: boolean } | undefined;
   /** Centre "+" slot - never shown; tapping it opens NewTask. */
   NewTaskTab: undefined;
   Schedule: undefined;
@@ -21,7 +21,8 @@ export type TaskStackParamList = {
   NewTask: { editId?: string; date?: string; duplicateOf?: string } | undefined;
   TaskCreated: { taskId: string; occurrences?: number };
   Reassign: { taskId: string };
-  Reschedule: { taskId: string };
+  /** `request: true` sends a reschedule request instead of changing the date directly. */
+  Reschedule: { taskId: string; request?: boolean };
   /** Opened from the avatar on Home (was the "More" tab). */
   Profile: undefined;
   /** Opened from the bell on Home. */

@@ -10,6 +10,15 @@ import { useViewer } from "./viewerContext";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const FREQ_UNIT = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" };
+// "Last" always means the final occurrence that month, whether it's the 4th or 5th.
+const MONTH_WEEK_OPTIONS = [
+  [1, "First"],
+  [2, "Second"],
+  [3, "Third"],
+  [4, "Fourth"],
+  [-1, "Last"],
+];
+const MONTH_WEEK_LABELS = { 1: "first", 2: "second", 3: "third", 4: "fourth", "-1": "last" };
 const REPEATS = [
   ["ONCE", "Once"],
   ["DAILY", "Daily"],
@@ -41,7 +50,14 @@ function repeatText(freq, rec) {
   const n = Number(rec.interval_value) || 1;
   const every = n > 1 ? `every ${n} ${FREQ_UNIT[freq]}s` : `every ${FREQ_UNIT[freq]}`;
   if (freq === "WEEKLY") return `${every} on ${rec.days_of_week.length ? rec.days_of_week.map((d) => WEEKDAY_LABELS[d]).join(", ") : "…"}`;
-  if (freq === "MONTHLY") return `${every} on ${rec.use_last_day_of_month ? "the last day" : `day ${rec.day_of_month}`}`;
+  if (freq === "MONTHLY") {
+    if (rec.month_mode === "WEEKDAY") {
+      const weeks = rec.month_weeks.map((w) => MONTH_WEEK_LABELS[w]).join(", ") || "…";
+      const days = rec.month_weekdays.map((d) => WEEKDAY_LABELS[d]).join(", ") || "…";
+      return `${every} on the ${weeks} ${days}`;
+    }
+    return `${every} on ${rec.use_last_day_of_month ? "the last day" : `day ${rec.day_of_month}`}`;
+  }
   if (freq === "YEARLY") return `${every} on ${rec.day_of_month} ${MONTHS[Number(rec.month_of_year) - 1]}`;
   return every;
 }
@@ -181,6 +197,9 @@ const blankRec = () => ({
   days_of_week: [new Date().getDay()],
   day_of_month: new Date().getDate(),
   use_last_day_of_month: false,
+  month_mode: "DATE",
+  month_weeks: [2],
+  month_weekdays: [new Date().getDay()],
   month_of_year: new Date().getMonth() + 1,
   time_of_day: "09:00",
   start_date: todayStr(),
@@ -270,6 +289,16 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
       ...r,
       days_of_week: r.days_of_week.includes(n) ? r.days_of_week.filter((d) => d !== n) : [...r.days_of_week, n].sort(),
     }));
+  const toggleMonthWeek = (n) =>
+    setRec((r) => ({
+      ...r,
+      month_weeks: r.month_weeks.includes(n) ? r.month_weeks.filter((x) => x !== n) : [...r.month_weeks, n].sort((a, b) => a - b),
+    }));
+  const toggleMonthWeekday = (n) =>
+    setRec((r) => ({
+      ...r,
+      month_weekdays: r.month_weekdays.includes(n) ? r.month_weekdays.filter((x) => x !== n) : [...r.month_weekdays, n].sort(),
+    }));
 
   const quickTypes = types.slice(0, 6);
   const assignee = people.find((p) => p.id === Number(form.assigned_to));
@@ -299,6 +328,10 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
       setError("Pick at least one day of the week.");
       return;
     }
+    if (repeat === "MONTHLY" && rec.month_mode === "WEEKDAY" && (rec.month_weeks.length === 0 || rec.month_weekdays.length === 0)) {
+      setError("Pick at least one week and one weekday.");
+      return;
+    }
     if (isRepeat && rec.end_type === "ON_DATE" && !rec.end_date) {
       setError("Pick the date the schedule ends.");
       return;
@@ -322,7 +355,13 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
         time_of_day: `${rec.time_of_day || "09:00"}:00`,
         end_type: rec.end_type,
         ...(repeat === "WEEKLY" ? { days_of_week: rec.days_of_week } : {}),
-        ...(repeat === "MONTHLY" ? (rec.use_last_day_of_month ? { use_last_day_of_month: true } : { day_of_month: Number(rec.day_of_month) }) : {}),
+        ...(repeat === "MONTHLY"
+          ? rec.month_mode === "WEEKDAY"
+            ? { month_week: rec.month_weeks, days_of_week: rec.month_weekdays }
+            : rec.use_last_day_of_month
+              ? { use_last_day_of_month: true }
+              : { day_of_month: Number(rec.day_of_month) }
+          : {}),
         ...(repeat === "YEARLY" ? { month_of_year: Number(rec.month_of_year), day_of_month: Number(rec.day_of_month) } : {}),
         ...(rec.end_type === "ON_DATE" ? { end_date: rec.end_date } : {}),
         ...(rec.end_type === "AFTER_COUNT" ? { end_count: Number(rec.end_count) } : {}),
@@ -521,15 +560,50 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
                 {repeat === "MONTHLY" && (
                   <div className="tp-nt-rec-row">
                     <div className="tp-nt-pills">
-                      <button type="button" className={!rec.use_last_day_of_month ? "on" : ""} onClick={() => setR("use_last_day_of_month", false)}>
+                      <button
+                        type="button"
+                        className={rec.month_mode === "DATE" && !rec.use_last_day_of_month ? "on" : ""}
+                        onClick={() => setRec((r) => ({ ...r, month_mode: "DATE", use_last_day_of_month: false }))}
+                      >
                         On day
                       </button>
-                      <button type="button" className={rec.use_last_day_of_month ? "on" : ""} onClick={() => setR("use_last_day_of_month", true)}>
+                      <button
+                        type="button"
+                        className={rec.month_mode === "DATE" && rec.use_last_day_of_month ? "on" : ""}
+                        onClick={() => setRec((r) => ({ ...r, month_mode: "DATE", use_last_day_of_month: true }))}
+                      >
                         Last day of month
                       </button>
+                      <button type="button" className={rec.month_mode === "WEEKDAY" ? "on" : ""} onClick={() => setR("month_mode", "WEEKDAY")}>
+                        On the
+                      </button>
                     </div>
-                    {!rec.use_last_day_of_month && (
+                    {rec.month_mode === "DATE" && !rec.use_last_day_of_month && (
                       <input className="tp-input tp-nt-num" type="number" min={1} max={31} value={rec.day_of_month} onChange={changeRec("day_of_month")} aria-label="Day of month" />
+                    )}
+                    {rec.month_mode === "WEEKDAY" && (
+                      <>
+                        <div className="tp-nt-pills">
+                          {MONTH_WEEK_OPTIONS.map(([v, label]) => (
+                            <button key={v} type="button" className={rec.month_weeks.includes(v) ? "on" : ""} onClick={() => toggleMonthWeek(v)} aria-pressed={rec.month_weeks.includes(v)}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="tp-weekdays">
+                          {WEEKDAY_LABELS.map((label, i) => (
+                            <button
+                              key={label}
+                              type="button"
+                              className={rec.month_weekdays.includes(i) ? "on" : ""}
+                              onClick={() => toggleMonthWeekday(i)}
+                              aria-pressed={rec.month_weekdays.includes(i)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

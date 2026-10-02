@@ -32,6 +32,11 @@ function parseDaysOfWeek(value) {
   const arr = Array.isArray(value) ? value : typeof value === "string" ? safeJson(value) : [];
   return arr.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
 }
+// Ordinals for "Nth weekday of the month": 1-4 = First..Fourth, -1 = Last.
+function parseMonthWeeks(value) {
+  const arr = Array.isArray(value) ? value : typeof value === "string" ? safeJson(value) : [];
+  return arr.map(Number).filter((n) => [1, 2, 3, 4, -1].includes(n));
+}
 function safeJson(text) {
   try {
     const parsed = JSON.parse(text);
@@ -61,6 +66,15 @@ function matchesRecurrence(dateStr, rec) {
     const months = (d.getUTCFullYear() - start.getUTCFullYear()) * 12 + (d.getUTCMonth() - start.getUTCMonth());
     if (months < 0 || months % interval !== 0) return false;
     const last = daysInMonth(d.getUTCFullYear(), d.getUTCMonth() + 1);
+    const weeks = parseMonthWeeks(rec.month_week);
+    if (weeks.length) {
+      // "Nth weekday of the month" (e.g. the 1st and 3rd Monday and Friday).
+      // -1 means the last occurrence that month, whichever week it falls in.
+      if (!parseDaysOfWeek(rec.days_of_week).includes(d.getUTCDay())) return false;
+      const isLast = d.getUTCDate() + 7 > last;
+      const nth = Math.floor((d.getUTCDate() - 1) / 7) + 1;
+      return (weeks.includes(-1) && isLast) || weeks.includes(nth);
+    }
     if (rec.use_last_day_of_month) return d.getUTCDate() === last;
     return d.getUTCDate() === Math.min(Number(rec.day_of_month) || start.getUTCDate(), last);
   }
@@ -133,7 +147,7 @@ function validateRecurrence(r, todayStr) {
   const start = toDate(r.start_date);
   const out = {
     frequency: r.frequency, interval_value: interval, time_of_day: timeOfDay, start_date: r.start_date,
-    days_of_week: null, day_of_month: null, use_last_day_of_month: 0, month_of_year: null,
+    days_of_week: null, day_of_month: null, use_last_day_of_month: 0, month_week: null, month_of_year: null,
     end_type: "NEVER", end_date: null, end_count: null,
   };
 
@@ -145,7 +159,18 @@ function validateRecurrence(r, todayStr) {
     out.days_of_week = days.sort((a, b) => a - b);
   }
   if (r.frequency === "MONTHLY") {
-    if (r.use_last_day_of_month) out.use_last_day_of_month = 1;
+    if (r.month_week !== undefined && r.month_week !== null) {
+      const weeks = (Array.isArray(r.month_week) ? r.month_week : [r.month_week]).map(Number);
+      if (weeks.length === 0 || weeks.some((n) => ![1, 2, 3, 4, -1].includes(n))) {
+        return { error: "recurrence.month_week must list 1, 2, 3, 4 or -1 (last)" };
+      }
+      const days = Array.isArray(r.days_of_week) ? [...new Set(r.days_of_week.map(Number))] : [];
+      if (days.length === 0 || days.some((n) => !Number.isInteger(n) || n < 0 || n > 6)) {
+        return { error: "recurrence.days_of_week must list weekdays 0 (Sunday) to 6 (Saturday) when month_week is set" };
+      }
+      out.month_week = [...new Set(weeks)].sort((a, b) => a - b);
+      out.days_of_week = days.sort((a, b) => a - b);
+    } else if (r.use_last_day_of_month) out.use_last_day_of_month = 1;
     else {
       const dom = r.day_of_month === undefined ? start.getUTCDate() : Number(r.day_of_month);
       if (!Number.isInteger(dom) || dom < 1 || dom > 31) return { error: "recurrence.day_of_month must be 1 to 31" };
@@ -180,7 +205,7 @@ function validateRecurrence(r, todayStr) {
 
 // ------------------------------------------------------------ generation
 
-const REC_COLUMNS = `frequency, interval_value, days_of_week, day_of_month, use_last_day_of_month, month_of_year,
+const REC_COLUMNS = `frequency, interval_value, days_of_week, day_of_month, use_last_day_of_month, month_week, month_of_year,
   time_of_day, ${DATE_FMT("start_date")} AS start_date, end_type, ${DATE_FMT("end_date")} AS end_date, end_count,
   occurrences_created, ${DATE_FMT("last_generated_until")} AS last_generated_until`;
 

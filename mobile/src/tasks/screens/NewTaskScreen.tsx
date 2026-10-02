@@ -19,9 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   CalendarIcon,
   ClockIcon,
-  CloseIcon,
   DocumentIcon,
-  PlusIcon,
   SparkleIcon,
   TagIcon,
 } from '../../components/icons';
@@ -74,6 +72,14 @@ const ENDS: [RecurrenceEnd, string][] = [
   ['NEVER', 'Never'],
   ['ON_DATE', 'On date'],
   ['AFTER_COUNT', 'After N times'],
+];
+// "Last" always means the final occurrence that month, whether it's the 4th or 5th.
+const MONTH_WEEK_SEG: [string, string][] = [
+  ['1', 'First'],
+  ['2', 'Second'],
+  ['3', 'Third'],
+  ['4', 'Fourth'],
+  ['-1', 'Last'],
 ];
 
 type Picker =
@@ -213,6 +219,7 @@ const factory = (t: CrmTheme) => ({
   weekdayOn: { backgroundColor: t.primary },
   weekdayText: { ...typography.captionMedium, color: t.textPrimary },
   mt: { marginTop: spacing.xs },
+  mb: { marginBottom: spacing.sm },
   error: {
     ...typography.captionMedium,
     color: t.dangerText,
@@ -241,14 +248,16 @@ export function NewTaskScreen() {
   const [dueDate, setDueDate] = useState(route.params?.date ?? todayStr());
   const [dueTime, setDueTime] = useState<string | null>(null);
   const [types, setTypes] = useState<string[]>([]);
-  const [addingType, setAddingType] = useState(false);
+  const [typeFocused, setTypeFocused] = useState(false);
 
   const [repeat, setRepeat] = useState(false);
   const [freq, setFreq] = useState<RecurrenceFrequency>('WEEKLY');
   const [interval, setIntervalValue] = useState('1');
   const [weekdays, setWeekdays] = useState<number[]>([new Date().getDay()]);
   const [dayOfMonth, setDayOfMonth] = useState(String(new Date().getDate()));
-  const [lastDay, setLastDay] = useState(false);
+  const [monthMode, setMonthMode] = useState<'day' | 'last' | 'weekday'>('day');
+  const [monthWeeks, setMonthWeeks] = useState<number[]>([2]);
+  const [monthWeekdays, setMonthWeekdays] = useState<number[]>([new Date().getDay()]);
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [recStart, setRecStart] = useState(todayStr());
   const [recTime, setRecTime] = useState('09:00');
@@ -307,15 +316,24 @@ export function NewTaskScreen() {
   }, [assignable, assignedTo]);
 
   const person = assignable.find(p => p.id === assignedTo);
-  const typeOptions = useMemo(() => {
-    const list = [...types];
-    if (taskType && !list.includes(taskType)) list.unshift(taskType);
-    return list.slice(0, 12);
+  // A few matches at a time, not the whole list - narrows as you type.
+  // Typing something that matches nothing just becomes a new type on save.
+  const typeSuggestions = useMemo(() => {
+    const q = taskType.trim().toLowerCase();
+    return types.filter(t => t.toLowerCase().includes(q)).slice(0, 6);
   }, [types, taskType]);
 
   const toggleWeekday = (n: number) =>
     setWeekdays(w =>
       w.includes(n) ? w.filter(d => d !== n) : [...w, n].sort(),
+    );
+  const toggleMonthWeek = (n: number) =>
+    setMonthWeeks(w =>
+      w.includes(n) ? w.filter(x => x !== n) : [...w, n].sort((a, b) => a - b),
+    );
+  const toggleMonthWeekday = (n: number) =>
+    setMonthWeekdays(w =>
+      w.includes(n) ? w.filter(x => x !== n) : [...w, n].sort(),
     );
 
   async function submit() {
@@ -354,6 +372,12 @@ export function NewTaskScreen() {
     if (repeat) {
       if (freq === 'WEEKLY' && weekdays.length === 0)
         return setError('Pick at least one day of the week.');
+      if (
+        freq === 'MONTHLY' &&
+        monthMode === 'weekday' &&
+        (monthWeeks.length === 0 || monthWeekdays.length === 0)
+      )
+        return setError('Pick at least one week and one weekday.');
       if (endType === 'ON_DATE' && endDate < recStart)
         return setError('The end date is before the start date.');
       payload.recurrence = {
@@ -364,9 +388,11 @@ export function NewTaskScreen() {
         end_type: endType,
         ...(freq === 'WEEKLY' ? { days_of_week: weekdays } : {}),
         ...(freq === 'MONTHLY'
-          ? lastDay
-            ? { use_last_day_of_month: true }
-            : { day_of_month: Number(dayOfMonth) || 1 }
+          ? monthMode === 'weekday'
+            ? { month_week: monthWeeks, days_of_week: monthWeekdays }
+            : monthMode === 'last'
+              ? { use_last_day_of_month: true }
+              : { day_of_month: Number(dayOfMonth) || 1 }
           : {}),
         ...(freq === 'YEARLY'
           ? { month_of_year: month, day_of_month: Number(dayOfMonth) || 1 }
@@ -516,51 +542,34 @@ export function NewTaskScreen() {
                 title="Task Type"
                 sub={taskType || 'Choose or add a type'}
               />
-              <View style={styles.tags}>
-                {typeOptions.map(x => {
-                  const on = taskType === x;
-                  return (
+              <TextInput
+                value={taskType}
+                onChangeText={setTaskType}
+                onFocus={() => setTypeFocused(true)}
+                // Delayed so a tap on a suggestion below still registers first.
+                onBlur={() => setTimeout(() => setTypeFocused(false), 150)}
+                placeholder="e.g. Follow-up, Site visit"
+                placeholderTextColor={theme.textMuted}
+                style={[styles.input, styles.mb]}
+                maxLength={100}
+              />
+              {typeFocused && typeSuggestions.length > 0 && (
+                <View style={styles.tags}>
+                  {typeSuggestions.map(x => (
                     <Pressable
                       key={x}
-                      onPress={() => setTaskType(on ? '' : x)}
-                      style={[styles.tag, on && styles.tagOn]}
+                      onPress={() => {
+                        setTaskType(x);
+                        setTypeFocused(false);
+                      }}
+                      style={styles.tag}
                       accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
                     >
-                      <Text style={[styles.tagText, on && styles.onPrimary]}>
-                        {x}
-                      </Text>
-                      {on && (
-                        <CloseIcon size={12} color={theme.textOnPrimary} />
-                      )}
+                      <Text style={styles.tagText}>{x}</Text>
                     </Pressable>
-                  );
-                })}
-                {addingType ? (
-                  <TextInput
-                    autoFocus
-                    placeholder="New type"
-                    placeholderTextColor={theme.textMuted}
-                    style={[styles.tag, styles.tagInput]}
-                    maxLength={100}
-                    onSubmitEditing={e => {
-                      const v = e.nativeEvent.text.trim();
-                      if (v) setTaskType(v);
-                      setAddingType(false);
-                    }}
-                    onBlur={() => setAddingType(false)}
-                  />
-                ) : (
-                  <Pressable
-                    onPress={() => setAddingType(true)}
-                    style={styles.tag}
-                    accessibilityRole="button"
-                  >
-                    <PlusIcon size={14} color={theme.textSecondary} />
-                    <Text style={styles.tagText}>Add</Text>
-                  </Pressable>
-                )}
-              </View>
+                  ))}
+                </View>
+              )}
 
               <OptionTitle
                 icon={<DocumentIcon size={18} color={theme.success} />}
@@ -698,11 +707,12 @@ export function NewTaskScreen() {
                             options={[
                               ['day', 'Day of month'],
                               ['last', 'Last day'],
+                              ['weekday', 'Weekday'],
                             ]}
-                            value={lastDay ? 'last' : 'day'}
-                            onChange={v => setLastDay(v === 'last')}
+                            value={monthMode}
+                            onChange={setMonthMode}
                           />
-                          {!lastDay && (
+                          {monthMode === 'day' && (
                             <TextInput
                               value={dayOfMonth}
                               onChangeText={v =>
@@ -711,6 +721,59 @@ export function NewTaskScreen() {
                               keyboardType="number-pad"
                               style={[styles.num, styles.mt]}
                             />
+                          )}
+                          {monthMode === 'weekday' && (
+                            <>
+                              <View style={styles.seg}>
+                                {MONTH_WEEK_SEG.map(([v, label]) => {
+                                  const n = Number(v);
+                                  const on = monthWeeks.includes(n);
+                                  return (
+                                    <Pressable
+                                      key={v}
+                                      onPress={() => toggleMonthWeek(n)}
+                                      style={[styles.segBtn, on && styles.segOn]}
+                                      accessibilityRole="button"
+                                      accessibilityState={{ selected: on }}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.segText,
+                                          on && styles.onPrimary,
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {label}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                              <View style={[styles.weekdays, styles.mt]}>
+                                {WEEKDAYS.map((w, i) => {
+                                  const on = monthWeekdays.includes(i);
+                                  return (
+                                    <Pressable
+                                      key={w}
+                                      onPress={() => toggleMonthWeekday(i)}
+                                      style={[
+                                        styles.weekday,
+                                        on && styles.weekdayOn,
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.weekdayText,
+                                          on && styles.onPrimary,
+                                        ]}
+                                      >
+                                        {w.slice(0, 2)}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            </>
                           )}
                         </>
                       )}

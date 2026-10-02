@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,10 +9,11 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { radii, spacing, typography } from '../../theme';
-import { byNewest, initials, isOverdue, LIST_MODES, type ListMode } from '../format';
+import { byNewest, initials, isOverdue, LIST_MODES, todayStr, type ListMode } from '../format';
 import type { TaskStackParamList } from '../navigation';
 import { useTasks } from '../TasksContext';
 import { TONE_GRADIENT } from '../theme';
+import type { WorkTask } from '../types';
 import { GradientBlock, TaskRow } from '../ui/parts';
 import { CheckIcon, ClipboardIcon, FlagIcon, RepeatIcon, SwapIcon } from '../ui/taskIcons';
 
@@ -49,6 +50,11 @@ const factory = (t: CrmTheme) => ({
     marginTop: 4,
   },
   roleText: { ...typography.overline, fontSize: 10, color: '#FFFFFF' },
+  scopeSwitch: { flexDirection: 'row' as const, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: radii.pill, padding: 4, marginTop: spacing.md },
+  scopeSeg: { flex: 1, paddingVertical: spacing.xs, borderRadius: radii.pill, alignItems: 'center' as const },
+  scopeSegOn: { backgroundColor: '#FFFFFF' },
+  scopeText: { ...typography.captionMedium, color: 'rgba(255,255,255,0.85)' },
+  scopeTextOn: { color: t.primary, fontWeight: '700' as const },
   bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
   badge: {
     position: 'absolute' as const,
@@ -246,27 +252,40 @@ export function TaskHomeScreen() {
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const { viewer, tasks, ready, refreshing, refresh, error, unreadCount } = useTasks();
+  // Only offered to people who manage someone; everyone else only ever sees their own work.
+  const hasTeam = viewer.team.length > 0;
+  const [scope, setScope] = useState<'my' | 'team'>('my');
+  const inScope = useCallback(
+    (t: WorkTask) => !hasTeam || (scope === 'my' ? t.assigned_to === viewer.id : t.assigned_to !== viewer.id),
+    [hasTeam, scope, viewer.id],
+  );
 
   const stats = useMemo(
     () => ({
-      today: tasks.filter((x) => LIST_MODES.today.match(x, viewer.id)).length,
-      overdue: tasks.filter(isOverdue).length,
-      upcoming: tasks.filter((x) => LIST_MODES.upcoming.match(x, viewer.id)).length,
+      today: tasks.filter((x) => inScope(x) && x.due_date === todayStr() && x.status !== 'CANCELLED').length,
+      overdue: tasks.filter((x) => inScope(x) && isOverdue(x)).length,
+      upcoming: tasks.filter((x) => inScope(x) && x.status === 'OPEN' && !!x.due_date && !isOverdue(x)).length,
     }),
-    [tasks, viewer.id],
+    [tasks, inScope],
   );
 
   // Newest first - a freshly created/assigned task shows at the top.
-  const recent = useMemo(() => tasks.filter((x) => x.status !== 'CANCELLED').sort(byNewest).slice(0, RECENT_LIMIT), [tasks]);
+  const recent = useMemo(
+    () => tasks.filter((x) => x.status !== 'CANCELLED' && inScope(x)).sort(byNewest).slice(0, RECENT_LIMIT),
+    [tasks, inScope],
+  );
 
 
   const openTask = (id: string) => navigation.navigate('TaskDetail', { taskId: id });
-  const openList = (mode: ListMode) => navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode } });
+  const openList = (mode: ListMode, teamScoped?: boolean) =>
+    navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode, teamScoped } });
 
   const quick = useMemo(() => {
-    const count = (m: ListMode) => tasks.filter((x) => LIST_MODES[m].match(x, viewer.id)).length;
-    return { progress: count('progress'), high: count('high'), delegated: count('delegated'), recurring: count('recurring'), completed: count('completed') };
-  }, [tasks, viewer.id]);
+    const count = (m: ListMode) => tasks.filter((x) => inScope(x) && LIST_MODES[m].match(x, viewer.id)).length;
+    // "Assigned by Me" is its own concept (tasks I created for others) - not part of the My/Team toggle.
+    const delegated = tasks.filter((x) => LIST_MODES.delegated.match(x, viewer.id)).length;
+    return { progress: count('progress'), high: count('high'), delegated, recurring: count('recurring'), completed: count('completed') };
+  }, [tasks, viewer.id, inScope]);
 
   return (
     <View style={styles.screen}>
@@ -315,6 +334,26 @@ export function TaskHomeScreen() {
               <Text style={styles.meText}>{initials(viewer.name)}</Text>
             </Pressable>
           </View>
+          {hasTeam && (
+            <View style={styles.scopeSwitch}>
+              <Pressable
+                onPress={() => setScope('my')}
+                style={[styles.scopeSeg, scope === 'my' && styles.scopeSegOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: scope === 'my' }}
+              >
+                <Text style={[styles.scopeText, scope === 'my' && styles.scopeTextOn]}>My Tasks</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setScope('team')}
+                style={[styles.scopeSeg, scope === 'team' && styles.scopeSegOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: scope === 'team' }}
+              >
+                <Text style={[styles.scopeText, scope === 'team' && styles.scopeTextOn]}>My Team</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
         <View style={styles.tiles}>
@@ -326,9 +365,27 @@ export function TaskHomeScreen() {
             </>
           ) : (
             <>
-              <Tile icon={<ClipboardIcon size={18} color="#FFFFFF" />} value={stats.today} label="Today's Tasks" tone="info" onPress={() => openList('today')} />
-              <Tile icon={<AlertTriangleIcon size={18} color="#FFFFFF" />} value={stats.overdue} label="Overdue" tone="danger" onPress={() => openList('overdue')} />
-              <Tile icon={<CalendarIcon size={18} color="#FFFFFF" />} value={stats.upcoming} label="Upcoming" tone="success" onPress={() => openList('upcoming')} />
+              <Tile
+                icon={<ClipboardIcon size={18} color="#FFFFFF" />}
+                value={stats.today}
+                label={scope === 'team' ? 'Team Today' : "Today's Tasks"}
+                tone="info"
+                onPress={() => openList('today', scope === 'team')}
+              />
+              <Tile
+                icon={<AlertTriangleIcon size={18} color="#FFFFFF" />}
+                value={stats.overdue}
+                label={scope === 'team' ? 'Team Overdue' : 'Overdue'}
+                tone="danger"
+                onPress={() => openList('overdue', scope === 'team')}
+              />
+              <Tile
+                icon={<CalendarIcon size={18} color="#FFFFFF" />}
+                value={stats.upcoming}
+                label={scope === 'team' ? 'Team Upcoming' : 'Upcoming'}
+                tone="success"
+                onPress={() => openList('upcoming', scope === 'team')}
+              />
             </>
           )}
         </View>
@@ -339,7 +396,7 @@ export function TaskHomeScreen() {
           <View style={styles.sectionRow}>
             <View>
               <View style={styles.sectionTitleRow}>
-                <Text style={styles.sectionTitle}>Recent Tasks</Text>
+                <Text style={styles.sectionTitle}>{scope === 'team' ? 'Team Recent Tasks' : 'Recent Tasks'}</Text>
                 {/* {ready && recent.length > 0 && (
                   <View style={styles.countBubble}>
                     <Text style={styles.countText}>{recent.length}</Text>
@@ -357,7 +414,14 @@ export function TaskHomeScreen() {
           </View>
 
           {!ready && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={84} radius={radii.lg} style={styles.skeletonRow} />)}
-          {ready && recent.length === 0 && !error && (
+          {ready && recent.length === 0 && !error && scope === 'team' && (
+            <CrmEmptyState
+              title="No tasks assigned to your team"
+              subtitle="Tasks you assign to your team will show here."
+              icon={<ClipboardIcon size={30} color={theme.primary} />}
+            />
+          )}
+          {ready && recent.length === 0 && !error && scope === 'my' && (
             <CrmEmptyState
               title="No tasks yet"
               subtitle="Tasks you create or are assigned will show here."

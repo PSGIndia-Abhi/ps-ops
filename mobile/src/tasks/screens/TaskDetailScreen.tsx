@@ -55,10 +55,10 @@ import * as api from '../api';
 import {
   fmtDateShort,
   fmtDateTime,
+  fmtTime,
   fmtTimestamp,
   formatBytes,
   isFinished,
-  recurrenceSummary,
   timeAgo,
   todayStr,
 } from '../format';
@@ -69,7 +69,6 @@ import type {
   TaskAttachment,
   TaskComment,
   TaskHistoryEntry,
-  TaskSeries,
   WorkTask,
 } from '../types';
 import {
@@ -83,6 +82,7 @@ import {
   TaskSummaryCard,
 } from '../ui/parts';
 import { ActionSheet, Sheet, type SheetAction } from '../ui/sheets';
+import { SeriesSheet } from '../ui/SeriesSheet';
 import {
   DotsIcon,
   EditIcon,
@@ -282,6 +282,15 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'space-between' as const,
     paddingVertical: spacing.xs,
   },
+  reqBanner: {
+    backgroundColor: t.infoBg,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  reqTitle: { ...typography.bodyMedium, color: t.info },
+  reqSub: { ...typography.body, color: t.info, marginTop: 2 },
   previewWrap: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',
@@ -377,9 +386,17 @@ export function TaskDetailScreen() {
 
   // Coming back from Reassign / Reschedule / Complete: those screens patch the
   // shared list, so pick up the newer copy (and its new history) from there.
+  // Sending a reschedule request only touches the request row, not the task's
+  // own updated_at, so that alone wouldn't catch it - compare the pending
+  // request too.
   const listCopy = tasks.find(x => x.id === taskId);
   useEffect(() => {
-    if (listCopy && task && listCopy.updated_at !== task.updated_at) {
+    if (
+      listCopy &&
+      task &&
+      (listCopy.updated_at !== task.updated_at ||
+        listCopy.pending_reschedule_request?.id !== task.pending_reschedule_request?.id)
+    ) {
       setTask({ ...task, ...listCopy });
       loadHistory();
       loadFiles();
@@ -413,6 +430,21 @@ export function TaskDetailScreen() {
     } catch (err) {
       showToast(errorMessage(err), 'error');
       return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Approve/reject/withdraw return the request row, not the task - reload it for the new due date (or cleared banner). */
+  async function decide(fn: () => Promise<unknown>, success: string) {
+    setBusy(true);
+    try {
+      await fn();
+      await load();
+      loadHistory();
+      showToast(success);
+    } catch (err) {
+      showToast(errorMessage(err), 'error');
     } finally {
       setBusy(false);
     }
@@ -452,6 +484,16 @@ export function TaskDetailScreen() {
   const canEditTerms = !isPlainAssignee && !finished;
   const canReassign =
     !finished && assignable.some(p => p.id !== task.assigned_to);
+  // A plain assignee can't reschedule directly - they ask, and the creator
+  // or their manager decides. Mirrors frontend/src/pages/taskpro/TaskDetail.jsx.
+  const canRequestReschedule = canWork && !canEditTerms;
+  const pendingReq = task.pending_reschedule_request;
+  const isRequester = !!pendingReq && pendingReq.requested_by === viewer.id;
+  const managesTask =
+    task.created_by === viewer.id ||
+    viewer.isAdmin ||
+    viewer.team.some(m => m.id === task.assigned_to);
+  const canDecideRequest = !!pendingReq && !isRequester && managesTask;
   const state = taskState(task);
   const explainFinished = (what: string) =>
     showToast(
@@ -640,6 +682,58 @@ export function TaskDetailScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <TaskSummaryCard task={task} right={<TaskStatePill task={task} />} />
+
+        {!!pendingReq && !finished && (
+          <View style={styles.reqBanner}>
+            {isRequester ? (
+              <>
+                <Text style={styles.reqTitle}>
+                  You asked to move this to {fmtDateShort(pendingReq.to_due_date)}
+                  {pendingReq.to_due_time ? ` at ${fmtTime(pendingReq.to_due_time)}` : ''}.
+                </Text>
+                <Text style={styles.reqSub}>
+                  Waiting for {task.created_by_name || 'your manager'} to decide.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.reqTitle}>
+                  {pendingReq.requested_by_name || 'They'} asked to move the due date
+                  {pendingReq.from_due_date ? ` from ${fmtDateShort(pendingReq.from_due_date)}` : ''} to{' '}
+                  {fmtDateShort(pendingReq.to_due_date)}
+                  {pendingReq.to_due_time ? ` at ${fmtTime(pendingReq.to_due_time)}` : ''}.
+                </Text>
+                {!!pendingReq.reason && <Text style={styles.reqSub}>{pendingReq.reason}</Text>}
+              </>
+            )}
+            {canDecideRequest && (
+              <View style={styles.sheetButtons}>
+                <PrimaryButton
+                  label="Reject"
+                  variant="secondary"
+                  style={styles.flex}
+                  loading={busy}
+                  onPress={() => decide(() => api.rejectRescheduleRequest(pendingReq.id), 'Request rejected')}
+                />
+                <PrimaryButton
+                  label="Approve"
+                  style={styles.flex}
+                  loading={busy}
+                  disabled={pendingReq.to_due_date < todayStr()}
+                  onPress={() => decide(() => api.approveRescheduleRequest(pendingReq.id), 'Request approved')}
+                />
+              </View>
+            )}
+            {isRequester && (
+              <PrimaryButton
+                label="Withdraw"
+                variant="secondary"
+                loading={busy}
+                onPress={() => decide(() => api.withdrawRescheduleRequest(pendingReq.id), 'Request withdrawn')}
+              />
+            )}
+          </View>
+        )}
 
         <View style={styles.tabs}>
           {(
@@ -1041,6 +1135,16 @@ export function TaskDetailScreen() {
               }
             />
           )}
+          {canRequestReschedule && (
+            <ActionButton
+              icon={<CalendarIcon size={20} color={theme.primary} />}
+              label={pendingReq ? 'Reschedule requested' : 'Request reschedule'}
+              disabled={!!pendingReq}
+              onPress={() =>
+                navigation.navigate('Reschedule', { taskId: task.id, request: true })
+              }
+            />
+          )}
           <ActionButton
             icon={<DotsIcon size={20} color={theme.primary} />}
             label="More"
@@ -1264,163 +1368,6 @@ function ActionButton({
       {icon}
       <Text style={styles.actionText}>{label}</Text>
     </Pressable>
-  );
-}
-
-function SeriesSheet({
-  visible,
-  onClose,
-  seriesId,
-  allowManage,
-  onChanged,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  seriesId: string;
-  allowManage: boolean;
-  onChanged: () => void;
-}) {
-  const { styles, theme } = useCrmStyles(factory);
-  const { showToast } = useTasks();
-  const [series, setSeries] = useState<TaskSeries | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(() => {
-    api
-      .getSeries(seriesId)
-      .then(s => {
-        setSeries(s);
-        setErr(null);
-      })
-      .catch(e => setErr(errorMessage(e)));
-  }, [seriesId]);
-
-  useEffect(() => {
-    if (visible) load();
-  }, [visible, load]);
-
-  async function act(fn: () => Promise<void>, label: string) {
-    setBusy(true);
-    try {
-      await fn();
-      load();
-      onChanged();
-      showToast(label);
-    } catch (e) {
-      showToast(errorMessage(e), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const LABEL = {
-    ACTIVE: ['Active', 'success'],
-    PAUSED: ['Paused', 'warning'],
-    CANCELLED: ['Stopped', 'neutral'],
-  } as const;
-
-  return (
-    <Sheet visible={visible} onClose={onClose} title="Recurring schedule">
-      {!series && !err && <ActivityIndicator color={theme.primary} />}
-      {err && <Text style={styles.sheetText}>{err}</Text>}
-      {series && (
-        <ScrollView style={{ maxHeight: 520 }}>
-          <View style={styles.seriesHead}>
-            <View style={styles.flex}>
-              <Text style={styles.cardTitle}>{series.title}</Text>
-              <Text style={styles.fileMeta}>
-                {recurrenceSummary(series.recurrence)}
-              </Text>
-            </View>
-            <StatusBadge
-              label={LABEL[series.status][0]}
-              tone={LABEL[series.status][1]}
-            />
-          </View>
-          {series.status === 'PAUSED' && series.pause_from && (
-            <Text style={styles.sheetText}>
-              Paused from {fmtDateShort(series.pause_from)}
-              {series.pause_until
-                ? ` to ${fmtDateShort(series.pause_until)}`
-                : ' until resumed'}
-              .
-            </Text>
-          )}
-          {!!series.next_occurrence_date && (
-            <Text style={styles.sheetText}>
-              Next occurrence: {fmtDateShort(series.next_occurrence_date)}
-            </Text>
-          )}
-          <Text style={styles.cardTitle}>Recent occurrences</Text>
-          {series.occurrences.slice(0, 6).map(o => (
-            <View key={o.id} style={styles.occRow}>
-              <Text style={styles.descText}>
-                {fmtDateTime(o.due_date, o.due_time)}
-              </Text>
-              <StatusBadge
-                label={
-                  o.status === 'IN_PROGRESS'
-                    ? 'In Progress'
-                    : o.status.charAt(0) + o.status.slice(1).toLowerCase()
-                }
-                tone={
-                  o.status === 'COMPLETED'
-                    ? 'success'
-                    : o.status === 'CANCELLED'
-                    ? 'neutral'
-                    : o.status === 'IN_PROGRESS'
-                    ? 'accent'
-                    : 'info'
-                }
-                dot={false}
-              />
-            </View>
-          ))}
-          {allowManage && series.status !== 'CANCELLED' && (
-            <View style={[styles.sheetButtons, { marginTop: spacing.lg }]}>
-              {series.status === 'ACTIVE' && (
-                <PrimaryButton
-                  label="Pause"
-                  variant="secondary"
-                  style={styles.flex}
-                  loading={busy}
-                  onPress={() =>
-                    act(
-                      () =>
-                        api.pauseSeries(
-                          series.id,
-                          series.next_occurrence_date || todayStr(),
-                        ),
-                      'Schedule paused',
-                    )
-                  }
-                />
-              )}
-              {series.status === 'PAUSED' && (
-                <PrimaryButton
-                  label="Resume"
-                  style={styles.flex}
-                  loading={busy}
-                  onPress={() =>
-                    act(() => api.resumeSeries(series.id), 'Schedule resumed')
-                  }
-                />
-              )}
-              <PrimaryButton
-                label="Stop"
-                variant="brand"
-                style={styles.flex}
-                loading={busy}
-                onPress={() =>
-                  act(() => api.stopSeries(series.id), 'Schedule stopped')
-                }
-              />
-            </View>
-          )}
-        </ScrollView>
-      )}
-    </Sheet>
   );
 }
 

@@ -110,7 +110,7 @@ router.get("/", auth, requireRealUser, async (req, res) => {
     if (req.query.status) { where.push("s.status = ?"); params.push(String(req.query.status)); }
 
     const [rows] = await pool.query(
-      `SELECT ${SERIES_COLUMNS}, r.frequency, r.interval_value, r.days_of_week, r.day_of_month, r.use_last_day_of_month,
+      `SELECT ${SERIES_COLUMNS}, r.frequency, r.interval_value, r.days_of_week, r.day_of_month, r.use_last_day_of_month, r.month_week,
               r.month_of_year, r.time_of_day, ${DATE_FMT("r.start_date")} AS start_date, r.end_type,
               ${DATE_FMT("r.end_date")} AS end_date, r.end_count, r.occurrences_created,
               ${DATE_FMT("r.last_generated_until")} AS last_generated_until

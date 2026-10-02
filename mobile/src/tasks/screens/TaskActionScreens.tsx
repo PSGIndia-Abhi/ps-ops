@@ -38,9 +38,9 @@ const factory = (t: CrmTheme) => ({
 
 function useTaskScreen<R extends 'Reassign' | 'Reschedule'>() {
   const navigation = useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
-  const { taskId } = useRoute<RouteProp<TaskStackParamList, R>>().params as { taskId: string };
-  const { task, error } = useTaskById(taskId);
-  return { navigation, task, error };
+  const params = useRoute<RouteProp<TaskStackParamList, R>>().params as TaskStackParamList[R];
+  const { task, error } = useTaskById(params.taskId);
+  return { navigation, task, error, params };
 }
 
 function Loading({ error, onBack, title }: { error: string | null; onBack: () => void; title: string }) {
@@ -114,7 +114,8 @@ export function ReassignScreen() {
 // ---- Reschedule ---------------------------------------------------------------------
 
 export function RescheduleScreen() {
-  const { navigation, task, error } = useTaskScreen<'Reschedule'>();
+  const { navigation, task, error, params } = useTaskScreen<'Reschedule'>();
+  const requestMode = !!params.request;
   const { styles, theme } = useCrmStyles(factory);
   const { patch, showToast } = useTasks();
   const [date, setDate] = useState<string | null>(null);
@@ -124,15 +125,25 @@ export function RescheduleScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  if (!task) return <Loading error={error} onBack={() => navigation.goBack()} title="Reschedule Task" />;
+  const title = requestMode ? 'Request Reschedule' : 'Reschedule Task';
+  if (!task) return <Loading error={error} onBack={() => navigation.goBack()} title={title} />;
   const newDate = date ?? (task.due_date && task.due_date >= todayStr() ? task.due_date : todayStr());
   const newTime = time === undefined ? (task.due_time ? task.due_time.slice(0, 5) : null) : time;
 
   async function submit() {
+    if (requestMode && !reason.trim()) return setErr('Tell them why you need to move this.');
     setBusy(true);
     try {
-      patch(await api.rescheduleTask(task!.id, newDate, newTime ? `${newTime}:00` : null, reason.trim() || undefined));
-      showToast(`Moved to ${fmtDateTime(newDate, newTime)}`);
+      if (requestMode) {
+        await api.requestReschedule(task!.id, newDate, newTime ? `${newTime}:00` : null, reason.trim());
+        // The request endpoint returns the request row, not the task - reload
+        // it so the detail screen's pending-request banner shows right away.
+        patch(await api.getTask(task!.id));
+        showToast('Reschedule requested');
+      } else {
+        patch(await api.rescheduleTask(task!.id, newDate, newTime ? `${newTime}:00` : null, reason.trim() || undefined));
+        showToast(`Moved to ${fmtDateTime(newDate, newTime)}`);
+      }
       navigation.goBack();
     } catch (e) {
       setErr(errorMessage(e));
@@ -144,9 +155,12 @@ export function RescheduleScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={styles.flex} behavior="padding">
-        <ScreenHeader title="Reschedule Task" onBack={() => navigation.goBack()} />
+        <ScreenHeader title={title} onBack={() => navigation.goBack()} />
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <TaskSummaryCard task={task} />
+          {requestMode && (
+            <Text style={styles.muted}>The task's creator or your manager decides whether to move it.</Text>
+          )}
           <View>
             <FieldLabel required>New Date</FieldLabel>
             <Pressable style={styles.picker} onPress={() => setPicker('date')} accessibilityRole="button">
@@ -162,7 +176,7 @@ export function RescheduleScreen() {
             </Pressable>
           </View>
           <View>
-            <FieldLabel>Reason (Optional)</FieldLabel>
+            <FieldLabel required={requestMode}>{requestMode ? 'Reason' : 'Reason (Optional)'}</FieldLabel>
             <TextInput
               value={reason}
               onChangeText={setReason}
@@ -176,7 +190,7 @@ export function RescheduleScreen() {
         </ScrollView>
         <View style={styles.footer}>
           <PrimaryButton label="Cancel" variant="secondary" style={styles.flex} onPress={() => navigation.goBack()} />
-          <PrimaryButton label="Update" style={styles.flex} onPress={submit} loading={busy} />
+          <PrimaryButton label={requestMode ? 'Send Request' : 'Update'} style={styles.flex} onPress={submit} loading={busy} />
         </View>
       </KeyboardAvoidingView>
       <DateSheet visible={picker === 'date'} onClose={() => setPicker(null)} value={newDate} onPick={setDate} minDate={todayStr()} />

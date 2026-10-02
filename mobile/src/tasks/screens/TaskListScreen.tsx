@@ -6,15 +6,58 @@ import { AlertTriangleIcon, CalendarIcon, InboxIcon, MenuIcon, PersonIcon, PlayI
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
-import { byNewest, LIST_MODES, type ListMode } from '../format';
+import { byNewest, isOverdue, LIST_MODES, todayStr, type ListMode } from '../format';
 import type { TaskStackParamList, TaskTabParamList } from '../navigation';
 import { useTasks } from '../TasksContext';
+import { NotStartedSeries } from '../ui/NotStartedSeries';
 import { TaskRow, inputStyle } from '../ui/parts';
 import { ActionSheet } from '../ui/sheets';
+import { SeriesSheet } from '../ui/SeriesSheet';
 import { CheckIcon, ClipboardIcon, FlagIcon, RepeatIcon, SearchIcon, SwapIcon } from '../ui/taskIcons';
+import type { WorkTask } from '../types';
 
 const CHIP_ORDER: ListMode[] = ['all', 'today', 'overdue', 'my', 'upcoming', 'team', 'completed'];
 const EXTRA_MODES: ListMode[] = ['progress', 'high', 'delegated'];
+// Reached from a Home Quick Action tile: a single dedicated view, no chip row back into the others.
+const BARE_MODES: ListMode[] = ['progress', 'high', 'completed', 'recurring'];
+// Switching among just these, never into Team/All - a dedicated "my work" /
+// "my team's work" view (which one depends on `teamScoped`, see below).
+const MY_ONLY_MODES: ListMode[] = ['today', 'overdue', 'upcoming'];
+const MY_RELATED_CHIPS: ListMode[] = ['my', 'today', 'overdue', 'upcoming'];
+const TEAM_RELATED_CHIPS: ListMode[] = ['team', 'today', 'overdue', 'upcoming'];
+const TEAM_LABEL: Partial<Record<ListMode, string>> = { today: 'Team Today', overdue: 'Team Overdue', upcoming: 'Team Upcoming' };
+// The date/status part of today/overdue/upcoming, without LIST_MODES' own
+// "assigned to me" baked in (today has it, overdue/upcoming don't) - lets the
+// same three dates be scoped to either "mine" or "my team's" below.
+function dateOnlyMatch(m: ListMode, t: WorkTask): boolean {
+  if (m === 'today') return t.due_date === todayStr() && t.status !== 'CANCELLED';
+  if (m === 'overdue') return isOverdue(t);
+  if (m === 'upcoming') return t.status === 'OPEN' && !!t.due_date && !isOverdue(t);
+  return false;
+}
+// "My Tasks" itself isn't a date filter - dateOnlyMatch doesn't know it, so fall back to its own LIST_MODES definition.
+const myRelatedMatch = (m: ListMode, t: WorkTask, me: number) =>
+  m === 'my' ? LIST_MODES.my.match(t, me) : t.assigned_to === me && dateOnlyMatch(m, t);
+// Same proxy for "my team" the generic Team chip already uses: anyone visible who isn't me.
+const teamRelatedMatch = (m: ListMode, t: WorkTask, me: number) =>
+  m === 'team' ? LIST_MODES.team.match(t, me) : t.assigned_to !== me && dateOnlyMatch(m, t);
+
+type DelegatedSub = 'all' | 'overdue' | 'progress' | 'completed';
+const DELEGATED_SUBS: [DelegatedSub, string][] = [
+  ['all', 'All'],
+  ['overdue', 'Overdue'],
+  ['progress', 'In Progress'],
+  ['completed', 'Completed'],
+];
+/** Tasks I created for someone else - "Assigned by Me", regardless of their status. */
+const isMyDelegated = (t: WorkTask, me: number) => t.created_by === me && t.assigned_to !== me;
+function delegatedSubMatch(sub: DelegatedSub, t: WorkTask, me: number): boolean {
+  if (!isMyDelegated(t, me)) return false;
+  if (sub === 'overdue') return isOverdue(t);
+  if (sub === 'progress') return t.status === 'IN_PROGRESS' || t.status === 'PAUSED';
+  if (sub === 'completed') return t.status === 'COMPLETED';
+  return true;
+}
 
 type IconComp = (p: { size?: number; color?: string }) => React.ReactElement;
 
@@ -64,6 +107,7 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
   },
   chips: { gap: spacing.xs, paddingBottom: spacing.md },
+  chipsRow: { flexDirection: 'row' as const, gap: spacing.xs, paddingBottom: spacing.md },
   chip: { borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, backgroundColor: t.surfaceAlt },
   chipOn: { backgroundColor: t.primary },
   chipDanger: { backgroundColor: t.dangerBg },
@@ -82,6 +126,28 @@ export function TaskListScreen() {
   const [mode, setMode] = useState<ListMode>(route.params?.mode ?? 'all');
   const [q, setQ] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [openSeries, setOpenSeries] = useState<{ id: string; allowManage: boolean } | null>(null);
+  const [delegatedSub, setDelegatedSub] = useState<DelegatedSub>('all');
+  // Whether Today/Overdue/Upcoming mean "mine" or "my team's" - set when
+  // arriving from a Team stat tile on Home, cleared by picking a mode any
+  // other way (see selectMode below) so it never sticks around stale.
+  const [teamScoped, setTeamScoped] = useState(!!route.params?.teamScoped);
+  // Quick Action tiles (In Progress, High Priority, Completed, Recurring) open
+  // a single dedicated view - no chip row or "Show" sheet back into the others.
+  const bareView = BARE_MODES.includes(mode);
+  // Today/Overdue/Upcoming: only let switching among those and My Tasks (or,
+  // from a Team tile, Team + those three), never into All/Completed from here.
+  const myOnlyView = MY_ONLY_MODES.includes(mode) && !teamScoped;
+  const teamOnlyView = MY_ONLY_MODES.includes(mode) && teamScoped;
+  // "Assigned by Me" gets its own status row scoped to tasks I delegated, not the generic chips.
+  const delegatedView = mode === 'delegated';
+  const restricted = bareView || myOnlyView || teamOnlyView || delegatedView;
+  // Every way of picking a mode goes through this, so teamScoped never leaks
+  // from a Team-tile visit into a later, unrelated chip tap.
+  const selectMode = (m: ListMode, team = false) => {
+    setMode(m);
+    setTeamScoped(team);
+  };
 
   // Keep the selected chip in view: arriving from Home ("Completed",
   // "In Progress"...) or the filter sheet scrolls the chip row to it instead
@@ -102,6 +168,8 @@ export function TaskListScreen() {
   useEffect(() => {
     if (route.params?.mode) setMode(route.params.mode);
     if (route.params?.q !== undefined) setQ(route.params.q);
+    if (route.params?.mode) setTeamScoped(!!route.params.teamScoped);
+    if (route.params?.mode === 'delegated') setDelegatedSub('all');
   }, [route.params]);
 
   const hasTeam = viewer.team.length > 0 || viewer.isAdmin;
@@ -124,7 +192,15 @@ export function TaskListScreen() {
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const list = tasks
-      .filter((x) => LIST_MODES[mode].match(x, viewer.id))
+      .filter((x) =>
+        delegatedView
+          ? delegatedSubMatch(delegatedSub, x, viewer.id)
+          : myOnlyView
+            ? myRelatedMatch(mode, x, viewer.id)
+            : teamOnlyView
+              ? teamRelatedMatch(mode, x, viewer.id)
+              : LIST_MODES[mode].match(x, viewer.id),
+      )
       .filter(
         (x) =>
           !needle ||
@@ -133,7 +209,7 @@ export function TaskListScreen() {
           (x.task_type || '').toLowerCase().includes(needle),
       );
     return mode === 'completed' ? list.sort((a, b) => (b.completed_at || '').localeCompare(a.completed_at || '')) : list.sort(byNewest);
-  }, [tasks, mode, q, viewer.id]);
+  }, [tasks, mode, q, viewer.id, delegatedView, delegatedSub, myOnlyView, teamOnlyView]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -146,7 +222,7 @@ export function TaskListScreen() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View>
-            <Text style={styles.title}>Tasks</Text>
+            <Text style={styles.title}>{restricted ? (teamOnlyView ? TEAM_LABEL[mode] : LIST_MODES[mode].label) : 'Tasks'}</Text>
             <View style={styles.searchRow}>
               <View style={styles.search}>
                 <SearchIcon size={18} color={theme.textMuted} />
@@ -159,35 +235,110 @@ export function TaskListScreen() {
                   returnKeyType="search"
                 />
               </View>
-              <Pressable style={styles.filterBtn} onPress={() => setFilterOpen(true)} accessibilityRole="button" accessibilityLabel="Filter tasks">
-                <MenuIcon size={22} color={theme.textPrimary} />
-              </Pressable>
+              {!restricted && (
+                <Pressable style={styles.filterBtn} onPress={() => setFilterOpen(true)} accessibilityRole="button" accessibilityLabel="Filter tasks">
+                  <MenuIcon size={22} color={theme.textPrimary} />
+                </Pressable>
+              )}
             </View>
-            <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              {modes.map((m) => {
-                const on = mode === m;
-                const danger = m === 'overdue' && !on;
-                return (
-                  <Pressable
-                    key={m}
-                    onLayout={(e) => {
-                      chipX.current[m] = e.nativeEvent.layout.x;
-                      if (m === mode) scrollToChip(m, false);
-                    }}
-                    // Tapping the active chip again goes back to All.
-                    onPress={() => setMode(on && m !== 'all' ? 'all' : m)}
-                    style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                  >
-                    <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
-                      {LIST_MODES[m].label}
-                      {ready ? ` (${counts[m]})` : ''}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            {!restricted && (
+              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+                {modes.map((m) => {
+                  const on = mode === m;
+                  const danger = m === 'overdue' && !on;
+                  return (
+                    <Pressable
+                      key={m}
+                      onLayout={(e) => {
+                        chipX.current[m] = e.nativeEvent.layout.x;
+                        if (m === mode) scrollToChip(m, false);
+                      }}
+                      // Tapping the active chip again goes back to All.
+                      onPress={() => selectMode(on && m !== 'all' ? 'all' : m)}
+                      style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
+                        {LIST_MODES[m].label}
+                        {ready ? ` (${counts[m]})` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
+            {myOnlyView && (
+              <View style={styles.chipsRow}>
+                {MY_RELATED_CHIPS.map((m) => {
+                  const on = mode === m;
+                  const danger = m === 'overdue' && !on;
+                  const count = tasks.filter((x) => myRelatedMatch(m, x, viewer.id)).length;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => selectMode(m, false)}
+                      style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
+                        {LIST_MODES[m].label}
+                        {ready ? ` (${count})` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            {teamOnlyView && (
+              <View style={styles.chipsRow}>
+                {TEAM_RELATED_CHIPS.map((m) => {
+                  const on = mode === m;
+                  const danger = m === 'overdue' && !on;
+                  const count = tasks.filter((x) => teamRelatedMatch(m, x, viewer.id)).length;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => selectMode(m, m !== 'team')}
+                      style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
+                        {TEAM_LABEL[m] ?? LIST_MODES[m].label}
+                        {ready ? ` (${count})` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            {delegatedView && (
+              <View style={styles.chipsRow}>
+                {DELEGATED_SUBS.map(([key, label]) => {
+                  const on = delegatedSub === key;
+                  const count = tasks.filter((x) => delegatedSubMatch(key, x, viewer.id)).length;
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => setDelegatedSub(key)}
+                      style={[styles.chip, on && styles.chipOn]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                        {label}
+                        {ready ? ` (${count})` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            {ready && mode === 'upcoming' && (
+              <NotStartedSeries viewer={viewer} onOpen={(id, allowManage) => setOpenSeries({ id, allowManage })} />
+            )}
             <CrmErrorBanner message={ready ? error : null} onRetry={refresh} />
             {!ready && [0, 1, 2, 3].map((i) => <CrmSkeleton key={i} height={76} radius={radii.lg} style={styles.skeleton} />)}
           </View>
@@ -218,10 +369,19 @@ export function TaskListScreen() {
             icon: <Icon size={18} color={color} />,
             iconBg: bg,
             selected: m === mode,
-            onPress: () => setMode(m),
+            onPress: () => selectMode(m, false),
           };
         })}
       />
+      {openSeries && (
+        <SeriesSheet
+          visible
+          onClose={() => setOpenSeries(null)}
+          seriesId={openSeries.id}
+          allowManage={openSeries.allowManage}
+          onChanged={refresh}
+        />
+      )}
     </SafeAreaView>
   );
 }

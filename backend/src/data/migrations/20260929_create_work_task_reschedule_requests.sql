@@ -9,7 +9,7 @@
 -- endpoint locks the task row). Rows are removed with their task.
 -- Safe to re-run.
 
-CREATE TABLE IF NOT EXISTS `work_task_reschedule_requests` (
+CREATE TABLE IF NOT EXISTS `work_task_reschedule_requests` ( 
   `id` CHAR(36) NOT NULL,
   `task_id` CHAR(36) NOT NULL,
   `requested_by` BIGINT NOT NULL,
