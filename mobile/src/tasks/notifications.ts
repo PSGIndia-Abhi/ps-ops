@@ -153,13 +153,18 @@ export function detectEvents(
   baseline: boolean,
 ): { events: TaskNotification[]; known: Record<string, string>; knownReq: Record<string, string | null>; knownDue: Record<string, string> } {
   const directIds = new Set(team.filter((m) => m.is_direct).map((m) => m.id));
+  // Reschedule-request notifications go up the whole chain, not just direct
+  // reports - that matches who the backend actually lets approve/reject
+  // (any manager in the hierarchy with MANAGE_TEAM_WORK_TASKS, not only the
+  // assignee's immediate boss). The other event kinds below stay direct-only.
+  const allTeamIds = new Set(team.map((m) => m.id));
   const known: Record<string, string> = {};
   const knownReq: Record<string, string | null> = {};
   const knownDue: Record<string, string> = {};
   const events: TaskNotification[] = [];
 
   for (const x of tasks) {
-    const manages = x.created_by === me || directIds.has(x.assigned_to);
+    const manages = x.created_by === me || allTeamIds.has(x.assigned_to);
     const tracked = isCreatedForMe(x, me) || manages;
     const reqId = x.pending_reschedule_request_id ?? null;
     if (!tracked) continue;

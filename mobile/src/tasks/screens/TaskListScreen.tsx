@@ -151,16 +151,18 @@ export function TaskListScreen() {
 
   // Keep the selected chip in view: arriving from Home ("Completed",
   // "In Progress"...) or the filter sheet scrolls the chip row to it instead
-  // of leaving it off-screen at the end of the row.
+  // of leaving it off-screen at the end of the row. Shared across every chip
+  // row below (general + the three restricted ones) - only one is ever
+  // mounted at a time, so one ref/key-map covers all of them.
   const chipScroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
-  const chipX = useRef<Partial<Record<ListMode, number>>>({});
-  const scrollToChip = useCallback((m: ListMode, animated = true) => {
+  const chipX = useRef<Record<string, number>>({});
+  const scrollToChip = useCallback((m: string, animated = true) => {
     const x = chipX.current[m];
     if (x !== undefined) chipScroll.current?.scrollTo({ x: Math.max(0, x - spacing.lg), animated });
   }, []);
   useEffect(() => {
-    scrollToChip(mode);
-  }, [mode, scrollToChip]);
+    scrollToChip(delegatedView ? delegatedSub : mode);
+  }, [mode, delegatedSub, delegatedView, scrollToChip]);
 
   // Drill-downs from Home (stat tiles, "View all") pick the view.
   // Insights' Team workload pre-fills the search; the Tasks tab resets both.
@@ -269,7 +271,7 @@ export function TaskListScreen() {
               </ScrollView>
             )}
             {myOnlyView && (
-              <View style={styles.chipsRow}>
+              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                 {MY_RELATED_CHIPS.map((m) => {
                   const on = mode === m;
                   const danger = m === 'overdue' && !on;
@@ -277,6 +279,10 @@ export function TaskListScreen() {
                   return (
                     <Pressable
                       key={m}
+                      onLayout={(e) => {
+                        chipX.current[m] = e.nativeEvent.layout.x;
+                        if (m === mode) scrollToChip(m, false);
+                      }}
                       onPress={() => selectMode(m, false)}
                       style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
                       accessibilityRole="button"
@@ -289,10 +295,10 @@ export function TaskListScreen() {
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             )}
             {teamOnlyView && (
-              <View style={styles.chipsRow}>
+              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                 {TEAM_RELATED_CHIPS.map((m) => {
                   const on = mode === m;
                   const danger = m === 'overdue' && !on;
@@ -300,6 +306,10 @@ export function TaskListScreen() {
                   return (
                     <Pressable
                       key={m}
+                      onLayout={(e) => {
+                        chipX.current[m] = e.nativeEvent.layout.x;
+                        if (m === mode) scrollToChip(m, false);
+                      }}
                       onPress={() => selectMode(m, m !== 'team')}
                       style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
                       accessibilityRole="button"
@@ -312,16 +322,20 @@ export function TaskListScreen() {
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             )}
             {delegatedView && (
-              <View style={styles.chipsRow}>
+              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                 {DELEGATED_SUBS.map(([key, label]) => {
                   const on = delegatedSub === key;
                   const count = tasks.filter((x) => delegatedSubMatch(key, x, viewer.id)).length;
                   return (
                     <Pressable
                       key={key}
+                      onLayout={(e) => {
+                        chipX.current[key] = e.nativeEvent.layout.x;
+                        if (key === delegatedSub) scrollToChip(key, false);
+                      }}
                       onPress={() => setDelegatedSub(key)}
                       style={[styles.chip, on && styles.chipOn]}
                       accessibilityRole="button"
@@ -334,7 +348,7 @@ export function TaskListScreen() {
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             )}
             {ready && mode === 'upcoming' && (
               <NotStartedSeries viewer={viewer} onOpen={(id, allowManage) => setOpenSeries({ id, allowManage })} />

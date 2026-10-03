@@ -207,14 +207,20 @@ const deepCleaningServices = [
   "Deep Cleaning with Scrubbing",
   "Deep Cleaning with Sticker Removal",
   "Debris Removal"
-];  
+];
+
+const salesServices = [
+  "Invoice Submission"
+];
 
   const visibleSubServices =
     form.serviceType === "PEST"
       ? pestServices
       : form.serviceType === "DEEP"
         ? deepCleaningServices
-        : [...pestServices, ...deepCleaningServices];
+        : form.serviceType === "SALES"
+          ? salesServices
+          : [...pestServices, ...deepCleaningServices];
 
   function update(key, value) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -786,6 +792,7 @@ const deepCleaningServices = [
                 { key: "PEST", label: "Pest Control" },
                 { key: "DEEP", label: "Deep Cleaning" },
                 { key: "BOTH", label: "Both" },
+                { key: "SALES", label: "Sales" },
               ].map(s => (
                 <div
                   key={s.key}
