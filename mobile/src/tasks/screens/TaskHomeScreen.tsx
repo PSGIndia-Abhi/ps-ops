@@ -277,8 +277,8 @@ export function TaskHomeScreen() {
 
 
   const openTask = (id: string) => navigation.navigate('TaskDetail', { taskId: id });
-  const openList = (mode: ListMode, teamScoped?: boolean) =>
-    navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode, teamScoped } });
+  const openList = (mode: ListMode, teamScoped?: boolean, focused?: boolean) =>
+    navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode, teamScoped, focused } });
 
   const quick = useMemo(() => {
     const count = (m: ListMode) => tasks.filter((x) => inScope(x) && LIST_MODES[m].match(x, viewer.id)).length;
@@ -406,7 +406,7 @@ export function TaskHomeScreen() {
               <View style={styles.underline} />
             </View>
             {ready && recent.length > 0 && (
-              <Pressable style={styles.sectionAction} onPress={() => openList('all')} hitSlop={10} accessibilityRole="button">
+              <Pressable style={styles.sectionAction} onPress={() => openList(scope === 'team' ? 'team' : 'my', false, true)} hitSlop={10} accessibilityRole="button">
                 <Text style={styles.sectionActionText}>View all</Text>
                 <ChevronRightIcon size={16} color={theme.primary} />
               </Pressable>

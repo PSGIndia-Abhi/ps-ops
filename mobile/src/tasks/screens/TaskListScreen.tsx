@@ -26,6 +26,8 @@ const MY_ONLY_MODES: ListMode[] = ['today', 'overdue', 'upcoming'];
 const MY_RELATED_CHIPS: ListMode[] = ['my', 'today', 'overdue', 'upcoming'];
 const TEAM_RELATED_CHIPS: ListMode[] = ['team', 'today', 'overdue', 'upcoming'];
 const TEAM_LABEL: Partial<Record<ListMode, string>> = { today: 'Team Today', overdue: 'Team Overdue', upcoming: 'Team Upcoming' };
+// "View all" on Home opens just My Tasks or Team Tasks - a single list, no chip row (see `focused` below).
+const FOCUSED_LABEL: Partial<Record<ListMode, string>> = { my: 'My Tasks', team: 'Team Tasks' };
 // The date/status part of today/overdue/upcoming, without LIST_MODES' own
 // "assigned to me" baked in (today has it, overdue/upcoming don't) - lets the
 // same three dates be scoped to either "mine" or "my team's" below.
@@ -132,6 +134,9 @@ export function TaskListScreen() {
   // arriving from a Team stat tile on Home, cleared by picking a mode any
   // other way (see selectMode below) so it never sticks around stale.
   const [teamScoped, setTeamScoped] = useState(!!route.params?.teamScoped);
+  // Set when arriving from Home's "View all": shows only My Tasks or Team Tasks
+  // with no chip row. Cleared by picking a mode any other way (see selectMode).
+  const [focused, setFocused] = useState(!!route.params?.focused);
   // Quick Action tiles (In Progress, High Priority, Completed, Recurring) open
   // a single dedicated view - no chip row or "Show" sheet back into the others.
   const bareView = BARE_MODES.includes(mode);
@@ -141,12 +146,14 @@ export function TaskListScreen() {
   const teamOnlyView = MY_ONLY_MODES.includes(mode) && teamScoped;
   // "Assigned by Me" gets its own status row scoped to tasks I delegated, not the generic chips.
   const delegatedView = mode === 'delegated';
-  const restricted = bareView || myOnlyView || teamOnlyView || delegatedView;
+  const focusedView = focused && (mode === 'my' || mode === 'team');
+  const restricted = bareView || myOnlyView || teamOnlyView || delegatedView || focusedView;
   // Every way of picking a mode goes through this, so teamScoped never leaks
   // from a Team-tile visit into a later, unrelated chip tap.
   const selectMode = (m: ListMode, team = false) => {
     setMode(m);
     setTeamScoped(team);
+    setFocused(false);
   };
 
   // Keep the selected chip in view: arriving from Home ("Completed",
@@ -171,6 +178,7 @@ export function TaskListScreen() {
     if (route.params?.mode) setMode(route.params.mode);
     if (route.params?.q !== undefined) setQ(route.params.q);
     if (route.params?.mode) setTeamScoped(!!route.params.teamScoped);
+    if (route.params?.mode) setFocused(!!route.params.focused);
     if (route.params?.mode === 'delegated') setDelegatedSub('all');
   }, [route.params]);
 
@@ -224,7 +232,7 @@ export function TaskListScreen() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View>
-            <Text style={styles.title}>{restricted ? (teamOnlyView ? TEAM_LABEL[mode] : LIST_MODES[mode].label) : 'Tasks'}</Text>
+            <Text style={styles.title}>{restricted ? (teamOnlyView ? TEAM_LABEL[mode] : focusedView ? FOCUSED_LABEL[mode] : LIST_MODES[mode].label) : 'Tasks'}</Text>
             <View style={styles.searchRow}>
               <View style={styles.search}>
                 <SearchIcon size={18} color={theme.textMuted} />
