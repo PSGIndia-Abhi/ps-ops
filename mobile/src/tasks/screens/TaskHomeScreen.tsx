@@ -3,7 +3,7 @@ import { Animated, Easing, Pressable, RefreshControl, ScrollView, StyleSheet, Te
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
-import { BrandMark } from '../../components/BrandMark';
+import { TaskBrandMark } from '../ui/TaskBrandMark';
 import { AlertTriangleIcon, BellIcon, CalendarIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -299,7 +299,7 @@ export function TaskHomeScreen() {
           <BandBackground />
           <View style={styles.ident}>
             <View style={styles.logo}>
-              <BrandMark size={34} />
+              <TaskBrandMark size={40} />
             </View>
             <View style={styles.flex1}>
               <Text style={styles.hi}>Welcome back</Text>
@@ -446,14 +446,14 @@ export function TaskHomeScreen() {
                 label="In Progress"
                 tone="accent"
                 count={quick.progress}
-                onPress={() => openList('progress')}
+                onPress={() => openList('progress', scope === 'team')}
               />
               <QuickAction
                 icon={<FlagIcon size={19} color="#FFFFFF" />}
                 label="High Priority"
                 tone="danger"
                 count={quick.high}
-                onPress={() => openList('high')}
+                onPress={() => openList('high', scope === 'team')}
               />
               {viewer.team.length > 0 ? (
                 <QuickAction
@@ -469,7 +469,7 @@ export function TaskHomeScreen() {
                   label="Recurring"
                   tone="info"
                   count={quick.recurring}
-                  onPress={() => openList('recurring')}
+                  onPress={() => openList('recurring', scope === 'team')}
                 />
               )}
               <QuickAction
@@ -477,7 +477,7 @@ export function TaskHomeScreen() {
                 label="Completed"
                 tone="success"
                 count={quick.completed}
-                onPress={() => openList('completed')}
+                onPress={() => openList('completed', scope === 'team')}
               />
             </View>
           </View>

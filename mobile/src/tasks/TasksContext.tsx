@@ -62,6 +62,26 @@ interface TasksContextValue {
 
 const TasksContext = createContext<TasksContextValue | undefined>(undefined);
 
+/**
+ * Merges a fresh download into the list on screen. Tasks that didn't change keep
+ * their old object, and if nothing changed the same array comes back, so React
+ * skips redrawing the screens (and rows) that show them.
+ */
+function mergeTasks(prev: WorkTask[], next: WorkTask[]): WorkTask[] {
+  const byId = new Map(prev.map((t) => [t.id, t]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((t, i) => {
+    const old = byId.get(t.id);
+    if (old && JSON.stringify(old) === JSON.stringify(t)) {
+      if (prev[i] !== old) changed = true;
+      return old;
+    }
+    changed = true;
+    return t;
+  });
+  return changed ? merged : prev;
+}
+
 export const errorMessage = (err: unknown) =>
   err instanceof ApiError || err instanceof Error ? err.message : 'Something went wrong. Please try again.';
 
@@ -126,9 +146,10 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       if (!silent) setRefreshing(true);
       try {
         const list = await api.listTasks();
-        setTasks(list);
+        setTasks((prev) => mergeTasks(prev, list));
         setError(null);
         await stateLoaded;
+        const before = JSON.stringify([notifState.current.known, notifState.current.knownReq, notifState.current.knownDue]);
         const { events, known, knownReq, knownDue } = detectEvents(list, notifState.current, userId, teamRef.current, baseline.current);
         notifState.current.known = known;
         notifState.current.knownReq = knownReq;
@@ -138,7 +159,8 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
           saveState(userId, notifState.current);
         } else if (events.length) {
           ingest(events);
-        } else {
+        } else if (before !== JSON.stringify([known, knownReq, knownDue])) {
+          // Only write to storage when the remembered statuses actually moved on.
           saveState(userId, notifState.current);
         }
       } catch (err) {

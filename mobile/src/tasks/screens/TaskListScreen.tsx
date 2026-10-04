@@ -18,15 +18,15 @@ import type { WorkTask } from '../types';
 
 const CHIP_ORDER: ListMode[] = ['all', 'today', 'overdue', 'my', 'upcoming', 'team', 'completed'];
 const EXTRA_MODES: ListMode[] = ['progress', 'high', 'delegated'];
-// Reached from a Home Quick Action tile: a single dedicated view, no chip row back into the others.
-const BARE_MODES: ListMode[] = ['progress', 'high', 'completed', 'recurring'];
-// Switching among just these, never into Team/All - a dedicated "my work" /
-// "my team's work" view (which one depends on `teamScoped`, see below).
-const MY_ONLY_MODES: ListMode[] = ['today', 'overdue', 'upcoming'];
-const MY_RELATED_CHIPS: ListMode[] = ['my', 'today', 'overdue', 'upcoming'];
-const TEAM_RELATED_CHIPS: ListMode[] = ['team', 'today', 'overdue', 'upcoming'];
+// The fixed filter row for each part. The row never changes when a chip is tapped - only the list does.
+const MY_PART: ListMode[] = ['my', 'today', 'overdue', 'upcoming', 'progress', 'high', 'completed'];
+const TEAM_PART: ListMode[] = ['team', 'today', 'overdue', 'upcoming', 'progress', 'high', 'completed'];
+// Date views: "mine" or "my team's" depending on the part they are in.
+const DATE_MODES: ListMode[] = ['today', 'overdue', 'upcoming'];
+// Quick Action views (from Home). Scoped to My or Team like the date views.
+const QUICK_MODES: ListMode[] = ['progress', 'high', 'completed', 'recurring'];
 const TEAM_LABEL: Partial<Record<ListMode, string>> = { today: 'Team Today', overdue: 'Team Overdue', upcoming: 'Team Upcoming' };
-// "View all" on Home opens just My Tasks or Team Tasks - a single list, no chip row (see `focused` below).
+// "View all" on Home opens just My Tasks or Team Tasks - a single list, no switch (see `focused` below).
 const FOCUSED_LABEL: Partial<Record<ListMode, string>> = { my: 'My Tasks', team: 'Team Tasks' };
 // The date/status part of today/overdue/upcoming, without LIST_MODES' own
 // "assigned to me" baked in (today has it, overdue/upcoming don't) - lets the
@@ -116,51 +116,57 @@ const factory = (t: CrmTheme) => ({
   chipText: { ...typography.captionMedium, fontSize: 14, color: t.textSecondary },
   chipTextOn: { color: t.textOnPrimary },
   chipTextDanger: { color: t.dangerText },
+  scopeTrack: { flexDirection: 'row' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 4, marginBottom: spacing.md },
+  scopeSeg: { flex: 1, paddingVertical: spacing.xs, borderRadius: radii.pill, alignItems: 'center' as const },
+  scopeSegOn: { backgroundColor: t.surface, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  scopeText: { ...typography.captionMedium, color: t.textSecondary },
+  scopeTextOn: { color: t.primary, fontWeight: '700' as const },
   skeleton: { marginBottom: spacing.sm },
 });
 
-/** My Tasks - list + search, with the same filter views as the web sidebar. */
+/** My Tasks / My Team - list + search, with the same filter views as the web sidebar. */
 export function TaskListScreen() {
   const navigation = useNavigation<NavigationProp<TaskStackParamList>>();
   const route = useRoute<RouteProp<TaskTabParamList, 'Tasks'>>();
   const { styles, theme } = useCrmStyles(factory);
   const { tasks, viewer, ready, refreshing, refresh, error } = useTasks();
-  const [mode, setMode] = useState<ListMode>(route.params?.mode ?? 'all');
+  const [mode, setMode] = useState<ListMode>(route.params?.mode ?? 'my');
   const [q, setQ] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [openSeries, setOpenSeries] = useState<{ id: string; allowManage: boolean } | null>(null);
   const [delegatedSub, setDelegatedSub] = useState<DelegatedSub>('all');
-  // Whether Today/Overdue/Upcoming mean "mine" or "my team's" - set when
-  // arriving from a Team stat tile on Home, cleared by picking a mode any
-  // other way (see selectMode below) so it never sticks around stale.
+  // Whether the date and Quick Action views mean "mine" or "my team's". Set by
+  // the My/Team switch, by Home's team tiles, and by the chips in each part.
   const [teamScoped, setTeamScoped] = useState(!!route.params?.teamScoped);
-  // Set when arriving from Home's "View all": shows only My Tasks or Team Tasks
-  // with no chip row. Cleared by picking a mode any other way (see selectMode).
+  // Set when arriving from Home's "View all": shows only My Tasks or Team Tasks, with no switch.
   const [focused, setFocused] = useState(!!route.params?.focused);
-  // Quick Action tiles (In Progress, High Priority, Completed, Recurring) open
-  // a single dedicated view - no chip row or "Show" sheet back into the others.
-  const bareView = BARE_MODES.includes(mode);
-  // Today/Overdue/Upcoming: only let switching among those and My Tasks (or,
-  // from a Team tile, Team + those three), never into All/Completed from here.
-  const myOnlyView = MY_ONLY_MODES.includes(mode) && !teamScoped;
-  const teamOnlyView = MY_ONLY_MODES.includes(mode) && teamScoped;
-  // "Assigned by Me" gets its own status row scoped to tasks I delegated, not the generic chips.
-  const delegatedView = mode === 'delegated';
-  const focusedView = focused && (mode === 'my' || mode === 'team');
-  const restricted = bareView || myOnlyView || teamOnlyView || delegatedView || focusedView;
+
+  const hasTeam = viewer.team.length > 0 || viewer.isAdmin;
+  // Which part is showing: the mode decides it for My/Team, otherwise the teamScoped flag does.
+  const partTeam = mode === 'team' || (mode !== 'my' && teamScoped);
+  const inPart = MY_PART.includes(mode) || TEAM_PART.includes(mode);
+  // Every part view and the Quick Action views (Recurring, Assigned by Me) show the filter row.
+  const showRow = inPart || mode === 'recurring' || mode === 'delegated';
+  const showSwitch = hasTeam && inPart && !focused;
+  // The row's chips: the fixed set for this part, plus the current mode first if it isn't in that set (Recurring).
+  const rowChips: ListMode[] = inPart ? (partTeam ? TEAM_PART : MY_PART) : [mode, ...MY_PART];
+
   // Every way of picking a mode goes through this, so teamScoped never leaks
-  // from a Team-tile visit into a later, unrelated chip tap.
-  const selectMode = (m: ListMode, team = false) => {
+  // from one part into the other.
+  const selectMode = (m: ListMode, team = partTeam) => {
     setMode(m);
     setTeamScoped(team);
     setFocused(false);
   };
+  // The My Tasks / My Team switch keeps the current filter (Overdue stays Overdue, and so on).
+  const switchPart = (team: boolean) => {
+    setMode(mode === 'my' || mode === 'team' ? (team ? 'team' : 'my') : mode);
+    setTeamScoped(team);
+    setFocused(false);
+  };
 
-  // Keep the selected chip in view: arriving from Home ("Completed",
-  // "In Progress"...) or the filter sheet scrolls the chip row to it instead
-  // of leaving it off-screen at the end of the row. Shared across every chip
-  // row below (general + the three restricted ones) - only one is ever
-  // mounted at a time, so one ref/key-map covers all of them.
+  // Keep the selected chip in view: arriving from Home or the filter sheet scrolls
+  // the chip row to it instead of leaving it off-screen at the end of the row.
   const chipScroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const chipX = useRef<Record<string, number>>({});
   const scrollToChip = useCallback((m: string, animated = true) => {
@@ -168,10 +174,10 @@ export function TaskListScreen() {
     if (x !== undefined) chipScroll.current?.scrollTo({ x: Math.max(0, x - spacing.lg), animated });
   }, []);
   useEffect(() => {
-    scrollToChip(delegatedView ? delegatedSub : mode);
-  }, [mode, delegatedSub, delegatedView, scrollToChip]);
+    scrollToChip(mode);
+  }, [mode, partTeam, scrollToChip]);
 
-  // Drill-downs from Home (stat tiles, "View all") pick the view.
+  // Drill-downs from Home (stat tiles, Quick Actions, "View all") pick the view.
   // Insights' Team workload pre-fills the search; the Tasks tab resets both.
   // Keyed on the whole params object so a repeat tap (same values) still applies.
   useEffect(() => {
@@ -182,7 +188,6 @@ export function TaskListScreen() {
     if (route.params?.mode === 'delegated') setDelegatedSub('all');
   }, [route.params]);
 
-  const hasTeam = viewer.team.length > 0 || viewer.isAdmin;
   // The Quick Actions views (In Progress, High Priority...) live in the filter
   // sheet, and get a chip of their own only while one of them is selected.
   const allModes = useMemo(
@@ -199,18 +204,24 @@ export function TaskListScreen() {
     [tasks, viewer.id, allModes],
   );
 
+  /** Whether a task belongs to the view `m`, within the current part (My or Team). */
+  const matchFor = useCallback(
+    (m: ListMode, x: WorkTask): boolean => {
+      const me = viewer.id;
+      if (m === 'delegated') return delegatedSubMatch(delegatedSub, x, me);
+      if (DATE_MODES.includes(m)) return partTeam ? teamRelatedMatch(m, x, me) : myRelatedMatch(m, x, me);
+      if (QUICK_MODES.includes(m) && hasTeam) return LIST_MODES[m].match(x, me) && (partTeam ? x.assigned_to !== me : x.assigned_to === me);
+      return LIST_MODES[m].match(x, me);
+    },
+    [viewer.id, delegatedSub, partTeam, hasTeam],
+  );
+  // Chip counts. "Assigned by Me" always counts all of them, whatever sub-filter is picked.
+  const countFor = (m: ListMode) => tasks.filter((x) => (m === 'delegated' ? LIST_MODES.delegated.match(x, viewer.id) : matchFor(m, x))).length;
+
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const list = tasks
-      .filter((x) =>
-        delegatedView
-          ? delegatedSubMatch(delegatedSub, x, viewer.id)
-          : myOnlyView
-            ? myRelatedMatch(mode, x, viewer.id)
-            : teamOnlyView
-              ? teamRelatedMatch(mode, x, viewer.id)
-              : LIST_MODES[mode].match(x, viewer.id),
-      )
+      .filter((x) => matchFor(mode, x))
       .filter(
         (x) =>
           !needle ||
@@ -219,7 +230,14 @@ export function TaskListScreen() {
           (x.task_type || '').toLowerCase().includes(needle),
       );
     return mode === 'completed' ? list.sort((a, b) => (b.completed_at || '').localeCompare(a.completed_at || '')) : list.sort(byNewest);
-  }, [tasks, mode, q, viewer.id, delegatedView, delegatedSub, myOnlyView, teamOnlyView]);
+  }, [tasks, mode, q, matchFor]);
+
+  const title =
+    focused && (mode === 'my' || mode === 'team')
+      ? FOCUSED_LABEL[mode]
+      : showRow && mode !== 'my' && mode !== 'team'
+        ? (partTeam && TEAM_LABEL[mode]) || LIST_MODES[mode].label
+        : 'Tasks';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -232,7 +250,25 @@ export function TaskListScreen() {
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View>
-            <Text style={styles.title}>{restricted ? (teamOnlyView ? TEAM_LABEL[mode] : focusedView ? FOCUSED_LABEL[mode] : LIST_MODES[mode].label) : 'Tasks'}</Text>
+            <Text style={styles.title}>{title}</Text>
+            {showSwitch && (
+              <View style={styles.scopeTrack}>
+                {(['my', 'team'] as const).map((m) => {
+                  const on = m === 'team' ? partTeam : !partTeam;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => switchPart(m === 'team')}
+                      style={[styles.scopeSeg, on && styles.scopeSegOn]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.scopeText, on && styles.scopeTextOn]}>{m === 'my' ? 'My Tasks' : 'My Team'}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
             <View style={styles.searchRow}>
               <View style={styles.search}>
                 <SearchIcon size={18} color={theme.textMuted} />
@@ -245,13 +281,13 @@ export function TaskListScreen() {
                   returnKeyType="search"
                 />
               </View>
-              {!restricted && (
+              {!showRow && (
                 <Pressable style={styles.filterBtn} onPress={() => setFilterOpen(true)} accessibilityRole="button" accessibilityLabel="Filter tasks">
                   <MenuIcon size={22} color={theme.textPrimary} />
                 </Pressable>
               )}
             </View>
-            {!restricted && (
+            {!showRow && (
               <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
                 {modes.map((m) => {
                   const on = mode === m;
@@ -264,7 +300,7 @@ export function TaskListScreen() {
                         if (m === mode) scrollToChip(m, false);
                       }}
                       // Tapping the active chip again goes back to All.
-                      onPress={() => selectMode(on && m !== 'all' ? 'all' : m)}
+                      onPress={() => selectMode(on && m !== 'all' ? 'all' : m, false)}
                       style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: on }}
@@ -278,12 +314,11 @@ export function TaskListScreen() {
                 })}
               </ScrollView>
             )}
-            {myOnlyView && (
+            {showRow && (
               <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-                {MY_RELATED_CHIPS.map((m) => {
+                {rowChips.map((m) => {
                   const on = mode === m;
                   const danger = m === 'overdue' && !on;
-                  const count = tasks.filter((x) => myRelatedMatch(m, x, viewer.id)).length;
                   return (
                     <Pressable
                       key={m}
@@ -291,59 +326,28 @@ export function TaskListScreen() {
                         chipX.current[m] = e.nativeEvent.layout.x;
                         if (m === mode) scrollToChip(m, false);
                       }}
-                      onPress={() => selectMode(m, false)}
+                      onPress={() => selectMode(m)}
                       style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: on }}
                     >
                       <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
-                        {LIST_MODES[m].label}
-                        {ready ? ` (${count})` : ''}
+                        {(partTeam && TEAM_LABEL[m]) || LIST_MODES[m].label}
+                        {ready ? ` (${countFor(m)})` : ''}
                       </Text>
                     </Pressable>
                   );
                 })}
               </ScrollView>
             )}
-            {teamOnlyView && (
-              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-                {TEAM_RELATED_CHIPS.map((m) => {
-                  const on = mode === m;
-                  const danger = m === 'overdue' && !on;
-                  const count = tasks.filter((x) => teamRelatedMatch(m, x, viewer.id)).length;
-                  return (
-                    <Pressable
-                      key={m}
-                      onLayout={(e) => {
-                        chipX.current[m] = e.nativeEvent.layout.x;
-                        if (m === mode) scrollToChip(m, false);
-                      }}
-                      onPress={() => selectMode(m, m !== 'team')}
-                      style={[styles.chip, on && styles.chipOn, danger && styles.chipDanger]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: on }}
-                    >
-                      <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
-                        {TEAM_LABEL[m] ?? LIST_MODES[m].label}
-                        {ready ? ` (${count})` : ''}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            )}
-            {delegatedView && (
-              <ScrollView ref={chipScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+            {mode === 'delegated' && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
                 {DELEGATED_SUBS.map(([key, label]) => {
                   const on = delegatedSub === key;
                   const count = tasks.filter((x) => delegatedSubMatch(key, x, viewer.id)).length;
                   return (
                     <Pressable
                       key={key}
-                      onLayout={(e) => {
-                        chipX.current[key] = e.nativeEvent.layout.x;
-                        if (key === delegatedSub) scrollToChip(key, false);
-                      }}
                       onPress={() => setDelegatedSub(key)}
                       style={[styles.chip, on && styles.chipOn]}
                       accessibilityRole="button"

@@ -111,11 +111,11 @@ function TaskTabs() {
         component={TaskListScreen}
         options={{ tabBarIcon: tasksIcon }}
         listeners={({ navigation: tabNav }) => ({
-          // Tapping the Tasks tab always opens the full list (All, no search),
-          // even if a Home shortcut left it on Completed / In Progress...
+          // Tapping the Tasks tab always opens My Tasks (no search), even if a Home
+          // shortcut left it on Completed / In Progress. My Team is one tap away.
           tabPress: (event) => {
             event.preventDefault();
-            tabNav.navigate('Tasks', { mode: 'all', q: '', at: Date.now() });
+            tabNav.navigate('Tasks', { mode: 'my', q: '', at: Date.now() });
           },
         })}
       />

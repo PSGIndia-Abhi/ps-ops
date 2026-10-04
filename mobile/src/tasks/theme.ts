@@ -68,9 +68,6 @@ export const TONE_GRADIENT: Record<Tone, [string, string]> = {
   neutral: ['#CBD5E1', '#94A3B8'],
 };
 
-/** Short, readable reference for a task (ids are UUIDs). */
-export const taskRef = (id: string) => `TSK-${id.slice(0, 8).toUpperCase()}`;
-
 /** Stable colour per person, for avatar circles. */
 const AVATAR_COLORS = ['#2563EB', '#7C3AED', '#0891B2', '#16A34A', '#D97706', '#DB2777', '#4F46E5'];
 export function avatarColor(seed: string | number | null | undefined): string {

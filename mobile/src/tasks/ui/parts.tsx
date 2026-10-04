@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { ChevronLeftIcon, ClockIcon, CloseIcon, PauseIcon, PlayIcon } from '../../components/icons';
@@ -7,7 +7,7 @@ import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
 import { dueInfo, initials } from '../format';
 import { dueLabel } from '../notifications';
-import { avatarColor, PRIORITY_META, STATE_META, taskRef, taskState, TONE_GRADIENT, toneSolid } from '../theme';
+import { avatarColor, PRIORITY_META, STATE_META, taskState, TONE_GRADIENT, toneSolid } from '../theme';
 import type { TaskPriority, WorkTask } from '../types';
 import { CheckIcon, ClipboardIcon } from './taskIcons';
 
@@ -153,7 +153,9 @@ export function PriorityPill({ priority }: { priority: TaskPriority }) {
  * icon square, title, ref, due line with a clock, state pill. Rows slide in one
  * after another (`index` staggers them; capped so long lists don't lag).
  */
-export function TaskRow({ task, onPress, showAssignee, index = 0 }: { task: WorkTask; onPress: () => void; showAssignee?: boolean; index?: number }) {
+type TaskRowProps = { task: WorkTask; onPress: () => void; showAssignee?: boolean; index?: number };
+
+function TaskRowView({ task, onPress, showAssignee, index = 0 }: TaskRowProps) {
   const { styles, theme } = useCrmStyles(factory);
   const state = taskState(task);
   const strip = toneSolid(theme, STATE_META[state].tone);
@@ -183,10 +185,11 @@ export function TaskRow({ task, onPress, showAssignee, index = 0 }: { task: Work
           <Text style={styles.rowTitle} numberOfLines={1}>
             {task.title}
           </Text>
-          <Text style={styles.rowRef} numberOfLines={1}>
-            {showAssignee && task.assigned_to_name ? `${task.assigned_to_name} · ` : ''}
-            {taskRef(task.id)}
-          </Text>
+          {showAssignee && task.assigned_to_name ? (
+            <Text style={styles.rowRef} numberOfLines={1}>
+              {task.assigned_to_name}
+            </Text>
+          ) : null}
           <View style={styles.dueLine}>
             <ClockIcon size={12} color={dueColor} />
             <Text style={[styles.rowDue, { color: dueColor }]} numberOfLines={1}>
@@ -202,6 +205,15 @@ export function TaskRow({ task, onPress, showAssignee, index = 0 }: { task: Work
   );
 }
 
+/**
+ * Only redraws when its own task (or assignee label / stagger position) changes.
+ * `onPress` is left out of the comparison on purpose: every caller only opens
+ * the task by its id, so the handler it was given earlier still does the same thing.
+ */
+export const TaskRow = memo(TaskRowView, (prev, next) =>
+  prev.task === next.task && prev.showAssignee === next.showAssignee && prev.index === next.index,
+);
+
 /** The task summary card at the top of Details / Reassign / Reschedule / Complete. */
 export function TaskSummaryCard({ task, right, style }: { task: WorkTask; right?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   const { styles } = useCrmStyles(factory);
@@ -213,7 +225,6 @@ export function TaskSummaryCard({ task, right, style }: { task: WorkTask; right?
           <Text style={styles.rowTitle} numberOfLines={2}>
             {task.title}
           </Text>
-          <Text style={styles.rowRef}>{taskRef(task.id)}</Text>
         </View>
         {right}
       </View>
