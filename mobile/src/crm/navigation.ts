@@ -2,13 +2,15 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import type { LeadType } from './types';
+
 export type LeadFilter = 'all' | 'paid' | 'pending';
 
 /** Exactly five bottom items; "NewLead" is the raised centre action and never renders a screen (it opens the CrmNewLead form). */
 export type CrmTabParamList = {
   Home: undefined;
   /** `at` changes on every navigation so re-opening with the same filter still re-applies it. */
-  Leads: { filter?: LeadFilter; at?: number } | undefined;
+  Leads: { filter?: LeadFilter; kind?: LeadType; at?: number } | undefined;
   NewLead: undefined;
   Payments: undefined;
   More: undefined;
@@ -17,6 +19,8 @@ export type CrmTabParamList = {
 export type CrmStackParamList = {
   CrmTabs: NavigatorScreenParams<CrmTabParamList> | undefined;
   CrmNewLead: undefined;
+  /** The commercial lead form (company, quote, photos - no payment). */
+  CrmNewCommercialLead: undefined;
   CrmLeadDetail: { leadId: string };
   /** Shown right after saving; `note` explains anything the rep should still do (e.g. payment pending). */
   CrmLeadSaved: { leadId: string; note?: string };

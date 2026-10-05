@@ -13,6 +13,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useUserRole } from '../../auth/role';
 import { GradientCard } from '../../components/GradientCard';
 import {
+  BriefcaseIcon,
   CheckCircleIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -27,7 +28,7 @@ import { useLeads } from '../LeadsContext';
 import { computeMonthlyAchievements } from '../stats';
 import type { CrmTabScreenNav } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
-import type { Lead } from '../types';
+import { isCommercial, type Lead } from '../types';
 import { ClipboardListIcon, RupeeIcon, TrendUpIcon, WalletIcon } from '../ui/crmIcons';
 import { AchievementCard } from '../ui/AchievementCard';
 import { CrmBackgroundWash } from '../ui/CrmBackgroundWash';
@@ -308,17 +309,22 @@ const METHOD_LABEL = { cash: 'Cash', online: 'Online', other: 'Other' } as const
 /** One Recent Leads card - the technician's schedule card treatment (status accent strip, amount block + divider, status pill, ghost glyph, round chevron) carrying a lead's details. */
 function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) {
   const { styles, theme } = useCrmStyles(factory);
+  // A commercial lead has no service and no payment: it leads with the company, shows its quote
+  // and wears a "Commercial" pill where a consumer lead shows Paid / Pending.
+  const commercial = isCommercial(lead);
   const paid = lead.paymentStatus === 'paid';
-  const color = paid ? theme.success : theme.warning;
-  const pillBg = paid ? theme.successBg : theme.warningBg;
-  const pillText = paid ? theme.successText : theme.warningText;
+  const color = commercial ? theme.primary : paid ? theme.success : theme.warning;
+  const pillBg = commercial ? theme.primarySoftBg : paid ? theme.successBg : theme.warningBg;
+  const pillText = commercial ? theme.primary : paid ? theme.successText : theme.warningText;
   const isNew = lead.leadStatus === 'new';
+  const title = commercial ? lead.companyName || lead.customerName : lead.customerName;
+  const subtitle = commercial ? lead.customerName : lead.service;
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${lead.customerName}, ${lead.service}, ${formatINR(lead.amount)}`}
+      accessibilityLabel={`${title}, ${subtitle}, ${commercial ? 'quote ' : ''}${formatINR(lead.amount)}`}
       style={({ pressed }) => [
         styles.leadItem,
         { backgroundColor: `${color}0D` },
@@ -338,7 +344,7 @@ function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) 
         <Text style={[styles.leadAmount, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
           {formatINR(lead.amount)}
         </Text>
-        <Text style={styles.leadMethod}>{METHOD_LABEL[lead.paymentMethod]}</Text>
+        <Text style={styles.leadMethod}>{commercial ? 'Quote' : METHOD_LABEL[lead.paymentMethod]}</Text>
       </View>
 
       <View style={[styles.leadDivider, { backgroundColor: `${color}33` }]} />
@@ -346,7 +352,7 @@ function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) 
       <View style={styles.leadBody}>
         <View style={styles.leadTopRow}>
           <Text style={styles.leadName} numberOfLines={1}>
-            {lead.customerName}
+            {title}
           </Text>
           {isNew && (
             <View style={styles.newTag}>
@@ -355,12 +361,20 @@ function RecentLeadItem({ lead, onPress }: { lead: Lead; onPress: () => void }) 
           )}
         </View>
         <Text style={styles.leadService} numberOfLines={1}>
-          {lead.service}
+          {subtitle}
         </Text>
         <View style={styles.leadBottom}>
           <View style={[styles.leadPill, { backgroundColor: pillBg }]}>
-            {paid ? <CheckCircleIcon size={12} color={pillText} /> : <ClockIcon size={12} color={pillText} />}
-            <Text style={[styles.leadPillText, { color: pillText }]}>{paid ? 'Paid' : 'Pending'}</Text>
+            {commercial ? (
+              <BriefcaseIcon size={12} color={pillText} />
+            ) : paid ? (
+              <CheckCircleIcon size={12} color={pillText} />
+            ) : (
+              <ClockIcon size={12} color={pillText} />
+            )}
+            <Text style={[styles.leadPillText, { color: pillText }]}>
+              {commercial ? 'Commercial' : paid ? 'Paid' : 'Pending'}
+            </Text>
           </View>
           <Text style={styles.leadMeta} numberOfLines={1}>
             {formatLeadWhen(lead.createdAt)}
@@ -449,7 +463,8 @@ export function CrmHomeScreen() {
   const rootNavigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
   const { user } = useAuth();
   const role = useUserRole();
-  const { leads, stats, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } = useLeads();
+  const { leads, commercialLeads, stats, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } =
+    useLeads();
   const { styles, theme } = useCrmStyles(factory);
 
   // The slider width is measured (not assumed) so each card is exactly one page wide.
@@ -469,8 +484,18 @@ export function CrmHomeScreen() {
   }, [refreshing]);
   const [sliderIndex, setSliderIndex] = useState(0);
 
-  const recent = leads.slice(0, RECENT_LIMIT);
-  const achievements = useMemo(() => computeMonthlyAchievements(leads), [leads]);
+  // The newest leads of both kinds together (ISO timestamps sort correctly as text).
+  const recent = useMemo(
+    () =>
+      [...leads, ...commercialLeads]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, RECENT_LIMIT),
+    [leads, commercialLeads],
+  );
+  const achievements = useMemo(
+    () => computeMonthlyAchievements(leads, new Date(), commercialLeads),
+    [leads, commercialLeads],
+  );
   const monthLabel = new Date().toLocaleString('en-IN', { month: 'long' });
 
   function handleSliderEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -532,7 +557,7 @@ export function CrmHomeScreen() {
           <RichSectionHeader
             title="Recent Leads"
             gradientUnderline
-            actionLabel={!loading && leads.length > 0 ? 'View all' : undefined}
+            actionLabel={!loading && recent.length > 0 ? 'View all' : undefined}
             onAction={() => navigation.navigate('Leads', { filter: 'all', at: Date.now() })}
           />
           {loading ? (

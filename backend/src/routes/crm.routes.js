@@ -1,12 +1,14 @@
 const crypto = require("crypto");
 const express = require("express");
 const { v4: uuid } = require("uuid");
+const multer = require("multer");
 
 const router = express.Router();
 
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
+const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
@@ -30,6 +32,13 @@ const PAYMENT_STATUSES = ["paid", "pending"];
 const LEAD_STATUSES = ["new", "contacted", "converted", "lost"];
 const LIST_LIMIT = 500;
 
+// A commercial lead is a business enquiry: company + address + approximate quote + photos,
+// with no house type / service / plan and no payment. Everything else is a consumer lead.
+const COMMERCIAL_LEAD_SOURCES = ["google", "website", "referral", "social_media", "other"];
+const MAX_LEAD_PHOTOS = 5;
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const PHOTO_TYPES = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
+
 // Same coupons as the bestserve.in website (Bestserve Website/backend/server.js). Keep the two lists
 // in step until they move into a shared table. `expiresAt` is optional.
 const COUPONS = {
@@ -49,8 +58,11 @@ function findCoupon(rawCode) {
 function toLead(row) {
   return {
     id: row.id,
+    lead_type: row.lead_type || "consumer",
     customer_name: row.customer_name,
+    company_name: row.company_name || "",
     phone: row.phone,
+    alternate_phone: row.alternate_phone || "",
     email: row.customer_email || "",
     house_type: row.house_type,
     service_name: row.service_name,
@@ -111,10 +123,16 @@ router.get("/services", auth, requirePermission("CRM_VIEW_SERVICE_PRICE"), async
 // LEADS
 // --------------------
 // GET /api/crm/leads -> newest first (capped)
+// Consumer leads only unless ?lead_type=commercial or ?lead_type=all is sent, so app versions
+// from before commercial leads existed keep getting exactly the list they always got.
 router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
+    const wanted = req.query.lead_type;
+    const leadType = wanted === "commercial" || wanted === "all" ? wanted : "consumer";
     const [rows] = await pool.query(
-      `SELECT * FROM crm_leads ORDER BY created_at DESC LIMIT ${LIST_LIMIT}`
+      `SELECT * FROM crm_leads ${leadType === "all" ? "" : "WHERE lead_type = ?"}
+       ORDER BY created_at DESC LIMIT ${LIST_LIMIT}`,
+      leadType === "all" ? [] : [leadType]
     );
     res.json(rows.map(toLead));
   } catch (err) {
@@ -169,6 +187,9 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   if (phone.length !== 10) return res.status(400).json({ error: "A valid 10-digit phone number is required" });
   if (email && (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
     return res.status(400).json({ error: "Enter a valid email address" });
+  }
+  if (body.lead_type === "commercial") {
+    return createCommercialLead(req, res, { customerName, phone, email, amount, location, notes, clientRef, leadStatus });
   }
   if (referenceBy.length > 100) return res.status(400).json({ error: "Reference name is too long (max 100)" });
   if (!houseType) return res.status(400).json({ error: "House type is required" });
@@ -264,6 +285,216 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
     }
     console.error("CRM lead create error:", err);
     res.status(500).json({ error: "Failed to save lead" });
+  }
+});
+
+// The commercial half of POST /api/crm/leads. Name, phone and email were already checked by the
+// caller. No price list and no payment: `amount` is the approximate quote, `location` the address.
+async function createCommercialLead(req, res, lead) {
+  const body = req.body || {};
+  const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
+  const alternatePhone = typeof body.alternate_phone === "string" ? body.alternate_phone.replace(/\D/g, "") : "";
+  const leadSource = body.lead_source || null;
+
+  if (companyName.length < 2) return res.status(400).json({ error: "Company / business name is required" });
+  if (companyName.length > 150) return res.status(400).json({ error: "Company / business name is too long (max 150)" });
+  if (!lead.location) return res.status(400).json({ error: "Address is required" });
+  if (lead.location.length > 255) return res.status(400).json({ error: "Address is too long (max 255)" });
+  if (alternatePhone && alternatePhone.length !== 10) {
+    return res.status(400).json({ error: "Alternate number must be a valid 10-digit phone number" });
+  }
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return res.status(400).json({ error: "Source of lead is required" });
+  if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
+    return res.status(400).json({ error: "A valid approximate quote is required" });
+  }
+  if (!LEAD_STATUSES.includes(lead.leadStatus)) return res.status(400).json({ error: "Invalid lead status" });
+
+  const findByRef = async () => {
+    const [[row]] = await pool.query(
+      `SELECT * FROM crm_leads WHERE external_ref = ? AND created_by_user_id = ? LIMIT 1`,
+      [lead.clientRef, req.user.id]
+    );
+    return row;
+  };
+
+  try {
+    if (lead.clientRef) {
+      const already = await findByRef();
+      if (already) return res.status(200).json(toLead(already));
+    }
+
+    const id = uuid();
+    await pool.query(
+      `INSERT INTO crm_leads
+        (id, lead_type, customer_name, company_name, phone, alternate_phone, customer_email,
+         house_type, service_name, plan_type, standard_amount, amount, location, lead_source, notes,
+         payment_method, payment_status, lead_status, created_by_user_id, external_ref)
+       VALUES (?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
+      [
+        id,
+        lead.customerName,
+        companyName,
+        lead.phone,
+        alternatePhone || null,
+        lead.email || null,
+        lead.amount,
+        lead.location,
+        leadSource,
+        lead.notes || null,
+        lead.leadStatus,
+        req.user.id,
+        lead.clientRef,
+      ]
+    );
+
+    const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    res.status(201).json(toLead(created));
+  } catch (err) {
+    if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {
+      // Two copies of the same save arrived at once: the other one won, so return its lead.
+      try {
+        const winner = await findByRef();
+        if (winner) return res.status(200).json(toLead(winner));
+      } catch (lookupErr) {
+        console.error("CRM lead duplicate lookup error:", lookupErr);
+      }
+    }
+    console.error("CRM commercial lead create error:", err);
+    res.status(500).json({ error: "Failed to save lead" });
+  }
+}
+
+// --------------------
+// LEAD PHOTOS (commercial leads)
+// --------------------
+// Files live in MinIO (same bucket as job / task attachments); the DB row is metadata only.
+// Anyone who can see leads can see the photos; adding one needs the create-lead permission.
+
+const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PHOTO_BYTES, files: 1 } });
+
+const PHOTO_SQL = `SELECT id, file_name, file_type, file_size, created_at FROM crm_lead_photos`;
+
+// Checks the lead BEFORE the upload body is read.
+async function precheckPhotoUpload(req, res, next) {
+  try {
+    const [[lead]] = await pool.query(`SELECT id, lead_type FROM crm_leads WHERE id = ? LIMIT 1`, [req.params.id]);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+    if (lead.lead_type !== "commercial") return res.status(400).json({ error: "Photos can only be added to commercial leads" });
+    next();
+  } catch (err) {
+    console.error("CRM lead photo precheck error:", err);
+    res.status(500).json({ error: "Failed to check lead" });
+  }
+}
+
+function acceptPhoto(req, res, next) {
+  photoUpload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "Photo is too large (max 10 MB)" });
+    return res.status(400).json({ error: "Invalid upload. Send one photo in the 'file' field." });
+  });
+}
+
+// GET /api/crm/leads/:id/photos -> [{ id, file_name, file_type, file_size, created_at }]
+router.get("/leads/:id/photos", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(`${PHOTO_SQL} WHERE lead_id = ? ORDER BY created_at ASC`, [req.params.id]);
+    res.json(rows);
+  } catch (err) {
+    console.error("CRM lead photos list error:", err);
+    res.status(500).json({ error: "Failed to load photos" });
+  }
+});
+
+// POST /api/crm/leads/:id/photos -- multipart/form-data: one image in "file", optional "client_ref"
+router.post(
+  "/leads/:id/photos",
+  auth,
+  requirePermission("CRM_CREATE_LEAD"),
+  precheckPhotoUpload,
+  acceptPhoto,
+  async (req, res) => {
+    const leadId = req.params.id;
+    let objectKey = null;
+    try {
+      if (!req.file) return res.status(400).json({ error: "file is required" });
+      const ext = PHOTO_TYPES[req.file.mimetype];
+      if (!ext) return res.status(400).json({ error: "Only JPG, PNG or WEBP photos can be added" });
+
+      // Sent by the app with every photo, so a retried upload returns the photo we already stored.
+      const rawRef = req.body ? req.body.client_ref : null;
+      const clientRef = typeof rawRef === "string" && /^[A-Za-z0-9-]{8,40}$/.test(rawRef) ? rawRef : null;
+      if (clientRef) {
+        const [[already]] = await pool.query(`${PHOTO_SQL} WHERE lead_id = ? AND client_ref = ? LIMIT 1`, [leadId, clientRef]);
+        if (already) return res.status(200).json(already);
+      }
+
+      const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM crm_lead_photos WHERE lead_id = ?`, [leadId]);
+      if (total >= MAX_LEAD_PHOTOS) {
+        return res.status(400).json({ error: `A lead can have at most ${MAX_LEAD_PHOTOS} photos` });
+      }
+
+      // multer decodes filenames as latin1; restore the real UTF-8 name.
+      const fileName = Buffer.from(req.file.originalname || `photo.${ext}`, "latin1").toString("utf8").slice(0, 255);
+      const id = uuid();
+      objectKey = `crm-leads/${leadId}/${uuid()}.${ext}`;
+
+      // Same lazy bucket creation the task attachments already do.
+      if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
+        await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+      }
+      await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.buffer.length, {
+        "Content-Type": req.file.mimetype,
+      });
+      await pool.query(
+        `INSERT INTO crm_lead_photos (id, lead_id, object_key, file_name, file_type, file_size, client_ref, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, leadId, objectKey, fileName, req.file.mimetype, req.file.buffer.length, clientRef, req.user.id]
+      );
+      const [[row]] = await pool.query(`${PHOTO_SQL} WHERE id = ?`, [id]);
+      res.status(201).json(row);
+    } catch (err) {
+      // DB failed after the file was stored: don't leave an orphan file behind.
+      if (objectKey) minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
+      if (err && err.code === "ER_DUP_ENTRY") {
+        // Two copies of the same upload arrived at once: the other one won, so return its photo.
+        try {
+          const [[winner]] = await pool.query(`${PHOTO_SQL} WHERE lead_id = ? AND client_ref = ? LIMIT 1`, [
+            leadId,
+            req.body && req.body.client_ref,
+          ]);
+          if (winner) return res.status(200).json(winner);
+        } catch (lookupErr) {
+          console.error("CRM lead photo duplicate lookup error:", lookupErr);
+        }
+      }
+      console.error("CRM lead photo upload error:", err);
+      res.status(500).json({ error: "Failed to upload photo" });
+    }
+  }
+);
+
+// GET /api/crm/leads/:id/photos/:photoId/view -- streams the image
+router.get("/leads/:id/photos/:photoId/view", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const [[photo]] = await pool.query(
+      `SELECT object_key, file_type FROM crm_lead_photos WHERE id = ? AND lead_id = ? LIMIT 1`,
+      [req.params.photoId, req.params.id]
+    );
+    if (!photo) return res.status(404).json({ error: "Photo not found" });
+
+    const stream = await minioClient.getObject(process.env.MINIO_BUCKET, photo.object_key);
+    res.setHeader("Content-Type", photo.file_type);
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    stream.on("error", (err) => {
+      console.error("CRM lead photo stream failed:", err.message);
+      res.destroy(err);
+    });
+    stream.pipe(res);
+  } catch (err) {
+    console.error("CRM lead photo view error:", err);
+    res.status(500).json({ error: "Failed to load photo" });
   }
 });
 

@@ -72,3 +72,50 @@ export function validateLead(values: LeadFormValues): LeadFormErrors {
 
   return errors;
 }
+
+/** The commercial lead form: a business enquiry with an approximate quote and no payment. */
+export interface CommercialLeadFormValues {
+  /** The contact person. */
+  customerName: string;
+  companyName: string;
+  address: string;
+  phone: string;
+  alternatePhone: string;
+  email: string;
+  source: string | null;
+  /** Approximate quote; kept as text while editing, parsed on save. */
+  amount: string;
+  notes: string;
+}
+
+export type CommercialLeadFormErrors = Partial<Record<keyof CommercialLeadFormValues, string>>;
+
+/** Required: lead name, company, address, phone, source and a positive quote. */
+export function validateCommercialLead(values: CommercialLeadFormValues): CommercialLeadFormErrors {
+  const errors: CommercialLeadFormErrors = {};
+
+  if (values.customerName.trim().length < 2) errors.customerName = "Enter the contact person's name.";
+  if (values.companyName.trim().length < 2) errors.companyName = 'Enter the company / business name.';
+  if (!values.address.trim()) errors.address = 'Enter the address.';
+
+  const phone = phoneError(values.phone);
+  if (phone) errors.phone = phone;
+
+  if (normalizePhone(values.alternatePhone)) {
+    const alternate = phoneError(values.alternatePhone);
+    if (alternate) errors.alternatePhone = alternate;
+    else if (normalizePhone(values.alternatePhone) === normalizePhone(values.phone)) {
+      errors.alternatePhone = 'This is the same as the phone number.';
+    }
+  }
+
+  const email = values.email.trim();
+  if (email && !EMAIL_PATTERN.test(email)) {
+    errors.email = 'That email looks incomplete - check it (e.g. name@company.com).';
+  }
+
+  if (!values.source) errors.source = 'Select where this lead came from.';
+  if (parseAmount(values.amount) <= 0) errors.amount = 'Enter the approximate quote.';
+
+  return errors;
+}

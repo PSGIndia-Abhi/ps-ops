@@ -1,10 +1,35 @@
 export type PaymentMethod = 'cash' | 'online' | 'other';
 export type PaymentStatus = 'paid' | 'pending';
 export type LeadStatus = 'new' | 'contacted' | 'converted' | 'lost';
-export type LeadSource = 'website' | 'apartment' | 'referral' | 'social_media' | 'other';
+export type LeadSource = 'website' | 'apartment' | 'referral' | 'social_media' | 'google' | 'other';
+/** Consumer = a household service with a payment. Commercial = a business enquiry with a quote and photos, no payment. */
+export type LeadType = 'consumer' | 'commercial';
+
+/** A photo picked on this phone that has not reached the server yet. */
+export interface LocalLeadPhoto {
+  /** Sent with the upload so a retry can never store the same photo twice. */
+  ref: string;
+  uri: string;
+  name: string;
+  type: string;
+}
+
+/** A photo stored on the server (GET /api/crm/leads/:id/photos). */
+export interface LeadPhoto {
+  id: string;
+  fileName: string;
+}
 
 export interface Lead {
   id: string;
+  /** Missing means consumer (leads saved before commercial leads existed). */
+  leadType?: LeadType;
+  /** Commercial only. For a commercial lead `customerName` is the contact person, `location` the address and `amount` the approximate quote. */
+  companyName?: string;
+  /** Commercial only. */
+  alternatePhone?: string;
+  /** Commercial only: photos of a lead still waiting on this phone to be sent. */
+  localPhotos?: LocalLeadPhoto[];
   customerName: string;
   phone: string;
   email: string;
@@ -30,7 +55,11 @@ export interface Lead {
   syncError?: string;
 }
 
-export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError'>;
+export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError' | 'localPhotos'>;
+
+export const isCommercial = (lead: Pick<Lead, 'leadType'>): boolean => lead.leadType === 'commercial';
+
+export const MAX_LEAD_PHOTOS = 5;
 
 export interface Option<T extends string> {
   value: T;
@@ -43,6 +72,19 @@ export const LEAD_SOURCES: Option<LeadSource>[] = [
   { value: 'referral', label: 'Referral' },
   { value: 'social_media', label: 'Social Media' },
   { value: 'other', label: 'Other' },
+];
+
+export const COMMERCIAL_LEAD_SOURCES: Option<LeadSource>[] = [
+  { value: 'google', label: 'Google' },
+  { value: 'website', label: 'Website' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'social_media', label: 'Social Media' },
+  { value: 'other', label: 'Other' },
+];
+
+export const LEAD_TYPES: Option<LeadType>[] = [
+  { value: 'consumer', label: 'Consumer' },
+  { value: 'commercial', label: 'Commercial' },
 ];
 
 export const PAYMENT_METHODS: Option<PaymentMethod>[] = [

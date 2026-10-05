@@ -1,5 +1,5 @@
 import { kvGet, kvSet } from './secureKv';
-import type { Lead, NewLeadInput } from './types';
+import type { Lead, LocalLeadPhoto, NewLeadInput } from './types';
 
 const KEY = 'outbox';
 
@@ -11,6 +11,10 @@ export interface OutboxItem {
   createdAt: string;
   /** Set when the server refused it (bad coupon etc.) - such items are not retried automatically. */
   error?: string;
+  /** Photos still to be uploaded for this lead (commercial leads only). */
+  photos?: LocalLeadPhoto[];
+  /** Set once the lead itself is on the server and only its photos are still waiting. */
+  leadId?: string;
 }
 
 export async function loadOutbox(scope: string): Promise<OutboxItem[]> {
@@ -36,5 +40,6 @@ export function outboxToLead(item: OutboxItem): Lead {
         : item.input.paymentStatus,
     pendingSync: true,
     syncError: item.error,
+    localPhotos: item.photos,
   };
 }

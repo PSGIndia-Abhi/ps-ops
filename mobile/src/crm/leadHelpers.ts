@@ -1,5 +1,5 @@
 import { formatINR } from './format';
-import type { Lead } from './types';
+import { isCommercial, type Lead } from './types';
 import { normalizePhone } from './validation';
 
 /** An existing lead with the same 10-digit phone number, if there is one (newest first). */
@@ -44,6 +44,13 @@ export function suggestReferences(
 /** The WhatsApp message a rep can send once a lead is saved. */
 export function confirmationMessage(lead: Lead): string {
   const first = lead.customerName.trim().split(/\s+/)[0] || 'there';
+  if (isCommercial(lead)) {
+    return [
+      `Hello ${first}, thank you for your interest in BestServe!`,
+      `We have noted your enquiry for ${lead.companyName}.`,
+      'Our team will contact you shortly with a detailed quote.',
+    ].join('\n');
+  }
   const lines = [
     `Hello ${first}, thank you for choosing BestServe!`,
     `Your ${lead.service} (${lead.plan}) for ${lead.houseType} is noted.`,

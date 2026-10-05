@@ -24,11 +24,13 @@ import { payForLead } from '../payment';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
+  isCommercial,
   LEAD_SOURCES,
   optionLabel,
   PAYMENT_METHODS,
   type PaymentMethod,
 } from '../types';
+import { CommercialLeadDetail } from './CrmCommercialLeadDetail';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../ui/CrmScreen';
 import { PaymentFailedOverlay, PaymentSuccessOverlay } from '../ui/Celebration';
 import { RupeeIcon, WalletIcon, WhatsAppIcon } from '../ui/crmIcons';
@@ -302,6 +304,8 @@ export function CrmLeadDetailScreen() {
       </CrmScreen>
     );
   }
+
+  if (isCommercial(lead)) return <CommercialLeadDetail lead={lead} />;
 
   const paid = lead.paymentStatus === 'paid';
   const hasEmail = !!lead.email;

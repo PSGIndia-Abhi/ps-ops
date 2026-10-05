@@ -50,10 +50,12 @@ import { useCrmStyles, type CrmTheme } from '../theme';
 import {
   LEAD_SOURCES,
   LEAD_STATUSES,
+  LEAD_TYPES,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   type LeadSource,
   type LeadStatus,
+  type LeadType,
   type PaymentMethod,
   type PaymentStatus,
 } from '../types';
@@ -79,6 +81,7 @@ import { TopBar } from '../ui/TopBar';
 
 const factory = (t: CrmTheme) => ({
   scroll: { padding: spacing.lg, paddingBottom: spacing.xl },
+  typeSwitch: { marginBottom: spacing.md },
   section: {
     backgroundColor: t.surface,
     borderRadius: radii.lg,
@@ -647,6 +650,17 @@ export function CrmNewLeadScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.typeSwitch}>
+          <SegmentedControl
+            options={LEAD_TYPES}
+            value="consumer"
+            onChange={(type: LeadType) => {
+              // The commercial form is its own screen; what was typed here stays as the draft.
+              if (type === 'commercial')
+                navigation.replace('CrmNewCommercialLead');
+            }}
+          />
+        </View>
         {draftRestored && (
           <View style={[styles.banner, styles.bannerInfo]}>
             <Text style={[styles.bannerText, styles.bannerTextInfo]}>
