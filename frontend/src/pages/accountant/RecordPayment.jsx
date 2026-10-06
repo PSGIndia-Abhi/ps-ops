@@ -276,6 +276,9 @@ export default function RecordPayment() {
         <div className="ac-info ok" style={{ marginBottom: 16, justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <span><FiCheckCircle style={{ marginRight: 6 }} />Payment saved successfully.</span>
           <div className="ac-actions">
+            {location.state?.followUpId && (
+              <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${location.state.followUpId}`)}>Back to Follow-up</button>
+            )}
             <button type="button" className="ac-btn" onClick={recordAnother}>Record Another Payment</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/payments/list")}>Go to Payment List</button>
           </div>

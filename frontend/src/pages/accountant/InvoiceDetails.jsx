@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { FiCheckSquare, FiPhone, FiPlusCircle } from "react-icons/fi";
-import SetReminderModal from "../../components/accountant/SetReminderModal";
+import FollowUpModal from "../../components/accountant/FollowUpModal";
 import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
-import { createReminder, fetchInvoice, showDate, ymd, useAccountantData } from "./data";
+import { byDue, fetchInvoice, showDate, ymd, useAccountantData } from "./data";
+import { fetchCustomerContact, showDue } from "./followups";
 
 const dash = (v) => (v == null || v === "" ? "—" : v);
 const MODE_LABEL = { CASH: "Cash", UPI: "UPI", BANK_TRANSFER: "Bank Transfer", NEFT: "NEFT", CHEQUE: "Cheque", CARD: "Card", OTHER: "Other" };
@@ -12,10 +13,11 @@ const MODE_LABEL = { CASH: "Cash", UPI: "UPI", BANK_TRANSFER: "Bank Transfer", N
 export default function InvoiceDetails() {
   const navigate = useNavigate();
   const { invoiceId } = useParams();
-  const { tasks, reload: reloadTasks } = useAccountantData();
+  const { invoices, followUps: allFollowUps, reload: reloadFollowUps } = useAccountantData();
   const [invoice, setInvoice] = useState(null);
   const [error, setError] = useState("");
-  const [reminderOpen, setReminderOpen] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [phone, setPhone] = useState(null);
 
   const [attempt, setAttempt] = useState(0); // bumped by "Try again" to load the invoice again
 
@@ -35,6 +37,17 @@ export default function InvoiceDetails() {
     return () => { cancelled = true; };
   }, [invoiceId, attempt]);
 
+  // The customer's phone, for the Call Customer button.
+  const customerId = invoice?.customer_id || "";
+  useEffect(() => {
+    if (!customerId) return undefined;
+    let cancelled = false;
+    fetchCustomerContact(customerId)
+      .then((c) => { if (!cancelled) setPhone(c?.phone || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [customerId]);
+
   const total = Number(invoice?.invoice_amount) || 0;
   const paid = Number(invoice?.paid_amount) || 0;
   const pending = Number(invoice?.pending_amount) || 0;
@@ -52,10 +65,11 @@ export default function InvoiceDetails() {
     received_by: a.received_by || "",
   }));
 
-  // Follow-ups are the reminder tasks set on this invoice.
-  const followUps = tasks
-    .filter((t) => t.reference_id === invoiceId)
-    .sort((a, b) => (b.due_date || "").localeCompare(a.due_date || ""));
+  // Follow-ups on this invoice, and the customer's whole-outstanding follow-ups (which cover it too).
+  const followUps = allFollowUps
+    .filter((f) => (f.scope === "INVOICE" && f.invoice_id === invoiceId) || (f.scope === "CUSTOMER" && customerId && f.customer_id === customerId))
+    .sort((a, b) => (a.active === b.active ? byDue(b, a) : a.active ? -1 : 1));
+  const openFollowUp = followUps.find((f) => f.active && f.scope === "INVOICE");
 
   const info = [
     ["Invoice Date", showDate(invoice?.invoice_date)],
@@ -67,10 +81,6 @@ export default function InvoiceDetails() {
     ["Created On", showDate(invoice?.created_at)],
   ];
 
-  async function saveReminder(form) {
-    await createReminder(form, { id: invoiceId, invoice_number: invoice?.invoice_number });
-    await reloadTasks();
-  }
 
   return (
     <div className="ac-page">
@@ -91,10 +101,20 @@ export default function InvoiceDetails() {
             onClick={() => navigate("/accountant/payments/record", { state: { customerId: invoice.customer_id } })}>
             <FiPlusCircle /> Record Payment
           </button>
-          <button type="button" className="ac-btn" disabled={!invoice} onClick={() => setReminderOpen(true)}>
-            <FiCheckSquare /> Add Task
-          </button>
-          <button type="button" className="ac-btn" disabled title="No phone number is stored for customers"><FiPhone /> Call Customer</button>
+          {openFollowUp ? (
+            <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${openFollowUp.id}`)}>
+              <FiCheckSquare /> Follow-up {showDue(openFollowUp.due_date, openFollowUp.due_time)}
+            </button>
+          ) : (
+            <button type="button" className="ac-btn" disabled={!invoice || pending <= 0 || status === "CANCELLED"} onClick={() => setFollowUpOpen(true)}>
+              <FiCheckSquare /> + Follow-up
+            </button>
+          )}
+          {phone ? (
+            <a className="ac-btn" href={`tel:${phone.replace(/[^\d+]/g, "")}`}><FiPhone /> Call Customer</a>
+          ) : (
+            <button type="button" className="ac-btn" disabled title="No phone number is saved for this customer"><FiPhone /> Call Customer</button>
+          )}
         </div>
       </div>
 
@@ -168,13 +188,13 @@ export default function InvoiceDetails() {
             <h3 className="ac-card-title">Follow-up History</h3>
             <div className="ac-table-wrap">
               <table className="ac-table">
-                <thead><tr><th>Due</th><th>Action</th><th>Remarks</th><th>Status</th></tr></thead>
+                <thead><tr><th>Due</th><th>For</th><th>Notes</th><th>Status</th></tr></thead>
                 <tbody>
                   {followUps.length ? followUps.map((f) => (
-                    <tr key={f.id}>
-                      <td>{showDate(f.due_date)}{f.due_time && <div className="ac-sub">{f.due_time}</div>}</td>
-                      <td>{f.task_type}</td>
-                      <td>{dash(f.notes)}</td>
+                    <tr key={f.id} className="ac-fu-click" onClick={() => navigate(`/accountant/follow-ups/${f.id}`)}>
+                      <td>{showDue(f.due_date, f.due_time)}</td>
+                      <td>{f.scope === "INVOICE" ? "This invoice" : "Whole customer"}</td>
+                      <td>{dash(f.completion_note || f.notes)}</td>
                       <td><Badge value={f.display_status} /></td>
                     </tr>
                   )) : <EmptyRow cols={4} text="No follow-ups yet" />}
@@ -185,12 +205,16 @@ export default function InvoiceDetails() {
         </div>
       </div>
 
-      <SetReminderModal
-        open={reminderOpen}
-        onClose={() => setReminderOpen(false)}
-        invoices={invoice ? [{ id: invoiceId, invoice_number: invoice.invoice_number }] : []}
-        defaultInvoiceId={invoiceId}
-        onSave={saveReminder}
+      <FollowUpModal
+        key={followUpOpen ? "open" : "closed"}
+        open={followUpOpen}
+        onClose={() => setFollowUpOpen(false)}
+        onCreated={reloadFollowUps}
+        invoices={invoices}
+        followUps={allFollowUps}
+        customerId={customerId}
+        invoiceId={invoiceId}
+        lockCustomer
       />
     </div>
   );
