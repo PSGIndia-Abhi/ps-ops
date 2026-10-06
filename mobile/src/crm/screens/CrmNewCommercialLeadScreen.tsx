@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   BackHandler,
   Keyboard,
   Pressable,
@@ -14,25 +15,34 @@ import {
   AlertCircleIcon,
   BriefcaseIcon,
   CameraIcon,
+  CheckCircleIcon,
   DocumentIcon,
   EmailIcon,
   ExternalLinkIcon,
   PersonIcon,
   PhoneIcon,
   PinIcon,
+  TagIcon,
   UsersIcon,
 } from '../../components/icons';
 import { ApiError } from '../../api';
 import { radii, spacing, typography } from '../../theme';
+import { getCurrentLocation } from '../../utils/location';
+import { reverseGeocode } from '../../utils/reverseGeocode';
 import { formatINR } from '../format';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
   COMMERCIAL_LEAD_SOURCES,
+  COMMERCIAL_SERVICES,
+  INDUSTRY_TYPES,
   LEAD_TYPES,
   MAX_LEAD_PHOTOS,
   optionLabel,
+  servicesLabel,
+  type CommercialService,
+  type IndustryType,
   type LeadSource,
   type LeadType,
   type LocalLeadPhoto,
@@ -46,7 +56,7 @@ import {
   type CommercialLeadFormValues,
 } from '../validation';
 import { ContactPickerSheet } from '../ui/ContactPickerSheet';
-import { RupeeIcon } from '../ui/crmIcons';
+import { CheckIcon, RupeeIcon } from '../ui/crmIcons';
 import { CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
 import { CrmTextField } from '../ui/CrmTextField';
 import { SectionHeader } from '../ui/LeadFormParts';
@@ -90,6 +100,62 @@ const factory = (t: CrmTheme) => ({
   },
   contactsPillText: { ...typography.captionMedium, color: t.primary },
   amountInput: { ...typography.subtitle },
+
+  fieldLabel: {
+    ...typography.captionMedium,
+    color: t.textSecondary,
+    marginBottom: spacing.xxs,
+  },
+  fieldError: {
+    ...typography.caption,
+    color: t.dangerText,
+    marginTop: spacing.xxs,
+  },
+  locationBox: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    minHeight: 56,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  locationBoxOk: { backgroundColor: t.successBg },
+  locationBoxFailed: { backgroundColor: t.warningBg },
+  locationText: { flex: 1 },
+  locationTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  locationSub: { ...typography.caption, color: t.textSecondary, marginTop: 1 },
+  locationAction: { ...typography.captionMedium, color: t.primary },
+  locationGap: { marginBottom: spacing.md },
+  typeLink: {
+    ...typography.captionMedium,
+    color: t.primary,
+    marginTop: spacing.sm,
+  },
+  addressWrap: { marginTop: spacing.md },
+
+  chips: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: spacing.xs,
+  },
+  chip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+  },
+  chipOn: { borderColor: t.primary, backgroundColor: t.primary },
+  chipText: { ...typography.captionMedium, color: t.textSecondary },
+  chipTextOn: { color: t.textOnPrimary },
+  chipsWrap: { marginBottom: spacing.md },
+
   reviewIntro: {
     ...typography.body,
     color: t.textSecondary,
@@ -124,18 +190,28 @@ const factory = (t: CrmTheme) => ({
 });
 
 const INITIAL_VALUES: CommercialLeadFormValues = {
-  customerName: '',
+  industryType: null,
   companyName: '',
   address: '',
+  customerName: '',
+  designation: '',
   phone: '',
   alternatePhone: '',
   email: '',
   source: null,
+  referenceBy: '',
+  services: [],
   amount: '',
   notes: '',
 };
 
 type Step = 'details' | 'review';
+
+/** Where the phone is: read automatically when the form opens. */
+type LocationState =
+  | { status: 'locating' }
+  | { status: 'ok'; latitude: number; longitude: number; accuracy: number | null }
+  | { status: 'failed' };
 
 /** One field on the review step. An optional field left blank still shows, as "Not provided". */
 function ReviewRow({
@@ -198,7 +274,10 @@ function ReviewSection({
 
 /**
  * New commercial lead: a business enquiry. Two steps - fill in the details, then review and save.
- * There is no service / plan and no payment here; the amount is only an approximate quote.
+ * There is no house type / plan and no payment here; the amount is only an approximate quote.
+ * Where the business is comes from the phone's own location, read when the form opens; the
+ * address for that spot is then filled in for the rep, who can correct it. The rep types the
+ * address from scratch only if the location (or the address lookup) fails.
  */
 export function CrmNewCommercialLeadScreen() {
   const navigation =
@@ -211,6 +290,13 @@ export function CrmNewCommercialLeadScreen() {
   const latest = useRef<CommercialLeadFormValues>(INITIAL_VALUES);
   latest.current = values;
   const [errors, setErrors] = useState<CommercialLeadFormErrors>({});
+  const [location, setLocation] = useState<LocationState>({ status: 'locating' });
+  /** Shown once there is an address to show: found for the location, or to be typed by the rep. */
+  const [typeAddress, setTypeAddress] = useState(false);
+  /** True while the written address for the location is being looked up. */
+  const [findingAddress, setFindingAddress] = useState(false);
+  /** The address the lookup last filled in - so a later lookup never overwrites what the rep typed. */
+  const filledAddress = useRef('');
   const [photos, setPhotos] = useState<LocalLeadPhoto[]>([]);
   const [photoProblem, setPhotoProblem] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -218,13 +304,63 @@ export function CrmNewCommercialLeadScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
-  const companyRef = useRef<React.ComponentRef<typeof TextInput>>(null);
-  const addressRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const designationRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const phoneRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const alternateRef = useRef<React.ComponentRef<typeof TextInput>>(null);
   const emailRef = useRef<React.ComponentRef<typeof TextInput>>(null);
 
   const amountNumber = parseAmount(values.amount);
   const hasErrors = Object.values(errors).some(Boolean);
+  const hasLocation = location.status === 'ok';
+  const hasLocationRef = useRef(hasLocation);
+  hasLocationRef.current = hasLocation;
+
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
+
+  const readLocation = useCallback(async () => {
+    setLocation({ status: 'locating' });
+    try {
+      const fix = await getCurrentLocation();
+      if (!mounted.current) return;
+      setLocation({
+        status: 'ok',
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        accuracy: fix.accuracy,
+      });
+      setErrors(prev => (prev.address ? { ...prev, address: undefined } : prev));
+
+      // Fill in the written address for this spot - unless the rep has typed their own.
+      setFindingAddress(true);
+      const found = await reverseGeocode(fix.latitude, fix.longitude);
+      if (!mounted.current) return;
+      setFindingAddress(false);
+      const current = latest.current.address.trim();
+      if (found && (!current || current === filledAddress.current)) {
+        const address = found.slice(0, 255);
+        filledAddress.current = address;
+        latest.current = { ...latest.current, address };
+        setValues(prev => ({ ...prev, address }));
+        setTypeAddress(true);
+      }
+    } catch {
+      // Permission refused, location switched off, or no fix indoors: the rep types the address instead.
+      if (!mounted.current) return;
+      setLocation({ status: 'failed' });
+      setTypeAddress(true);
+    }
+  }, []);
+
+  // The location is read on its own as soon as the form opens - the rep does not have to ask for it.
+  useEffect(() => {
+    readLocation();
+  }, [readLocation]);
 
   // On the review step the phone's back button goes back to the details, not out of the form.
   useEffect(() => {
@@ -251,9 +387,22 @@ export function CrmNewCommercialLeadScreen() {
 
   /** Checks a field as the user leaves it: the error appears right there, not only on Next. */
   function checkField(key: keyof CommercialLeadFormValues) {
-    const message = validateCommercialLead(latest.current)[key];
+    const message = validateCommercialLead(
+      latest.current,
+      hasLocationRef.current,
+    )[key];
     setErrors(prev =>
       prev[key] === message ? prev : { ...prev, [key]: message },
+    );
+  }
+
+  function toggleService(service: CommercialService) {
+    const chosen = latest.current.services;
+    setField(
+      'services',
+      chosen.includes(service)
+        ? chosen.filter(s => s !== service)
+        : [...chosen, service],
     );
   }
 
@@ -273,7 +422,8 @@ export function CrmNewCommercialLeadScreen() {
   function goToReview() {
     Keyboard.dismiss();
     setSaveError(null);
-    const found = validateCommercialLead(values);
+    // While the location is still being read it is not a problem yet - Save checks it again.
+    const found = validateCommercialLead(values, location.status !== 'failed');
     setErrors(found);
     if (Object.keys(found).length > 0) {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -285,26 +435,42 @@ export function CrmNewCommercialLeadScreen() {
   async function save() {
     if (saving) return;
     setSaveError(null);
+    if (location.status === 'locating') {
+      setSaveError('Still reading your location. Wait a moment, then tap Save Lead again.');
+      return;
+    }
+    // The location may have failed after the details were checked: an address is needed then.
+    const found = validateCommercialLead(values, hasLocation);
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      setStep('details');
+      return;
+    }
     setSaving(true);
     try {
       const saved = await addLead(
         {
           leadType: 'commercial',
-          customerName: values.customerName.trim(),
+          industryType: values.industryType as IndustryType,
           companyName: values.companyName.trim(),
+          customerName: values.customerName.trim(),
+          designation: values.designation.trim(),
           phone: normalizePhone(values.phone),
           alternatePhone: normalizePhone(values.alternatePhone),
           email: values.email.trim(),
+          latitude: location.status === 'ok' ? location.latitude : null,
+          longitude: location.status === 'ok' ? location.longitude : null,
           location: values.address.trim(),
           source: values.source as LeadSource,
+          referenceBy: values.referenceBy.trim(),
+          servicesRequested: values.services as CommercialService[],
           amount: amountNumber,
           notes: values.notes.trim(),
-          // A commercial lead has no service and no payment; these stay empty / unused.
+          // A commercial lead has no house type / plan and no payment; these stay empty / unused.
           houseType: '',
           service: '',
           plan: '',
           coupon: '',
-          referenceBy: '',
           paymentMethod: 'other',
           paymentStatus: 'pending',
           leadStatus: 'new',
@@ -324,6 +490,12 @@ export function CrmNewCommercialLeadScreen() {
   }
 
   const reviewing = step === 'review';
+  const locationSummary =
+    location.status === 'ok'
+      ? 'Current location captured'
+      : location.status === 'locating'
+      ? 'Still reading the location...'
+      : '';
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
@@ -359,13 +531,22 @@ export function CrmNewCommercialLeadScreen() {
             </Text>
 
             <ReviewSection title="BUSINESS" onEdit={() => setStep('details')}>
-              <ReviewRow first label="Lead Name" value={values.customerName.trim()} />
+              <ReviewRow
+                first
+                label="Industry Type"
+                value={optionLabel(INDUSTRY_TYPES, values.industryType as IndustryType)}
+              />
               <ReviewRow label="Company / Business Name" value={values.companyName.trim()} />
-              <ReviewRow label="Address" value={values.address.trim()} />
+              <ReviewRow label="Location" value={locationSummary} />
+              {(!hasLocation || !!values.address.trim()) && (
+                <ReviewRow label="Address" value={values.address.trim()} />
+              )}
             </ReviewSection>
 
             <ReviewSection title="CONTACT" onEdit={() => setStep('details')}>
-              <ReviewRow first label="Phone Number" value={`+91 ${normalizePhone(values.phone)}`} />
+              <ReviewRow first label="Contact Person Name" value={values.customerName.trim()} />
+              <ReviewRow label="Designation" value={values.designation.trim()} />
+              <ReviewRow label="Phone Number" value={`+91 ${normalizePhone(values.phone)}`} />
               <ReviewRow
                 label="Alternate Number"
                 value={
@@ -382,6 +563,11 @@ export function CrmNewCommercialLeadScreen() {
                 first
                 label="Source of Lead"
                 value={optionLabel(COMMERCIAL_LEAD_SOURCES, values.source as LeadSource)}
+              />
+              <ReviewRow label="Referred By" value={values.referenceBy.trim()} />
+              <ReviewRow
+                label="Service Requested"
+                value={servicesLabel(values.services as CommercialService[])}
               />
               <ReviewRow label="Approximate Quote" value={formatINR(amountNumber)} strong />
               <ReviewRow label="Notes" value={values.notes.trim()} />
@@ -416,22 +602,17 @@ export function CrmNewCommercialLeadScreen() {
                 icon={<BriefcaseIcon size={20} color={theme.primary} />}
                 title="Business"
               />
-              <CrmTextField
-                label="Lead Name *"
-                placeholder="Contact person's name"
-                value={values.customerName}
-                onChangeText={text => setField('customerName', text)}
-                onBlur={() => checkField('customerName')}
-                error={errors.customerName}
-                icon={<PersonIcon size={18} color={theme.textMuted} />}
-                autoCapitalize="words"
-                autoComplete="name"
-                returnKeyType="next"
-                onSubmitEditing={() => companyRef.current?.focus()}
-                testID="commercial-name"
+              <SelectField
+                label="Industry Type *"
+                sheetTitle="Industry Type"
+                icon={<TagIcon size={18} color={theme.textMuted} />}
+                placeholder="Select industry type"
+                options={INDUSTRY_TYPES}
+                value={values.industryType as IndustryType | null}
+                onChange={value => setField('industryType', value)}
+                error={errors.industryType}
               />
               <CrmTextField
-                ref={companyRef}
                 label="Company / Business Name *"
                 placeholder="e.g. Skyline Builders"
                 value={values.companyName}
@@ -441,23 +622,92 @@ export function CrmNewCommercialLeadScreen() {
                 icon={<BriefcaseIcon size={18} color={theme.textMuted} />}
                 autoCapitalize="words"
                 maxLength={150}
-                returnKeyType="next"
-                onSubmitEditing={() => addressRef.current?.focus()}
+                returnKeyType="done"
                 testID="commercial-company"
               />
-              <CrmTextField
-                ref={addressRef}
-                label="Address *"
-                placeholder="Building, area, city"
-                value={values.address}
-                onChangeText={text => setField('address', text)}
-                onBlur={() => checkField('address')}
-                error={errors.address}
-                icon={<PinIcon size={18} color={theme.textMuted} />}
-                maxLength={255}
-                multiline
-                testID="commercial-address"
-              />
+
+              <Text style={styles.fieldLabel}>Location</Text>
+              <View
+                style={[
+                  styles.locationBox,
+                  location.status === 'ok' && styles.locationBoxOk,
+                  location.status === 'failed' && styles.locationBoxFailed,
+                ]}
+                accessibilityLiveRegion="polite"
+                testID="commercial-location"
+              >
+                {location.status === 'locating' ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : location.status === 'ok' ? (
+                  <CheckCircleIcon size={22} color={theme.successText} />
+                ) : (
+                  <PinIcon size={22} color={theme.warningText} />
+                )}
+                <View style={styles.locationText}>
+                  <Text style={styles.locationTitle}>
+                    {location.status === 'locating'
+                      ? 'Reading your current location...'
+                      : location.status === 'ok'
+                      ? 'Current location captured'
+                      : 'Could not read your location'}
+                  </Text>
+                  <Text style={styles.locationSub}>
+                    {location.status === 'locating'
+                      ? 'This takes a few seconds.'
+                      : location.status === 'ok'
+                      ? findingAddress
+                        ? 'Finding the address...'
+                        : location.accuracy !== null
+                        ? `Accurate to about ${Math.round(location.accuracy)} m`
+                        : 'Saved with this lead'
+                      : 'Type the address below, or try again.'}
+                  </Text>
+                </View>
+                {location.status !== 'locating' && (
+                  <Pressable
+                    onPress={readLocation}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    testID="commercial-location-retry"
+                  >
+                    <Text style={styles.locationAction}>
+                      {location.status === 'ok' ? 'Refresh' : 'Try again'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              {typeAddress ? (
+                <View style={styles.addressWrap}>
+                  <CrmTextField
+                    label={hasLocation ? 'Address' : 'Address *'}
+                    placeholder="Building, area, city"
+                    hint={
+                      hasLocation && !!values.address && values.address === filledAddress.current
+                        ? 'Filled in from your location - correct it if needed.'
+                        : undefined
+                    }
+                    value={values.address}
+                    onChangeText={text => setField('address', text)}
+                    onBlur={() => checkField('address')}
+                    error={errors.address}
+                    icon={<PinIcon size={18} color={theme.textMuted} />}
+                    maxLength={255}
+                    multiline
+                    testID="commercial-address"
+                  />
+                </View>
+              ) : location.status === 'locating' || findingAddress ? (
+                <View style={styles.locationGap} />
+              ) : (
+                <Pressable
+                  onPress={() => setTypeAddress(true)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  style={styles.locationGap}
+                >
+                  <Text style={styles.typeLink}>Type the address</Text>
+                </Pressable>
+              )}
             </View>
 
             <View style={styles.section}>
@@ -466,6 +716,34 @@ export function CrmNewCommercialLeadScreen() {
                 title="Contact"
               />
               <CrmTextField
+                label="Contact Person Name *"
+                placeholder="Who you spoke to"
+                value={values.customerName}
+                onChangeText={text => setField('customerName', text)}
+                onBlur={() => checkField('customerName')}
+                error={errors.customerName}
+                icon={<PersonIcon size={18} color={theme.textMuted} />}
+                autoCapitalize="words"
+                autoComplete="name"
+                returnKeyType="next"
+                onSubmitEditing={() => designationRef.current?.focus()}
+                testID="commercial-name"
+              />
+              <CrmTextField
+                ref={designationRef}
+                label="Designation"
+                placeholder="e.g. Facility Manager (optional)"
+                value={values.designation}
+                onChangeText={text => setField('designation', text)}
+                icon={<BriefcaseIcon size={18} color={theme.textMuted} />}
+                autoCapitalize="words"
+                maxLength={100}
+                returnKeyType="next"
+                onSubmitEditing={() => phoneRef.current?.focus()}
+                testID="commercial-designation"
+              />
+              <CrmTextField
+                ref={phoneRef}
                 label="Phone Number *"
                 placeholder="Mobile number"
                 value={values.phone}
@@ -543,6 +821,46 @@ export function CrmNewCommercialLeadScreen() {
                 onChange={value => setField('source', value)}
                 error={errors.source}
               />
+              <CrmTextField
+                label="Referred By"
+                placeholder="Who referred this lead? (optional)"
+                value={values.referenceBy}
+                onChangeText={text => setField('referenceBy', text)}
+                icon={<UsersIcon size={18} color={theme.textMuted} />}
+                autoCapitalize="words"
+                maxLength={100}
+                returnKeyType="done"
+                testID="commercial-referred-by"
+              />
+
+              <Text style={styles.fieldLabel}>Service Requested *</Text>
+              <View style={styles.chipsWrap}>
+                <View style={styles.chips}>
+                  {COMMERCIAL_SERVICES.map(service => {
+                    const on = values.services.includes(service.value);
+                    return (
+                      <Pressable
+                        key={service.value}
+                        onPress={() => toggleService(service.value)}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: on }}
+                        accessibilityLabel={service.label}
+                        testID={`commercial-service-${service.value}`}
+                        style={[styles.chip, on && styles.chipOn]}
+                      >
+                        {on && <CheckIcon size={14} color={theme.textOnPrimary} />}
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                          {service.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {!!errors.services && (
+                  <Text style={styles.fieldError}>{errors.services}</Text>
+                )}
+              </View>
+
               <CrmTextField
                 label="Approximate Quote (₹) *"
                 placeholder="0"

@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
-import { roleLabel, useUserRole } from '../../auth/role';
+import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
 import { ChartIcon, ChevronRightIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { radii, spacing, typography } from '../../theme';
@@ -103,8 +103,11 @@ export function CrmMoreScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
   const { user, logout } = useAuth();
   const role = useUserRole();
+  const rawRole = useRawRole();
   const { styles, theme } = useCrmStyles(factory);
   const name = user?.name ?? 'Account';
+  // A Managing Director / Personal Assistant in the Sales app keeps their own role name.
+  const roleText = role ? roleLabel(role) : rawRole ?? '';
 
   return (
     <CrmScreen>
@@ -123,7 +126,7 @@ export function CrmMoreScreen() {
               {user.email}
             </Text>
           )}
-          {role && <StatusBadge label={roleLabel(role)} tone="info" dot={false} />}
+          {!!roleText && <StatusBadge label={roleText} tone="info" dot={false} />}
         </View>
       </View>
 

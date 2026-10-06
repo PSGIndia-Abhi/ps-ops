@@ -10,6 +10,7 @@ import {
   PhoneIcon,
   PinIcon,
   TagIcon,
+  UsersIcon,
 } from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
@@ -17,7 +18,13 @@ import { whatsappUrl } from '../leadHelpers';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
-import { COMMERCIAL_LEAD_SOURCES, optionLabel, type Lead } from '../types';
+import {
+  COMMERCIAL_LEAD_SOURCES,
+  INDUSTRY_TYPES,
+  optionLabel,
+  servicesLabel,
+  type Lead,
+} from '../types';
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
@@ -199,6 +206,10 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
   const iconColor = theme.primary;
   const hasEmail = !!lead.email;
   const localPhotos = lead.localPhotos ?? [];
+  const hasPoint =
+    typeof lead.latitude === 'number' && typeof lead.longitude === 'number';
+  const industry = optionLabel(INDUSTRY_TYPES, lead.industryType ?? null);
+  const services = servicesLabel(lead.servicesRequested);
 
   async function open(url: string, failMessage: string) {
     try {
@@ -230,7 +241,9 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
               <View style={styles.contactPerson}>
                 <PersonIcon size={15} color={theme.textMuted} />
                 <Text style={styles.contactPersonText} numberOfLines={1}>
-                  {lead.customerName}
+                  {lead.designation
+                    ? `${lead.customerName} · ${lead.designation}`
+                    : lead.customerName}
                 </Text>
               </View>
             </View>
@@ -343,16 +356,62 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
             label="Company / Business"
             value={lead.companyName ?? ''}
           />
+          {!!industry && (
+            <InfoRow
+              icon={<TagIcon size={18} color={iconColor} />}
+              label="Industry Type"
+              value={industry}
+            />
+          )}
+          {hasPoint && (
+            <InfoRow
+              icon={<PinIcon size={18} color={iconColor} />}
+              label="Location"
+              value="Open in Maps"
+              onPress={() =>
+                open(
+                  `https://www.google.com/maps/search/?api=1&query=${lead.latitude},${lead.longitude}`,
+                  'No maps app found on this device.',
+                )
+              }
+            />
+          )}
+          {(!hasPoint || !!lead.location) && (
+            <InfoRow
+              icon={<PinIcon size={18} color={iconColor} />}
+              label="Address"
+              value={lead.location}
+            />
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>LEAD DETAILS</Text>
           <InfoRow
-            icon={<PinIcon size={18} color={iconColor} />}
-            label="Address"
-            value={lead.location}
-          />
-          <InfoRow
+            first
             icon={<TagIcon size={18} color={iconColor} />}
             label="Source of Lead"
             value={optionLabel(COMMERCIAL_LEAD_SOURCES, lead.source)}
           />
+          {!!lead.referenceBy && (
+            <InfoRow
+              icon={<UsersIcon size={18} color={iconColor} />}
+              label="Referred By"
+              value={lead.referenceBy}
+            />
+          )}
+          <InfoRow
+            icon={<BriefcaseIcon size={18} color={iconColor} />}
+            label="Service Requested"
+            value={services}
+          />
+          {!!lead.createdByName && (
+            <InfoRow
+              icon={<PersonIcon size={18} color={iconColor} />}
+              label="Added By"
+              value={lead.createdByName}
+            />
+          )}
         </View>
 
         <View style={styles.card}>
@@ -360,9 +419,16 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
           <InfoRow
             first
             icon={<PersonIcon size={18} color={iconColor} />}
-            label="Lead Name"
+            label="Contact Person Name"
             value={lead.customerName}
           />
+          {!!lead.designation && (
+            <InfoRow
+              icon={<BriefcaseIcon size={18} color={iconColor} />}
+              label="Designation"
+              value={lead.designation}
+            />
+          )}
           <InfoRow
             icon={<PhoneIcon size={18} color={iconColor} />}
             label="Phone Number"

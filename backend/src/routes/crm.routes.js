@@ -35,6 +35,16 @@ const LIST_LIMIT = 500;
 // A commercial lead is a business enquiry: company + address + approximate quote + photos,
 // with no house type / service / plan and no payment. Everything else is a consumer lead.
 const COMMERCIAL_LEAD_SOURCES = ["google", "website", "referral", "social_media", "other"];
+const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
+const COMMERCIAL_SERVICES = [
+  "gpc",
+  "rodent_control",
+  "cockroach_control",
+  "ant_treatment",
+  "honeybee_control",
+  "snake_control",
+  "fly_control",
+];
 const MAX_LEAD_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const PHOTO_TYPES = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -61,6 +71,11 @@ function toLead(row) {
     lead_type: row.lead_type || "consumer",
     customer_name: row.customer_name,
     company_name: row.company_name || "",
+    industry_type: row.industry_type || null,
+    contact_designation: row.contact_designation || "",
+    services_requested: row.services_requested ? String(row.services_requested).split(",") : [],
+    latitude: row.latitude === null || row.latitude === undefined ? null : Number(row.latitude),
+    longitude: row.longitude === null || row.longitude === undefined ? null : Number(row.longitude),
     phone: row.phone,
     alternate_phone: row.alternate_phone || "",
     email: row.customer_email || "",
@@ -78,9 +93,30 @@ function toLead(row) {
     payment_status: row.payment_status,
     lead_status: row.lead_status,
     created_by_user_id: row.created_by_user_id === null ? null : String(row.created_by_user_id),
+    created_by_name: row.created_by_name || "",
     created_at: row.created_at,
     paid_at: row.paid_at || null,
   };
+}
+
+// Who may see which leads: a sales / marketing user sees only the leads they created. Roles
+// holding CRM_VIEW_ALL_LEADS (Managing Director, Personal Assistant) and admin see everyone's,
+// including website leads, which have no creator.
+function canViewAllLeads(req) {
+  return req.user.role === "admin" || !!req.user.permissions?.includes("CRM_VIEW_ALL_LEADS");
+}
+
+const LEAD_WITH_CREATOR_SQL = `SELECT l.*, u.name AS created_by_name
+                                 FROM crm_leads l LEFT JOIN users u ON u.id = l.created_by_user_id`;
+
+// The lead with this id if the caller is allowed to see it, otherwise undefined.
+async function loadVisibleLead(req, id) {
+  const own = canViewAllLeads(req) ? "" : "AND l.created_by_user_id = ?";
+  const [[row]] = await pool.query(
+    `${LEAD_WITH_CREATOR_SQL} WHERE l.id = ? ${own} LIMIT 1`,
+    canViewAllLeads(req) ? [id] : [id, req.user.id]
+  );
+  return row;
 }
 
 // --------------------
@@ -129,10 +165,20 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
   try {
     const wanted = req.query.lead_type;
     const leadType = wanted === "commercial" || wanted === "all" ? wanted : "consumer";
+    const where = [];
+    const params = [];
+    if (leadType !== "all") {
+      where.push("l.lead_type = ?");
+      params.push(leadType);
+    }
+    if (!canViewAllLeads(req)) {
+      where.push("l.created_by_user_id = ?");
+      params.push(req.user.id);
+    }
     const [rows] = await pool.query(
-      `SELECT * FROM crm_leads ${leadType === "all" ? "" : "WHERE lead_type = ?"}
-       ORDER BY created_at DESC LIMIT ${LIST_LIMIT}`,
-      leadType === "all" ? [] : [leadType]
+      `${LEAD_WITH_CREATOR_SQL} ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       ORDER BY l.created_at DESC LIMIT ${LIST_LIMIT}`,
+      params
     );
     res.json(rows.map(toLead));
   } catch (err) {
@@ -144,7 +190,7 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
 // GET /api/crm/leads/:id
 router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
-    const [[row]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ? LIMIT 1`, [req.params.id]);
+    const row = await loadVisibleLead(req, req.params.id);
     if (!row) return res.status(404).json({ error: "Lead not found" });
     res.json(toLead(row));
   } catch (err) {
@@ -189,7 +235,17 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
     return res.status(400).json({ error: "Enter a valid email address" });
   }
   if (body.lead_type === "commercial") {
-    return createCommercialLead(req, res, { customerName, phone, email, amount, location, notes, clientRef, leadStatus });
+    return createCommercialLead(req, res, {
+      customerName,
+      phone,
+      email,
+      amount,
+      location,
+      notes,
+      referenceBy,
+      clientRef,
+      leadStatus,
+    });
   }
   if (referenceBy.length > 100) return res.status(400).json({ error: "Reference name is too long (max 100)" });
   if (!houseType) return res.status(400).json({ error: "House type is required" });
@@ -289,7 +345,10 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
 });
 
 // The commercial half of POST /api/crm/leads. Name, phone and email were already checked by the
-// caller. No price list and no payment: `amount` is the approximate quote, `location` the address.
+// caller. No price list and no payment: `amount` is the approximate quote. Where the business is
+// comes from the phone's GPS (latitude / longitude); `location` is an address typed by hand, used
+// when the GPS could not be read. Industry type and services are checked only when sent, so the
+// app version from before they existed can still save.
 async function createCommercialLead(req, res, lead) {
   const body = req.body || {};
   const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
@@ -298,7 +357,26 @@ async function createCommercialLead(req, res, lead) {
 
   if (companyName.length < 2) return res.status(400).json({ error: "Company / business name is required" });
   if (companyName.length > 150) return res.status(400).json({ error: "Company / business name is too long (max 150)" });
-  if (!lead.location) return res.status(400).json({ error: "Address is required" });
+  const industryType = body.industry_type || null;
+  const designation = typeof body.contact_designation === "string" ? body.contact_designation.trim() : "";
+  const services = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
+  const hasPoint = body.latitude !== null && body.latitude !== undefined && body.latitude !== "" &&
+    body.longitude !== null && body.longitude !== undefined && body.longitude !== "";
+  const latitude = hasPoint ? Number(body.latitude) : null;
+  const longitude = hasPoint ? Number(body.longitude) : null;
+
+  if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) {
+    return res.status(400).json({ error: "Invalid industry type" });
+  }
+  if (designation.length > 100) return res.status(400).json({ error: "Designation is too long (max 100)" });
+  if (services.some((service) => !COMMERCIAL_SERVICES.includes(service))) {
+    return res.status(400).json({ error: "Invalid service requested" });
+  }
+  if (lead.referenceBy.length > 100) return res.status(400).json({ error: "Reference name is too long (max 100)" });
+  if (hasPoint && (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180)) {
+    return res.status(400).json({ error: "Invalid location" });
+  }
+  if (!hasPoint && !lead.location) return res.status(400).json({ error: "The current location or an address is required" });
   if (lead.location.length > 255) return res.status(400).json({ error: "Address is too long (max 255)" });
   if (alternatePhone && alternatePhone.length !== 10) {
     return res.status(400).json({ error: "Alternate number must be a valid 10-digit phone number" });
@@ -326,20 +404,28 @@ async function createCommercialLead(req, res, lead) {
     const id = uuid();
     await pool.query(
       `INSERT INTO crm_leads
-        (id, lead_type, customer_name, company_name, phone, alternate_phone, customer_email,
-         house_type, service_name, plan_type, standard_amount, amount, location, lead_source, notes,
+        (id, lead_type, customer_name, company_name, industry_type, contact_designation,
+         phone, alternate_phone, customer_email,
+         house_type, service_name, plan_type, standard_amount, amount, services_requested,
+         location, latitude, longitude, lead_source, reference_by, notes,
          payment_method, payment_status, lead_status, created_by_user_id, external_ref)
-       VALUES (?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
+       VALUES (?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
       [
         id,
         lead.customerName,
         companyName,
+        industryType,
+        designation || null,
         lead.phone,
         alternatePhone || null,
         lead.email || null,
         lead.amount,
-        lead.location,
+        services.length ? services.join(",") : null,
+        lead.location || null,
+        latitude,
+        longitude,
         leadSource,
+        lead.referenceBy || null,
         lead.notes || null,
         lead.leadStatus,
         req.user.id,
@@ -377,7 +463,7 @@ const PHOTO_SQL = `SELECT id, file_name, file_type, file_size, created_at FROM c
 // Checks the lead BEFORE the upload body is read.
 async function precheckPhotoUpload(req, res, next) {
   try {
-    const [[lead]] = await pool.query(`SELECT id, lead_type FROM crm_leads WHERE id = ? LIMIT 1`, [req.params.id]);
+    const lead = await loadVisibleLead(req, req.params.id);
     if (!lead) return res.status(404).json({ error: "Lead not found" });
     if (lead.lead_type !== "commercial") return res.status(400).json({ error: "Photos can only be added to commercial leads" });
     next();
@@ -398,6 +484,7 @@ function acceptPhoto(req, res, next) {
 // GET /api/crm/leads/:id/photos -> [{ id, file_name, file_type, file_size, created_at }]
 router.get("/leads/:id/photos", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
+    if (!(await loadVisibleLead(req, req.params.id))) return res.status(404).json({ error: "Lead not found" });
     const [rows] = await pool.query(`${PHOTO_SQL} WHERE lead_id = ? ORDER BY created_at ASC`, [req.params.id]);
     res.json(rows);
   } catch (err) {
@@ -477,6 +564,7 @@ router.post(
 // GET /api/crm/leads/:id/photos/:photoId/view -- streams the image
 router.get("/leads/:id/photos/:photoId/view", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
+    if (!(await loadVisibleLead(req, req.params.id))) return res.status(404).json({ error: "Lead not found" });
     const [[photo]] = await pool.query(
       `SELECT object_key, file_type FROM crm_lead_photos WHERE id = ? AND lead_id = ? LIMIT 1`,
       [req.params.photoId, req.params.id]

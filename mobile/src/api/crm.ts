@@ -1,5 +1,7 @@
 import { httpClient } from './httpClient';
 import type {
+  CommercialService,
+  IndustryType,
   Lead,
   LeadPhoto,
   LeadSource,
@@ -26,6 +28,12 @@ interface ApiLead {
   lead_type?: LeadType;
   customer_name: string;
   company_name?: string;
+  industry_type?: IndustryType | null;
+  contact_designation?: string;
+  services_requested?: CommercialService[];
+  latitude?: number | null;
+  longitude?: number | null;
+  created_by_name?: string;
   phone: string;
   alternate_phone?: string;
   email: string;
@@ -59,6 +67,12 @@ function toLead(row: ApiLead): Lead {
     leadType: commercial ? 'commercial' : 'consumer',
     customerName: row.customer_name,
     companyName: row.company_name ?? '',
+    industryType: row.industry_type ?? null,
+    designation: row.contact_designation ?? '',
+    servicesRequested: row.services_requested ?? [],
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+    createdByName: row.created_by_name ?? '',
     phone: row.phone,
     alternatePhone: row.alternate_phone ?? '',
     email: row.email ?? '',
@@ -92,6 +106,11 @@ export async function createLead(input: NewLeadInput, clientRef?: string): Promi
     lead_type: input.leadType ?? 'consumer',
     customer_name: input.customerName,
     company_name: input.companyName ?? '',
+    industry_type: input.industryType ?? null,
+    contact_designation: input.designation ?? '',
+    services_requested: input.servicesRequested ?? [],
+    latitude: input.latitude ?? null,
+    longitude: input.longitude ?? null,
     phone: input.phone,
     alternate_phone: input.alternatePhone ?? '',
     email: input.email,

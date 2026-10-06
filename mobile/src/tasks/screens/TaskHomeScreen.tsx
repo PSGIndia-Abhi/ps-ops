@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, RefreshControl, ScrollView, StyleSheet, Te
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import { TaskBrandMark } from '../ui/TaskBrandMark';
 import { AlertTriangleIcon, BellIcon, CalendarIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -72,6 +73,19 @@ const factory = (t: CrmTheme) => ({
   },
   badgeText: { fontSize: 10, fontWeight: '700' as const, color: '#FFFFFF' },
   me: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center' as const, justifyContent: 'center' as const },
+  switchBadge: {
+    position: 'absolute' as const,
+    right: -3,
+    bottom: -3,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: t.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
   meText: { ...typography.bodyMedium, fontWeight: '800' as const, color: t.primary },
   pressed: { opacity: 0.75 },
   tiles: { flexDirection: 'row' as const, gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: -TILE_OVERLAP },
@@ -252,6 +266,11 @@ export function TaskHomeScreen() {
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const { viewer, tasks, ready, refreshing, refresh, error, unreadCount } = useTasks();
+  // Managing Director / Personal Assistant also have the Sales app: for them the logo and the
+  // avatar open "Switch app" (with a link on to the profile). Everyone else: the profile, as before.
+  const { canSwitch, openSwitcher } = useAppSwitch();
+  const openProfile = () => navigation.navigate('Profile');
+  const openSwitchSheet = () => openSwitcher(openProfile);
   // Only offered to people who manage someone; everyone else only ever sees their own work.
   const hasTeam = viewer.team.length > 0;
   const [scope, setScope] = useState<'my' | 'team'>('my');
@@ -298,9 +317,16 @@ export function TaskHomeScreen() {
         <View style={[styles.band, { paddingTop: insets.top + spacing.md }]}>
           <BandBackground />
           <View style={styles.ident}>
-            <View style={styles.logo}>
+            <Pressable
+              onPress={canSwitch ? openSwitchSheet : undefined}
+              disabled={!canSwitch}
+              style={styles.logo}
+              accessibilityRole={canSwitch ? 'button' : undefined}
+              accessibilityLabel={canSwitch ? 'Switch app' : undefined}
+              testID="header-logo"
+            >
               <TaskBrandMark size={40} />
-            </View>
+            </Pressable>
             <View style={styles.flex1}>
               <Text style={styles.hi}>Welcome back</Text>
               <Text style={styles.name} numberOfLines={2}>
@@ -326,12 +352,18 @@ export function TaskHomeScreen() {
               )}
             </Pressable>
             <Pressable
-              onPress={() => navigation.navigate('Profile')}
+              onPress={canSwitch ? openSwitchSheet : openProfile}
               style={({ pressed }) => [styles.me, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Profile"
+              accessibilityLabel={canSwitch ? 'Switch app' : 'Profile'}
+              testID="header-avatar"
             >
               <Text style={styles.meText}>{initials(viewer.name)}</Text>
+              {canSwitch && (
+                <View style={styles.switchBadge}>
+                  <SwapIcon size={11} color={theme.primary} />
+                </View>
+              )}
             </Pressable>
           </View>
           {hasTeam && (

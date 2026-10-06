@@ -10,7 +10,7 @@ import {
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useAuth } from '../../auth/AuthContext';
-import { roleLabel, useUserRole } from '../../auth/role';
+import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
 import { GradientCard } from '../../components/GradientCard';
 import {
   BriefcaseIcon,
@@ -25,7 +25,8 @@ import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
 import { useLeads } from '../LeadsContext';
-import { computeMonthlyAchievements } from '../stats';
+import { computeCommercialAchievements, computeLeadStats } from '../stats';
+import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import type { CrmTabScreenNav } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { isCommercial, type Lead } from '../types';
@@ -463,7 +464,8 @@ export function CrmHomeScreen() {
   const rootNavigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
   const { user } = useAuth();
   const role = useUserRole();
-  const { leads, commercialLeads, stats, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } =
+  const rawRole = useRawRole();
+  const { leads, commercialLeads, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } =
     useLeads();
   const { styles, theme } = useCrmStyles(factory);
 
@@ -492,10 +494,23 @@ export function CrmHomeScreen() {
         .slice(0, RECENT_LIMIT),
     [leads, commercialLeads],
   );
-  const achievements = useMemo(
-    () => computeMonthlyAchievements(leads, new Date(), commercialLeads),
-    [leads, commercialLeads],
+  // Home's card and the three tiles under it are about commercial leads (quotes and conversions).
+  // Residential money - collected and still to collect - lives on the Leads and Payments tabs.
+  const achievements = useMemo(() => computeCommercialAchievements(commercialLeads), [commercialLeads]);
+  const commercialTotals = useMemo(
+    () => ({
+      today: computeLeadStats(commercialLeads).todaysLeads,
+      quoted: commercialLeads.reduce((sum, lead) => sum + lead.amount, 0),
+      converted: commercialLeads.filter(lead => lead.leadStatus === 'converted').length,
+    }),
+    [commercialLeads],
   );
+  const openCommercialLeads = () => navigation.navigate('Leads', { kind: 'commercial', at: Date.now() });
+  const { canSwitch, openSwitcher } = useAppSwitch();
+  // Managing Director / Personal Assistant: the logo and the avatar open "Switch app" (with a link
+  // on to the profile). Everyone else: the avatar opens the profile as before.
+  const openProfile = () => navigation.navigate('More');
+  const openSwitchSheet = () => openSwitcher(openProfile);
   const monthLabel = new Date().toLocaleString('en-IN', { month: 'long' });
 
   function handleSliderEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -509,8 +524,10 @@ export function CrmHomeScreen() {
       <CrmBackgroundWash />
       <CrmHeader
         userName={user?.name ?? ''}
-        roleLabel={role ? roleLabel(role) : ''}
-        onProfilePress={() => navigation.navigate('More')}
+        roleLabel={role ? roleLabel(role) : rawRole ?? ''}
+        onProfilePress={canSwitch ? openSwitchSheet : openProfile}
+        onLogoPress={canSwitch ? openSwitchSheet : undefined}
+        switchHint={canSwitch}
         onNotificationsPress={() => rootNavigation.navigate('Notifications')}
       />
       <CrmScreen transparent edges={[]} refreshing={refreshing} onRefresh={refresh}>
@@ -531,24 +548,24 @@ export function CrmHomeScreen() {
               <>
                 <DashStat
                   icon={<ClipboardListIcon size={17} color={theme.textOnPrimary} />}
-                  value={String(stats.todaysLeads)}
+                  value={String(commercialTotals.today)}
                   label="Today's Leads"
                   accentColor={theme.primary}
-                  onPress={() => navigation.navigate('Leads', { filter: 'all', at: Date.now() })}
+                  onPress={openCommercialLeads}
                 />
                 <DashStat
                   icon={<TrendUpIcon size={17} color={theme.textOnPrimary} />}
-                  value={formatINR(stats.paidTotal)}
-                  label="Paid"
+                  value={formatINR(commercialTotals.quoted)}
+                  label="Total Quoted"
                   accentColor={theme.success}
-                  onPress={() => navigation.navigate('Payments')}
+                  onPress={openCommercialLeads}
                 />
                 <DashStat
-                  icon={<ClockIcon size={17} color={theme.textOnPrimary} />}
-                  value={formatINR(stats.pendingTotal)}
-                  label="Payment Pending"
+                  icon={<CheckCircleIcon size={17} color={theme.textOnPrimary} />}
+                  value={String(commercialTotals.converted)}
+                  label="Converted"
                   accentColor={theme.warning}
-                  onPress={() => navigation.navigate('Payments')}
+                  onPress={openCommercialLeads}
                 />
               </>
             )}

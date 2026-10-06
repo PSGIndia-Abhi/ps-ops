@@ -6,6 +6,7 @@ import { BrandMark } from '../../components/BrandMark';
 import { AvatarIcon, BellIcon } from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { useCrmStyles, type CrmTheme } from '../theme';
+import { SwapIcon } from '../../tasks/ui/taskIcons';
 
 const factory = (t: CrmTheme) => ({
   outer: { marginHorizontal: spacing.md },
@@ -58,6 +59,19 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
   },
   pressed: { opacity: 0.75 },
+  switchBadge: {
+    position: 'absolute' as const,
+    right: -4,
+    bottom: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
 });
 
 function HeaderWave({ width, height, color }: { width: number; height: number; color: string }) {
@@ -84,10 +98,21 @@ interface CrmHeaderProps {
   roleLabel: string;
   onProfilePress?: () => void;
   onNotificationsPress?: () => void;
+  /** Makes the brand mark tappable (users with two apps open "Switch app" from it). */
+  onLogoPress?: () => void;
+  /** Shows a small switch badge on the avatar: it opens "Switch app" rather than the profile. */
+  switchHint?: boolean;
 }
 
 /** Technician Home's floating header card (brand mark, name + role pill, bell, avatar), themed for light/dark. */
-export function CrmHeader({ userName, roleLabel, onProfilePress, onNotificationsPress }: CrmHeaderProps) {
+export function CrmHeader({
+  userName,
+  roleLabel,
+  onProfilePress,
+  onNotificationsPress,
+  onLogoPress,
+  switchHint = false,
+}: CrmHeaderProps) {
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
@@ -101,7 +126,16 @@ export function CrmHeader({ userName, roleLabel, onProfilePress, onNotifications
       <View style={styles.container} onLayout={onLayout}>
         {!!size && <HeaderWave width={size.width} height={size.height} color={theme.primarySoft} />}
         <View style={styles.identity}>
-          <BrandMark size={32} />
+          <Pressable
+            onPress={onLogoPress}
+            disabled={!onLogoPress}
+            hitSlop={8}
+            accessibilityRole={onLogoPress ? 'button' : undefined}
+            accessibilityLabel={onLogoPress ? 'Switch app' : undefined}
+            testID="header-logo"
+          >
+            <BrandMark size={32} />
+          </Pressable>
           <View style={styles.textBlock}>
             <Text style={styles.name} numberOfLines={1}>
               {userName}
@@ -130,9 +164,15 @@ export function CrmHeader({ userName, roleLabel, onProfilePress, onNotifications
             hitSlop={8}
             style={({ pressed }) => [styles.avatar, pressed && styles.pressed]}
             accessibilityRole="button"
-            accessibilityLabel="Profile"
+            accessibilityLabel={switchHint ? 'Switch app' : 'Profile'}
+            testID="header-avatar"
           >
             <AvatarIcon size={19} color={theme.textOnPrimary} />
+            {switchHint && (
+              <View style={styles.switchBadge}>
+                <SwapIcon size={10} color={theme.primary} />
+              </View>
+            )}
           </Pressable>
         </View>
       </View>

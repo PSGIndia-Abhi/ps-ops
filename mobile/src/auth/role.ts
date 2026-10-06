@@ -59,6 +59,17 @@ export function isTaskRole(role: string | null | undefined): boolean {
   return !!role && TASK_ROLES.includes(role.toLowerCase().trim());
 }
 
+/**
+ * Task Management roles that also work in the Sales (CRM) app and switch between the two without
+ * signing out. They see every lead, not only their own - the backend grants these two roles the
+ * CRM permissions plus CRM_VIEW_ALL_LEADS.
+ */
+const SALES_SWITCH_ROLES = ['managing director', 'personal assistant'];
+
+export function canSwitchToSales(role: string | null | undefined): boolean {
+  return !!role && SALES_SWITCH_ROLES.includes(role.toLowerCase().trim());
+}
+
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */
 export function useRawRole(): string | null {
   const { user, session } = useAuth();
