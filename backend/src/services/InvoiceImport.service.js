@@ -22,7 +22,9 @@ function withStatus(message, status = 400) {
 const COLUMNS = {
   invoice_number: { label: "Invoice No", required: true, aliases: ["invoiceno", "invoicenumber", "invoice", "invno"] },
   customer: { label: "Customer", required: true, aliases: ["customer", "customername", "customerid", "customercode", "companyid", "company"] },
-  site: { label: "Site", required: true, aliases: ["site", "sitename", "siteid"] },
+  // Optional and left out of the template: files no longer carry a site. A file that
+  // still has the column is checked as before; without it the invoice has no site.
+  site: { label: "Site", required: false, template: false, aliases: ["site", "sitename", "siteid"] },
   invoice_date: { label: "Invoice Date", required: true, aliases: ["invoicedate", "date"] },
   due_date: { label: "Due Date", required: false, aliases: ["duedate"] },
   amount: { label: "Amount", required: true, aliases: ["amount", "invoiceamount", "total"] },
@@ -135,9 +137,12 @@ async function validateRows(rows, user) {
   if (typedCustomers.length) {
     const lowerVals = typedCustomers.map(lower);
     const upperVals = typedCustomers.map(upper);
+    // TRIM: some customers are saved with a stray leading/trailing space ("Krupanidhi College
+    // Canteen "), which must not stop a name typed without it from matching. The display
+    // name (what accountants see on screen) is accepted as well.
     const [customers] = await pool.query(
       `SELECT id, name, display_name, code, is_active FROM companies
-       WHERE UPPER(id) IN (?) OR LOWER(name) IN (?) OR LOWER(display_name) IN (?) OR LOWER(code) IN (?)`,
+        WHERE UPPER(TRIM(id)) IN (?) OR LOWER(TRIM(name)) IN (?) OR LOWER(TRIM(display_name)) IN (?) OR LOWER(TRIM(code)) IN (?)`,
       [upperVals, lowerVals, lowerVals, lowerVals]
     );
     for (const c of customers) {
@@ -150,13 +155,27 @@ async function validateRows(rows, user) {
     }
   }
 
+  // Several customers with the same name/code: one is picked instead of failing the row --
+  // an active one first, then one with a site in the user's branch, then the oldest
+  // (lowest number in its id). `ambiguous` lets the preview show which id was taken.
+  const idNumber = (id) => Number(String(id).replace(/\D/g, "")) || Number.MAX_SAFE_INTEGER;
+  function pickCustomer(list) {
+    return [...list].sort(
+      (a, b) =>
+        Number(Boolean(b.is_active)) - Number(Boolean(a.is_active)) ||
+        Number(customersInBranch.has(b.id)) - Number(customersInBranch.has(a.id)) ||
+        idNumber(a.id) - idNumber(b.id) ||
+        String(a.id).localeCompare(String(b.id))
+    )[0];
+  }
+
   function resolveCustomer(typed) {
     const byId = customersById.get(upper(typed));
     if (byId) return { customer: byId };
     const matches = customersByNameKey.get(lower(typed)) || [];
     const unique = [...new Map(matches.map((c) => [c.id, c])).values()];
     if (unique.length === 0) return { error: `Customer "${typed}" was not found` };
-    if (unique.length > 1) return { error: "More than one customer has this name. Please use the Customer ID instead." };
+    if (unique.length > 1) return { customer: pickCustomer(unique), ambiguous: true };
     return { customer: unique[0] };
   }
 
@@ -169,7 +188,7 @@ async function validateRows(rows, user) {
     const lowerVals = typedSites.map(lower);
     const upperVals = typedSites.map(upper);
     const [sites] = await pool.query(
-      `SELECT id, company_id, name, branch_id, is_active FROM sites WHERE UPPER(id) IN (?) OR LOWER(name) IN (?)`,
+      `SELECT id, company_id, name, branch_id, is_active FROM sites WHERE UPPER(TRIM(id)) IN (?) OR LOWER(TRIM(name)) IN (?)`,
       [upperVals, lowerVals]
     );
     for (const s of sites) {
@@ -208,6 +227,17 @@ async function validateRows(rows, user) {
     userBranchId = row?.branch_id || null;
   }
 
+  // Rows without a site: outside admin, the customer must have an active site in the
+  // user's branch (the same rule payments use), so nobody imports another branch's invoices.
+  const customersInBranch = new Set();
+  if (userBranchId && allCustomerIds.length) {
+    const [inBranch] = await pool.query(
+      "SELECT DISTINCT company_id FROM sites WHERE company_id IN (?) AND branch_id = ? AND COALESCE(is_active, 1) = 1",
+      [allCustomerIds, userBranchId]
+    );
+    for (const s of inBranch) customersInBranch.add(s.company_id);
+  }
+
   const seenInFile = new Map(); // customerId|invoice -> first row number
 
   return rows.map((row) => {
@@ -219,7 +249,6 @@ async function validateRows(rows, user) {
     else if (row.invoice_number.length > 100) errors.push("Invoice number is too long (maximum 100 characters)");
 
     if (!row.customer) errors.push("Customer is required");
-    if (!row.site) errors.push("Site is required");
 
     if (!row.amount) errors.push("Invoice amount is required");
     else {
@@ -246,13 +275,19 @@ async function validateRows(rows, user) {
 
     // customer -- resolved from either the name/code or the id typed on the row
     let customer = null;
+    let ambiguous = false;
     if (row.customer) {
       const resolved = resolveCustomer(row.customer);
       if (resolved.error) errors.push(resolved.error);
       else if (!resolved.customer.is_active) errors.push("Customer is inactive");
-      else customer = resolved.customer;
+      else {
+        customer = resolved.customer;
+        ambiguous = Boolean(resolved.ambiguous);
+      }
     }
-    result.customer_display = customer ? (customer.display_name || customer.name) : row.customer;
+    const customerName = customer ? String(customer.display_name || customer.name).trim() : row.customer;
+    // When the name matched several customers, the id that was taken is shown with it.
+    result.customer_display = customer && ambiguous ? `${customerName} (${customer.id})` : customerName;
 
     // site -- resolved from either the name (scoped to this row's customer)
     // or the id (checked against this row's customer afterwards, so a valid
@@ -274,6 +309,9 @@ async function validateRows(rows, user) {
       }
     }
     result.site_display = site ? site.name : row.site;
+    if (!row.site && customer && user.role !== "admin" && !customersInBranch.has(customer.id)) {
+      errors.push("This customer has no site in your branch, so you cannot create invoices for it");
+    }
 
     // duplicates
     if (customer && row.invoice_number) {
@@ -516,11 +554,12 @@ const csvCell = (v) => {
 
 async function buildErrorRowsCsv(importId, user) {
   const data = await getImport(importId, user);
-  const header = ["Row", "Invoice No", "Customer", "Site", "Invoice Date", "Due Date", "Amount", "Error Reason"];
+  const hasSite = data.rows.some((r) => r.site); // the Site column only appears when the file had one
+  const header = ["Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount", "Error Reason"];
   const lines = [header.map(csvCell).join(",")];
   for (const r of data.rows.filter((row) => row.status === "error")) {
     lines.push(
-      [r.rowNumber, r.invoiceNo, r.customer, r.site, r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
+      [r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
         .map(csvCell)
         .join(",")
     );
@@ -531,7 +570,7 @@ async function buildErrorRowsCsv(importId, user) {
 async function buildTemplate() {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Invoices");
-  sheet.columns = Object.values(COLUMNS).map((c) => ({ header: c.label, width: 20 }));
+  sheet.columns = Object.values(COLUMNS).filter((c) => c.template !== false).map((c) => ({ header: c.label, width: 20 }));
   sheet.getRow(1).font = { bold: true };
   return workbook.xlsx.writeBuffer();
 }

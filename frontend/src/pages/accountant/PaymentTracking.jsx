@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiBell, FiDownload, FiPlusCircle } from "react-icons/fi";
-import SetReminderModal from "../../components/accountant/SetReminderModal";
+import FollowUpModal from "../../components/accountant/FollowUpModal";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { createReminder, daysOverdue, followUpsByInvoice, showDate, useAccountantData, usePaged } from "./data";
+import { daysOverdue, followUpForInvoice, followUpIndex, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 
 const PIPELINE = [
@@ -35,18 +35,18 @@ const sum = (list, key) => list.reduce((s, i) => s + (Number(i[key]) || 0), 0);
 
 export default function PaymentTracking() {
   const navigate = useNavigate();
-  const { invoices: all, tasks, loading, error, reload } = useAccountantData();
+  const { invoices: all, followUps: followUpList, loading, error, reload } = useAccountantData();
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [reminderFor, setReminderFor] = useState(null); // invoice id the reminder dialog is for
+  const [reminderFor, setReminderFor] = useState(null); // invoice id the follow-up dialog is for
 
-  const followUps = useMemo(() => followUpsByInvoice(tasks), [tasks]);
+  const index = useMemo(() => followUpIndex(followUpList), [followUpList]);
   const invoices = useMemo(
-    () => all.map((i) => ({ ...i, next_follow_up: followUps.get(i.id)?.next_follow_up || "" })),
-    [all, followUps]
+    () => all.map((i) => ({ ...i, next_follow_up: followUpForInvoice(index, i)?.due_date || "" })),
+    [all, index]
   );
 
   const active = invoices.filter((i) => i.status !== "CANCELLED");
@@ -91,13 +91,6 @@ export default function PaymentTracking() {
       { header: "Last Payment", value: (i) => i.last_payment_date },
       { header: "Next Follow-up", value: (i) => i.next_follow_up },
     ], rows);
-  }
-
-  async function saveReminder(form) {
-    const invoice = invoices.find((i) => i.id === form.invoice_id);
-    if (!invoice) throw new Error("Please select an invoice");
-    await createReminder(form, invoice);
-    await reload();
   }
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
@@ -211,7 +204,8 @@ export default function PaymentTracking() {
                         <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
                           disabled={i.pending_amount <= 0 || i.status === "CANCELLED"}
                           onClick={() => navigate("/accountant/payments/record", { state: { customerId: i.customer_id } })}><FiPlusCircle /></button>
-                        <button type="button" className="ac-link" title="Add reminder" aria-label="Add reminder"
+                        <button type="button" className="ac-link" title="Add follow-up" aria-label="Add follow-up"
+                          disabled={i.pending_amount <= 0 || i.status === "CANCELLED"}
                           onClick={() => setReminderFor(i.id)}><FiBell /></button>
                       </div>
                     </td>
@@ -225,13 +219,15 @@ export default function PaymentTracking() {
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
 
-      <SetReminderModal
+      <FollowUpModal
         key={reminderFor || "closed"}
         open={Boolean(reminderFor)}
         onClose={() => setReminderFor(null)}
-        invoices={invoices}
-        defaultInvoiceId={reminderFor || ""}
-        onSave={saveReminder}
+        onCreated={reload}
+        invoices={all}
+        followUps={followUpList}
+        invoiceId={reminderFor || ""}
+        lockCustomer
       />
     </div>
   );

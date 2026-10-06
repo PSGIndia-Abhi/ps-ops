@@ -28,6 +28,22 @@ async function getClientCompanyId(connection, userId) {
   return row?.company_id || null;
 }
 
+// Whether an invoice belongs to the given branch: through its site, or -- for an
+// invoice without a site (imported files no longer carry one) -- through its
+// customer having a site in that branch.
+async function invoiceInBranch(connection, invoice, branchId) {
+  if (!branchId) return false;
+  if (invoice.site_id) {
+    const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
+    return Boolean(site && site.branch_id === branchId);
+  }
+  const [[hasSite]] = await connection.query(
+    "SELECT 1 AS ok FROM sites WHERE company_id = ? AND branch_id = ? LIMIT 1",
+    [invoice.customer_id, branchId]
+  );
+  return Boolean(hasSite);
+}
+
 function computeInvoiceView(row) {
   const isOverdue =
     row.status !== "PAID" &&
@@ -52,8 +68,9 @@ async function listInvoices(req, res) {
     } else if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
       if (!branchId) return res.status(403).json({ error: "Branch not assigned" });
-      where = "WHERE s.branch_id = ?";
-      params = [branchId];
+      where = `WHERE (s.branch_id = ?
+                  OR (i.site_id IS NULL AND EXISTS (SELECT 1 FROM sites cs WHERE cs.company_id = i.customer_id AND cs.branch_id = ?)))`;
+      params = [branchId, branchId];
     }
 
     const [rows] = await connection.query(
@@ -102,9 +119,7 @@ async function getInvoice(req, res) {
       }
     } else if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
-      if (!invoice.site_id) return res.status(404).json({ error: "Invoice not found" });
-      const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
-      if (!site || site.branch_id !== branchId) return res.status(404).json({ error: "Invoice not found" });
+      if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(404).json({ error: "Invoice not found" });
     }
 
     const [allocations] = await connection.query(
@@ -204,10 +219,8 @@ async function updateInvoice(req, res) {
     if (invoice.status === "CANCELLED") return res.status(400).json({ error: "Cannot edit a cancelled invoice" });
 
     if (role !== "admin") {
-      if (!invoice.site_id) return res.status(403).json({ error: "Forbidden" });
       const branchId = await getUserBranchId(connection, userId);
-      const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
-      if (!site || site.branch_id !== branchId) return res.status(403).json({ error: "Forbidden" });
+      if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(403).json({ error: "Forbidden" });
     }
 
     const newAmount = invoice_amount !== undefined ? Number(invoice_amount) : Number(invoice.invoice_amount);
@@ -258,10 +271,8 @@ async function cancelInvoice(req, res) {
     }
 
     if (role !== "admin") {
-      if (!invoice.site_id) return res.status(403).json({ error: "Forbidden" });
       const branchId = await getUserBranchId(connection, userId);
-      const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
-      if (!site || site.branch_id !== branchId) return res.status(403).json({ error: "Forbidden" });
+      if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(403).json({ error: "Forbidden" });
     }
 
     await connection.query("UPDATE invoices SET status = 'CANCELLED', updated_by = ? WHERE id = ?", [userId, id]);
@@ -275,4 +286,44 @@ async function cancelInvoice(req, res) {
   }
 }
 
-module.exports = { listInvoices, getInvoice, createInvoice, updateInvoice, cancelInvoice };
+// GET /api/invoices/customers/:customerId/contact
+// The customer's phone for the "Call customer" button: the primary active contact
+// at one of the customer's sites (contacts.company_id holds a sites.id). Read only.
+// Outside admin, only contacts at sites in the user's own branch.
+async function getCustomerContact(req, res) {
+  const { role, id: userId } = req.user;
+  const { customerId } = req.params;
+  if (role === "client") return res.status(403).json({ error: "Forbidden" });
+
+  const connection = await pool.getConnection();
+  try {
+    let branchFilter = "";
+    const params = [customerId];
+    if (role !== "admin") {
+      const branchId = await getUserBranchId(connection, userId);
+      if (!branchId) return res.status(403).json({ error: "Branch not assigned" });
+      branchFilter = "AND s.branch_id = ?";
+      params.push(branchId);
+    }
+
+    const [[contact]] = await connection.query(
+      `SELECT c.name, c.phone, c.email
+         FROM contacts c
+         JOIN sites s ON s.id = c.company_id
+        WHERE s.company_id = ? ${branchFilter}
+          AND COALESCE(c.is_active, 1) = 1
+          AND c.phone IS NOT NULL AND TRIM(c.phone) <> ''
+        ORDER BY c.is_primary DESC, c.created_at ASC
+        LIMIT 1`,
+      params
+    );
+    res.json(contact ? { name: contact.name, phone: contact.phone, email: contact.email || null } : { name: null, phone: null, email: null });
+  } catch (err) {
+    console.error("Failed to load customer contact:", err);
+    res.status(500).json({ error: "Failed to load the customer's contact" });
+  } finally {
+    connection.release();
+  }
+}
+
+module.exports = { listInvoices, getInvoice, createInvoice, updateInvoice, cancelInvoice, getCustomerContact };

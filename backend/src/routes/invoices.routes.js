@@ -10,6 +10,7 @@ const {
   createInvoice,
   updateInvoice,
   cancelInvoice,
+  getCustomerContact,
 } = require("../controllers/invoices.controller");
 
 const { listTdsSettings, updateTdsSettings } = require("../controllers/tds.controller");
@@ -29,6 +30,9 @@ const {
 // Customer TDS settings. Declared before "/:id" so "tds-settings" is never read as an invoice id.
 router.get("/tds-settings", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), listTdsSettings);
 router.put("/tds-settings/:customerId", auth, requirePermission(PERMISSIONS.UPDATE_INVOICE), updateTdsSettings);
+
+// A customer's phone for the payment follow-up "Call customer" button. Declared before "/:id".
+router.get("/customers/:customerId/contact", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), getCustomerContact);
 
 router.get("/import", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), listImportHistory);
 router.get("/import/template", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), downloadTemplate);
