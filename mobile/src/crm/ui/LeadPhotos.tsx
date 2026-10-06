@@ -55,6 +55,7 @@ const factory = (t: CrmTheme) => ({
     gap: spacing.sm,
   },
   gridBelowButtons: { marginTop: spacing.md },
+  savedGrid: { marginBottom: spacing.md },
   thumbWrap: { width: THUMB, height: THUMB },
   thumb: {
     width: THUMB,
@@ -120,6 +121,8 @@ interface LeadPhotoPickerProps {
   onChange: (photos: LocalLeadPhoto[]) => void;
   /** Something the rep should know (permission denied, the camera would not open). */
   onProblem: (message: string) => void;
+  /** How many may be picked here - fewer than MAX_LEAD_PHOTOS when the lead already has some saved. */
+  max?: number;
 }
 
 /** "Take photo" / "From gallery" plus the photos picked so far, each removable. Up to MAX_LEAD_PHOTOS. */
@@ -127,9 +130,10 @@ export function LeadPhotoPicker({
   photos,
   onChange,
   onProblem,
+  max = MAX_LEAD_PHOTOS,
 }: LeadPhotoPickerProps) {
   const { styles, theme } = useCrmStyles(factory);
-  const remaining = MAX_LEAD_PHOTOS - photos.length;
+  const remaining = max - photos.length;
   const full = remaining <= 0;
 
   function add(response: ImagePickerResponse) {
@@ -142,7 +146,7 @@ export function LeadPhotoPicker({
       );
       return;
     }
-    onChange([...photos, ...toLocalPhotos(response)].slice(0, MAX_LEAD_PHOTOS));
+    onChange([...photos, ...toLocalPhotos(response)].slice(0, max));
   }
 
   async function takePhoto() {
@@ -231,7 +235,9 @@ export function LeadPhotoPicker({
 
       <Text style={styles.hint}>
         {full
-          ? `${MAX_LEAD_PHOTOS} photos added - that is the most a lead can have.`
+          ? `That is the most a lead can have (${MAX_LEAD_PHOTOS} photos).`
+          : max < MAX_LEAD_PHOTOS
+          ? `${photos.length} new photo${photos.length === 1 ? '' : 's'} added - room for ${remaining} more.`
           : `${photos.length} of ${MAX_LEAD_PHOTOS} photos added (optional).`}
       </Text>
     </View>
@@ -283,6 +289,63 @@ function PhotoThumbs({
           </Pressable>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+/**
+ * A saved lead's photos while it is being edited: each one can be marked for removal. Nothing is
+ * deleted here - the form removes them from the server when the changes are saved.
+ */
+export function SavedLeadPhotos({
+  leadId,
+  photos,
+  onRemove,
+}: {
+  leadId: string;
+  photos: LeadPhoto[];
+  onRemove: (photoId: string) => void;
+}) {
+  const { styles } = useCrmStyles(factory);
+  const [authHeader, setAuthHeader] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getToken().then(token => {
+      if (!cancelled && token) setAuthHeader(`Bearer ${token}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (photos.length === 0) return null;
+  return (
+    <View style={[styles.grid, styles.savedGrid]}>
+      {photos.map((photo, index) => (
+        <View key={photo.id} style={styles.thumbWrap}>
+          {authHeader ? (
+            <Image
+              source={{
+                uri: `${API_BASE_URL}${crmApi.leadPhotoViewPath(leadId, photo.id)}`,
+                headers: { Authorization: authHeader },
+              }}
+              style={styles.thumb}
+            />
+          ) : (
+            <View style={styles.thumb} />
+          )}
+          <Pressable
+            onPress={() => onRemove(photo.id)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove saved photo ${index + 1}`}
+            style={styles.remove}
+          >
+            <CloseIcon size={12} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      ))}
     </View>
   );
 }

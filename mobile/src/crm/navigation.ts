@@ -18,9 +18,10 @@ export type CrmTabParamList = {
 
 export type CrmStackParamList = {
   CrmTabs: NavigatorScreenParams<CrmTabParamList> | undefined;
-  CrmNewLead: undefined;
-  /** The commercial lead form (company, quote, photos - no payment). */
-  CrmNewCommercialLead: undefined;
+  /** The residential lead form. With `editLeadId` it opens filled in, to change that lead. */
+  CrmNewLead: { editLeadId?: string } | undefined;
+  /** The commercial lead form (company, quote, photos - no payment). `editLeadId` as above. */
+  CrmNewCommercialLead: { editLeadId?: string } | undefined;
   CrmLeadDetail: { leadId: string };
   /** Shown right after saving; `note` explains anything the rep should still do (e.g. payment pending). */
   CrmLeadSaved: { leadId: string; note?: string };

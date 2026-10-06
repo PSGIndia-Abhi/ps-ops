@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertCircleIcon,
@@ -25,7 +25,7 @@ import {
   TagIcon,
   UsersIcon,
 } from '../../components/icons';
-import { ApiError } from '../../api';
+import { ApiError, crmApi } from '../../api';
 import { radii, spacing, typography } from '../../theme';
 import { getCurrentLocation } from '../../utils/location';
 import { reverseGeocode } from '../../utils/reverseGeocode';
@@ -37,15 +37,20 @@ import {
   COMMERCIAL_LEAD_SOURCES,
   COMMERCIAL_SERVICES,
   INDUSTRY_TYPES,
+  LEAD_STATUSES,
   LEAD_TYPES,
   MAX_LEAD_PHOTOS,
   optionLabel,
   servicesLabel,
   type CommercialService,
   type IndustryType,
+  type Lead,
+  type LeadPhoto,
   type LeadSource,
+  type LeadStatus,
   type LeadType,
   type LocalLeadPhoto,
+  type NewLeadInput,
 } from '../types';
 import {
   cleanPhoneInput,
@@ -60,7 +65,7 @@ import { CheckIcon, RupeeIcon } from '../ui/crmIcons';
 import { CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
 import { CrmTextField } from '../ui/CrmTextField';
 import { SectionHeader } from '../ui/LeadFormParts';
-import { LeadPhotoPicker, LocalLeadPhotos } from '../ui/LeadPhotos';
+import { LeadPhotoPicker, LocalLeadPhotos, SavedLeadPhotos } from '../ui/LeadPhotos';
 import { PrimaryButton } from '../ui/PrimaryButton';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { SelectField } from '../ui/SelectField';
@@ -207,6 +212,25 @@ const INITIAL_VALUES: CommercialLeadFormValues = {
 
 type Step = 'details' | 'review';
 
+/** The form's values for a lead that is being edited. */
+function valuesOf(lead: Lead): CommercialLeadFormValues {
+  return {
+    industryType: lead.industryType ?? null,
+    companyName: lead.companyName ?? '',
+    address: lead.location ?? '',
+    customerName: lead.customerName,
+    designation: lead.designation ?? '',
+    phone: lead.phone,
+    alternatePhone: lead.alternatePhone ?? '',
+    email: lead.email ?? '',
+    source: lead.source,
+    referenceBy: lead.referenceBy ?? '',
+    services: lead.servicesRequested ?? [],
+    amount: lead.amount > 0 ? String(Math.round(lead.amount)) : '',
+    notes: lead.notes ?? '',
+  };
+}
+
 /** Where the phone is: read automatically when the form opens. */
 type LocationState =
   | { status: 'locating' }
@@ -278,25 +302,49 @@ function ReviewSection({
  * Where the business is comes from the phone's own location, read when the form opens; the
  * address for that spot is then filled in for the rep, who can correct it. The rep types the
  * address from scratch only if the location (or the address lookup) fails.
+ *
+ * Opened with `editLeadId` it is the same form filled in with that lead, to change it: the saved
+ * location is kept unless the rep asks for the current one, the lead status can be changed, and
+ * saved photos can be removed as well as new ones added.
  */
 export function CrmNewCommercialLeadScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
-  const { addLead } = useLeads();
+  const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewCommercialLead'>>();
+  const { addLead, updateLead, getLead, showNotice } = useLeads();
   const { styles, theme } = useCrmStyles(factory);
 
+  // The lead being edited, as it was when the form opened (it does not change under the rep's hands).
+  const editLeadId = route.params?.editLeadId;
+  const editLead = useRef(editLeadId ? getLead(editLeadId) : undefined).current;
+  const editing = !!editLead;
+  const initialValues = useRef(editLead ? valuesOf(editLead) : INITIAL_VALUES).current;
+
   const [step, setStep] = useState<Step>('details');
-  const [values, setValues] = useState<CommercialLeadFormValues>(INITIAL_VALUES);
-  const latest = useRef<CommercialLeadFormValues>(INITIAL_VALUES);
+  const [values, setValues] = useState<CommercialLeadFormValues>(initialValues);
+  const latest = useRef<CommercialLeadFormValues>(initialValues);
   latest.current = values;
   const [errors, setErrors] = useState<CommercialLeadFormErrors>({});
-  const [location, setLocation] = useState<LocationState>({ status: 'locating' });
+  const [leadStatus, setLeadStatus] = useState<LeadStatus>(editLead?.leadStatus ?? 'new');
+  const [location, setLocation] = useState<LocationState>(() => {
+    if (!editLead) return { status: 'locating' };
+    return typeof editLead.latitude === 'number' && typeof editLead.longitude === 'number'
+      ? { status: 'ok', latitude: editLead.latitude, longitude: editLead.longitude, accuracy: null }
+      : { status: 'failed' };
+  });
   /** Shown once there is an address to show: found for the location, or to be typed by the rep. */
-  const [typeAddress, setTypeAddress] = useState(false);
+  const [typeAddress, setTypeAddress] = useState(editing);
   /** True while the written address for the location is being looked up. */
   const [findingAddress, setFindingAddress] = useState(false);
-  /** The address the lookup last filled in - so a later lookup never overwrites what the rep typed. */
-  const filledAddress = useRef('');
+  /**
+   * The address the lookup last filled in - so a later lookup never overwrites what the rep typed.
+   * When editing it starts as the saved address: asking for the current location replaces that,
+   * unless the rep has changed it by hand.
+   */
+  const filledAddress = useRef(editLead?.location?.trim() ?? '');
+  /** Editing only: the photos already on the server (minus any marked for removal), null until loaded. */
+  const [savedPhotos, setSavedPhotos] = useState<LeadPhoto[] | null>(editing ? null : []);
+  const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
   const [photos, setPhotos] = useState<LocalLeadPhoto[]>([]);
   const [photoProblem, setPhotoProblem] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -323,7 +371,9 @@ export function CrmNewCommercialLeadScreen() {
     [],
   );
 
+  const [hasTriedLocation, setHasTriedLocation] = useState(false);
   const readLocation = useCallback(async () => {
+    setHasTriedLocation(true);
     setLocation({ status: 'locating' });
     try {
       const fix = await getCurrentLocation();
@@ -357,10 +407,27 @@ export function CrmNewCommercialLeadScreen() {
     }
   }, []);
 
-  // The location is read on its own as soon as the form opens - the rep does not have to ask for it.
+  // A new lead: the location is read on its own as soon as the form opens. An edited lead keeps the
+  // location it was saved with until the rep asks for the current one.
   useEffect(() => {
-    readLocation();
-  }, [readLocation]);
+    if (!editing) readLocation();
+  }, [editing, readLocation]);
+
+  useEffect(() => {
+    if (!editLead) return;
+    let cancelled = false;
+    crmApi
+      .listLeadPhotos(editLead.id)
+      .then(list => {
+        if (!cancelled) setSavedPhotos(list);
+      })
+      .catch(() => {
+        if (!cancelled) setSavedPhotos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editLead]);
 
   // On the review step the phone's back button goes back to the details, not out of the form.
   useEffect(() => {
@@ -446,37 +513,67 @@ export function CrmNewCommercialLeadScreen() {
       setStep('details');
       return;
     }
+    const input: NewLeadInput = {
+      leadType: 'commercial',
+      industryType: values.industryType as IndustryType,
+      companyName: values.companyName.trim(),
+      customerName: values.customerName.trim(),
+      designation: values.designation.trim(),
+      phone: normalizePhone(values.phone),
+      alternatePhone: normalizePhone(values.alternatePhone),
+      email: values.email.trim(),
+      latitude: location.status === 'ok' ? location.latitude : null,
+      longitude: location.status === 'ok' ? location.longitude : null,
+      location: values.address.trim(),
+      source: values.source as LeadSource,
+      referenceBy: values.referenceBy.trim(),
+      servicesRequested: values.services as CommercialService[],
+      amount: amountNumber,
+      notes: values.notes.trim(),
+      // A commercial lead has no house type / plan and no payment; these stay empty / unused.
+      houseType: '',
+      service: '',
+      plan: '',
+      coupon: '',
+      paymentMethod: 'other',
+      paymentStatus: 'pending',
+      leadStatus,
+    };
+
     setSaving(true);
     try {
-      const saved = await addLead(
-        {
-          leadType: 'commercial',
-          industryType: values.industryType as IndustryType,
-          companyName: values.companyName.trim(),
-          customerName: values.customerName.trim(),
-          designation: values.designation.trim(),
-          phone: normalizePhone(values.phone),
-          alternatePhone: normalizePhone(values.alternatePhone),
-          email: values.email.trim(),
-          latitude: location.status === 'ok' ? location.latitude : null,
-          longitude: location.status === 'ok' ? location.longitude : null,
-          location: values.address.trim(),
-          source: values.source as LeadSource,
-          referenceBy: values.referenceBy.trim(),
-          servicesRequested: values.services as CommercialService[],
-          amount: amountNumber,
-          notes: values.notes.trim(),
-          // A commercial lead has no house type / plan and no payment; these stay empty / unused.
-          houseType: '',
-          service: '',
-          plan: '',
-          coupon: '',
-          paymentMethod: 'other',
-          paymentStatus: 'pending',
-          leadStatus: 'new',
-        },
-        photos,
-      );
+      if (editLead) {
+        await updateLead(editLead.id, input);
+        // Photo changes follow the lead itself; one that fails does not undo the saved details.
+        let failed = 0;
+        for (const photoId of removedPhotoIds) {
+          try {
+            await crmApi.deleteLeadPhoto(editLead.id, photoId);
+          } catch {
+            failed += 1;
+          }
+        }
+        for (const photo of photos) {
+          try {
+            await crmApi.uploadLeadPhoto(editLead.id, photo);
+          } catch {
+            failed += 1;
+          }
+        }
+        if (failed > 0) {
+          showNotice(
+            failed === 1
+              ? 'Changes saved, but 1 photo change did not go through'
+              : `Changes saved, but ${failed} photo changes did not go through`,
+            'warning',
+          );
+        } else {
+          showNotice('Changes saved');
+        }
+        navigation.goBack();
+        return;
+      }
+      const saved = await addLead(input, photos);
       navigation.replace('CrmLeadSaved', { leadId: saved.id });
     } catch (err) {
       setSaveError(
@@ -490,6 +587,7 @@ export function CrmNewCommercialLeadScreen() {
   }
 
   const reviewing = step === 'review';
+  const savedCount = savedPhotos?.length ?? 0;
   const locationSummary =
     location.status === 'ok'
       ? 'Current location captured'
@@ -500,8 +598,14 @@ export function CrmNewCommercialLeadScreen() {
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
       <TopBar
-        title="New Commercial Lead"
-        subtitle={reviewing ? 'Check the details, then save' : 'Add a business enquiry'}
+        title={editing ? 'Edit Commercial Lead' : 'New Commercial Lead'}
+        subtitle={
+          reviewing
+            ? 'Check the details, then save'
+            : editing
+            ? 'Change what you need, then save'
+            : 'Add a business enquiry'
+        }
         icon={reviewing ? 'back' : 'close'}
         onBack={() => (reviewing ? setStep('details') : navigation.goBack())}
       />
@@ -512,7 +616,7 @@ export function CrmNewCommercialLeadScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {!reviewing && (
+        {!reviewing && !editing && (
           <View style={styles.typeSwitch}>
             <SegmentedControl
               options={LEAD_TYPES}
@@ -570,19 +674,31 @@ export function CrmNewCommercialLeadScreen() {
                 value={servicesLabel(values.services as CommercialService[])}
               />
               <ReviewRow label="Approximate Quote" value={formatINR(amountNumber)} strong />
+              {editing && <ReviewRow label="Lead Status" value={optionLabel(LEAD_STATUSES, leadStatus)} />}
               <ReviewRow label="Notes" value={values.notes.trim()} />
             </ReviewSection>
 
             <ReviewSection
-              title={`PHOTOS (${photos.length} of ${MAX_LEAD_PHOTOS})`}
+              title={`PHOTOS (${savedCount + photos.length} of ${MAX_LEAD_PHOTOS})`}
               onEdit={() => setStep('details')}
             >
+              {editing && (
+                <ReviewRow
+                  first
+                  label="Saved photos"
+                  value={
+                    removedPhotoIds.length > 0
+                      ? `${savedCount} kept, ${removedPhotoIds.length} to be removed`
+                      : `${savedCount} kept`
+                  }
+                />
+              )}
               {photos.length > 0 ? (
                 <View style={styles.reviewPhotos}>
                   <LocalLeadPhotos photos={photos} />
                 </View>
               ) : (
-                <ReviewRow first label="Photos" value="" />
+                <ReviewRow first={!editing} label={editing ? 'New photos' : 'Photos'} value="" />
               )}
             </ReviewSection>
           </>
@@ -648,7 +764,11 @@ export function CrmNewCommercialLeadScreen() {
                     {location.status === 'locating'
                       ? 'Reading your current location...'
                       : location.status === 'ok'
-                      ? 'Current location captured'
+                      ? editing && location.accuracy === null
+                        ? 'Location saved with this lead'
+                        : 'Current location captured'
+                      : editing && !hasTriedLocation
+                      ? 'No location saved with this lead'
                       : 'Could not read your location'}
                   </Text>
                   <Text style={styles.locationSub}>
@@ -659,6 +779,8 @@ export function CrmNewCommercialLeadScreen() {
                         ? 'Finding the address...'
                         : location.accuracy !== null
                         ? `Accurate to about ${Math.round(location.accuracy)} m`
+                        : editing
+                        ? 'Tap "Use current" if you are at the site now.'
                         : 'Saved with this lead'
                       : 'Type the address below, or try again.'}
                   </Text>
@@ -671,7 +793,7 @@ export function CrmNewCommercialLeadScreen() {
                     testID="commercial-location-retry"
                   >
                     <Text style={styles.locationAction}>
-                      {location.status === 'ok' ? 'Refresh' : 'Try again'}
+                      {location.status !== 'ok' ? 'Try again' : editing ? 'Use current' : 'Refresh'}
                     </Text>
                   </Pressable>
                 )}
@@ -833,6 +955,17 @@ export function CrmNewCommercialLeadScreen() {
                 testID="commercial-referred-by"
               />
 
+              {editing && (
+                <SelectField
+                  label="Lead Status"
+                  icon={<TagIcon size={18} color={theme.textMuted} />}
+                  placeholder="Select lead status"
+                  options={LEAD_STATUSES}
+                  value={leadStatus}
+                  onChange={setLeadStatus}
+                />
+              )}
+
               <Text style={styles.fieldLabel}>Service Requested *</Text>
               <View style={styles.chipsWrap}>
                 <View style={styles.chips}>
@@ -894,14 +1027,29 @@ export function CrmNewCommercialLeadScreen() {
                 hint="Site or problem-area photos help the team quote"
               />
               <CrmErrorBanner message={photoProblem} />
-              <LeadPhotoPicker
-                photos={photos}
-                onChange={next => {
-                  setPhotoProblem(null);
-                  setPhotos(next);
-                }}
-                onProblem={setPhotoProblem}
-              />
+              {editLead && savedPhotos !== null && (
+                <SavedLeadPhotos
+                  leadId={editLead.id}
+                  photos={savedPhotos}
+                  onRemove={photoId => {
+                    setSavedPhotos(list => (list ?? []).filter(photo => photo.id !== photoId));
+                    setRemovedPhotoIds(ids => [...ids, photoId]);
+                  }}
+                />
+              )}
+              {editing && savedPhotos === null ? (
+                <ActivityIndicator color={theme.primary} />
+              ) : (
+                <LeadPhotoPicker
+                  photos={photos}
+                  max={MAX_LEAD_PHOTOS - savedCount}
+                  onChange={next => {
+                    setPhotoProblem(null);
+                    setPhotos(next);
+                  }}
+                  onProblem={setPhotoProblem}
+                />
+              )}
             </View>
           </>
         )}
@@ -919,7 +1067,7 @@ export function CrmNewCommercialLeadScreen() {
               testID="commercial-back"
             />
             <PrimaryButton
-              label="Save Lead"
+              label={editing ? 'Save Changes' : 'Save Lead'}
               onPress={save}
               loading={saving}
               style={styles.footerButtonWide}

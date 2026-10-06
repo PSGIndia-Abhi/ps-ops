@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   BriefcaseIcon,
@@ -202,6 +202,13 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const { showNotice, discardQueued } = useLeads();
+  // Photos can change in the edit form, so they are loaded again each time this screen comes back.
+  const [photosKey, setPhotosKey] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setPhotosKey(k => k + 1);
+    }, []),
+  );
   const { styles, theme } = useCrmStyles(factory);
   const iconColor = theme.primary;
   const hasEmail = !!lead.email;
@@ -223,7 +230,19 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
-      <TopBar title="Commercial Lead" onBack={() => navigation.goBack()} />
+      <TopBar
+        title="Commercial Lead"
+        onBack={() => navigation.goBack()}
+        // A lead still waiting on this phone is not on the server yet, so there is nothing to edit there.
+        action={
+          lead.pendingSync
+            ? undefined
+            : {
+                label: 'Edit',
+                onPress: () => navigation.navigate('CrmNewCommercialLead', { editLeadId: lead.id }),
+              }
+        }
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -461,7 +480,7 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
               <Text style={styles.notes}>No photos were added to this lead.</Text>
             )
           ) : (
-            <ServerLeadPhotos leadId={lead.id} />
+            <ServerLeadPhotos key={photosKey} leadId={lead.id} />
           )}
         </View>
 

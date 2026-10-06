@@ -62,6 +62,8 @@ interface LeadsContextValue {
   addLead: (input: NewLeadInput, photos?: LocalLeadPhoto[]) => Promise<Lead>;
   /** Removes a queued lead the server refused (or one the user no longer wants sent). */
   discardQueued: (id: string) => void;
+  /** Saves changes to a lead that is already on the server; rejects with the server's message. Needs a connection. */
+  updateLead: (id: string, input: NewLeadInput) => Promise<Lead>;
   /** Swaps in an updated copy of a lead (e.g. after it was paid). */
   replaceLead: (lead: Lead) => void;
   showNotice: (message: string, tone?: NoticeTone) => void;
@@ -366,6 +368,15 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     setServerLeads(prev => prev.map(l => (l.id === lead.id ? lead : l)));
   }, []);
 
+  const updateLead = useCallback(
+    async (id: string, input: NewLeadInput): Promise<Lead> => {
+      const lead = await crmApi.updateLead(id, input);
+      replaceLead(lead);
+      return lead;
+    },
+    [replaceLead],
+  );
+
   // An outbox item whose lead already reached the server is only waiting on photos - the list
   // shows the server's copy of that lead, not a second "waiting to send" one.
   const allLeads = useMemo(
@@ -410,6 +421,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
       refresh,
       addLead,
       discardQueued,
+      updateLead,
       replaceLead,
       showNotice,
       getLead,
@@ -428,6 +440,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
       refresh,
       addLead,
       discardQueued,
+      updateLead,
       replaceLead,
       showNotice,
       getLead,

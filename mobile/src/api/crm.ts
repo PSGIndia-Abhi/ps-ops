@@ -99,10 +99,9 @@ export async function listLeads(): Promise<Lead[]> {
   return data.map(toLead);
 }
 
-/** POST /api/crm/leads - the server re-checks the price list and forces Online payments to "pending". */
-export async function createLead(input: NewLeadInput, clientRef?: string): Promise<Lead> {
-  const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
-    client_ref: clientRef,
+/** A lead as POST / PUT /api/crm/leads take it. */
+function toApiBody(input: NewLeadInput) {
+  return {
     lead_type: input.leadType ?? 'consumer',
     customer_name: input.customerName,
     company_name: input.companyName ?? '',
@@ -126,8 +125,30 @@ export async function createLead(input: NewLeadInput, clientRef?: string): Promi
     payment_method: input.paymentMethod,
     payment_status: input.paymentStatus,
     lead_status: input.leadStatus,
+  };
+}
+
+/** POST /api/crm/leads - the server re-checks the price list and forces Online payments to "pending". */
+export async function createLead(input: NewLeadInput, clientRef?: string): Promise<Lead> {
+  const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
+    client_ref: clientRef,
+    ...toApiBody(input),
   });
   return toLead(data);
+}
+
+/**
+ * PUT /api/crm/leads/:id - saves changes to a lead. On a paid residential lead the server keeps
+ * the service, amount and payment as they are, whatever is sent.
+ */
+export async function updateLead(leadId: string, input: NewLeadInput): Promise<Lead> {
+  const { data } = await httpClient.put<ApiLead>(`/api/crm/leads/${leadId}`, toApiBody(input));
+  return toLead(data);
+}
+
+/** DELETE /api/crm/leads/:id/photos/:photoId */
+export async function deleteLeadPhoto(leadId: string, photoId: string): Promise<void> {
+  await httpClient.delete(`/api/crm/leads/${leadId}/photos/${photoId}`);
 }
 
 interface ApiLeadPhoto {

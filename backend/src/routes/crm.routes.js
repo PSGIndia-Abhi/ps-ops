@@ -349,14 +349,13 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
 // comes from the phone's GPS (latitude / longitude); `location` is an address typed by hand, used
 // when the GPS could not be read. Industry type and services are checked only when sent, so the
 // app version from before they existed can still save.
-async function createCommercialLead(req, res, lead) {
-  const body = req.body || {};
+// Reads and checks the commercial-only fields of a lead - shared by create and edit.
+// `lead` carries what the caller already read (location, referenceBy, amount, leadStatus).
+// -> { error } when something is wrong, otherwise { values }.
+function readCommercialFields(body, lead) {
   const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
   const alternatePhone = typeof body.alternate_phone === "string" ? body.alternate_phone.replace(/\D/g, "") : "";
   const leadSource = body.lead_source || null;
-
-  if (companyName.length < 2) return res.status(400).json({ error: "Company / business name is required" });
-  if (companyName.length > 150) return res.status(400).json({ error: "Company / business name is too long (max 150)" });
   const industryType = body.industry_type || null;
   const designation = typeof body.contact_designation === "string" ? body.contact_designation.trim() : "";
   const services = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
@@ -365,27 +364,36 @@ async function createCommercialLead(req, res, lead) {
   const latitude = hasPoint ? Number(body.latitude) : null;
   const longitude = hasPoint ? Number(body.longitude) : null;
 
-  if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) {
-    return res.status(400).json({ error: "Invalid industry type" });
-  }
-  if (designation.length > 100) return res.status(400).json({ error: "Designation is too long (max 100)" });
-  if (services.some((service) => !COMMERCIAL_SERVICES.includes(service))) {
-    return res.status(400).json({ error: "Invalid service requested" });
-  }
-  if (lead.referenceBy.length > 100) return res.status(400).json({ error: "Reference name is too long (max 100)" });
+  if (companyName.length < 2) return { error: "Company / business name is required" };
+  if (companyName.length > 150) return { error: "Company / business name is too long (max 150)" };
+  if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) return { error: "Invalid industry type" };
+  if (designation.length > 100) return { error: "Designation is too long (max 100)" };
+  if (services.some((service) => !COMMERCIAL_SERVICES.includes(service))) return { error: "Invalid service requested" };
+  if (lead.referenceBy.length > 100) return { error: "Reference name is too long (max 100)" };
   if (hasPoint && (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180)) {
-    return res.status(400).json({ error: "Invalid location" });
+    return { error: "Invalid location" };
   }
-  if (!hasPoint && !lead.location) return res.status(400).json({ error: "The current location or an address is required" });
-  if (lead.location.length > 255) return res.status(400).json({ error: "Address is too long (max 255)" });
+  if (!hasPoint && !lead.location) return { error: "The current location or an address is required" };
+  if (lead.location.length > 255) return { error: "Address is too long (max 255)" };
   if (alternatePhone && alternatePhone.length !== 10) {
-    return res.status(400).json({ error: "Alternate number must be a valid 10-digit phone number" });
+    return { error: "Alternate number must be a valid 10-digit phone number" };
   }
-  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return res.status(400).json({ error: "Source of lead is required" });
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return { error: "Source of lead is required" };
   if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
-    return res.status(400).json({ error: "A valid approximate quote is required" });
+    return { error: "A valid approximate quote is required" };
   }
-  if (!LEAD_STATUSES.includes(lead.leadStatus)) return res.status(400).json({ error: "Invalid lead status" });
+  if (!LEAD_STATUSES.includes(lead.leadStatus)) return { error: "Invalid lead status" };
+
+  return {
+    values: { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude },
+  };
+}
+
+async function createCommercialLead(req, res, lead) {
+  const read = readCommercialFields(req.body || {}, lead);
+  if (read.error) return res.status(400).json({ error: read.error });
+  const { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude } =
+    read.values;
 
   const findByRef = async () => {
     const [[row]] = await pool.query(
@@ -449,6 +457,170 @@ async function createCommercialLead(req, res, lead) {
     res.status(500).json({ error: "Failed to save lead" });
   }
 }
+
+// --------------------
+// EDIT A LEAD
+// --------------------
+// PUT /api/crm/leads/:id -> the updated lead
+// Anyone who can see a lead can edit it (a sales user their own; the roles that see every lead,
+// any of them). The body is the same shape POST /leads takes.
+//
+// Residential leads: the customer's details and the lead status can always be changed. The
+// service, the amount and the payment can be changed only while the payment is pending - once a
+// lead is paid they are locked and whatever is sent for them is ignored. A cash / other payment
+// can be marked paid here; an online payment still becomes paid only through Razorpay.
+router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req, res) => {
+  const body = req.body || {};
+
+  const customerName = typeof body.customer_name === "string" ? body.customer_name.trim() : "";
+  const phone = typeof body.phone === "string" ? body.phone.replace(/\D/g, "") : "";
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  const location = typeof body.location === "string" ? body.location.trim() : "";
+  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+  const referenceBy = typeof body.reference_by === "string" ? body.reference_by.trim() : "";
+  const amount = Number(body.amount);
+  const leadStatus = body.lead_status || "new";
+
+  if (customerName.length < 2) return res.status(400).json({ error: "Customer name is required" });
+  if (phone.length !== 10) return res.status(400).json({ error: "A valid 10-digit phone number is required" });
+  if (email && (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return res.status(400).json({ error: "Enter a valid email address" });
+  }
+  if (referenceBy.length > 100) return res.status(400).json({ error: "Reference name is too long (max 100)" });
+  if (!LEAD_STATUSES.includes(leadStatus)) return res.status(400).json({ error: "Invalid lead status" });
+
+  try {
+    const existing = await loadVisibleLead(req, req.params.id);
+    if (!existing) return res.status(404).json({ error: "Lead not found" });
+
+    if (existing.lead_type === "commercial") {
+      const read = readCommercialFields(body, { location, referenceBy, amount, leadStatus });
+      if (read.error) return res.status(400).json({ error: read.error });
+      const v = read.values;
+
+      await pool.query(
+        `UPDATE crm_leads
+            SET customer_name = ?, company_name = ?, industry_type = ?, contact_designation = ?,
+                phone = ?, alternate_phone = ?, customer_email = ?, amount = ?, services_requested = ?,
+                location = ?, latitude = ?, longitude = ?, lead_source = ?, reference_by = ?, notes = ?,
+                lead_status = ?
+          WHERE id = ?`,
+        [
+          customerName,
+          v.companyName,
+          v.industryType,
+          v.designation || null,
+          phone,
+          v.alternatePhone || null,
+          email || null,
+          amount,
+          v.services.length ? v.services.join(",") : null,
+          location || null,
+          v.latitude,
+          v.longitude,
+          v.leadSource,
+          referenceBy || null,
+          notes || null,
+          leadStatus,
+          existing.id,
+        ]
+      );
+    } else {
+      const leadSource = body.lead_source || null;
+      if (leadSource !== null && !LEAD_SOURCES.includes(leadSource)) {
+        return res.status(400).json({ error: "Invalid lead source" });
+      }
+
+      const wasPaid = existing.payment_status === "paid";
+      // What the service / money columns end up as: unchanged for a paid lead.
+      let houseType = existing.house_type;
+      let serviceName = existing.service_name;
+      let planType = existing.plan_type;
+      let standardAmount = existing.standard_amount;
+      let newAmount = Number(existing.amount);
+      let paymentMethod = existing.payment_method;
+      let paymentStatus = existing.payment_status;
+      let razorpayOrderId = existing.razorpay_order_id;
+
+      if (!wasPaid) {
+        houseType = typeof body.house_type === "string" ? body.house_type.trim() : "";
+        serviceName = typeof body.service_name === "string" ? body.service_name.trim() : "";
+        planType = typeof body.plan_type === "string" ? body.plan_type.trim() : "";
+        newAmount = amount;
+        paymentMethod = body.payment_method;
+        paymentStatus = body.payment_status || "pending";
+
+        if (!houseType) return res.status(400).json({ error: "House type is required" });
+        if (!serviceName) return res.status(400).json({ error: "Service is required" });
+        if (!planType) return res.status(400).json({ error: "Plan is required" });
+        if (!Number.isFinite(newAmount) || newAmount <= 0) return res.status(400).json({ error: "A valid amount is required" });
+        if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: "Invalid payment method" });
+        if (!PAYMENT_STATUSES.includes(paymentStatus)) return res.status(400).json({ error: "Invalid payment status" });
+        // Online payments are only "paid" once Razorpay confirms them.
+        if (paymentMethod === "online") paymentStatus = "pending";
+
+        // The list price is looked up again only when the service itself changed, so an old lead
+        // whose service has since left the price list can still have its other details edited.
+        const serviceChanged =
+          houseType !== existing.house_type || serviceName !== existing.service_name || planType !== existing.plan_type;
+        if (serviceChanged) {
+          const [[priceRow]] = await pool.query(
+            `SELECT p.price
+               FROM crm_service_prices p
+               JOIN crm_services s ON s.id = p.service_id
+              WHERE s.name = ? AND p.house_type = ? AND p.plan_type = ?
+                AND s.is_active = 1 AND p.is_active = 1
+              LIMIT 1`,
+            [serviceName, houseType, planType]
+          );
+          if (!priceRow) {
+            return res.status(400).json({ error: "That service, house type and plan combination is not in the price list" });
+          }
+          standardAmount = priceRow.price;
+        }
+
+        // An open Razorpay order is for the old amount: drop it so the next payment starts a new one.
+        if (paymentMethod !== "online" || newAmount !== Number(existing.amount)) razorpayOrderId = null;
+      }
+
+      const nowPaid = !wasPaid && paymentStatus === "paid";
+      await pool.query(
+        `UPDATE crm_leads
+            SET customer_name = ?, phone = ?, customer_email = ?, house_type = ?, service_name = ?, plan_type = ?,
+                standard_amount = ?, amount = ?, location = ?, lead_source = ?, reference_by = ?, notes = ?,
+                payment_method = ?, payment_status = ?, lead_status = ?, razorpay_order_id = ?
+                ${nowPaid ? ", paid_at = NOW()" : ""}
+          WHERE id = ?`,
+        [
+          customerName,
+          phone,
+          email || null,
+          houseType,
+          serviceName,
+          planType,
+          standardAmount,
+          newAmount,
+          location || null,
+          leadSource,
+          referenceBy || null,
+          notes || null,
+          paymentMethod,
+          paymentStatus,
+          leadStatus,
+          razorpayOrderId,
+          existing.id,
+        ]
+      );
+      if (nowPaid) await handleNewCustomer(customerName);
+    }
+
+    const updated = await loadVisibleLead(req, existing.id);
+    res.json(toLead(updated));
+  } catch (err) {
+    console.error("CRM lead update error:", err);
+    res.status(500).json({ error: "Failed to save the changes" });
+  }
+});
 
 // --------------------
 // LEAD PHOTOS (commercial leads)
@@ -583,6 +755,29 @@ router.get("/leads/:id/photos/:photoId/view", auth, requirePermission("CRM_VIEW_
   } catch (err) {
     console.error("CRM lead photo view error:", err);
     res.status(500).json({ error: "Failed to load photo" });
+  }
+});
+
+// DELETE /api/crm/leads/:id/photos/:photoId
+router.delete("/leads/:id/photos/:photoId", auth, requirePermission("CRM_CREATE_LEAD"), async (req, res) => {
+  try {
+    if (!(await loadVisibleLead(req, req.params.id))) return res.status(404).json({ error: "Lead not found" });
+    const [[photo]] = await pool.query(
+      `SELECT object_key FROM crm_lead_photos WHERE id = ? AND lead_id = ? LIMIT 1`,
+      [req.params.photoId, req.params.id]
+    );
+    if (!photo) return res.status(404).json({ error: "Photo not found" });
+
+    await pool.query(`DELETE FROM crm_lead_photos WHERE id = ? AND lead_id = ?`, [req.params.photoId, req.params.id]);
+    try {
+      await minioClient.removeObject(process.env.MINIO_BUCKET, photo.object_key);
+    } catch (err) {
+      console.error(`Failed to remove lead photo file ${photo.object_key}:`, err.message);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("CRM lead photo delete error:", err);
+    res.status(500).json({ error: "Failed to remove photo" });
   }
 });
 

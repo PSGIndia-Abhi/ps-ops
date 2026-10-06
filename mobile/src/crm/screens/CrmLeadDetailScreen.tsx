@@ -320,7 +320,19 @@ export function CrmLeadDetailScreen() {
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
-      <TopBar title="Lead Details" onBack={() => navigation.goBack()} />
+      <TopBar
+        title="Lead Details"
+        onBack={() => navigation.goBack()}
+        // A lead still waiting on this phone is not on the server yet, so there is nothing to edit there.
+        action={
+          lead.pendingSync
+            ? undefined
+            : {
+                label: 'Edit',
+                onPress: () => navigation.navigate('CrmNewLead', { editLeadId: lead.id }),
+              }
+        }
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
