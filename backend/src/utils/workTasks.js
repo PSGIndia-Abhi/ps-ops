@@ -34,6 +34,16 @@ function isRealDate(value) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
+// Checks the shape AND the actual ranges -- "99:99" matches /^\d{2}:\d{2}$/
+// but isn't a real time, and MySQL rejects it with an unhandled 500 instead
+// of a clean validation error.
+function isValidTime(value) {
+  const m = typeof value === "string" && value.match(/^(\d{2}):(\d{2})(:(\d{2}))?$/);
+  if (!m) return false;
+  const [, h, mi, , s] = m;
+  return Number(h) <= 23 && Number(mi) <= 59 && (s === undefined || Number(s) <= 59);
+}
+
 // Same shape everywhere a single task is returned (GET one, create, start,
 // progress, complete, reassign, reschedule, skip) — including the assignee's
 // and creator's names, exactly like the list endpoint already does, so the
@@ -77,4 +87,4 @@ async function resolveVisibleUserIds(executor, req) {
   return [...ids];
 }
 
-module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, loadTask, logHistory, hasPerm, resolveVisibleUserIds };
+module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds };

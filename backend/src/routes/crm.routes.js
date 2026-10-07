@@ -10,6 +10,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
+const { nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead } = require("../utils/crmLeadManagement");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -80,6 +81,14 @@ function toLead(row) {
     created_by_user_id: row.created_by_user_id === null ? null : String(row.created_by_user_id),
     created_at: row.created_at,
     paid_at: row.paid_at || null,
+    // Lead Management fields -- always present, but only ever set for lead_type='commercial'.
+    lead_number: row.lead_number || null,
+    provider_id: row.provider_id === null || row.provider_id === undefined ? null : String(row.provider_id),
+    pipeline_stage: row.pipeline_stage || null,
+    assigned_telecaller_id: row.assigned_telecaller_id === null || row.assigned_telecaller_id === undefined ? null : String(row.assigned_telecaller_id),
+    assigned_sales_employee_id: row.assigned_sales_employee_id === null || row.assigned_sales_employee_id === undefined ? null : String(row.assigned_sales_employee_id),
+    loss_reason_id: row.loss_reason_id || null,
+    row_version: row.row_version === undefined ? null : Number(row.row_version),
   };
 }
 
@@ -129,6 +138,33 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
   try {
     const wanted = req.query.lead_type;
     const leadType = wanted === "commercial" || wanted === "all" ? wanted : "consumer";
+
+    // Commercial leads get Lead Management's visibility scoping + filters.
+    // Consumer leads (and lead_type=all, which includes consumer rows) keep
+    // their original unscoped behaviour untouched, for backward compatibility
+    // with the existing mobile app.
+    if (leadType === "commercial") {
+      const where = ["lead_type = 'commercial'"];
+      const params = [];
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null) {
+        where.push("(created_by_user_id IN (?) OR assigned_telecaller_id IN (?) OR assigned_sales_employee_id IN (?))");
+        params.push(visibleIds, visibleIds, visibleIds);
+      }
+      if (req.query.pipeline_stage) { where.push("pipeline_stage = ?"); params.push(String(req.query.pipeline_stage)); }
+      if (req.query.assigned_telecaller_id) { where.push("assigned_telecaller_id = ?"); params.push(Number(req.query.assigned_telecaller_id)); }
+      if (req.query.assigned_sales_employee_id) { where.push("assigned_sales_employee_id = ?"); params.push(Number(req.query.assigned_sales_employee_id)); }
+      if (req.query.lead_source) { where.push("lead_source = ?"); params.push(String(req.query.lead_source)); }
+      if (req.query.from_date) { where.push("DATE(created_at) >= ?"); params.push(String(req.query.from_date)); }
+      if (req.query.to_date) { where.push("DATE(created_at) <= ?"); params.push(String(req.query.to_date)); }
+
+      const [rows] = await pool.query(
+        `SELECT * FROM crm_leads WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT ${LIST_LIMIT}`,
+        params
+      );
+      return res.json(rows.map(toLead));
+    }
+
     const [rows] = await pool.query(
       `SELECT * FROM crm_leads ${leadType === "all" ? "" : "WHERE lead_type = ?"}
        ORDER BY created_at DESC LIMIT ${LIST_LIMIT}`,
@@ -146,6 +182,12 @@ router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, r
   try {
     const [[row]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ? LIMIT 1`, [req.params.id]);
     if (!row) return res.status(404).json({ error: "Lead not found" });
+    if (row.lead_type === "commercial") {
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null && !isOwnLead(row, req.user.id) && !visibleIds.some((id) => isOwnLead(row, id))) {
+        return res.status(404).json({ error: "Lead not found" });
+      }
+    }
     res.json(toLead(row));
   } catch (err) {
     console.error("CRM lead fetch error:", err);
@@ -324,28 +366,41 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const id = uuid();
-    await pool.query(
-      `INSERT INTO crm_leads
-        (id, lead_type, customer_name, company_name, phone, alternate_phone, customer_email,
-         house_type, service_name, plan_type, standard_amount, amount, location, lead_source, notes,
-         payment_method, payment_status, lead_status, created_by_user_id, external_ref)
-       VALUES (?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
-      [
-        id,
-        lead.customerName,
-        companyName,
-        lead.phone,
-        alternatePhone || null,
-        lead.email || null,
-        lead.amount,
-        lead.location,
-        leadSource,
-        lead.notes || null,
-        lead.leadStatus,
-        req.user.id,
-        lead.clientRef,
-      ]
-    );
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const leadNumber = await nextLeadNumber(conn);
+      await conn.query(
+        `INSERT INTO crm_leads
+          (id, lead_number, lead_type, customer_name, company_name, phone, alternate_phone, customer_email,
+           house_type, service_name, plan_type, standard_amount, amount, location, lead_source, notes,
+           payment_method, payment_status, lead_status, pipeline_stage, created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, 'NEW', ?, ?)`,
+        [
+          id,
+          leadNumber,
+          lead.customerName,
+          companyName,
+          lead.phone,
+          alternatePhone || null,
+          lead.email || null,
+          lead.amount,
+          lead.location,
+          leadSource,
+          lead.notes || null,
+          lead.leadStatus,
+          req.user.id,
+          lead.clientRef,
+        ]
+      );
+      await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
     res.status(201).json(toLead(created));

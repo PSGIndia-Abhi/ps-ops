@@ -38,6 +38,13 @@ const orgUnitsRoutes = require("./src/routes/org-units.routes");
 const userHierarchyRoutes = require("./src/routes/user-hierarchy.routes");
 const hierarchyRoutes = require("./src/routes/hierarchy.routes");
 const crmRoutes = require("./src/routes/crm.routes");
+const crmLeadManagementRoutes = require("./src/routes/crm-lead-management.routes");
+const crmLeadMeetingsRoutes = require("./src/routes/crm-lead-meetings.routes");
+const crmLeadFollowupsRoutes = require("./src/routes/crm-lead-followups.routes");
+const crmLeadQuotationsRoutes = require("./src/routes/crm-lead-quotations.routes");
+const crmLeadProviderRoutes = require("./src/routes/crm-lead-provider.routes");
+const crmLeadReportsRoutes = require("./src/routes/crm-lead-reports.routes");
+const crmLeadMobileRoutes = require("./src/routes/crm-lead-mobile.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
@@ -98,6 +105,15 @@ app.use("/api/org-units", orgUnitsRoutes);
 app.use("/api/users", userHierarchyRoutes);
 app.use("/api/hierarchy", hierarchyRoutes);
 app.use("/api/crm", crmRoutes);
+// Lead Management (telecaller/internal workflow for commercial leads) --
+// mounted after crmRoutes: new paths only, no collisions with it.
+app.use("/api/crm", crmLeadManagementRoutes);
+app.use("/api/crm", crmLeadMeetingsRoutes);
+app.use("/api/crm", crmLeadFollowupsRoutes);
+app.use("/api/crm", crmLeadQuotationsRoutes);
+app.use("/api/crm", crmLeadProviderRoutes);
+app.use("/api/crm", crmLeadReportsRoutes);
+app.use("/api/crm", crmLeadMobileRoutes);
 app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);

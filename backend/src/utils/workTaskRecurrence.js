@@ -9,11 +9,10 @@
 
 const { v4: uuid } = require("uuid");
 const { today: dbToday } = require("./hierarchy");
-const { logHistory, isRealDate: isValidDate } = require("./workTasks");
+const { logHistory, isRealDate: isValidDate, isValidTime } = require("./workTasks");
 
 const FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
 const END_TYPES = ["NEVER", "ON_DATE", "AFTER_COUNT"];
-const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
 const MAX_BACKDATE_DAYS = 366; // a new series may start at most this far in the past
 const MAX_PER_RUN = 100; // occurrences created per series per run; the rest catch up next run
 const SCAN_DAYS = 4 * 366;
@@ -140,7 +139,7 @@ function validateRecurrence(r, todayStr) {
 
   let timeOfDay = "09:00:00";
   if (r.time_of_day !== undefined && r.time_of_day !== null) {
-    if (!TIME_RE.test(String(r.time_of_day))) return { error: "recurrence.time_of_day must be HH:MM or HH:MM:SS" };
+    if (!isValidTime(r.time_of_day)) return { error: "recurrence.time_of_day must be a valid HH:MM or HH:MM:SS" };
     timeOfDay = String(r.time_of_day).length === 5 ? `${r.time_of_day}:00` : String(r.time_of_day);
   }
 

@@ -8,7 +8,7 @@ const multer = require("multer");
 const minioClient = require("../lib/minio");
 const { getTeamUserIds, today: dbToday } = require("../utils/hierarchy");
 const {
-  TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
+  TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
 } = require("../utils/workTasks");
 const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate } = require("../utils/workTaskRecurrence");
 
@@ -28,7 +28,6 @@ function parseId(value) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
 const isValidDate = isRealDate;
 const PRIORITIES = ["LOW", "NORMAL", "HIGH"];
 
@@ -483,7 +482,7 @@ router.post("/", auth, requireRealUser, async (req, res) => {
 
     if (!isRecurring) {
       if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD), or send a recurrence");
-      if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
+      if (body.due_time && !isValidTime(body.due_time)) throw new HttpError(400, "due_time must be a valid HH:MM or HH:MM:SS");
       if (body.next_action_date && !isValidDate(body.next_action_date)) throw new HttpError(400, "next_action_date must be YYYY-MM-DD");
     }
 
@@ -814,7 +813,7 @@ router.post("/:id/reschedule-requests", auth, requireRealUser, async (req, res) 
     const body = req.body || {};
     if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD)");
     await assertNotPast(body.due_date);
-    if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
+    if (body.due_time && !isValidTime(body.due_time)) throw new HttpError(400, "due_time must be a valid HH:MM or HH:MM:SS");
     const dueTime = body.due_time || null;
     if (body.due_date === task.due_date && String(dueTime || "").slice(0, 5) === String(task.due_time || "").slice(0, 5)) {
       throw new HttpError(400, "That is already the due date");
@@ -888,7 +887,7 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
     const body = req.body || {};
     if (!isValidDate(body.due_date)) throw new HttpError(400, "due_date is required (YYYY-MM-DD)");
     await assertNotPast(body.due_date);
-    if (body.due_time && !TIME_RE.test(String(body.due_time))) throw new HttpError(400, "due_time must be HH:MM or HH:MM:SS");
+    if (body.due_time && !isValidTime(body.due_time)) throw new HttpError(400, "due_time must be a valid HH:MM or HH:MM:SS");
     const dueTime = body.due_time !== undefined ? body.due_time || null : task.due_time;
     const reason = optionalText(body.reason);
     const historyNote = `Due ${task.due_date}${task.due_time ? ` ${task.due_time}` : ""} moved to ${body.due_date}${dueTime ? ` ${dueTime}` : ""}${reason ? `: ${reason}` : ""}`;
