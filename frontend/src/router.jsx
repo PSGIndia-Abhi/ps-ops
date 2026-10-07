@@ -62,6 +62,12 @@ import TaskProReports from "./pages/taskpro/TaskReports";
 import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
 import { TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
+import LeadsLayout from "./pages/leads/LeadsLayout";
+import LeadsHome from "./pages/leads/Home";
+import LeadsList from "./pages/leads/LeadsList";
+import LeadDetail from "./pages/leads/LeadDetail";
+import { FollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
+import { LEADS_HOME, LEADS_ROLES } from "./pages/leads/access";
 import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
@@ -242,6 +248,28 @@ const router = createBrowserRouter([
       },
       { path: "tasks", element: <TaskManagement /> },
       { path: "settings", element: <TdsSettings /> },
+    ],
+  },
+
+  // LEADS — lead management: provider portal, telecaller, sales and sales manager
+  // dashboards (protected; roles in pages/leads/access.js). The index page shows
+  // the dashboard that matches the signed-in role.
+  // -------------------------
+  {
+    path: LEADS_HOME,
+    element: (
+      <ProtectedRoute allowedRoles={LEADS_ROLES}>
+        <LeadsLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <LeadsHome /> },
+      { path: "submit", element: <SubmitLead /> },
+      { path: "all", element: <LeadsList /> },
+      { path: "follow-ups", element: <FollowUps /> },
+      { path: "meetings", element: <Meetings /> },
+      { path: "providers", element: <Providers /> },
+      { path: ":id", element: <LeadDetail /> },
     ],
   },
 

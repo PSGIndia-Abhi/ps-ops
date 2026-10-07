@@ -17,6 +17,12 @@ export const ROLE_HOME = {
   temporary_worker: "/temp",
   staff: "/staff",
 
+  // Lead Management (pages/leads). Each lands on /leads, which shows the
+  // dashboard for that role: provider portal, telecaller or sales manager.
+  lead_provider: "/leads",
+  telecaller: "/leads",
+  sales_manager: "/leads",
+
   // The real org-hierarchy designations (see user_hierarchy / Roles &
   // Permissions) land in Task Management. Deliberately NOT "supervisor" —
   // that role name is shared with the existing, unrelated supervisor panel,
