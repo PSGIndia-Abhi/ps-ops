@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
+const { nextCompanyId } = require("../utils/crmCustomerCompany");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -40,6 +41,8 @@ async function inTransaction(fn) {
 }
 
 const TERMINAL_STAGES = ["WON", "CONVERTED", "NOT_GENUINE", "LOST", "CANCELLED"];
+// Still with the telecaller (null = a lead from before pipeline stages existed).
+const UNVERIFIED_STAGES = [null, "NEW", "TO_CALL", "NEED_MORE_INFO"];
 
 // Same mysql2 timezone-shift gotcha as everywhere else in this codebase --
 // DATETIME columns are always read back as plain strings, never raw Date objects.
@@ -178,6 +181,10 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
     const lead = await loadVisibleLead(req, req.params.id);
     if (req.user.role !== "admin" && !hasPerm(req, "CONVERT_LEAD")) throw new HttpError(403, "You do not have permission to convert leads");
     if (TERMINAL_STAGES.includes(lead.pipeline_stage)) throw new HttpError(400, `Cannot convert a lead that is ${lead.pipeline_stage}`);
+    // Every lead is verified by a telecaller first - one still waiting for that is not a customer yet.
+    if (UNVERIFIED_STAGES.includes(lead.pipeline_stage)) {
+      throw new HttpError(400, "This lead has not been verified yet. It can be converted once it is qualified.");
+    }
 
     const [[already]] = await pool.query("SELECT id FROM crm_lead_conversions WHERE lead_id = ?", [lead.id]);
     if (already) throw new HttpError(409, "This lead has already been converted");
@@ -189,10 +196,7 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
     const companyId = await inTransaction(async (conn) => {
       // companies.id is VARCHAR(20), a short readable id (COMP1, COMP2, ...)
       // -- same convention companies.routes.js already uses, not a UUID.
-      const [[nextCompany]] = await conn.query(
-        "SELECT COALESCE(MAX(CAST(SUBSTRING(id, 5) AS UNSIGNED)), 0) + 1 AS next FROM companies WHERE id LIKE 'COMP%' FOR UPDATE"
-      );
-      const newCompanyId = `COMP${nextCompany.next}`;
+      const newCompanyId = await nextCompanyId(conn);
       await conn.query(
         "INSERT INTO companies (id, name, type, is_active, created_at) VALUES (?, ?, 'CORPORATE', 1, NOW())",
         [newCompanyId, companyName]

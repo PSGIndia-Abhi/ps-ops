@@ -142,7 +142,9 @@ router.post("/provider/leads", auth, requireProvider, async (req, res) => {
       const [[dupe]] = await pool.query(
         `SELECT id, lead_number, company_name FROM crm_leads
           WHERE lead_type = 'commercial' AND phone = ?
-            AND pipeline_stage NOT IN ('NOT_GENUINE','LOST','CANCELLED')
+            -- "IS NULL OR": a lead from before pipeline stages existed has no stage, and
+            -- NULL NOT IN (...) is never true, so it would be missed as a duplicate.
+            AND (pipeline_stage IS NULL OR pipeline_stage NOT IN ('NOT_GENUINE','LOST','CANCELLED'))
           LIMIT 1`,
         [phone]
       );
