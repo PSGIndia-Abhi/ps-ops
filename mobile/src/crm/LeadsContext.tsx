@@ -20,7 +20,12 @@ import {
 } from './outbox';
 import type { ServiceMasterRow } from './serviceMaster';
 import { computeLeadStats, type LeadStats } from './stats';
-import type { Lead, NewLeadInput } from './types';
+import {
+  isCommercial,
+  type Lead,
+  type LocalLeadPhoto,
+  type NewLeadInput,
+} from './types';
 
 const NOTICE_VISIBLE_MS = 3500;
 const OUTBOX_RETRY_MS = 30000;
@@ -32,7 +37,10 @@ function messageFrom(err: unknown, fallback: string): string {
 }
 
 interface LeadsContextValue {
+  /** Consumer leads only - everything about payments is worked out from these. */
   leads: Lead[];
+  /** Commercial leads (company enquiries with a quote and photos, no payment). */
+  commercialLeads: Lead[];
   /** The price list (service + house type + plan -> price), from the backend. */
   serviceMaster: ServiceMasterRow[];
   stats: LeadStats;
@@ -48,11 +56,14 @@ interface LeadsContextValue {
   /**
    * Saves to the backend; rejects with the server's message so the form can show it. With no
    * connection the lead is kept on the phone instead (the returned lead has `pendingSync: true`)
-   * and is sent automatically later.
+   * and is sent automatically later. `photos` (commercial leads) are uploaded once the lead is on
+   * the server; any that can't be sent yet wait on the phone the same way.
    */
-  addLead: (input: NewLeadInput) => Promise<Lead>;
+  addLead: (input: NewLeadInput, photos?: LocalLeadPhoto[]) => Promise<Lead>;
   /** Removes a queued lead the server refused (or one the user no longer wants sent). */
   discardQueued: (id: string) => void;
+  /** Saves changes to a lead that is already on the server; rejects with the server's message. Needs a connection. */
+  updateLead: (id: string, input: NewLeadInput) => Promise<Lead>;
   /** Swaps in an updated copy of a lead (e.g. after it was paid). */
   replaceLead: (lead: Lead) => void;
   showNotice: (message: string, tone?: NoticeTone) => void;
@@ -95,24 +106,73 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     () => undefined,
   );
 
-  /** Sends queued leads one by one. Stops quietly at the first connection failure. */
+  /**
+   * Uploads a queued item's photos one at a time, dropping each from the outbox as it lands (and
+   * the item itself once none are left). `offline` means the connection dropped part-way: what is
+   * left stays queued. `failed` counts photos the server refused - those are not retried.
+   */
+  const sendQueuedPhotos = useCallback(
+    async (
+      clientRef: string,
+      leadId: string,
+    ): Promise<{ offline: boolean; failed: number }> => {
+      const photos =
+        outboxRef.current.find(i => i.clientRef === clientRef)?.photos ?? [];
+      let failed = 0;
+      for (const photo of photos) {
+        try {
+          await crmApi.uploadLeadPhoto(leadId, photo);
+        } catch (err) {
+          if (err instanceof ApiError && err.isNetworkError)
+            return { offline: true, failed };
+          failed += 1;
+        }
+        updateOutbox(
+          outboxRef.current.map(i =>
+            i.clientRef === clientRef
+              ? {
+                  ...i,
+                  photos: (i.photos ?? []).filter(p => p.ref !== photo.ref),
+                }
+              : i,
+          ),
+        );
+      }
+      updateOutbox(outboxRef.current.filter(i => i.clientRef !== clientRef));
+      return { offline: false, failed };
+    },
+    [updateOutbox],
+  );
+
+  /** Sends queued leads (and their photos) one by one. Stops quietly at the first connection failure. */
   const syncOutbox = useCallback(async (): Promise<boolean> => {
     if (syncing.current || !outboxLoaded.current) return false;
     const pending = outboxRef.current.filter(i => !i.error);
     if (pending.length === 0) return false;
     syncing.current = true;
     let sent = 0;
+    let failedPhotos = 0;
     try {
       for (const item of pending) {
         try {
-          const lead = await crmApi.createLead(item.input, item.clientRef);
-          setServerLeads(prev =>
-            prev.some(l => l.id === lead.id) ? prev : [lead, ...prev],
-          );
-          updateOutbox(
-            outboxRef.current.filter(i => i.clientRef !== item.clientRef),
-          );
-          sent += 1;
+          let leadId = item.leadId;
+          if (!leadId) {
+            const lead = await crmApi.createLead(item.input, item.clientRef);
+            setServerLeads(prev =>
+              prev.some(l => l.id === lead.id) ? prev : [lead, ...prev],
+            );
+            sent += 1;
+            leadId = lead.id;
+            // The lead is on the server now; from here only its photos are waiting.
+            updateOutbox(
+              outboxRef.current.map(i =>
+                i.clientRef === item.clientRef ? { ...i, leadId: lead.id } : i,
+              ),
+            );
+          }
+          const photos = await sendQueuedPhotos(item.clientRef, leadId);
+          failedPhotos += photos.failed;
+          if (photos.offline) break;
         } catch (err) {
           if (err instanceof ApiError && err.isNetworkError) break;
           const message =
@@ -129,7 +189,14 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       syncing.current = false;
     }
-    if (sent > 0) {
+    if (failedPhotos > 0) {
+      showNoticeRef.current(
+        failedPhotos === 1
+          ? '1 photo could not be uploaded'
+          : `${failedPhotos} photos could not be uploaded`,
+        'warning',
+      );
+    } else if (sent > 0) {
       showNoticeRef.current(
         sent === 1
           ? 'Saved lead sent to the office'
@@ -137,7 +204,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
       );
     }
     return sent > 0;
-  }, [updateOutbox]);
+  }, [updateOutbox, sendQueuedPhotos]);
 
   const load = useCallback(async () => {
     try {
@@ -223,13 +290,14 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
   showNoticeRef.current = showNotice;
 
   const addLead = useCallback(
-    async (input: NewLeadInput): Promise<Lead> => {
+    async (
+      input: NewLeadInput,
+      photos: LocalLeadPhoto[] = [],
+    ): Promise<Lead> => {
       const clientRef = newClientRef();
+      let lead: Lead;
       try {
-        const lead = await crmApi.createLead(input, clientRef);
-        setServerLeads(prev => [lead, ...prev]);
-        showNotice(`Lead saved - ${lead.customerName}`);
-        return lead;
+        lead = await crmApi.createLead(input, clientRef);
       } catch (err) {
         if (!(err instanceof ApiError && err.isNetworkError)) throw err;
         // No connection: keep it on the phone; the same clientRef makes a later retry safe.
@@ -237,6 +305,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
           clientRef,
           input,
           createdAt: new Date().toISOString(),
+          photos: photos.length > 0 ? photos : undefined,
         };
         updateOutbox([item, ...outboxRef.current]);
         showNotice(
@@ -245,8 +314,45 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
         );
         return outboxToLead(item);
       }
+
+      setServerLeads(prev => [lead, ...prev]);
+      if (photos.length === 0) {
+        showNotice(`Lead saved - ${lead.customerName}`);
+        return lead;
+      }
+      // The lead is safe on the server. Its photos go through the outbox, so a dropped
+      // connection only delays them instead of losing them.
+      updateOutbox([
+        { clientRef, input, createdAt: lead.createdAt, photos, leadId: lead.id },
+        ...outboxRef.current,
+      ]);
+      let result = { offline: true, failed: 0 };
+      if (!syncing.current) {
+        syncing.current = true;
+        try {
+          result = await sendQueuedPhotos(clientRef, lead.id);
+        } finally {
+          syncing.current = false;
+        }
+      }
+      if (result.offline) {
+        showNotice(
+          'Lead saved. Its photos will be sent as soon as the connection allows',
+          'warning',
+        );
+      } else if (result.failed > 0) {
+        showNotice(
+          result.failed === 1
+            ? 'Lead saved, but 1 photo could not be uploaded'
+            : `Lead saved, but ${result.failed} photos could not be uploaded`,
+          'warning',
+        );
+      } else {
+        showNotice(`Lead saved - ${lead.customerName}`);
+      }
+      return lead;
     },
-    [showNotice, updateOutbox],
+    [showNotice, updateOutbox, sendQueuedPhotos],
   );
 
   const discardQueued = useCallback(
@@ -262,20 +368,49 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     setServerLeads(prev => prev.map(l => (l.id === lead.id ? lead : l)));
   }, []);
 
-  const leads = useMemo(
-    () => [...outbox.map(outboxToLead), ...serverLeads],
+  const updateLead = useCallback(
+    async (id: string, input: NewLeadInput): Promise<Lead> => {
+      const lead = await crmApi.updateLead(id, input);
+      replaceLead(lead);
+      return lead;
+    },
+    [replaceLead],
+  );
+
+  // An outbox item whose lead already reached the server is only waiting on photos - the list
+  // shows the server's copy of that lead, not a second "waiting to send" one.
+  const allLeads = useMemo(
+    () => [...outbox.filter(i => !i.leadId).map(outboxToLead), ...serverLeads],
     [outbox, serverLeads],
   );
+  const leads = useMemo(
+    () => allLeads.filter(l => !isCommercial(l)),
+    [allLeads],
+  );
+  const commercialLeads = useMemo(
+    () => allLeads.filter(isCommercial),
+    [allLeads],
+  );
   const getLead = useCallback(
-    (id: string) => leads.find(l => l.id === id),
-    [leads],
+    (id: string) => allLeads.find(l => l.id === id),
+    [allLeads],
   );
   const dismissNotice = useCallback(() => setNotice(null), []);
-  const stats = useMemo(() => computeLeadStats(leads), [leads]);
+  // Money totals are consumer-only (a commercial quote is not a payment); the count of
+  // today's leads is everything the rep brought in today.
+  const stats = useMemo(() => {
+    const consumer = computeLeadStats(leads);
+    return {
+      ...consumer,
+      todaysLeads:
+        consumer.todaysLeads + computeLeadStats(commercialLeads).todaysLeads,
+    };
+  }, [leads, commercialLeads]);
 
   const value = useMemo(
     () => ({
       leads,
+      commercialLeads,
       serviceMaster,
       stats,
       loading,
@@ -286,6 +421,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
       refresh,
       addLead,
       discardQueued,
+      updateLead,
       replaceLead,
       showNotice,
       getLead,
@@ -293,6 +429,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       leads,
+      commercialLeads,
       serviceMaster,
       stats,
       loading,
@@ -303,6 +440,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
       refresh,
       addLead,
       discardQueued,
+      updateLead,
       replaceLead,
       showNotice,
       getLead,

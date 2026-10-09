@@ -5,7 +5,8 @@
  * Calendar dates are plain 'YYYY-MM-DD' strings, times 'HH:MM:SS' or null.
  */
 
-export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+/** PAUSED: the assignee put a started task on hold (with a reason); it must be resumed before completing. */
+export type TaskStatus = 'OPEN' | 'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'NORMAL' | 'HIGH';
 
 export interface WorkTask {
@@ -28,6 +29,10 @@ export interface WorkTask {
   next_action_date: string | null;
   started_at: string | null;
   started_by: number | null;
+  /** When the current pause began (null unless PAUSED). */
+  paused_at?: string | null;
+  /** Total seconds spent paused so far, left out of "time worked". */
+  paused_seconds?: number | null;
   completed_at: string | null;
   completed_by: number | null;
   completion_note: string | null;
@@ -36,6 +41,37 @@ export interface WorkTask {
   is_overdue?: boolean;
   comment_count?: number;
   attachment_count?: number;
+  /** The task's current PENDING ask to move the due date, if any (GET /:id only). */
+  pending_reschedule_request?: RescheduleRequest | null;
+  /** Same, as just an id (GET /api/work-tasks list) - lightweight signal for notification diffing. */
+  pending_reschedule_request_id?: string | null;
+}
+
+export type RescheduleRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+
+/** A plain assignee's ask to move a task's due date, needing the creator's or their manager's approval. */
+export interface RescheduleRequest {
+  id: string;
+  task_id: string;
+  requested_by: number;
+  requested_by_name: string | null;
+  from_due_date: string | null;
+  from_due_time: string | null;
+  to_due_date: string;
+  to_due_time: string | null;
+  reason: string | null;
+  status: RescheduleRequestStatus;
+  decided_by: number | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  created_at: string;
+  task_title: string;
+  task_status: TaskStatus;
+  task_priority: TaskPriority;
+  assigned_to: number;
+  assigned_to_name: string | null;
+  task_created_by: number;
 }
 
 export interface TaskComment {
@@ -90,6 +126,8 @@ export interface RecurrenceInput {
   days_of_week?: number[];
   day_of_month?: number;
   use_last_day_of_month?: boolean;
+  /** "Nth weekday(s) of the month" (e.g. the 1st and 3rd Monday and Friday): 1-4 = First..Fourth, -1 = Last. Pairs with `days_of_week`. */
+  month_week?: number[];
   month_of_year?: number;
   end_date?: string;
   end_count?: number;
@@ -128,4 +166,25 @@ export interface TaskSeries {
   recurrence: (RecurrenceInput & { days_of_week?: number[] | string | null }) | null;
   next_occurrence_date: string | null;
   occurrences: { id: string; due_date: string; due_time: string | null; status: TaskStatus }[];
+}
+
+/** One row of GET /api/work-task-series - flat (recurrence fields inline, not nested). */
+export interface SeriesListItem {
+  id: string;
+  title: string;
+  assigned_to: number;
+  assigned_to_name: string | null;
+  created_by: number;
+  status: SeriesStatus;
+  frequency: RecurrenceFrequency;
+  interval_value: number;
+  days_of_week: number[] | string | null;
+  day_of_month: number | null;
+  use_last_day_of_month: boolean | number;
+  month_week: number[] | string | null;
+  time_of_day: string;
+  start_date: string;
+  end_type: RecurrenceEnd;
+  occurrences_created: number;
+  next_occurrence_date: string | null;
 }

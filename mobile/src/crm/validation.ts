@@ -72,3 +72,67 @@ export function validateLead(values: LeadFormValues): LeadFormErrors {
 
   return errors;
 }
+
+/** The commercial lead form: a business enquiry with an approximate quote and no payment. */
+export interface CommercialLeadFormValues {
+  industryType: string | null;
+  companyName: string;
+  /** Typed by hand only when the phone's location could not be read. */
+  address: string;
+  /** The contact person. */
+  customerName: string;
+  designation: string;
+  phone: string;
+  alternatePhone: string;
+  email: string;
+  source: string | null;
+  referenceBy: string;
+  /** One or more of the commercial services. */
+  services: string[];
+  /** Approximate quote; kept as text while editing, parsed on save. */
+  amount: string;
+  notes: string;
+}
+
+export type CommercialLeadFormErrors = Partial<Record<keyof CommercialLeadFormValues, string>>;
+
+/**
+ * Required: industry type, company, contact person, phone, source, at least one service and a
+ * positive quote - plus where the business is: the phone's location (`hasLocation`) or, when that
+ * could not be read, a typed address.
+ */
+export function validateCommercialLead(
+  values: CommercialLeadFormValues,
+  hasLocation = false,
+): CommercialLeadFormErrors {
+  const errors: CommercialLeadFormErrors = {};
+
+  if (!values.industryType) errors.industryType = 'Select the industry type.';
+  if (values.companyName.trim().length < 2) errors.companyName = 'Enter the company / business name.';
+  if (!hasLocation && !values.address.trim()) {
+    errors.address = 'Your location could not be read - type the address, or try again.';
+  }
+  if (values.customerName.trim().length < 2) errors.customerName = "Enter the contact person's name.";
+
+  const phone = phoneError(values.phone);
+  if (phone) errors.phone = phone;
+
+  if (normalizePhone(values.alternatePhone)) {
+    const alternate = phoneError(values.alternatePhone);
+    if (alternate) errors.alternatePhone = alternate;
+    else if (normalizePhone(values.alternatePhone) === normalizePhone(values.phone)) {
+      errors.alternatePhone = 'This is the same as the phone number.';
+    }
+  }
+
+  const email = values.email.trim();
+  if (email && !EMAIL_PATTERN.test(email)) {
+    errors.email = 'That email looks incomplete - check it (e.g. name@company.com).';
+  }
+
+  if (!values.source) errors.source = 'Select where this lead came from.';
+  if (values.services.length === 0) errors.services = 'Select at least one service.';
+  if (parseAmount(values.amount) <= 0) errors.amount = 'Enter the approximate quote.';
+
+  return errors;
+}

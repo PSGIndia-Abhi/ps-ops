@@ -48,7 +48,7 @@ function normalizeScheduledDateTime(scheduledDate, scheduledTime) {
   return null;
 }
 
-const VISIT_GEOFENCE_RADIUS_METERS = 100;
+const VISIT_GEOFENCE_RADIUS_METERS = 500;
 
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;

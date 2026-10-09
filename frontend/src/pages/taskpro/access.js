@@ -6,7 +6,9 @@
 // in auth/roleBasePath.js so a role that can open TaskPro also lands there
 // on login.
 export const TASKPRO_ROLES = [
-  "admin",
+  // Deliberately NOT "admin" — admin manages the whole app from /admin and
+  // should never be bounced into TaskPro, including by typing /taskpro
+  // directly. "branch_admin" is unaffected (not asked for).
   "branch_admin",
   "Managing Director",
   "Personal Assistant",

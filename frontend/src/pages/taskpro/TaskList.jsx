@@ -6,6 +6,8 @@ import { PRIORITY, STATUS } from "./data";
 import PeopleFilters from "./Filters";
 import { daysFromToday, dueInfo, fmtDateTime, todayStr } from "./format";
 import { assignedByText, deptOf } from "./hierarchy";
+import NotStartedSeries from "./NotStartedSeries";
+import SeriesDialog from "./SeriesDialog";
 import { COMPLETED_PERIODS, completedIn, FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, readFilters, withParam } from "./selectors";
 import { useTaskStore } from "./tasksApi";
 import { useViewer } from "./viewerContext";
@@ -96,6 +98,7 @@ export default function TaskList({ mode }) {
   const status = params.get("status") || "ALL";
   const priority = params.get("priority") || "ALL";
   const [sort, setSort] = useState("due");
+  const [openSeries, setOpenSeries] = useState(null); // { id, allowManage } | null
 
   const shown = FILTERS_FOR[mode] || DEFAULT_FILTERS;
   const hasWhen = mode === "my";
@@ -191,6 +194,10 @@ export default function TaskList({ mode }) {
           <span className="tp-count-pill">{ready ? `${rows.length} ${rows.length === 1 ? "task" : "tasks"}` : "—"}</span>
         </div>
       </div>
+
+      {mode === "upcoming" && (
+        <NotStartedSeries scope={active.scope || "all"} viewer={viewer} onOpen={(id, allowManage) => setOpenSeries({ id, allowManage })} />
+      )}
 
       {ready && hiddenOverdue > 0 && (
         <button type="button" className="tp-overdue-note" onClick={() => setParam("when", "overdue")}>
@@ -299,6 +306,15 @@ export default function TaskList({ mode }) {
             </button>
           )}
         </EmptyState>
+      )}
+
+      {openSeries && (
+        <SeriesDialog
+          seriesId={openSeries.id}
+          allowManage={openSeries.allowManage}
+          onClose={() => setOpenSeries(null)}
+          onChanged={() => {}}
+        />
       )}
     </>
   );

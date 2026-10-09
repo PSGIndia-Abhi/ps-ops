@@ -26,6 +26,7 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
       SELECT
         c.id,
         c.name,
+        c.display_name,
         c.code,
         c.gst_number,
         c.type,
@@ -95,9 +96,11 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
 
 // POST /api/companies (legal entity)
 router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req, res) => {
-  const { group_id, name, code, gst_number, type } = req.body || {};
+  const { group_id, name, display_name, code, gst_number, type } = req.body || {};
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
+  // Display name is optional -- left blank, it defaults to the company name.
+  const trimmedDisplayName = (typeof display_name === "string" ? display_name.trim() : "") || trimmedName;
   const trimmedCode = typeof code === "string" ? code.trim().toUpperCase() : "";
   const trimmedGst = typeof gst_number === "string" ? gst_number.trim() : "";
   const normalizedType = typeof type === "string" ? type.trim().toUpperCase() : "";
@@ -140,12 +143,13 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
     const id = `COMP${nextCompany.next}`;
     await pool.query(
       `INSERT INTO companies
-      (id, group_id, name, code, gst_number, type, is_active, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, NOW())`,
+      (id, group_id, name, display_name, code, gst_number, type, is_active, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
       [
         id,
         resolvedGroupId,
         trimmedName,
+        trimmedDisplayName,
         trimmedCode || null,
         trimmedGst || null,
         normalizedType || null
@@ -159,6 +163,7 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
         SELECT
           c.id,
           c.name,
+          c.display_name,
           c.code,
           c.gst_number,
           c.type,
@@ -215,9 +220,11 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
 // that reads it (Sites list, Contacts, dashboards) with no denormalized copies.
 router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (req, res) => {
   const { id } = req.params;
-  const { group_id, name, code, gst_number, type } = req.body || {};
+  const { group_id, name, display_name, code, gst_number, type } = req.body || {};
 
   const trimmedName = typeof name === "string" ? name.trim() : "";
+  // Display name is optional -- left blank, it defaults to the company name.
+  const trimmedDisplayName = (typeof display_name === "string" ? display_name.trim() : "") || trimmedName;
   const trimmedCode = typeof code === "string" ? code.trim().toUpperCase() : "";
   const trimmedGst = typeof gst_number === "string" ? gst_number.trim() : "";
   const normalizedType = typeof type === "string" ? type.trim().toUpperCase() : "";
@@ -256,9 +263,9 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
 
     await pool.query(
       `UPDATE companies
-       SET group_id = ?, name = ?, code = ?, gst_number = ?, type = ?
+       SET group_id = ?, name = ?, display_name = ?, code = ?, gst_number = ?, type = ?
        WHERE id = ?`,
-      [resolvedGroupId, trimmedName, trimmedCode || null, trimmedGst || null, normalizedType || null, id]
+      [resolvedGroupId, trimmedName, trimmedDisplayName, trimmedCode || null, trimmedGst || null, normalizedType || null, id]
     );
 
     let updated = null;
@@ -266,7 +273,7 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
       const [[row]] = await pool.query(
         `
         SELECT
-          c.id, c.name, c.code, c.gst_number, c.type, c.is_active,
+          c.id, c.name, c.display_name, c.code, c.gst_number, c.type, c.is_active,
           c.group_id, g.name AS group_name, c.created_at,
           c.logo_object_key, c.logo_file_name, c.logo_file_type
         FROM companies c

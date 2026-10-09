@@ -7,6 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.bestserve.mobile.locationenabler.LocationEnablerPackage
+import com.bestserve.mobile.reversegeocoder.ReverseGeocoderPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -18,6 +19,7 @@ class MainApplication : Application(), ReactApplication {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
           add(LocationEnablerPackage())
+          add(ReverseGeocoderPackage())
         },
     )
   }

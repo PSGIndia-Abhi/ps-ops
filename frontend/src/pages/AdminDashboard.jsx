@@ -7,6 +7,11 @@ import CreateBookingModal from "../components/CreateBookingModal";
 import { apiFetch } from "../api";
 import JobFilters from "../components/JobFilters";
 import { filterJobs, getSupervisorOptions, getTechnicianOptions, getCompanyOptions } from "../utils/jobFilters";
+import Pagination from "../components/Pagination";
+import { getTotalPages, paginate } from "../utils/pagination";
+
+// Jobs shown per page on the dashboard list.
+const JOBS_PER_PAGE = 30;
 
 
 
@@ -42,7 +47,13 @@ export default function AdminDashboard() {
     technicianId: "",
     companyId: "",
   };
-  const [filters, setFilters] = useState(defaultFilters);
+  const [filters, setFiltersState] = useState(defaultFilters);
+  const [page, setPage] = useState(1);
+  // Any filter change starts again from page 1.
+  const setFilters = (next) => {
+    setFiltersState(next);
+    setPage(1);
+  };
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
@@ -139,6 +150,18 @@ export default function AdminDashboard() {
 
   const companyOptions = useMemo(() => getCompanyOptions(jobs), [jobs]);
   const filteredJobs = useMemo(() => filterJobs(jobs, filters), [jobs, filters]);
+  // Never past the last page (e.g. after a refresh returns fewer jobs).
+  const currentPage = Math.min(page, getTotalPages(filteredJobs.length, JOBS_PER_PAGE));
+  const pagedJobs = useMemo(
+    () => paginate(filteredJobs, currentPage, JOBS_PER_PAGE),
+    [filteredJobs, currentPage]
+  );
+
+  function goToPage(p) {
+    setPage(p);
+    setExpandedJobId(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   //  checkbox 
   function toggleJobSelection(jobId) {
@@ -300,7 +323,14 @@ export default function AdminDashboard() {
             showCompany
           />
 
-          {filteredJobs.map((job) => (
+          {filteredJobs.length > 0 && (
+            <div className="jobs-count" style={{ margin: "4px 2px 10px", fontSize: 14, color: "#6b7280" }}>
+              Showing {(currentPage - 1) * JOBS_PER_PAGE + 1}–{Math.min(currentPage * JOBS_PER_PAGE, filteredJobs.length)} of{" "}
+              {filteredJobs.length} jobs
+            </div>
+          )}
+
+          {pagedJobs.map((job) => (
             <div key={job.id} style={{ marginBottom: "8px" }}>
               <JobRow
                 job={job}
@@ -313,6 +343,13 @@ export default function AdminDashboard() {
               {expandedJobId === job.id && <JobDetails job={job} />}
             </div>
           ))}
+
+          <Pagination
+            page={currentPage}
+            totalItems={filteredJobs.length}
+            pageSize={JOBS_PER_PAGE}
+            onChange={goToPage}
+          />
         </div>
 
         {/* RIGHT COLUMN */}

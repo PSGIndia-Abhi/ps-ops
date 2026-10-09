@@ -1,5 +1,7 @@
-import React from 'react';
-import { isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import React, { useMemo, useState } from 'react';
+import { canSwitchToSales, isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
+import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
@@ -27,8 +29,41 @@ export function RoleTabs() {
   const role = useUserRole();
   const rawRole = useRawRole();
 
+  // Managing Director / Personal Assistant open in Task Management like every org-hierarchy role,
+  // and can move to the Sales app and back without signing out.
+  const canSwitch = canSwitchToSales(rawRole);
+  const [inSales, setInSales] = useState(false);
+  const current: AppKind = canSwitch && inSales ? 'sales' : 'tasks';
+  const [sheet, setSheet] = useState<{ onProfile?: () => void } | null>(null);
+  const appSwitch = useMemo(
+    () => ({
+      canSwitch,
+      current,
+      openSwitcher: (onProfile?: () => void) => setSheet({ onProfile }),
+    }),
+    [canSwitch, current],
+  );
+
   // Org-hierarchy designations get Task Management - same login split as the web app.
-  if (isTaskRole(rawRole)) return <TaskNavigator />;
+  if (isTaskRole(rawRole)) {
+    return (
+      <AppSwitchProvider value={appSwitch}>
+        {current === 'sales' ? <CrmNavigator /> : <TaskNavigator />}
+        {canSwitch && (
+          <AppSwitchSheet
+            visible={sheet !== null}
+            current={current}
+            onPick={app => {
+              setSheet(null);
+              setInSales(app === 'sales');
+            }}
+            onProfile={sheet?.onProfile}
+            onClose={() => setSheet(null)}
+          />
+        )}
+      </AppSwitchProvider>
+    );
+  }
 
   switch (role) {
     case 'supervisor':

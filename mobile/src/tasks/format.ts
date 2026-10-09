@@ -12,6 +12,8 @@ export const MONTHS_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// "Last" always means the final occurrence that month, whether it's the 4th or 5th.
+const MONTH_WEEK_LABELS: Record<number, string> = { 1: 'first', 2: 'second', 3: 'third', 4: 'fourth', '-1': 'last' };
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export const toDateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -95,7 +97,8 @@ export const formatBytes = (n: number | null) => {
 
 // ---- selectors (same definitions as web selectors.js) ---------------------
 
-export const isActive = (t: WorkTask) => t.status === 'OPEN' || t.status === 'IN_PROGRESS';
+/** Not finished yet - a paused task is still open work (same as the backend's is_overdue rule). */
+export const isActive = (t: WorkTask) => t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'PAUSED';
 export const isFinished = (s: TaskStatus) => s === 'COMPLETED' || s === 'CANCELLED';
 
 /** Day-granularity, the same rule the server uses for `is_overdue`. */
@@ -114,15 +117,37 @@ export function dueInfo(t: Pick<WorkTask, 'due_date' | 'status'>): { text: strin
   return { text: `Due in ${days} days`, tone: 'ok' };
 }
 
-export type ListMode = 'my' | 'team' | 'all' | 'overdue' | 'upcoming' | 'completed';
+export type ListMode =
+  | 'my'
+  | 'team'
+  | 'all'
+  | 'today'
+  | 'overdue'
+  | 'upcoming'
+  | 'completed'
+  | 'progress'
+  | 'high'
+  | 'delegated'
+  | 'recurring'
+  | 'tomorrow';
 
 export const LIST_MODES: Record<ListMode, { label: string; match: (t: WorkTask, me: number) => boolean }> = {
   my: { label: 'My Tasks', match: (t, me) => t.assigned_to === me && isActive(t) },
   team: { label: 'Team', match: (t, me) => t.assigned_to !== me && isActive(t) },
   all: { label: 'All', match: () => true },
+  // Only the viewer's own work (assigned to them) - not their team's, not tasks they created for others.
+  today: { label: 'Today', match: (t, me) => t.assigned_to === me && t.due_date === todayStr() && t.status !== 'CANCELLED' },
   overdue: { label: 'Overdue', match: (t) => isOverdue(t) },
   upcoming: { label: 'Upcoming', match: (t) => t.status === 'OPEN' && !!t.due_date && !isOverdue(t) },
   completed: { label: 'Completed', match: (t) => t.status === 'COMPLETED' },
+  // Reached from Home's Quick Actions.
+  // Started work, including tasks currently paused.
+  progress: { label: 'In Progress', match: (t) => t.status === 'IN_PROGRESS' || t.status === 'PAUSED' },
+  high: { label: 'High Priority', match: (t) => isActive(t) && t.priority === 'HIGH' },
+  delegated: { label: 'Assigned by Me', match: (t, me) => t.created_by === me && t.assigned_to !== me && isActive(t) },
+  recurring: { label: 'Recurring', match: (t) => !!t.series_id && isActive(t) },
+  // Reached from Notifications' "Due tomorrow".
+  tomorrow: { label: 'Tomorrow', match: (t) => isActive(t) && t.due_date === addDays(todayStr(), 1) },
 };
 
 /** Newest first - a freshly created/assigned task shows at the top. */
@@ -143,9 +168,19 @@ export function recurrenceSummary(r: TaskSeriesRecurrence | null): string {
     return `${every}week${plural} on ${(days as number[]).map((d) => WEEKDAYS[d]).join(', ')}`;
   }
   if (r.frequency === 'MONTHLY') {
+    const weeksArr = typeof r.month_week === 'string' ? JSON.parse(r.month_week) : r.month_week || [];
+    if ((weeksArr as number[]).length > 0) {
+      const weeks = (weeksArr as number[]).map((w) => MONTH_WEEK_LABELS[w]).join(', ');
+      const days = typeof r.days_of_week === 'string' ? JSON.parse(r.days_of_week) : r.days_of_week || [];
+      const wd = (days as number[]).map((d) => WEEKDAYS[d]).join(', ');
+      return `${every}month${plural} on the ${weeks} ${wd}`;
+    }
     return `${every}month${plural} on ${r.use_last_day_of_month ? 'the last day' : `day ${r.day_of_month}`}`;
   }
   return `${every}year${plural}`;
 }
 
-type TaskSeriesRecurrence = Omit<RecurrenceInput, 'days_of_week'> & { days_of_week?: number[] | string | null };
+type TaskSeriesRecurrence = Omit<RecurrenceInput, 'days_of_week' | 'month_week'> & {
+  days_of_week?: number[] | string | null;
+  month_week?: number[] | string | null;
+};

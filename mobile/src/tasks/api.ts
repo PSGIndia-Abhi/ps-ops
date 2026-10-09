@@ -2,6 +2,8 @@ import { httpClient } from '../api/httpClient';
 import type {
   CreateSeriesResponse,
   CreateTaskInput,
+  RescheduleRequest,
+  SeriesListItem,
   TaskAttachment,
   TaskComment,
   TaskHistoryEntry,
@@ -45,6 +47,18 @@ export async function startTask(id: string): Promise<WorkTask> {
   return data;
 }
 
+/** IN_PROGRESS -> PAUSED. Only the assignee; a reason is required. */
+export async function pauseTask(id: string, reason: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/pause`, { reason });
+  return data;
+}
+
+/** PAUSED -> IN_PROGRESS. The paused time is kept out of "time worked". */
+export async function resumeTask(id: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/resume`);
+  return data;
+}
+
 export async function addProgress(id: string, note: string, nextAction?: string): Promise<WorkTask> {
   const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/progress`, {
     note,
@@ -83,14 +97,58 @@ export async function rescheduleTask(
   return data;
 }
 
+/**
+ * A plain assignee (not the creator, not their manager) asks to move the due
+ * date instead of changing it directly - the creator or their manager has to
+ * approve it. Refused with 400 if the caller could just reschedule directly.
+ */
+export async function requestReschedule(
+  id: string,
+  dueDate: string,
+  dueTime: string | null,
+  reason?: string,
+): Promise<RescheduleRequest> {
+  const { data } = await httpClient.post<RescheduleRequest>(`/api/work-tasks/${id}/reschedule-requests`, {
+    due_date: dueDate,
+    due_time: dueTime,
+    reason: reason || undefined,
+  });
+  return data;
+}
+
+/** Applies the requested date to the task. Only the creator or the assignee's manager may. */
+export async function approveRescheduleRequest(requestId: string, note?: string): Promise<RescheduleRequest> {
+  const { data } = await httpClient.post<RescheduleRequest>(`/api/work-tasks/reschedule-requests/${requestId}/approve`, {
+    note: note || undefined,
+  });
+  return data;
+}
+
+/** Leaves the task's due date untouched. Only the creator or the assignee's manager may. */
+export async function rejectRescheduleRequest(requestId: string, note?: string): Promise<RescheduleRequest> {
+  const { data } = await httpClient.post<RescheduleRequest>(`/api/work-tasks/reschedule-requests/${requestId}/reject`, {
+    note: note || undefined,
+  });
+  return data;
+}
+
+/** Only the person who asked may take their own request back. */
+export async function withdrawRescheduleRequest(requestId: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/reschedule-requests/${requestId}/withdraw`);
+}
+
 /** Cancels one recurring occurrence - the series and its other occurrences are untouched. */
 export async function skipTask(id: string, reason?: string): Promise<WorkTask> {
   const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/skip`, reason ? { reason } : {});
   return data;
 }
 
-/** Soft-cancel (the API never hard-deletes an active task from here). */
-export async function cancelTask(id: string): Promise<void> {
+/**
+ * Permanently deletes the task with its comments, files, reschedule requests
+ * and history (DELETE /api/work-tasks/:id). Only the task's creator may; the
+ * backend refuses anyone else. There is no undo.
+ */
+export async function deleteTask(id: string): Promise<void> {
   await httpClient.delete(`/api/work-tasks/${id}`);
 }
 
@@ -163,6 +221,12 @@ export async function listHistory(id: string): Promise<TaskHistoryEntry[]> {
 
 export async function getSeries(id: string): Promise<TaskSeries> {
   const { data } = await httpClient.get<TaskSeries>(`/api/work-task-series/${id}`);
+  return data;
+}
+
+/** The scoped list of series (mine + my team's) - flat rows, not the nested single-GET shape. */
+export async function listSeries(): Promise<SeriesListItem[]> {
+  const { data } = await httpClient.get<SeriesListItem[]>('/api/work-task-series');
   return data;
 }
 

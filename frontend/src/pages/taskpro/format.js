@@ -104,6 +104,28 @@ export function toTimeInput(due_time) {
   return due_time ? due_time.slice(0, 5) : "";
 }
 
+/** A recurrence rule -> "every week on Mon, Fri" / "every 2 months on day 15" etc. */
+export function recurrenceSummary(r) {
+  if (!r) return "";
+  const every = r.interval_value > 1 ? `every ${r.interval_value} ` : "every ";
+  if (r.frequency === "DAILY") return `${every}day${r.interval_value > 1 ? "s" : ""}`;
+  if (r.frequency === "WEEKLY") {
+    const names = (r.days_of_week || []).map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ");
+    return `${every}week${r.interval_value > 1 ? "s" : ""} on ${names}`;
+  }
+  if (r.frequency === "MONTHLY") {
+    if (Array.isArray(r.month_week) && r.month_week.length > 0) {
+      const ordMap = { 1: "first", 2: "second", 3: "third", 4: "fourth", "-1": "last" };
+      const weeks = r.month_week.map((w) => ordMap[w]).join(", ");
+      const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const days = (r.days_of_week || []).map((d) => wd[d]).join(", ");
+      return `${every}month${r.interval_value > 1 ? "s" : ""} on the ${weeks} ${days}`;
+    }
+    return `${every}month${r.interval_value > 1 ? "s" : ""} on ${r.use_last_day_of_month ? "the last day" : `day ${r.day_of_month}`}`;
+  }
+  return `${every}year${r.interval_value > 1 ? "s" : ""}`;
+}
+
 export function timeAgo(iso, now = Date.now()) {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (s < 60) return "just now";

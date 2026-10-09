@@ -24,11 +24,13 @@ import { payForLead } from '../payment';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
+  isCommercial,
   LEAD_SOURCES,
   optionLabel,
   PAYMENT_METHODS,
   type PaymentMethod,
 } from '../types';
+import { CommercialLeadDetail } from './CrmCommercialLeadDetail';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../ui/CrmScreen';
 import { PaymentFailedOverlay, PaymentSuccessOverlay } from '../ui/Celebration';
 import { RupeeIcon, WalletIcon, WhatsAppIcon } from '../ui/crmIcons';
@@ -303,6 +305,8 @@ export function CrmLeadDetailScreen() {
     );
   }
 
+  if (isCommercial(lead)) return <CommercialLeadDetail lead={lead} />;
+
   const paid = lead.paymentStatus === 'paid';
   const hasEmail = !!lead.email;
   const iconColor = theme.primary;
@@ -316,7 +320,19 @@ export function CrmLeadDetailScreen() {
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
-      <TopBar title="Lead Details" onBack={() => navigation.goBack()} />
+      <TopBar
+        title="Lead Details"
+        onBack={() => navigation.goBack()}
+        // A lead still waiting on this phone is not on the server yet, so there is nothing to edit there.
+        action={
+          lead.pendingSync
+            ? undefined
+            : {
+                label: 'Edit',
+                onPress: () => navigation.navigate('CrmNewLead', { editLeadId: lead.id }),
+              }
+        }
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

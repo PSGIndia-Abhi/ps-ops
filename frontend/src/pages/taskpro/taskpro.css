@@ -739,6 +739,27 @@
   }
   .tp-count-pill { white-space: nowrap; padding: 6px 14px; border-radius: 20px; background: #fff; border: 1px solid var(--tp-border); font-weight: 600; color: #475569; }
 
+  /* Schedules that haven't produced their first occurrence yet — see NotStartedSeries.jsx. */
+  .tp-not-started {
+    margin-bottom: 16px; padding: 12px; border-radius: 14px; background: var(--tp-primary-soft); border: 1px dashed #bcd0fb;
+    animation: tp-fade-up .3s var(--tp-ease) both;
+  }
+  .tp-not-started-head {
+    display: flex; align-items: center; gap: 7px; padding: 2px 4px 10px; font-size: 12.5px; font-weight: 700; color: var(--tp-primary-600);
+    > svg { font-size: 15px; }
+  }
+  .tp-not-started-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 10px; background: #fff;
+    transition: background .15s, transform .15s var(--tp-ease);
+    &:not(:last-child) { margin-bottom: 6px; }
+    &:hover { background: var(--tp-primary-soft); transform: translateX(2px); }
+  }
+  .tp-not-started-text { flex: 1; min-width: 0; display: grid; line-height: 1.3;
+    strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  .tp-not-started-chevron { color: var(--tp-soft); flex: none; }
+
   .tp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   .tp-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .tp-chip {
