@@ -8,14 +8,13 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
-import type { Tone } from '../../crm/ui/StatusBadge';
-import { TopBar } from '../../crm/ui/TopBar';
+import { toneColors, type Tone } from '../../crm/ui/StatusBadge';
 import { addDays, fmtDateShort, initials, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { Performance, Person } from '../types';
-import { Card, StatTile, useLoad, useMe } from '../ui';
+import { Card, StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen, personTone } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -84,9 +83,9 @@ export function PerformanceScreen() {
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the performance report.');
 
   return (
-    <CrmScreen scroll={false} edges={['top', 'bottom']}>
+    <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={params?.name ?? 'My performance'} subtitle="Sales performance" onBack={() => navigation.goBack()} />
-      <CrmScreen edges={[]} refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+      <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
         <SegmentedControl options={RANGES} value={range} onChange={setRange} />
         <Text style={styles.range}>{from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`}</Text>
         <CrmErrorBanner message={error} onRetry={reload} />
@@ -103,7 +102,7 @@ export function PerformanceScreen() {
           ))
         )}
       </CrmScreen>
-    </CrmScreen>
+    </LeadScreen>
   );
 }
 
@@ -128,6 +127,17 @@ async function loadTeam(myId: number): Promise<Person[]> {
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Initials on a tint that is stable per person, so the list is easy to scan. */
+function PersonAvatar({ name }: { name: string }) {
+  const { styles, theme } = useCrmStyles(factory);
+  const { bg, fg } = toneColors(theme, personTone(name));
+  return (
+    <View style={[styles.avatar, { backgroundColor: bg }]}>
+      <Text style={[styles.avatarText, { color: fg }]}>{initials(name)}</Text>
+    </View>
+  );
+}
+
 export function TeamScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
@@ -137,7 +147,7 @@ export function TeamScreen() {
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the team.');
 
   return (
-    <CrmScreen scroll={false} edges={['top']}>
+    <LeadScreen edges={['top']}>
       <Text style={styles.title}>Team</Text>
       <FlatList
         data={data ?? []}
@@ -160,9 +170,7 @@ export function TeamScreen() {
           >
             <Card>
               <View style={styles.person}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{initials(item.name)}</Text>
-                </View>
+                <PersonAvatar name={item.name} />
                 <View style={styles.personBody}>
                   <Text style={styles.personName} numberOfLines={1}>
                     {item.name}
@@ -175,6 +183,6 @@ export function TeamScreen() {
           </Pressable>
         )}
       />
-    </CrmScreen>
+    </LeadScreen>
   );
 }

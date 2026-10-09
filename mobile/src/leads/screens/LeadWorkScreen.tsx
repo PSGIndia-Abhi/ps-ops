@@ -18,15 +18,13 @@ import {
 import { formatINR, formatLeadWhen } from '../../crm/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner, SectionLabel } from '../../crm/ui/CrmScreen';
-import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { StatusBadge, type Tone } from '../../crm/ui/StatusBadge';
-import { TopBar } from '../../crm/ui/TopBar';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { actionLabel, leadActions, sourceLabel, type LeadAction } from '../stage';
 import type { PipelineLead } from '../types';
-import { ActionRow, Card, errorMessage, InfoLine, StageBadge, useLoad, useMe } from '../ui';
+import { ActionRow, Card, errorMessage, InfoLine, StageBadge, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -161,9 +159,9 @@ export function LeadWorkScreen() {
   const actions = lead ? leadActions(lead, persona, myId) : [];
 
   return (
-    <CrmScreen scroll={false} edges={['top', 'bottom']}>
+    <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={lead?.leadNumber || 'Lead'} subtitle={lead?.companyName} onBack={() => navigation.goBack()} />
-      <CrmScreen edges={[]} refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+      <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
         <NoticeBanner message={notice} onDismiss={() => setNotice(null)} />
@@ -306,6 +304,6 @@ export function LeadWorkScreen() {
           </>
         )}
       </CrmScreen>
-    </CrmScreen>
+    </LeadScreen>
   );
 }

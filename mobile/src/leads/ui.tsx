@@ -1,12 +1,29 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { ApiError } from '../api/httpClient';
 import { useAuth } from '../auth/AuthContext';
 import { useRawRole } from '../auth/role';
-import { ChevronRightIcon, ClockIcon, PinIcon } from '../components/icons';
+import {
+  BriefcaseIcon,
+  CalendarIcon,
+  CheckCircleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  CloseIcon,
+  DocumentIcon,
+  PhoneIcon,
+  PinIcon,
+  SparkleIcon,
+  TagIcon,
+  UsersIcon,
+} from '../components/icons';
 import { formatINR } from '../crm/format';
-import { useCrmStyles, type CrmTheme } from '../crm/theme';
+import { useCrmStyles, useCrmTheme, type CrmTheme } from '../crm/theme';
+import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import { StatusBadge, toneColors, type Tone } from '../crm/ui/StatusBadge';
 import { fmtDateShort, fmtTime, initials, todayStr } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
@@ -26,9 +43,69 @@ const factory = (t: CrmTheme) => ({
     ...t.cardShadow,
   },
   pressed: { opacity: 0.75 },
-  tile: { flex: 1, minHeight: 84, borderRadius: radii.lg, padding: spacing.sm, justifyContent: 'space-between' as const },
+  screenRoot: { flex: 1, backgroundColor: t.background },
+  screenSafe: { flex: 1 },
+  tile: {
+    flex: 1,
+    minHeight: 88,
+    borderRadius: radii.lg,
+    padding: spacing.sm,
+    justifyContent: 'space-between' as const,
+    overflow: 'hidden' as const,
+    borderWidth: 1,
+    borderColor: t.isDark ? t.border : 'rgba(255,255,255,0.7)',
+    ...t.cardShadow,
+  },
   tileValue: { ...typography.title, fontSize: 24 },
   tileLabel: { ...typography.captionMedium },
+  tileIcon: {
+    position: 'absolute' as const,
+    right: 8,
+    top: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: t.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.75)',
+  },
+  timeChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: t.primarySoftBg,
+    marginBottom: 4,
+  },
+  topBar: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  topButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    ...t.cardShadow,
+  },
+  topTitleWrap: { flex: 1, marginHorizontal: spacing.sm },
+  topTitle: { ...typography.subtitle, color: t.textPrimary },
+  topSubtitle: { ...typography.caption, color: t.textMuted },
+  button: {
+    minHeight: 52,
+    borderRadius: radii.lg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: spacing.lg,
+    overflow: 'hidden' as const,
+  },
+  buttonFilled: { ...t.raisedShadow },
+  buttonSecondary: { backgroundColor: t.isDark ? 'transparent' : 'rgba(255,255,255,0.7)', borderWidth: 1.5, borderColor: t.primary },
+  buttonOff: { opacity: 0.5 },
+  buttonContent: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs },
+  buttonLabel: { ...typography.button },
   row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   rowBody: { flex: 1 },
   rowTitle: { ...typography.bodyMedium, color: t.textPrimary },
@@ -45,7 +122,7 @@ const factory = (t: CrmTheme) => ({
   fieldCell: { flex: 1 },
   timeCol: { width: 74 },
   timeText: { ...typography.captionMedium, color: t.textPrimary },
-  rail: { width: 2, alignSelf: 'stretch' as const, backgroundColor: t.border, borderRadius: 1 },
+  rail: { width: 3, alignSelf: 'stretch' as const, backgroundColor: t.primarySoft, borderRadius: 2 },
   action: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -158,9 +235,107 @@ export function StageBadge({ stage }: { stage: PipelineStage }) {
   return <StatusBadge label={meta.label} tone={meta.tone} />;
 }
 
+type IconType = React.ComponentType<{ size?: number; color?: string }>;
+
+/** A two-colour diagonal fill for whatever it is placed in (the parent clips it to its own rounded shape). */
+function GradientFill({ from, to }: { from: string; to: string }) {
+  const id = useRef(`lead${Math.round(Math.random() * 1e9)}`).current;
+  return (
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Defs>
+        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor={from} />
+          <Stop offset="1" stopColor={to} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width="100%" height="100%" fill={`url(#${id})`} />
+    </Svg>
+  );
+}
+
+/**
+ * The lead screens' backdrop: soft blue at the top easing through the app's
+ * own background to a faint rose at the bottom. Sits behind everything in the
+ * screen container it is placed in.
+ */
+export function LeadWash() {
+  const theme = useCrmTheme();
+  const id = useRef(`leadWash${Math.round(Math.random() * 1e9)}`).current;
+  // Light: the pale blue and rose of the brand, fully opaque so the tint is the same on every screen.
+  // Dark: the same hues as a faint glow over the dark background.
+  const top = theme.isDark ? '#12213D' : '#D9E9FB';
+  const bottom = theme.isDark ? '#1A1420' : '#F8EEF1';
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width="100%" height="100%">
+        <Defs>
+          {/* Corner to corner, like the CRM Home wash. A straight top-to-bottom gradient (x1 = x2) paints flat here. */}
+          <LinearGradient id={id} x1="1" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={top} />
+            <Stop offset="0.42" stopColor={theme.background} />
+            <Stop offset="1" stopColor={bottom} />
+          </LinearGradient>
+        </Defs>
+        <Rect x={0} y={0} width="100%" height="100%" fill={`url(#${id})`} />
+      </Svg>
+    </View>
+  );
+}
+
+/**
+ * The container every lead screen sits in: the wash behind, then a safe-area
+ * box for the content. The wash is a sibling of the safe area inside a plain
+ * View (as on the CRM Home) - placed inside the safe-area view itself it is
+ * not drawn.
+ */
+export function LeadScreen({ edges = ['top'], children }: { edges?: Edge[]; children: React.ReactNode }) {
+  const { styles } = useCrmStyles(factory);
+  return (
+    <View style={styles.screenRoot}>
+      <LeadWash />
+      <SafeAreaView style={styles.screenSafe} edges={edges}>
+        {children}
+      </SafeAreaView>
+    </View>
+  );
+}
+
+/** Light tile tints, top-left to bottom-right. Dark mode keeps the flat tone colour instead. */
+const TILE_GRADIENT: Record<Tone, [string, string] | null> = {
+  info: ['#E6F4FF', '#CBE7FB'],
+  success: ['#E3FBEA', '#C9F3D6'],
+  warning: ['#FFF6D6', '#FDE9A8'],
+  danger: ['#FFE9E9', '#FBD0D0'],
+  accent: ['#F1ECFF', '#DFD5FB'],
+  neutral: null,
+};
+
+/** The icon each count tile carries, by what it counts. */
+const TILE_ICONS: Record<string, IconType> = {
+  Today: CalendarIcon,
+  Upcoming: ClockIcon,
+  Quotations: DocumentIcon,
+  Converted: CheckCircleIcon,
+  New: SparkleIcon,
+  'To call': PhoneIcon,
+  Qualified: CheckCircleIcon,
+  Closed: CloseIcon,
+  Meetings: CalendarIcon,
+  Quoted: DocumentIcon,
+  'Leads generated': ClipboardListIcon,
+  'Genuine leads': CheckCircleIcon,
+  'Meetings scheduled': CalendarIcon,
+  'Visits completed': PinIcon,
+  'Quotations sent': DocumentIcon,
+  'Follow-ups due': ClockIcon,
+  Lost: CloseIcon,
+};
+
 export function StatTile({ label, value, tone, onPress }: { label: string; value: number | string; tone: Tone; onPress?: () => void }) {
   const { styles, theme } = useCrmStyles(factory);
   const { bg, fg } = toneColors(theme, tone);
+  const gradient = theme.isDark ? null : TILE_GRADIENT[tone];
+  const Icon = TILE_ICONS[label] ?? TagIcon;
   return (
     <Pressable
       onPress={onPress}
@@ -169,6 +344,10 @@ export function StatTile({ label, value, tone, onPress }: { label: string; value
       accessibilityLabel={`${label}: ${value}`}
       style={({ pressed }) => [styles.tile, { backgroundColor: bg }, pressed && styles.pressed]}
     >
+      {gradient && <GradientFill from={gradient[0]} to={gradient[1]} />}
+      <View style={styles.tileIcon}>
+        <Icon size={16} color={fg} />
+      </View>
       <Text style={[styles.tileValue, { color: fg }]}>{value}</Text>
       <Text style={[styles.tileLabel, { color: fg }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
         {label}
@@ -249,6 +428,18 @@ export function FieldRow({ children }: { children: [React.ReactNode, React.React
   );
 }
 
+/** "Site visit" / "Meeting" with its icon: a briefcase for going to the customer, people for a meeting at the office. */
+function MeetingKind({ type, office = 'Meeting' }: { type: Meeting['type']; office?: string }) {
+  const { styles, theme } = useCrmStyles(factory);
+  const Icon = type === 'OFFICE' ? UsersIcon : BriefcaseIcon;
+  return (
+    <View style={styles.rowMeta}>
+      <Icon size={13} color={theme.textMuted} />
+      <Text style={styles.rowMetaText}>{type === 'OFFICE' ? office : 'Site visit'}</Text>
+    </View>
+  );
+}
+
 /** A meeting as a line of the day's agenda: time on the left, who and where on the right. */
 export function AgendaRow({ meeting, title, onPress }: { meeting: Meeting; title: string; onPress: () => void }) {
   const { styles, theme } = useCrmStyles(factory);
@@ -258,6 +449,9 @@ export function AgendaRow({ meeting, title, onPress }: { meeting: Meeting; title
     <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.row}>
         <View style={styles.timeCol}>
+          <View style={styles.timeChip}>
+            <ClockIcon size={15} color={theme.primary} />
+          </View>
           <Text style={styles.timeText}>{fmtTime(meeting.time)}</Text>
         </View>
         <View style={styles.rail} />
@@ -265,7 +459,7 @@ export function AgendaRow({ meeting, title, onPress }: { meeting: Meeting; title
           <Text style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.rowSub}>{meeting.type === 'OFFICE' ? 'Meeting' : 'Site visit'}</Text>
+          <MeetingKind type={meeting.type} />
           {!!meeting.address && (
             <View style={styles.rowMeta}>
               <PinIcon size={13} color={theme.textMuted} />
@@ -304,7 +498,7 @@ export function MeetingRow({ meeting, title, onPress }: { meeting: Meeting; titl
           <Text style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.rowSub}>{meeting.type === 'OFFICE' ? 'Office meeting' : 'Site visit'}</Text>
+          <MeetingKind type={meeting.type} office="Office meeting" />
         </View>
         {meta && <StatusBadge label={meta.label} tone={meta.tone} />}
       </View>
@@ -322,6 +516,91 @@ export function MeetingRow({ meeting, title, onPress }: { meeting: Meeting; titl
       )}
     </Pressable>
   );
+}
+
+/** Back / close bar for a lead screen. Has no background of its own, so the screen's wash shows through. */
+export function LeadTopBar({ title, subtitle, onBack, icon = 'back' }: { title: string; subtitle?: string; onBack: () => void; icon?: 'back' | 'close' }) {
+  const { styles, theme } = useCrmStyles(factory);
+  return (
+    <View style={styles.topBar}>
+      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={icon === 'close' ? 'Close' : 'Back'} style={styles.topButton}>
+        {icon === 'close' ? <CloseIcon size={18} color={theme.textPrimary} /> : <ChevronLeftIcon size={20} color={theme.textPrimary} />}
+      </Pressable>
+      <View style={styles.topTitleWrap}>
+        <Text style={styles.topTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {!!subtitle && (
+          <Text style={styles.topSubtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const BUTTON_GRADIENT = { primary: ['#3B82F6', '#1D4ED8'], brand: ['#E53935', '#9B1C1C'] } as const;
+
+/**
+ * The lead screens' main button: the same sizes and variants as the CRM's
+ * PrimaryButton, with a gradient fill on the two filled variants.
+ */
+export function LeadButton({
+  label,
+  onPress,
+  variant = 'primary',
+  icon,
+  loading = false,
+  disabled = false,
+  style,
+  testID,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: 'primary' | 'brand' | 'secondary';
+  icon?: React.ReactNode;
+  loading?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}) {
+  const { styles, theme } = useCrmStyles(factory);
+  const off = disabled || loading;
+  const filled = variant !== 'secondary';
+  return (
+    <Pressable
+      onPress={off ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: off, busy: loading }}
+      testID={testID}
+      style={({ pressed }) => [
+        styles.button,
+        filled ? [styles.buttonFilled, { backgroundColor: variant === 'brand' ? theme.crestRed : theme.primary }] : styles.buttonSecondary,
+        off && styles.buttonOff,
+        pressed && !off && styles.pressed,
+        style,
+      ]}
+    >
+      {variant !== 'secondary' && <GradientFill from={BUTTON_GRADIENT[variant][0]} to={BUTTON_GRADIENT[variant][1]} />}
+      {loading ? (
+        <ActivityIndicator color={filled ? theme.textOnPrimary : theme.primary} />
+      ) : (
+        <View style={styles.buttonContent}>
+          {icon}
+          <Text style={[styles.buttonLabel, { color: filled ? theme.textOnPrimary : theme.primary }]}>{label}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+/** A soft tint for a person's avatar, the same one every time for the same name. */
+export function personTone(name: string): Tone {
+  const tones: Tone[] = ['info', 'success', 'accent', 'warning', 'danger'];
+  let sum = 0;
+  for (let i = 0; i < name.length; i += 1) sum += name.charCodeAt(i);
+  return tones[sum % tones.length];
 }
 
 export function ActionRow({

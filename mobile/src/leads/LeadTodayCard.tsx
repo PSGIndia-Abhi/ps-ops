@@ -1,30 +1,31 @@
 import React, { useCallback } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCrmTheme } from '../crm/theme';
-import { spacing, typography } from '../theme';
+import { CalendarIcon, ChartIcon, CheckCircleIcon, ClockIcon, DocumentIcon } from '../components/icons';
+import { spacing } from '../theme';
+import { todayStr } from '../tasks/format';
 import * as api from './api';
+import { HomeTile, QuickAction, SectionTitle } from './homeParts';
 import type { LeadStackParamList } from './navigation';
 import type { Meeting, PipelineLead } from './types';
-import { AgendaRow, StatTile, useLoad } from './ui';
-import { todayStr } from '../tasks/format';
+import { AgendaRow, useLoad } from './ui';
 
 /** How many of today's meetings to list on Home before sending the user to the full list. */
 const MAX_ROWS = 3;
+const WHITE = '#FFFFFF';
 
 /**
- * The sales executive's commercial-lead day, for the CRM Home: four counts
- * (today's meetings, upcoming meetings, quotations awaiting a reply, leads
- * converted) and today's meetings as an agenda. Every part opens the matching
- * lead screen.
+ * The sales executive's commercial-lead day, for the CRM Home: three stat
+ * tiles (today's meetings, upcoming meetings, quotations awaiting a reply),
+ * lead Quick Actions, and today's meetings as an agenda. Same tiles and
+ * shortcuts as the telecaller / manager Home, so the three roles match.
  *
  * Renders nothing if it cannot be loaded - Home already has its own error
  * banner, and this is an extra, not the screen's main content.
  */
 export function LeadTodayCard() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
-  const theme = useCrmTheme();
 
   const loader = useCallback(async () => {
     const [summary, today, upcoming, leads] = await Promise.all([
@@ -50,22 +51,30 @@ export function LeadTodayCard() {
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        <StatTile label="Today" value={data.today.length} tone="success" onPress={openMeetings} />
-        <StatTile label="Upcoming" value={data.upcomingCount} tone="info" onPress={openMeetings} />
-        <StatTile label="Quotations" value={data.summary.pendingQuotationsCount} tone="accent" onPress={() => navigation.navigate('LeadList', { group: 'quoted' })} />
-        <StatTile label="Converted" value={data.converted} tone="danger" onPress={() => navigation.navigate('LeadList', { group: 'won' })} />
+        <HomeTile icon={<CalendarIcon size={18} color={WHITE} />} value={data.today.length} label="Today's Meetings" tone="info" onPress={openMeetings} />
+        <HomeTile icon={<ClockIcon size={18} color={WHITE} />} value={data.upcomingCount} label="Upcoming" tone="accent" onPress={openMeetings} />
+        <HomeTile
+          icon={<DocumentIcon size={18} color={WHITE} />}
+          value={data.summary.pendingQuotationsCount}
+          label="Quotations"
+          tone="success"
+          onPress={() => navigation.navigate('LeadList', { group: 'quoted' })}
+        />
+      </View>
+
+      <SectionTitle title="Lead Quick Actions" />
+      <View style={styles.row}>
+        <QuickAction icon={<ClockIcon size={19} color={WHITE} />} label="Follow-ups" tone="warning" count={data.summary.todayFollowUpsCount} onPress={() => navigation.navigate('LeadTasks')} />
+        <QuickAction icon={<CalendarIcon size={19} color={WHITE} />} label="Meetings" tone="accent" count={data.today.length} onPress={openMeetings} />
+        <QuickAction icon={<CheckCircleIcon size={19} color={WHITE} />} label="Converted" tone="success" count={data.converted} onPress={() => navigation.navigate('LeadList', { group: 'won' })} />
+        <QuickAction icon={<ChartIcon size={19} color={WHITE} />} label="Performance" tone="info" onPress={() => navigation.navigate('LeadPerformance')} />
       </View>
 
       {data.today.length > 0 && (
         <>
-          <Text style={[styles.heading, { color: theme.textPrimary }]}>Today's Meetings ({data.today.length})</Text>
+          <SectionTitle title={`Today's Meetings (${data.today.length})`} onViewAll={openMeetings} />
           {data.today.slice(0, MAX_ROWS).map((m) => (
-            <AgendaRow
-              key={m.id}
-              meeting={m}
-              title={data.names.get(m.leadId) || m.address || 'Meeting'}
-              onPress={() => navigation.navigate('LeadMeeting', { meetingId: m.id })}
-            />
+            <AgendaRow key={m.id} meeting={m} title={data.names.get(m.leadId) || m.address || 'Meeting'} onPress={() => navigation.navigate('LeadMeeting', { meetingId: m.id })} />
           ))}
         </>
       )}
@@ -75,6 +84,5 @@ export function LeadTodayCard() {
 
 const styles = StyleSheet.create({
   wrap: { marginBottom: spacing.sm },
-  row: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.md },
-  heading: { ...typography.subtitle, marginBottom: spacing.sm },
+  row: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
 });

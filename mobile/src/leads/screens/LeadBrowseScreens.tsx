@@ -1,33 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
-import { useNavigation, useRoute, type CompositeNavigationProp, type RouteProp } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAuth } from '../../auth/AuthContext';
-import { CalendarIcon, ChartIcon, CheckCircleIcon, ClockIcon } from '../../components/icons';
+import { CalendarIcon, CheckCircleIcon, PhoneIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
-import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, SectionLabel } from '../../crm/ui/CrmScreen';
+import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SearchIcon } from '../../crm/ui/crmIcons';
-import { TopBar } from '../../crm/ui/TopBar';
 import { completeTask } from '../../tasks/api';
-import { firstName, fmtTime, greeting } from '../../tasks/format';
+import { fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
-import type { LeadRootStackParamList, LeadStackParamList, LeadTabParamList } from '../navigation';
+import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
 import type { LeadTask, PipelineLead } from '../types';
-import { ActionRow, Card, errorMessage, LeadRow, MeetingRow, StatTile, useLoad, useMe } from '../ui';
-import type { Tone } from '../../crm/ui/StatusBadge';
+import { Card, errorMessage, LeadRow, useLoad, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
-  body: { padding: spacing.lg, paddingBottom: spacing.xxl },
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
-  hello: { ...typography.caption, color: t.textMuted },
-  name: { ...typography.display, color: t.textPrimary, marginBottom: spacing.md },
   title: { ...typography.display, color: t.textPrimary, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xs },
-  tileRow: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.sm },
-  spacer: { height: spacing.sm },
   search: { paddingHorizontal: spacing.lg },
   chips: { paddingHorizontal: spacing.lg, gap: spacing.xs, paddingBottom: spacing.sm },
   chip: {
@@ -44,6 +35,7 @@ const factory = (t: CrmTheme) => ({
   chipText: { ...typography.captionMedium, color: t.textSecondary },
   chipTextOn: { color: t.textOnPrimary },
   taskRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  taskIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: t.warningBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   taskBody: { flex: 1 },
   taskTitle: { ...typography.bodyMedium, color: t.textPrimary },
   taskSub: { ...typography.caption, color: t.textMuted, marginTop: 2 },
@@ -57,132 +49,7 @@ const factory = (t: CrmTheme) => ({
     gap: 4,
   },
   doneText: { ...typography.captionMedium, color: t.successText },
-  muted: { ...typography.caption, color: t.textMuted },
 });
-
-// Module scope so the rows are not handed a new icon function on every render.
-const clockIcon = (c: string) => <ClockIcon size={20} color={c} />;
-const calendarIcon = (c: string) => <CalendarIcon size={20} color={c} />;
-const chartIcon = (c: string) => <ChartIcon size={20} color={c} />;
-
-type HomeNav = CompositeNavigationProp<BottomTabNavigationProp<LeadTabParamList, 'Home'>, NativeStackNavigationProp<LeadRootStackParamList>>;
-
-// ---------------------------------------------------------------------------
-// Home (telecaller / sales manager)
-// ---------------------------------------------------------------------------
-
-const TELECALLER_TILES: { group: StageGroup; tone: Tone }[][] = [
-  [
-    { group: 'new', tone: 'info' },
-    { group: 'to_call', tone: 'warning' },
-  ],
-  [
-    { group: 'qualified', tone: 'success' },
-    { group: 'closed', tone: 'danger' },
-  ],
-];
-
-const MANAGER_TILES: { group: StageGroup; tone: Tone }[][] = [
-  [
-    { group: 'new', tone: 'info' },
-    { group: 'to_call', tone: 'warning' },
-    { group: 'qualified', tone: 'success' },
-  ],
-  [
-    { group: 'meeting', tone: 'accent' },
-    { group: 'quoted', tone: 'accent' },
-    { group: 'won', tone: 'success' },
-  ],
-];
-
-export function LeadHomeScreen() {
-  const navigation = useNavigation<HomeNav>();
-  const { user } = useAuth();
-  const { persona } = useMe();
-  const { styles } = useCrmStyles(factory);
-
-  const loader = useCallback(async () => {
-    const [leads, tasks, meetings] = await Promise.all([
-      api.listLeads(),
-      api.myTasksToday().catch(() => [] as LeadTask[]),
-      api.meetingsToday().catch(() => []),
-    ]);
-    return { leads, tasks, meetings };
-  }, []);
-  const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load your leads.');
-
-  const counts = useMemo(() => countByGroup(data?.leads ?? []), [data]);
-  const names = useMemo(() => new Map((data?.leads ?? []).map((l) => [l.id, l.companyName])), [data]);
-  const tiles = persona === 'sales_manager' ? MANAGER_TILES : TELECALLER_TILES;
-  const openGroup = (group: StageGroup) => navigation.navigate('Leads', { group, at: Date.now() });
-  const openTasks = () => (persona === 'telecaller' ? navigation.navigate('Tasks') : navigation.navigate('LeadTasks'));
-
-  return (
-    <CrmScreen refreshing={refreshing} onRefresh={refresh}>
-      <Text style={styles.hello}>{greeting()},</Text>
-      <Text style={styles.name} numberOfLines={1}>
-        {firstName(user?.name)}
-      </Text>
-      <CrmErrorBanner message={error} onRetry={reload} />
-
-      <SectionLabel>{persona === 'sales_manager' ? 'PIPELINE' : 'LEADS TO VERIFY'}</SectionLabel>
-      {loading && !data ? (
-        <CrmSkeleton height={176} radius={radii.lg} />
-      ) : (
-        tiles.map((row, i) => (
-          <View key={i} style={styles.tileRow}>
-            {row.map(({ group, tone }) => (
-              <StatTile key={group} label={STAGE_GROUPS[group].label} value={counts[group]} tone={tone} onPress={() => openGroup(group)} />
-            ))}
-          </View>
-        ))
-      )}
-      <View style={styles.spacer} />
-
-      <SectionLabel>TODAY</SectionLabel>
-      <Card>
-        <ActionRow
-          icon={clockIcon}
-          title={`${data?.tasks.length ?? 0} follow-up${data?.tasks.length === 1 ? '' : 's'} due today`}
-          hint="Calls and reminders assigned to you"
-          tone="warning"
-          onPress={openTasks}
-        />
-        <ActionRow
-          icon={calendarIcon}
-          title={`${data?.meetings.length ?? 0} meeting${data?.meetings.length === 1 ? '' : 's'} today`}
-          hint="Meetings assigned to you"
-          tone="accent"
-          divider
-          onPress={() => navigation.navigate('LeadMeetings')}
-        />
-        {persona === 'sales_manager' && (
-          <ActionRow
-            icon={chartIcon}
-            title="Team performance"
-            hint="Leads, visits and conversions per person"
-            tone="info"
-            divider
-            onPress={() => navigation.navigate('Team')}
-          />
-        )}
-      </Card>
-
-      {!!data && data.meetings.length > 0 && (
-        <>
-          <SectionLabel>TODAY'S MEETINGS</SectionLabel>
-          {data.meetings.slice(0, 3).map((m) => (
-            <MeetingRow key={m.id} meeting={m} title={names.get(m.leadId) || m.address || 'Meeting'} onPress={() => navigation.navigate('LeadMeeting', { meetingId: m.id })} />
-          ))}
-        </>
-      )}
-
-      {!!data && data.leads.length === 0 && !error && (
-        <CrmEmptyState title="No leads yet" subtitle="New commercial leads will appear here as soon as they are submitted." />
-      )}
-    </CrmScreen>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Lead list - a tab for telecaller / manager, a pushed screen for sales
@@ -223,7 +90,7 @@ export function LeadListScreen() {
   }, [data, group, query]);
 
   return (
-    <CrmScreen scroll={false} edges={['top']}>
+    <LeadScreen edges={['top']}>
       {pushed ? <TopBar title="Commercial leads" onBack={() => navigation.goBack()} /> : <Text style={styles.title}>Leads</Text>}
       <View style={styles.search}>
         <CrmTextField
@@ -268,7 +135,7 @@ export function LeadListScreen() {
         }
         renderItem={({ item }) => <LeadRow lead={item} onPress={() => navigation.navigate('LeadWork', { leadId: item.id })} />}
       />
-    </CrmScreen>
+    </LeadScreen>
   );
 }
 
@@ -301,7 +168,7 @@ export function LeadTasksScreen() {
   };
 
   return (
-    <CrmScreen scroll={false} edges={['top']}>
+    <LeadScreen edges={['top']}>
       {pushed ? <TopBar title="Today's follow-ups" onBack={() => navigation.goBack()} /> : <Text style={styles.title}>Today</Text>}
       <FlatList
         data={data ?? []}
@@ -324,6 +191,9 @@ export function LeadTasksScreen() {
         renderItem={({ item }) => (
           <Card>
             <View style={styles.taskRow}>
+              <View style={styles.taskIcon}>
+                {item.taskType === 'LEAD_MEETING' ? <CalendarIcon size={18} color={theme.warningText} /> : <PhoneIcon size={18} color={theme.warningText} />}
+              </View>
               <Pressable
                 style={styles.taskBody}
                 disabled={!item.leadId}
@@ -348,6 +218,6 @@ export function LeadTasksScreen() {
           </Card>
         )}
       />
-    </CrmScreen>
+    </LeadScreen>
   );
 }

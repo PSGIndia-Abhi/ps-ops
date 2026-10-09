@@ -8,17 +8,15 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmErrorBanner, CrmScreen } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
-import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { SelectField } from '../../crm/ui/SelectField';
-import { TopBar } from '../../crm/ui/TopBar';
 import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
-import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, PickField, RadioRow, useMe } from '../ui';
+import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, PickField, RadioRow, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 /**
  * The small forms that act on one lead: log a call, schedule a meeting or a
@@ -60,15 +58,15 @@ function FormShell({
   const navigation = useNavigation<Nav>();
   const { styles } = useCrmStyles(factory);
   return (
-    <CrmScreen scroll={false} edges={['top', 'bottom']}>
+    <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={title} subtitle={subtitle} onBack={() => navigation.goBack()} icon="close" />
-      <CrmScreen edges={[]} contentStyle={styles.body}>
+      <CrmScreen edges={[]} transparent contentStyle={styles.body}>
         <CrmErrorBanner message={error} />
         {children}
         <View style={styles.gap} />
         <PrimaryButton label={submitLabel} onPress={onSubmit} loading={saving} variant={danger ? 'brand' : 'primary'} />
       </CrmScreen>
-    </CrmScreen>
+    </LeadScreen>
   );
 }
 

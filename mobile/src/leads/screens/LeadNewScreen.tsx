@@ -6,15 +6,13 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmErrorBanner, CrmScreen } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
-import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { SelectField } from '../../crm/ui/SelectField';
-import { TopBar } from '../../crm/ui/TopBar';
 import { spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { SOURCE_LABELS } from '../stage';
 import type { CommercialLeadSource, NewCommercialLead } from '../types';
-import { errorMessage, FieldRow } from '../ui';
+import { errorMessage, FieldRow, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -106,9 +104,9 @@ export function LeadNewScreen() {
   };
 
   return (
-    <CrmScreen scroll={false} edges={['top', 'bottom']}>
+    <LeadScreen edges={['top', 'bottom']}>
       <TopBar title="New commercial lead" onBack={() => navigation.goBack()} icon="close" />
-      <CrmScreen edges={[]} contentStyle={styles.body}>
+      <CrmScreen edges={[]} transparent contentStyle={styles.body}>
         <Text style={styles.help}>Offices, factories, warehouses, malls, schools, hospitals and other businesses.</Text>
         <CrmErrorBanner message={error} />
         <CrmTextField label="Company / business name" value={companyName} onChangeText={setCompanyName} error={errors.companyName} maxLength={150} autoCapitalize="words" />
@@ -126,6 +124,6 @@ export function LeadNewScreen() {
         <CrmTextField label="Requirement / notes" value={requirement} onChangeText={setRequirement} placeholder="e.g. Annual pest control contract" multiline maxLength={2000} style={styles.notes} />
         <PrimaryButton label="Save lead" onPress={onSave} loading={saving} />
       </CrmScreen>
-    </CrmScreen>
+    </LeadScreen>
   );
 }
