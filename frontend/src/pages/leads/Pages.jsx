@@ -3,13 +3,13 @@
 
 import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { FiCalendar, FiCheckCircle, FiEdit2, FiPhoneCall, FiPlus, FiShield } from "react-icons/fi";
+import { FiCalendar, FiCheckCircle, FiPhoneCall, FiPlus, FiShield } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
-import { CallVerifyModal, LeadForm, ProviderModal, ScheduleMeetingModal } from "./dialogs";
+import { CallVerifyModal, LeadForm, ScheduleMeetingModal } from "./dialogs";
 import { Agenda } from "./Home";
-import { setProviderActive, useLeadData } from "./leadsApi";
+import { useLeadData } from "./leadsApi";
 import { compactMoney, dayLabel, isPast, isToday, timeLabel } from "./format";
-import { useLoaded, useToast } from "./hooks";
+import { useLoaded } from "./hooks";
 import { Badge, Button, Card, Done, Empty, SkeletonRows, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads, visibleMeetings } from "./viewer";
 
@@ -215,35 +215,15 @@ export function Meetings() {
 /* ------------------------------------------------------------ providers */
 
 export function Providers() {
-  const toast = useToast();
   const { providers, leads } = useLeadData();
   const ready = useLoaded();
-  const [editing, setEditing] = useState(null); // null | "new" | provider
-  const [busyId, setBusyId] = useState(null);
-
-  async function toggle(provider) {
-    setBusyId(provider.id);
-    try {
-      await setProviderActive(provider.id, !provider.active);
-      toast(provider.active ? `${provider.name} can no longer sign in` : `${provider.name} can sign in again`);
-    } catch (err) {
-      toast(err.message || "Could not update the provider.", true);
-    } finally {
-      setBusyId(null);
-    }
-  }
 
   return (
     <Only personas={["sales_manager"]}>
       <div className="lm-head">
         <div>
           <h1>Lead Providers</h1>
-          <p>External partners who submit commercial leads through the restricted portal.</p>
-        </div>
-        <div className="lm-head-actions">
-          <Button icon={<FiPlus />} onClick={() => setEditing("new")}>
-            Add Provider
-          </Button>
+          <p>External partners who submit commercial leads through the restricted portal. Provider logins are created by an administrator.</p>
         </div>
       </div>
 
@@ -251,7 +231,7 @@ export function Providers() {
         {!ready ? (
           <SkeletonRows rows={3} />
         ) : providers.length === 0 ? (
-          <Empty title="No providers yet" text="Add a provider to give them a login." />
+          <Empty title="No providers yet" text="Providers appear here once an administrator has created their login." />
         ) : (
           <div className="lm-table-wrap">
             <table className="lm-table">
@@ -263,7 +243,6 @@ export function Providers() {
                   <th>Leads</th>
                   <th>Converted</th>
                   <th>Status</th>
-                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -286,16 +265,6 @@ export function Providers() {
                       <td>
                         <Badge tone={p.active ? "success" : "neutral"}>{p.active ? "Active" : "Disabled"}</Badge>
                       </td>
-                      <td>
-                        <span style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                          <Button size="sm" variant="ghost" icon={<FiEdit2 />} onClick={() => setEditing(p)}>
-                            Edit
-                          </Button>
-                          <Button size="sm" variant={p.active ? "danger" : "ghost"} busy={busyId === p.id} onClick={() => toggle(p)}>
-                            {p.active ? "Disable" : "Enable"}
-                          </Button>
-                        </span>
-                      </td>
                     </tr>
                   );
                 })}
@@ -305,7 +274,6 @@ export function Providers() {
         )}
       </Card>
 
-      {editing && <ProviderModal provider={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
     </Only>
   );
 }

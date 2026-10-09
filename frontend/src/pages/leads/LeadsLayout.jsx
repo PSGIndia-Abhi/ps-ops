@@ -18,8 +18,7 @@ import {
 import logo from "../../assets/logo.png";
 import { roleBasePath } from "../../auth/roleBasePath";
 import { LEADS_HOME, PERSONAS, PERSONA_KEYS, resolvePersona, roleIsPersona, savePreviewPersona } from "./access";
-import { USING_SAMPLE_DATA, useLeadData } from "./leadsApi";
-import { PERSONA_USER } from "./mockData";
+import { loadWorkspace, resetWorkspace, useLeadData } from "./leadsApi";
 import { isPast, isToday } from "./format";
 import { dayLabel, timeLabel } from "./format";
 import { Avatar, ToastProvider } from "./ui";
@@ -74,10 +73,20 @@ export default function LeadsLayout() {
   const [popover, setPopover] = useState(null); // null | "bell" | "me"
   const mainRef = useRef(null);
   const [query, setQuery] = useState("");
-  const { leads, meetings } = useLeadData();
+  const { leads, meetings, me, error } = useLeadData();
 
-  // While the data is sample data, each dashboard is shown as the sample person it belongs to.
-  const viewer = useMemo(() => ({ persona, me: { ...PERSONA_USER[persona], role: persona }, canPick }), [persona, canPick]);
+  // Everything shown here is read when the lead area opens, and forgotten when it closes
+  // so the next person to sign in on this browser never glimpses it.
+  useEffect(() => {
+    loadWorkspace();
+    return resetWorkspace;
+  }, []);
+
+  // The signed-in person. Until their details arrive the screens draw their loading state.
+  const viewer = useMemo(
+    () => ({ persona, me: { id: me?.id || "", name: me?.name || "", providerId: me?.providerId, role: persona }, canPick }),
+    [persona, me, canPick],
+  );
 
   const counts = useMemo(() => {
     const mine = visibleLeads(leads, viewer);
@@ -202,11 +211,14 @@ export default function LeadsLayout() {
           <button type="button" className="lm-side-scrim" aria-label="Close menu" onClick={() => setNavOpen(false)} />
 
           <div className="lm-col">
-            {(USING_SAMPLE_DATA || canPick) && (
-              <div className="lm-ribbon" role="note">
-                {USING_SAMPLE_DATA && (
+            {(!!error || canPick) && (
+              <div className="lm-ribbon" role={error ? "alert" : "note"}>
+                {!!error && (
                   <span>
-                    <strong>Sample data.</strong> Nothing here is saved or sent to the server yet.
+                    <strong>Could not load leads.</strong> {error}{" "}
+                    <button type="button" className="lm-ribbon-tab on" onClick={loadWorkspace}>
+                      Try again
+                    </button>
                   </span>
                 )}
                 {canPick && (

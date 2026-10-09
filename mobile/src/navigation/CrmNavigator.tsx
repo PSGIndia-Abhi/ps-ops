@@ -19,6 +19,7 @@ import { CrmNewCommercialLeadScreen } from '../crm/screens/CrmNewCommercialLeadS
 import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
 import { CrmPaymentsScreen } from '../crm/screens/CrmPaymentsScreen';
 import { useCrmTheme } from '../crm/theme';
+import { LEAD_STACK_SCREENS } from '../leads/screens';
 import { ClipboardListIcon, WalletIcon } from '../crm/ui/crmIcons';
 import { radii, shadows } from '../theme';
 
@@ -128,6 +129,9 @@ export function CrmNavigator() {
         <Stack.Screen name="CrmNewCommercialLead" component={CrmNewCommercialLeadScreen} options={{ animation: 'none' }} />
         <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />
         <Stack.Screen name="CrmLeadSaved" component={CrmLeadSavedScreen} options={{ gestureEnabled: false }} />
+        {LEAD_STACK_SCREENS.map((s) => (
+          <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
+        ))}
       </Stack.Navigator>
     </LeadsProvider>
   );

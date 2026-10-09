@@ -28,6 +28,7 @@ import { useLeads } from '../LeadsContext';
 import { computeMonthlyAchievements } from '../stats';
 import type { CrmTabScreenNav } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
+import { LeadTodayCard } from '../../leads/LeadTodayCard';
 import { isCommercial, type Lead } from '../types';
 import { ClipboardListIcon, RupeeIcon, TrendUpIcon, WalletIcon } from '../ui/crmIcons';
 import { AchievementCard } from '../ui/AchievementCard';
@@ -519,6 +520,8 @@ export function CrmHomeScreen() {
 
           <NoticeBanner message={notice} tone={noticeTone} onDismiss={dismissNotice} />
           <CrmErrorBanner message={error} onRetry={refresh} />
+
+          <LeadTodayCard />
 
           <View style={styles.dashStatRow}>
             {loading ? (

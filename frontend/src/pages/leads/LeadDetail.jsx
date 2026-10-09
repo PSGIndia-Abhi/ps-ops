@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   FiAlertTriangle,
@@ -15,13 +15,15 @@ import {
   FiPhoneCall,
   FiPlus,
   FiThumbsDown,
+  FiUploadCloud,
   FiUserCheck,
   FiXCircle,
 } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
-import { CallVerifyModal, CloseLeadModal, ScheduleMeetingModal, VisitModal } from "./dialogs";
-import { providerName, useLeadData, userName } from "./leadsApi";
-import { PIPELINE } from "./mockData";
+import { CallVerifyModal, CloseLeadModal, QuotationModal, ScheduleMeetingModal, VisitModal } from "./dialogs";
+import { listQuotations, openQuotationPdf, providerName, useLeadData, userName } from "./leadsApi";
+import { PIPELINE } from "./constants";
+import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Badge, Button, Card, Empty, StageBadge, Tabs } from "./ui";
 import { useViewer, visibleLeads } from "./viewer";
@@ -46,6 +48,90 @@ function progressOf(lead, hasMeeting) {
   if (PIPELINE.includes(lead.stage)) return PIPELINE.indexOf(lead.stage);
   if (lead.stage === "LOST") return hasMeeting ? PIPELINE.indexOf("VISIT_COMPLETED") : PIPELINE.indexOf("QUALIFIED");
   return 0; // TO_CALL, NEED_MORE_INFO, NOT_GENUINE: still at the first step
+}
+
+/** A lead's quotations: what has been sent, each one's PDF, and the button to upload another. */
+function QuotationsTab({ lead, canAdd, onAdd }) {
+  const toast = useToast();
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [opening, setOpening] = useState(null);
+
+  // lead.updatedAt changes when a quotation is uploaded, which is what brings the new one in.
+  useEffect(() => {
+    let alive = true;
+    listQuotations(lead.id)
+      .then((list) => alive && (setRows(list), setError("")))
+      .catch((err) => alive && setError(err.message || "Could not load quotations."));
+    return () => {
+      alive = false;
+    };
+  }, [lead.id, lead.updatedAt]);
+
+  async function open(q) {
+    setOpening(q.id);
+    try {
+      await openQuotationPdf(lead.id, q.id);
+    } catch (err) {
+      toast(err.message || "Could not open the quotation.", true);
+    } finally {
+      setOpening(null);
+    }
+  }
+
+  const add = canAdd && (
+    <Button icon={<FiUploadCloud />} onClick={onAdd}>
+      Create Quotation
+    </Button>
+  );
+
+  if (error) return <Empty title="Could not load quotations" text={error} icon={<FiFileText />} />;
+  if (!rows) return <Empty title="Loading quotations..." icon={<FiFileText />} />;
+  if (rows.length === 0) {
+    return <Empty title="No quotations yet" text={canAdd ? "Upload the quotation PDF once it has been prepared for the customer." : "A quotation appears here once the sales team uploads one."} icon={<FiFileText />} action={add} />;
+  }
+
+  return (
+    <>
+      {add && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>{add}</div>}
+      <div className="lm-table-wrap" style={{ margin: "0 -20px -20px" }}>
+        <table className="lm-table">
+          <thead>
+            <tr>
+              <th>Quotation No</th>
+              <th>Amount</th>
+              <th>Sent</th>
+              <th>Status</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((q, i) => (
+              <tr key={q.id} style={{ "--i": i, cursor: "default" }}>
+                <td>
+                  <strong>{q.number}</strong>
+                </td>
+                <td className="num">{money(q.total)}</td>
+                <td className="muted">{dateTime(q.sentAt)}</td>
+                <td>
+                  <Badge tone="violet">{q.status === "SENT" ? "Sent" : q.status}</Badge>
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  {q.hasPdf ? (
+                    <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
+                      View PDF
+                    </Button>
+                  ) : (
+                    <span className="muted">No PDF</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
 }
 
 const MEETING_TONE = { SCHEDULED: "info", IN_PROGRESS: "warn", FOLLOW_UP: "violet", COMPLETED: "success" };
@@ -331,18 +417,13 @@ export default function LeadDetail() {
               </div>
             ))}
 
-          {tab === "quotations" && (
-            <Empty
-              title="Quotations are coming next"
-              text="Creating and sending a quotation from a lead will be added here once its format is finalised."
-              icon={<FiFileText />}
-            />
-          )}
+          {tab === "quotations" && <QuotationsTab lead={lead} canAdd={canSell && !closed} onAdd={() => setDialog("quotation")} />}
         </div>
       </Card>
 
       {dialog === "call" && <CallVerifyModal lead={lead} onClose={() => setDialog(null)} onScheduleMeeting={() => setDialog("meeting")} />}
       {dialog === "meeting" && <ScheduleMeetingModal lead={lead} onClose={() => setDialog(null)} />}
+      {dialog === "quotation" && <QuotationModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "won" && <CloseLeadModal lead={lead} won onClose={() => setDialog(null)} />}
       {dialog === "lost" && <CloseLeadModal lead={lead} won={false} onClose={() => setDialog(null)} />}
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}

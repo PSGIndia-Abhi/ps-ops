@@ -21,6 +21,7 @@ import { COMMERCIAL_LEAD_SOURCES, optionLabel, type Lead } from '../types';
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
+import { PrimaryButton } from '../ui/PrimaryButton';
 import { LeadStatusBadge } from '../ui/StatusBadge';
 import { TopBar } from '../ui/TopBar';
 
@@ -94,6 +95,8 @@ const factory = (t: CrmTheme) => ({
     color: t.dangerText,
     marginTop: spacing.xs,
   },
+
+  manage: { marginBottom: spacing.md },
 
   contactRow: {
     flexDirection: 'row' as const,
@@ -279,6 +282,16 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
           </View>
         )}
 
+        {/* Meetings, follow-ups, history and closing the lead all live on the pipeline screen. */}
+        {!lead.pendingSync && (
+          <PrimaryButton
+            label="Manage lead"
+            onPress={() => navigation.navigate('LeadWork', { leadId: lead.id })}
+            style={styles.manage}
+            testID="manage-lead"
+          />
+        )}
+
         <View style={styles.contactRow}>
           <Pressable
             onPress={() => call(lead.phone)}
@@ -351,7 +364,8 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
           <InfoRow
             icon={<TagIcon size={18} color={iconColor} />}
             label="Source of Lead"
-            value={optionLabel(COMMERCIAL_LEAD_SOURCES, lead.source)}
+            // A source from outside this app's own list (e.g. "Lead Provider") is shown as stored.
+            value={optionLabel(COMMERCIAL_LEAD_SOURCES, lead.source) || lead.source || ''}
           />
         </View>
 

@@ -1,6 +1,8 @@
 import React from 'react';
 import { isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { leadPersonaForRole } from '../leads/stage';
 import { CrmNavigator } from './CrmNavigator';
+import { LeadsNavigator } from './LeadsNavigator';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
@@ -29,6 +31,8 @@ export function RoleTabs() {
 
   // Org-hierarchy designations get Task Management - same login split as the web app.
   if (isTaskRole(rawRole)) return <TaskNavigator />;
+  // Telecallers and sales managers get Lead Management (sales executives reach it inside the CRM app).
+  if (leadPersonaForRole(rawRole)) return <LeadsNavigator />;
 
   switch (role) {
     case 'supervisor':

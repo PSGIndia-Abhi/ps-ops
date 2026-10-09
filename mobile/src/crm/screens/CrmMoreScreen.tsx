@@ -3,7 +3,8 @@ import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useUserRole } from '../../auth/role';
-import { ChartIcon, ChevronRightIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import { CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import type { LeadStackParamList } from '../../leads/navigation';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
@@ -101,6 +102,8 @@ function MenuRow({ icon, label, onPress, soon, danger, divider }: MenuRowProps) 
 
 export function CrmMoreScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  // The lead screens live on whichever stack hosts this screen (CRM or Lead Management).
+  const leadNavigation = useNavigation<NavigationProp<LeadStackParamList>>();
   const { user, logout } = useAuth();
   const role = useUserRole();
   const { styles, theme } = useCrmStyles(factory);
@@ -134,7 +137,26 @@ export function CrmMoreScreen() {
           onPress={() => navigation.navigate('Profile')}
         />
         <MenuRow icon={<SettingsIcon size={18} color={theme.textMuted} />} label="Settings" soon divider />
-        <MenuRow icon={<ChartIcon size={18} color={theme.textMuted} />} label="Reports" soon divider />
+      </View>
+
+      <View style={styles.group}>
+        <MenuRow
+          icon={<CalendarIcon size={18} color={theme.primary} />}
+          label="My meetings"
+          onPress={() => leadNavigation.navigate('LeadMeetings')}
+        />
+        <MenuRow
+          icon={<ClockIcon size={18} color={theme.primary} />}
+          label="Today's follow-ups"
+          divider
+          onPress={() => leadNavigation.navigate('LeadTasks')}
+        />
+        <MenuRow
+          icon={<ChartIcon size={18} color={theme.primary} />}
+          label="My performance"
+          divider
+          onPress={() => leadNavigation.navigate('LeadPerformance')}
+        />
       </View>
 
       <View style={styles.group}>

@@ -4,7 +4,7 @@ import { FiChevronRight, FiPhoneCall, FiPlus, FiSearch } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { AddLeadModal, CallVerifyModal, ScheduleMeetingModal } from "./dialogs";
 import { providerName, useLeadData } from "./leadsApi";
-import { SOURCES } from "./mockData";
+import { SOURCES } from "./constants";
 import { compactMoney, dayLabel, nextAction } from "./format";
 import { useLoaded, usePaged } from "./hooks";
 import { Button, Card, Empty, Pager, SkeletonRows, StageBadge, Tabs } from "./ui";

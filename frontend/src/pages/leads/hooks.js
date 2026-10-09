@@ -1,15 +1,11 @@
 // Small hooks shared by the Lead Management screens.
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
+import { useLeadData } from "./leadsApi";
 
-/** True after a short beat - lets a screen show its loading skeleton first, as it will with a real request. */
-export function useLoaded(ms = 480) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setReady(true), ms);
-    return () => clearTimeout(t);
-  }, [ms]);
-  return ready;
+/** True once the leads have come back from the server - until then a screen shows its loading skeleton. */
+export function useLoaded() {
+  return useLeadData().ready;
 }
 
 /** Splits a list into pages and goes back to page 1 whenever the list changes size. */

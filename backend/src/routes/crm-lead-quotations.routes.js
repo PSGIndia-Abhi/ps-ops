@@ -7,6 +7,8 @@ const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
+const multer = require("multer");
+const minioClient = require("../lib/minio");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -71,14 +73,93 @@ function canManageLead(req, lead) {
 // module -- none exists in this codebase to reuse). POST creates it already
 // SENT: the API has no separate draft/send step, matching the endpoint list
 // this was scoped against.
+//
+// Two ways to send one:
+//   - JSON line items ({ items: [{ description, quantity, unitPrice }] }) --
+//     the total is worked out from them.
+//   - multipart/form-data with the quotation as a PDF: "file" (PDF, max 10 MB),
+//     "totalAmount", optional "notes". The file goes to MinIO (same bucket as
+//     every other upload) and its key into pdf_object_key; there are no line
+//     items, the PDF is the quotation.
 // ---------------------------------------------------------------------------
-router.post("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PDF_BYTES, files: 1 } });
+
+// Checks the lead and the caller's rights BEFORE any upload body is read.
+async function precheckQuotationWrite(req, res, next) {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
     if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot create a quotation for this lead");
     if (TERMINAL_STAGES.includes(lead.pipeline_stage)) {
       throw new HttpError(400, `Cannot create a quotation for a lead that is ${lead.pipeline_stage}`);
     }
+    req.lead = lead;
+    next();
+  } catch (err) {
+    sendError(res, err, "Failed to create quotation");
+  }
+}
+
+// multer only reads multipart bodies; a JSON request passes straight through.
+function acceptPdf(req, res, next) {
+  pdfUpload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "File is too large (max 10 MB)" });
+    return res.status(400).json({ error: "Invalid upload. Send one PDF in the 'file' field." });
+  });
+}
+
+async function createPdfQuotation(req, res) {
+  const lead = req.lead;
+  let objectKey = null;
+  try {
+    if (!req.file) throw new HttpError(400, "file is required");
+    // Trust the content, not the label: a real PDF starts with "%PDF-".
+    const isPdf = req.file.mimetype === "application/pdf" && req.file.buffer.subarray(0, 5).toString("latin1") === "%PDF-";
+    if (!isPdf) throw new HttpError(400, "The quotation must be a PDF file");
+
+    const totalAmount = Number(req.body?.totalAmount);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 99999999) {
+      throw new HttpError(400, "A valid totalAmount is required");
+    }
+    const notes = optionalText(req.body?.notes, 300);
+    if (notes === false) throw new HttpError(400, "notes is too long (max 300 characters)");
+
+    const quotationId = uuid();
+    objectKey = `crm-quotations/${lead.id}/${quotationId}.pdf`;
+    // Same lazy bucket creation the other uploads already do.
+    if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
+      await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+    }
+    await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.buffer.length, { "Content-Type": "application/pdf" });
+
+    await inTransaction(async (conn) => {
+      const quotationNumber = await nextQuotationNumber(conn);
+      await conn.query(
+        `INSERT INTO crm_lead_quotations (id, lead_id, quotation_number, total_amount, status, pdf_object_key, sent_at, created_by)
+         VALUES (?, ?, ?, ?, 'SENT', ?, NOW(), ?)`,
+        [quotationId, lead.id, quotationNumber, totalAmount, objectKey, req.user.id]
+      );
+      await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
+      await logLeadHistory(conn, lead.id, "QUOTATION_SENT", {
+        note: `${quotationNumber} for Rs. ${totalAmount} (PDF)${notes ? `: ${notes}` : ""}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
+    });
+
+    const [[quotation]] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE id = ?`, [quotationId]);
+    res.status(201).json({ ...quotation, total_amount: Number(quotation.total_amount), items: [] });
+  } catch (err) {
+    // DB failed after the file was stored: don't leave an orphan file behind.
+    if (objectKey) minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
+    sendError(res, err, "Failed to create quotation");
+  }
+}
+
+router.post("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), precheckQuotationWrite, acceptPdf, async (req, res) => {
+  if (req.file || req.is("multipart/form-data")) return createPdfQuotation(req, res);
+  try {
+    const lead = req.lead;
 
     const body = req.body || {};
     const items = Array.isArray(body.items) ? body.items : [];
@@ -130,6 +211,32 @@ router.get("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), as
     res.json(rows.map((r) => ({ ...r, total_amount: Number(r.total_amount) })));
   } catch (err) {
     sendError(res, err, "Failed to load quotations");
+  }
+});
+
+// GET /api/crm/leads/:id/quotations/:quotationId/pdf -- streams the uploaded
+// quotation PDF to anyone who can see the lead.
+router.get("/leads/:id/quotations/:quotationId/pdf", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    const [[row]] = await pool.query(
+      "SELECT quotation_number, pdf_object_key FROM crm_lead_quotations WHERE id = ? AND lead_id = ?",
+      [req.params.quotationId, lead.id]
+    );
+    if (!row) throw new HttpError(404, "Quotation not found");
+    if (!row.pdf_object_key) throw new HttpError(404, "This quotation has no PDF");
+
+    const stream = await minioClient.getObject(process.env.MINIO_BUCKET, row.pdf_object_key);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(`${row.quotation_number}.pdf`)}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    stream.on("error", (err) => {
+      console.error("Quotation PDF stream failed:", err.message);
+      res.destroy(err);
+    });
+    stream.pipe(res);
+  } catch (err) {
+    sendError(res, err, "Failed to load quotation PDF");
   }
 });
 

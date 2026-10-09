@@ -1,20 +1,25 @@
 // The Lead Management data layer.
 //
-// RIGHT NOW THIS IS SAMPLE DATA: everything lives in memory (see mockData.js)
-// and is reset when the page is reloaded. No request goes to the server.
+// Screens only ever talk to the functions and the hook exported here. What is
+// on screen is one snapshot of the server's data, kept in memory:
 //
-// Screens only ever talk to the functions and the hook exported here, so when
-// the lead APIs are ready this is the one file to change - each function
-// below names the endpoint it stands in for. Every write is async and may
-// reject with an Error whose message is shown to the user, exactly as a real
-// call would.
+//   staff (telecaller / sales / sales manager / admin)
+//       GET /api/crm/lead-workspace - leads, meetings, history, names and
+//       providers the signed-in person may see, in one read
+//   lead provider
+//       GET /api/crm/provider/leads (+ each lead's published feedback) -
+//       only their own submissions and only what they are allowed to know
+//
+// Every write goes to its own endpoint and then reloads the snapshot, so the
+// screen always shows what the server actually saved.
 
 import { useSyncExternalStore } from "react";
-import { USERS, buildSampleData } from "./mockData";
+import { API_BASE, apiFetch, safeJson } from "../../api";
+import { KNOWN_VISIT_OUTCOMES, PROVIDER_SOURCE, sourceLabel } from "./constants";
 
-export const USING_SAMPLE_DATA = true;
+const EMPTY = { ready: false, error: "", me: null, leads: [], meetings: [], activities: [], providers: [], people: [], leadSources: [] };
 
-let state = buildSampleData();
+let state = EMPTY;
 const listeners = new Set();
 
 function commit(next) {
@@ -28,31 +33,285 @@ const subscribe = (fn) => {
 };
 const snapshot = () => state;
 
-/** { leads, meetings, activities, providers } - re-renders when any of them change. */
+/** { ready, error, me, leads, meetings, activities, providers } - re-renders when any of them change. */
 export function useLeadData() {
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-/** Stands in for network latency so loading and saving states can be seen. */
-const wait = (ms = 420) => new Promise((resolve) => setTimeout(resolve, ms));
-const uid = (prefix) => `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-const now = () => new Date().toISOString();
+const isProviderLogin = () => localStorage.getItem("role") === "lead_provider";
 
-export const userName = (id) => USERS.find((u) => u.id === id)?.name || state.providers.find((p) => p.userId === id)?.name || "";
-export const providerName = (id) => state.providers.find((p) => p.id === id)?.name || "";
-export const salesTeam = () => USERS.filter((u) => u.role === "sales");
-export const telecallers = () => USERS.filter((u) => u.role === "telecaller");
+// ---- talking to the server --------------------------------------------------
 
-function log(leadId, type, text, by, extra = {}) {
-  return { id: uid("a"), leadId, type, text, by, at: now(), ...extra };
+/** Calls the API and returns its JSON; a refusal becomes an Error carrying the server's own message. */
+async function request(endpoint, { method = "GET", body, form } = {}) {
+  const res = await apiFetch(endpoint, { method, body: form || (body === undefined ? undefined : JSON.stringify(body)) });
+  // apiFetch has already sent the browser to /login when the session has ended.
+  if (!res) throw new Error("Your session has ended. Please sign in again.");
+  const data = await safeJson(res);
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status}).`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
-function patchLead(id, patch, activity) {
-  commit({
-    leads: state.leads.map((l) => (l.id === id ? { ...l, ...patch, updatedAt: now() } : l)),
-    activities: activity ? [...state.activities, ...[].concat(activity)] : state.activities,
+// ---- reading the server's rows ---------------------------------------------
+
+/** A wall-clock "YYYY-MM-DD HH:MM:SS" from the server as a value `new Date()` reads in local time. */
+const wall = (value) => (value ? String(value).replace(" ", "T") : null);
+
+/** "2026-10-09T05:30:00.000Z" -> "2026-10-09T11:00" in the user's own time zone, which is what the server stores. */
+function toWallClock(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** The locality of an address ("12, Whitefield, Bengaluru" -> "Whitefield"), for the leads-by-location chart. */
+function areaOf(address) {
+  const parts = String(address || "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "";
+  return parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+}
+
+/** The screens know one "converted" and one "lost" stage; the server has two of each. */
+function stageOf(raw) {
+  if (!raw) return "NEW";
+  if (raw === "CONVERTED") return "WON";
+  if (raw === "CANCELLED") return "LOST";
+  return raw;
+}
+
+function toLead(row, closingNote) {
+  const quote = Number(row.amount) || 0;
+  return {
+    id: row.id,
+    number: row.lead_number || "-",
+    company: row.company_name || row.customer_name || "",
+    contact: row.customer_name || "",
+    phone: row.phone || "",
+    altPhone: row.alternate_phone || "",
+    email: row.email || "",
+    address: row.location || "",
+    area: areaOf(row.location),
+    source: sourceLabel(row.lead_source),
+    quote,
+    requirement: row.notes || "",
+    stage: stageOf(row.pipeline_stage),
+    providerId: row.provider_id,
+    createdBy: row.created_by_user_id,
+    telecallerId: row.assigned_telecaller_id,
+    salesId: row.assigned_sales_employee_id,
+    priority: quote >= 500000 ? "HIGH" : "NORMAL",
+    reason: row.loss_reason || closingNote || "",
+    providerFeedback: row.latest_feedback || "",
+    nextFollowUpAt: wall(row.next_follow_up_at),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+  };
+}
+
+function toMeeting(row) {
+  // The outcome is saved as "Outcome: notes" (or just notes); pull a known outcome back out.
+  const saved = row.outcome_notes || "";
+  const outcome = KNOWN_VISIT_OUTCOMES.find((o) => saved === o || saved.startsWith(`${o}:`)) || "";
+  const outcomeNotes = outcome ? saved.slice(outcome.length).replace(/^:\s*/, "") : saved;
+  const office = row.meeting_type === "OFFICE";
+  return {
+    id: row.id,
+    leadId: row.lead_id,
+    salesId: row.sales_employee_id,
+    type: office ? "MEETING" : "SITE_VISIT",
+    locationType: office ? "OFFICE" : "CUSTOMER",
+    address: row.meeting_address || "",
+    scheduledAt: wall(row.scheduled_at),
+    status: row.status === "SCHEDULED" && row.check_in_at ? "IN_PROGRESS" : row.status,
+    outcome,
+    notes: outcomeNotes || row.notes || "",
+    checkInAt: wall(row.check_in_at),
+    checkOutAt: wall(row.check_out_at),
+  };
+}
+
+/** One row of the lead's history as the timeline shows it. */
+function toActivity(row) {
+  const by = row.changed_by_name || "";
+  const note = row.note || "";
+  const who = by ? ` by ${by}` : "";
+  const base = { id: `a-${row.id}`, leadId: row.lead_id, by, at: row.changed_at, note: "" };
+  switch (row.action) {
+    case "CREATE":
+      return { ...base, type: "CREATED", text: `Lead created${who}` };
+    case "ASSIGN_TELECALLER":
+      return { ...base, type: "STATUS", text: note || "Taken for verification" };
+    case "CALL_LOGGED":
+      return { ...base, type: "CALL", text: `Called${who}`, note };
+    case "QUALIFY":
+      return /GENUINE/.test(note) && !/NEEDS_INFO/.test(note)
+        ? { ...base, type: "QUALIFIED", text: "Marked as Genuine Lead" }
+        : { ...base, type: "STATUS", text: "Marked as Need More Information" };
+    case "REJECT":
+      return { ...base, type: "REJECTED", text: `Marked as Not Genuine${note ? ` - ${note}` : ""}` };
+    case "MEETING_SCHEDULED":
+      return { ...base, type: "MEETING", text: note || "Meeting scheduled" };
+    case "MEETING_RESCHEDULED":
+      return { ...base, type: "MEETING", text: "Meeting rescheduled", note };
+    case "MEETING_CANCELLED":
+      return { ...base, type: "MEETING", text: "Meeting cancelled", note };
+    case "VISIT_CHECK_IN":
+      return { ...base, type: "VISIT", text: `Visit started${who}` };
+    case "VISIT_COMPLETED":
+      return { ...base, type: "VISIT", text: `Site visit completed${who}`, note };
+    case "QUOTATION_SENT":
+      return { ...base, type: "QUOTATION", text: `Quotation sent${note ? ` (${note})` : ""}` };
+    case "FOLLOW_UP_SCHEDULED":
+      return { ...base, type: "STATUS", text: "Follow-up scheduled", note };
+    case "FEEDBACK_SENT":
+      return { ...base, type: "STATUS", text: "Feedback sent to the lead provider", note };
+    case "MARK_LOST":
+      return { ...base, type: "LOST", text: `Marked as Lost${note ? ` - ${note}` : ""}` };
+    case "CONVERTED":
+      return { ...base, type: "WON", text: "Lead converted to customer", note };
+    default:
+      return { ...base, type: "STATUS", text: String(row.action || "Updated").replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase()), note };
+  }
+}
+
+// ---- loading ----------------------------------------------------------------
+
+async function loadStaff() {
+  const data = await request("/api/crm/lead-workspace");
+
+  // Why a lead was closed, for a lead closed with a typed reason rather than one from the list.
+  const closingNote = new Map();
+  for (const h of data.activities) {
+    if (h.action === "REJECT" || h.action === "MARK_LOST") closingNote.set(h.lead_id, h.note);
+  }
+
+  const leads = data.leads.map((row) => toLead(row, closingNote.get(row.id)));
+  const activities = data.activities.map(toActivity);
+  // A lead from before the history existed still needs a first line on its timeline.
+  const started = new Set(data.activities.filter((h) => h.action === "CREATE").map((h) => h.lead_id));
+  for (const lead of leads) {
+    if (!started.has(lead.id)) activities.push({ id: `a-created-${lead.id}`, leadId: lead.id, type: "CREATED", text: "Lead created", by: "", at: lead.createdAt, note: "" });
+  }
+
+  return {
+    me: { id: data.me.id, name: data.me.name, canManage: !!data.me.can_manage, canConvert: !!data.me.can_convert },
+    leads,
+    // A cancelled meeting no longer belongs on anyone's agenda; the timeline still records it.
+    meetings: data.meetings.filter((m) => m.status !== "CANCELLED").map(toMeeting),
+    activities,
+    people: data.people,
+    providers: data.providers.map((p, i) => ({
+      id: p.user_id,
+      userId: p.user_id,
+      code: `LP-${String(i + 1).padStart(3, "0")}`,
+      name: p.organization_name,
+      contact: p.contact_name,
+      phone: p.phone,
+      email: p.email,
+      active: p.is_active,
+    })),
+  };
+}
+
+/** The provider portal's five statuses, as the stage the screens draw. */
+const PROVIDER_STAGE = { under_review: "NEW", qualified: "QUALIFIED", rejected: "NOT_GENUINE", converted: "WON" };
+
+async function loadProvider() {
+  const [meRow, rows, sources] = await Promise.all([
+    request("/api/auth/me"),
+    request("/api/crm/provider/leads"),
+    request("/api/crm/provider/lead-sources").catch(() => []),
+  ]);
+  const myId = String(meRow.id);
+
+  // Only what staff chose to publish to this provider - never internal notes.
+  const feedback = await Promise.all(rows.map((row) => request(`/api/crm/provider/leads/${row.id}/feedback`).catch(() => [])));
+
+  const activities = [];
+  const leads = rows.map((row, i) => {
+    const createdAt = wall(row.created_at);
+    const messages = feedback[i];
+    activities.push({ id: `a-created-${row.id}`, leadId: row.id, type: "CREATED", text: "Lead submitted", by: "", at: createdAt, note: "" });
+    messages.forEach((f) => activities.push({ id: `a-${f.id}`, leadId: row.id, type: "STATUS", text: f.message, by: "", at: wall(f.created_at), note: "" }));
+    const quote = Number(row.approx_quote_amount) || 0;
+    return {
+      id: row.id,
+      number: row.lead_number || "-",
+      company: row.company_name || row.contact_person || "",
+      contact: row.contact_person || "",
+      phone: row.phone_number || "",
+      altPhone: row.alternate_phone || "",
+      email: row.email || "",
+      address: row.address || "",
+      area: areaOf(row.address),
+      source: row.lead_source || PROVIDER_SOURCE,
+      quote,
+      requirement: row.requirement || "",
+      stage: PROVIDER_STAGE[row.status] || "NEW",
+      providerId: myId,
+      createdBy: myId,
+      telecallerId: null,
+      salesId: null,
+      priority: quote >= 500000 ? "HIGH" : "NORMAL",
+      reason: "",
+      providerFeedback: messages.length ? messages[messages.length - 1].message : "",
+      nextFollowUpAt: null,
+      createdAt,
+      updatedAt: messages.length ? wall(messages[messages.length - 1].created_at) : createdAt,
+    };
   });
+
+  return {
+    me: { id: myId, name: meRow.name || "", providerId: myId },
+    leads,
+    meetings: [],
+    activities,
+    people: [],
+    leadSources: sources,
+    providers: [{ id: myId, userId: myId, code: "", name: meRow.name || "", contact: meRow.name || "", phone: meRow.phone || "", email: meRow.email || "", active: true }],
+  };
 }
+
+// Only the newest load may write its result - an older, slower one must not overwrite it.
+let loadSeq = 0;
+
+/** Reads everything again from the server. Called when the lead area opens and after every change. */
+export async function loadWorkspace() {
+  const mine = ++loadSeq;
+  try {
+    const next = await (isProviderLogin() ? loadProvider() : loadStaff());
+    if (mine === loadSeq) commit({ ...next, ready: true, error: "" });
+  } catch (err) {
+    if (mine === loadSeq) commit({ ready: true, error: err.message || "Could not load leads." });
+  }
+}
+
+/** Forgets what was loaded, so the next person to sign in on this browser never glimpses it. */
+export function resetWorkspace() {
+  loadSeq += 1;
+  state = EMPTY;
+  listeners.forEach((fn) => fn());
+}
+
+// ---- names ------------------------------------------------------------------
+
+export const userName = (id) => state.people.find((u) => u.id === id)?.name || state.providers.find((p) => p.userId === id)?.name || "";
+/** The provider organisation; for someone who cannot see the provider list, the name of the provider's login. */
+export const providerName = (id) => state.providers.find((p) => p.id === id)?.name || state.people.find((u) => u.id === id)?.name || "";
+/** Who a meeting can be given to. */
+export const salesTeam = () => state.people.filter((u) => u.can_visit).map((u) => ({ id: u.id, name: u.name, role: "sales" }));
+export const telecallers = () => state.people.filter((u) => u.role === "telecaller").map((u) => ({ id: u.id, name: u.name, role: "telecaller" }));
+
+/** The sources a lead provider may pick, straight from the server's list. */
+export const providerSources = () => state.leadSources.map((s) => s.name);
 
 /** Leads that share this phone number or company name (the duplicate warning). */
 export function findDuplicates({ phone, company }, exceptId) {
@@ -63,149 +322,169 @@ export function findDuplicates({ phone, company }, exceptId) {
   );
 }
 
-// ---- writes ---------------------------------------------------------------
+const leadById = (id) => state.leads.find((l) => l.id === id);
+
+// ---- writes -----------------------------------------------------------------
+
+/** A reference the server accepts ("APP-" + 8..36 letters, digits or dashes) to recognise a retried save. */
+const newClientRef = () => `APP-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 /** POST /provider/leads (a provider) or POST /leads (staff). New leads go to the telecaller queue. */
 export async function submitLead(input, actor) {
-  await wait();
-  const number = `LD-2026-${String(101 + state.leads.length).padStart(6, "0")}`;
-  const lead = {
-    id: uid("l"),
-    number,
-    company: input.company.trim(),
-    contact: input.contact.trim(),
-    phone: input.phone,
-    altPhone: input.altPhone || "",
-    email: input.email?.trim() || "",
-    address: input.address.trim(),
-    area: input.area?.trim() || "",
-    source: input.source,
-    quote: Number(input.quote) || 0,
-    requirement: input.requirement?.trim() || "",
-    stage: "NEW",
-    providerId: actor.providerId || null,
-    createdBy: actor.id,
-    telecallerId: null,
-    // A lead a sales person brings in is theirs to visit once the telecaller has verified it.
-    salesId: actor.role === "sales" ? actor.id : null,
-    priority: Number(input.quote) >= 500000 ? "HIGH" : "NORMAL",
-    reason: "",
-    providerFeedback: "",
-    nextFollowUpAt: null,
-    createdAt: now(),
-    updatedAt: now(),
-  };
-  commit({
-    leads: [lead, ...state.leads],
-    activities: [...state.activities, log(lead.id, "CREATED", `Lead created by ${actor.name}${actor.providerId ? " (Lead Provider)" : ""}`, actor.name)],
-  });
-  return lead;
+  let created;
+  if (actor.providerId) {
+    const body = {
+      leadType: "COMMERCIAL",
+      companyName: input.company.trim(),
+      contactPerson: input.contact.trim(),
+      phoneNumber: input.phone,
+      email: input.email?.trim() || "",
+      address: input.address.trim(),
+      area: input.area?.trim() || "",
+      leadSourceId: state.leadSources.find((s) => s.name === input.source)?.id,
+      approxQuoteAmount: Number(input.quote),
+      requirement: input.requirement.trim(),
+    };
+    try {
+      created = await request("/api/crm/provider/leads", { method: "POST", body });
+    } catch (err) {
+      // The server found an open lead with this phone number and wants a deliberate yes.
+      if (err.status !== 409 || !err.data?.possible_duplicate) throw err;
+      const existing = err.data.existing_lead;
+      const ok = window.confirm(
+        `${existing?.company_name || "A lead"} (${existing?.lead_number || "existing lead"}) already uses this phone number.\n\nSubmit this as a separate enquiry anyway?`,
+      );
+      if (!ok) throw new Error("Not submitted - a lead with this phone number already exists.");
+      created = await request("/api/crm/provider/leads", { method: "POST", body: { ...body, confirmDuplicate: true } });
+    }
+  } else {
+    created = await request("/api/crm/leads", {
+      method: "POST",
+      body: {
+        client_ref: newClientRef(),
+        lead_type: "commercial",
+        customer_name: input.contact.trim(),
+        company_name: input.company.trim(),
+        phone: input.phone,
+        alternate_phone: input.altPhone || "",
+        email: input.email?.trim() || "",
+        location: input.address.trim(),
+        lead_source: input.source,
+        amount: Number(input.quote),
+        notes: input.requirement?.trim() || "",
+      },
+    });
+  }
+  await loadWorkspace();
+  return leadById(created.id) || { id: created.id, number: created.lead_number || "", company: input.company.trim() };
 }
 
 /**
- * POST /leads/{id}/call-activities, then /qualify or /reject.
+ * The result of a verification call: logs it, then makes the decision it led to.
  * outcome: "GENUINE" | "NEED_MORE_INFO" | "NOT_GENUINE" | "CALL_BACK"
  */
-export async function saveCall(leadId, { outcome, notes, reason, followUpAt, feedback }, actor) {
-  await wait();
+export async function saveCall(leadId, { outcome, notes, reason, followUpAt, feedback }) {
   if (outcome === "NOT_GENUINE" && !reason) throw new Error("Choose a reason for marking this lead not genuine.");
-  const stage = { GENUINE: "QUALIFIED", NEED_MORE_INFO: "NEED_MORE_INFO", NOT_GENUINE: "NOT_GENUINE", CALL_BACK: "TO_CALL" }[outcome];
-  const label = {
-    GENUINE: "Marked as Genuine Lead",
-    NEED_MORE_INFO: "Marked as Need More Information",
-    NOT_GENUINE: `Marked as Not Genuine - ${reason}`,
-    CALL_BACK: "Call back requested",
-  }[outcome];
-  patchLead(
-    leadId,
-    {
-      stage,
-      telecallerId: actor.id,
-      reason: outcome === "NOT_GENUINE" ? reason : "",
-      nextFollowUpAt: outcome === "GENUINE" || outcome === "NOT_GENUINE" ? null : followUpAt || null,
-      providerFeedback: feedback?.trim() || (outcome === "NOT_GENUINE" ? `Not genuine (${reason.toLowerCase()})` : outcome === "GENUINE" ? "Qualified" : ""),
-    },
-    [
-      log(leadId, "CALL", `Called by ${actor.name}`, actor.name, { note: notes?.trim() || "" }),
-      log(leadId, outcome === "GENUINE" ? "QUALIFIED" : outcome === "NOT_GENUINE" ? "REJECTED" : "STATUS", label, actor.name),
-    ],
-  );
+  const lead = leadById(leadId);
+  const base = `/api/crm/leads/${leadId}`;
+  try {
+    // A new lead has to be taken for verification before the server will qualify it.
+    if (lead?.stage === "NEW") await request(`${base}/assign-telecaller`, { method: "POST", body: { telecaller_id: Number(state.me.id) } });
+
+    await request(`${base}/call-activities`, {
+      method: "POST",
+      body: {
+        outcome: outcome === "CALL_BACK" ? "CALLBACK_REQUESTED" : "CONNECTED",
+        qualificationStatus: { GENUINE: "GENUINE", NEED_MORE_INFO: "NEEDS_INFO", NOT_GENUINE: "NOT_GENUINE" }[outcome],
+        comments: notes?.trim() || undefined,
+      },
+    });
+
+    if (outcome === "GENUINE") await request(`${base}/qualify`, { method: "POST", body: { status: "GENUINE" } });
+    if (outcome === "NEED_MORE_INFO" && lead?.stage !== "NEED_MORE_INFO") await request(`${base}/qualify`, { method: "POST", body: { status: "NEEDS_INFO" } });
+    if (outcome === "NOT_GENUINE") await request(`${base}/reject`, { method: "POST", body: { reason } });
+
+    if (followUpAt && (outcome === "NEED_MORE_INFO" || outcome === "CALL_BACK")) {
+      const [date, time] = toWallClock(followUpAt).split("T");
+      await request(`${base}/follow-ups`, { method: "POST", body: { nextActionDate: date, nextActionTime: time, note: notes?.trim() || "" } });
+    }
+    if (feedback?.trim() && lead?.providerId) await request(`${base}/feedback`, { method: "POST", body: { message: feedback.trim() } });
+  } finally {
+    // Some steps may have been saved even if a later one failed - show whatever is true now.
+    await loadWorkspace();
+  }
 }
 
 /** POST /leads/{id}/meetings - also creates the sales person's task in Task Management. */
-export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationType, address, notes, type }, actor) {
-  await wait();
+export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationType, address, notes }) {
   if (!salesId) throw new Error("Choose the sales person for this meeting.");
   if (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() - 60000) throw new Error("Choose a meeting time in the future.");
-  const meeting = {
-    id: uid("m"),
-    leadId,
-    salesId,
-    type: type || "SITE_VISIT",
-    locationType,
-    address: address.trim(),
-    scheduledAt,
-    status: "SCHEDULED",
-    outcome: "",
-    notes: notes?.trim() || "",
-    checkInAt: null,
-    checkOutAt: null,
-  };
-  commit({ meetings: [...state.meetings, meeting] });
-  patchLead(
-    leadId,
-    { stage: "MEETING_SCHEDULED", salesId, providerFeedback: "Meeting scheduled", nextFollowUpAt: null },
-    log(leadId, "MEETING", `Meeting scheduled with ${userName(salesId)}`, actor.name, { note: meeting.notes }),
-  );
+  const meeting = await request(`/api/crm/leads/${leadId}/meetings`, {
+    method: "POST",
+    body: {
+      salesEmployeeId: Number(salesId),
+      scheduledAt: toWallClock(scheduledAt),
+      meetingType: locationType === "OFFICE" ? "OFFICE" : "SITE_VISIT",
+      meetingAddress: address.trim(),
+      notes: notes?.trim() || "",
+    },
+  });
+  await loadWorkspace();
   return meeting;
 }
 
-/** POST /meetings/{id}/complete - the outcome of a visit. */
-export async function completeVisit(meetingId, { outcome, notes }, actor) {
-  await wait();
-  const meeting = state.meetings.find((m) => m.id === meetingId);
-  if (!meeting) throw new Error("That meeting no longer exists.");
-  commit({
-    meetings: state.meetings.map((m) =>
-      m.id === meetingId ? { ...m, status: "COMPLETED", outcome, notes: notes?.trim() || m.notes, checkInAt: m.checkInAt || now(), checkOutAt: now() } : m,
-    ),
-  });
-  patchLead(
-    meeting.leadId,
-    { stage: outcome === "Quotation provided" ? "QUOTATION_SENT" : "VISIT_COMPLETED", providerFeedback: outcome === "Quotation provided" ? "Quotation shared" : "Visit completed" },
-    [
-      log(meeting.leadId, "VISIT", `Site visit completed by ${actor.name}`, actor.name, { note: notes?.trim() || "" }),
-      ...(outcome === "Quotation provided" ? [log(meeting.leadId, "QUOTATION", "Quotation provided", actor.name)] : []),
-    ],
-  );
+/** POST /meetings/{id}/complete - the outcome of a visit. Only the sales person it is assigned to may do this. */
+export async function completeVisit(meetingId, { outcome, notes }) {
+  const extra = notes?.trim();
+  await request(`/api/crm/meetings/${meetingId}/complete`, { method: "POST", body: { outcomeNotes: extra ? `${outcome}: ${extra}` : outcome } });
+  await loadWorkspace();
 }
 
 /** POST /leads/{id}/convert-to-customer (won) or /leads/{id}/mark-lost (lost). */
-export async function closeLead(leadId, { won, reason, notes }, actor) {
-  await wait();
+export async function closeLead(leadId, { won, reason, notes }) {
   if (!won && !reason) throw new Error("Choose why this lead was lost.");
-  patchLead(
-    leadId,
-    { stage: won ? "WON" : "LOST", reason: won ? "" : reason, providerFeedback: won ? "Customer created" : "Closed - not proceeding", nextFollowUpAt: null },
-    log(leadId, won ? "WON" : "LOST", won ? "Lead converted to customer" : `Marked as Lost - ${reason}`, actor.name, { note: notes?.trim() || "" }),
-  );
+  const extra = notes?.trim();
+  if (won) await request(`/api/crm/leads/${leadId}/convert-to-customer`, { method: "POST", body: { notes: extra || "" } });
+  else await request(`/api/crm/leads/${leadId}/mark-lost`, { method: "POST", body: { reason: extra ? `${reason}: ${extra}` : reason } });
+  await loadWorkspace();
 }
 
-/** POST /lead-providers or PATCH /lead-providers/{id} - a provider company and its login. */
-export async function saveProvider(input) {
-  await wait();
-  if (state.providers.some((p) => p.id !== input.id && p.email.toLowerCase() === input.email.trim().toLowerCase())) {
-    throw new Error("Another provider already uses this email address.");
-  }
-  if (input.id) {
-    commit({ providers: state.providers.map((p) => (p.id === input.id ? { ...p, ...input } : p)) });
-    return;
-  }
-  const code = `LP-${String(state.providers.length + 1).padStart(3, "0")}`;
-  commit({ providers: [...state.providers, { ...input, id: uid("p"), code, userId: uid("u"), active: true }] });
+// ---- quotations ---------------------------------------------------------------
+
+const toQuotation = (row) => ({
+  id: row.id,
+  number: row.quotation_number,
+  total: Number(row.total_amount) || 0,
+  status: row.status,
+  sentAt: wall(row.sent_at),
+  hasPdf: !!row.pdf_object_key,
+});
+
+/** GET /leads/{id}/quotations - newest first. */
+export async function listQuotations(leadId) {
+  const rows = await request(`/api/crm/leads/${leadId}/quotations`);
+  return rows.map(toQuotation);
 }
 
-export async function setProviderActive(id, active) {
-  await wait(260);
-  commit({ providers: state.providers.map((p) => (p.id === id ? { ...p, active } : p)) });
+/** POST /leads/{id}/quotations with the quotation as a PDF. The lead moves to Quotation Sent. */
+export async function uploadQuotation(leadId, { file, totalAmount, notes }) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("totalAmount", String(totalAmount));
+  if (notes?.trim()) form.append("notes", notes.trim().slice(0, 300));
+  const row = await request(`/api/crm/leads/${leadId}/quotations`, { method: "POST", form });
+  await loadWorkspace();
+  return toQuotation(row);
+}
+
+/** Opens a quotation's PDF in a new tab. Fetched with the session token, since a plain link would not carry it. */
+export async function openQuotationPdf(leadId, quotationId) {
+  const res = await fetch(`${API_BASE}/api/crm/leads/${leadId}/quotations/${quotationId}/pdf`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+  });
+  if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not open the quotation.");
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, "_blank", "noopener");
+  // Long enough for the new tab to load it; then the copy held in memory is released.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }

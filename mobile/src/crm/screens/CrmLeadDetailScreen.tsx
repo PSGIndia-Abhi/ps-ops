@@ -310,7 +310,8 @@ export function CrmLeadDetailScreen() {
   const paid = lead.paymentStatus === 'paid';
   const hasEmail = !!lead.email;
   const iconColor = theme.primary;
-  const source = optionLabel(LEAD_SOURCES, lead.source);
+  // A source from outside this app's own list is shown as stored rather than left blank.
+  const source = optionLabel(LEAD_SOURCES, lead.source) || lead.source || '';
   const hasLeadInfo = !!(
     source ||
     lead.referenceBy ||

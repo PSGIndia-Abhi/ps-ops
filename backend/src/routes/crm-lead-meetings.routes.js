@@ -109,6 +109,32 @@ async function loadVisibleMeeting(req, meetingId) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/crm/sales-employees -- who a meeting can be assigned to. Scheduling
+// needs a salesEmployeeId, but a telecaller has no VIEW_USER (so no
+// GET /api/users) and nobody below them in the hierarchy (so GET
+// /api/users/me/team is empty). This returns only what the picker shows --
+// id, name, role -- for active users whose role can work a lead
+// (CRM_VIEW_LEAD, which check-in/complete require anyway). Telecallers are
+// left out: they verify leads, they don't visit customers.
+// ---------------------------------------------------------------------------
+router.get("/sales-employees", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT u.id, u.name, r.name AS role
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         JOIN role_permissions rp ON rp.role_id = r.id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name <> 'telecaller'
+        ORDER BY u.name ASC`
+    );
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load sales employees");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/crm/leads/:id/meetings -- schedule a sales meeting/site visit.
 // Also creates the linked Task Management follow-up (source_module='LEAD',
 // task_type='LEAD_MEETING'), in the same transaction as the meeting row.

@@ -22,6 +22,7 @@ type Filter = 'all' | 'unread' | 'due';
 const MAX_SHOWN = 10;
 
 const factory = (t: CrmTheme) => ({
+  
   screen: { flex: 1, backgroundColor: t.background },
   flex1: { flex: 1 },
   bar: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },

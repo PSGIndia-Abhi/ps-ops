@@ -1,7 +1,7 @@
 // Formatting and date helpers for the Lead Management screens.
 
 import { userName } from "./leadsApi";
-import { STAGES } from "./mockData";
+import { STAGES } from "./constants";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 export const money = (n) => inr.format(Number(n) || 0);

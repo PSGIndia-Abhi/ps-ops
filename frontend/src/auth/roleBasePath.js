@@ -22,6 +22,8 @@ export const ROLE_HOME = {
   lead_provider: "/leads",
   telecaller: "/leads",
   sales_manager: "/leads",
+  // The sales executive works their leads, meetings and quotations there too.
+  sales: "/leads",
 
   // The real org-hierarchy designations (see user_hierarchy / Roles &
   // Permissions) land in Task Management. Deliberately NOT "supervisor" —

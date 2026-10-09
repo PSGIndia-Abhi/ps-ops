@@ -1,10 +1,10 @@
 // The dialogs that move a lead along: verify a call, schedule a meeting,
-// record a visit, close the lead, and add or edit a provider.
+// record a visit, upload a quotation, and close the lead.
 
 import { useMemo, useState } from "react";
-import { FiBriefcase, FiCalendar, FiCheck, FiSend, FiThumbsDown, FiThumbsUp } from "react-icons/fi";
-import { closeLead, completeVisit, findDuplicates, salesTeam, saveCall, saveProvider, scheduleMeeting, submitLead } from "./leadsApi";
-import { REASONS, SOURCES, VISIT_OUTCOMES } from "./mockData";
+import { FiBriefcase, FiCalendar, FiCheck, FiSend, FiThumbsDown, FiThumbsUp, FiUploadCloud } from "react-icons/fi";
+import { closeLead, completeVisit, findDuplicates, providerSources, salesTeam, saveCall, scheduleMeeting, submitLead, uploadQuotation } from "./leadsApi";
+import { FORM_SOURCES, REASONS, VISIT_OUTCOMES } from "./constants";
 import { toLocalInput, tomorrowInput } from "./format";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
@@ -69,6 +69,8 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
   };
 
   const duplicates = useMemo(() => findDuplicates(values), [values]);
+  // Staff pick from the sources the lead API accepts; a provider from the list the portal is given.
+  const sources = viewer.persona === "lead_provider" ? providerSources().map((name) => ({ value: name, label: name })) : FORM_SOURCES;
 
   function validate() {
     const found = {};
@@ -132,8 +134,10 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
         <Field label="Source of Lead" required error={errors.source}>
           <select className={`lm-select${errors.source ? " bad" : ""}`} value={values.source} onChange={set("source")} disabled={!!fixedSource}>
             <option value="">Select source</option>
-            {SOURCES.map((s) => (
-              <option key={s}>{s}</option>
+            {sources.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
             ))}
           </select>
         </Field>
@@ -458,75 +462,74 @@ export function CloseLeadModal({ lead, won, onClose }) {
   );
 }
 
-/* ------------------------------------------------------------ provider */
+/* ------------------------------------------------------------ quotation */
 
-export function ProviderModal({ provider, onClose }) {
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+/** Upload a quotation as a PDF with its total. The lead moves to Quotation Sent. */
+export function QuotationModal({ lead, onClose }) {
   const toast = useToast();
-  const editing = !!provider;
-  const [values, setValues] = useState(provider || { name: "", contact: "", phone: "", email: "", password: "" });
+  const [amount, setAmount] = useState(lead.quote ? String(Math.round(lead.quote)) : "");
+  const [file, setFile] = useState(null);
+  const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
-  const set = (key) => (e) => {
-    setValues((v) => ({ ...v, [key]: key === "phone" ? digits(e.target.value) : e.target.value }));
-    setErrors((er) => ({ ...er, [key]: "" }));
-  };
+
+  function pick(e) {
+    const picked = e.target.files?.[0] || null;
+    setFile(picked);
+    setErrors((er) => ({ ...er, file: "" }));
+  }
 
   async function save(close) {
     const found = {};
-    if (values.name.trim().length < 2) found.name = "Enter the provider's company name.";
-    if (values.contact.trim().length < 2) found.contact = "Enter the contact person.";
-    if (phoneProblem(values.phone)) found.phone = phoneProblem(values.phone);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) found.email = "Enter the login email address.";
-    if (!editing && (values.password || "").length < 8) found.password = "Use at least 8 characters.";
+    if (!(Number(amount) > 0)) found.amount = "Enter the quotation amount.";
+    if (!file) found.file = "Attach the quotation PDF.";
+    else if (file.type !== "application/pdf") found.file = "The quotation must be a PDF file.";
+    else if (file.size > MAX_PDF_BYTES) found.file = "That file is too large. The limit is 10 MB.";
     setErrors(found);
     if (busy || Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      await saveProvider({ ...values, name: values.name.trim(), contact: values.contact.trim(), email: values.email.trim() });
-      toast(editing ? "Provider updated" : "Provider created - they can now sign in");
+      const quotation = await uploadQuotation(lead.id, { file, totalAmount: Number(amount), notes });
+      toast(`Quotation ${quotation.number} uploaded`);
       close();
     } catch (err) {
-      toast(err.message || "Could not save the provider.", true);
+      toast(err.message || "Could not upload the quotation.", true);
       setBusy(false);
     }
   }
 
-  const cls = (key) => `lm-input${errors[key] ? " bad" : ""}`;
-
   return (
     <Modal
-      title={editing ? "Edit Lead Provider" : "Add Lead Provider"}
-      sub="A provider signs in to the restricted portal and sees only their own leads"
+      title="Create Quotation"
+      sub="Upload the quotation PDF - it is saved as sent to the customer"
       onClose={onClose}
       footer={(close) => (
         <>
           <Button variant="ghost" onClick={close}>
             Cancel
           </Button>
-          <Button busy={busy} icon={<FiCheck />} onClick={() => save(close)}>
-            {editing ? "Save Changes" : "Create Provider"}
+          <Button busy={busy} icon={<FiUploadCloud />} onClick={() => save(close)}>
+            Upload Quotation
           </Button>
         </>
       )}
     >
+      <LeadBar lead={lead} />
       <div className="lm-form">
-        <Field label="Provider / Company Name" required error={errors.name} wide>
-          <input className={cls("name")} value={values.name} onChange={set("name")} placeholder="e.g. Surya Marketing" />
+        <Field label="Quotation No" hint="Assigned automatically when uploaded">
+          <input className="lm-input" value="Auto" disabled />
         </Field>
-        <Field label="Contact Person" required error={errors.contact}>
-          <input className={cls("contact")} value={values.contact} onChange={set("contact")} />
+        <Field label="Total Amount (\u20b9)" required error={errors.amount}>
+          <input className={`lm-input${errors.amount ? " bad" : ""}`} value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" placeholder="0" />
         </Field>
-        <Field label="Phone Number" required error={errors.phone}>
-          <input className={cls("phone")} value={values.phone} onChange={set("phone")} inputMode="numeric" />
+        <Field label="Upload Quotation (PDF)" required error={errors.file} hint={file ? `${file.name} - choose again to replace` : "PDF only, up to 10 MB"} wide>
+          <input className={`lm-input${errors.file ? " bad" : ""}`} type="file" accept="application/pdf" onChange={pick} />
         </Field>
-        <Field label="Login Email" required error={errors.email} wide>
-          <input className={cls("email")} value={values.email} onChange={set("email")} type="email" placeholder="They sign in with this" />
+        <Field label="Notes" wide>
+          <textarea className="lm-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={300} placeholder="e.g. Sent quotation by email. Follow up after 1 week." />
         </Field>
-        {!editing && (
-          <Field label="Password" required error={errors.password} wide hint="Share this with the provider; they can change it after signing in.">
-            <input className={cls("password")} value={values.password} onChange={set("password")} type="password" autoComplete="new-password" />
-          </Field>
-        )}
       </div>
     </Modal>
   );

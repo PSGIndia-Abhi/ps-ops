@@ -2,6 +2,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import type { LeadStackParamList } from '../leads/navigation';
 import type { LeadType } from './types';
 
 export type LeadFilter = 'all' | 'paid' | 'pending';
@@ -24,7 +25,8 @@ export type CrmStackParamList = {
   CrmLeadDetail: { leadId: string };
   /** Shown right after saving; `note` explains anything the rep should still do (e.g. payment pending). */
   CrmLeadSaved: { leadId: string; note?: string };
-};
+  // The Lead Management screens (meetings, follow-ups, pipeline) are pushed onto this same stack.
+} & LeadStackParamList;
 
 /** Navigation prop for a tab screen that can also push the CRM stack's screens. */
 export type CrmTabScreenNav<T extends keyof CrmTabParamList> = CompositeNavigationProp<
