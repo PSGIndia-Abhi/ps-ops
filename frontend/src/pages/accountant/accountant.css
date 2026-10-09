@@ -602,3 +602,232 @@
 /* Customer Outstanding: amounts and the follow-up chip stay on one line */
 @media (min-width: 1340px) { .ac-custout .ac-table .ac-num, .ac-fu-chip span { white-space: nowrap; } }
 @media (max-width: 1339px) { .ac-custout .ac-fu-chip > svg { display: none; } .ac-custout .ac-fu-chip { padding: 6px 8px; } }
+
+/* ---------- Customer Outstanding: reminder bell + customer reminder panel ---------- */
+.ac-bell-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 9px; border: 1px solid #e2e8f0; background: #fff; color: #64748b; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .15s, background .15s, color .15s; }
+.ac-bell-btn svg { font-size: 16px; flex-shrink: 0; }
+.ac-bell-btn:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+.ac-bell-btn.on { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.ac-bell-btn.late { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.ac-bell-btn:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+.ac-btn-sm { padding: 6px 12px; font-size: 13px; }
+
+.ac-drawer-overlay { position: fixed; inset: 0; z-index: 900; background: rgba(15, 23, 42, .45); display: flex; justify-content: flex-end; }
+.ac-drawer { width: min(560px, 100%); height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -12px 0 32px rgba(15, 23, 42, .18); animation: ac-drawer-in .2s ease-out; }
+@keyframes ac-drawer-in { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ac-drawer { animation: none; } }
+.ac-drawer-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid #e5e7eb; }
+.ac-drawer-head h3 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.ac-drawer-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: #eff6ff; color: #2563eb; font-size: 19px; }
+.ac-drawer-close { font-size: 20px !important; color: #64748b !important; display: inline-flex; }
+.ac-drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 18px; }
+.ac-drawer-body .ac-fu-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ac-drawer-title { margin: 0 0 8px; font-size: 14px; color: #0f172a; }
+.ac-drawer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.ac-drawer-row .ac-drawer-title { margin: 0; }
+.ac-drawer-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid #e5e7eb; background: #f8fafc; }
+
+.ac-rem-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ac-rem-list li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.ac-rem-list li.done { background: #f8fafc; }
+.ac-rem-bell { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: #f1f5f9; color: #64748b; }
+.ac-rem-bell.on { background: #dcfce7; color: #15803d; }
+.ac-rem-bell.late { background: #fee2e2; color: #b91c1c; }
+.ac-rem-main { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 13.5px; }
+.ac-rem-main span { font-size: 12.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-rem-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+
+.ac-fu-timeline .tone-green .dot { background: #16a34a; }
+.ac-fu-timeline .tone-amber .dot { background: #f59e0b; }
+.ac-fu-timeline .tone-blue .dot { background: #2563eb; }
+.ac-fu-timeline .tone-red .dot { background: #dc2626; }
+
+@media (max-width: 560px) {
+  .ac-drawer-body .ac-fu-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ac-rem-list li { flex-wrap: wrap; }
+  .ac-rem-side { flex-direction: row; align-items: center; width: 100%; justify-content: space-between; }
+}
+@media (max-width: 480px) { .ac-drawer-table th:nth-child(4), .ac-drawer-table td:nth-child(4) { display: none; } }
+
+/* Customer Outstanding: separate Reminder / Action / History buttons per row */
+.ac-co-icon-col { text-align: center; }
+.ac-custout .ac-table td:nth-last-child(-n+3) { text-align: center; }
+.ac-icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid #e2e8f0; background: #fff; color: #475569; font-size: 16px; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+.ac-icon-btn:hover, .ac-icon-btn.active { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+.ac-icon-btn:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+.ac-action-menu { position: fixed; z-index: 950; width: 220px; padding: 6px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 12px 28px rgba(15, 23, 42, .16); display: grid; gap: 2px; }
+.ac-action-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: none; color: #0f172a; font: inherit; font-size: 13.5px; font-weight: 500; text-align: left; cursor: pointer; }
+.ac-action-menu button svg { color: #2563eb; flex-shrink: 0; }
+.ac-action-menu button:hover, .ac-action-menu button:focus-visible { background: #eff6ff; outline: none; }
+.ac-drawer-icon.history { background: #f1f5f9; color: #475569; }
+/* keep the 3 action buttons from pushing the table wider than a laptop screen */
+.ac-custout .ac-table th { white-space: normal; }
+.ac-bell-time::before { content: ", "; }
+@media (max-width: 1599px) { .ac-bell-time { display: none; } }
+
+/* Dashboard: 5 KPI tiles and 2 cards (trend + payment status) per row */
+.ac-dashboard .ac-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ac-dashboard .ac-row-2 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+@media (max-width: 1100px) {
+  .ac-dashboard .ac-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ac-dashboard .ac-row-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .ac-dashboard .ac-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Reminder bell (icon only): green = reminder set, red = overdue */
+.ac-icon-btn.ac-bell-icon.on { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+.ac-icon-btn.ac-bell-icon.late { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+/* icon buttons: no inherited button padding, so the icon sits exactly in the middle of its box */
+.ac-icon-btn { padding: 0; line-height: 0; flex-shrink: 0; }
+.ac-icon-btn svg { display: block; }
+/* the three button columns (Reminder / Action / History) take only the room they need */
+.ac-custout .ac-table th.ac-co-icon-col,
+.ac-custout .ac-table td:nth-last-child(-n+3) { width: 1%; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+@media (max-width: 1279px) {
+  .ac-custout .ac-icon-btn { width: 30px; height: 30px; font-size: 15px; border-radius: 8px; }
+  .ac-custout .ac-table th.ac-co-icon-col,
+  .ac-custout .ac-table td:nth-last-child(-n+3) { padding-left: 3px; padding-right: 3px; }
+}
+/* Pager: no inherited button padding (it pushed the arrows out of the 32px boxes);
+   arrows stay clearly visible, just greyed, when there is no previous/next page */
+.ac-pager-btns button { padding: 0 8px; display: inline-grid; place-items: center; color: #334155; font-size: 13px; font-weight: 600; }
+.ac-pager-btns button.active { color: #fff; }
+.ac-pager-arrow svg { font-size: 17px; display: block; }
+.ac-pager-btns button:hover:not(:disabled):not(.active) { background: #f1f5f9; border-color: #94a3b8; }
+.ac-pager-btns button:disabled { opacity: 1; color: #94a3b8; background: #f8fafc; border-color: #e2e8f0; cursor: not-allowed; }
+/* Create Reminder: tick list of the customer's unpaid invoices */
+.ac-pick-list { list-style: none; margin: 0; padding: 0; border: 1px solid #e5e7eb; border-radius: 10px; max-height: 220px; overflow-y: auto; }
+.ac-pick-list li + li { border-top: 1px solid #f1f5f9; }
+.ac-pick-list label { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; font-weight: 400 !important; }
+.ac-pick-list label:hover { background: #f8fafc; }
+.ac-pick-list label.disabled { cursor: not-allowed; background: #f8fafc; }
+.ac-pick-list input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; flex-shrink: 0; }
+.ac-pick-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ac-pick-main strong { font-size: 13.5px; color: #0f172a; }
+.ac-pick-main span { font-size: 12px; color: #64748b; }
+.ac-pick-list label.disabled .ac-pick-main span { color: #15803d; }
+.ac-pick-amt { font-size: 13px; font-weight: 600; color: #b91c1c; white-space: nowrap; }
+/* Reminder page: a proper Back button (arrow and text on one line, normal size) */
+.ac-fu-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; width: fit-content; padding: 7px 14px 7px 10px; border: 1px solid #d1d5db; border-radius: 9px; background: #fff; color: #334155; font-size: 13.5px; font-weight: 600; line-height: 1; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.ac-fu-back svg { font-size: 16px; display: block; flex-shrink: 0; }
+.ac-fu-back:hover { background: #f1f5f9; border-color: #94a3b8; color: #0f172a; }
+.ac-fu-back:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+/* ---------- Timed payment reminders: pop-ups when a reminder comes due ---------- */
+.ac-alert-stack { position: fixed; top: 84px; right: 20px; z-index: 1300; display: flex; flex-direction: column; gap: 10px; width: 380px; max-width: calc(100vw - 32px); }
+.ac-alert { display: flex; align-items: flex-start; gap: 12px; padding: 14px 12px 14px 14px; background: #fff; border: 1px solid #e5e7eb; border-left: 5px solid #f59e0b; border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, .2); animation: ac-toast-in .28s ease-out; }
+.ac-alert-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: #ffedd5; color: #c2410c; font-size: 17px; }
+.ac-alert-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #475569; }
+.ac-alert-body strong { font-size: 14.5px; color: #0f172a; overflow-wrap: anywhere; }
+.ac-alert-body span { overflow-wrap: anywhere; }
+.ac-alert-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ac-alert-close { flex: none; border: 0; background: transparent; color: #64748b; font-size: 18px; cursor: pointer; display: inline-flex; padding: 2px; border-radius: 6px; line-height: 0; }
+.ac-alert-close:hover { background: #f1f5f9; color: #0f172a; }
+.ac-alert-more { align-self: flex-end; font-size: 12px; font-weight: 600; color: #475569; background: #fff; border: 1px solid #e5e7eb; border-radius: 20px; padding: 3px 10px; box-shadow: 0 4px 12px rgba(15, 23, 42, .12); }
+@media (prefers-reduced-motion: reduce) { .ac-alert { animation: none; } }
+@media (max-width: 640px) { .ac-alert-stack { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-width: none; } }
+
+/* Customer contact (phone numbers): the Contact section of the reminder panel and the
+   Phone line of the reminder page. */
+.ac-contact-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.ac-contact-tag { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11.5px; font-weight: 700; vertical-align: 1px; }
+.ac-contact-muted { color: #64748b; font-weight: 500; }
+.ac-contact-empty { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; color: #64748b; font-size: 13.5px; }
+.ac-contact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ac-contact-list li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.ac-contact-avatar { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 50%; background: #e0e7ff; color: #3730a3; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.ac-contact-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ac-contact-main strong { font-size: 14px; color: #0f172a; overflow-wrap: anywhere; }
+.ac-contact-main span { font-size: 13px; color: #64748b; overflow-wrap: anywhere; }
+.ac-contact-main .ac-contact-tag { font-size: 11.5px; color: #166534; }
+.ac-contact-actions { display: flex; gap: 6px; flex-shrink: 0; }
+a.ac-contact-call { text-decoration: none; background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+a.ac-contact-call:hover { background: #dcfce7; }
+.ac-contact-form { display: grid; gap: 12px; margin-top: 10px; padding: 14px; border: 1px solid #bfdbfe; border-radius: 10px; background: #f8fbff; font-weight: 400; }
+.ac-contact-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.ac-contact-form-foot { justify-content: flex-end; }
+.ac-contact-line { min-width: 0; display: grid; gap: 6px; }
+.ac-contact-line-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.ac-contact-line-row .ac-contact-tag { margin-left: 0; }
+/* on the reminder page the form takes the whole row (label column included), not just the value column */
+.ac-fu-pay .ac-kv .ac-contact-form { margin-left: -130px; }
+@media (max-width: 640px) { .ac-fu-pay .ac-kv .ac-contact-form { margin-left: 0; } }
+@media (max-width: 520px) {
+  .ac-contact-list li { flex-wrap: wrap; }
+  .ac-contact-actions { width: 100%; }
+  .ac-contact-actions .ac-btn { flex: 1; justify-content: center; }
+}
+
+/* Contacts page (the accountant's phone list for every customer) */
+.ac-contacts-page .ac-search .ac-input { min-width: 300px; }
+.ac-contacts-phone { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; white-space: nowrap; }
+.ac-contacts-actions { flex-wrap: nowrap; gap: 8px; }
+/* "+2 more" opens the customer's other numbers, shown as lighter rows under the primary one */
+.ac-contacts-more { display: inline-flex; align-items: center; gap: 3px; margin-left: 10px; padding: 2px 8px; border-radius: 999px; background: #eff6ff; font-size: 12px; font-weight: 700; white-space: nowrap; vertical-align: 1px; }
+.ac-contacts-more:hover { background: #dbeafe; }
+.ac-contacts-sub td { background: #f8fafc; }
+.ac-contacts-sub td:first-child { padding-left: 28px; }
+/* Edit (blue) and Archive (grey), the same look as the admin Contacts page */
+.ac-contacts-edit, .ac-contacts-archive { padding: 7px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 700; }
+.ac-contacts-edit { background: #2563eb; border-color: #2563eb; color: #fff; }
+.ac-contacts-edit:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+.ac-contacts-archive { background: #eef0f3; border-color: #eef0f3; color: #0f172a; }
+.ac-contacts-archive:hover:not(:disabled) { background: #e2e5ea; border-color: #e2e5ea; }
+@media (max-width: 640px) {
+  .ac-contacts-page .ac-head .ac-actions, .ac-contacts-page .ac-search { width: 100%; }
+  .ac-contacts-page .ac-search .ac-input { min-width: 0; }
+  .ac-contacts-actions { flex-wrap: wrap; }
+}
+
+/* Reminder progress track (reminder page, under the action buttons): one step per stage,
+   joined by a line that is filled up to the furthest stage reached. */
+.ac-track { list-style: none; margin: 6px 0 0; padding: 14px 0 0; border-top: 1px solid #eef0f3; flex: 1 1 100%; display: flex; }
+.ac-track li { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.ac-track li + li::before { content: ""; position: absolute; top: 14px; right: 50%; width: 100%; height: 3px; background: #e2e8f0; border-radius: 2px; }
+.ac-track li.reached + li.reached::before, .ac-track li.reached + li.current::before { background: #2563eb; }
+.ac-track-dot { position: relative; z-index: 1; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #fff; border: 2px solid #cbd5e1; color: #64748b; font-size: 13px; font-weight: 700; line-height: 1; }
+.ac-track-dot svg { display: block; }
+.ac-track li.done .ac-track-dot { background: #2563eb; border-color: #2563eb; color: #fff; font-size: 15px; }
+.ac-track li.current .ac-track-dot { border-color: #2563eb; color: #2563eb; box-shadow: 0 0 0 4px #dbeafe; }
+.ac-track-label { font-size: 12.5px; font-weight: 600; color: #94a3b8; padding: 0 4px; overflow-wrap: anywhere; }
+.ac-track li.done .ac-track-label { color: #0f172a; }
+.ac-track li.current .ac-track-label { color: #2563eb; }
+.ac-track-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 520px) {
+  .ac-track-dot { width: 26px; height: 26px; font-size: 12px; }
+  .ac-track li + li::before { top: 12px; }
+  .ac-track-label { font-size: 11px; padding: 0 2px; }
+}
+
+/* Files attached to a reminder (Attachments tab of the reminder page) */
+.ac-files { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+.ac-files li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.ac-files-icon { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 9px; background: #eff6ff; color: #2563eb; display: grid; place-items: center; font-size: 16px; }
+.ac-files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.ac-files-main .ac-link { padding: 0; font-size: 14px; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.ac-files-remove { flex-shrink: 0; color: #b91c1c; }
+.ac-contacts-email { overflow-wrap: anywhere; }
+
+/* ---- Small-screen fixes for the reminder / contacts screens ---- */
+/* Side panel: its invoice table fits the panel (the general 640px table minimum made it scroll sideways, hiding Pending). */
+@media (max-width: 640px) {
+  .ac-drawer .ac-drawer-table { min-width: 0; }
+  .ac-drawer-table th, .ac-drawer-table td { padding-left: 6px; padding-right: 6px; overflow-wrap: anywhere; }
+  .ac-drawer-table .ac-num, .ac-drawer-table th { white-space: nowrap; overflow-wrap: normal; }
+  .ac-drawer-table th, .ac-drawer-table td { font-size: 13px; }
+}
+/* Contacts page as a table (tablet and up): the email keeps a readable width before it wraps. */
+@media (min-width: 641px) { .ac-contacts-email { min-width: 150px; } }
+/* Contacts page as cards (phones): Edit and Archive stay side by side; a folded number's card is marked by a left bar, not an indent. */
+@media (max-width: 640px) {
+  .ac-contacts-page .ac-contacts-actions { flex-wrap: nowrap; justify-content: flex-end; }
+  .ac-table.ac-stack tr.ac-contacts-sub { border-left: 3px solid #bfdbfe; background: #f8fafc; }
+  .ac-table.ac-stack tr.ac-contacts-sub td { background: transparent; }
+  .ac-table.ac-stack tr.ac-contacts-sub td:first-child { padding-left: 0; }
+  .ac-contacts-more { margin-left: 0; }
+}
+
+/* "Every day at 10:00 AM until 05/10/2026" beside a repeating reminder's badges */
+.ac-fu-repeat { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 600; }

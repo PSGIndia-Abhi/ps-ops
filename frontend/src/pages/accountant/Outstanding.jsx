@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { FiActivity, FiAlertTriangle, FiBell, FiBellOff, FiCalendar, FiClock, FiDownload, FiFileText, FiList, FiPlusCircle, FiSearch } from "react-icons/fi";
-import FollowUpModal from "../../components/accountant/FollowUpModal";
+import { useLocation, useNavigate } from "react-router-dom";
+import { FiActivity, FiAlertTriangle, FiCalendar, FiClock, FiDownload, FiFileText, FiList, FiPlusCircle, FiSearch } from "react-icons/fi";
 import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { daysOverdue, followUpForInvoice, followUpIndex, showDate, useAccountantData, usePaged } from "./data";
-import { showDue } from "./followups";
+import { daysOverdue, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 
 const CHIPS = [
@@ -14,7 +12,6 @@ const CHIPS = [
   { key: "TODAY", label: "Due Today", icon: <FiClock />, test: (i) => daysOverdue(i.due_date) === 0 },
   { key: "WEEK", label: "Due This Week", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; } },
   { key: "MONTH", label: "Due This Month", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -30; } },
-  { key: "NOFOLLOW", label: "No Follow-up Set", icon: <FiBellOff />, test: (i) => !i.follow_up },
 ];
 
 const BUCKETS = [
@@ -36,27 +33,23 @@ function severity(days) {
 
 export default function Outstanding() {
   const navigate = useNavigate();
-  const { invoices, followUps, loading, error, reload } = useAccountantData();
+  const location = useLocation();
+  const { invoices, loading, error, reload } = useAccountantData();
   const [chip, setChip] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [customer, setCustomer] = useState("");
+  // "Open in Outstanding" from Customer Outstanding arrives filtered to that customer.
+  const [customer, setCustomer] = useState(location.state?.customer || "");
   const [site, setSite] = useState("");
   const [bucket, setBucket] = useState("");
   const [minAmount, setMinAmount] = useState("");
-  const [selected, setSelected] = useState([]);
-  const [followUpIds, setFollowUpIds] = useState([]); // invoices the follow-up dialog is for (empty = closed)
 
-  const index = useMemo(() => followUpIndex(followUps), [followUps]);
-
-  // Unpaid invoices only, most overdue first. follow_up: the open follow-up covering the
-  // invoice (its own, otherwise its customer's).
+  // Unpaid invoices only, most overdue first.
   const unpaid = useMemo(
     () =>
       invoices
         .filter((i) => i.status !== "CANCELLED" && i.pending_amount > 0)
-        .map((i) => ({ ...i, follow_up: followUpForInvoice(index, i) }))
         .sort((a, b) => (daysOverdue(b.due_date) ?? -Infinity) - (daysOverdue(a.due_date) ?? -Infinity)),
-    [invoices, index]
+    [invoices]
   );
 
   const customers = useMemo(() => [...new Set(unpaid.map((i) => i.customer_name))].sort(), [unpaid]);
@@ -101,17 +94,6 @@ export default function Outstanding() {
     { key: "light", icon: <FiActivity />, label: "Avg. Days Overdue", value: avgDays == null ? "—" : `${avgDays} days` },
   ];
 
-  const allChecked = pageRows.length > 0 && pageRows.every((r) => selected.includes(r.id));
-
-  function toggleAll() {
-    const ids = pageRows.map((r) => r.id);
-    setSelected((s) => (allChecked ? s.filter((id) => !ids.includes(id)) : [...new Set([...s, ...ids])]));
-  }
-
-  function toggleOne(id) {
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }
-
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
   // Changing the customer clears any site pick that no longer applies.
   const changeCustomer = (e) => { setCustomer(e.target.value); setSite(""); setPage(0); };
@@ -126,14 +108,7 @@ export default function Outstanding() {
       { header: "Invoice Amount", value: (i) => i.invoice_amount },
       { header: "Paid", value: (i) => i.paid_amount },
       { header: "Pending", value: (i) => i.pending_amount },
-      { header: "Follow-up For", value: (i) => (i.follow_up ? (i.follow_up.scope === "INVOICE" ? "Invoice" : "Customer") : "") },
-      { header: "Next Follow-up", value: (i) => (i.follow_up ? `${i.follow_up.due_date} ${i.follow_up.due_time}`.trim() : "") },
     ], rows);
-  }
-
-  async function afterFollowUp() {
-    setSelected([]);
-    await reload();
   }
 
   return (
@@ -183,24 +158,13 @@ export default function Outstanding() {
           <input className="ac-input" type="number" min="0" placeholder="Min. pending (₹)" value={minAmount} onChange={filterChange(setMinAmount)} />
         </div>
 
-        {selected.length > 0 && (
-          <div className="ac-bulk">
-            <span>{selected.length} invoice{selected.length > 1 ? "s" : ""} selected</span>
-            <div className="ac-actions">
-              <button type="button" className="ac-btn ac-btn-primary" onClick={() => setFollowUpIds(selected)}><FiBell /> Add Follow-ups</button>
-              <button type="button" className="ac-btn" onClick={() => setSelected([])}>Clear</button>
-            </div>
-          </div>
-        )}
-
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack">
             <thead>
               <tr>
-                <th><input type="checkbox" aria-label="Select all on this page" checked={allChecked} onChange={toggleAll} /></th>
                 <th>Invoice No</th><th>Customer / Site</th><th>Due Date</th><th className="ac-num">Days Overdue</th>
                 <th className="ac-num">Invoice Amount</th><th className="ac-num">Paid</th><th className="ac-num">Pending</th>
-                <th>Follow-up</th><th>Action</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -208,7 +172,6 @@ export default function Outstanding() {
                 const d = daysOverdue(i.due_date);
                 return (
                   <tr key={i.id}>
-                    <td><input type="checkbox" aria-label={`Select ${i.invoice_number}`} checked={selected.includes(i.id)} onChange={() => toggleOne(i.id)} /></td>
                     <td>
                       <button type="button" className="ac-link" onClick={() => navigate(`/accountant/invoices/${i.id}`)}>{i.invoice_number}</button>
                     </td>
@@ -219,34 +182,20 @@ export default function Outstanding() {
                     <td className="ac-num">{money(i.paid_amount)}</td>
                     <td className="ac-num ac-money-red">{money(i.pending_amount)}</td>
                     <td>
-                      {i.follow_up ? (
-                        <button type="button" className={`ac-fu-chip${i.follow_up.display_status === "OVERDUE" ? " late" : ""}`}
-                          onClick={() => navigate(`/accountant/follow-ups/${i.follow_up.id}`)}>
-                          <FiCalendar />
-                          <span>
-                            {showDue(i.follow_up.due_date, i.follow_up.due_time, { short: true })}
-                            <small>{i.follow_up.scope === "INVOICE" ? "This invoice" : "Whole customer"}</small>
-                          </span>
-                        </button>
-                      ) : <span className="ac-sub">No follow-up set</span>}
-                    </td>
-                    <td>
                       <div className="ac-actions" style={{ flexWrap: "nowrap" }}>
                         <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
                           onClick={() => navigate("/accountant/payments/record", { state: { customerId: i.customer_id } })}><FiPlusCircle /></button>
-                        <button type="button" className="ac-link" title="Add follow-up" aria-label="Add follow-up"
-                          onClick={() => setFollowUpIds([i.id])}><FiBell /></button>
                       </div>
                     </td>
                   </tr>
                 );
-              }) : <EmptyRow cols={10} loading={loading} text="No outstanding invoices" />}
+              }) : <EmptyRow cols={8} loading={loading} text="No outstanding invoices" />}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={7}>Total pending for all {rows.length} row{rows.length === 1 ? "" : "s"} shown</td>
+                <td colSpan={6}>Total pending for all {rows.length} row{rows.length === 1 ? "" : "s"} shown</td>
                 <td className="ac-num ac-money-red">{money(sum(rows, "pending_amount"))}</td>
-                <td colSpan={2} />
+                <td />
               </tr>
             </tfoot>
           </table>
@@ -254,18 +203,6 @@ export default function Outstanding() {
 
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
-
-      <FollowUpModal
-        key={followUpIds.join(",") || "none"}
-        open={followUpIds.length > 0}
-        onClose={() => setFollowUpIds([])}
-        onCreated={afterFollowUp}
-        invoices={invoices}
-        followUps={followUps}
-        invoiceId={followUpIds.length === 1 ? followUpIds[0] : ""}
-        invoiceIds={followUpIds.length > 1 ? followUpIds : []}
-        lockCustomer
-      />
     </div>
   );
 }

@@ -122,13 +122,15 @@ export function cleanFollowUp(row, invoicesById = new Map(), customerNames = new
   const due = ymd(row.due_date);
   return {
     id: row.id,
+    series_id: row.series_id || "", // set when the reminder repeats (see REPEATS in followups.js)
     scope,
     customer_id: customerId,
     invoice_id: scope === "INVOICE" ? row.source_id || "" : "",
     invoice_number: invoice?.invoice_number || "",
     customer_name: invoice?.customer_name || customerNames.get(customerId) || "",
     site_name: invoice?.site_name || "",
-    title: row.title,
+    // Reminders saved before the rename are titled "Payment Follow-up - ..."; shown as "Payment Reminder".
+    title: String(row.title || "").replace(/^Payment Follow-up\b/, "Payment Reminder"),
     notes: row.description || "",
     priority: row.priority,
     status: row.status,
@@ -192,14 +194,18 @@ export function groupByCustomer(invoices, payments = []) {
 // The hook every accountant screen uses.
 // ---------------------------------------------------------------------------
 export function useAccountantData() {
-  const [state, setState] = useState({ invoices: [], payments: [], followUps: [], loading: true, error: "" });
+  const [state, setState] = useState({ invoices: [], payments: [], followUps: [], loading: true, error: "", reminderError: "" });
 
   const load = useCallback(async () => {
     try {
-      const [rawInvoices, rawPayments, rawFollowUps] = await Promise.all([
+      // Reminders are loaded alongside but on their own: if they fail, the invoices and
+      // payments still show, and only the reminder screens say so (reminderError).
+      const [rawInvoices, rawPayments, reminders] = await Promise.all([
         getJson("/api/invoices"),
         getJson("/api/payments"),
-        getJson(`/api/work-tasks?task_type=${encodeURIComponent(FOLLOWUP_TYPE)}`),
+        getJson(`/api/work-tasks?task_type=${encodeURIComponent(FOLLOWUP_TYPE)}`)
+          .then((rows) => ({ rows, error: "" }))
+          .catch((err) => ({ rows: [], error: err.message || "Could not load the reminders" })),
       ]);
       const invoices = rawInvoices.map(cleanInvoice);
       const byId = new Map(invoices.map((i) => [i.id, i]));
@@ -207,9 +213,10 @@ export function useAccountantData() {
       setState({
         invoices,
         payments: rawPayments.map(cleanPayment),
-        followUps: rawFollowUps.filter(isFollowUpRow).map((t) => cleanFollowUp(t, byId, names)),
+        followUps: reminders.rows.filter(isFollowUpRow).map((t) => cleanFollowUp(t, byId, names)),
         loading: false,
         error: "",
+        reminderError: reminders.error ? "Reminders could not be loaded right now. Invoices and payments are shown as usual." : "",
       });
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err.message || "Could not load data from the server" }));
@@ -260,7 +267,3 @@ export function followUpIndex(followUps) {
   }
   return { byCustomer, byInvoice };
 }
-
-// The follow-up that covers an invoice: its own, otherwise its customer's.
-export const followUpForInvoice = (index, invoice) =>
-  index.byInvoice.get(invoice.id) || index.byCustomer.get(invoice.customer_id) || null;

@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   FiAlertCircle, FiArrowLeft, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiEdit3, FiFileText, FiMessageSquare,
-  FiPhone, FiPlay, FiPlusCircle, FiRotateCcw, FiUser, FiX,
+  FiPaperclip, FiPhone, FiPlay, FiPlusCircle, FiRepeat, FiRotateCcw, FiTrash2, FiUpload, FiUser, FiX,
 } from "react-icons/fi";
+import CustomerContacts from "../../components/accountant/CustomerContacts";
 import FollowUpOutcomeModal from "../../components/accountant/FollowUpOutcomeModal";
-import DateInput from "../../components/accountant/DateInput";
 import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, cleanFollowUp, showDate, todayYmd, useAccountantData } from "./data";
+import { byDue, cleanFollowUp, showDate, useAccountantData } from "./data";
 import {
-  addFollowUpComment, completeFollowUp, fetchCustomerContact, fetchFollowUp, fetchFollowUpComments, fetchFollowUpHistory,
-  reopenFollowUp, rescheduleFollowUp, showDue, startFollowUp,
+  addFollowUpComment, completeFollowUp, deleteFollowUpAttachment, fetchCustomerContact, fetchFollowUp, fetchFollowUpAttachments,
+  fetchFollowUpComments, fetchFollowUpHistory, fetchReminderSchedule, MAX_ATTACHMENT_MB, repeatEnd, repeatText, openFollowUpAttachment, uploadFollowUpAttachment,
+  reopenFollowUp, showDue, startFollowUp,
 } from "./followups";
 
 const TABS = [
@@ -19,11 +20,12 @@ const TABS = [
   { key: "details", label: "Details" },
   { key: "history", label: "History" },
   { key: "comments", label: "Comments" },
+  { key: "attachments", label: "Attachments" },
 ];
 
 const HISTORY_LABEL = {
-  CREATE: "Follow-up created", START: "Started", UPDATE: "Update", RESCHEDULE: "Rescheduled", COMPLETE: "Completed",
-  REOPEN: "Reopened", PAUSE: "Paused", RESUME: "Resumed", REASSIGN: "Reassigned", EDIT: "Edited", CANCEL: "Cancelled",
+  CREATE: "Reminder created", START: "Started", UPDATE: "Update", RESCHEDULE: "Rescheduled", COMPLETE: "Completed",
+  REOPEN: "Reopened", ATTACH: "File attached", DETACH: "File removed", PAUSE: "Paused", RESUME: "Resumed", REASSIGN: "Reassigned", EDIT: "Edited", CANCEL: "Cancelled",
   RESCHEDULE_REQUEST: "Reschedule requested",
 };
 
@@ -37,38 +39,58 @@ const showDateTime = (v) => {
 export default function FollowUpDetails() {
   const navigate = useNavigate();
   const { taskId } = useParams();
+  const location = useLocation();
+  // Back returns to where the accountant came from; opened directly (bookmark, refresh) there is
+  // no previous page, so it goes to Tasks & Reminders instead of doing nothing.
+  const goBack = () => (location.key !== "default" ? navigate(-1) : navigate("/accountant/tasks"));
   const { invoices, payments, followUps, loading: dataLoading, error: dataError, reload: reloadData } = useAccountantData();
 
   const [raw, setRaw] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [history, setHistory] = useState([]);
   const [comments, setComments] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [schedule, setSchedule] = useState(null); // how the reminder repeats, when it does
   const [contact, setContact] = useState(null); // { phone } once loaded
   const [tab, setTab] = useState("payment");
   const [busy, setBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
-  const [dialog, setDialog] = useState(""); // "outcome" | "reschedule" | "complete" | "reopen"
+  const [dialog, setDialog] = useState(""); // "outcome" | "complete" | "reopen"
 
   const loadTask = useCallback(async () => {
     try {
-      const [task, hist, notes] = await Promise.all([
+      const [task, hist, notes, files] = await Promise.all([
         fetchFollowUp(taskId),
         fetchFollowUpHistory(taskId).catch(() => []),
         fetchFollowUpComments(taskId).catch(() => []),
+        fetchFollowUpAttachments(taskId).catch(() => []),
       ]);
       setRaw(task);
       setHistory(hist);
       setComments(notes);
+      setAttachments(files);
       setLoadError("");
     } catch (err) {
-      setLoadError(err.message || "Could not load this follow-up");
+      setLoadError(err.message || "Could not load this reminder");
     }
   }, [taskId]);
 
   useEffect(() => {
     loadTask();
   }, [loadTask]);
+
+  // A repeating reminder: load its schedule, to say how it repeats.
+  const seriesId = raw?.series_id || "";
+  useEffect(() => {
+    if (!seriesId) return undefined;
+    let cancelled = false;
+    fetchReminderSchedule(seriesId).then((s) => { if (!cancelled) setSchedule(s); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [seriesId]);
+  const repeats = schedule?.recurrence && schedule.status !== "CANCELLED"
+    ? `${repeatText(schedule.recurrence)}${repeatEnd(schedule.recurrence) ? ` until ${showDate(repeatEnd(schedule.recurrence))}` : ""}`
+    : "";
 
   const byId = useMemo(() => new Map(invoices.map((i) => [i.id, i])), [invoices]);
   const names = useMemo(() => new Map(invoices.map((i) => [i.customer_id, i.customer_name])), [invoices]);
@@ -91,9 +113,8 @@ export default function FollowUpDetails() {
   const customerOutstanding = customerUnpaid.reduce((s, i) => s + i.pending_amount, 0);
   const invoice = task?.scope === "INVOICE" ? byId.get(task.invoice_id) : null;
   const outstanding = task?.scope === "INVOICE" ? invoice?.pending_amount ?? 0 : customerOutstanding;
-  const shownInvoices = task?.scope === "INVOICE"
-    ? [invoice, ...customerUnpaid.filter((i) => i.id !== task.invoice_id)].filter(Boolean)
-    : customerUnpaid;
+  // An invoice reminder shows only its own invoice; a whole-customer reminder shows all unpaid ones.
+  const shownInvoices = task?.scope === "INVOICE" ? [invoice].filter(Boolean) : customerUnpaid;
   const customerCode = customerInvoices[0]?.customer_code || "";
   const lastPayment = payments
     .filter((p) => p.customer_id === customerId && p.status !== "CANCELLED")
@@ -122,7 +143,7 @@ export default function FollowUpDetails() {
   async function afterOutcome({ outcome, rescheduled }) {
     setDialog("");
     await Promise.all([loadTask(), reloadData()]);
-    setNotice(rescheduled ? "Update saved and the follow-up was rescheduled." : "Update saved.");
+    setNotice(rescheduled ? "Update saved and the reminder was rescheduled." : "Update saved.");
     if (outcome === "PAYMENT_RECEIVED") {
       navigate("/accountant/payments/record", { state: { customerId, followUpId: task.id } });
     }
@@ -133,18 +154,19 @@ export default function FollowUpDetails() {
   if (loadError && !raw) {
     return (
       <div className="ac-page">
-        <button type="button" className="ac-back" onClick={() => navigate(-1)}><FiArrowLeft /> Back</button>
+        <button type="button" className="ac-fu-back" onClick={goBack}><FiArrowLeft /> Back</button>
         <DataError error={loadError} onRetry={loadTask} />
       </div>
     );
   }
 
   const active = task?.active;
+  const started = active && task.status !== "OPEN"; // in progress (or paused)
   const phone = contact?.phone;
 
   return (
     <div className="ac-page ac-fu-page">
-      <button type="button" className="ac-back" onClick={() => navigate(-1)}><FiArrowLeft /> Back</button>
+      <button type="button" className="ac-fu-back" onClick={goBack}><FiArrowLeft /> Back</button>
 
       <DataError error={dataError} onRetry={reloadData} />
       {actionError && <div className="ac-info error" role="alert"><FiAlertCircle style={{ flexShrink: 0 }} /><span>{actionError}</span></div>}
@@ -166,8 +188,8 @@ export default function FollowUpDetails() {
             {task && (
               <div className="ac-fu-badges">
                 <Badge value={task.display_status} />
-                {(task.status === "IN_PROGRESS" || task.status === "PAUSED") && <Badge value={task.status} />}
                 <Badge value={task.priority} />
+                {repeats && <span className="ac-fu-repeat" title="This reminder repeats"><FiRepeat /> {repeats}</span>}
               </div>
             )}
           </div>
@@ -177,27 +199,35 @@ export default function FollowUpDetails() {
           <div className="ac-actions ac-fu-actions">
             {phone && <a className="ac-btn" href={`tel:${phone.replace(/[^\d+]/g, "")}`}><FiPhone /> Call Customer</a>}
             {task.status === "OPEN" && (
-              <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => run("start", () => startFollowUp(task.id), "Follow-up started.")}>
+              <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => run("start", () => startFollowUp(task.id), "Reminder started.")}>
                 <FiPlay /> {busy === "start" ? "Starting…" : "Start"}
               </button>
             )}
-            {active && <button type="button" className="ac-btn ac-btn-primary" disabled={Boolean(busy)} onClick={() => setDialog("outcome")}><FiEdit3 /> Update Follow-up</button>}
-            {active && <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => setDialog("reschedule")}><FiCalendar /> Reschedule</button>}
-            {active && <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => setDialog("complete")}><FiCheck /> Complete</button>}
+            {/* Update and Complete only appear once the reminder has been started */}
+            {started && <button type="button" className="ac-btn ac-btn-primary" disabled={Boolean(busy)} onClick={() => setDialog("outcome")}><FiEdit3 /> Update Reminder</button>}
+            {started && <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => setDialog("complete")}><FiCheck /> Complete</button>}
             {active && outstanding > 0 && <button type="button" className="ac-btn" onClick={recordPayment}><FiPlusCircle /> Record Payment</button>}
             {task.status === "COMPLETED" && <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => setDialog("reopen")}><FiRotateCcw /> Reopen</button>}
           </div>
         )}
+
+        {task && isPaymentFollowUp && (
+          <ReminderTrack
+            task={task}
+            contacted={history.some((h) => h.action === "UPDATE")}
+            paid={!dataLoading && (task.scope !== "INVOICE" || Boolean(invoice)) && outstanding <= 0}
+          />
+        )}
       </div>
 
       {raw && !isPaymentFollowUp && (
-        <div className="ac-info error">This task is not a payment follow-up.</div>
+        <div className="ac-info error">This task is not a payment reminder.</div>
       )}
 
       <div className="ac-stats ac-fu-stats-row">
         <div className="ac-stat orange"><div className="ac-stat-label">{task?.scope === "INVOICE" ? "Invoice Outstanding" : "Total Outstanding"}</div><div className="ac-stat-value">{task && !dataLoading ? money(outstanding) : "—"}</div></div>
-        <div className="ac-stat blue"><div className="ac-stat-label">Pending Invoices</div><div className="ac-stat-value">{task && !dataLoading ? customerUnpaid.length : "—"}</div></div>
-        <div className="ac-stat red"><div className="ac-stat-label">{task?.status === "COMPLETED" ? "Completed On" : "Next Follow-up"}</div><div className="ac-stat-value ac-fu-stat-small">{task ? (task.status === "COMPLETED" ? showDateTime(task.completed_at) : showDue(task.due_date, task.due_time)) : "—"}</div></div>
+        <div className="ac-stat blue"><div className="ac-stat-label">{task?.scope === "INVOICE" ? "Invoice" : "Pending Invoices"}</div><div className="ac-stat-value">{task && !dataLoading ? (task.scope === "INVOICE" ? task.invoice_number || "—" : customerUnpaid.length) : "—"}</div></div>
+        <div className="ac-stat red"><div className="ac-stat-label">{task?.status === "COMPLETED" ? "Completed On" : "Next Reminder"}</div><div className="ac-stat-value ac-fu-stat-small">{task ? (task.status === "COMPLETED" ? showDateTime(task.completed_at) : showDue(task.due_date, task.due_time)) : "—"}</div></div>
         <div className="ac-stat green"><div className="ac-stat-label">Assigned To</div><div className="ac-stat-value ac-fu-stat-small">{dash(task?.assigned_to_name)}</div></div>
       </div>
 
@@ -205,7 +235,7 @@ export default function FollowUpDetails() {
         <div className="ac-tabs" style={{ marginBottom: 14 }}>
           {TABS.map((t) => (
             <button key={t.key} type="button" className={`ac-tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
-              {t.label}{t.key === "history" && history.length ? ` (${history.length})` : ""}{t.key === "comments" && comments.length ? ` (${comments.length})` : ""}
+              {t.label}{t.key === "history" && history.length ? ` (${history.length})` : ""}{t.key === "comments" && comments.length ? ` (${comments.length})` : ""}{t.key === "attachments" && attachments.length ? ` (${attachments.length})` : ""}
             </button>
           ))}
         </div>
@@ -218,13 +248,22 @@ export default function FollowUpDetails() {
                 <dt>Customer</dt><dd>{dash(task?.customer_name)}{customerCode ? ` (${customerCode})` : ""}</dd>
                 <dt>Phone</dt>
                 <dd>
-                  {contact == null ? "…" : phone ? <a className="ac-link" href={`tel:${phone.replace(/[^\d+]/g, "")}`}><FiPhone /> {phone}</a> : "No phone number saved"}
+                  <CustomerContacts
+                    variant="line"
+                    customerId={customerId}
+                    customerName={task?.customer_name}
+                    data={contact}
+                    onSaved={async () => {
+                      setContact(await fetchCustomerContact(customerId).catch(() => contact));
+                      setNotice("Contact saved.");
+                    }}
+                  />
                 </dd>
                 <dt>Total Outstanding</dt><dd className="ac-money-red">{dataLoading ? "…" : money(customerOutstanding)}</dd>
                 <dt>Pending Invoices</dt><dd>{dataLoading ? "…" : customerUnpaid.length}</dd>
                 <dt>Last Payment</dt><dd>{showDate(lastPayment) || "—"}</dd>
                 {task?.scope === "INVOICE" && (
-                  <><dt>This follow-up is for</dt><dd>{dash(task.invoice_number)} {invoice ? `(${money(invoice.pending_amount)} pending)` : ""}</dd></>
+                  <><dt>This reminder is for</dt><dd>{dash(task.invoice_number)} {invoice ? `(${money(invoice.pending_amount)} pending)` : ""}</dd></>
                 )}
               </dl>
               <div className="ac-actions" style={{ marginTop: 14 }}>
@@ -235,13 +274,13 @@ export default function FollowUpDetails() {
               </div>
               {otherOpen.length > 0 && (
                 <p className="ac-sub" style={{ marginTop: 12 }}>
-                  This customer also has {otherOpen.length} other open follow-up{otherOpen.length === 1 ? "" : "s"}.
+                  This customer also has {otherOpen.length} other open reminder{otherOpen.length === 1 ? "" : "s"}.
                 </p>
               )}
             </div>
 
             <div style={{ minWidth: 0 }}>
-              <h3 className="ac-card-title">Pending Invoices</h3>
+              <h3 className="ac-card-title">{task?.scope === "INVOICE" ? "Invoice" : "Pending Invoices"}</h3>
               <div className="ac-table-wrap">
                 <table className="ac-table ac-stack">
                   <thead>
@@ -269,10 +308,11 @@ export default function FollowUpDetails() {
         {tab === "details" && task && (
           <dl className="ac-kv ac-fu-kv">
             <dt>Title</dt><dd>{task.title}</dd>
-            <dt>Follow-up For</dt><dd>{task.scope === "INVOICE" ? `Invoice ${dash(task.invoice_number)}` : "Entire customer outstanding"}</dd>
-            <dt>Status</dt><dd><Badge value={task.status === "OPEN" ? task.display_status : task.status} /></dd>
+            <dt>Reminder For</dt><dd>{task.scope === "INVOICE" ? `Invoice ${dash(task.invoice_number)}` : "Entire customer outstanding"}</dd>
+            <dt>Status</dt><dd><Badge value={task.display_status} /></dd>
             <dt>Priority</dt><dd><Badge value={task.priority} /></dd>
             <dt>Due</dt><dd>{showDue(task.due_date, task.due_time)}</dd>
+            {seriesId && <><dt>Repeats</dt><dd>{repeats || (schedule ? "No longer repeating" : "…")}</dd></>}
             <dt>Assigned To</dt><dd>{dash(task.assigned_to_name)}</dd>
             <dt>Created By</dt><dd>{dash(task.created_by_name)}</dd>
             <dt>Created On</dt><dd>{showDateTime(task.created_at)}</dd>
@@ -303,42 +343,65 @@ export default function FollowUpDetails() {
         {tab === "comments" && task && (
           <Comments task={task} comments={comments} onAdded={loadTask} />
         )}
+
+        {tab === "attachments" && task && (
+          <Attachments task={task} attachments={attachments} onChanged={loadTask} />
+        )}
       </div>
 
       {dialog === "outcome" && <FollowUpOutcomeModal task={task} onClose={() => setDialog("")} onSaved={afterOutcome} />}
-      {dialog === "reschedule" && (
-        <RescheduleDialog
-          task={task}
-          onClose={() => setDialog("")}
-          onSave={async (date, time, reason) => {
-            const ok = await run("reschedule", () => rescheduleFollowUp(task.id, date, time, reason), "Follow-up rescheduled.");
-            if (ok) setDialog("");
-          }}
-        />
-      )}
       {dialog === "complete" && (
         <CompleteDialog
           outstanding={outstanding}
           onClose={() => setDialog("")}
           onSave={async (note) => {
-            const ok = await run("complete", () => completeFollowUp(task, note), "Follow-up completed.");
+            const ok = await run("complete", () => completeFollowUp(task, note), "Reminder completed.");
             if (ok) setDialog("");
           }}
         />
       )}
       {dialog === "reopen" && (
         <SimpleDialog
-          title="Reopen Follow-up"
+          title="Reopen Reminder"
           label="Reason (optional)"
           button="Reopen"
           onClose={() => setDialog("")}
           onSave={async (reason) => {
-            const ok = await run("reopen", () => reopenFollowUp(task.id, reason), "Follow-up reopened.");
+            const ok = await run("reopen", () => reopenFollowUp(task.id, reason), "Reminder reopened.");
             if (ok) setDialog("");
           }}
         />
       )}
     </div>
+  );
+}
+
+// Where the reminder stands, as a row of steps: a tick for each one reached, a number for the
+// rest, and the next one to do highlighted. Read from the reminder as it is now (its status,
+// its updates, the money still owed); nothing extra is stored.
+function ReminderTrack({ task, contacted, paid }) {
+  const cancelled = task.status === "CANCELLED";
+  const closed = task.status === "COMPLETED" || cancelled;
+  const steps = [
+    { label: "Created", done: true },
+    { label: "Started", done: task.status !== "OPEN" || Boolean(task.started_at) },
+    { label: "Customer Contacted", done: contacted },
+    { label: "Payment Received", done: paid },
+    { label: cancelled ? "Cancelled" : "Completed", done: closed },
+  ];
+  const reached = steps.reduce((last, s, i) => (s.done ? i : last), 0); // the furthest step reached
+  const next = closed ? -1 : steps.findIndex((s) => !s.done);
+
+  return (
+    <ol className="ac-track" aria-label="Reminder progress">
+      {steps.map((s, i) => (
+        <li key={s.label} className={`${s.done ? "done" : ""}${i === next ? " current" : ""}${i <= reached ? " reached" : ""}`}
+          aria-current={i === next ? "step" : undefined}>
+          <span className="ac-track-dot" aria-hidden="true">{s.done ? <FiCheck /> : i + 1}</span>
+          <span className="ac-track-label">{s.label}<span className="ac-track-sr">{s.done ? " (done)" : i === next ? " (next)" : ""}</span></span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -382,9 +445,9 @@ function Comments({ task, comments, onAdded }) {
       ) : <p className="ac-sub" style={{ marginBottom: 12 }}><FiMessageSquare /> No comments yet.</p>}
 
       {closed ? (
-        <p className="ac-sub">This follow-up is {task.status.toLowerCase()}, so comments are closed.</p>
+        <p className="ac-sub">This reminder is {task.status.toLowerCase()}, so comments are closed.</p>
       ) : notStarted ? (
-        <p className="ac-sub">Start the follow-up to add comments.</p>
+        <p className="ac-sub">Start the reminder to add comments.</p>
       ) : (
         <form onSubmit={add} className="ac-fu-comment-form">
           <textarea className="ac-textarea" value={text} maxLength={5000} onChange={(e) => setText(e.target.value)} placeholder="Add a comment" />
@@ -398,52 +461,112 @@ function Comments({ task, comments, onAdded }) {
   );
 }
 
-function RescheduleDialog({ task, onClose, onSave }) {
-  const [date, setDate] = useState(task.due_date && task.due_date >= todayYmd() ? task.due_date : "");
-  const [time, setTime] = useState(task.due_time || "10:00");
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+const fileSize = (bytes) => {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+};
 
-  async function submit(e) {
-    e.preventDefault();
-    if (!date) return setError("Please choose the new date.");
-    if (date < todayYmd()) return setError("The new date can't be in the past.");
-    setSaving(true);
-    await onSave(date, time, reason.trim());
-    setSaving(false);
+// Files kept with the reminder (a cheque photo, a payment advice, an email...). Like
+// comments: the reminder must be started, and a completed or cancelled one is closed.
+function Attachments({ task, attachments, onChanged }) {
+  const input = useRef(null);
+  const [busy, setBusy] = useState(""); // "upload", or the id of the file being opened/removed
+  const [error, setError] = useState("");
+  const [removing, setRemoving] = useState(null); // the file the "Remove?" dialog is open for
+  const closed = !task.active;
+  const notStarted = task.status === "OPEN";
+
+  async function run(label, action) {
+    setBusy(label);
+    setError("");
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setError(err.message || "That did not work. Please try again.");
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function upload(e) {
+    const files = [...e.target.files];
+    e.target.value = ""; // so choosing the same file again still fires
+    if (!files.length) return;
+    const tooBig = files.find((f) => f.size > MAX_ATTACHMENT_MB * 1024 * 1024);
+    if (tooBig) return setError(`${tooBig.name} is larger than ${MAX_ATTACHMENT_MB} MB.`);
+    await run("upload", async () => {
+      // one at a time: the server takes a single file per request
+      for (const file of files) await uploadFollowUpAttachment(task.id, file);
+    });
+    await onChanged();
   }
 
   return (
-    <div className="ac-overlay" onMouseDown={() => !saving && onClose()}>
-      <form className="ac-modal ac-fu-modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} noValidate>
-        <div className="ac-fu-modal-head">
-          <h3>Reschedule Follow-up</h3>
-          <button type="button" className="ac-link" aria-label="Close" onClick={onClose}><FiX /></button>
+    <div>
+      {error && <div className="ac-info error" style={{ marginBottom: 12 }} role="alert"><span>{error}</span></div>}
+
+      {attachments.length ? (
+        <ul className="ac-files">
+          {attachments.map((a) => (
+            <li key={a.id}>
+              <span className="ac-files-icon" aria-hidden="true"><FiPaperclip /></span>
+              <div className="ac-files-main">
+                <button type="button" className="ac-link" disabled={Boolean(busy)} onClick={() => run(a.id, () => openFollowUpAttachment(task.id, a))}>
+                  {busy === a.id ? "Opening…" : a.file_name}
+                </button>
+                <span className="ac-sub">{fileSize(a.file_size)} · {showDateTime(a.created_at)}{a.uploaded_by_name ? ` · ${a.uploaded_by_name}` : ""}</span>
+              </div>
+              {!closed && !notStarted && (
+                <button type="button" className="ac-icon-btn ac-files-remove" disabled={Boolean(busy)} onClick={() => setRemoving(a)}
+                  title={`Remove ${a.file_name}`} aria-label={`Remove ${a.file_name}`}><FiTrash2 /></button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : <p className="ac-sub" style={{ marginBottom: 12 }}><FiPaperclip /> No files attached yet.</p>}
+
+      {closed ? (
+        <p className="ac-sub">This reminder is {task.status.toLowerCase()}, so files are closed.</p>
+      ) : notStarted ? (
+        <p className="ac-sub">Start the reminder to attach files.</p>
+      ) : (
+        <div className="ac-actions" style={{ alignItems: "center" }}>
+          <input ref={input} type="file" multiple hidden onChange={upload} aria-label="Choose files to attach" />
+          <button type="button" className="ac-btn ac-btn-primary" disabled={Boolean(busy)} onClick={() => input.current?.click()}>
+            <FiUpload /> {busy === "upload" ? "Uploading…" : "Attach File"}
+          </button>
+          <span className="ac-sub">Up to {MAX_ATTACHMENT_MB} MB each</span>
         </div>
-        {error && <div className="ac-info error" style={{ marginBottom: 12 }} role="alert"><span>{error}</span></div>}
-        <div className="ac-fu-form">
-          <p className="ac-sub">Currently due {showDue(task.due_date, task.due_time)}. The same follow-up is moved; the change is kept in its history.</p>
-          <div className="ac-grid-2">
-            <div className="ac-field"><label>New Date *</label><DateInput value={date} onChange={setDate} ariaLabel="New follow-up date" /></div>
-            <div className="ac-field"><label>Time</label><input className="ac-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="New follow-up time" /></div>
+      )}
+
+      {removing && (
+        <div className="ac-overlay" onMouseDown={() => !busy && setRemoving(null)}>
+          <div className="ac-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <h3>Remove this file?</h3>
+            <p className="ac-sub" style={{ fontSize: 14, overflowWrap: "anywhere" }}>{removing.file_name} will be deleted from this reminder. This cannot be undone.</p>
+            <div className="ac-modal-foot">
+              <button type="button" className="ac-btn" onClick={() => setRemoving(null)} disabled={Boolean(busy)}>Cancel</button>
+              <button type="button" className="ac-btn ac-btn-primary" disabled={Boolean(busy)}
+                onClick={async () => {
+                  const ok = await run(removing.id, () => deleteFollowUpAttachment(task.id, removing.id));
+                  setRemoving(null);
+                  if (ok) await onChanged();
+                }}>
+                <FiTrash2 /> Remove
+              </button>
+            </div>
           </div>
-          <div className="ac-field">
-            <label>Reason</label>
-            <textarea className="ac-textarea" value={reason} maxLength={450} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer asked to call next week" />
-          </div>
         </div>
-        <div className="ac-modal-foot">
-          <button type="button" className="ac-btn" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" className="ac-btn ac-btn-primary" disabled={saving}>{saving ? "Saving…" : "Reschedule"}</button>
-        </div>
-      </form>
+      )}
     </div>
   );
 }
 
 // Completing by hand: when money is still outstanding a closing note is required,
-// so a follow-up is never closed by accident.
+// so a reminder is never closed by accident.
 function CompleteDialog({ outstanding, onClose, onSave }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -462,12 +585,12 @@ function CompleteDialog({ outstanding, onClose, onSave }) {
     <div className="ac-overlay" onMouseDown={() => !saving && onClose()}>
       <form className="ac-modal ac-fu-modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit} noValidate>
         <div className="ac-fu-modal-head">
-          <h3>Complete Follow-up</h3>
+          <h3>Complete Reminder</h3>
           <button type="button" className="ac-link" aria-label="Close" onClick={onClose}><FiX /></button>
         </div>
         {stillOwed ? (
           <div className="ac-note" style={{ color: "#b45309", marginBottom: 12 }}>
-            <FiClock /> {money(outstanding)} is still outstanding. Reschedule the follow-up instead, or give a closing reason.
+            <FiClock /> {money(outstanding)} is still outstanding. Use Update Reminder to set a new date instead, or give a closing reason.
           </div>
         ) : (
           <div className="ac-note ok" style={{ marginBottom: 12 }}><FiCheckCircle /> The outstanding is cleared.</div>

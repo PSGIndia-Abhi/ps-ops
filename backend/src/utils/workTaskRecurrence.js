@@ -18,6 +18,13 @@ const MAX_BACKDATE_DAYS = 366; // a new series may start at most this far in the
 const MAX_PER_RUN = 100; // occurrences created per series per run; the rest catch up next run
 const SCAN_DAYS = 4 * 366;
 
+// Series that point at a payment (the accountant's repeating payment reminders) behave
+// differently from every other recurring task: instead of a new task on each date, the
+// one reminder carries on -- each date it falls due again its due date moves to that
+// date (the accountant is alerted again), and when it is completed the schedule ends.
+// Everything else (TaskPro's recurring tasks) is unchanged: one new task per date.
+const PAYMENT_MODULES = ["PAYMENT_CUSTOMER", "PAYMENT_INVOICE"];
+
 const DATE_FMT = (col) => `DATE_FORMAT(${col}, '%Y-%m-%d')`;
 
 // ---------------------------------------------------------------- date math
@@ -205,13 +212,46 @@ async function generateDueOccurrences(conn, seriesId, todayStr) {
   let created = 0;
   let moved = false;
 
+  // Payment reminders (the accountant panel) repeat as ONE reminder that carries on, not
+  // a new task per date: see the comment on PAYMENT_MODULES. `openTask` is that reminder.
+  const carriesOn = PAYMENT_MODULES.includes(series.source_module);
+  let openTask = null;
+  if (carriesOn) {
+    [[openTask]] = await conn.query(
+      `SELECT id, ${DATE_FMT("due_date")} AS due_date, due_time FROM work_tasks
+        WHERE series_id = ? AND status IN ('OPEN','IN_PROGRESS','PAUSED')
+        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [seriesId]
+    );
+    // Its reminder was completed (by hand, or because the money came in) or cancelled:
+    // the schedule has done its job, so it ends rather than starting a new reminder.
+    if (!openTask && total > 0) {
+      await conn.query("UPDATE work_task_series SET status = 'CANCELLED', pause_from = NULL, pause_until = NULL WHERE id = ?", [seriesId]);
+      return 0;
+    }
+  }
+
   while (created < MAX_PER_RUN) {
     if (rec.end_type === "AFTER_COUNT" && total >= rec.end_count) break;
     const next = findNextOccurrenceDate(rec, cursor);
-    if (!next || next > todayStr) break;
+    // A payment reminder is made straight away for its first date, even when that is
+    // still ahead, so it shows as "Upcoming" from the moment the schedule is saved.
+    const firstAhead = carriesOn && total === 0 && !openTask && next && next > todayStr && !inPauseWindow(series, next);
+    if (!next || (next > todayStr && !firstAhead)) break;
     cursor = next;
     moved = true;
     if (inPauseWindow(series, next)) continue; // paused day: skipped for good
+
+    if (openTask) {
+      // The same reminder comes due again: move it to this date and say so in its history.
+      const note = `Due ${openTask.due_date}${openTask.due_time ? ` ${openTask.due_time}` : ""} moved to ${next} ${String(rec.time_of_day).slice(0, 5)}: Repeating reminder`;
+      await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [next, rec.time_of_day, openTask.id]);
+      await logHistory(conn, openTask.id, "RESCHEDULE", { note: note.slice(0, 500), changedBy: series.created_by });
+      openTask = { ...openTask, due_date: next, due_time: rec.time_of_day };
+      total += 1;
+      created += 1;
+      continue;
+    }
 
     const taskId = uuid();
     await conn.query(
@@ -222,6 +262,7 @@ async function generateDueOccurrences(conn, seriesId, todayStr) {
        series.source_module, series.source_id, series.assigned_to, series.created_by, next, rec.time_of_day]
     );
     await logHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: series.created_by, note: "Created from recurring schedule" });
+    if (carriesOn) openTask = { id: taskId, due_date: next, due_time: rec.time_of_day };
     total += 1;
     created += 1;
   }

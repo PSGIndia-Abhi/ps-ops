@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FiAlertTriangle, FiBarChart2, FiBell, FiCalendar, FiCheckCircle, FiCheckSquare, FiChevronDown, FiClock,
+  FiAlertTriangle, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiClock,
   FiCreditCard, FiFileText, FiPieChart, FiUsers,
 } from "react-icons/fi";
 import {
@@ -19,10 +19,9 @@ import {
 } from "recharts";
 import useMe from "../../hooks/useMe";
 import DateInput from "../../components/accountant/DateInput";
-import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
+import { DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, daysOverdue, groupByCustomer, showDate, todayYmd, ymd, useAccountantData } from "./data";
-import { showDue } from "./followups";
+import { daysOverdue, groupByCustomer, showDate, todayYmd, ymd, useAccountantData } from "./data";
 
 // Y-axis labels in lakhs (1L = 1,00,000), e.g. 500000 -> "5L".
 const lakhs = (v) => (v === 0 ? "0" : `${Number((v / 100000).toFixed(1))}L`);
@@ -104,7 +103,7 @@ function computeRangeDefault(invoices) {
 export default function AccountantDashboard() {
   const navigate = useNavigate();
   const { user } = useMe();
-  const { invoices, payments, followUps, loading, error, reload } = useAccountantData();
+  const { invoices, payments, loading, error, reload } = useAccountantData();
   // null = the accountant has not picked a date themselves yet, so the computed default is shown.
   const [range, setRange] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -159,30 +158,12 @@ export default function AccountantDashboard() {
     (!filters.mode || p.payment_mode === filters.mode) &&
     inRange(p.payment_date)
   );
-  // Follow-ups due today or already overdue. "Today" is always today, so the date range
-  // does not apply here; the customer filter does.
-  const dueFollowUps = followUps
-    .filter((f) => f.active && (f.display_status === "TODAY" || f.display_status === "OVERDUE"))
-    .filter((f) => !filters.customer || f.customer_name === filters.customer)
-    .sort(byDue);
 
   // ---- numbers ----------------------------------------------------------------------------
   const live = fInvoices.filter((i) => i.status !== "CANCELLED");
   const unpaid = live.filter((i) => i.pending_amount > 0);
   const overdueInvoices = live.filter((i) => i.status === "OVERDUE");
   const dueThisWeek = unpaid.filter((i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; });
-  const followupsToday = dueFollowUps.filter((f) => f.display_status === "TODAY").length;
-  const followupsLate = dueFollowUps.length - followupsToday;
-  // Live outstanding for a follow-up: its invoice's pending, or the customer's total pending.
-  const pendingByCustomer = new Map();
-  for (const i of invoices) {
-    if (i.status !== "CANCELLED" && i.pending_amount > 0) pendingByCustomer.set(i.customer_id, (pendingByCustomer.get(i.customer_id) || []).concat(i));
-  }
-  const followUpAmount = (f) => {
-    const list = pendingByCustomer.get(f.customer_id) || [];
-    if (f.scope === "INVOICE") return { amount: list.find((i) => i.id === f.invoice_id)?.pending_amount || 0, line: f.invoice_number || "Invoice" };
-    return { amount: list.reduce((s, i) => s + i.pending_amount, 0), line: `${list.length} invoice${list.length === 1 ? "" : "s"}` };
-  };
   const hasData = invoices.length > 0;
 
   const kpis = [
@@ -191,7 +172,6 @@ export default function AccountantDashboard() {
     { key: "orange", icon: FiClock, label: "Outstanding", value: money(sum(unpaid, "pending_amount")), note: `${unpaid.length} invoice${unpaid.length === 1 ? "" : "s"}` },
     { key: "red", icon: FiAlertTriangle, label: "Overdue", value: money(sum(overdueInvoices, "pending_amount")), note: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? "" : "s"}` },
     { key: "purple", icon: FiCalendar, label: "Due This Week", value: money(sum(dueThisWeek, "pending_amount")), note: `${dueThisWeek.length} invoice${dueThisWeek.length === 1 ? "" : "s"}` },
-    { key: "light", icon: FiBell, label: "Today's Follow-ups", value: followupsToday, note: followupsLate ? `Due today · ${followupsLate} overdue` : "Due today", to: "/accountant/tasks", tab: "TODAY" },
   ];
 
   // Trend: invoiced and collected per month, following the selected From/To dates (see trendMonths).
@@ -228,7 +208,6 @@ export default function AccountantDashboard() {
     .sort((a, b) => b.payment_date.localeCompare(a.payment_date))
     .map((p) => ({ id: p.id, date: p.payment_date, customer: p.customer_name, payment_no: p.payment_number, amount: p.received_amount, mode: p.payment_mode }));
 
-  const todayFollowUps = dueFollowUps.slice(0, PREVIEW_ROWS);
   const topOutstanding = topOutstandingAll.slice(0, PREVIEW_ROWS);
   const recentPayments = recentPaymentsAll.slice(0, PREVIEW_ROWS);
   const viewAllLabel = (all) => (all.length > PREVIEW_ROWS ? `View All (${all.length})` : "View All");
@@ -295,11 +274,10 @@ export default function AccountantDashboard() {
 
       <div className="ac-kpis">
         {kpis.map((k) => (
-          <div key={k.label} className={`ac-kpi ${k.key}${k.to ? " ac-kpi-link" : ""}`}
-            {...(k.to ? { role: "link", tabIndex: 0, onClick: () => navigate(k.to, { state: { tab: k.tab } }), onKeyDown: (e) => e.key === "Enter" && navigate(k.to, { state: { tab: k.tab } }) } : {})}>
+          <div key={k.label} className={`ac-kpi ${k.key}`}>
             <span className="ac-kpi-icon" aria-hidden="true"><k.icon /></span>
             <div className="ac-kpi-label">{k.label}</div>
-            <div className="ac-kpi-value">{loading ? <Skeleton width="60%" height={26} /> : hasData || k.to ? k.value : "—"}</div>
+            <div className="ac-kpi-value">{loading ? <Skeleton width="60%" height={26} /> : hasData ? k.value : "—"}</div>
             <div className="ac-kpi-note">{k.note}</div>
           </div>
         ))}
@@ -363,37 +341,6 @@ export default function AccountantDashboard() {
               ))}
             </div>
           </div>
-        </div>
-
-        <div className="ac-card">
-          <div className="ac-card-head">
-            <h3 className="ac-card-title"><FiCheckSquare className="ac-title-icon" />Today's Follow-ups</h3>
-            <button type="button" className="ac-link" onClick={() => navigate("/accountant/tasks", { state: { tab: "ALL" } })}>{viewAllLabel(dueFollowUps)}</button>
-          </div>
-          {todayFollowUps.length ? (
-            <ul className="ac-fu-list">
-              {todayFollowUps.map((f) => {
-                const { amount, line } = followUpAmount(f);
-                return (
-                  <li key={f.id}>
-                    <button type="button" onClick={() => navigate(`/accountant/follow-ups/${f.id}`)}>
-                      <span className={`ac-fu-list-icon${f.display_status === "OVERDUE" ? " late" : ""}`} aria-hidden="true"><FiBell /></span>
-                      <span className="ac-fu-list-main">
-                        <strong>{f.customer_name || f.title}</strong>
-                        <span>{money(amount)} · {line}</span>
-                      </span>
-                      <span className="ac-fu-list-side">
-                        <span>{f.display_status === "OVERDUE" ? showDate(f.due_date) : showDue(f.due_date, f.due_time).split(", ").pop()}</span>
-                        <Badge value={f.display_status} />
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="ac-empty" style={{ padding: "24px 8px" }}>{loading ? "Loading…" : "No follow-ups due today"}</p>
-          )}
         </div>
       </div>
 

@@ -535,7 +535,20 @@ async function notifyInvoiceImport({ userId, importId, fileName, total, imported
   });
 }
 
+// A payment reminder has reached its date and time: tells the accountant it is assigned to.
+// entity_id is the reminder (work_tasks.id), so the bell can open it.
+async function notifyPaymentReminderDue({ userId, taskId, title, message }) {
+  return insertNotifications(pool, [userId], {
+    type: "PAYMENT_REMINDER",
+    title,
+    message,
+    entityType: "payment_reminder",
+    entityId: taskId,
+  });
+}
+
 module.exports = {
+  notifyPaymentReminderDue,
   listNotificationsForUser,
   getUnreadNotificationCount,
   markNotificationRead,

@@ -35,6 +35,7 @@ import PaymentList from "./pages/accountant/PaymentList";
 import CustomerOutstanding from "./pages/accountant/CustomerOutstanding";
 import TdsSettings from "./pages/accountant/TdsSettings";
 import FollowUpDetails from "./pages/accountant/FollowUpDetails";
+import CustomerContactsPage from "./pages/accountant/CustomerContactsPage";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
 import ClientTickets from "./pages/ClientTickets";
@@ -243,6 +244,7 @@ const router = createBrowserRouter([
       },
       { path: "tasks", element: <TaskManagement /> },
       { path: "follow-ups/:taskId", element: <FollowUpDetails /> },
+      { path: "contacts", element: <CustomerContactsPage /> },
       { path: "settings", element: <TdsSettings /> },
     ],
   },

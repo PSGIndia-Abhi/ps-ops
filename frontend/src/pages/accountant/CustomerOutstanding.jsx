@@ -1,7 +1,7 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FiCalendar, FiChevronDown, FiChevronRight, FiDownload, FiPlus, FiPlusCircle } from "react-icons/fi";
-import FollowUpModal from "../../components/accountant/FollowUpModal";
+import { FiBell, FiChevronDown, FiChevronRight, FiClock, FiCreditCard, FiDownload, FiEye, FiZap } from "react-icons/fi";
+import CustomerReminderPanel from "../../components/accountant/CustomerReminderPanel";
 import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { byDue, daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
@@ -33,10 +33,10 @@ function compare(sort) {
 export default function CustomerOutstanding() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { invoices, payments, followUps, loading, error, reload } = useAccountantData();
+  const { invoices, payments, followUps, loading, error, reminderError, reload } = useAccountantData();
   // "View Outstanding" on a follow-up opens this page already searched to that customer.
   const [search, setSearch] = useState(location.state?.search || "");
-  const [followUpFor, setFollowUpFor] = useState(""); // customer id the Create Follow-up dialog is open for
+  const [panel, setPanel] = useState(null); // { id, mode: "reminder" | "history" } -- the side panel that is open
   const [view, setView] = useState("");
   const [sort, setSort] = useState("OUTSTANDING");
   const [minAmount, setMinAmount] = useState("");
@@ -86,7 +86,7 @@ export default function CustomerOutstanding() {
       { header: "Oldest Due", value: (c) => c.oldest_due },
       { header: "Unpaid Invoices", value: (c) => c.unpaid_count },
       { header: "Last Payment", value: (c) => c.last_payment_date },
-      { header: "Next Follow-up", value: (c) => { const f = nextFollowUp.get(c.id); return f ? `${f.due_date} ${f.due_time}`.trim() : ""; } },
+      { header: "Next Reminder", value: (c) => { const f = nextFollowUp.get(c.id); return f ? `${f.due_date} ${f.due_time}`.trim() : ""; } },
     ], rows);
   }
 
@@ -100,7 +100,7 @@ export default function CustomerOutstanding() {
         <button type="button" className="ac-btn" onClick={exportRows} disabled={!rows.length}><FiDownload /> Export</button>
       </div>
 
-      <DataError error={error} onRetry={reload} />
+      <DataError error={error || reminderError} onRetry={reload} />
 
       <div className="ac-kpis" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
         {cards.map((c) => (
@@ -134,7 +134,7 @@ export default function CustomerOutstanding() {
                 <th>Customer</th>
                 <th className="ac-num">Total Invoiced</th><th className="ac-num">Paid</th>
                 <th className="ac-num">Outstanding</th><th className="ac-num">Overdue</th>
-                <th>Oldest Due</th><th className="ac-num">Unpaid Invoices</th><th>Last Payment</th><th>Follow-up</th><th>Action</th>
+                <th>Oldest Due</th><th className="ac-num">Unpaid Invoices</th><th>Last Payment</th><th className="ac-co-icon-col">Reminder</th><th className="ac-co-icon-col">Action</th><th className="ac-co-icon-col">History</th>
               </tr>
             </thead>
             <tbody>
@@ -162,23 +162,27 @@ export default function CustomerOutstanding() {
                       <td className="ac-num">{c.unpaid_count}</td>
                       <td>{showDate(c.last_payment_date) || "—"}</td>
                       <td>
-                        <FollowUpCell
-                          followUp={nextFollowUp.get(c.id)}
-                          onOpen={(f) => navigate(`/accountant/follow-ups/${f.id}`)}
-                          onCreate={() => setFollowUpFor(c.id)}
+                        <ReminderCell followUp={nextFollowUp.get(c.id)} customerName={c.name} onOpen={() => setPanel({ id: c.id, mode: "reminder" })} />
+                      </td>
+                      <td>
+                        <ActionMenu
+                          customerName={c.name}
+                          expanded={expanded}
+                          onViewDetails={() => setOpen(expanded ? null : c.id)}
+                          onRecordPayment={() => navigate("/accountant/payments/record", { state: { customerId: c.id } })}
                         />
                       </td>
                       <td>
-                        <div className="ac-actions" style={{ flexWrap: "nowrap" }}>
-                          <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
-                            onClick={() => navigate("/accountant/payments/record", { state: { customerId: c.id } })}><FiPlusCircle /></button>
-                        </div>
+                        <button type="button" className="ac-icon-btn" onClick={() => setPanel({ id: c.id, mode: "history" })}
+                          title={`Activity history for ${c.name}`} aria-label={`Activity history for ${c.name}`}>
+                          <FiClock />
+                        </button>
                       </td>
                     </tr>
                     {expanded && (
                       <tr className="ac-expand-row">
                         <td />
-                        <td colSpan={10}>
+                        <td colSpan={11}>
                           <div className="ac-expand-box">
                             <h4>Unpaid invoices</h4>
                             {c.invoices?.length ? (
@@ -207,7 +211,7 @@ export default function CustomerOutstanding() {
                     )}
                   </Fragment>
                 );
-              }) : <EmptyRow cols={11} loading={loading} text="No customers with outstanding amounts" />}
+              }) : <EmptyRow cols={12} loading={loading} text="No customers with outstanding amounts" />}
             </tbody>
             <tfoot>
               <tr>
@@ -216,7 +220,7 @@ export default function CustomerOutstanding() {
                 <td className="ac-num">{money(sum(rows, "total_paid"))}</td>
                 <td className="ac-num ac-money-red">{money(sum(rows, "outstanding"))}</td>
                 <td className="ac-num">{money(sum(rows, "overdue_amount"))}</td>
-                <td colSpan={5} />
+                <td colSpan={6} />
               </tr>
             </tfoot>
           </table>
@@ -225,38 +229,90 @@ export default function CustomerOutstanding() {
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
 
-      <FollowUpModal
-        key={followUpFor || "closed"}
-        open={Boolean(followUpFor)}
-        onClose={() => setFollowUpFor("")}
-        onCreated={reload}
-        invoices={invoices}
-        followUps={followUps}
-        customerId={followUpFor}
-        lockCustomer
-      />
+      {panel && customers.find((c) => c.id === panel.id) && (
+        <CustomerReminderPanel
+          key={`${panel.id}-${panel.mode}`}
+          mode={panel.mode}
+          customer={customers.find((c) => c.id === panel.id)}
+          invoices={invoices}
+          payments={payments}
+          followUps={followUps}
+          onClose={() => setPanel(null)}
+          onChanged={reload}
+        />
+      )}
     </div>
   );
 }
 
-// "+ Follow-up" when the customer has no open follow-up, otherwise its date (opens it).
-function FollowUpCell({ followUp, onOpen, onCreate }) {
-  if (!followUp) {
-    return (
-      <button type="button" className="ac-fu-add" onClick={onCreate}>
-        <FiPlus /> Follow-up
-      </button>
-    );
+// The ⚡ Action menu: the record's payment actions (separate from Reminder and History).
+// The menu is fixed-positioned next to the button, so the table's scroll box never clips it.
+function ActionMenu({ customerName, expanded, onViewDetails, onRecordPayment }) {
+  const [pos, setPos] = useState(null); // { top, left } while open
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!pos) return undefined;
+    const close = () => setPos(null);
+    const start = btnRef.current?.getBoundingClientRect();
+    // Close when the button actually moves (the page or table scrolled), not on any scroll event.
+    const onScroll = () => {
+      const now = btnRef.current?.getBoundingClientRect();
+      if (!now || !start || Math.abs(now.top - start.top) > 2 || Math.abs(now.left - start.left) > 2) close();
+    };
+    const onDown = (e) => { if (!menuRef.current?.contains(e.target) && !btnRef.current?.contains(e.target)) close(); };
+    const onKey = (e) => { if (e.key === "Escape") { close(); btnRef.current?.focus(); } };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [pos]);
+
+  function toggle() {
+    if (pos) return setPos(null);
+    const r = btnRef.current.getBoundingClientRect();
+    const width = 220;
+    const height = 92; // two items
+    const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+    const top = r.bottom + 6 + height > window.innerHeight ? Math.max(8, r.top - height - 6) : r.bottom + 6;
+    setPos({ top, left });
   }
-  const late = followUp.display_status === "OVERDUE";
+  const run = (fn) => () => { setPos(null); fn(); };
+
   return (
-    <button type="button" className={`ac-fu-chip${late ? " late" : ""}`} onClick={() => onOpen(followUp)}
-      title={`${followUp.scope === "INVOICE" ? `Follow-up for ${followUp.invoice_number}` : "Follow-up for the whole outstanding"} · ${showDue(followUp.due_date, followUp.due_time)}`}>
-      <FiCalendar />
-      <span>
-        {showDue(followUp.due_date, followUp.due_time, { short: true })}
-        <small>{followUp.scope === "INVOICE" ? followUp.invoice_number || "Invoice" : "Whole customer"}</small>
-      </span>
+    <>
+      <button type="button" ref={btnRef} className={`ac-icon-btn${pos ? " active" : ""}`} onClick={toggle}
+        aria-haspopup="menu" aria-expanded={Boolean(pos)} title={`Actions for ${customerName}`} aria-label={`Actions for ${customerName}`}>
+        <FiZap />
+      </button>
+      {pos && (
+        <div ref={menuRef} className="ac-action-menu" role="menu" style={{ top: pos.top, left: pos.left }}>
+          <button type="button" role="menuitem" onClick={run(onViewDetails)}><FiEye /> {expanded ? "Hide Details" : "View Details"}</button>
+          <button type="button" role="menuitem" onClick={run(onRecordPayment)}><FiCreditCard /> Record Payment</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// The reminder bell (icon only, no date): grey when the customer has no open reminder,
+// green when one is set, red when it is overdue. The date shows in the tooltip.
+// Opens the customer's reminder panel.
+function ReminderCell({ followUp, customerName, onOpen }) {
+  const late = followUp?.display_status === "OVERDUE";
+  const label = followUp
+    ? `Reminder ${showDue(followUp.due_date, followUp.due_time)} for ${customerName}${late ? " (overdue)" : ""}`
+    : `Set a reminder for ${customerName}`;
+  return (
+    <button type="button" className={`ac-icon-btn ac-bell-icon${followUp ? (late ? " late" : " on") : ""}`} onClick={onOpen} title={label} aria-label={label}>
+      <FiBell />
     </button>
   );
 }

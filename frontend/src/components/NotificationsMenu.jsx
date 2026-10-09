@@ -36,6 +36,11 @@ function resolveNotificationPath(notification, role) {
     return `/accountant/invoices/review?import=${notification.entity_id}`;
   }
 
+  // A payment reminder that has come due opens that reminder.
+  if (notification.entity_type === "payment_reminder" && notification.entity_id) {
+    return `/accountant/follow-ups/${notification.entity_id}`;
+  }
+
   if (notification.entity_type === "job" && notification.entity_id) {
     return role === "client"
       ? `/client/jobs/${notification.entity_id}`

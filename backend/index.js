@@ -29,6 +29,7 @@ const rolesRoutes = require("./src/routes/roles.routes");
 const { startVisitMissedCron } = require("./src/jobs/visitMissed.cron");
 const { startInvoiceStatusCron } = require("./src/jobs/invoiceStatus.cron");
 const { startShiftAutoEndCron } = require("./src/jobs/shiftAutoEnd.cron");
+const { startPaymentReminderCron } = require("./src/jobs/paymentReminder.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
 const invoicesRoutes = require("./src/routes/invoices.routes");
 const paymentsRoutes = require("./src/routes/payments.routes");
@@ -117,6 +118,7 @@ const PORT = process.env.PORT || 3000;
     startVisitMissedCron();
     startInvoiceStatusCron();
     startShiftAutoEndCron();
+    startPaymentReminderCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

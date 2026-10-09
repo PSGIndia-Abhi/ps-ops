@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiBell, FiDownload, FiPlusCircle } from "react-icons/fi";
-import FollowUpModal from "../../components/accountant/FollowUpModal";
+import { FiDownload, FiPlusCircle } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { daysOverdue, followUpForInvoice, followUpIndex, showDate, useAccountantData, usePaged } from "./data";
+import { daysOverdue, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 
 const PIPELINE = [
@@ -35,19 +34,12 @@ const sum = (list, key) => list.reduce((s, i) => s + (Number(i[key]) || 0), 0);
 
 export default function PaymentTracking() {
   const navigate = useNavigate();
-  const { invoices: all, followUps: followUpList, loading, error, reload } = useAccountantData();
+  const { invoices, loading, error, reload } = useAccountantData();
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [reminderFor, setReminderFor] = useState(null); // invoice id the follow-up dialog is for
-
-  const index = useMemo(() => followUpIndex(followUpList), [followUpList]);
-  const invoices = useMemo(
-    () => all.map((i) => ({ ...i, next_follow_up: followUpForInvoice(index, i)?.due_date || "" })),
-    [all, index]
-  );
 
   const active = invoices.filter((i) => i.status !== "CANCELLED");
   const customers = useMemo(() => [...new Set(invoices.map((i) => i.customer_name))].sort(), [invoices]);
@@ -89,7 +81,6 @@ export default function PaymentTracking() {
       { header: "Pending", value: (i) => i.pending_amount },
       { header: "Status", value: (i) => i.status },
       { header: "Last Payment", value: (i) => i.last_payment_date },
-      { header: "Next Follow-up", value: (i) => i.next_follow_up },
     ], rows);
   }
 
@@ -174,7 +165,7 @@ export default function PaymentTracking() {
             <thead>
               <tr>
                 <th>Invoice No</th><th>Customer</th><th>Due Date</th><th>Payment Progress</th>
-                <th className="ac-num">Pending</th><th>Status</th><th>Last Payment</th><th>Next Follow-up</th><th>Action</th>
+                <th className="ac-num">Pending</th><th>Status</th><th>Last Payment</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -198,37 +189,21 @@ export default function PaymentTracking() {
                     <td className="ac-num">{money(i.pending_amount)}</td>
                     <td><Badge value={i.status} /></td>
                     <td>{showDate(i.last_payment_date) || "—"}</td>
-                    <td>{showDate(i.next_follow_up) || "—"}</td>
                     <td>
                       <div className="ac-actions" style={{ flexWrap: "nowrap" }}>
                         <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
                           disabled={i.pending_amount <= 0 || i.status === "CANCELLED"}
-                          onClick={() => navigate("/accountant/payments/record", { state: { customerId: i.customer_id } })}><FiPlusCircle /></button>
-                        <button type="button" className="ac-link" title="Add follow-up" aria-label="Add follow-up"
-                          disabled={i.pending_amount <= 0 || i.status === "CANCELLED"}
-                          onClick={() => setReminderFor(i.id)}><FiBell /></button>
-                      </div>
+                          onClick={() => navigate("/accountant/payments/record", { state: { customerId: i.customer_id } })}><FiPlusCircle /></button>                      </div>
                     </td>
                   </tr>
                 );
-              }) : <EmptyRow cols={9} loading={loading} text="No invoices to track yet" />}
+              }) : <EmptyRow cols={8} loading={loading} text="No invoices to track yet" />}
             </tbody>
           </table>
         </div>
 
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
-
-      <FollowUpModal
-        key={reminderFor || "closed"}
-        open={Boolean(reminderFor)}
-        onClose={() => setReminderFor(null)}
-        onCreated={reload}
-        invoices={all}
-        followUps={followUpList}
-        invoiceId={reminderFor || ""}
-        lockCustomer
-      />
     </div>
   );
 }
