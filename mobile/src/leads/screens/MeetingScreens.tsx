@@ -7,10 +7,8 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner, SectionLabel } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
-import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
-import { TopBar } from '../../crm/ui/TopBar';
 import { fmtTimestamp, todayStr } from '../../tasks/format';
 import { DateSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
@@ -19,7 +17,7 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { VISIT_OUTCOMES, visitOutcomeText, type VisitNext } from '../stage';
 import type { Coords, Meeting, PipelineLead } from '../types';
-import { Card, errorMessage, InfoLine, MEETING_STATUS_META, MeetingRow, meetingWhen, RadioRow, useLoad, useMe } from '../ui';
+import { Card, errorMessage, InfoLine, MEETING_STATUS_META, MeetingRow, meetingWhen, RadioRow, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 type Nav = NativeStackNavigationProp<LeadStackParamList>;
 
@@ -76,7 +74,7 @@ export function MeetingsScreen() {
   const rows = !data ? [] : tab === 'today' ? data.today : data.upcoming.filter((m) => m.date !== todayStr());
 
   return (
-    <CrmScreen scroll={false} edges={['top']}>
+    <LeadScreen edges={['top']}>
       <TopBar title="My meetings" onBack={() => navigation.goBack()} />
       <View style={styles.segment}>
         <SegmentedControl options={TABS} value={tab} onChange={setTab} />
@@ -106,7 +104,7 @@ export function MeetingsScreen() {
           />
         )}
       />
-    </CrmScreen>
+    </LeadScreen>
   );
 }
 
@@ -209,9 +207,9 @@ export function MeetingScreen() {
   const statusMeta = meeting ? (open && checkedIn ? { label: 'In progress', tone: 'warning' as const } : MEETING_STATUS_META[meeting.status]) : null;
 
   return (
-    <CrmScreen scroll={false} edges={['top', 'bottom']}>
+    <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={meeting?.type === 'OFFICE' ? 'Office meeting' : 'Site visit'} subtitle={lead?.companyName} onBack={() => navigation.goBack()} />
-      <CrmScreen edges={[]} refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+      <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
         <NoticeBanner message={notice} onDismiss={() => setNotice(null)} />
@@ -334,6 +332,6 @@ export function MeetingScreen() {
           }}
         />
       </CrmScreen>
-    </CrmScreen>
+    </LeadScreen>
   );
 }
