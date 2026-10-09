@@ -33,3 +33,12 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.pagination {
+  align-items: center;
+}
+
+.pagination .pagination-arrow {
+  font-size: 18px;
+  line-height: 1;
+}

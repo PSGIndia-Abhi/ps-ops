@@ -35,7 +35,8 @@ import {
   FiX,
 } from "react-icons/fi";
 import { TASKPRO_HOME } from "./access";
-import { PRIORITY, SERIES_STATUS, STATUS } from "./data";
+import { PRIORITY, STATUS } from "./data";
+import SeriesDialog from "./SeriesDialog";
 import { assignableUsers, personOf } from "./hierarchy";
 import { dueInfo, fmtDate, fmtDateTime, fmtDuration, fmtTimestamp, timeAgo, todayStr, toTimeInput } from "./format";
 import {
@@ -53,19 +54,16 @@ import {
   listComments,
   listHistory,
   openAttachment,
-  pauseSeries,
   pauseTask,
   reassignTask,
   rejectRequest,
   reopenTask,
   requestReschedule,
   rescheduleTask,
-  resumeSeries,
   resumeTask,
   scheduleDelete,
   skipTask,
   startTask,
-  stopSeries,
   undoDelete,
   updateTask,
   uploadAttachment,
@@ -672,142 +670,6 @@ function RejectDialog({ request, onClose, onReject }) {
   );
 }
 
-const REC_SUMMARY = (r) => {
-  if (!r) return "";
-  const every = r.interval_value > 1 ? `every ${r.interval_value} ` : "every ";
-  if (r.frequency === "DAILY") return `${every}day${r.interval_value > 1 ? "s" : ""}`;
-  if (r.frequency === "WEEKLY") {
-    const names = (r.days_of_week || []).map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ");
-    return `${every}week${r.interval_value > 1 ? "s" : ""} on ${names}`;
-  }
-  if (r.frequency === "MONTHLY") return `${every}month${r.interval_value > 1 ? "s" : ""} on ${r.use_last_day_of_month ? "the last day" : `day ${r.day_of_month}`}`;
-  return `${every}year${r.interval_value > 1 ? "s" : ""}`;
-};
-
-function SeriesDialog({ seriesId, allowManage, onClose, onChanged }) {
-  const toast = useToast();
-  const [series, setSeries] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [pauseUntil, setPauseUntil] = useState("");
-
-  const load = useCallback(async () => {
-    try {
-      setSeries(await getSeries(seriesId));
-    } catch {
-      setSeries(null);
-    }
-  }, [seriesId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  async function act(fn, label) {
-    setBusy(true);
-    try {
-      await fn();
-      await load();
-      onChanged?.();
-      toast.push({ type: "success", title: label });
-    } catch (err) {
-      toast.push({ type: "error", title: "Couldn't update the schedule", text: err.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title="Recurring schedule" onClose={onClose} size="md">
-      {() =>
-        !series ? (
-          <Skeleton height={120} radius={12} />
-        ) : (
-          <div className="tp-form">
-            <div className="tp-related">
-              <span className="tp-file-icon blue">
-                <FiRepeat />
-              </span>
-              <div>
-                <strong>{series.title}</strong>
-                <small>{REC_SUMMARY(series.recurrence)}</small>
-              </div>
-              <span className="tp-badge" style={{ color: SERIES_STATUS[series.status].color, background: SERIES_STATUS[series.status].soft }}>
-                {SERIES_STATUS[series.status].label}
-              </span>
-            </div>
-
-            {series.status === "PAUSED" && series.pause_from && (
-              <p className="tp-desc muted">
-                Paused from {series.pause_from}
-                {series.pause_until ? ` to ${series.pause_until}` : " (until resumed)"}.
-              </p>
-            )}
-            {series.next_occurrence_date && <p className="tp-desc">Next occurrence: {series.next_occurrence_date}</p>}
-
-            <div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>Recent occurrences</span>
-              <ul className="tp-files" style={{ marginTop: 8 }}>
-                {(series.occurrences || []).slice(0, 6).map((o) => (
-                  <li key={o.id}>
-                    <span className="tp-file-icon">
-                      <FiCalendar />
-                    </span>
-                    <span>
-                      <strong>{o.due_date}</strong>
-                      <small>{STATUS[o.status]?.label}</small>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {!allowManage && (
-              <p className="tp-desc muted">You can view this schedule. Only its creator or your manager can pause, resume or stop it.</p>
-            )}
-
-            {allowManage && series.status !== "CANCELLED" && (
-              <div className="tp-form-grid">
-                {series.status === "ACTIVE" && (
-                  <label className="tp-field">
-                    <span>
-                      Pause until <em>(optional)</em>
-                    </span>
-                    <input className="tp-input" type="date" value={pauseUntil} onChange={(e) => setPauseUntil(e.target.value)} />
-                  </label>
-                )}
-              </div>
-            )}
-
-            {allowManage && (
-              <div className="tp-modal-actions">
-                {series.status === "ACTIVE" && (
-                  <button
-                    type="button"
-                    className="tp-btn outline"
-                    disabled={busy}
-                    onClick={() => act(() => pauseSeries(series.id, series.next_occurrence_date || series.recurrence?.start_date, pauseUntil || undefined), "Schedule paused")}
-                  >
-                    <FiPause /> Pause
-                  </button>
-                )}
-                {series.status === "PAUSED" && (
-                  <button type="button" className="tp-btn outline" disabled={busy} onClick={() => act(() => resumeSeries(series.id), "Schedule resumed")}>
-                    <FiPlay /> Resume
-                  </button>
-                )}
-                {series.status !== "CANCELLED" && (
-                  <button type="button" className="tp-btn danger" disabled={busy} onClick={() => act(() => stopSeries(series.id), "Schedule stopped")}>
-                    <FiSlash /> Stop schedule
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )
-      }
-    </Modal>
-  );
-}
 
 /** "Who do they report to?" — the assignee's (or creator's) real place in the
  * org hierarchy: their designation, unit, and the manager chain up to the

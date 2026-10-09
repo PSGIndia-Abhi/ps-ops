@@ -68,6 +68,7 @@ const LEAD_SOURCE_META: Record<
   apartment: { label: 'Apartment', tone: 'accent', emoji: '🏢' },
   referral: { label: 'Referral', tone: 'success', emoji: '🤝' },
   social_media: { label: 'Social Media', tone: 'warning', emoji: '📱' },
+  google: { label: 'Google', tone: 'info', emoji: '🔎' },
   other: { label: 'Other', tone: 'neutral', emoji: '🏷️' },
 };
 const UNKNOWN_SOURCE_META = { label: 'Source not set', tone: 'neutral' as Tone, emoji: '🏷️' };

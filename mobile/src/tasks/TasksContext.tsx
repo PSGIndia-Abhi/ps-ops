@@ -28,7 +28,7 @@ const POLL_MS = 60000;
  * GET /api/work-tasks to what this person may see, so every tab just filters
  * this one list; mutations patch it from what the server hands back.
  */
-interface Viewer {
+export interface Viewer {
   id: number;
   name: string;
   role: string;
@@ -44,7 +44,8 @@ interface TasksContextValue {
   error: string | null;
   refresh: () => Promise<void>;
   patch: (task: WorkTask) => void;
-  markCancelled: (id: string) => void;
+  /** Drops a deleted task from the shared list. */
+  removeTask: (id: string) => void;
   /** Self + team (or everyone, for admin) - who this viewer may assign to. */
   assignable: TeamMember[];
   showToast: (message: string, variant?: ToastMessage['variant']) => void;
@@ -52,7 +53,7 @@ interface TasksContextValue {
   notifications: TaskNotification[];
   unreadCount: number;
   /** Announce an event this device caused itself (create / complete response). */
-  notifyLocal: (task: WorkTask, kind: TaskNotificationKind) => void;
+  notifyLocal: (task: WorkTask, kind: TaskNotificationKind, opts?: { toast?: boolean }) => void;
   openNotification: (n: TaskNotification) => void;
   markAllNotificationsRead: () => void;
   /** Called once by the task stack so notifications can open a task from anywhere. */
@@ -60,6 +61,26 @@ interface TasksContextValue {
 }
 
 const TasksContext = createContext<TasksContextValue | undefined>(undefined);
+
+/**
+ * Merges a fresh download into the list on screen. Tasks that didn't change keep
+ * their old object, and if nothing changed the same array comes back, so React
+ * skips redrawing the screens (and rows) that show them.
+ */
+function mergeTasks(prev: WorkTask[], next: WorkTask[]): WorkTask[] {
+  const byId = new Map(prev.map((t) => [t.id, t]));
+  let changed = prev.length !== next.length;
+  const merged = next.map((t, i) => {
+    const old = byId.get(t.id);
+    if (old && JSON.stringify(old) === JSON.stringify(t)) {
+      if (prev[i] !== old) changed = true;
+      return old;
+    }
+    changed = true;
+    return t;
+  });
+  return changed ? merged : prev;
+}
 
 export const errorMessage = (err: unknown) =>
   err instanceof ApiError || err instanceof Error ? err.message : 'Something went wrong. Please try again.';
@@ -107,14 +128,14 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
 
   /** Single entry point for every event source; drops anything already shown. */
   const ingest = useCallback(
-    (events: TaskNotification[]) => {
+    (events: TaskNotification[], popup = true) => {
       const st = notifState.current;
       const fresh = events.filter((e) => !st.seen.includes(e.key));
       if (!fresh.length) return;
       st.seen = [...st.seen, ...fresh.map((e) => e.key)];
       st.items = [...fresh.slice().reverse(), ...st.items].slice(0, 30);
       setNotifications(st.items);
-      setQueue((q) => [...q, ...fresh]);
+      if (popup) setQueue((q) => [...q, ...fresh]);
       saveState(userId, st);
     },
     [userId],
@@ -125,17 +146,21 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       if (!silent) setRefreshing(true);
       try {
         const list = await api.listTasks();
-        setTasks(list);
+        setTasks((prev) => mergeTasks(prev, list));
         setError(null);
         await stateLoaded;
-        const { events, known } = detectEvents(list, notifState.current, userId, teamRef.current, baseline.current);
+        const before = JSON.stringify([notifState.current.known, notifState.current.knownReq, notifState.current.knownDue]);
+        const { events, known, knownReq, knownDue } = detectEvents(list, notifState.current, userId, teamRef.current, baseline.current);
         notifState.current.known = known;
+        notifState.current.knownReq = knownReq;
+        notifState.current.knownDue = knownDue;
         if (baseline.current) {
           baseline.current = false;
           saveState(userId, notifState.current);
         } else if (events.length) {
           ingest(events);
-        } else {
+        } else if (before !== JSON.stringify([known, knownReq, knownDue])) {
+          // Only write to storage when the remembered statuses actually moved on.
           saveState(userId, notifState.current);
         }
       } catch (err) {
@@ -169,9 +194,9 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
   }, [load]);
 
   const notifyLocal = useCallback(
-    (task: WorkTask, kind: TaskNotificationKind) => {
+    (task: WorkTask, kind: TaskNotificationKind, opts?: { toast?: boolean }) => {
       notifState.current.known[task.id] = task.status;
-      ingest([buildNotification(task, kind)]);
+      ingest([buildNotification(task, kind)], opts?.toast ?? true);
     },
     [ingest],
   );
@@ -213,8 +238,8 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const markCancelled = useCallback((id: string) => {
-    setTasks((list) => list.map((x) => (x.id === id ? { ...x, status: 'CANCELLED' } : x)));
+  const removeTask = useCallback((id: string) => {
+    setTasks((list) => list.filter((x) => x.id !== id));
   }, []);
 
   const assignable = useMemo<TeamMember[]>(() => {
@@ -236,7 +261,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       error,
       refresh,
       patch,
-      markCancelled,
+      removeTask,
       assignable,
       showToast,
       notifications,
@@ -254,7 +279,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       error,
       refresh,
       patch,
-      markCancelled,
+      removeTask,
       assignable,
       showToast,
       notifications,
@@ -281,6 +306,29 @@ export function useTasks(): TasksContextValue {
   const ctx = useContext(TasksContext);
   if (!ctx) throw new Error('useTasks must be used inside TasksProvider');
   return ctx;
+}
+
+/**
+ * One task by id: the shared list's copy (always the latest the app wrote or
+ * fetched), or a one-off GET when it isn't in the list yet.
+ */
+export function useTaskById(id: string): { task: WorkTask | null; error: string | null } {
+  const { tasks, patch } = useTasks();
+  const fromList = tasks.find((x) => x.id === id) ?? null;
+  const [fetched, setFetched] = useState<WorkTask | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (fromList) return;
+    api
+      .getTask(id)
+      .then((x) => {
+        setFetched(x);
+        patch(x);
+      })
+      .catch((err) => setError(errorMessage(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  return { task: fromList ?? fetched, error };
 }
 
 const styles = StyleSheet.create({ flex: { flex: 1 } });

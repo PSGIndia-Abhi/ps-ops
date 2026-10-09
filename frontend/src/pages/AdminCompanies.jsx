@@ -13,6 +13,7 @@ const defaultGroupForm = { name: "" };
 const defaultCompanyForm = {
   group_id: "",
   name: "",
+  display_name: "",
   gst_number: "",
   type: "CORPORATE",
 };
@@ -163,6 +164,7 @@ export default function AdminCompanies() {
       const payload = {
         group_id: companyForm.group_id || null,
         name: companyForm.name.trim(),
+        display_name: companyForm.display_name.trim() || null,
         gst_number: companyForm.gst_number.trim() || null,
         type: companyForm.type,
       };
@@ -390,6 +392,15 @@ console.log("Site payload:", payload);
               value={companyForm.name}
               onChange={(e) => updateCompany("name", e.target.value)}
               placeholder="e.g. Manipal Health Enterprises Pvt Ltd"
+            />
+          </div>
+
+          <div className="company-field">
+            <label>Display Name</label>
+            <input
+              value={companyForm.display_name}
+              onChange={(e) => updateCompany("display_name", e.target.value)}
+              placeholder="Optional — defaults to company name"
             />
           </div>
 

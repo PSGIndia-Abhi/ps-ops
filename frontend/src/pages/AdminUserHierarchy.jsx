@@ -176,8 +176,12 @@ function collectExpandableIds(units, out = []) {
 }
 
 const emptyForm = {
-  // Only used when creating a new person:
+  // Person details. Creating: typed in. Editing: pre-filled from their details
+  // and editable in the drawer's Roles / Additional Info tabs.
   name: "", email: "", phone: "", password: "", roleId: "", branchId: "",
+  // Editing only: the details API gives the role by name; its id is looked up
+  // from the roles list (roleId wins once the admin picks one).
+  roleName: "",
   // Used for both creating and editing:
   unitId: "", designationId: "", isHead: false, managers: [], from: "", to: "",
 };
@@ -185,6 +189,11 @@ const emptyForm = {
 function formFromDetail(detail) {
   return {
     ...emptyForm,
+    name: detail.user.name || "",
+    email: detail.user.email || "",
+    phone: detail.user.phone || "",
+    roleName: detail.user.role || "",
+    branchId: detail.user.branch_id || "",
     unitId: detail.unit?.id || "",
     designationId: detail.designation?.id || "",
     isHead: Boolean(detail.is_head),
@@ -221,7 +230,7 @@ const DRAWER_TABS_EDIT = [
 // Creating a person: role/branch/credentials are their own always-visible
 // section (there's no existing "Roles" or "Additional Info" to show yet).
 const DRAWER_TABS_CREATE = [
-  { key: "departments", label: "Departments" },
+  { key: "departments", label: "Details" },
   { key: "hierarchy", label: "Hierarchy" },
 ];
 
@@ -458,16 +467,22 @@ export default function AdminUserHierarchy() {
     [roles]
   );
 
-  function openDrawerFor(id) {
+  // Role picked in the edit drawer: the admin's choice, else the person's current role looked up by name.
+  const formRoleId = form.roleId || String(roles.find((r) => r.name === form.roleName)?.id ?? "");
+
+  function openDrawerFor(id, tab = "hierarchy") {
     setDrawerMode("edit");
     if (id !== selectedId) setSelectedId(id);
-    setDrawerTab("hierarchy");
+    setDrawerTab(tab);
+    // Roles / branches back the editable Roles and Additional Info tabs.
+    if (!roles.length || !branches.length) loadLookups();
     setManagerSearch("");
     setDrawerError(null);
     setFormFor(null); // forces the form to be rebuilt from fresh details
     scrolledFor.current = null;
     setDrawerOpen(true);
   }
+
 
   // Creating a person isn't tied to a headcount: any unit, any designation, as
   // many people as needed. `unitId` pre-fills the unit when opened from a
@@ -555,11 +570,42 @@ export default function AdminUserHierarchy() {
       (form.designationId || "") !== (detail.designation?.id || "") ||
       Boolean(form.isHead) !== Boolean(detail.is_head);
 
-    if (!managersChanged && !unitChanged) return setDrawerError("There are no changes to save.");
+    // The person's own details (Additional Info / Roles tabs).
+    const originalRoleId = String(roles.find((r) => r.name === detail.user.role)?.id ?? "");
+    const detailsChanged =
+      form.name.trim() !== (detail.user.name || "") ||
+      form.email.trim() !== (detail.user.email || "") ||
+      form.phone.trim() !== (detail.user.phone || "") ||
+      (form.branchId || "") !== (detail.user.branch_id || "") ||
+      formRoleId !== originalRoleId;
+
+    if (!managersChanged && !unitChanged && !detailsChanged) return setDrawerError("There are no changes to save.");
+    if (detailsChanged) {
+      if (!form.name.trim()) return setDrawerError("Full name is required (Additional Info).");
+      if (!form.email.trim()) return setDrawerError("Email is required (Additional Info).");
+      if (!formRoleId) return setDrawerError("Choose a role (Roles).");
+      if (!form.branchId) return setDrawerError("Choose a branch (Additional Info).");
+    }
 
     try {
       setSaving(true);
       setDrawerError(null);
+
+      // Person details first - the same PUT /api/users/:id User Management uses.
+      if (detailsChanged) {
+        const res = await apiFetch(`/api/users/${personId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: form.name.trim(),
+            email: form.email.trim(),
+            phone: form.phone.trim() || null,
+            role_id: formRoleId,
+            branch_id: form.branchId,
+          }),
+        });
+        const data = await safeJson(res);
+        if (!res?.ok) throw new Error(data?.error || "Failed to save user details");
+      }
 
       // Reporting lines first: a loop needs the admin's confirmation, and we
       // don't want half the change applied while they decide.
@@ -608,7 +654,7 @@ export default function AdminUserHierarchy() {
 
       closeDrawer();
       await Promise.all([loadTree(), loadDetail(personId)]);
-      setStatus({ type: "success", message: `Hierarchy updated for ${detail.user.name}.` });
+      setStatus({ type: "success", message: `Changes saved for ${form.name.trim() || detail.user.name}.` });
     } catch (err) {
       console.error(err);
       setDrawerError(err.message || "Failed to update hierarchy");
@@ -1160,7 +1206,13 @@ export default function AdminUserHierarchy() {
           <div className="uh-details-head">
             <h3>User Details</h3>
             {detail && (
-              <button type="button" className="uh-edit" onClick={() => openDrawerFor(detail.user.id)}>
+              // Opens the edit drawer - from the Details tab straight on the
+              // person's own details (Additional Info), otherwise on Hierarchy.
+              <button
+                type="button"
+                className="uh-edit"
+                onClick={() => openDrawerFor(detail.user.id, detailTab === "details" ? "info" : "hierarchy")}
+              >
                 <FiEdit2 /> Edit
               </button>
             )}
@@ -1541,30 +1593,63 @@ export default function AdminUserHierarchy() {
 
                   {drawerTab === "roles" && (
                     <div className="uh-tab-body">
-                      <div className="uh-block">
-                        <h4>Role</h4>
-                        <span className="uh-badge head big">{detail.user.role || "No role"}</span>
-                      </div>
+                      <label className="uh-field">
+                        <span>Role *</span>
+                        <select value={formRoleId} onChange={(e) => setForm((p) => ({ ...p, roleId: e.target.value }))}>
+                          <option value="">Select role</option>
+                          {assignableRoles.map((r) => (
+                            <option key={r.id} value={String(r.id)}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <div className="uh-note">
                         <FiInfo /> A role controls what someone can do. It doesn&apos;t change where they sit in the
-                        hierarchy, and is edited from User Management.
+                        hierarchy.
                       </div>
                     </div>
                   )}
 
                   {drawerTab === "info" && (
-                    <div className="uh-fact-grid single">
-                      {[
-                        ["Email", detail.user.email],
-                        ["Phone", detail.user.phone],
-                        ["Branch", detail.user.branch_name],
-                        ["Status", detail.user.is_active ? "Active" : "Inactive"],
-                      ].map(([label, value]) => (
-                        <div key={label} className="uh-fact">
-                          <span>{label}</span>
-                          <strong>{value || "—"}</strong>
-                        </div>
-                      ))}
+                    <div className="uh-tab-body">
+                      <label className="uh-field">
+                        <span>Full Name *</span>
+                        <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+                      </label>
+                      <label className="uh-field">
+                        <span>Email *</span>
+                        <input
+                          type="email"
+                          value={form.email}
+                          onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                          placeholder="name@example.com"
+                        />
+                      </label>
+                      <label className="uh-field">
+                        <span>Phone</span>
+                        <input
+                          value={form.phone}
+                          onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+                          placeholder="Optional"
+                        />
+                      </label>
+                      <label className="uh-field">
+                        <span>Branch *</span>
+                        <select value={form.branchId} onChange={(e) => setForm((p) => ({ ...p, branchId: e.target.value }))}>
+                          <option value="">Select branch</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="uh-fact">
+                        <span>Status</span>
+                        <strong>{detail.user.is_active ? "Active" : "Inactive"}</strong>
+                      </div>
+                      <div className="uh-muted">Status is changed from User Management.</div>
                     </div>
                   )}
                 </div>
@@ -1590,7 +1675,7 @@ export default function AdminUserHierarchy() {
                     </button>
                   ) : (
                     <button type="button" className="primary" onClick={() => saveHierarchy(false)} disabled={saving}>
-                      {saving ? "Saving..." : "Update Hierarchy"}
+                      {saving ? "Saving..." : "Save Changes"}
                     </button>
                   )}
                 </div>

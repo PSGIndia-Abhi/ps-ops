@@ -1,13 +1,21 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
-import { AlertCircleIcon, ClockIcon } from '../../components/icons';
+import {
+  AlertCircleIcon,
+  BriefcaseIcon,
+  ClockIcon,
+} from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
-import type { Lead } from '../types';
+import { isCommercial, type Lead } from '../types';
 import { ContactActions } from './ContactActions';
 import { PestIcon } from './PestIcon';
-import { LeadSourceIcon, PaymentStatusIcon } from './StatusBadge';
+import {
+  LeadSourceIcon,
+  LeadStatusIcon,
+  PaymentStatusIcon,
+} from './StatusBadge';
 
 const factory = (t: CrmTheme) => ({
   card: {
@@ -68,6 +76,8 @@ const STAGGER_LIMIT = 8;
 export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
   const { styles, theme } = useCrmStyles(factory);
   const paid = lead.paymentStatus === 'paid';
+  // A commercial lead leads with the company, shows a quote and has no payment state.
+  const commercial = isCommercial(lead);
   const enter = useRef(
     new Animated.Value(index < STAGGER_LIMIT ? 0 : 1),
   ).current;
@@ -94,24 +104,46 @@ export function LeadCard({ lead, onPress, index = 0 }: LeadCardProps) {
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={`${lead.customerName}, ${
-            lead.service
-          }, ${formatINR(lead.amount)}, ${paid ? 'paid' : 'payment pending'}`}
+          accessibilityLabel={
+            commercial
+              ? `${lead.companyName}, ${lead.customerName}, quote ${formatINR(
+                  lead.amount,
+                )}`
+              : `${lead.customerName}, ${lead.service}, ${formatINR(
+                  lead.amount,
+                )}, ${paid ? 'paid' : 'payment pending'}`
+          }
           style={({ pressed }) => [styles.topRow, pressed && styles.pressed]}
         >
           <View style={styles.pestTile}>
-            <PestIcon service={lead.service} size={30} color={theme.primary} />
+            {commercial ? (
+              <BriefcaseIcon size={28} color={theme.primary} />
+            ) : (
+              <PestIcon
+                service={lead.service}
+                size={30}
+                color={theme.primary}
+              />
+            )}
           </View>
           <View style={styles.main}>
             <Text style={styles.name} numberOfLines={1}>
-              {lead.customerName}
+              {commercial
+                ? lead.companyName || lead.customerName
+                : lead.customerName}
             </Text>
             <Text style={styles.service} numberOfLines={1}>
-              {lead.service} · {formatINR(lead.amount)}
+              {commercial
+                ? `${lead.customerName} · Quote ${formatINR(lead.amount)}`
+                : `${lead.service} · ${formatINR(lead.amount)}`}
             </Text>
           </View>
           <View style={styles.status}>
-            <PaymentStatusIcon status={lead.paymentStatus} />
+            {commercial ? (
+              <LeadStatusIcon status={lead.leadStatus} />
+            ) : (
+              <PaymentStatusIcon status={lead.paymentStatus} />
+            )}
             <LeadSourceIcon source={lead.source} />
           </View>
         </Pressable>

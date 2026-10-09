@@ -15,6 +15,7 @@ import { CrmLeadDetailScreen } from '../crm/screens/CrmLeadDetailScreen';
 import { CrmLeadSavedScreen } from '../crm/screens/CrmLeadSavedScreen';
 import { CrmLeadsScreen } from '../crm/screens/CrmLeadsScreen';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
+import { CrmNewCommercialLeadScreen } from '../crm/screens/CrmNewCommercialLeadScreen';
 import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
 import { CrmPaymentsScreen } from '../crm/screens/CrmPaymentsScreen';
 import { useCrmTheme } from '../crm/theme';
@@ -124,6 +125,7 @@ export function CrmNavigator() {
       >
         <Stack.Screen name="CrmTabs" component={CrmTabs} />
         <Stack.Screen name="CrmNewLead" component={CrmNewLeadScreen} options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="CrmNewCommercialLead" component={CrmNewCommercialLeadScreen} options={{ animation: 'none' }} />
         <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />
         <Stack.Screen name="CrmLeadSaved" component={CrmLeadSavedScreen} options={{ gestureEnabled: false }} />
       </Stack.Navigator>

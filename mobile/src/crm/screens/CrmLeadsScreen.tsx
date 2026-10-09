@@ -34,7 +34,8 @@ import {
 } from '../ui/CrmScreen';
 import { LeadCard } from '../ui/LeadCard';
 import { PrimaryButton } from '../ui/PrimaryButton';
-import type { Lead } from '../types';
+import { SegmentedControl } from '../ui/SegmentedControl';
+import { LEAD_TYPES, type Lead, type LeadType } from '../types';
 
 const factory = (t: CrmTheme) => ({
   list: { padding: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
@@ -146,6 +147,8 @@ const factory = (t: CrmTheme) => ({
   chipCountActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
   chipCountText: { ...typography.captionMedium, color: t.textSecondary },
   skeletonCard: { borderRadius: radii.lg, marginBottom: spacing.sm },
+  kindSwitch: { marginTop: spacing.md },
+  searchGap: { marginBottom: spacing.md },
 });
 
 const FILTERS: { value: LeadFilter; label: string }[] = [
@@ -165,6 +168,7 @@ function matchesQuery(lead: Lead, query: string): boolean {
   const digits = normalizePhone(q);
   return (
     lead.customerName.toLowerCase().includes(q) ||
+    (lead.companyName ?? '').toLowerCase().includes(q) ||
     (digits.length > 0 && lead.phone.includes(digits))
   );
 }
@@ -173,7 +177,8 @@ export function CrmLeadsScreen() {
   const navigation = useNavigation<CrmTabScreenNav<'Leads'>>();
   const route = useRoute<RouteProp<CrmTabParamList, 'Leads'>>();
   const {
-    leads,
+    leads: consumerLeads,
+    commercialLeads,
     stats,
     loading,
     refreshing,
@@ -189,13 +194,33 @@ export function CrmLeadsScreen() {
   const [filter, setFilter] = useState<LeadFilter>(
     route.params?.filter ?? 'all',
   );
+  const [kind, setKind] = useState<LeadType>(route.params?.kind ?? 'consumer');
   const paramFilter = route.params?.filter;
+  const paramKind = route.params?.kind;
   const paramAt = route.params?.at;
+  const commercial = kind === 'commercial';
+  const leads = commercial ? commercialLeads : consumerLeads;
 
   // Home's "Paid" tile / "View all" open this tab (which stays mounted), so re-apply the requested filter each time.
   useEffect(() => {
     if (paramFilter) setFilter(paramFilter);
-  }, [paramFilter, paramAt]);
+    // A filter on its own (Home's "Paid" tile) is about payments, so it means consumer leads.
+    if (paramKind || paramFilter) setKind(paramKind ?? 'consumer');
+  }, [paramFilter, paramKind, paramAt]);
+
+  function changeKind(next: LeadType) {
+    setKind(next);
+    // Paid / Pending only exist for consumer leads.
+    setFilter('all');
+  }
+
+  const commercialSummary = useMemo(
+    () => ({
+      quoted: commercialLeads.reduce((sum, l) => sum + l.amount, 0),
+      fresh: commercialLeads.filter(l => l.leadStatus === 'new').length,
+    }),
+    [commercialLeads],
+  );
 
   const counts = useMemo(
     () => ({
@@ -207,8 +232,12 @@ export function CrmLeadsScreen() {
   );
 
   const visible = useMemo(
-    () => leads.filter(l => matchesFilter(l, filter) && matchesQuery(l, query)),
-    [leads, filter, query],
+    () =>
+      leads.filter(
+        l =>
+          (commercial || matchesFilter(l, filter)) && matchesQuery(l, query),
+      ),
+    [leads, commercial, filter, query],
   );
 
   const header = (
@@ -226,6 +255,14 @@ export function CrmLeadsScreen() {
       />
       <CrmErrorBanner message={error} onRetry={refresh} />
 
+      <View style={styles.kindSwitch}>
+        <SegmentedControl
+          options={LEAD_TYPES}
+          value={kind}
+          onChange={changeKind}
+        />
+      </View>
+
       <View style={styles.summary}>
         <View style={styles.blobA} />
         <View style={styles.blobB} />
@@ -236,27 +273,45 @@ export function CrmLeadsScreen() {
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>Collected</Text>
+            <Text style={styles.summaryLabel}>
+              {commercial ? 'Total Quoted' : 'Collected'}
+            </Text>
             <Text style={styles.summaryValue}>
-              {formatINR(stats.paidTotal)}
+              {formatINR(
+                commercial ? commercialSummary.quoted : stats.paidTotal,
+              )}
             </Text>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>To Collect</Text>
+            <Text style={styles.summaryLabel}>
+              {commercial ? 'New' : 'To Collect'}
+            </Text>
             <Text style={styles.summaryValue}>
-              {formatINR(stats.pendingTotal)}
+              {commercial
+                ? commercialSummary.fresh
+                : formatINR(stats.pendingTotal)}
             </Text>
           </View>
         </View>
       </View>
 
-      <View style={[styles.search, searchFocused && styles.searchFocused]}>
+      <View
+        style={[
+          styles.search,
+          searchFocused && styles.searchFocused,
+          commercial && styles.searchGap,
+        ]}
+      >
         <SearchIcon size={20} color={theme.textMuted} />
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Search by name or phone"
+          placeholder={
+            commercial
+              ? 'Search by company, name or phone'
+              : 'Search by name or phone'
+          }
           placeholderTextColor={theme.textMuted}
           style={styles.searchInput}
           returnKeyType="search"
@@ -277,47 +332,50 @@ export function CrmLeadsScreen() {
           </Pressable>
         )}
       </View>
-      <View style={styles.chips}>
-        {FILTERS.map(f => {
-          const active = f.value === filter;
-          const dotStyle =
-            f.value === 'paid'
-              ? styles.chipDotPaid
-              : f.value === 'pending'
-              ? styles.chipDotPending
-              : styles.chipDotAll;
-          return (
-            <Pressable
-              key={f.value}
-              onPress={() => setFilter(f.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              style={[styles.chip, active && styles.chipActive]}
-            >
-              {!active && <View style={[styles.chipDot, dotStyle]} />}
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                {f.label}
-              </Text>
-              <View
-                style={[styles.chipCount, active && styles.chipCountActive]}
+      {!commercial && (
+        <View style={styles.chips}>
+          {FILTERS.map(f => {
+            const active = f.value === filter;
+            const dotStyle =
+              f.value === 'paid'
+                ? styles.chipDotPaid
+                : f.value === 'pending'
+                ? styles.chipDotPending
+                : styles.chipDotAll;
+            return (
+              <Pressable
+                key={f.value}
+                onPress={() => setFilter(f.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.chip, active && styles.chipActive]}
               >
-                <Text
-                  style={[
-                    styles.chipCountText,
-                    active && styles.chipTextActive,
-                  ]}
-                >
-                  {counts[f.value]}
+                {!active && <View style={[styles.chipDot, dotStyle]} />}
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {f.label}
                 </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+                <View
+                  style={[styles.chipCount, active && styles.chipCountActive]}
+                >
+                  <Text
+                    style={[
+                      styles.chipCountText,
+                      active && styles.chipTextActive,
+                    ]}
+                  >
+                    {counts[f.value]}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 
-  const emptyForSearch = query.trim().length > 0 || filter !== 'all';
+  const emptyForSearch =
+    query.trim().length > 0 || (!commercial && filter !== 'all');
 
   return (
     <View style={styles.flex}>
@@ -369,18 +427,30 @@ export function CrmLeadsScreen() {
             ) : emptyForSearch ? (
               <CrmEmptyState
                 title="No matching leads"
-                subtitle="Try a different name or phone number, or switch the filter."
+                subtitle={
+                  commercial
+                    ? 'Try a different company, name or phone number.'
+                    : 'Try a different name or phone number, or switch the filter.'
+                }
                 icon={<SearchIcon size={30} color={theme.textMuted} />}
               />
             ) : (
               <CrmEmptyState
-                title="No leads yet"
-                subtitle="Add your first lead to get started."
+                title={commercial ? 'No commercial leads yet' : 'No leads yet'}
+                subtitle={
+                  commercial
+                    ? 'Add your first business enquiry to get started.'
+                    : 'Add your first lead to get started.'
+                }
                 icon={<ClipboardListIcon size={30} color={theme.textMuted} />}
                 action={
                   <PrimaryButton
                     label="New Lead"
-                    onPress={() => navigation.navigate('CrmNewLead')}
+                    onPress={() =>
+                      navigation.navigate(
+                        commercial ? 'CrmNewCommercialLead' : 'CrmNewLead',
+                      )
+                    }
                   />
                 }
               />

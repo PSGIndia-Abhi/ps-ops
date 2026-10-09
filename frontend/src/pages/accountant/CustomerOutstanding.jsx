@@ -32,6 +32,7 @@ function compare(sort) {
 
 export default function CustomerOutstanding() {
   const navigate = useNavigate();
+  const [customer, setCustomer] = useState("");
   const location = useLocation();
   const { invoices, payments, followUps, loading, error, reminderError, reload } = useAccountantData();
   // "View Outstanding" on a follow-up opens this page already searched to that customer.
@@ -53,27 +54,29 @@ export default function CustomerOutstanding() {
     return map;
   }, [followUps]);
   const hasData = withDues.length > 0;
-  const top = [...withDues].sort(compare("OUTSTANDING"))[0];
-  const totalOutstanding = sum(withDues, "outstanding");
-
-  const cards = [
-    { key: "orange", label: "Total Outstanding", value: money(totalOutstanding) },
-    { key: "blue", label: "Customers With Dues", value: withDues.length },
-    { key: "red", label: "Overdue Amount", value: money(sum(withDues, "overdue_amount")) },
-    { key: "purple", label: "Avg. per Customer", value: money(withDues.length ? totalOutstanding / withDues.length : 0) },
-    { key: "light", label: "Highest Outstanding", value: top ? top.name : "—", note: top ? money(top.outstanding) : "" },
-  ];
+  const customerOptions = [...withDues].sort(compare("NAME"));
 
   const rows = withDues
     .filter((c) => {
-      if (view === "OVERDUE" && !(Number(c.overdue_amount) > 0)) return false;
-      if (view === "CURRENT" && Number(c.overdue_amount) > 0) return false;
+      if (customer && String(c.id) !== customer) return false;
       if (minAmount && Number(c.outstanding) < Number(minAmount)) return false;
       const q = search.trim().toLowerCase();
       return !q || `${c.name} ${c.code || ""}`.toLowerCase().includes(q);
     })
     .sort(compare(sort));
   const { pageRows, page, setPage, pageSize } = usePaged(rows);
+
+  // The cards reflect whatever is currently filtered/searched, not the whole list.
+  const top = [...rows].sort(compare("OUTSTANDING"))[0];
+  const totalOutstanding = sum(rows, "outstanding");
+
+  const cards = [
+    { key: "orange", label: "Total Outstanding", value: money(totalOutstanding) },
+    { key: "blue", label: "Customers With Dues", value: rows.length },
+    { key: "red", label: "Overdue Amount", value: money(sum(rows, "overdue_amount")) },
+    { key: "purple", label: "Avg. per Customer", value: money(rows.length ? totalOutstanding / rows.length : 0) },
+    { key: "light", label: "Highest Outstanding", value: top ? top.name : "—", note: top ? money(top.outstanding) : "" },
+  ];
 
   function exportRows() {
     exportCsv("customer-outstanding.csv", [
@@ -115,10 +118,9 @@ export default function CustomerOutstanding() {
       <div className="ac-card">
         <div className="ac-filters" style={{ marginBottom: 14 }}>
           <input className="ac-input" placeholder="Search customer name or code" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-          <select className="ac-select" value={view} onChange={(e) => { setView(e.target.value); setPage(0); }}>
+          <select className="ac-select" value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(0); }}>
             <option value="">All Customers</option>
-            <option value="OVERDUE">Has Overdue Invoices</option>
-            <option value="CURRENT">Not Yet Due</option>
+            {customerOptions.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
           </select>
           <select className="ac-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort by">
             {SORTS.map(([v, l]) => <option key={v} value={v}>Sort: {l}</option>)}

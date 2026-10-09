@@ -449,7 +449,10 @@ router.get("/", auth, requireRealUser, async (req, res) => {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [rows] = await pool.query(
       `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
-              (t.status IN ('OPEN','IN_PROGRESS','PAUSED') AND t.due_date < CURDATE()) AS is_overdue
+              (t.status IN ('OPEN','IN_PROGRESS','PAUSED') AND t.due_date < CURDATE()) AS is_overdue,
+              (SELECT r.id FROM work_task_reschedule_requests r
+                WHERE r.task_id = t.id AND r.status = 'PENDING'
+                ORDER BY r.created_at DESC LIMIT 1) AS pending_reschedule_request_id
          FROM work_tasks t
          LEFT JOIN users ua ON ua.id = t.assigned_to
          LEFT JOIN users uc ON uc.id = t.created_by
@@ -511,12 +514,12 @@ router.post("/", auth, requireRealUser, async (req, res) => {
         );
         await conn.query(
           `INSERT INTO work_task_recurrence
-             (id, series_id, frequency, interval_value, days_of_week, day_of_month, use_last_day_of_month,
+             (id, series_id, frequency, interval_value, days_of_week, day_of_month, use_last_day_of_month, month_week,
               month_of_year, time_of_day, start_date, end_type, end_date, end_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [uuid(), seriesId, rec.frequency, rec.interval_value, rec.days_of_week ? JSON.stringify(rec.days_of_week) : null,
-           rec.day_of_month, rec.use_last_day_of_month, rec.month_of_year, rec.time_of_day, rec.start_date,
-           rec.end_type, rec.end_date, rec.end_count]
+           rec.day_of_month, rec.use_last_day_of_month, rec.month_week ? JSON.stringify(rec.month_week) : null,
+           rec.month_of_year, rec.time_of_day, rec.start_date, rec.end_type, rec.end_date, rec.end_count]
         );
         return generateDueOccurrences(conn, seriesId, todayStr);
       });

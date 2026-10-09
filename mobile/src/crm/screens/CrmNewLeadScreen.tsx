@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertCircleIcon,
@@ -50,10 +50,14 @@ import { useCrmStyles, type CrmTheme } from '../theme';
 import {
   LEAD_SOURCES,
   LEAD_STATUSES,
+  LEAD_TYPES,
+  optionLabel,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
+  type Lead,
   type LeadSource,
   type LeadStatus,
+  type LeadType,
   type PaymentMethod,
   type PaymentStatus,
 } from '../types';
@@ -79,6 +83,7 @@ import { TopBar } from '../ui/TopBar';
 
 const factory = (t: CrmTheme) => ({
   scroll: { padding: spacing.lg, paddingBottom: spacing.xl },
+  typeSwitch: { marginBottom: spacing.md },
   section: {
     backgroundColor: t.surface,
     borderRadius: radii.lg,
@@ -271,12 +276,36 @@ const INITIAL_VALUES: LeadFormValues = {
   notes: '',
 };
 
+/** The form's values for a lead that is being edited. */
+function valuesOf(lead: Lead): LeadFormValues {
+  return {
+    customerName: lead.customerName,
+    phone: lead.phone,
+    email: lead.email ?? '',
+    houseType: lead.houseType || null,
+    service: lead.service || null,
+    plan: lead.plan || null,
+    amount: lead.amount > 0 ? String(Math.round(lead.amount)) : '',
+    location: lead.location ?? '',
+    referenceBy: lead.referenceBy ?? '',
+    notes: lead.notes ?? '',
+  };
+}
+
+/**
+ * The residential lead form. Opened with `editLeadId` it is filled in with that lead, to change
+ * it: no draft is kept, nothing is paid from here, and once the lead is paid its service, amount
+ * and payment are locked (the server enforces the same).
+ */
 export function CrmNewLeadScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
+  const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewLead'>>();
   const {
     leads,
     addLead,
+    updateLead,
+    getLead,
     replaceLead,
     showNotice,
     serviceMaster,
@@ -287,14 +316,22 @@ export function CrmNewLeadScreen() {
   const scope = session?.userId ?? 'anon';
   const { styles, theme } = useCrmStyles(factory);
 
-  const [values, setValues] = useState<LeadFormValues>(INITIAL_VALUES);
-  const latest = useRef<LeadFormValues>(INITIAL_VALUES);
+  // The lead being edited, as it was when the form opened (it does not change under the rep's hands).
+  const editLeadId = route.params?.editLeadId;
+  const editLead = useRef(editLeadId ? getLead(editLeadId) : undefined).current;
+  const editing = !!editLead;
+  /** A paid lead's service, amount and payment can no longer be changed. */
+  const paidLocked = editLead?.paymentStatus === 'paid';
+  const initialValues = useRef(editLead ? valuesOf(editLead) : INITIAL_VALUES).current;
+
+  const [values, setValues] = useState<LeadFormValues>(initialValues);
+  const latest = useRef<LeadFormValues>(initialValues);
   latest.current = values;
   const [errors, setErrors] = useState<LeadFormErrors>({});
-  const [source, setSource] = useState<LeadSource | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('pending');
-  const [leadStatus, setLeadStatus] = useState<LeadStatus>('new');
+  const [source, setSource] = useState<LeadSource | null>(editLead?.source ?? null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(editLead?.paymentMethod ?? 'cash');
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(editLead?.paymentStatus ?? 'pending');
+  const [leadStatus, setLeadStatus] = useState<LeadStatus>(editLead?.leadStatus ?? 'new');
   const [saving, setSaving] = useState(false);
   /** True while the saved lead is being paid (drives the spinner on the Razorpay button instead of Save). */
   const [paying, setPaying] = useState(false);
@@ -326,7 +363,9 @@ export function CrmNewLeadScreen() {
   const submitted = useRef(false);
 
   // Bring back an unfinished lead (or at least the last lead source) when the form opens.
+  // Not when editing: the form is the lead itself, and the draft of a new lead is left alone.
   useEffect(() => {
+    if (editing) return;
     let cancelled = false;
     (async () => {
       const draft = await loadDraft(scope);
@@ -347,7 +386,7 @@ export function CrmNewLeadScreen() {
     return () => {
       cancelled = true;
     };
-  }, [scope]);
+  }, [scope, editing]);
 
   // Keep the draft up to date (a moment after typing stops) so nothing is lost if the app closes.
   useEffect(() => {
@@ -409,7 +448,9 @@ export function CrmNewLeadScreen() {
     [leads, values.phone],
   );
   const showDuplicate =
-    !!duplicate && dismissedDuplicate !== normalizePhone(values.phone);
+    !!duplicate &&
+    duplicate.id !== editLeadId &&
+    dismissedDuplicate !== normalizePhone(values.phone);
   const referenceSuggestions = useMemo(
     () =>
       referenceFocused ? suggestReferences(leads, values.referenceBy) : [],
@@ -555,6 +596,41 @@ export function CrmNewLeadScreen() {
       return;
     }
 
+    if (editLead) {
+      setSaving(true);
+      try {
+        await updateLead(editLead.id, {
+          leadType: 'consumer',
+          customerName: values.customerName.trim(),
+          phone: normalizePhone(values.phone),
+          email: values.email.trim(),
+          houseType: values.houseType ?? '',
+          service: values.service ?? '',
+          plan: values.plan ?? '',
+          amount: amountNumber,
+          coupon: editLead.coupon,
+          location: values.location.trim(),
+          source,
+          referenceBy: values.referenceBy.trim(),
+          notes: values.notes.trim(),
+          paymentMethod,
+          paymentStatus: paymentMethod === 'online' ? 'pending' : paymentStatus,
+          leadStatus,
+        });
+        showNotice('Changes saved');
+        navigation.goBack();
+      } catch (err) {
+        setSaveError(
+          err instanceof ApiError
+            ? err.message
+            : 'Unable to save the changes. Please try again.',
+        );
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+        setSaving(false);
+      }
+      return;
+    }
+
     setSaving(true);
     setPaying(payNow);
 
@@ -635,8 +711,8 @@ export function CrmNewLeadScreen() {
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
       <TopBar
-        title="New Lead"
-        subtitle="Add a customer and their service"
+        title={editing ? 'Edit Lead' : 'New Lead'}
+        subtitle={editing ? 'Change what you need, then save' : 'Add a customer and their service'}
         icon="close"
         onBack={() => navigation.goBack()}
       />
@@ -647,6 +723,26 @@ export function CrmNewLeadScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {!editing && (
+        <View style={styles.typeSwitch}>
+          <SegmentedControl
+            options={LEAD_TYPES}
+            value="consumer"
+            onChange={(type: LeadType) => {
+              // The commercial form is its own screen; what was typed here stays as the draft.
+              if (type === 'commercial')
+                navigation.replace('CrmNewCommercialLead');
+            }}
+          />
+        </View>
+        )}
+        {paidLocked && (
+          <View style={[styles.banner, styles.bannerInfo]}>
+            <Text style={[styles.bannerText, styles.bannerTextInfo]}>
+              This lead is paid, so its service, amount and payment can no longer be changed.
+            </Text>
+          </View>
+        )}
         {draftRestored && (
           <View style={[styles.banner, styles.bannerInfo]}>
             <Text style={[styles.bannerText, styles.bannerTextInfo]}>
@@ -680,7 +776,7 @@ export function CrmNewLeadScreen() {
         <View style={styles.section}>
           <SectionHeader
             icon={<PersonIcon size={20} color={theme.primary} />}
-            title="Add Lead"
+            title={editing ? 'Customer' : 'Add Lead'}
           />
           <CrmTextField
             ref={nameRef}
@@ -798,7 +894,7 @@ export function CrmNewLeadScreen() {
             placeholder={
               masterLoading ? 'Loading price list...' : 'Select house type'
             }
-            disabled={masterLoading}
+            disabled={masterLoading || paidLocked}
             options={houseOptions}
             value={values.houseType}
             onChange={value => applySelection({ houseType: value })}
@@ -816,7 +912,7 @@ export function CrmNewLeadScreen() {
             placeholder={
               masterLoading ? 'Loading price list...' : 'Select service'
             }
-            disabled={masterLoading}
+            disabled={masterLoading || paidLocked}
             options={serviceOptions}
             value={values.service}
             onChange={value => applySelection({ service: value })}
@@ -832,7 +928,7 @@ export function CrmNewLeadScreen() {
             value={values.plan}
             onChange={value => applySelection({ plan: value })}
             error={errors.plan}
-            disabled={!values.service}
+            disabled={!values.service || paidLocked}
           />
           <CrmTextField
             ref={amountRef}
@@ -845,10 +941,13 @@ export function CrmNewLeadScreen() {
             onBlur={() => checkField('amount')}
             error={errors.amount}
             valid={isGood('amount')}
+            editable={!paidLocked}
             returnKeyType="done"
             onSubmitEditing={() => Keyboard.dismiss()}
             hint={
-              standardPrice === null || expectedAmount === null
+              paidLocked
+                ? 'Paid - the amount can no longer be changed.'
+                : standardPrice === null || expectedAmount === null
                 ? 'Choose house type, service and plan to fill the price automatically.'
                 : customPrice
                 ? `Custom price. Standard price is ${formatINR(expectedAmount)}.`
@@ -859,7 +958,7 @@ export function CrmNewLeadScreen() {
             style={styles.amountInput}
             maxLength={7}
           />
-          {customPrice && expectedAmount !== null && (
+          {customPrice && expectedAmount !== null && !paidLocked && (
             <Pressable
               onPress={() => setField('amount', String(expectedAmount))}
               hitSlop={8}
@@ -946,6 +1045,12 @@ export function CrmNewLeadScreen() {
             icon={<WalletIcon size={20} color={theme.primary} />}
             title="Payment"
           />
+          {paidLocked ? (
+            <Text style={styles.paymentNote}>
+              Payment received by {optionLabel(PAYMENT_METHODS, paymentMethod)} - {formatINR(amountNumber)}.
+            </Text>
+          ) : (
+          <>
           <Text style={styles.subLabel}>Payment Method</Text>
           <SegmentedControl
             options={PAYMENT_METHODS}
@@ -962,7 +1067,12 @@ export function CrmNewLeadScreen() {
             }
           />
 
-          {paymentMethod === 'online' ? (
+          {paymentMethod === 'online' && editing ? (
+            <Text style={styles.paymentNote}>
+              Save the changes, then use "Pay with Razorpay" on the lead's details to collect{' '}
+              {formatINR(amountNumber)}.
+            </Text>
+          ) : paymentMethod === 'online' ? (
             <View style={styles.onlineCard}>
               <View style={styles.onlineBlobA} />
               <View style={styles.onlineBlobB} />
@@ -1036,6 +1146,8 @@ export function CrmNewLeadScreen() {
               </Text>
             </View>
           )}
+          </>
+          )}
         </View>
       </ScrollView>
 
@@ -1049,7 +1161,11 @@ export function CrmNewLeadScreen() {
         <View style={styles.footerButton}>
           <PrimaryButton
             label={
-              paymentMethod === 'online' ? 'Save (pay later)' : 'Save Lead'
+              editing
+                ? 'Save Changes'
+                : paymentMethod === 'online'
+                ? 'Save (pay later)'
+                : 'Save Lead'
             }
             onPress={() => submit(false)}
             loading={saving && !paying}

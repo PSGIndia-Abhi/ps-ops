@@ -45,7 +45,12 @@ export interface MonthlyAchievements {
   paidPercent: number;
 }
 
-/** "This month" numbers for the Home achievements card. */
+function inMonth(lead: Lead, now: Date): boolean {
+  const created = new Date(lead.createdAt);
+  return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth();
+}
+
+/** "This month" numbers for the Residential side of the Home achievements card (payments collected). */
 export function computeMonthlyAchievements(leads: Lead[], now: Date = new Date()): MonthlyAchievements {
   let monthLeads = 0;
   let paidLeads = 0;
@@ -54,8 +59,7 @@ export function computeMonthlyAchievements(leads: Lead[], now: Date = new Date()
   let totalValue = 0;
 
   for (const lead of leads) {
-    const created = new Date(lead.createdAt);
-    if (created.getFullYear() !== now.getFullYear() || created.getMonth() !== now.getMonth()) continue;
+    if (!inMonth(lead, now)) continue;
     monthLeads += 1;
     totalValue += lead.amount;
     if (lead.paymentStatus === 'paid') {
@@ -73,5 +77,44 @@ export function computeMonthlyAchievements(leads: Lead[], now: Date = new Date()
     totalValue,
     collectedPercent: totalValue > 0 ? Math.round((collected / totalValue) * 100) : 0,
     paidPercent: monthLeads > 0 ? Math.round((paidLeads / monthLeads) * 100) : 0,
+  };
+}
+
+export interface CommercialAchievements {
+  /** Commercial leads created in the current calendar month. */
+  monthLeads: number;
+  convertedLeads: number;
+  /** Still at "new" - nobody has followed up yet. */
+  newLeads: number;
+  /** The approximate quotes of this month's leads, added up. */
+  quoted: number;
+  /** converted leads / leads as a whole percent (0 when there are no leads yet). */
+  convertedPercent: number;
+}
+
+/**
+ * "This month" numbers for the Commercial side of the Home achievements card. A commercial lead has
+ * no payment, so progress here is leads won (converted) and the value quoted, not money collected.
+ */
+export function computeCommercialAchievements(leads: Lead[], now: Date = new Date()): CommercialAchievements {
+  let monthLeads = 0;
+  let convertedLeads = 0;
+  let newLeads = 0;
+  let quoted = 0;
+
+  for (const lead of leads) {
+    if (!inMonth(lead, now)) continue;
+    monthLeads += 1;
+    quoted += lead.amount;
+    if (lead.leadStatus === 'converted') convertedLeads += 1;
+    else if (lead.leadStatus === 'new') newLeads += 1;
+  }
+
+  return {
+    monthLeads,
+    convertedLeads,
+    newLeads,
+    quoted,
+    convertedPercent: monthLeads > 0 ? Math.round((convertedLeads / monthLeads) * 100) : 0,
   };
 }

@@ -15,7 +15,12 @@ import {
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Path } from 'react-native-svg';
-import { CheckCircleIcon, ClockIcon, PhoneIcon } from '../../components/icons';
+import {
+  BriefcaseIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  PhoneIcon,
+} from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR } from '../format';
 import { confirmationMessage, whatsappUrl } from '../leadHelpers';
@@ -26,7 +31,7 @@ import { PestIcon } from '../ui/PestIcon';
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { PrimaryButton } from '../ui/PrimaryButton';
-import type { Lead } from '../types';
+import { isCommercial, type Lead } from '../types';
 
 const WHATSAPP = '#25D366';
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -202,6 +207,15 @@ export function CrmLeadSavedScreen() {
 
   const offline = !!lead.pendingSync;
   const paid = lead.paymentStatus === 'paid';
+  const commercial = isCommercial(lead);
+  const displayName = commercial
+    ? lead.companyName || lead.customerName
+    : lead.customerName;
+  const openLeadsList = () =>
+    navigation.navigate('CrmTabs', {
+      screen: 'Leads',
+      params: commercial ? { kind: 'commercial', at: Date.now() } : undefined,
+    });
   const accent = offline ? theme.warning : theme.success;
   const checkOffset = draw.interpolate({
     inputRange: [0, 1],
@@ -267,38 +281,56 @@ export function CrmLeadSavedScreen() {
         <Text style={styles.subtitle}>
           {offline
             ? "You're offline. It will be sent automatically as soon as there is a connection."
-            : `${lead.customerName} is now in your leads.`}
+            : `${displayName} is now in your leads.`}
         </Text>
 
         <View style={styles.card}>
           <View style={styles.pestTile}>
-            <PestIcon service={lead.service} size={30} color={theme.primary} />
+            {commercial ? (
+              <BriefcaseIcon size={28} color={theme.primary} />
+            ) : (
+              <PestIcon
+                service={lead.service}
+                size={30}
+                color={theme.primary}
+              />
+            )}
           </View>
           <View style={styles.cardMain}>
             <Text style={styles.cardName} numberOfLines={1}>
-              {lead.customerName}
+              {displayName}
             </Text>
             <Text style={styles.cardService} numberOfLines={1}>
-              {lead.service}
+              {commercial ? lead.customerName : lead.service}
             </Text>
           </View>
           <View style={styles.cardRight}>
             <Text style={styles.cardAmount}>{formatINR(lead.amount)}</Text>
-            <View style={styles.cardStatus}>
-              {paid ? (
-                <CheckCircleIcon size={14} color={theme.successText} />
-              ) : (
-                <ClockIcon size={14} color={theme.warningText} />
-              )}
-              <Text
-                style={[
-                  styles.cardStatusText,
-                  { color: paid ? theme.successText : theme.warningText },
-                ]}
-              >
-                {paid ? 'Paid' : 'Pending'}
-              </Text>
-            </View>
+            {commercial ? (
+              <View style={styles.cardStatus}>
+                <Text
+                  style={[styles.cardStatusText, { color: theme.textMuted }]}
+                >
+                  Approx. quote
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.cardStatus}>
+                {paid ? (
+                  <CheckCircleIcon size={14} color={theme.successText} />
+                ) : (
+                  <ClockIcon size={14} color={theme.warningText} />
+                )}
+                <Text
+                  style={[
+                    styles.cardStatusText,
+                    { color: paid ? theme.successText : theme.warningText },
+                  ]}
+                >
+                  {paid ? 'Paid' : 'Pending'}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -349,7 +381,11 @@ export function CrmLeadSavedScreen() {
 
           <PrimaryButton
             label="Add another lead"
-            onPress={() => navigation.replace('CrmNewLead')}
+            onPress={() =>
+              navigation.replace(
+                commercial ? 'CrmNewCommercialLead' : 'CrmNewLead',
+              )
+            }
             testID="saved-add-another"
           />
           <PrimaryButton
@@ -358,12 +394,12 @@ export function CrmLeadSavedScreen() {
             onPress={() =>
               live
                 ? navigation.replace('CrmLeadDetail', { leadId: live.id })
-                : navigation.navigate('CrmTabs', { screen: 'Leads' })
+                : openLeadsList()
             }
             testID="saved-view"
           />
           <Pressable
-            onPress={() => navigation.navigate('CrmTabs', { screen: 'Leads' })}
+            onPress={openLeadsList}
             accessibilityRole="button"
             style={styles.link}
           >

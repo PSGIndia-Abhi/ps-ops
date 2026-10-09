@@ -34,7 +34,7 @@ function sortRows(rows, sortOrder, sortKey) {
   return sorted;
 }
 
-const emptyCompanyForm = { name: "", group_id: "", code: "", gst_number: "", type: "" };
+const emptyCompanyForm = { name: "", display_name: "", group_id: "", code: "", gst_number: "", type: "" };
 const emptySiteForm = { company_id: "", name: "", address: "", city: "", state: "" };
 
 export default function AdminGroupManagement() {
@@ -228,6 +228,7 @@ export default function AdminGroupManagement() {
     setEditingCompany(company);
     setCompanyForm({
       name: company.name || "",
+      display_name: company.display_name || "",
       group_id: company.group_id || "",
       code: company.code || "",
       gst_number: company.gst_number || "",
@@ -259,6 +260,7 @@ export default function AdminGroupManagement() {
         method: "PUT",
         body: JSON.stringify({
           name: trimmed,
+          display_name: companyForm.display_name.trim() || null,
           group_id: companyForm.group_id || null,
           code: companyForm.code.trim() || null,
           gst_number: companyForm.gst_number.trim() || null,
@@ -791,6 +793,15 @@ export default function AdminGroupManagement() {
                 value={companyForm.name}
                 onChange={(e) => updateCompanyField("name", e.target.value)}
                 placeholder="Company legal name"
+              />
+            </label>
+
+            <label className="group-mgmt-field">
+              <span>Display Name</span>
+              <input
+                value={companyForm.display_name}
+                onChange={(e) => updateCompanyField("display_name", e.target.value)}
+                placeholder="Leave blank to use company name"
               />
             </label>
 
