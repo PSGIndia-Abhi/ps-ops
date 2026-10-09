@@ -70,6 +70,14 @@ export function canSwitchToSales(role: string | null | undefined): boolean {
   return !!role && SALES_SWITCH_ROLES.includes(role.toLowerCase().trim());
 }
 
+/**
+ * The accountant opens in Task Management too, and switches to Payment Reminders (the mobile
+ * part of the web's Accountant Panel) and back without signing out.
+ */
+export function isAccountantRole(role: string | null | undefined): boolean {
+  return !!role && role.toLowerCase().trim() === 'accountant';
+}
+
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */
 export function useRawRole(): string | null {
   const { user, session } = useAuth();

@@ -1,9 +1,10 @@
 import { createContext, useContext } from 'react';
 
-export type AppKind = 'tasks' | 'sales';
+export type AppKind = 'tasks' | 'sales' | 'reminders';
 
 /**
- * Some Task Management roles (Managing Director, Personal Assistant) also work in the Sales app.
+ * Some Task Management roles (Managing Director, Personal Assistant) also work in the Sales app,
+ * and the accountant also works in Payment Reminders.
  * They move between the two without signing out; RoleTabs owns which one is showing and the
  * "Switch app" sheet they pick from.
  */
