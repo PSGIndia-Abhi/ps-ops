@@ -17,7 +17,7 @@ import { useSyncExternalStore } from "react";
 import { API_BASE, apiFetch, safeJson } from "../../api";
 import { KNOWN_VISIT_OUTCOMES, PROVIDER_SOURCE, sourceLabel } from "./constants";
 
-const EMPTY = { ready: false, error: "", me: null, leads: [], meetings: [], activities: [], providers: [], people: [], leadSources: [] };
+const EMPTY = { ready: false, error: "", me: null, leads: [], meetings: [], activities: [], providers: [], people: [], leadSources: [], lossReasons: [] };
 
 let state = EMPTY;
 const listeners = new Set();
@@ -113,6 +113,8 @@ function toLead(row, closingNote) {
     nextFollowUpAt: wall(row.next_follow_up_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.created_at,
+    // Sent back with an edit, so the server can refuse one made over someone else's newer change.
+    rowVersion: Number(row.row_version) || 0,
   };
 }
 
@@ -185,7 +187,11 @@ function toActivity(row) {
 // ---- loading ----------------------------------------------------------------
 
 async function loadStaff() {
-  const data = await request("/api/crm/lead-workspace");
+  const [data, lossReasons] = await Promise.all([
+    request("/api/crm/lead-workspace"),
+    // The reason picker falls back to its own list if this one cannot be read.
+    request("/api/crm/lead-loss-reasons").catch(() => []),
+  ]);
 
   // Why a lead was closed, for a lead closed with a typed reason rather than one from the list.
   const closingNote = new Map();
@@ -208,6 +214,7 @@ async function loadStaff() {
     meetings: data.meetings.filter((m) => m.status !== "CANCELLED").map(toMeeting),
     activities,
     people: data.people,
+    lossReasons,
     providers: data.providers.map((p, i) => ({
       id: p.user_id,
       userId: p.user_id,
@@ -313,6 +320,11 @@ export const telecallers = () => state.people.filter((u) => u.role === "telecall
 /** The sources a lead provider may pick, straight from the server's list. */
 export const providerSources = () => state.leadSources.map((s) => s.name);
 
+/** The server's list of reasons a lead is closed (not genuine or lost); empty if it could not be read. */
+export const lossReasons = () => state.lossReasons.map((r) => r.name);
+/** The id of a reason from that list, so the server records it against the lead (and its reports count it). */
+const lossReasonId = (name) => state.lossReasons.find((r) => r.name === name)?.id;
+
 /** Leads that share this phone number or company name (the duplicate warning). */
 export function findDuplicates({ phone, company }, exceptId) {
   const digits = String(phone || "").replace(/\D/g, "");
@@ -402,7 +414,7 @@ export async function saveCall(leadId, { outcome, notes, reason, followUpAt, fee
 
     if (outcome === "GENUINE") await request(`${base}/qualify`, { method: "POST", body: { status: "GENUINE" } });
     if (outcome === "NEED_MORE_INFO" && lead?.stage !== "NEED_MORE_INFO") await request(`${base}/qualify`, { method: "POST", body: { status: "NEEDS_INFO" } });
-    if (outcome === "NOT_GENUINE") await request(`${base}/reject`, { method: "POST", body: { reason } });
+    if (outcome === "NOT_GENUINE") await request(`${base}/reject`, { method: "POST", body: { reason, loss_reason_id: lossReasonId(reason) } });
 
     if (followUpAt && (outcome === "NEED_MORE_INFO" || outcome === "CALL_BACK")) {
       const [date, time] = toWallClock(followUpAt).split("T");
@@ -445,7 +457,57 @@ export async function closeLead(leadId, { won, reason, notes }) {
   if (!won && !reason) throw new Error("Choose why this lead was lost.");
   const extra = notes?.trim();
   if (won) await request(`/api/crm/leads/${leadId}/convert-to-customer`, { method: "POST", body: { notes: extra || "" } });
-  else await request(`/api/crm/leads/${leadId}/mark-lost`, { method: "POST", body: { reason: extra ? `${reason}: ${extra}` : reason } });
+  else {
+    await request(`/api/crm/leads/${leadId}/mark-lost`, {
+      method: "POST",
+      body: { reason: extra ? `${reason}: ${extra}` : reason, loss_reason_id: lossReasonId(reason) },
+    });
+  }
+  await loadWorkspace();
+}
+
+/**
+ * PATCH /leads/{id} - corrects a lead's details. Sends the version last read, so an edit made
+ * over someone else's newer change is refused (409) instead of silently overwriting it.
+ */
+export async function updateLead(leadId, input) {
+  const lead = leadById(leadId);
+  if (!lead) throw new Error("That lead is no longer available.");
+  try {
+    await request(`/api/crm/leads/${leadId}`, {
+      method: "PATCH",
+      body: {
+        row_version: lead.rowVersion,
+        company_name: input.company.trim(),
+        contact_person: input.contact.trim(),
+        phone_number: input.phone,
+        alternate_phone: input.altPhone || "",
+        email: input.email?.trim() || "",
+        address: input.address.trim(),
+        requirement: input.requirement.trim(),
+        approx_quote_amount: Number(input.quote),
+      },
+    });
+  } finally {
+    // On a 409 this brings in the newer version, so a retry starts from what is really saved.
+    await loadWorkspace();
+  }
+}
+
+/** PATCH /meetings/{id}/reschedule - moves the meeting and the sales person's task with it. */
+export async function rescheduleMeeting(meetingId, { scheduledAt, reason }) {
+  if (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() - 60000) throw new Error("Choose a new time in the future.");
+  await request(`/api/crm/meetings/${meetingId}/reschedule`, {
+    method: "PATCH",
+    body: { scheduledAt: toWallClock(scheduledAt), reason: reason?.trim() || undefined },
+  });
+  await loadWorkspace();
+}
+
+/** POST /meetings/{id}/cancel - also cancels the sales person's task. A reason is required. */
+export async function cancelMeeting(meetingId, { reason }) {
+  if (!reason?.trim()) throw new Error("Say why the meeting is cancelled.");
+  await request(`/api/crm/meetings/${meetingId}/cancel`, { method: "POST", body: { reason: reason.trim() } });
   await loadWorkspace();
 }
 

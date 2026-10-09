@@ -6,6 +6,7 @@ import {
   FiAward,
   FiCalendar,
   FiCheck,
+  FiEdit2,
   FiFileText,
   FiHash,
   FiMail,
@@ -20,7 +21,7 @@ import {
   FiXCircle,
 } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
-import { CallVerifyModal, CloseLeadModal, QuotationModal, ScheduleMeetingModal, VisitModal } from "./dialogs";
+import { CallVerifyModal, CloseLeadModal, EditLeadModal, MeetingChangeModal, QuotationModal, ScheduleMeetingModal, VisitModal } from "./dialogs";
 import { listQuotations, openQuotationPdf, providerName, useLeadData, userName } from "./leadsApi";
 import { PIPELINE } from "./constants";
 import { useToast } from "./hooks";
@@ -141,9 +142,9 @@ export default function LeadDetail() {
   const { id } = useParams();
   const viewer = useViewer();
   const { persona } = viewer;
-  const { leads, activities, meetings } = useLeadData();
+  const { leads, activities, meetings, me } = useLeadData();
   const [tab, setTab] = useState("details");
-  const [dialog, setDialog] = useState(null); // "call" | "meeting" | "won" | "lost" | { visit: meeting }
+  const [dialog, setDialog] = useState(null); // "call" | "meeting" | "edit" | "won" | "lost" | { visit | move | cancel: meeting }
 
   // A lead outside what this person may see is treated exactly like one that does not exist.
   const lead = useMemo(() => visibleLeads(leads, viewer).find((l) => l.id === id), [leads, viewer, id]);
@@ -173,6 +174,14 @@ export default function LeadDetail() {
   const progress = progressOf(lead, leadMeetings.length > 0);
   const openMeeting = leadMeetings.find((m) => m.status !== "COMPLETED");
   const closed = stopped || lead.stage === "WON";
+
+  // The server's own rules, so a button is only offered when pressing it can work:
+  // a lead is managed by an admin, whoever manages leads, or anyone on it (creator, telecaller, sales);
+  // only the meeting's own sales person (or an admin) records its outcome; converting needs its own permission.
+  const myId = String(me?.id || "");
+  const canManage = !provider && (viewer.canPick || !!me?.canManage || [lead.createdBy, lead.telecallerId, lead.salesId].some((uid) => uid && String(uid) === myId));
+  const myOpenMeeting = leadMeetings.find((m) => m.status !== "COMPLETED" && (viewer.canPick || String(m.salesId) === myId));
+  const canConvert = viewer.canPick || !!me?.canConvert;
 
   // The provider sees the outline of what happened, never the internal notes.
   const events = provider ? timeline.filter((a) => a.type !== "CALL").map((a) => ({ ...a, note: "" })) : timeline;
@@ -258,21 +267,24 @@ export default function LeadDetail() {
               Call &amp; Verify
             </Button>
           )}
-          {canVerify && lead.stage === "QUALIFIED" && (
+          {((canVerify && lead.stage === "QUALIFIED") || (canManage && lead.stage === "MEETING_SCHEDULED" && !openMeeting)) && (
+            // The second case: the only meeting was cancelled, so the lead needs a new one.
             <Button icon={<FiCalendar />} onClick={() => setDialog("meeting")}>
               Schedule Meeting
             </Button>
           )}
-          {canSell && openMeeting && (
-            <Button icon={<FiMapPin />} onClick={() => setDialog({ visit: openMeeting })}>
+          {canSell && myOpenMeeting && (
+            <Button icon={<FiMapPin />} onClick={() => setDialog({ visit: myOpenMeeting })}>
               Update After Visit
             </Button>
           )}
           {canSell && ["VISIT_COMPLETED", "QUOTATION_SENT"].includes(lead.stage) && (
             <>
-              <Button variant="success" icon={<FiAward />} onClick={() => setDialog("won")}>
-                Convert to Customer
-              </Button>
+              {canConvert && (
+                <Button variant="success" icon={<FiAward />} onClick={() => setDialog("won")}>
+                  Convert to Customer
+                </Button>
+              )}
               <Button variant="ghost" icon={<FiCalendar />} onClick={() => setDialog("meeting")}>
                 Schedule Another Meeting
               </Button>
@@ -281,6 +293,11 @@ export default function LeadDetail() {
           {canSell && ["MEETING_SCHEDULED", "VISIT_COMPLETED", "QUOTATION_SENT"].includes(lead.stage) && (
             <Button variant="danger" icon={<FiThumbsDown />} onClick={() => setDialog("lost")}>
               Mark as Lost
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="ghost" icon={<FiEdit2 />} onClick={() => setDialog("edit")}>
+              Edit Details
             </Button>
           )}
         </div>
@@ -410,6 +427,16 @@ export default function LeadDetail() {
                         <FiMapPin /> {m.address}
                       </small>
                       {!!m.outcome && <small>Outcome: {m.outcome}</small>}
+                      {canManage && !closed && m.status === "SCHEDULED" && (
+                        <span style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <Button size="sm" variant="ghost" icon={<FiCalendar />} onClick={() => setDialog({ move: m })}>
+                            Reschedule
+                          </Button>
+                          <Button size="sm" variant="ghost" icon={<FiXCircle />} onClick={() => setDialog({ cancel: m })}>
+                            Cancel
+                          </Button>
+                        </span>
+                      )}
                     </div>
                     <Badge tone={MEETING_TONE[m.status]}>{MEETING_LABEL[m.status]}</Badge>
                   </div>
@@ -427,6 +454,9 @@ export default function LeadDetail() {
       {dialog === "won" && <CloseLeadModal lead={lead} won onClose={() => setDialog(null)} />}
       {dialog === "lost" && <CloseLeadModal lead={lead} won={false} onClose={() => setDialog(null)} />}
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}
+      {dialog === "edit" && <EditLeadModal lead={lead} onClose={() => setDialog(null)} />}
+      {dialog?.move && <MeetingChangeModal meeting={dialog.move} lead={lead} mode="move" onClose={() => setDialog(null)} />}
+      {dialog?.cancel && <MeetingChangeModal meeting={dialog.cancel} lead={lead} mode="cancel" onClose={() => setDialog(null)} />}
     </>
   );
 }
