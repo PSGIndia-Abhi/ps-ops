@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Backend base URL configuration.
  *
@@ -33,7 +35,21 @@
  * version of this comment again - do not take it on faith.
  */
 
-const DEV_API_BASE_URL = 'http://localhost:3000';
+/**
+ * In a debug build the backend runs on the developer's PC.
+ *  - Android emulator: 10.0.2.2 is the emulator's own built-in name for that
+ *    PC, so it always works. `localhost` only works there while an
+ *    `adb reverse tcp:3000 tcp:3000` forward is alive, and that forward is
+ *    dropped every time adb or the emulator restarts - which showed up as
+ *    "Unable to connect" on the sign-in screen again and again.
+ *  - Physical phone on USB: it has no 10.0.2.2, so it keeps `localhost`
+ *    through `adb reverse` (or swap in the PC's LAN IP).
+ * An emulator image reports a model such as "sdk_gphone64_x86_64".
+ */
+const androidModel = Platform.OS === 'android' ? String((Platform.constants as { Model?: string }).Model ?? '') : '';
+const isAndroidEmulator = /^sdk_|emulator|android sdk built for/i.test(androidModel);
+
+const DEV_API_BASE_URL = isAndroidEmulator ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 const PROD_API_BASE_URL = 'https://bestserve.co.in';
 
 export const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : PROD_API_BASE_URL;
