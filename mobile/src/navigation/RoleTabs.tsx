@@ -1,12 +1,18 @@
 import React, { useMemo, useState } from 'react';
-import { canSwitchToSales, isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { StyleSheet, View } from 'react-native';
+import { canSwitchToSales, isAccountantRole, isTaskRole, useRawRole, useUserRole } from '../auth/role';
 import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
 import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
+import { RemindersNavigator } from './RemindersNavigator';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
+import { colors } from '../theme';
+
+/** How long the screen stays blank between unmounting one app and mounting the other. */
+const SWAP_MS = 80;
 
 /**
  * Picks the one bottom-tab navigator that matches the signed-in user's
@@ -30,10 +36,17 @@ export function RoleTabs() {
   const rawRole = useRawRole();
 
   // Managing Director / Personal Assistant open in Task Management like every org-hierarchy role,
-  // and can move to the Sales app and back without signing out.
-  const canSwitch = canSwitchToSales(rawRole);
-  const [inSales, setInSales] = useState(false);
-  const current: AppKind = canSwitch && inSales ? 'sales' : 'tasks';
+  // and can move to the Sales app and back without signing out. The accountant does the same
+  // with Payment Reminders.
+  const accountant = isAccountantRole(rawRole);
+  const other: AppKind | null = accountant ? 'reminders' : canSwitchToSales(rawRole) ? 'sales' : null;
+  const canSwitch = other !== null;
+  const [inOther, setInOther] = useState(false);
+  // The app being left is unmounted first and the other one mounted a moment later: replacing one
+  // navigator with the other in a single step leaves the native screen stack unable to open screens.
+  const [swapping, setSwapping] = useState(false);
+  const current: AppKind = other && inOther ? other : 'tasks';
+  const apps = useMemo<AppKind[]>(() => (other ? ['tasks', other] : ['tasks']), [other]);
   const [sheet, setSheet] = useState<{ onProfile?: () => void } | null>(null);
   const appSwitch = useMemo(
     () => ({
@@ -45,17 +58,30 @@ export function RoleTabs() {
   );
 
   // Org-hierarchy designations get Task Management - same login split as the web app.
-  if (isTaskRole(rawRole)) {
+  if (isTaskRole(rawRole) || accountant) {
     return (
       <AppSwitchProvider value={appSwitch}>
-        {current === 'sales' ? <CrmNavigator /> : <TaskNavigator />}
+        {swapping ? (
+          <View style={styles.blank} />
+        ) : current === 'sales' ? (
+          <CrmNavigator />
+        ) : current === 'reminders' ? (
+          <RemindersNavigator />
+        ) : (
+          <TaskNavigator />
+        )}
         {canSwitch && (
           <AppSwitchSheet
             visible={sheet !== null}
             current={current}
+            apps={apps}
             onPick={app => {
               setSheet(null);
-              setInSales(app === 'sales');
+              setSwapping(true);
+              setTimeout(() => {
+                setInOther(app !== 'tasks');
+                setSwapping(false);
+              }, SWAP_MS);
             }}
             onProfile={sheet?.onProfile}
             onClose={() => setSheet(null)}
@@ -78,3 +104,5 @@ export function RoleTabs() {
       return <UnsupportedRoleScreen />;
   }
 }
+
+const styles = StyleSheet.create({ blank: { flex: 1, backgroundColor: colors.background } });

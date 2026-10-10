@@ -2,7 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, View, StyleSheet } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
+import { isAccountantRole } from '../auth/role';
 import { ApiError } from '../api/httpClient';
+import { isPaymentReminder } from '../reminders/types';
 import { Toast, type ToastMessage } from '../components/Toast';
 import * as api from './api';
 import type { TaskStackParamList } from './navigation';
@@ -114,6 +116,9 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
   );
 
   const userId = viewer.id;
+  // The accountant's payment reminders are work tasks too, but they belong to the Payment
+  // Reminders app, so they are left out of every Task Management list and count.
+  const hideReminders = isAccountantRole(viewer.role);
 
   // Stored notification state is per user; wait for it before the first diff.
   const stateLoaded = useMemo(
@@ -145,7 +150,8 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     async (silent = false) => {
       if (!silent) setRefreshing(true);
       try {
-        const list = await api.listTasks();
+        const all = await api.listTasks();
+        const list = hideReminders ? all.filter((x) => !isPaymentReminder(x)) : all;
         setTasks((prev) => mergeTasks(prev, list));
         setError(null);
         await stateLoaded;
@@ -170,7 +176,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
         setReady(true);
       }
     },
-    [stateLoaded, userId, ingest],
+    [stateLoaded, userId, ingest, hideReminders],
   );
   const refresh = useCallback(() => load(false), [load]);
 
