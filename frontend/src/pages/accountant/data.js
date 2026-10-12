@@ -37,7 +37,7 @@ export function daysOverdue(due) {
   return Math.round((start - new Date(y, m - 1, d).getTime()) / DAY);
 }
 
-async function getJson(url) {
+export async function getJson(url) {
   const res = await apiFetch(url);
   if (!res) throw new Error("You need to log in again");
   const data = await safeJson(res);
@@ -94,38 +94,64 @@ function cleanPayment(row) {
   };
 }
 
-// A task's display status: Completed / Overdue / Today / Upcoming.
-function taskDisplayStatus(row) {
-  if (row.status === "COMPLETED") return "COMPLETED";
-  if (row.status === "CANCELLED") return "CANCELLED";
-  const due = ymd(row.due_date);
+// ---------------------------------------------------------------------------
+// Payment follow-ups. They are ordinary Task Management tasks (/api/work-tasks)
+// that point at a customer or an invoice through source_module + source_id;
+// amounts are never stored on the task, they are always read from the invoices.
+// ---------------------------------------------------------------------------
+export const FOLLOWUP_TYPE = "Payment Follow-up";
+export const FOLLOWUP_MODULE = { CUSTOMER: "PAYMENT_CUSTOMER", INVOICE: "PAYMENT_INVOICE" };
+const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "PAUSED"];
+
+// A follow-up's display status: Completed / Cancelled / Overdue / Today / Upcoming.
+function followUpDisplayStatus(status, due) {
+  if (status === "COMPLETED" || status === "CANCELLED") return status;
   if (!due) return "UPCOMING";
   const d = daysOverdue(due);
   if (d > 0) return "OVERDUE";
   return d === 0 ? "TODAY" : "UPCOMING";
 }
 
-function cleanTask(row, invoicesById) {
-  const invoice = row.reference_type === "INVOICE" ? invoicesById.get(row.reference_id) : null;
+// Turns a work task into the follow-up shape the screens use. `invoicesById` and
+// `customerNames` come from the invoices already loaded, so names and invoice
+// numbers need no extra request.
+export function cleanFollowUp(row, invoicesById = new Map(), customerNames = new Map()) {
+  const scope = row.source_module === FOLLOWUP_MODULE.INVOICE ? "INVOICE" : "CUSTOMER";
+  const invoice = scope === "INVOICE" ? invoicesById.get(row.source_id) : null;
+  const customerId = scope === "INVOICE" ? invoice?.customer_id || "" : row.source_id || "";
+  const due = ymd(row.due_date);
   return {
     id: row.id,
-    reference_id: row.reference_id,
+    scope,
+    customer_id: customerId,
+    invoice_id: scope === "INVOICE" ? row.source_id || "" : "",
+    invoice_number: invoice?.invoice_number || "",
+    customer_name: invoice?.customer_name || customerNames.get(customerId) || "",
+    site_name: invoice?.site_name || "",
     title: row.title,
-    notes: row.notes || "",
-    task_type: row.task_type,
+    notes: row.description || "",
     priority: row.priority,
     status: row.status,
-    display_status: taskDisplayStatus(row),
-    due_date: ymd(row.due_date),
+    active: ACTIVE_STATUSES.includes(row.status),
+    display_status: followUpDisplayStatus(row.status, due),
+    due_date: due,
     due_time: row.due_time ? String(row.due_time).slice(0, 5) : "",
-    completed_at: ymd(row.completed_at),
+    created_at: row.created_at || "",
+    started_at: row.started_at || "",
+    completed_at: row.completed_at || "",
+    completion_note: row.completion_note || "",
+    assigned_to: row.assigned_to,
     assigned_to_name: row.assigned_to_name || "",
-    invoice_number: invoice?.invoice_number || "",
-    customer_id: invoice?.customer_id || "",
-    customer_name: invoice?.customer_name || "",
-    site_name: invoice?.site_name || "",
+    created_by_name: row.created_by_name || "",
   };
 }
+
+const isFollowUpRow = (row) =>
+  row.source_module === FOLLOWUP_MODULE.CUSTOMER || row.source_module === FOLLOWUP_MODULE.INVOICE;
+
+// Sorts follow-ups by when they are due (date, then time); undated last.
+export const byDue = (a, b) =>
+  `${a.due_date || "9999-99-99"} ${a.due_time || "99:99"}`.localeCompare(`${b.due_date || "9999-99-99"} ${b.due_time || "99:99"}`);
 
 // One row per customer with an unpaid balance, worked out from the invoices.
 export function groupByCustomer(invoices, payments = []) {
@@ -166,21 +192,22 @@ export function groupByCustomer(invoices, payments = []) {
 // The hook every accountant screen uses.
 // ---------------------------------------------------------------------------
 export function useAccountantData() {
-  const [state, setState] = useState({ invoices: [], payments: [], tasks: [], loading: true, error: "" });
+  const [state, setState] = useState({ invoices: [], payments: [], followUps: [], loading: true, error: "" });
 
   const load = useCallback(async () => {
     try {
-      const [rawInvoices, rawPayments, rawTasks] = await Promise.all([
+      const [rawInvoices, rawPayments, rawFollowUps] = await Promise.all([
         getJson("/api/invoices"),
         getJson("/api/payments"),
-        getJson("/api/tasks"),
+        getJson(`/api/work-tasks?task_type=${encodeURIComponent(FOLLOWUP_TYPE)}`),
       ]);
       const invoices = rawInvoices.map(cleanInvoice);
       const byId = new Map(invoices.map((i) => [i.id, i]));
+      const names = new Map(invoices.map((i) => [i.customer_id, i.customer_name]));
       setState({
         invoices,
         payments: rawPayments.map(cleanPayment),
-        tasks: rawTasks.map((t) => cleanTask(t, byId)),
+        followUps: rawFollowUps.filter(isFollowUpRow).map((t) => cleanFollowUp(t, byId, names)),
         loading: false,
         error: "",
       });
@@ -199,7 +226,7 @@ export function useAccountantData() {
 // ---------------------------------------------------------------------------
 // Saving
 // ---------------------------------------------------------------------------
-async function send(method, url, body) {
+export async function send(method, url, body) {
   const res = await apiFetch(url, { method, body: body ? JSON.stringify(body) : undefined });
   if (!res) throw new Error("You need to log in again");
   const data = await safeJson(res);
@@ -208,25 +235,10 @@ async function send(method, url, body) {
 }
 
 export const savePayment = (payment) => send("POST", "/api/payments", payment);
-export const completeTask = (id) => send("PUT", `/api/tasks/${id}`, { status: "COMPLETED" });
 export const fetchPayment = (id) => getJson(`/api/payments/${id}`);
 export const fetchInvoice = (id) => getJson(`/api/invoices/${id}`);
 export const fetchTdsSettings = () => getJson("/api/invoices/tds-settings");
 export const saveTdsSettings = (customerId, body) => send("PUT", `/api/invoices/tds-settings/${customerId}`, body);
-
-// Creates a reminder task on an invoice from the Set Reminder dialog's values.
-export function createReminder(form, invoice) {
-  return send("POST", "/api/tasks", {
-    reference_type: "INVOICE",
-    reference_id: invoice.id,
-    task_type: form.task_type,
-    title: `${form.task_type} - ${invoice.invoice_number}`,
-    notes: form.notes || null,
-    priority: String(form.priority || "Normal").toUpperCase(),
-    due_date: form.date || null,
-    due_time: form.time ? `${form.time}:00` : null,
-  });
-}
 
 // Splits a list into pages. Returns { pageRows, page, setPage, pageSize }.
 export function usePaged(rows, pageSize = 10) {
@@ -236,21 +248,19 @@ export function usePaged(rows, pageSize = 10) {
   return { pageRows: rows.slice(current * pageSize, (current + 1) * pageSize), page: current, setPage, pageSize };
 }
 
-// For each invoice: the date of its next open reminder, and its last completed action.
-// Returns a Map: invoiceId -> { next_follow_up, last_action }.
-export function followUpsByInvoice(tasks) {
-  const map = new Map();
-  for (const t of tasks) {
-    if (!t.reference_id) continue;
-    const entry = map.get(t.reference_id) || { next_follow_up: "", last_action: "", lastDone: "" };
-    if (t.status === "OPEN" && t.due_date && (!entry.next_follow_up || t.due_date < entry.next_follow_up)) {
-      entry.next_follow_up = t.due_date;
-    }
-    if (t.status === "COMPLETED" && (t.completed_at || "") >= entry.lastDone) {
-      entry.lastDone = t.completed_at || "";
-      entry.last_action = t.task_type;
-    }
-    map.set(t.reference_id, entry);
+// The open follow-up for each customer and for each invoice (the soonest due when
+// there is more than one). Returns { byCustomer: Map, byInvoice: Map }.
+export function followUpIndex(followUps) {
+  const byCustomer = new Map();
+  const byInvoice = new Map();
+  for (const f of [...followUps].filter((x) => x.active).sort(byDue)) {
+    const map = f.scope === "INVOICE" ? byInvoice : byCustomer;
+    const key = f.scope === "INVOICE" ? f.invoice_id : f.customer_id;
+    if (key && !map.has(key)) map.set(key, f);
   }
-  return map;
+  return { byCustomer, byInvoice };
 }
+
+// The follow-up that covers an invoice: its own, otherwise its customer's.
+export const followUpForInvoice = (index, invoice) =>
+  index.byInvoice.get(invoice.id) || index.byCustomer.get(invoice.customer_id) || null;

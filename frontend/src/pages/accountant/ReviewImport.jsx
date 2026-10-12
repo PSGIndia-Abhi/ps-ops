@@ -31,11 +31,12 @@ function csvCell(v) {
 }
 
 function downloadDraftErrorsCsv(review) {
-  const header = ["Row", "Invoice No", "Customer", "Site", "Invoice Date", "Due Date", "Amount", "Error Reason"];
+  const hasSite = review.rows.some((r) => r.site);
+  const header = ["Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount", "Error Reason"];
   const lines = [header.map(csvCell).join(",")];
   for (const r of review.rows.filter((row) => row.status === "error")) {
     lines.push(
-      [r.rowNumber, r.invoiceNo, r.customer, r.site, r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
+      [r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
         .map(csvCell)
         .join(",")
     );
@@ -232,6 +233,8 @@ export default function ReviewImport() {
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const current = Math.min(page, pages - 1);
   const visible = rows.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+  // Files no longer carry a site; the column only shows when this file still had one.
+  const hasSite = review.rows.some((r) => r.site);
   const imported = review.status === "CONFIRMED";
   const tabs = [
     ["all", `All (${review.total})`, <FiList />],
@@ -331,7 +334,7 @@ export default function ReviewImport() {
           <table className="rv-table">
             <thead>
               <tr>
-                <th>#</th><th>Invoice No</th><th>Customer</th><th>Site</th><th className="ac-num">Amount</th>
+                <th>#</th><th>Invoice No</th><th>Customer</th>{hasSite && <th>Site</th>}<th className="ac-num">Amount</th>
                 <th>Status</th><th>Error Reason</th>
               </tr>
             </thead>
@@ -341,7 +344,7 @@ export default function ReviewImport() {
                   <td className="rv-row-no">{r.rowNumber}</td>
                   <td>{r.invoiceNo || "—"}</td>
                   <td>{r.customer || "—"}</td>
-                  <td>{r.site || "—"}</td>
+                  {hasSite && <td>{r.site || "—"}</td>}
                   <td className="ac-num">{typeof r.amount === "number" ? money(r.amount) : r.amount || "—"}</td>
                   <td>
                     {r.status === "valid"
@@ -351,7 +354,7 @@ export default function ReviewImport() {
                   <td><Reasons errors={r.errors} big={tab === "error"} /></td>
                 </tr>
               )) : (
-                <tr><td className="rv-empty" colSpan={7}>
+                <tr><td className="rv-empty" colSpan={hasSite ? 7 : 6}>
                   {tab === "error" ? "No errors found" : tab === "valid" ? "No valid records" : "No records"}
                 </td></tr>
               )}

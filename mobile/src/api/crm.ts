@@ -1,5 +1,7 @@
 import { httpClient } from './httpClient';
 import type {
+  CommercialService,
+  IndustryType,
   Lead,
   LeadPhoto,
   LeadSource,
@@ -26,6 +28,12 @@ interface ApiLead {
   lead_type?: LeadType;
   customer_name: string;
   company_name?: string;
+  industry_type?: IndustryType | null;
+  contact_designation?: string;
+  services_requested?: CommercialService[];
+  latitude?: number | null;
+  longitude?: number | null;
+  created_by_name?: string;
   phone: string;
   alternate_phone?: string;
   email: string;
@@ -59,6 +67,12 @@ function toLead(row: ApiLead): Lead {
     leadType: commercial ? 'commercial' : 'consumer',
     customerName: row.customer_name,
     companyName: row.company_name ?? '',
+    industryType: row.industry_type ?? null,
+    designation: row.contact_designation ?? '',
+    servicesRequested: row.services_requested ?? [],
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+    createdByName: row.created_by_name ?? '',
     phone: row.phone,
     alternatePhone: row.alternate_phone ?? '',
     email: row.email ?? '',
@@ -85,13 +99,17 @@ export async function listLeads(): Promise<Lead[]> {
   return data.map(toLead);
 }
 
-/** POST /api/crm/leads - the server re-checks the price list and forces Online payments to "pending". */
-export async function createLead(input: NewLeadInput, clientRef?: string): Promise<Lead> {
-  const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
-    client_ref: clientRef,
+/** A lead as POST / PUT /api/crm/leads take it. */
+function toApiBody(input: NewLeadInput) {
+  return {
     lead_type: input.leadType ?? 'consumer',
     customer_name: input.customerName,
     company_name: input.companyName ?? '',
+    industry_type: input.industryType ?? null,
+    contact_designation: input.designation ?? '',
+    services_requested: input.servicesRequested ?? [],
+    latitude: input.latitude ?? null,
+    longitude: input.longitude ?? null,
     phone: input.phone,
     alternate_phone: input.alternatePhone ?? '',
     email: input.email,
@@ -107,8 +125,30 @@ export async function createLead(input: NewLeadInput, clientRef?: string): Promi
     payment_method: input.paymentMethod,
     payment_status: input.paymentStatus,
     lead_status: input.leadStatus,
+  };
+}
+
+/** POST /api/crm/leads - the server re-checks the price list and forces Online payments to "pending". */
+export async function createLead(input: NewLeadInput, clientRef?: string): Promise<Lead> {
+  const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
+    client_ref: clientRef,
+    ...toApiBody(input),
   });
   return toLead(data);
+}
+
+/**
+ * PUT /api/crm/leads/:id - saves changes to a lead. On a paid residential lead the server keeps
+ * the service, amount and payment as they are, whatever is sent.
+ */
+export async function updateLead(leadId: string, input: NewLeadInput): Promise<Lead> {
+  const { data } = await httpClient.put<ApiLead>(`/api/crm/leads/${leadId}`, toApiBody(input));
+  return toLead(data);
+}
+
+/** DELETE /api/crm/leads/:id/photos/:photoId */
+export async function deleteLeadPhoto(leadId: string, photoId: string): Promise<void> {
+  await httpClient.delete(`/api/crm/leads/${leadId}/photos/${photoId}`);
 }
 
 interface ApiLeadPhoto {

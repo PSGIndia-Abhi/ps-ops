@@ -18,9 +18,11 @@ const STATUS_CLASS = {
   HIGH: "high",
   CLEARED: "paid",
   NOT_APPLICABLE: "cancelled",
+  IN_PROGRESS: "partial",
+  PAUSED: "pending",
 };
 
-const LABELS = { PARTIAL: "Partially Paid", NOT_APPLICABLE: "Not applicable" };
+const LABELS = { PARTIAL: "Partially Paid", NOT_APPLICABLE: "Not applicable", TODAY: "Due today", IN_PROGRESS: "In progress" };
 
 export function Badge({ value }) {
   const key = String(value || "").toUpperCase();

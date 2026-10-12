@@ -497,3 +497,108 @@
 
 .ac-paymentlist .ac-table .ac-link { transition: opacity 0.15s ease; }
 .ac-paymentlist .ac-table .ac-link:hover { opacity: 0.75; }
+
+/* ---------- Payment follow-ups (Task Management tasks linked to a customer/invoice) ---------- */
+.ac-dashboard .ac-kpi.ac-kpi-link { cursor: pointer; }
+.ac-kpi-link:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+/* dialogs */
+.ac-fu-modal { max-width: 560px; }
+.ac-fu-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ac-fu-modal-head h3 { margin: 0; }
+.ac-fu-modal-head .ac-link { font-size: 18px; color: #64748b; display: inline-flex; }
+.ac-fu-form { display: flex; flex-direction: column; gap: 14px; }
+.ac-fu-readonly { padding: 9px 12px; border-radius: 9px; background: #f8fafc; border: 1px solid #e5e7eb; font-weight: 600; font-size: 14px; color: #0f172a; }
+.ac-fu-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ac-fu-stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ac-fu-stats > div { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; padding: 9px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ac-fu-stats span { font-size: 12px; color: #64748b; }
+.ac-fu-stats strong { font-size: 15px; color: #0f172a; overflow-wrap: anywhere; }
+.ac-fu-stats strong.red { color: #dc2626; }
+.ac-radio-row { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.ac-radio-col { display: grid; gap: 9px; }
+.ac-radio { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #0f172a; cursor: pointer; font-weight: 500 !important; }
+.ac-radio input { width: 16px; height: 16px; margin: 0; accent-color: #2563eb; cursor: pointer; }
+.ac-fu-exists { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 10px; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.ac-fu-exists > svg { font-size: 20px; flex-shrink: 0; }
+.ac-fu-exists > div { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 180px; font-size: 13px; }
+.ac-fu-exists strong { font-size: 13.5px; }
+
+/* "+ Follow-up" button and the open follow-up's date chip (Customer Outstanding, Outstanding) */
+.ac-fu-add { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding: 6px 11px; border-radius: 8px; border: 1px dashed #93c5fd; background: #eff6ff; color: #1d4ed8; font-weight: 600; font-size: 12.5px; cursor: pointer; }
+.ac-fu-add:hover { background: #dbeafe; border-style: solid; }
+.ac-fu-chip { display: inline-flex; align-items: center; gap: 7px; text-align: left; padding: 6px 10px; border-radius: 8px; border: 1px solid #bbf7d0; background: #f0fdf4; color: #15803d; font-size: 12.5px; font-weight: 600; cursor: pointer; max-width: 220px; }
+.ac-fu-chip:hover { border-color: #4ade80; }
+.ac-fu-chip > svg { flex-shrink: 0; }
+.ac-fu-chip span { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.ac-fu-chip small { font-weight: 500; color: #64748b; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-fu-chip.late { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.ac-fu-chip.late:hover { border-color: #f87171; }
+
+/* clickable rows */
+.ac-fu-click { cursor: pointer; }
+.ac-fu-click:hover { background: #f8fafc; }
+.ac-fu-note { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-fu-row-focus td { background: #eff6ff; }
+
+/* dashboard "Today's Follow-ups" */
+.ac-fu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ac-fu-list button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 8px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.ac-fu-list button:hover { background: #f8fafc; }
+.ac-fu-list-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; background: #ffedd5; color: #c2410c; }
+.ac-fu-list-icon.late { background: #fee2e2; color: #b91c1c; }
+.ac-fu-list-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ac-fu-list-main strong { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-fu-list-main span { font-size: 12px; color: #64748b; }
+.ac-fu-list-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; color: #334155; white-space: nowrap; }
+
+/* follow-up page */
+.ac-fu-hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.ac-fu-hero-main { display: flex; gap: 14px; align-items: flex-start; min-width: 0; flex: 1 1 320px; }
+.ac-fu-hero-main .ac-title { margin: 0; overflow-wrap: anywhere; }
+.ac-fu-hero-icon { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; flex-shrink: 0; font-size: 22px; color: #fff; background: linear-gradient(135deg, #dc2626, #f97316); }
+.ac-fu-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ac-fu-actions { flex-wrap: wrap; justify-content: flex-end; }
+.ac-fu-actions a.ac-btn { text-decoration: none; }
+.ac-fu-stat-small { font-size: 15px !important; overflow-wrap: anywhere; }
+.ac-fu-pay { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); gap: 20px; }
+.ac-fu-pay .ac-kv { grid-template-columns: 130px minmax(0, 1fr); }
+.ac-fu-pay .ac-kv dd { overflow-wrap: anywhere; }
+.ac-fu-pay .ac-kv a { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; text-decoration: none; }
+.ac-fu-kv { grid-template-columns: 160px minmax(0, 1fr); max-width: 760px; }
+.ac-fu-timeline { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.ac-fu-timeline li { position: relative; display: flex; gap: 12px; padding: 0 0 16px 0; }
+.ac-fu-timeline li::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: 0; width: 2px; background: #e5e7eb; }
+.ac-fu-timeline li:last-child::before { display: none; }
+.ac-fu-timeline .dot { width: 12px; height: 12px; border-radius: 50%; background: #94a3b8; margin-top: 3px; flex-shrink: 0; position: relative; }
+.ac-fu-timeline .act-complete .dot { background: #16a34a; }
+.ac-fu-timeline .act-reschedule .dot { background: #f59e0b; }
+.ac-fu-timeline .act-update .dot, .ac-fu-timeline .act-start .dot { background: #2563eb; }
+.ac-fu-timeline li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13.5px; }
+.ac-fu-timeline p { margin: 2px 0; color: #334155; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ac-fu-comments { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 12px; }
+.ac-fu-comments li { display: flex; gap: 10px; }
+.ac-fu-comments li > div { min-width: 0; font-size: 13.5px; }
+.ac-fu-comments p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #334155; }
+.ac-fu-avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: #e0e7ff; color: #4338ca; }
+.ac-fu-comment-form { display: grid; gap: 10px; }
+
+@media (max-width: 1100px) {
+  .ac-fu-pay { grid-template-columns: minmax(0, 1fr); }
+  .ac-fu-stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ac-fu-stats.three { grid-template-columns: minmax(0, 1fr); }
+  .ac-fu-actions { justify-content: flex-start; }
+  .ac-fu-kv, .ac-fu-pay .ac-kv { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+  .ac-fu-kv dd, .ac-fu-pay .ac-kv dd { margin-bottom: 8px; }
+}
+@media (max-width: 420px) {
+  .ac-fu-stats-row, .ac-fu-stats { grid-template-columns: minmax(0, 1fr); }
+}
+/* inside follow-up dialogs the date box fills its column, like the time box next to it */
+.ac-fu-modal .ac-date { display: block; width: 100%; }
+.ac-fu-modal .ac-date-text { width: 100%; }
+/* Customer Outstanding: amounts and the follow-up chip stay on one line */
+@media (min-width: 1340px) { .ac-custout .ac-table .ac-num, .ac-fu-chip span { white-space: nowrap; } }
+@media (max-width: 1339px) { .ac-custout .ac-fu-chip > svg { display: none; } .ac-custout .ac-fu-chip { padding: 6px 8px; } }

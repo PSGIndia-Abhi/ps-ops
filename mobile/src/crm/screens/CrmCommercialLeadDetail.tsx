@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   BriefcaseIcon,
@@ -10,6 +10,7 @@ import {
   PhoneIcon,
   PinIcon,
   TagIcon,
+  UsersIcon,
 } from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
@@ -17,7 +18,13 @@ import { whatsappUrl } from '../leadHelpers';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
-import { COMMERCIAL_LEAD_SOURCES, optionLabel, type Lead } from '../types';
+import {
+  COMMERCIAL_LEAD_SOURCES,
+  INDUSTRY_TYPES,
+  optionLabel,
+  servicesLabel,
+  type Lead,
+} from '../types';
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
@@ -198,10 +205,21 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const { showNotice, discardQueued } = useLeads();
+  // Photos can change in the edit form, so they are loaded again each time this screen comes back.
+  const [photosKey, setPhotosKey] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setPhotosKey(k => k + 1);
+    }, []),
+  );
   const { styles, theme } = useCrmStyles(factory);
   const iconColor = theme.primary;
   const hasEmail = !!lead.email;
   const localPhotos = lead.localPhotos ?? [];
+  const hasPoint =
+    typeof lead.latitude === 'number' && typeof lead.longitude === 'number';
+  const industry = optionLabel(INDUSTRY_TYPES, lead.industryType ?? null);
+  const services = servicesLabel(lead.servicesRequested);
 
   async function open(url: string, failMessage: string) {
     try {
@@ -215,7 +233,19 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
-      <TopBar title="Commercial Lead" onBack={() => navigation.goBack()} />
+      <TopBar
+        title="Commercial Lead"
+        onBack={() => navigation.goBack()}
+        // A lead still waiting on this phone is not on the server yet, so there is nothing to edit there.
+        action={
+          lead.pendingSync
+            ? undefined
+            : {
+                label: 'Edit',
+                onPress: () => navigation.navigate('CrmNewCommercialLead', { editLeadId: lead.id }),
+              }
+        }
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -233,7 +263,9 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
               <View style={styles.contactPerson}>
                 <PersonIcon size={15} color={theme.textMuted} />
                 <Text style={styles.contactPersonText} numberOfLines={1}>
-                  {lead.customerName}
+                  {lead.designation
+                    ? `${lead.customerName} · ${lead.designation}`
+                    : lead.customerName}
                 </Text>
               </View>
             </View>
@@ -356,17 +388,63 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
             label="Company / Business"
             value={lead.companyName ?? ''}
           />
+          {!!industry && (
+            <InfoRow
+              icon={<TagIcon size={18} color={iconColor} />}
+              label="Industry Type"
+              value={industry}
+            />
+          )}
+          {hasPoint && (
+            <InfoRow
+              icon={<PinIcon size={18} color={iconColor} />}
+              label="Location"
+              value="Open in Maps"
+              onPress={() =>
+                open(
+                  `https://www.google.com/maps/search/?api=1&query=${lead.latitude},${lead.longitude}`,
+                  'No maps app found on this device.',
+                )
+              }
+            />
+          )}
+          {(!hasPoint || !!lead.location) && (
+            <InfoRow
+              icon={<PinIcon size={18} color={iconColor} />}
+              label="Address"
+              value={lead.location}
+            />
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>LEAD DETAILS</Text>
           <InfoRow
-            icon={<PinIcon size={18} color={iconColor} />}
-            label="Address"
-            value={lead.location}
-          />
-          <InfoRow
+            first
             icon={<TagIcon size={18} color={iconColor} />}
             label="Source of Lead"
             // A source from outside this app's own list (e.g. "Lead Provider") is shown as stored.
             value={optionLabel(COMMERCIAL_LEAD_SOURCES, lead.source) || lead.source || ''}
           />
+          {!!lead.referenceBy && (
+            <InfoRow
+              icon={<UsersIcon size={18} color={iconColor} />}
+              label="Referred By"
+              value={lead.referenceBy}
+            />
+          )}
+          <InfoRow
+            icon={<BriefcaseIcon size={18} color={iconColor} />}
+            label="Service Requested"
+            value={services}
+          />
+          {!!lead.createdByName && (
+            <InfoRow
+              icon={<PersonIcon size={18} color={iconColor} />}
+              label="Added By"
+              value={lead.createdByName}
+            />
+          )}
         </View>
 
         <View style={styles.card}>
@@ -374,9 +452,16 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
           <InfoRow
             first
             icon={<PersonIcon size={18} color={iconColor} />}
-            label="Lead Name"
+            label="Contact Person Name"
             value={lead.customerName}
           />
+          {!!lead.designation && (
+            <InfoRow
+              icon={<BriefcaseIcon size={18} color={iconColor} />}
+              label="Designation"
+              value={lead.designation}
+            />
+          )}
           <InfoRow
             icon={<PhoneIcon size={18} color={iconColor} />}
             label="Phone Number"
@@ -409,7 +494,7 @@ export function CommercialLeadDetail({ lead }: { lead: Lead }) {
               <Text style={styles.notes}>No photos were added to this lead.</Text>
             )
           ) : (
-            <ServerLeadPhotos leadId={lead.id} />
+            <ServerLeadPhotos key={photosKey} leadId={lead.id} />
           )}
         </View>
 

@@ -2,6 +2,7 @@ const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { round2, tdsStatus } = require("./Tds.service");
 const { syncInvoiceStatusesSafely } = require("./InvoiceStatus.service");
+const { closeClearedFollowUpsSafely } = require("./PaymentFollowUp.service");
 
 function withStatus(message, status = 400) {
   const err = new Error(message);
@@ -136,6 +137,8 @@ async function recordPayment({
 
     await connection.commit();
     await syncInvoiceStatusesSafely(); // a part-paid invoice that is past its due date is stored as OVERDUE
+    // Open payment follow-ups whose customer/invoice is now fully paid are completed.
+    await closeClearedFollowUpsSafely(customer_id, { userId: created_by, paymentNumber });
     return paymentId;
   } catch (err) {
     await connection.rollback();

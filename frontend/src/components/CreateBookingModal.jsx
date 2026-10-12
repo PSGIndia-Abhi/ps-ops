@@ -213,6 +213,10 @@ const salesServices = [
   "Invoice Submission"
 ];
 
+const operationServices = [
+  "CRM"
+];
+
   const visibleSubServices =
     form.serviceType === "PEST"
       ? pestServices
@@ -220,7 +224,9 @@ const salesServices = [
         ? deepCleaningServices
         : form.serviceType === "SALES"
           ? salesServices
-          : [...pestServices, ...deepCleaningServices];
+          : form.serviceType === "OPERATION"
+            ? operationServices
+            : [...pestServices, ...deepCleaningServices];
 
   function update(key, value) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -793,6 +799,7 @@ const salesServices = [
                 { key: "DEEP", label: "Deep Cleaning" },
                 { key: "BOTH", label: "Both" },
                 { key: "SALES", label: "Sales" },
+                { key: "OPERATION", label: "Operation" },
               ].map(s => (
                 <div
                   key={s.key}
