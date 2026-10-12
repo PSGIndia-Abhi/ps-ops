@@ -71,8 +71,8 @@ export function canSwitchToSales(role: string | null | undefined): boolean {
 }
 
 /**
- * The accountant opens in Task Management too, and switches to Payment Reminders (the mobile
- * part of the web's Accountant Panel) and back without signing out.
+ * The accountant opens in Payment Reminders (the mobile part of the web's Accountant Panel), and
+ * switches to Task Management and back without signing out.
  */
 export function isAccountantRole(role: string | null | undefined): boolean {
   return !!role && role.toLowerCase().trim() === 'accountant';

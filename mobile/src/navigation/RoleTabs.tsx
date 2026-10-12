@@ -36,12 +36,12 @@ export function RoleTabs() {
   const rawRole = useRawRole();
 
   // Managing Director / Personal Assistant open in Task Management like every org-hierarchy role,
-  // and can move to the Sales app and back without signing out. The accountant does the same
-  // with Payment Reminders.
+  // and can move to the Sales app and back without signing out. The accountant opens in Payment
+  // Reminders instead, and can move to Task Management and back the same way.
   const accountant = isAccountantRole(rawRole);
   const other: AppKind | null = accountant ? 'reminders' : canSwitchToSales(rawRole) ? 'sales' : null;
   const canSwitch = other !== null;
-  const [inOther, setInOther] = useState(false);
+  const [inOther, setInOther] = useState(accountant);
   // The app being left is unmounted first and the other one mounted a moment later: replacing one
   // navigator with the other in a single step leaves the native screen stack unable to open screens.
   const [swapping, setSwapping] = useState(false);
