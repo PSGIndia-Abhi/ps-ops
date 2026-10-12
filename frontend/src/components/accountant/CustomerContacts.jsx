@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiEdit2, FiPhone, FiPlus } from "react-icons/fi";
+import CallDialog from "./CallDialog";
 import { saveCustomerContact } from "../../pages/accountant/followups";
 import "../../pages/accountant/accountant.css";
 
@@ -19,6 +20,7 @@ const initials = (name) =>
 export default function CustomerContacts({ customerId, customerName, data, onSaved, variant = "panel" }) {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(null); // null = closed, "new", or the contact being edited
+  const [calling, setCalling] = useState(null); // the contact the Call pop-up is open for
 
   if (data == null) return variant === "line" ? "…" : null;
 
@@ -90,7 +92,7 @@ export default function CustomerContacts({ customerId, customerName, data, onSav
                 <span>{c.phone}</span>
               </div>
               <div className="ac-contact-actions">
-                <a className="ac-btn ac-btn-sm ac-contact-call" href={tel(c.phone)}><FiPhone /> Call</a>
+                <button type="button" className="ac-btn ac-btn-sm ac-contact-call" onClick={() => setCalling(c)}><FiPhone /> Call</button>
                 <button type="button" className="ac-btn ac-btn-sm" onClick={() => setEditing(c)}><FiEdit2 /> Edit</button>
               </div>
             </li>
@@ -103,6 +105,7 @@ export default function CustomerContacts({ customerId, customerName, data, onSav
         </div>
       )}
       {form}
+      {calling && <CallDialog name={calling.name} customer={customerName} phone={calling.phone} onClose={() => setCalling(null)} />}
     </section>
   );
 }

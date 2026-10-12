@@ -83,8 +83,9 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
       .sort((a, b) => (a.active === b.active ? (a.active ? byDue(a, b) : byDue(b, a)) : a.active ? -1 : 1)),
     [followUps, customer.id]
   );
-  // The panel shows only the customer's next open reminder (reminders are sorted open first, soonest due first).
-  const nextReminder = reminders.find((f) => f.active) || null;
+  // The panel lists every open reminder of the customer, soonest due first (a whole-customer
+  // reminder and reminders for single invoices can be open at the same time).
+  const openReminders = reminders.filter((f) => f.active);
   // The invoices the open reminders are for: only the one(s) the accountant picked. A whole-customer
   // reminder (or no reminder yet) shows all the customer's unpaid invoices.
   const shownInvoices = useMemo(() => {
@@ -202,9 +203,9 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
               <h4 className="ac-drawer-title">Reminders</h4>
               <button type="button" className="ac-btn ac-btn-primary ac-btn-sm" onClick={() => setCreateOpen(true)}><FiPlus /> Create Reminder</button>
             </div>
-            {nextReminder ? (
+            {openReminders.length ? (
               <ul className="ac-rem-list">
-                {[nextReminder].map((f) => (
+                {openReminders.map((f) => (
                   <li key={f.id} className={f.active ? "" : "done"}>
                     <span className={`ac-rem-bell ${f.display_status === "OVERDUE" && f.active ? "late" : f.active ? "on" : ""}`} aria-hidden="true"><FiBell /></span>
                     <div className="ac-rem-main">

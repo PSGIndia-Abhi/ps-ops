@@ -4,6 +4,7 @@ import {
   FiAlertCircle, FiArrowLeft, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiEdit3, FiFileText, FiMessageSquare,
   FiPaperclip, FiPhone, FiPlay, FiPlusCircle, FiRepeat, FiRotateCcw, FiTrash2, FiUpload, FiUser, FiX,
 } from "react-icons/fi";
+import CallDialog from "../../components/accountant/CallDialog";
 import CustomerContacts from "../../components/accountant/CustomerContacts";
 import FollowUpOutcomeModal from "../../components/accountant/FollowUpOutcomeModal";
 import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
@@ -56,7 +57,7 @@ export default function FollowUpDetails() {
   const [busy, setBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
-  const [dialog, setDialog] = useState(""); // "outcome" | "complete" | "reopen"
+  const [dialog, setDialog] = useState(""); // "outcome" | "complete" | "reopen" | "call"
 
   const loadTask = useCallback(async () => {
     try {
@@ -197,7 +198,7 @@ export default function FollowUpDetails() {
 
         {task && isPaymentFollowUp && (
           <div className="ac-actions ac-fu-actions">
-            {phone && <a className="ac-btn" href={`tel:${phone.replace(/[^\d+]/g, "")}`}><FiPhone /> Call Customer</a>}
+            {phone && <button type="button" className="ac-btn" onClick={() => setDialog("call")}><FiPhone /> Call Customer</button>}
             {task.status === "OPEN" && (
               <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => run("start", () => startFollowUp(task.id), "Reminder started.")}>
                 <FiPlay /> {busy === "start" ? "Starting…" : "Start"}
@@ -215,6 +216,7 @@ export default function FollowUpDetails() {
           <ReminderTrack
             task={task}
             contacted={history.some((h) => h.action === "UPDATE")}
+            rescheduled={history.some((h) => h.action === "RESCHEDULE")}
             paid={!dataLoading && (task.scope !== "INVOICE" || Boolean(invoice)) && outstanding <= 0}
           />
         )}
@@ -349,6 +351,10 @@ export default function FollowUpDetails() {
         )}
       </div>
 
+      {dialog === "call" && phone && (
+        <CallDialog name={contact?.name} customer={task?.customer_name} phone={phone}
+          hint="After the call, use Update Reminder to save what the customer said." onClose={() => setDialog("")} />
+      )}
       {dialog === "outcome" && <FollowUpOutcomeModal task={task} onClose={() => setDialog("")} onSaved={afterOutcome} />}
       {dialog === "complete" && (
         <CompleteDialog
@@ -379,18 +385,21 @@ export default function FollowUpDetails() {
 // Where the reminder stands, as a row of steps: a tick for each one reached, a number for the
 // rest, and the next one to do highlighted. Read from the reminder as it is now (its status,
 // its updates, the money still owed); nothing extra is stored.
-function ReminderTrack({ task, contacted, paid }) {
+// Rescheduled is ticked once the reminder date has been moved; it is never the "next" step,
+// because a reminder does not have to be rescheduled.
+function ReminderTrack({ task, contacted, rescheduled, paid }) {
   const cancelled = task.status === "CANCELLED";
   const closed = task.status === "COMPLETED" || cancelled;
   const steps = [
     { label: "Created", done: true },
     { label: "Started", done: task.status !== "OPEN" || Boolean(task.started_at) },
     { label: "Customer Contacted", done: contacted },
+    { label: "Rescheduled", done: rescheduled, optional: true },
     { label: "Payment Received", done: paid },
     { label: cancelled ? "Cancelled" : "Completed", done: closed },
   ];
   const reached = steps.reduce((last, s, i) => (s.done ? i : last), 0); // the furthest step reached
-  const next = closed ? -1 : steps.findIndex((s) => !s.done);
+  const next = closed ? -1 : steps.findIndex((s) => !s.done && !s.optional);
 
   return (
     <ol className="ac-track" aria-label="Reminder progress">
