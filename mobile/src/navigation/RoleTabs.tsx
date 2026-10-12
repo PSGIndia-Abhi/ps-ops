@@ -31,7 +31,7 @@ export function RoleTabs() {
 
   // Org-hierarchy designations get Task Management - same login split as the web app.
   if (isTaskRole(rawRole)) return <TaskNavigator />;
-  // Telecallers and sales managers get Lead Management (sales executives reach it inside the CRM app).
+  // Telecallers, sales and sales managers get Lead Management.
   if (leadPersonaForRole(rawRole)) return <LeadsNavigator />;
 
   switch (role) {
@@ -39,8 +39,7 @@ export function RoleTabs() {
       return <SupervisorTabNavigator />;
     case 'technician':
       return <TechnicianTabNavigator />;
-    // Sales and Marketing get the CRM app instead of the field-service tabs.
-    case 'sales':
+    // Marketing gets the CRM app instead of the field-service tabs.
     case 'marketing':
       return <CrmNavigator />;
     default:
