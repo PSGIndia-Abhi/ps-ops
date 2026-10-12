@@ -97,7 +97,7 @@ export function LeadHomeScreen() {
       >
         <HomeBand
           name={user?.name ?? ''}
-          role={manager ? 'Sales Manager' : persona === 'sales' ? 'Sales' : 'Telecaller'}
+          role={manager ? 'Sales Manager' : 'Telecaller'}
           alerts={followUps}
           topInset={insets.top}
           onBell={openTasks}
