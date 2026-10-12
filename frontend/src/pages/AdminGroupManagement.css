@@ -115,7 +115,7 @@
 }
 
 .group-mgmt-row-companies {
-  grid-template-columns: 1.6fr 1.2fr 1fr 0.8fr 180px;
+  grid-template-columns: 1.4fr 1.4fr 1.1fr 1fr 0.8fr 140px;
 }
 
 .group-mgmt-row-sites {

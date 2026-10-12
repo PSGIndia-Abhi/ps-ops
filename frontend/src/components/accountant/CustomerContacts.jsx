@@ -49,10 +49,11 @@ export default function CustomerContacts({ customerId, customerName, data, onSav
               <a className="ac-link" href={tel(main.phone)}><FiPhone /> {main.phone}</a>
               <span className="ac-contact-muted">· {main.name}</span>
               {main.is_primary && <span className="ac-contact-tag">Primary</span>}
-              {closed && <button type="button" className="ac-link ac-contact-link" onClick={() => setEditing(main)}><FiEdit2 /> Edit</button>}
             </span>
+            {/* the actions sit together on their own line, under the number */}
             {closed && (
               <span className="ac-contact-line-row">
+                <button type="button" className="ac-link ac-contact-link" onClick={() => setEditing(main)}><FiEdit2 /> Edit</button>
                 <button type="button" className="ac-link ac-contact-link" onClick={() => setEditing("new")}><FiPlus /> Add another</button>
                 {contacts.length > 1 && (
                   <button type="button" className="ac-link ac-contact-link" onClick={() => navigate("/accountant/contacts", { state: { search: customerName || "" } })}>

@@ -9,7 +9,7 @@ import CustomerContacts from "../../components/accountant/CustomerContacts";
 import FollowUpOutcomeModal from "../../components/accountant/FollowUpOutcomeModal";
 import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, cleanFollowUp, showDate, useAccountantData } from "./data";
+import { byDue, cleanFollowUp, showDate, useAccountantData, ymd } from "./data";
 import {
   addFollowUpComment, completeFollowUp, deleteFollowUpAttachment, fetchCustomerContact, fetchFollowUp, fetchFollowUpAttachments,
   fetchFollowUpComments, fetchFollowUpHistory, fetchReminderSchedule, MAX_ATTACHMENT_MB, repeatEnd, repeatText, openFollowUpAttachment, uploadFollowUpAttachment,
@@ -124,6 +124,16 @@ export default function FollowUpDetails() {
     .pop();
   const otherOpen = followUps.filter((f) => f.active && f.customer_id === customerId && f.id !== task?.id).sort(byDue);
 
+  // Part paid: money came in after this reminder was made, but what it chases is not cleared.
+  // The reminder then has to be moved to a new date for the rest, so the track asks for a
+  // reschedule made on or after that payment (an earlier one was for the first amount).
+  const paidOn = task?.scope === "INVOICE" ? invoice?.last_payment_date || (invoice?.paid_amount > 0 ? lastPayment : "") : lastPayment;
+  const partPaid = Boolean(task) && !dataLoading && outstanding > 0 && Boolean(paidOn) && paidOn >= ymd(task.created_at);
+  // A repeating reminder is moved to its next date by the server (history note "...: Repeating
+  // reminder"); only a move made by a person counts as rescheduled.
+  const rescheduled = history.some((h) =>
+    h.action === "RESCHEDULE" && !/: Repeating reminder$/.test(h.note || "") && (!partPaid || ymd(h.changed_at) >= paidOn));
+
   async function run(label, action, message) {
     setBusy(label);
     setActionError("");
@@ -216,7 +226,8 @@ export default function FollowUpDetails() {
           <ReminderTrack
             task={task}
             contacted={history.some((h) => h.action === "UPDATE")}
-            rescheduled={history.some((h) => h.action === "RESCHEDULE")}
+            rescheduled={rescheduled}
+            partPaid={partPaid}
             paid={!dataLoading && (task.scope !== "INVOICE" || Boolean(invoice)) && outstanding <= 0}
           />
         )}
@@ -385,21 +396,27 @@ export default function FollowUpDetails() {
 // Where the reminder stands, as a row of steps: a tick for each one reached, a number for the
 // rest, and the next one to do highlighted. Read from the reminder as it is now (its status,
 // its updates, the money still owed); nothing extra is stored.
-// Rescheduled is ticked once the reminder date has been moved; it is never the "next" step,
-// because a reminder does not have to be rescheduled.
-function ReminderTrack({ task, contacted, rescheduled, paid }) {
+// Rescheduled is ticked once the reminder date has been moved. Normally it is never the "next"
+// step, because a reminder does not have to be rescheduled. After a part payment it is: the
+// rest is still owed, so the reminder must be given its next date.
+function ReminderTrack({ task, contacted, rescheduled, partPaid, paid }) {
   const cancelled = task.status === "CANCELLED";
   const closed = task.status === "COMPLETED" || cancelled;
+  // Paid in full and completed: the reminder has done its job, so the whole track is ticked,
+  // including steps that were skipped on the way (no call logged, never rescheduled).
+  const finished = task.status === "COMPLETED" && paid;
   const steps = [
     { label: "Created", done: true },
-    { label: "Started", done: task.status !== "OPEN" || Boolean(task.started_at) },
-    { label: "Customer Contacted", done: contacted },
-    { label: "Rescheduled", done: rescheduled, optional: true },
+    { label: "Started", done: finished || task.status !== "OPEN" || Boolean(task.started_at) },
+    { label: "Customer Contacted", done: finished || contacted },
+    { label: "Rescheduled", done: finished || rescheduled, optional: true },
     { label: "Payment Received", done: paid },
     { label: cancelled ? "Cancelled" : "Completed", done: closed },
   ];
   const reached = steps.reduce((last, s, i) => (s.done ? i : last), 0); // the furthest step reached
-  const next = closed ? -1 : steps.findIndex((s) => !s.done && !s.optional);
+  const next = closed ? -1
+    : partPaid && !rescheduled ? steps.findIndex((s) => s.label === "Rescheduled")
+    : steps.findIndex((s) => !s.done && !s.optional);
 
   return (
     <ol className="ac-track" aria-label="Reminder progress">

@@ -7,6 +7,7 @@ import {
 import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
 import { groupByCustomer, savePayment, showDate, todayYmd, useAccountantData } from "./data";
+import { rescheduleFollowUp, showDue } from "./followups";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -30,7 +31,7 @@ const canPick = (inv) => isOpen(inv) || (inv.tds_applicable && inv.pending_tds >
 export default function RecordPayment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { invoices, payments, loading, error, reload } = useAccountantData();
+  const { invoices, payments, followUps, loading, error, reload } = useAccountantData();
 
   // Coming from an invoice or customer screen pre-selects that customer.
   const [customerId, setCustomerId] = useState(location.state?.customerId || "");
@@ -54,6 +55,14 @@ export default function RecordPayment() {
     [invoices, payments]
   );
   const customer = customers.find((c) => c.id === customerId) || null;
+
+  // Opened from a payment reminder: after a part payment the reminder is still open (the server
+  // only completes it once its outstanding is cleared), so the accountant is asked when to be
+  // reminded next. `reminderOwed` is what that reminder is still chasing, read from the invoices.
+  const reminder = followUps.find((f) => f.id === location.state?.followUpId && f.active && f.customer_id === customerId) || null;
+  const reminderOwed = !reminder ? 0
+    : reminder.scope === "INVOICE" ? amt(invoices.find((i) => i.id === reminder.invoice_id)?.pending_amount)
+    : amt(customer?.outstanding);
 
   // The customer's invoices, oldest first.
   const allInvoices = useMemo(
@@ -298,6 +307,10 @@ export default function RecordPayment() {
         </div>
       )}
 
+      {saved && reminder && reminderOwed > 0.005 && (
+        <NextReminderPrompt key={reminder.id} reminder={reminder} owed={reminderOwed} onSaved={reload} />
+      )}
+
       {/* 1. Customer */}
       <div className="ac-card">
         <div className="ac-rp-top">
@@ -540,6 +553,66 @@ export default function RecordPayment() {
 
       {prevOpen && <PreviousTdsModal invoices={previousCandidates} current={tds} onClose={() => setPrevOpen(false)} onApply={applyPrevious} />}
     </div>
+  );
+}
+
+// Shown after a part payment recorded from a reminder: the reminder stays open, and this asks
+// when to be reminded for the rest. Saving moves that same reminder to the new date and time
+// (a reschedule, so its track shows Rescheduled); nothing new is created.
+function NextReminderPrompt({ reminder, owed, onSaved }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState(reminder.due_time || "10:00");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [movedTo, setMovedTo] = useState(""); // set once the reminder has been rescheduled
+
+  async function save(e) {
+    e.preventDefault();
+    if (!date) return setError("Please choose the next reminder date.");
+    if (date < todayYmd()) return setError("The reminder date can't be in the past.");
+    if (!time) return setError("Please choose a time.");
+    setSaving(true);
+    setError("");
+    try {
+      await rescheduleFollowUp(reminder.id, date, time, `Part payment received, ${money(owed)} still outstanding`);
+      setMovedTo(showDue(date, time));
+      await onSaved?.();
+    } catch (err) {
+      setError(err.message || "The reminder could not be rescheduled. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (movedTo) {
+    return (
+      <div className="ac-info ok" style={{ marginBottom: 16 }} role="status">
+        <FiCheckCircle style={{ flexShrink: 0, marginTop: 2 }} /><span>Reminder rescheduled to {movedTo} for the remaining {money(owed)}.</span>
+      </div>
+    );
+  }
+
+  return (
+    <form className="ac-info" style={{ marginBottom: 16, flexDirection: "column", gap: 12 }} onSubmit={save} noValidate>
+      <span>
+        <FiClock style={{ marginRight: 6, verticalAlign: "-2px" }} />
+        Part payment recorded. <strong>{money(owed)}</strong> is still outstanding
+        {reminder.scope === "INVOICE" ? ` on invoice ${reminder.invoice_number}` : " for this customer"}, so the reminder stays open.
+        Choose when to be reminded next.
+      </span>
+      {error && <div className="ac-info error" role="alert"><FiAlertCircle style={{ flexShrink: 0, marginTop: 2 }} /><span>{error}</span></div>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+        <div className="ac-field">
+          <label>Next Reminder Date *</label>
+          <input className="ac-input" type="date" min={todayYmd()} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Next reminder date" />
+        </div>
+        <div className="ac-field">
+          <label>Time *</label>
+          <input className="ac-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Next reminder time" />
+        </div>
+        <button type="submit" className="ac-btn ac-btn-primary" disabled={saving}>{saving ? "Saving…" : "Reschedule Reminder"}</button>
+      </div>
+    </form>
   );
 }
 
