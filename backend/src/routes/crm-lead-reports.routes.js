@@ -99,7 +99,7 @@ router.get("/reports/sales-performance", auth, requirePermission("CRM_VIEW_LEAD"
 
     const [[{ quotationsSent }]] = await pool.query(
       `SELECT COUNT(*) AS quotationsSent FROM crm_lead_quotations
-        WHERE created_by = ? AND DATE(sent_at) BETWEEN ? AND ?`,
+        WHERE created_by = ? AND status <> 'CANCELLED' AND DATE(sent_at) BETWEEN ? AND ?`,
       [employeeId, from, to]
     );
 

@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, hasPerm, nextLeadNumber, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -59,7 +60,43 @@ function providerBucket(stage) {
   return "qualified"; // QUALIFIED, MEETING_SCHEDULED, VISIT_COMPLETED, QUOTATION_SENT
 }
 
-function toProviderLead(row) {
+// The step of the lead's journey the provider is shown: where it is, without
+// who is working it. Added alongside `status`, which older app versions read.
+function providerProgress(stage) {
+  if (stage === null || stage === "NEW") return "SUBMITTED";
+  if (["TO_CALL", "NEED_MORE_INFO"].includes(stage)) return "IN_VERIFICATION";
+  if (stage === "QUALIFIED") return "VERIFIED";
+  if (["WON", "CONVERTED"].includes(stage)) return "CONVERTED";
+  if (["LOST", "CANCELLED"].includes(stage)) return "LOST";
+  return stage; // MEETING_SCHEDULED, VISIT_COMPLETED, QUOTATION_SENT, NOT_GENUINE
+}
+
+// When each step of a lead's journey was first reached, from its history -- dates only, no notes or names.
+const MILESTONE_OF = {
+  QUALIFY: "verified", REJECT: "verified", MEETING_SCHEDULED: "meeting",
+  VISIT_COMPLETED: "visit", QUOTATION_SENT: "quotation", CONVERTED: "closed", MARK_LOST: "closed",
+};
+async function loadMilestones(leadIds) {
+  const byLead = new Map(leadIds.map((id) => [id, {}]));
+  if (leadIds.length === 0) return byLead;
+  const [rows] = await pool.query(
+    `SELECT lead_id, action, DATE_FORMAT(MIN(changed_at), '%Y-%m-%d %H:%i:%s') AS at
+       FROM crm_lead_history
+      WHERE lead_id IN (?) AND action IN (?)
+        -- a "needs more info" result is not the verification decision
+        AND NOT (action = 'QUALIFY' AND note NOT LIKE 'Marked GENUINE%')
+      GROUP BY lead_id, action`,
+    [leadIds, Object.keys(MILESTONE_OF)]
+  );
+  for (const r of rows) {
+    const m = byLead.get(r.lead_id);
+    const key = MILESTONE_OF[r.action];
+    if (m && (!m[key] || r.at < m[key])) m[key] = r.at;
+  }
+  return byLead;
+}
+
+function toProviderLead(row, milestones = {}) {
   return {
     id: row.id,
     lead_number: row.lead_number,
@@ -73,6 +110,8 @@ function toProviderLead(row) {
     approx_quote_amount: row.amount === null ? null : Number(row.amount),
     requirement: row.notes,
     status: providerBucket(row.pipeline_stage),
+    progress: providerProgress(row.pipeline_stage),
+    milestones,
     created_at: row.created_at_formatted,
   };
 }
@@ -172,6 +211,8 @@ router.post("/provider/leads", auth, requireProvider, async (req, res) => {
     });
 
     const [[row]] = await pool.query(`SELECT ${LEAD_SELECT_WITH_FORMATTED_DATE} FROM crm_leads WHERE id = ?`, [leadId]);
+    // Best effort, after the change is saved: never holds up or fails the request.
+    notifyLead(leadId, "SUBMITTED", { actorId: req.user.id });
     res.status(201).json(toProviderLead(row));
   } catch (err) {
     sendError(res, err, "Failed to submit lead");
@@ -185,7 +226,8 @@ router.get("/provider/leads", auth, requireProvider, async (req, res) => {
       `SELECT ${LEAD_SELECT_WITH_FORMATTED_DATE} FROM crm_leads WHERE lead_type = 'commercial' AND provider_id = ? ORDER BY created_at DESC`,
       [req.user.id]
     );
-    res.json(rows.map(toProviderLead));
+    const milestones = await loadMilestones(rows.map((r) => r.id));
+    res.json(rows.map((r) => toProviderLead(r, milestones.get(r.id))));
   } catch (err) {
     sendError(res, err, "Failed to load leads");
   }
@@ -199,7 +241,8 @@ router.get("/provider/leads/:id", auth, requireProvider, async (req, res) => {
       [req.params.id, req.user.id]
     );
     if (!row) throw new HttpError(404, "Lead not found");
-    res.json(toProviderLead(row));
+    const milestones = await loadMilestones([row.id]);
+    res.json(toProviderLead(row, milestones.get(row.id)));
   } catch (err) {
     sendError(res, err, "Failed to load lead");
   }
@@ -266,6 +309,8 @@ router.post("/leads/:id/feedback", auth, requirePermission("CRM_VIEW_LEAD"), asy
       await logLeadHistory(conn, lead.id, "FEEDBACK_SENT", { note: message.slice(0, 500), changedBy: req.user.id });
     });
     const [[row]] = await pool.query("SELECT id, message, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at FROM crm_lead_feedback WHERE id = ?", [id]);
+    // Best effort, after the change is saved: never holds up or fails the request.
+    notifyLead(lead.id, "FEEDBACK", { actorId: req.user.id, extra: { message } });
     res.status(201).json(row);
   } catch (err) {
     sendError(res, err, "Failed to send feedback");

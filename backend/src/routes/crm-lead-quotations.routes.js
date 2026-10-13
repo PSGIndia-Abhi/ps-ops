@@ -7,6 +7,7 @@ const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
 
@@ -148,6 +149,7 @@ async function createPdfQuotation(req, res) {
     });
 
     const [[quotation]] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE id = ?`, [quotationId]);
+    notifyLead(lead.id, "QUOTATION_SENT", { actorId: req.user.id, extra: { reason: quotation.quotation_number } });
     res.status(201).json({ ...quotation, total_amount: Number(quotation.total_amount), items: [] });
   } catch (err) {
     // DB failed after the file was stored: don't leave an orphan file behind.
@@ -197,6 +199,7 @@ router.post("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), p
 
     const [[quotation]] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE id = ?`, [quotationId]);
     const [lineItems] = await pool.query("SELECT id, description, quantity, unit_price FROM crm_lead_quotation_items WHERE quotation_id = ?", [quotationId]);
+    notifyLead(lead.id, "QUOTATION_SENT", { actorId: req.user.id, extra: { reason: quotation.quotation_number } });
     res.status(201).json({ ...quotation, total_amount: Number(quotation.total_amount), items: lineItems.map((i) => ({ ...i, unit_price: Number(i.unit_price) })) });
   } catch (err) {
     sendError(res, err, "Failed to create quotation");
@@ -211,6 +214,58 @@ router.get("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), as
     res.json(rows.map((r) => ({ ...r, total_amount: Number(r.total_amount) })));
   } catch (err) {
     sendError(res, err, "Failed to load quotations");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/crm/leads/:id/quotations/:quotationId/cancel { reason } -- takes a
+// quotation back (sent by mistake, or replaced). Nothing is deleted: the row is
+// marked CANCELLED and keeps its number and PDF, the lead's history records
+// it, and reports stop counting it. If no other quotation on the lead is still
+// standing, the lead steps back from QUOTATION_SENT to where it was before.
+// Allowed for whoever uploaded it, a lead manager or admin, while the lead is open.
+// ---------------------------------------------------------------------------
+router.post("/leads/:id/quotations/:quotationId/cancel", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    const [[quotation]] = await pool.query(
+      "SELECT id, quotation_number, status, created_by FROM crm_lead_quotations WHERE id = ? AND lead_id = ?",
+      [req.params.quotationId, lead.id]
+    );
+    if (!quotation) throw new HttpError(404, "Quotation not found");
+    const uploader = Number(quotation.created_by) === Number(req.user.id);
+    if (!uploader && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) {
+      throw new HttpError(403, "Only the person who sent this quotation or a sales manager can cancel it");
+    }
+    if (TERMINAL_STAGES.includes(lead.pipeline_stage)) throw new HttpError(400, `Cannot change a quotation on a lead that is ${lead.pipeline_stage}`);
+    if (quotation.status === "CANCELLED") throw new HttpError(400, "This quotation is already cancelled");
+    const reason = optionalText(req.body?.reason, 300);
+    if (reason === false) throw new HttpError(400, "reason is too long (max 300 characters)");
+    if (!reason) throw new HttpError(400, "reason is required");
+
+    await inTransaction(async (conn) => {
+      await conn.query("UPDATE crm_lead_quotations SET status = 'CANCELLED' WHERE id = ? AND status <> 'CANCELLED'", [quotation.id]);
+      await logLeadHistory(conn, lead.id, "QUOTATION_CANCELLED", { note: `${quotation.quotation_number} cancelled: ${reason}`.slice(0, 500), changedBy: req.user.id });
+
+      // No quotation left standing: the lead goes back to the step it had reached before one was sent.
+      const [[{ standing }]] = await conn.query(
+        "SELECT COUNT(*) AS standing FROM crm_lead_quotations WHERE lead_id = ? AND status <> 'CANCELLED'",
+        [lead.id]
+      );
+      if (Number(standing) === 0 && lead.pipeline_stage === "QUOTATION_SENT") {
+        const [[m]] = await conn.query(
+          `SELECT SUM(status = 'COMPLETED') AS done, SUM(status = 'SCHEDULED') AS open FROM crm_lead_meetings WHERE lead_id = ?`,
+          [lead.id]
+        );
+        const back = Number(m?.done) > 0 ? "VISIT_COMPLETED" : Number(m?.open) > 0 ? "MEETING_SCHEDULED" : "QUALIFIED";
+        await conn.query("UPDATE crm_leads SET pipeline_stage = ?, row_version = row_version + 1 WHERE id = ?", [back, lead.id]);
+      }
+    });
+
+    const [[row]] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE id = ?`, [quotation.id]);
+    res.json({ ...row, total_amount: Number(row.total_amount) });
+  } catch (err) {
+    sendError(res, err, "Failed to cancel quotation");
   }
 });
 
@@ -268,6 +323,7 @@ router.post("/leads/:id/mark-lost", auth, requirePermission("CRM_VIEW_LEAD"), as
       if (!upd.affectedRows) throw new HttpError(409, "This lead was just changed by someone else. Reload and try again.");
       await logLeadHistory(conn, lead.id, "MARK_LOST", { note: reason, changedBy: req.user.id });
     });
+    notifyLead(lead.id, "LOST", { actorId: req.user.id, extra: { reason } });
     const [[updated]] = await pool.query("SELECT * FROM crm_leads WHERE id = ?", [lead.id]);
     res.json(updated);
   } catch (err) {
@@ -331,6 +387,7 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
         WHERE c.id = ?`,
       [conversionId]
     );
+    notifyLead(lead.id, "CONVERTED", { actorId: req.user.id });
     res.status(201).json(conversion);
   } catch (err) {
     sendError(res, err, "Failed to convert lead");

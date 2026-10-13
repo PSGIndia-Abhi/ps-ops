@@ -11,6 +11,7 @@ const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 const { nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead } = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -345,7 +346,19 @@ async function createCommercialLead(req, res, lead) {
   if (alternatePhone && alternatePhone.length !== 10) {
     return res.status(400).json({ error: "Alternate number must be a valid 10-digit phone number" });
   }
-  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return res.status(400).json({ error: "Source of lead is required" });
+  // The fixed codes the mobile app sends, or any active source from the lead source master.
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) {
+    let master = null;
+    try {
+      if (typeof leadSource === "string") {
+        [[master]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ? AND is_active = 1", [leadSource]);
+      }
+    } catch (err) {
+      console.error("CRM lead source lookup error:", err);
+      return res.status(500).json({ error: "Failed to save lead" });
+    }
+    if (!master) return res.status(400).json({ error: "Source of lead is required" });
+  }
   if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
     return res.status(400).json({ error: "A valid approximate quote is required" });
   }
@@ -366,6 +379,9 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const id = uuid();
+    // A sales executive's own lead skips the telecaller: they met or know the customer, so it starts
+    // verified (QUALIFIED) and assigned to them. Every other lead joins the telecaller queue as NEW.
+    const salesOwn = req.user.role === "sales";
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -374,8 +390,8 @@ async function createCommercialLead(req, res, lead) {
         `INSERT INTO crm_leads
           (id, lead_number, lead_type, customer_name, company_name, phone, alternate_phone, customer_email,
            house_type, service_name, plan_type, standard_amount, amount, location, lead_source, notes,
-           payment_method, payment_status, lead_status, pipeline_stage, created_by_user_id, external_ref)
-         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, 'NEW', ?, ?)`,
+           payment_method, payment_status, lead_status, pipeline_stage, assigned_sales_employee_id, created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?)`,
         [
           id,
           leadNumber,
@@ -389,11 +405,16 @@ async function createCommercialLead(req, res, lead) {
           leadSource,
           lead.notes || null,
           lead.leadStatus,
+          salesOwn ? "QUALIFIED" : "NEW",
+          salesOwn ? req.user.id : null,
           req.user.id,
           lead.clientRef,
         ]
       );
       await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      if (salesOwn) {
+        await logLeadHistory(conn, id, "QUALIFY", { note: "Marked GENUINE - the sales executive's own lead, no telecaller call needed", changedBy: req.user.id });
+      }
       await conn.commit();
     } catch (err) {
       await conn.rollback().catch(() => {});
@@ -403,6 +424,8 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    // Best effort, after the change is saved: never holds up or fails the request.
+    notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
     res.status(201).json(toLead(created));
   } catch (err) {
     if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {

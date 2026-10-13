@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 const { logHistory: logTaskHistory } = require("../utils/workTasks");
 
 class HttpError extends Error {
@@ -192,6 +193,7 @@ router.post("/leads/:id/meetings", auth, requirePermission("CRM_VIEW_LEAD"), asy
     });
 
     const meeting = await loadMeeting(meetingId);
+    notifyLead(lead.id, "MEETING_SCHEDULED", { actorId: req.user.id, extra: { salesId: salesEmployeeId, scheduledAt: scheduled.sql } });
     res.status(201).json(meeting);
   } catch (err) {
     sendError(res, err, "Failed to schedule meeting");
@@ -255,6 +257,7 @@ router.patch("/meetings/:id/reschedule", auth, requirePermission("CRM_VIEW_LEAD"
       }
       await logLeadHistory(conn, meeting.lead_id, "MEETING_RESCHEDULED", { note: `Moved to ${scheduled.sql}${reason ? `: ${reason}` : ""}`, changedBy: req.user.id });
     });
+    notifyLead(meeting.lead_id, "MEETING_RESCHEDULED", { actorId: req.user.id, extra: { scheduledAt: scheduled.sql, reason } });
     res.json(await loadMeeting(meeting.id));
   } catch (err) {
     sendError(res, err, "Failed to reschedule meeting");
@@ -311,6 +314,7 @@ router.post("/meetings/:id/complete", auth, requirePermission("CRM_VIEW_LEAD"), 
       await conn.query("UPDATE crm_leads SET pipeline_stage = 'VISIT_COMPLETED', row_version = row_version + 1 WHERE id = ?", [meeting.lead_id]);
       await logLeadHistory(conn, meeting.lead_id, "VISIT_COMPLETED", { note: outcomeNotes, changedBy: req.user.id });
     });
+    notifyLead(meeting.lead_id, "VISIT_COMPLETED", { actorId: req.user.id, extra: { reason: outcomeNotes } });
     res.json(await loadMeeting(meeting.id));
   } catch (err) {
     sendError(res, err, "Failed to complete meeting");
@@ -335,6 +339,7 @@ router.post("/meetings/:id/cancel", auth, requirePermission("CRM_VIEW_LEAD"), as
       }
       await logLeadHistory(conn, meeting.lead_id, "MEETING_CANCELLED", { note: reason, changedBy: req.user.id });
     });
+    notifyLead(meeting.lead_id, "MEETING_CANCELLED", { actorId: req.user.id, extra: { reason } });
     res.json(await loadMeeting(meeting.id));
   } catch (err) {
     sendError(res, err, "Failed to cancel meeting");

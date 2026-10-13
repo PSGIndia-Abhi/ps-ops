@@ -4,7 +4,12 @@
 import { useMemo, useState } from "react";
 import { FiBriefcase, FiCalendar, FiCheck, FiSave, FiSend, FiThumbsDown, FiThumbsUp, FiUploadCloud, FiXCircle } from "react-icons/fi";
 import {
+  addFollowUp,
   cancelMeeting,
+  cancelQuotation,
+  FOLLOW_UP_OUTCOMES,
+  leadTeam,
+  sendProviderUpdate,
   closeLead,
   completeVisit,
   findDuplicates,
@@ -89,8 +94,9 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
   };
 
   const duplicates = useMemo(() => findDuplicates(values), [values]);
-  // Staff pick from the sources the lead API accepts; a provider from the list the portal is given.
-  const sources = viewer.persona === "lead_provider" ? providerSources().map((name) => ({ value: name, label: name })) : FORM_SOURCES;
+  // Everyone picks from the lead source master; staff fall back to the fixed codes if it could not be read.
+  const master = providerSources().map((name) => ({ value: name, label: name }));
+  const sources = master.length > 0 || viewer.persona === "lead_provider" ? master : FORM_SOURCES;
 
   function validate() {
     const found = {};
@@ -107,8 +113,13 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     return Object.keys(found).length === 0;
   }
 
+  // An admin looking at the provider portal is not a provider: a lead saved here would be an
+  // ordinary staff lead under the admin, and would never reach any provider's list.
+  const providerPreview = viewer.persona === "lead_provider" && !viewer.me.providerId;
+
   async function save(e) {
     e.preventDefault();
+    if (providerPreview) return;
     if (busy || !validate()) return;
     setBusy(true);
     try {
@@ -127,16 +138,21 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
 
   return (
     <form onSubmit={save} noValidate style={{ display: "grid", gap: 16 }}>
+      {providerPreview && (
+        <Note tone="info">
+          <b>Preview only.</b> Leads are submitted from a lead provider&apos;s own login, so they appear in that provider&apos;s list.
+        </Note>
+      )}
       {duplicates.length > 0 && (
         <Note tone="warn">
           <b>Possible duplicate.</b> {duplicates[0].company} ({duplicates[0].phone}) is already a lead, {duplicates[0].number}. You can still submit if this is a different enquiry.
         </Note>
       )}
       <div className="lm-form">
-        <Field label="Company / Customer Name" required error={errors.company} wide>
+        <Field label="Company / Customer Name" required error={errors.company}>
           <input className={cls("company")} value={values.company} onChange={set("company")} placeholder="e.g. ABC Pharma Pvt Ltd" maxLength={150} />
         </Field>
-        <Field label="Contact Person" required error={errors.contact} wide>
+        <Field label="Contact Person" required error={errors.contact}>
           <input className={cls("contact")} value={values.contact} onChange={set("contact")} placeholder="Who should we speak to?" maxLength={120} />
         </Field>
         <Field label="Phone Number" required error={errors.phone}>
@@ -145,10 +161,10 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
         <Field label="Alternate Phone" error={errors.altPhone}>
           <input className={cls("altPhone")} value={values.altPhone} onChange={set("altPhone")} inputMode="numeric" placeholder="Optional" />
         </Field>
-        <Field label="Email" error={errors.email} wide>
+        <Field label="Email" error={errors.email}>
           <input className={cls("email")} value={values.email} onChange={set("email")} type="email" placeholder="name@company.com (optional)" />
         </Field>
-        <Field label="Address" required error={errors.address} wide>
+        <Field label="Address" required error={errors.address}>
           <input className={cls("address")} value={values.address} onChange={set("address")} placeholder="Plot / building, area, city" maxLength={255} />
         </Field>
         <Field label="Source of Lead" required error={errors.source}>
@@ -174,7 +190,7 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
             Cancel
           </Button>
         )}
-        <Button type="submit" busy={busy} icon={<FiSend />}>
+        <Button type="submit" busy={busy} disabled={providerPreview} icon={<FiSend />}>
           {submitLabel}
         </Button>
       </div>
@@ -183,8 +199,13 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
 }
 
 export function AddLeadModal({ onClose }) {
+  const { persona } = useViewer();
+  const sub =
+    persona === "sales"
+      ? "Your own commercial lead - it is verified and assigned to you straight away"
+      : "Commercial lead - it joins the telecaller queue for verification";
   return (
-    <Modal title="Add New Lead" sub="Commercial lead - it joins the telecaller queue for verification" onClose={onClose} wide>
+    <Modal title="Add New Lead" sub={sub} onClose={onClose} wide>
       {(close) => <LeadForm submitLabel="Add Lead" onSaved={close} onCancel={close} />}
     </Modal>
   );
@@ -195,7 +216,9 @@ export function AddLeadModal({ onClose }) {
 const OUTCOMES = [
   { value: "GENUINE", label: "Genuine Lead", sub: "Requirement confirmed - ready for a sales meeting", tone: "success" },
   { value: "NEED_MORE_INFO", label: "Need More Information", sub: "Follow up again before deciding", tone: "violet" },
-  { value: "CALL_BACK", label: "Call Back Later", sub: "No answer, or the customer asked for another time", tone: "warn" },
+  { value: "CALL_BACK", label: "Call Back Later", sub: "The customer asked to be called at another time", tone: "warn" },
+  { value: "NO_ANSWER", label: "No Response", sub: "Rang, but nobody picked up - try again later", tone: "warn" },
+  { value: "INVALID_NUMBER", label: "Invalid Number", sub: "Wrong or unreachable number - only logs the call", tone: "neutral" },
   { value: "NOT_GENUINE", label: "Not Genuine", sub: "Invalid, duplicate or not a real enquiry", tone: "danger" },
 ];
 
@@ -209,7 +232,7 @@ export function CallVerifyModal({ lead, onClose, onScheduleMeeting }) {
   const [followUpAt, setFollowUpAt] = useState(tomorrowInput);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
-  const needsFollowUp = outcome === "NEED_MORE_INFO" || outcome === "CALL_BACK";
+  const needsFollowUp = FOLLOW_UP_OUTCOMES.includes(outcome);
 
   async function save(close, thenSchedule) {
     if (busy) return;
@@ -331,15 +354,15 @@ export function ScheduleMeetingModal({ lead, onClose }) {
     >
       <LeadBar lead={lead} />
       <div className="lm-form">
-        <Field label="Meeting Date & Time" required wide>
+        <Field label="Meeting Date & Time" required>
           <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
         </Field>
-        <Field label="Assign to Sales Person" required wide hint={lead.salesId ? "Defaults to the sales person who brought in this lead." : undefined}>
+        <Field label="Assign to Sales Person" required hint={lead.salesId ? "Pre-filled with the sales person already on this lead." : undefined}>
           <select className="lm-select" value={salesId} onChange={(e) => setSalesId(e.target.value)}>
             <option value="">Select sales person</option>
             {team.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name}
+                {u.title ? `${u.name} (${u.title})` : u.name}
               </option>
             ))}
           </select>
@@ -621,10 +644,10 @@ export function EditLeadModal({ lead, onClose }) {
       )}
     >
       <div className="lm-form">
-        <Field label="Company / Customer Name" required error={errors.company} wide>
+        <Field label="Company / Customer Name" required error={errors.company}>
           <input className={cls("company")} value={values.company} onChange={set("company")} maxLength={150} />
         </Field>
-        <Field label="Contact Person" required error={errors.contact} wide>
+        <Field label="Contact Person" required error={errors.contact}>
           <input className={cls("contact")} value={values.contact} onChange={set("contact")} maxLength={150} />
         </Field>
         <Field label="Phone Number" required error={errors.phone}>
@@ -633,14 +656,14 @@ export function EditLeadModal({ lead, onClose }) {
         <Field label="Alternate Phone" error={errors.altPhone}>
           <input className={cls("altPhone")} value={values.altPhone} onChange={set("altPhone")} inputMode="numeric" placeholder="Optional" />
         </Field>
-        <Field label="Email" error={errors.email} wide>
+        <Field label="Email" error={errors.email}>
           <input className={cls("email")} value={values.email} onChange={set("email")} type="email" placeholder="Optional" maxLength={150} />
-        </Field>
-        <Field label="Address" required error={errors.address} wide>
-          <input className={cls("address")} value={values.address} onChange={set("address")} maxLength={255} />
         </Field>
         <Field label="Approximate Quote (₹)" required error={errors.quote}>
           <input className={cls("quote")} value={values.quote} onChange={set("quote")} inputMode="numeric" />
+        </Field>
+        <Field label="Address" required error={errors.address} wide>
+          <input className={cls("address")} value={values.address} onChange={set("address")} maxLength={255} />
         </Field>
         <Field label="Requirement / Description" required error={errors.requirement} wide>
           <textarea className={`lm-textarea${errors.requirement ? " bad" : ""}`} value={values.requirement} onChange={set("requirement")} />
@@ -704,6 +727,175 @@ export function MeetingChangeModal({ meeting, lead, mode, onClose }) {
           maxLength={500}
           placeholder={cancelling ? "e.g. Customer postponed the requirement." : "e.g. Customer asked for Monday instead."}
         />
+      </Field>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------ cancel a quotation */
+
+/** Takes a quotation back. It is not deleted: it stays on the lead, marked Cancelled, with its PDF. */
+export function CancelQuotationModal({ lead, quotation, onClose }) {
+  const toast = useToast();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save(close) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await cancelQuotation(lead.id, quotation.id, reason);
+      toast(`Quotation ${quotation.number} cancelled`);
+      close();
+    } catch (err) {
+      toast(err.message || "Could not cancel the quotation.", true);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Cancel Quotation"
+      sub={`${quotation.number} - it stays on the lead, marked Cancelled`}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Back
+          </Button>
+          <Button variant="danger" busy={busy} icon={<FiXCircle />} onClick={() => save(close)}>
+            Cancel Quotation
+          </Button>
+        </>
+      )}
+    >
+      <LeadBar lead={lead} />
+      <Note tone="warn">
+        The quotation and its PDF are kept for the record but no longer count as sent. If no other quotation is left on this lead, it goes back to its earlier stage.
+      </Note>
+      <Field label="Reason" required>
+        <textarea className="lm-textarea" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="e.g. Wrong amount - a corrected quotation will be sent." />
+      </Field>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------ follow-up at any time */
+
+/**
+ * Plans the next call or check-in on a lead, outside a verification call - after a visit, a
+ * quotation, or whenever it is needed. A lead manager may give it to someone else.
+ */
+export function FollowUpModal({ lead, onClose }) {
+  const viewer = useViewer();
+  const toast = useToast();
+  const canAssign = viewer.persona === "sales_manager";
+  const team = canAssign ? leadTeam() : [];
+  const [when, setWhen] = useState(tomorrowInput);
+  const [assignedTo, setAssignedTo] = useState(() => (canAssign ? lead.salesId || lead.telecallerId || viewer.me.id : viewer.me.id));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save(close) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
+      toast("Follow-up added to Task Management");
+      close();
+    } catch (err) {
+      toast(err.message || "Could not add the follow-up.", true);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Add Follow-up"
+      sub="Plan the next call or check-in on this lead"
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} icon={<FiCalendar />} onClick={() => save(close)}>
+            Add Follow-up
+          </Button>
+        </>
+      )}
+    >
+      <LeadBar lead={lead} />
+      <div className="lm-form">
+        <Field label="Follow-up Date & Time" required>
+          <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
+        </Field>
+        {canAssign ? (
+          <Field label="Assign to" required>
+            <select className="lm-select" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+              {team.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                  {u.id === String(viewer.me.id) ? " (me)" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label="Assign to" hint="Follow-ups you add are yours.">
+            <input className="lm-input" value={viewer.me.name || "Me"} disabled />
+          </Field>
+        )}
+        <Field label="What to follow up on" wide>
+          <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="e.g. Ask whether the quotation was reviewed by their finance team." />
+        </Field>
+      </div>
+      <Note tone="info">It appears in Follow-ups and Today&apos;s Tasks on that day, and in Task Management.</Note>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------ update for the lead provider */
+
+/** A short update the lead provider sees next to their lead - never internal notes. */
+export function ProviderUpdateModal({ lead, onClose }) {
+  const toast = useToast();
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save(close) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await sendProviderUpdate(lead.id, message);
+      toast("Update sent to the lead provider");
+      close();
+    } catch (err) {
+      toast(err.message || "Could not send the update.", true);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Update Lead Provider"
+      sub="A short note the provider sees on their lead"
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} icon={<FiSend />} onClick={() => save(close)}>
+            Send Update
+          </Button>
+        </>
+      )}
+    >
+      <LeadBar lead={lead} />
+      <Note tone="warn">The lead provider sees exactly this text, and is notified. Keep internal details out of it.</Note>
+      <Field label="Update" required hint={`${message.length}/300`}>
+        <textarea className="lm-textarea" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={300} placeholder="e.g. Site visit done - the customer is reviewing our quotation." />
       </Field>
     </Modal>
   );

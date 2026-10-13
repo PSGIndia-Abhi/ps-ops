@@ -1,10 +1,11 @@
 // Shared building blocks for the Lead Management screens.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FiAlertCircle, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiX } from "react-icons/fi";
 import { stageOf } from "./format";
 import { ToastContext } from "./hooks";
+import { ViewerContext } from "./viewer";
 
 /* ------------------------------------------------------------ small parts */
 
@@ -36,9 +37,24 @@ export function Badge({ tone = "neutral", children, plain = false }) {
   return <span className={`lm-badge tone-${tone}${plain ? " plain" : ""}`}>{children}</span>;
 }
 
+/** How a stage reads to the lead provider who sent the lead: where it is, in their words. */
+const PROVIDER_LABEL = {
+  NEW: "Submitted",
+  TO_CALL: "Under Verification",
+  NEED_MORE_INFO: "Under Verification",
+  QUALIFIED: "Verified",
+  MEETING_SCHEDULED: "Meeting Scheduled",
+  VISIT_COMPLETED: "Site Visit Done",
+  QUOTATION_SENT: "Quotation Sent",
+  WON: "Converted",
+  NOT_GENUINE: "Not Genuine",
+  LOST: "Lost",
+};
+
 export function StageBadge({ stage }) {
   const s = stageOf(stage);
-  return <Badge tone={s.tone}>{s.label}</Badge>;
+  const provider = useContext(ViewerContext)?.persona === "lead_provider";
+  return <Badge tone={s.tone}>{(provider && PROVIDER_LABEL[stage]) || s.label}</Badge>;
 }
 
 /** Counts up to `value` once, when it first appears (and again if it changes). */
@@ -194,14 +210,46 @@ export function Pager({ page, pages, total, perPage, onPage }) {
 
 /* ------------------------------------------------------------ overlays */
 
-const host = () => document.querySelector(".lm-root") || document.body;
+/** Where a form page opens: over the content area, below the top bar. */
+const host = () => document.querySelector(".lm-stage") || document.querySelector(".lm-root") || document.body;
 
 /**
- * A panel that slides in from the right, the way Task Management's forms do
- * (pass `side={false}` for a centred dialog instead). Closes on Escape and on
- * a click outside, and plays its exit before unmounting.
+ * Every form opens as a full page: it takes over the content area beside the
+ * sidebar, with a Back button and its title on top, the form in the middle and
+ * its buttons pinned to the bottom. Closes on Escape or Back, and plays its exit
+ * before unmounting. (`wide` gives the form a wider column.)
  */
-export function Modal({ title, sub, onClose, children, footer, wide, side = true }) {
+/**
+ * A short message in the middle of the screen with its buttons underneath.
+ * `actions(close)` draws the buttons; Escape or a click outside closes it.
+ */
+export function Alert({ icon, tone = "info", title, children, actions, onClose }) {
+  const [closing, setClosing] = useState(false);
+  const close = useCallback(() => {
+    setClosing(true);
+    setTimeout(onClose, 180);
+  }, [onClose]);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && close();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
+
+  return createPortal(
+    <div className={`lm-alert-shade${closing ? " closing" : ""}`} onClick={(e) => e.target === e.currentTarget && close()}>
+      <div className="lm-alert" role="alertdialog" aria-modal="true" aria-label={title}>
+        {!!icon && <span className={`lm-alert-icon tone-${tone}`}>{icon}</span>}
+        <h3>{title}</h3>
+        {!!children && <div className="lm-alert-body">{children}</div>}
+        <div className="lm-alert-actions">{actions ? actions(close) : <Button onClick={close}>OK</Button>}</div>
+      </div>
+    </div>,
+    document.querySelector(".lm-root") || document.body,
+  );
+}
+
+export function Modal({ title, sub, onClose, children, footer, wide }) {
   const [closing, setClosing] = useState(false);
   const close = useCallback(() => {
     setClosing(true);
@@ -215,20 +263,31 @@ export function Modal({ title, sub, onClose, children, footer, wide, side = true
   }, [close]);
 
   return createPortal(
-    <div className={`lm-scrim${side ? " side" : ""}${closing ? " closing" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div className={side ? `lm-drawer${wide ? " wide" : ""}` : `lm-modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
-        <header className="lm-modal-head">
-          <div>
-            <h2>{title}</h2>
-            {!!sub && <p>{sub}</p>}
+    <div className={`lm-page-form${wide ? " wide" : ""}${closing ? " closing" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+      <header className="lm-pf-head">
+        <button type="button" className="lm-pf-back" onClick={close}>
+          <FiChevronLeft /> Back
+        </button>
+        <div className="lm-pf-title">
+          <h2>{title}</h2>
+          {!!sub && <p>{sub}</p>}
+        </div>
+        <button type="button" className="lm-x" onClick={close} aria-label="Close">
+          <FiX />
+        </button>
+      </header>
+      <div className="lm-pf-scroll">
+        <div className="lm-pf-in">
+          <div className="lm-pf-card">
+            <div className="lm-modal-body">{typeof children === "function" ? children(close) : children}</div>
           </div>
-          <button type="button" className="lm-x" onClick={close} aria-label="Close">
-            <FiX />
-          </button>
-        </header>
-        <div className="lm-modal-body">{typeof children === "function" ? children(close) : children}</div>
-        {!!footer && <footer className="lm-modal-foot">{typeof footer === "function" ? footer(close) : footer}</footer>}
+        </div>
       </div>
+      {!!footer && (
+        <footer className="lm-pf-foot">
+          <div className="lm-pf-in">{typeof footer === "function" ? footer(close) : footer}</div>
+        </footer>
+      )}
     </div>,
     host(),
   );

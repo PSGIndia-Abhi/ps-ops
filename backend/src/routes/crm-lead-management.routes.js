@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -62,12 +63,76 @@ function canManageLead(req, lead) {
 // GET /api/crm/lead-sources, /api/crm/lead-loss-reasons -- configurable
 // master data. Any signed-in user may read these.
 // ---------------------------------------------------------------------------
+// ?all=1 (lead managers only) also returns switched-off sources, for the master screen.
 router.get("/lead-sources", auth, async (req, res) => {
   try {
+    if (req.query.all === "1" && hasPerm(req, "MANAGE_LEADS")) {
+      const [rows] = await pool.query(
+        `SELECT s.id, s.name, s.is_active,
+                (SELECT COUNT(*) FROM crm_leads l WHERE l.lead_type = 'commercial' AND l.lead_source = s.name) AS lead_count
+           FROM crm_lead_sources s ORDER BY s.name ASC`
+      );
+      return res.json(rows.map((r) => ({ id: r.id, name: r.name, is_active: Number(r.is_active) === 1, lead_count: Number(r.lead_count) })));
+    }
     const [rows] = await pool.query("SELECT id, name FROM crm_lead_sources WHERE is_active = 1 ORDER BY name ASC");
     res.json(rows);
   } catch (err) {
     sendError(res, err, "Failed to load lead sources");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/crm/lead-sources, PATCH /api/crm/lead-sources/:id -- the lead
+// source master, kept by whoever manages leads (sales manager, admin). A source
+// is never deleted: leads store its name, so it is switched off instead.
+// ---------------------------------------------------------------------------
+function sourceName(value) {
+  const name = optionalText(value, 60);
+  if (name === false) throw new HttpError(400, "Name is too long (max 60 characters)");
+  if (!name || name.length < 2) throw new HttpError(400, "Enter a source name");
+  return name;
+}
+
+router.post("/lead-sources", auth, async (req, res) => {
+  try {
+    if (!hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "You cannot manage lead sources");
+    const name = sourceName(req.body?.name);
+    const [[taken]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ?", [name]);
+    if (taken) throw new HttpError(409, "A source with this name already exists");
+    const id = uuid();
+    await pool.query("INSERT INTO crm_lead_sources (id, name, is_active) VALUES (?, ?, 1)", [id, name]);
+    res.status(201).json({ id, name, is_active: true, lead_count: 0 });
+  } catch (err) {
+    if (err?.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "A source with this name already exists" });
+    sendError(res, err, "Failed to add lead source");
+  }
+});
+
+router.patch("/lead-sources/:id", auth, async (req, res) => {
+  try {
+    if (!hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "You cannot manage lead sources");
+    const [[source]] = await pool.query("SELECT id, name, is_active FROM crm_lead_sources WHERE id = ?", [req.params.id]);
+    if (!source) throw new HttpError(404, "Lead source not found");
+
+    const body = req.body || {};
+    const name = body.name !== undefined ? sourceName(body.name) : source.name;
+    const isActive = body.is_active !== undefined ? (body.is_active ? 1 : 0) : Number(source.is_active);
+    if (name !== source.name) {
+      const [[taken]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ? AND id <> ?", [name, source.id]);
+      if (taken) throw new HttpError(409, "A source with this name already exists");
+    }
+
+    await inTransaction(async (conn) => {
+      await conn.query("UPDATE crm_lead_sources SET name = ?, is_active = ? WHERE id = ?", [name, isActive, source.id]);
+      // Leads keep the source as text, so a rename carries over to the commercial leads already using it.
+      if (name !== source.name) {
+        await conn.query("UPDATE crm_leads SET lead_source = ? WHERE lead_type = 'commercial' AND lead_source = ?", [name, source.name]);
+      }
+    });
+    res.json({ id: source.id, name, is_active: isActive === 1 });
+  } catch (err) {
+    if (err?.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "A source with this name already exists" });
+    sendError(res, err, "Failed to update lead source");
   }
 });
 
@@ -263,6 +328,7 @@ router.post("/leads/:id/qualify", auth, requirePermission("CRM_VIEW_LEAD"), asyn
       if (!upd.affectedRows) throw new HttpError(409, "This lead was just changed by someone else. Reload and try again.");
       await logLeadHistory(conn, lead.id, "QUALIFY", { note: `Marked ${status}`, changedBy: req.user.id });
     });
+    if (status === "GENUINE") notifyLead(lead.id, "VERIFIED", { actorId: req.user.id });
     const [[updated]] = await pool.query("SELECT * FROM crm_leads WHERE id = ?", [lead.id]);
     res.json(updated);
   } catch (err) {
@@ -299,6 +365,7 @@ router.post("/leads/:id/reject", auth, requirePermission("CRM_VIEW_LEAD"), async
       if (!upd.affectedRows) throw new HttpError(409, "This lead was just changed by someone else. Reload and try again.");
       await logLeadHistory(conn, lead.id, "REJECT", { note: reason, changedBy: req.user.id });
     });
+    notifyLead(lead.id, "NOT_GENUINE", { actorId: req.user.id, extra: { reason } });
     const [[updated]] = await pool.query("SELECT * FROM crm_leads WHERE id = ?", [lead.id]);
     res.json(updated);
   } catch (err) {

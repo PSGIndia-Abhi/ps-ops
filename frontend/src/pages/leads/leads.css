@@ -11,8 +11,6 @@
 @keyframes lm-fade-out { to { opacity: 0; } }
 @keyframes lm-pop { from { opacity: 0; transform: translateY(18px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes lm-pop-out { to { opacity: 0; transform: translateY(10px) scale(.97); } }
-@keyframes lm-drawer-in { from { transform: translateX(100%); } to { transform: none; } }
-@keyframes lm-drawer-out { to { transform: translateX(100%); } }
 @keyframes lm-slide-left { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
 @keyframes lm-shimmer { 0% { background-position: 130% 0; } 100% { background-position: -130% 0; } }
 @keyframes lm-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
@@ -168,6 +166,35 @@
   }
   &.collapsed .lm-nav-item[data-tip]:hover::after, &.collapsed .lm-nav-item[data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
 
+  /* ---- Task Management's colours, for the staff who use both areas (telecaller, sales, sales manager):
+          a white sidebar with dark text and a soft blue highlight, as in pages/taskpro/taskpro.css ---- */
+  &.tp-theme {
+    --lm-bg: #f4f6fb;
+    --lm-border: #e6eaf2;
+    --lm-line: #eef1f6;
+    .lm-side { color: #334155; background: var(--lm-surface); border-right: 1px solid var(--lm-border); }
+    .lm-side::after { display: none; }
+    .lm-brand-mark { box-shadow: 0 6px 16px rgba(37, 99, 235, .18); border: 1px solid var(--lm-border); }
+    .lm-brand-text strong { color: var(--lm-text); }
+    .lm-brand-text small { color: var(--lm-muted); }
+    .lm-nav-group { color: var(--lm-soft); }
+    .lm-nav-item {
+      color: #334155;
+      &::before { left: 0; top: 22%; bottom: 22%; width: 3px; border-radius: 3px; background: var(--lm-primary); box-shadow: none; }
+      &:hover { background: #f1f5fb; color: #334155; transform: translateX(2px); }
+      &.active { background: var(--lm-primary-soft); color: var(--lm-primary-600); }
+    }
+    .lm-nav-count { color: var(--lm-primary-600); background: var(--lm-primary-soft); }
+    .lm-nav-item.active .lm-nav-count { color: #fff; background: var(--lm-primary); }
+    .lm-side-foot { border-top-color: var(--lm-line); }
+    &.collapsed .lm-nav-item {
+      &:hover { background: #f1f5fb; }
+      &.active { background: var(--lm-primary-soft); box-shadow: none; }
+      &::before { left: -14px; }
+    }
+    &.collapsed .lm-nav-count { color: #fff; background: var(--lm-primary); border-color: var(--lm-surface); }
+  }
+
   /* ================= main column ================= */
   .lm-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .lm-ribbon {
@@ -240,9 +267,78 @@
   .lm-pop-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--lm-primary); box-shadow: 0 0 0 4px var(--lm-primary-soft); }
   .lm-pop-empty { padding: 18px 12px 20px; text-align: center; color: var(--lm-muted); }
   .lm-pop-shade { position: fixed; inset: 0; z-index: 50; cursor: default; }
+
+  /* the bell: an unread count, two tabs (Updates from the server, Reminders worked out here) and the list */
+  .lm-bell-count {
+    position: absolute; top: 4px; right: 3px; min-width: 19px; height: 19px; padding: 0 5px; display: grid; place-items: center;
+    border-radius: 999px; background: #ef4444; color: #fff; font-size: 10.5px; font-weight: 700; border: 2px solid #fff;
+    animation: lm-dot .4s var(--lm-spring) both;
+  }
+  .lm-pop.lm-bell { width: 380px; padding: 0; overflow: hidden; }
+  .lm-bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 10px; strong { font-size: 15px; } .lm-link { font-size: 12.5px; font-weight: 600; } }
+  .lm-bell-tabs {
+    display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--lm-line);
+    button {
+      display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px 10px; margin-bottom: -1px; font-size: 13px; font-weight: 600;
+      color: var(--lm-muted); border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+      &:hover { color: var(--lm-text); }
+      &.on { color: var(--lm-primary); border-bottom-color: var(--lm-primary); }
+      span { min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 999px; font-size: 10.5px; background: var(--lm-primary-soft); color: var(--lm-primary); }
+    }
+  }
+  .lm-bell-list { max-height: min(430px, 60vh); overflow-y: auto; padding: 6px; overscroll-behavior: contain; scrollbar-width: thin; }
+  .lm-note {
+    display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 11px 10px; border-radius: 12px; text-align: left;
+    animation: lm-rise .3s var(--lm-ease) both; animation-delay: calc(min(var(--i, 0), 8) * 35ms);
+    transition: background .18s;
+    &:hover { background: var(--lm-bg); }
+    &.unread { background: #f5f8ff; &:hover { background: #ecf2ff; } }
+    .lm-pop-dot { margin-top: 6px; }
+  }
+  .lm-note-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; font-size: 16px; color: var(--tone); background: var(--tone-soft); }
+  .lm-note-text {
+    flex: 1; min-width: 0; display: grid; gap: 2px;
+    strong { font-size: 13.5px; line-height: 1.3; }
+    small { color: #475569; font-size: 12.5px; line-height: 1.4; }
+    em { font-style: normal; font-size: 11.5px; color: var(--lm-soft); }
+  }
+  .lm-note:not(.unread) strong { font-weight: 600; color: #334155; }
   .lm-today { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 12px; background: #fff; border: 1px solid var(--lm-border); color: #475569; font-weight: 500; }
+  /* The dashboard welcome banner - the same as Task Management's .tp-hero. */
+  .lm-welcome {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+    padding: 26px 28px; margin-bottom: 20px; border-radius: 20px; color: #fff; position: relative; overflow: hidden;
+    background: linear-gradient(120deg, #1e40af 0%, #2563eb 55%, #4f8df7 100%); box-shadow: 0 12px 32px rgba(37, 99, 235, .3);
+    animation: lm-rise .5s var(--lm-ease) both;
+    &::before, &::after { content: ""; position: absolute; border-radius: 50%; background: rgba(255, 255, 255, .08); }
+    &::before { width: 260px; height: 260px; right: -60px; top: -110px; }
+    &::after { width: 160px; height: 160px; right: 140px; bottom: -90px; }
+    > * { position: relative; z-index: 1; }
+    h1 { font-size: 28px; letter-spacing: -.5px; margin: 6px 0 4px; color: #fff; }
+    p { color: #dbe7ff; }
+    p strong { color: #fff; }
+    .lm-btn.primary { background: #fff; color: var(--lm-primary-600); box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+    .lm-btn.primary:hover:not(:disabled) { background: #f1f6ff; }
+    .lm-date-pick, .lm-select { border-color: transparent; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); }
+    .lm-seg { background: rgba(255, 255, 255, .16); }
+    .lm-seg button { color: #dbe7ff; &:hover { color: #fff; } &.on { background: #fff; color: var(--lm-primary-600); } }
+  }
+  .lm-welcome-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #c7dbff; }
+  .lm-welcome-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  @media (max-width: 860px) {
+    .lm-welcome { padding: 20px; }
+    .lm-welcome h1 { font-size: 23px; }
+    .lm-welcome-side { width: 100%; }
+  }
+  .lm-date-pick {
+    display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 10px 0 14px; border-radius: 12px;
+    background: #fff; border: 1px solid var(--lm-border); color: #475569; font-weight: 500; cursor: pointer;
+    input { border: 0; outline: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+    button { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: #f1f5f9; color: #475569; cursor: pointer; &:hover { background: #e2e8f0; } }
+  }
   .lm-me-text { display: grid; line-height: 1.2; strong { font-size: 13.5px; } small { font-size: 11.5px; color: var(--lm-muted); } }
 
+  .lm-stage { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .lm-main { flex: 1; overflow-y: auto; padding: 26px; scrollbar-gutter: stable; }
   .lm-page { max-width: 1320px; margin: 0 auto; animation: lm-rise .5s var(--lm-ease) both; }
 
@@ -251,7 +347,7 @@
   .lm-head h1 { font-size: 25px; letter-spacing: -.5px; }
   .lm-head p { margin-top: 3px; color: var(--lm-muted); }
   .lm-head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-  .lm-crumb { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; color: var(--lm-muted); font-weight: 500; transition: color .2s, transform .2s var(--lm-ease); &:hover { color: var(--lm-primary); transform: translateX(-3px); } }
+  .lm-crumb { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; color: var(--lm-muted); font-weight: 500; transition: color .2s, transform .2s var(--lm-ease); &:hover { color: var(--lm-primary); transform: translateX(-3px); } }
 
   /* ================= buttons ================= */
   .lm-btn {
@@ -275,6 +371,7 @@
   .lm-btn.block { width: 100%; }
   .lm-spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor; animation: lm-spin .7s linear infinite; }
   .lm-link { color: var(--lm-primary); font-weight: 600; transition: opacity .2s; &:hover { opacity: .75; } }
+  button.lm-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; }
 
   /* ================= cards ================= */
   .lm-card {
@@ -390,7 +487,8 @@
 
   /* ================= forms ================= */
   .lm-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-  .lm-field { display: grid; gap: 6px; &.wide { grid-column: 1 / -1; } }
+  /* label, input and hint stay together at the top, even when the field beside it is taller (it has a hint or an error) */
+  .lm-field { display: grid; gap: 6px; align-content: start; &.wide { grid-column: 1 / -1; } }
   .lm-label { font-size: 12.5px; font-weight: 600; color: #475569; i { color: var(--lm-danger); font-style: normal; } }
   .lm-input, .lm-textarea {
     width: 100%; padding: 0 14px; border-radius: 12px; border: 1px solid var(--lm-border); background: #fff;
@@ -407,6 +505,7 @@
   .lm-hint { font-size: 12px; color: var(--lm-muted); }
   .lm-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; font-size: 13px; color: var(--tone); background: var(--tone-soft); animation: lm-rise .35s var(--lm-ease) both; svg { flex: none; margin-top: 2px; font-size: 16px; } b { font-weight: 700; } }
   .lm-choice { display: grid; gap: 8px; }
+  .lm-page-form .lm-choice { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lm-radio {
     display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--lm-border); cursor: pointer;
     transition: border-color .2s, background .2s, transform .2s var(--lm-ease);
@@ -419,29 +518,76 @@
   .lm-radio-text { display: grid; line-height: 1.3; strong { font-size: 14px; } small { color: var(--lm-muted); font-size: 12.5px; } }
   .lm-check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 500; input { width: 18px; height: 18px; accent-color: var(--lm-primary); } }
 
-  /* ================= modal / drawer ================= */
-  .lm-scrim { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(10, 26, 51, .5); backdrop-filter: blur(5px); animation: lm-fade .25s both; &.closing { animation: lm-fade-out .2s both; } }
-  .lm-modal { width: min(560px, 100%); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; background: #fff; border-radius: 20px; box-shadow: var(--lm-shadow-lg); animation: lm-pop .4s var(--lm-spring) both; &.wide { width: min(720px, 100%); } }
-  .lm-scrim.closing .lm-modal { animation: lm-pop-out .2s both; }
-  .lm-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 22px 14px; border-bottom: 1px solid var(--lm-line); h2 { font-size: 18px; letter-spacing: -.3px; } p { margin-top: 3px; color: var(--lm-muted); font-size: 13px; } }
-  .lm-x { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; font-size: 18px; color: var(--lm-muted); transition: background .2s, transform .3s var(--lm-spring); &:hover { background: var(--lm-bg); transform: rotate(90deg); } }
-  .lm-modal-body { padding: 20px 22px; overflow-y: auto; display: grid; gap: 16px; }
-  .lm-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px 20px; border-top: 1px solid var(--lm-line); }
-  /* The right-hand panel every form opens in. */
-  .lm-scrim.side { place-items: stretch end; padding: 0; backdrop-filter: blur(3px); }
-  .lm-drawer {
-    width: min(520px, 100%); height: 100%; display: flex; flex-direction: column; background: #fff;
-    border-radius: 22px 0 0 22px; box-shadow: var(--lm-shadow-lg); animation: lm-drawer-in .44s var(--lm-ease) both;
-    &.wide { width: min(640px, 100%); }
-    .lm-modal-head { padding: 22px 24px 16px; background: linear-gradient(180deg, #f3f7ff, #fff); border-radius: 22px 0 0 0; }
-    .lm-modal-body { flex: 1; min-height: 0; align-content: start; padding: 20px 24px 24px; overscroll-behavior: contain; scrollbar-width: thin; }
-    /* the fields arrive one after another, just behind the panel */
-    .lm-modal-body > * { animation: lm-rise .45s var(--lm-ease) both; animation-delay: calc(var(--n, 0) * 55ms + 160ms); }
-    .lm-modal-body > :nth-child(1) { --n: 0; } .lm-modal-body > :nth-child(2) { --n: 1; } .lm-modal-body > :nth-child(3) { --n: 2; }
-    .lm-modal-body > :nth-child(4) { --n: 3; } .lm-modal-body > :nth-child(5) { --n: 4; } .lm-modal-body > :nth-child(n + 6) { --n: 5; }
-    .lm-modal-foot { padding: 14px 24px; background: #fafcff; border-radius: 0 0 0 22px; }
+  /* ================= full-page form ================= */
+  /* Every form takes over the content area below the top bar - the menu, search and bell stay visible. */
+  /* A small message in the middle of the screen, over a dimmed page. */
+  .lm-alert-shade {
+    position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px;
+    background: rgba(10, 26, 51, .45); animation: lm-fade .2s both;
+    &.closing { animation: lm-fade-out .18s both; }
   }
-  .lm-scrim.side.closing .lm-drawer { animation: lm-drawer-out .22s ease-in both; }
+  .lm-alert {
+    width: min(400px, 100%); padding: 26px 24px 20px; border-radius: 18px; background: #fff; box-shadow: var(--lm-shadow-lg);
+    text-align: center; animation: lm-pop .3s var(--lm-ease) both;
+    .lm-alert-shade.closing & { animation: lm-pop-out .18s both; }
+    h3 { margin-top: 14px; font-size: 18px; letter-spacing: -.2px; }
+    p { margin-top: 6px; color: var(--lm-muted); line-height: 1.5; }
+  }
+  .lm-alert-icon {
+    display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; font-size: 24px;
+    background: var(--lm-primary-soft); color: var(--lm-primary);
+    &.tone-success { background: var(--lm-success-soft); color: var(--lm-success); }
+  }
+  .lm-alert-body { margin-top: 14px; }
+  .lm-alert-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+  .lm-page-form {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; background: var(--lm-bg);
+    animation: lm-fade .25s both;
+    &.closing { animation: lm-fade-out .2s both; }
+  }
+  /* The form column: left-aligned under the header's Back button, so header, form and buttons share one edge. */
+  /* The form uses the full width of the content area; its fields sit two to a row. */
+  .lm-pf-in { width: 100%; }
+  /* Header: full width - Back at the far left, the title beside it, Close at the far right. */
+  .lm-pf-head {
+    flex: none; display: flex; align-items: center; gap: 16px; padding: 14px 28px;
+    background: #fff; border-bottom: 1px solid var(--lm-line); box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+  }
+  .lm-pf-back {
+    flex: none; display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 14px 0 10px;
+    border-radius: 10px; border: 1px solid var(--lm-border); background: #fff; color: #334155;
+    font-weight: 600; font-size: 13.5px; cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s;
+    svg { font-size: 17px; transition: transform .2s var(--lm-ease); }
+    &:hover { background: var(--lm-primary-soft); border-color: #c7d8fb; color: var(--lm-primary); }
+    &:hover svg { transform: translateX(-2px); }
+    &:focus-visible { outline: 3px solid rgba(37, 99, 235, .25); outline-offset: 2px; }
+  }
+  .lm-pf-title {
+    flex: 1; min-width: 0; padding-left: 16px; border-left: 1px solid var(--lm-line);
+    h2 { font-size: 18px; line-height: 1.25; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    p { margin-top: 2px; color: var(--lm-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  }
+  .lm-pf-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 28px 32px; overscroll-behavior: contain; }
+  .lm-pf-card { background: #fff; border: 1px solid var(--lm-line); border-radius: 16px; box-shadow: var(--lm-shadow); animation: lm-rise .35s var(--lm-ease) both; }
+  .lm-modal-body { padding: 24px 26px; display: grid; gap: 18px; align-content: start; }
+  /* the fields arrive one after another */
+  .lm-modal-body > * { animation: lm-rise .45s var(--lm-ease) both; animation-delay: calc(var(--n, 0) * 55ms + 120ms); }
+  .lm-modal-body > :nth-child(1) { --n: 0; } .lm-modal-body > :nth-child(2) { --n: 1; } .lm-modal-body > :nth-child(3) { --n: 2; }
+  .lm-modal-body > :nth-child(4) { --n: 3; } .lm-modal-body > :nth-child(5) { --n: 4; } .lm-modal-body > :nth-child(n + 6) { --n: 5; }
+  .lm-pf-foot { flex: none; padding: 12px 28px; background: #fff; border-top: 1px solid var(--lm-line); box-shadow: 0 -4px 14px rgba(15, 23, 42, .04); }
+  .lm-pf-foot .lm-pf-in { display: flex; justify-content: flex-end; gap: 10px; }
+  /* Close: a quiet square that turns red on hover. */
+  .lm-x {
+    flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
+    border: 1px solid var(--lm-border); background: #fff; color: #64748b; font-size: 18px; cursor: pointer;
+    transition: background .2s, border-color .2s, color .2s;
+    svg { transition: transform .3s var(--lm-spring); }
+    &:hover { background: var(--lm-danger-soft); border-color: #f5c2c2; color: var(--lm-danger); }
+    &:hover svg { transform: rotate(90deg); }
+    &:focus-visible { outline: 3px solid rgba(220, 38, 38, .25); outline-offset: 2px; }
+  }
 
   /* ================= lead summary strip ================= */
   .lm-leadbar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, #f1f6ff, #f8fafe); border: 1px solid #dbe6fb; }
@@ -460,10 +606,11 @@
   .lm-hero .lm-badge { background: rgba(255, 255, 255, .18); color: #fff; backdrop-filter: blur(4px); }
   .lm-hero-quote { text-align: right; small { color: #cfe0ff; font-size: 12px; } strong { display: block; font-size: 28px; letter-spacing: -.6px; font-variant-numeric: tabular-nums; } }
   .lm-hero-actions { position: relative; z-index: 1; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-  .lm-hero-actions a {
+  .lm-hero-actions a, .lm-hero-actions button {
     display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 999px;
     font-weight: 600; font-size: 13px; color: #fff; background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .22);
     backdrop-filter: blur(4px); transition: background .2s, transform .25s var(--lm-spring);
+    font-family: inherit; cursor: pointer;
     &:hover { background: rgba(255, 255, 255, .26); transform: translateY(-2px); }
   }
   .lm-steps { position: relative; z-index: 1; display: flex; margin-top: 26px; }
@@ -476,13 +623,31 @@
   .lm-step.done .lm-step-dot, .lm-step.now .lm-step-dot { background: #fff; color: #1d4ed8; border-color: #fff; animation: lm-dot .45s var(--lm-spring) both; animation-delay: calc(var(--i) * 130ms + 380ms); }
   .lm-step.now .lm-step-dot { box-shadow: 0 0 0 6px rgba(255, 255, 255, .22); }
   .lm-step.done, .lm-step.now { color: #fff; font-weight: 600; }
+  /* where a lead stopped: not genuine at verification, or lost at the outcome */
+  .lm-step.fail { color: #fecaca; font-weight: 600; }
+  .lm-step.fail .lm-step-dot { background: #dc2626; color: #fff; border-color: #fca5a5; box-shadow: 0 0 0 6px rgba(220, 38, 38, .25); animation: lm-dot .45s var(--lm-spring) both; animation-delay: calc(var(--i) * 130ms + 380ms); }
+  .lm-step-label { line-height: 1.2; }
+  .lm-step-sub { margin-top: -4px; padding: 0 4px; font-size: 11px; font-weight: 500; line-height: 1.3; color: rgba(255, 255, 255, .72); }
+  .lm-step.now .lm-step-sub { color: #fde68a; }
+  .lm-step.fail .lm-step-sub { color: #fecaca; }
   .lm-stop { position: relative; z-index: 1; margin-top: 22px; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .14); font-weight: 500; }
 
   .lm-detail { margin-top: 18px; }
-  .lm-dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; }
-  .lm-dl div { display: grid; gap: 3px; min-width: 0; &.wide { grid-column: 1 / -1; } }
-  .lm-dl dt { font-size: 12px; font-weight: 600; color: var(--lm-soft); text-transform: uppercase; letter-spacing: .04em; }
-  .lm-dl dd { font-weight: 500; overflow-wrap: anywhere; }
+  /* Details tab: the lead's facts in titled sections, label on the left and value on the right. */
+  .lm-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .lm-info { border: 1px solid var(--lm-line); border-radius: 14px; background: #fff; overflow: hidden; animation: lm-rise .4s var(--lm-ease) both; &.wide { grid-column: 1 / -1; } }
+  .lm-info:nth-child(2) { animation-delay: 60ms; } .lm-info:nth-child(3) { animation-delay: 120ms; } .lm-info:nth-child(4) { animation-delay: 180ms; }
+  .lm-info h4 {
+    display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 16px;
+    font-size: 14px; font-weight: 700; letter-spacing: -.1px; background: #f8fafd; border-bottom: 1px solid var(--lm-line);
+  }
+  .lm-info-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; font-size: 15px; color: var(--lm-primary); background: var(--lm-primary-soft); }
+  .lm-info-row {
+    display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: center; padding: 11px 16px; min-height: 46px;
+    & + & { border-top: 1px solid #f0f3f8; }
+    > span { color: var(--lm-muted); font-size: 13px; }
+    > div { font-weight: 500; overflow-wrap: anywhere; }
+  }
 
   .lm-timeline { position: relative; display: grid; gap: 18px; padding-left: 4px; }
   .lm-timeline::before { content: ""; position: absolute; left: 17px; top: 8px; bottom: 8px; width: 2px; background: var(--lm-line); transform-origin: top; animation: lm-grow-y .9s var(--lm-ease) both; }
@@ -530,9 +695,9 @@
 
   /* ================= success tick ================= */
   .lm-done { display: grid; justify-items: center; gap: 8px; padding: 30px 20px; text-align: center; animation: lm-fade .4s both; }
-  .lm-done svg { width: 76px; height: 76px; }
-  .lm-done circle { fill: var(--lm-success-soft); animation: lm-dot .5s var(--lm-spring) both; transform-origin: center; }
-  .lm-done path { fill: none; stroke: var(--lm-success); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 30; stroke-dashoffset: 30; animation: lm-check .5s var(--lm-ease) .3s forwards; }
+  .lm-done > svg { width: 76px; height: 76px; }
+  .lm-done > svg circle { fill: var(--lm-success-soft); animation: lm-dot .5s var(--lm-spring) both; transform-origin: center; }
+  .lm-done > svg path { fill: none; stroke: var(--lm-success); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 30; stroke-dashoffset: 30; animation: lm-check .5s var(--lm-ease) .3s forwards; }
   .lm-done h3 { font-size: 19px; letter-spacing: -.3px; }
   .lm-done p { color: var(--lm-muted); max-width: 380px; }
 
@@ -552,7 +717,11 @@
     .lm-main { padding: 18px 14px; }
     .lm-top { padding: 10px 14px; }
     .lm-me-text, .lm-caret, .lm-top .lm-search, .lm-today { display: none; }
-    .lm-drawer, .lm-drawer .lm-modal-head, .lm-drawer .lm-modal-foot { border-radius: 0; }
+    .lm-pf-head, .lm-pf-scroll, .lm-pf-foot { padding-left: 14px; padding-right: 14px; }
+    .lm-pf-head { gap: 10px; }
+    .lm-pf-back { padding: 0 9px; font-size: 0; gap: 0; }
+    .lm-pf-title { padding-left: 10px; h2 { font-size: 16px; } p { white-space: normal; } }
+    .lm-modal-body { padding: 18px 16px; }
     .lm-pop.wide { width: min(340px, calc(100vw - 28px)); }
     /* the slide-over menu is always full width, whatever the desktop choice was */
     &.collapsed { --lm-side: 256px; }
@@ -564,7 +733,8 @@
     &.collapsed .lm-nav-item { width: 100%; height: auto; justify-content: flex-start; padding: 11px 12px; gap: 12px; border-radius: 12px; }
     &.collapsed .lm-nav-item[data-tip]::after { display: none; }
     &.collapsed .lm-nav-count { position: static; border: 0; }
-    .lm-form, .lm-dl, .lm-grid.half { grid-template-columns: minmax(0, 1fr); }
+    .lm-form, .lm-info-grid, .lm-grid.half, .lm-page-form .lm-choice { grid-template-columns: minmax(0, 1fr); }
+    .lm-info-row { grid-template-columns: 120px minmax(0, 1fr); }
     .lm-steps { overflow-x: auto; }
     .lm-step { min-width: 92px; }
     .lm-hero-quote { text-align: left; }

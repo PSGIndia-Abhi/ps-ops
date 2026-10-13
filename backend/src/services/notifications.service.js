@@ -535,7 +535,15 @@ async function notifyInvoiceImport({ userId, importId, fileName, total, imported
   });
 }
 
+// A notification for a set of users, without the person whose action caused it.
+async function notifyUsers(userIds, payload, { exceptUserId = null } = {}) {
+  const except = exceptUserId === null || exceptUserId === undefined ? null : String(exceptUserId);
+  const recipients = normalizeUserIds(userIds).filter((id) => id !== except);
+  return insertNotifications(pool, recipients, payload);
+}
+
 module.exports = {
+  notifyUsers,
   listNotificationsForUser,
   getUnreadNotificationCount,
   markNotificationRead,

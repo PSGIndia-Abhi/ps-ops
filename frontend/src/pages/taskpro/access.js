@@ -5,7 +5,13 @@
 // regardless of this list). Kept in one place, and mirrored by ROLE_HOME
 // in auth/roleBasePath.js so a role that can open TaskPro also lands there
 // on login.
+// The Lead Management staff roles. They log in to /leads but also open Task
+// Management from there, with the same login (their visits and follow-ups
+// are tasks), and get a link back to Lead Management in this sidebar.
+export const LEAD_ROLES = ["telecaller", "sales", "sales_manager"];
+
 export const TASKPRO_ROLES = [
+  ...LEAD_ROLES,
   // Deliberately NOT "admin" — admin manages the whole app from /admin and
   // should never be bounced into TaskPro, including by typing /taskpro
   // directly. "branch_admin" is unaffected (not asked for).

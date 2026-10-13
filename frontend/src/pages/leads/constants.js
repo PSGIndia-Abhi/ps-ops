@@ -18,8 +18,9 @@ export const STAGES = [
 export const PIPELINE = ["NEW", "QUALIFIED", "MEETING_SCHEDULED", "VISIT_COMPLETED", "QUOTATION_SENT", "WON"];
 
 /**
- * What staff may choose as the source when adding a lead. These are exactly
- * the values POST /api/crm/leads accepts for a commercial lead.
+ * The fixed source codes POST /api/crm/leads has always accepted (the mobile app sends these).
+ * The forms offer the lead source master instead; this list is only the fallback when the
+ * master cannot be read, and how an old code reads on screen.
  */
 export const FORM_SOURCES = [
   { value: "google", label: "Google" },
@@ -31,9 +32,6 @@ export const FORM_SOURCES = [
 
 /** A lead a provider submits always carries this source (a row of the server's lead-source list). */
 export const PROVIDER_SOURCE = "Lead Provider";
-
-/** Every source a lead can show, for the list filter: the staff values above plus the provider-portal ones. */
-export const SOURCES = ["Lead Provider", "Field Visit", "Referral", "Website", "Google", "Social Media", "Existing Client Reference", "Other"];
 
 /** The stored source as it reads on screen ("social_media" -> "Social Media"). */
 export function sourceLabel(raw) {

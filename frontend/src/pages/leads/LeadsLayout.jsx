@@ -1,29 +1,73 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   FiArrowLeft,
+  FiAward,
   FiBarChart2,
   FiBell,
   FiBriefcase,
   FiCalendar,
+  FiCheckSquare,
   FiChevronDown,
+  FiClock,
+  FiFileText,
   FiGrid,
+  FiInbox,
   FiList,
   FiLogOut,
+  FiMapPin,
   FiMenu,
   FiPhoneCall,
   FiPlusCircle,
   FiSearch,
+  FiTag,
+  FiThumbsDown,
+  FiTrendingUp,
+  FiUserCheck,
+  FiXCircle,
 } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import { roleBasePath } from "../../auth/roleBasePath";
-import { LEADS_HOME, PERSONAS, PERSONA_KEYS, resolvePersona, roleIsPersona, savePreviewPersona } from "./access";
-import { loadWorkspace, resetWorkspace, useLeadData } from "./leadsApi";
+import { LEAD_ROLES, TASKPRO_HOME } from "../taskpro/access";
+import { LEADS_HOME, PERSONAS, resolvePersona, roleIsPersona } from "./access";
+import { getNotifications, loadWorkspace, markNotificationRead, markNotificationsRead, resetWorkspace, useLeadData } from "./leadsApi";
 import { isPast, isToday } from "./format";
 import { dayLabel, timeLabel } from "./format";
 import { Avatar, ToastProvider } from "./ui";
 import { ViewerContext, visibleLeads, visibleMeetings } from "./viewer";
 import "./leads.css";
+
+/** How each kind of lead notification looks in the bell. */
+const NOTE_ICON = {
+  LEAD_NEW: <FiInbox />,
+  LEAD_VERIFIED: <FiUserCheck />,
+  LEAD_NOT_GENUINE: <FiXCircle />,
+  LEAD_MEETING_ASSIGNED: <FiCalendar />,
+  LEAD_MEETING_SCHEDULED: <FiCalendar />,
+  LEAD_MEETING_MOVED: <FiCalendar />,
+  LEAD_MEETING_CANCELLED: <FiXCircle />,
+  LEAD_VISIT_DONE: <FiMapPin />,
+  LEAD_QUOTATION: <FiFileText />,
+  LEAD_CONVERTED: <FiAward />,
+  LEAD_LOST: <FiThumbsDown />,
+  LEAD_FOLLOW_UP: <FiPhoneCall />,
+  LEAD_PROVIDER_UPDATE: <FiBell />,
+};
+const NOTE_TONE = {
+  LEAD_NEW: "info",
+  LEAD_VERIFIED: "success",
+  LEAD_NOT_GENUINE: "danger",
+  LEAD_MEETING_ASSIGNED: "violet",
+  LEAD_MEETING_SCHEDULED: "violet",
+  LEAD_MEETING_MOVED: "warn",
+  LEAD_MEETING_CANCELLED: "danger",
+  LEAD_VISIT_DONE: "teal",
+  LEAD_QUOTATION: "violet",
+  LEAD_CONVERTED: "success",
+  LEAD_LOST: "danger",
+  LEAD_FOLLOW_UP: "warn",
+  LEAD_PROVIDER_UPDATE: "info",
+};
 
 const COLLAPSE_KEY = "lm.sideCollapsed";
 
@@ -32,8 +76,8 @@ function navFor(persona, counts) {
   const home = { to: LEADS_HOME, end: true, label: "Dashboard", icon: <FiGrid /> };
   switch (persona) {
     case "lead_provider":
+      // No dashboard: the provider's home is their list of leads.
       return [
-        home,
         { to: `${LEADS_HOME}/submit`, label: "Submit New Lead", icon: <FiPlusCircle /> },
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
       ];
@@ -43,12 +87,14 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/all`, label: "Leads", icon: <FiList />, count: counts.queue },
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
+        { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
       ];
     case "sales":
       return [
         home,
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
+        { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
       ];
     default:
       return [
@@ -57,6 +103,8 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
         { to: `${LEADS_HOME}/providers`, label: "Lead Providers", icon: <FiBriefcase /> },
+        { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
+        { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
   }
 }
@@ -65,8 +113,9 @@ export default function LeadsLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const role = localStorage.getItem("role");
+  // An admin opening Lead Management from the admin panel (not a lead role): always the sales manager's dashboard.
   const canPick = !roleIsPersona(role);
-  const [persona, setPersona] = useState(() => resolvePersona(role));
+  const [persona] = useState(() => resolvePersona(role));
   const [navOpen, setNavOpen] = useState(false);
   // The three-line button folds the sidebar down to icons; the choice is remembered on this device.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === "1");
@@ -74,6 +123,23 @@ export default function LeadsLayout() {
   const mainRef = useRef(null);
   const [query, setQuery] = useState("");
   const { leads, meetings, me, error } = useLeadData();
+  // What happened on leads, from the server (unread first), and which bell tab is open.
+  const [notes, setNotes] = useState({ items: [], unread: 0 });
+  const [bellTab, setBellTab] = useState("updates");
+  const refreshNotes = useCallback(() => {
+    getNotifications()
+      .then(setNotes)
+      .catch(() => {}); // the bell just stays as it was
+  }, []);
+
+  // Read on opening, after every change to the leads (a save here can notify someone), and once a minute.
+  useEffect(() => {
+    refreshNotes();
+  }, [leads, refreshNotes]);
+  useEffect(() => {
+    const timer = setInterval(refreshNotes, 60000);
+    return () => clearInterval(timer);
+  }, [refreshNotes]);
 
   // Everything shown here is read when the lead area opens, and forgotten when it closes
   // so the next person to sign in on this browser never glimpses it.
@@ -145,11 +211,22 @@ export default function LeadsLayout() {
       .map((l) => ({ id: l.id, title: l.company, text: isPast(l.nextFollowUpAt) ? "Follow-up call overdue" : "Follow-up call due today", when: timeLabel(l.nextFollowUpAt), to: `${LEADS_HOME}/${l.id}` }));
   }, [leads, meetings, viewer, persona]);
 
-  function pickPersona(next) {
-    savePreviewPersona(next);
-    setPersona(next);
-    navigate(LEADS_HOME);
+  function openNote(n) {
+    if (!n.read) {
+      setNotes((cur) => ({ items: cur.items.map((x) => (x.id === n.id ? { ...x, read: true } : x)), unread: Math.max(0, cur.unread - 1) }));
+      markNotificationRead(n.id).catch(() => {});
+    }
+    if (n.leadId) go(`${LEADS_HOME}/${n.leadId}`);
   }
+
+  function readAll() {
+    const ids = notes.items.filter((n) => !n.read).map((n) => n.id);
+    if (ids.length === 0) return;
+    setNotes((cur) => ({ items: cur.items.map((x) => ({ ...x, read: true })), unread: 0 }));
+    markNotificationsRead(ids).then(refreshNotes);
+  }
+
+  const bellCount = notes.unread;
 
   function logout() {
     localStorage.removeItem("token");
@@ -163,12 +240,14 @@ export default function LeadsLayout() {
   }
 
   const info = PERSONAS[persona];
-  const nav = navFor(persona, counts);
+  // Lead staff open Task Management from here with the same login (it has its own login for everyone else).
+  const nav = [...navFor(persona, counts), ...(LEAD_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : [])];
 
   return (
     <ViewerContext.Provider value={viewer}>
       <ToastProvider>
-        <div className={`lm-root${navOpen ? " nav-open" : ""}${collapsed ? " collapsed" : ""}`}>
+        {/* The lead staff also work in Task Management, so their screens wear its colours. */}
+        <div className={`lm-root${persona !== "lead_provider" ? " tp-theme" : ""}${navOpen ? " nav-open" : ""}${collapsed ? " collapsed" : ""}`}>
           <aside className="lm-side">
             <div className="lm-brand">
               <span className="lm-brand-mark">
@@ -211,28 +290,14 @@ export default function LeadsLayout() {
           <button type="button" className="lm-side-scrim" aria-label="Close menu" onClick={() => setNavOpen(false)} />
 
           <div className="lm-col">
-            {(!!error || canPick) && (
-              <div className="lm-ribbon" role={error ? "alert" : "note"}>
-                {!!error && (
-                  <span>
-                    <strong>Could not load leads.</strong> {error}{" "}
-                    <button type="button" className="lm-ribbon-tab on" onClick={loadWorkspace}>
-                      Try again
-                    </button>
-                  </span>
-                )}
-                {canPick && (
-                  <>
-                    <span>View as:</span>
-                    <span className="lm-ribbon-tabs">
-                      {PERSONA_KEYS.map((key) => (
-                        <button key={key} type="button" className={`lm-ribbon-tab${key === persona ? " on" : ""}`} onClick={() => pickPersona(key)}>
-                          {PERSONAS[key].label}
-                        </button>
-                      ))}
-                    </span>
-                  </>
-                )}
+            {!!error && (
+              <div className="lm-ribbon" role="alert">
+                <span>
+                  <strong>Could not load leads.</strong> {error}{" "}
+                  <button type="button" className="lm-ribbon-tab on" onClick={loadWorkspace}>
+                    Try again
+                  </button>
+                </span>
               </div>
             )}
 
@@ -245,34 +310,77 @@ export default function LeadsLayout() {
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search leads, company, phone..." aria-label="Search leads" />
               </form>
               <span className="lm-top-space" />
-              <div className="lm-pop-anchor">
-                <button type="button" className="lm-icon-btn" aria-label={alerts.length ? `Notifications, ${alerts.length} waiting` : "Notifications"} aria-expanded={popover === "bell"} onClick={() => setPopover(popover === "bell" ? null : "bell")}>
-                  <FiBell />
-                  {alerts.length > 0 && <span className="lm-dot" />}
-                </button>
-                {popover === "bell" && (
-                  <div className="lm-pop wide" role="dialog" aria-label="Notifications">
-                    <div className="lm-pop-head">
-                      <strong>Notifications</strong>
-                      <small>{alerts.length ? `${alerts.length} waiting for you` : "You're all caught up"}</small>
-                    </div>
-                    {alerts.length === 0 ? (
-                      <div className="lm-pop-empty">Nothing needs your attention right now.</div>
-                    ) : (
-                      alerts.map((n, i) => (
-                        <button key={n.id} type="button" className="lm-pop-item" style={{ "--i": i }} onClick={() => go(n.to)}>
-                          <span className="lm-pop-dot" />
-                          <span className="lm-who-text">
-                            <strong>{n.title}</strong>
-                            <small>{n.text}</small>
-                          </span>
-                          <em>{n.when}</em>
+              {/* No bell for the provider: every update on their lead would tell them its status. */}
+              {persona !== "lead_provider" && (
+                <div className="lm-pop-anchor">
+                  <button
+                    type="button"
+                    className="lm-icon-btn"
+                    aria-label={bellCount ? `Notifications, ${bellCount} unread` : "Notifications"}
+                    aria-expanded={popover === "bell"}
+                    onClick={() => setPopover(popover === "bell" ? null : "bell")}
+                  >
+                    <FiBell />
+                    {bellCount > 0 ? <span className="lm-bell-count">{bellCount > 99 ? "99+" : bellCount}</span> : alerts.length > 0 && <span className="lm-dot" />}
+                  </button>
+                  {popover === "bell" && (
+                    <div className="lm-pop wide lm-bell" role="dialog" aria-label="Notifications">
+                      <div className="lm-bell-head">
+                        <strong>Notifications</strong>
+                        {notes.unread > 0 && bellTab === "updates" && (
+                          <button type="button" className="lm-link" onClick={readAll}>
+                            Mark all as read
+                          </button>
+                        )}
+                      </div>
+                      <div className="lm-bell-tabs" role="tablist">
+                        <button type="button" role="tab" aria-selected={bellTab === "updates"} className={bellTab === "updates" ? "on" : ""} onClick={() => setBellTab("updates")}>
+                          Updates{notes.unread > 0 && <span>{notes.unread}</span>}
                         </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                        <button type="button" role="tab" aria-selected={bellTab === "reminders"} className={bellTab === "reminders" ? "on" : ""} onClick={() => setBellTab("reminders")}>
+                          Reminders{alerts.length > 0 && <span>{alerts.length}</span>}
+                        </button>
+                      </div>
+                      <div className="lm-bell-list">
+                        {bellTab === "updates" ? (
+                          notes.items.length === 0 ? (
+                            <div className="lm-pop-empty">No updates yet. New leads, verifications, meetings and results appear here.</div>
+                          ) : (
+                            notes.items.map((n, i) => (
+                              <button key={n.id} type="button" className={`lm-note${n.read ? "" : " unread"}`} style={{ "--i": i }} onClick={() => openNote(n)}>
+                                <span className={`lm-note-icon tone-${NOTE_TONE[n.type] || "info"}`}>{NOTE_ICON[n.type] || <FiBell />}</span>
+                                <span className="lm-note-text">
+                                  <strong>{n.title}</strong>
+                                  <small>{n.text}</small>
+                                  <em>
+                                    {dayLabel(n.at)}, {timeLabel(n.at)}
+                                  </em>
+                                </span>
+                                {!n.read && <span className="lm-pop-dot" aria-label="Unread" />}
+                              </button>
+                            ))
+                          )
+                        ) : alerts.length === 0 ? (
+                          <div className="lm-pop-empty">Nothing needs your attention right now.</div>
+                        ) : (
+                          alerts.map((n, i) => (
+                            <button key={n.id} type="button" className="lm-note" style={{ "--i": i }} onClick={() => go(n.to)}>
+                              <span className="lm-note-icon tone-warn">
+                                <FiClock />
+                              </span>
+                              <span className="lm-note-text">
+                                <strong>{n.title}</strong>
+                                <small>{n.text}</small>
+                                <em>{n.when}</em>
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="lm-pop-anchor">
                 <button type="button" className="lm-me" aria-expanded={popover === "me"} onClick={() => setPopover(popover === "me" ? null : "me")}>
@@ -304,12 +412,16 @@ export default function LeadsLayout() {
               {popover && <button type="button" className="lm-pop-shade" aria-label="Close" onClick={() => setPopover(null)} />}
             </header>
 
-            <main className="lm-main" ref={mainRef}>
-              {/* `key` replays the page entrance on every navigation and dashboard switch. */}
-              <div className="lm-page" key={`${persona}:${location.pathname}`}>
-                <Outlet />
-              </div>
-            </main>
+            {/* The content area. Full-page forms open over it (not over the top bar), so the
+                menu button, search and bell stay in reach. */}
+            <div className="lm-stage">
+              <main className="lm-main" ref={mainRef}>
+                {/* `key` replays the page entrance on every navigation and dashboard switch. */}
+                <div className="lm-page" key={`${persona}:${location.pathname}`}>
+                  <Outlet />
+                </div>
+              </main>
+            </div>
           </div>
         </div>
       </ToastProvider>
