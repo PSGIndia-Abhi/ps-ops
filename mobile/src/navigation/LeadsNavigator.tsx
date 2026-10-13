@@ -8,6 +8,7 @@ import {
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChartIcon, ClockIcon, HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
+import { LeadsProvider } from '../crm/LeadsContext';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
@@ -117,13 +118,17 @@ function LeadTabs() {
  */
 export function LeadsNavigator() {
   const theme = useCrmTheme();
+  // LeadsProvider: the New Lead form is the CRM's commercial form, which saves through the CRM's
+  // lead store (offline outbox, photo uploads).
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
-      <Stack.Screen name="LeadTabs" component={LeadTabs} />
-      {LEAD_STACK_SCREENS.map((s) => (
-        <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
-      ))}
-    </Stack.Navigator>
+    <LeadsProvider>
+      <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
+        <Stack.Screen name="LeadTabs" component={LeadTabs} />
+        {LEAD_STACK_SCREENS.map((s) => (
+          <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
+        ))}
+      </Stack.Navigator>
+    </LeadsProvider>
   );
 }
 

@@ -66,7 +66,8 @@ export function RoleTabs() {
       </AppSwitchProvider>
     );
   }
-  // Telecallers and sales managers get Lead Management (sales executives reach it inside the CRM app).
+  // Telecallers, commercial sales executives and sales managers get Lead Management.
+  // The residential "sales" and "marketing" roles keep the CRM app below.
   if (leadPersonaForRole(rawRole)) return <LeadsNavigator />;
 
   switch (role) {

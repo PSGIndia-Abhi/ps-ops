@@ -36,6 +36,7 @@ import {
   saveLastSource,
 } from '../draft';
 import { findLeadByPhone, suggestReferences } from '../leadHelpers';
+import { isResidentialRole, useRawRole } from '../../auth/role';
 import { useLeads } from '../LeadsContext';
 import { payForLead } from '../payment';
 import {
@@ -301,6 +302,7 @@ export function CrmNewLeadScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewLead'>>();
+  const residential = isResidentialRole(useRawRole());
   const {
     leads,
     addLead,
@@ -723,7 +725,8 @@ export function CrmNewLeadScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {!editing && (
+        {/* Residential sales roles only add residential leads, so they get no Commercial tab. */}
+        {!editing && !residential && (
         <View style={styles.typeSwitch}>
           <SegmentedControl
             options={LEAD_TYPES}

@@ -10,7 +10,7 @@ import {
   LeadQuoteScreen,
 } from './LeadActionScreens';
 import { LeadListScreen, LeadTasksScreen } from './LeadBrowseScreens';
-import { LeadNewScreen } from './LeadNewScreen';
+import { LeadNewCommercialScreen } from './LeadNewCommercialScreen';
 import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
 import { PerformanceScreen } from './ReportScreens';
@@ -27,7 +27,8 @@ export const LEAD_STACK_SCREENS: {
 }[] = [
   { name: 'LeadWork', component: LeadWorkScreen },
   { name: 'LeadList', component: LeadListScreen },
-  { name: 'LeadNew', component: LeadNewScreen, modal: true },
+  // The production commercial form (see LeadNewCommercialScreen).
+  { name: 'LeadNew', component: LeadNewCommercialScreen, modal: true },
   { name: 'LeadCall', component: LeadCallScreen, modal: true },
   { name: 'LeadMeetingNew', component: LeadMeetingNewScreen, modal: true },
   { name: 'LeadFollowUp', component: LeadFollowUpScreen, modal: true },

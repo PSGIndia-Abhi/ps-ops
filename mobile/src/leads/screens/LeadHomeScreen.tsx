@@ -5,7 +5,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
-import { CalendarIcon, CheckCircleIcon, ClockIcon, CloseIcon, DocumentIcon, PhoneIcon, SparkleIcon, UsersIcon } from '../../components/icons';
+import { CalendarIcon, ChartIcon, CheckCircleIcon, ClockIcon, CloseIcon, DocumentIcon, PhoneIcon, SparkleIcon, UsersIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { ClipboardListIcon } from '../../crm/ui/crmIcons';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -15,7 +15,7 @@ import * as api from '../api';
 import { HomeBand, HomeTile, QuickAction, SectionTitle, TILE_OVERLAP } from '../homeParts';
 import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
 import { countByGroup, type StageGroup } from '../stage';
-import type { LeadTask } from '../types';
+import type { LeadPersona, LeadTask } from '../types';
 import { AgendaRow, LeadRow, LeadWash, useLoad, useMe } from '../ui';
 
 const RECENT_LIMIT = 3;
@@ -41,11 +41,17 @@ interface TileDef {
 }
 
 /** The three numbers each role opens the day with. */
-const TILES: Record<'telecaller' | 'sales_manager', TileDef[]> = {
+const TILES: Record<LeadPersona, TileDef[]> = {
   telecaller: [
     { group: 'new', label: 'New Leads', tone: 'info', icon: SparkleIcon },
     { group: 'to_call', label: 'To Call', tone: 'danger', icon: PhoneIcon },
     { group: 'qualified', label: 'Qualified', tone: 'success', icon: CheckCircleIcon },
+  ],
+  // The commercial sales executive's day: visits, quotations out, deals won.
+  sales: [
+    { group: 'meeting', label: 'Meetings', tone: 'accent', icon: CalendarIcon },
+    { group: 'quoted', label: 'Quotations', tone: 'info', icon: DocumentIcon },
+    { group: 'won', label: 'Converted', tone: 'success', icon: CheckCircleIcon },
   ],
   sales_manager: [
     { group: 'all', label: 'Total Leads', tone: 'info', icon: ClipboardListIcon },
@@ -54,8 +60,14 @@ const TILES: Record<'telecaller' | 'sales_manager', TileDef[]> = {
   ],
 };
 
+const ROLE_LABELS: Record<LeadPersona, string> = {
+  telecaller: 'Telecaller',
+  sales: 'Sales',
+  sales_manager: 'Sales Manager',
+};
+
 /**
- * Home for the telecaller and the sales manager: a blue header band, three
+ * Home for the telecaller, the commercial sales executive and the sales manager: a blue header band, three
  * stat tiles floating over its edge, the newest leads, Quick Actions, and
  * today's meetings when there are any.
  */
@@ -97,7 +109,7 @@ export function LeadHomeScreen() {
       >
         <HomeBand
           name={user?.name ?? ''}
-          role={manager ? 'Sales Manager' : 'Telecaller'}
+          role={ROLE_LABELS[persona]}
           alerts={followUps}
           topInset={insets.top}
           onBell={openTasks}
@@ -107,7 +119,7 @@ export function LeadHomeScreen() {
         <View style={styles.tiles}>
           {loading && !data
             ? [0, 1, 2].map((i) => <CrmSkeleton key={i} height={128} radius={22} style={styles.flex1} />)
-            : TILES[manager ? 'sales_manager' : 'telecaller'].map(({ group, label, tone, icon: Icon }) => (
+            : TILES[persona].map(({ group, label, tone, icon: Icon }) => (
                 <HomeTile key={group} icon={<Icon size={18} color={white} />} value={counts[group]} label={label} tone={tone} onPress={() => openGroup(group)} />
               ))}
         </View>
@@ -133,6 +145,11 @@ export function LeadHomeScreen() {
                 <>
                   <QuickAction icon={<DocumentIcon size={19} color={white} />} label="Quoted" tone="info" count={counts.quoted} onPress={() => openGroup('quoted')} />
                   <QuickAction icon={<UsersIcon size={19} color={white} />} label="Team" tone="success" onPress={() => navigation.navigate('Team')} />
+                </>
+              ) : persona === 'sales' ? (
+                <>
+                  <QuickAction icon={<ClipboardListIcon size={19} color={white} />} label="All Leads" tone="info" count={counts.all} onPress={() => openGroup('all')} />
+                  <QuickAction icon={<ChartIcon size={19} color={white} />} label="Performance" tone="success" onPress={() => navigation.navigate('LeadPerformance')} />
                 </>
               ) : (
                 <>

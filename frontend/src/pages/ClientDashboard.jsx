@@ -188,7 +188,7 @@ export default function ClientDashboard() {
       const data = await jobsRes.json();
       setJobs(Array.isArray(data) ? data : []);
     }
-    setIsCreateOpen(false);
+    // The form stays open to show its "Booking created" popup and closes when that is dismissed.
   }
 
   function showComingSoon(label = "Coming soon") {

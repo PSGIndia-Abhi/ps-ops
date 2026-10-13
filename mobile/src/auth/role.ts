@@ -28,6 +28,16 @@ export function isCrmRole(role: AppRole | null): boolean {
 }
 
 /**
+ * The residential sales roles: the CRM app exactly as it was before commercial leads - residential
+ * leads, form and payments only. Commercial leads belong to the Lead Management roles (telecaller,
+ * commercial_sales, sales_manager). Matched on the raw role, so MD / PA in the Sales app still see both.
+ */
+export function isResidentialRole(role: string | null | undefined): boolean {
+  const r = (role || '').toLowerCase().trim();
+  return r === 'sales' || r === 'marketing';
+}
+
+/**
  * The real org-hierarchy designations that land in Task Management - the
  * exact list the web app routes to /taskpro on login (frontend/src/auth/
  * roleBasePath.js ROLE_HOME, frontend/src/pages/taskpro/access.js). These

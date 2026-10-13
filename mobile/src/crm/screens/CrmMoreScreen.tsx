@@ -109,8 +109,9 @@ export function CrmMoreScreen() {
   const rawRole = useRawRole();
   const { styles, theme } = useCrmStyles(factory);
   const name = user?.name ?? 'Account';
-  // A Managing Director / Personal Assistant in the Sales app keeps their own role name.
-  const roleText = role ? roleLabel(role) : rawRole ?? '';
+  // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
+  // lead roles such as "commercial_sales" read as "Commercial Sales".
+  const roleText = role ? roleLabel(role) : (rawRole ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
     <CrmScreen>
