@@ -21,7 +21,8 @@ type Filter = 'all' | 'unread' | 'due';
 /** Most notification cards shown at once. */
 const MAX_SHOWN = 10;
 
-const factory = (t: CrmTheme) => ({
+// Shared with Payment Reminders' notifications screen (reminders/screens/ReminderNotificationsScreen.tsx).
+export const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },
   flex1: { flex: 1 },
   bar: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
@@ -82,7 +83,7 @@ const factory = (t: CrmTheme) => ({
 });
 
 /** Red gradient behind the "Needs attention" card. */
-function AttentionBackground() {
+export function AttentionBackground() {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;

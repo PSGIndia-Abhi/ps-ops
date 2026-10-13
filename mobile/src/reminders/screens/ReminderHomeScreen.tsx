@@ -43,6 +43,22 @@ const factory = (t: CrmTheme) => ({
     marginTop: 4,
   },
   roleText: { ...typography.overline, fontSize: 10, color: '#FFFFFF' },
+  bell: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  badge: {
+    position: 'absolute' as const,
+    top: -3,
+    right: -3,
+    minWidth: 19,
+    height: 19,
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#3B6FEA',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  badgeText: { fontSize: 10, fontWeight: '700' as const, color: '#FFFFFF' },
   me: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center' as const, justifyContent: 'center' as const },
   meText: { ...typography.bodyMedium, fontWeight: '800' as const, color: t.primary },
   switchBadge: {
@@ -89,7 +105,7 @@ const factory = (t: CrmTheme) => ({
 /**
  * Payment Reminders Home: the same blue band and three tiles as Task Management's Home
  * (Today / Overdue / Upcoming reminders), what is owed in total, the next reminders to act on
- * and shortcuts into the list. The avatar opens the app switcher.
+ * and shortcuts into the list. The bell opens Notifications; the avatar opens the app switcher.
  */
 export function ReminderHomeScreen() {
   const navigation = useNavigation<NavigationProp<ReminderStackParamList>>();
@@ -109,6 +125,8 @@ export function ReminderHomeScreen() {
       completed: reminders.filter((r) => r.status === 'COMPLETED').length,
     };
   }, [reminders]);
+  // The bell's badge: reminders to act on now.
+  const dueNow = stats.overdue + stats.today;
 
   const money = useMemo(() => {
     const today = todayStr();
@@ -151,6 +169,20 @@ export function ReminderHomeScreen() {
                 </View>
               )}
             </View>
+            <Pressable
+              onPress={() => navigation.navigate('Notifications')}
+              style={({ pressed }) => [styles.bell, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={dueNow ? `Notifications, ${dueNow} due` : 'Notifications'}
+              testID="header-bell"
+            >
+              <BellIcon size={20} color="#FFFFFF" />
+              {dueNow > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{dueNow > 9 ? '9+' : dueNow}</Text>
+                </View>
+              )}
+            </Pressable>
             <Pressable
               onPress={() => openSwitcher(() => navigation.navigate('Profile'))}
               style={({ pressed }) => [styles.me, pressed && styles.pressed]}

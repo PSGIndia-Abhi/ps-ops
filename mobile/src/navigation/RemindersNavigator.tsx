@@ -8,14 +8,17 @@ import {
 } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../auth/AuthContext';
 import { BellIcon, HomeIcon, PersonIcon, PlusIcon } from '../components/icons';
 import { useCrmTheme } from '../crm/theme';
 import type { ReminderStackParamList, ReminderTabParamList } from '../reminders/navigation';
+import { useReminders } from '../reminders-engine/useReminders';
 import { RemindersProvider } from '../reminders/RemindersContext';
 import { CreateReminderScreen } from '../reminders/screens/CreateReminderScreen';
 import { ReminderDetailScreen } from '../reminders/screens/ReminderDetailScreen';
 import { ReminderHomeScreen } from '../reminders/screens/ReminderHomeScreen';
 import { ReminderListScreen, RepeatingScreen } from '../reminders/screens/ReminderListScreen';
+import { ReminderNotificationsScreen } from '../reminders/screens/ReminderNotificationsScreen';
 import { ReminderProfileScreen } from '../reminders/screens/ReminderProfileScreen';
 import { RepeatIcon } from '../tasks/ui/taskIcons';
 import { radii, shadows } from '../theme';
@@ -75,6 +78,13 @@ function ReminderTabs() {
   const theme = useCrmTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<ReminderStackParamList>>();
+
+  // Alarms before payment reminders are due, and the push when one falls due; a tapped one opens that reminder.
+  const { user, session } = useAuth();
+  useReminders(String(user?.id ?? session?.userId ?? ''), 'payment', (route) => {
+    const reminderId = route.params?.reminderId;
+    if (route.screen === 'ReminderDetail' && typeof reminderId === 'string') navigation.navigate('ReminderDetail', { reminderId });
+  });
 
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,
@@ -136,6 +146,7 @@ export function RemindersNavigator() {
         <Stack.Screen name="CreateReminder" component={CreateReminderScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="ReminderDetail" component={ReminderDetailScreen} />
         <Stack.Screen name="Profile" component={ReminderProfileScreen} />
+        <Stack.Screen name="Notifications" component={ReminderNotificationsScreen} />
       </Stack.Navigator>
     </RemindersProvider>
   );

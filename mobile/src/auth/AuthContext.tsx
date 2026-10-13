@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { authApi, ApiError, setUnauthorizedHandler } from '../api';
+import { unregisterFromPush } from '../reminders-engine/push';
 import { clearSession, loadSession, saveSession } from './tokenStorage';
 import type { AuthSession, CurrentUser } from '../types/auth';
 
@@ -39,6 +40,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
     try {
+      // While still signed in: stop this phone getting the account's pushes (short, best effort).
+      await Promise.race([unregisterFromPush(), new Promise<void>((r) => setTimeout(() => r(), 3000))]);
       await clearSession();
     } finally {
       setUser(null);
