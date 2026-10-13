@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -114,6 +114,17 @@ export function ReminderListScreen() {
     if (params?.tab) setTab(params.tab);
   }, [params?.tab, params?.at]);
 
+  // The tab strip is wider than the screen: slide it so the selected tab is always in view.
+  const strip = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const tabX = useRef<Partial<Record<ReminderListTab, number>>>({});
+  const showTab = (key: ReminderListTab) => {
+    const x = tabX.current[key];
+    if (x !== undefined) strip.current?.scrollTo({ x: Math.max(0, x - spacing.lg), animated: true });
+  };
+  useEffect(() => {
+    showTab(tab);
+  }, [tab, params?.at]);
+
   const counts = useMemo(() => {
     const out = {} as Record<ReminderListTab, number>;
     for (const t of TABS) out[t.key] = reminders.filter(t.test).length;
@@ -133,11 +144,22 @@ export function ReminderListScreen() {
         <Text style={styles.sub}>Payment reminders for your customers and invoices</Text>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabsContent}>
+      <ScrollView ref={strip} horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabsContent}>
         {TABS.map((t) => {
           const on = t.key === tab;
           return (
-            <Pressable key={t.key} onPress={() => setTab(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }} style={[styles.tab, on && styles.tabOn]}>
+            <Pressable
+              key={t.key}
+              onPress={() => setTab(t.key)}
+              // Also covers arriving on a tab before the strip has been measured.
+              onLayout={(e) => {
+                tabX.current[t.key] = e.nativeEvent.layout.x;
+                if (on) showTab(t.key);
+              }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+              style={[styles.tab, on && styles.tabOn]}
+            >
               <Text style={[styles.tabText, on && styles.tabTextOn]}>
                 {t.label}
                 {ready ? ` (${counts[t.key]})` : ''}

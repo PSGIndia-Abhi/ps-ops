@@ -8,7 +8,9 @@ import {
 } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../auth/AuthContext';
 import { CalendarIcon, ChartIcon, HomeIcon, PlusIcon } from '../components/icons';
+import { useReminders } from '../reminders-engine/useReminders';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import { radii, shadows } from '../theme';
@@ -87,6 +89,12 @@ function TaskTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
   const { registerNavigator } = useTasks();
   useEffect(() => registerNavigator(navigation), [navigation, registerNavigator]);
+  // Alarms before tasks are due, and a popup when one is assigned to you; a tapped one opens the task.
+  const { user, session } = useAuth();
+  useReminders(String(user?.id ?? session?.userId ?? ''), 'task', (route) => {
+    const taskId = route.params?.taskId;
+    if (route.screen === 'TaskDetail' && typeof taskId === 'string') navigation.navigate('TaskDetail', { taskId });
+  });
 
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,

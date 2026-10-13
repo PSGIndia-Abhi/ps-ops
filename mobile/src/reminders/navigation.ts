@@ -20,4 +20,6 @@ export type ReminderStackParamList = {
   ReminderDetail: { reminderId: string };
   /** Opened from the avatar on Home. */
   Profile: undefined;
+  /** Opened from the bell on Home. */
+  Notifications: undefined;
 };
