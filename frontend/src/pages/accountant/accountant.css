@@ -211,7 +211,8 @@
 }
 
 /* payment list */
-.ac-filters-pl { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 10px; }
+/* the last column holds the From and To date boxes side by side, so it gets the extra room */
+.ac-filters-pl { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 10px; }
 .ac-expand-row td { background: #f8fafc; }
 .ac-expand-box { padding: 4px 4px 8px; }
 .ac-expand-box h4 { margin: 0 0 8px; font-size: 13px; color: #334155; }

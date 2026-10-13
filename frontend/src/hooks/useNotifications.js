@@ -80,18 +80,26 @@ export default function useNotifications(limit = 8) {
 
     load();
 
+    // A hidden tab (another tab in front, window minimised) does not poll; it checks once
+    // as soon as it is shown again.
     const intervalId = window.setInterval(() => {
-      if (!cancelled) {
+      if (!cancelled && !document.hidden) {
         refresh({ unreadOnly: false });
       }
     }, 25000);
 
+    function handleVisible() {
+      if (!document.hidden) handleFocus();
+    }
+
     window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisible);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisible);
     };
   }, [limit]);
 

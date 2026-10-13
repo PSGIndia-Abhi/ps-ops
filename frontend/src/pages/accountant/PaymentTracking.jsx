@@ -5,6 +5,7 @@ import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { daysOverdue, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
+import DateInput from "../../components/accountant/DateInput";
 
 const PIPELINE = [
   { key: "PENDING", label: "Pending" },
@@ -156,8 +157,8 @@ export default function PaymentTracking() {
             <option value="">All Status</option>
             {PIPELINE.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
           </select>
-          <input className="ac-input" type="date" value={from} onChange={filterChange(setFrom)} aria-label="Due from" />
-          <input className="ac-input" type="date" value={to} onChange={filterChange(setTo)} aria-label="Due to" />
+          <DateInput ariaLabel="Due from" style={{ width: "100%" }} value={from} onChange={(v) => filterChange(setFrom)({ target: { value: v } })} />
+          <DateInput ariaLabel="Due to" style={{ width: "100%" }} value={to} onChange={(v) => filterChange(setTo)({ target: { value: v } })} />
         </div>
 
         <div className="ac-table-wrap">

@@ -48,12 +48,16 @@ export default function ReminderAlerts() {
 
   useEffect(() => {
     const first = window.setTimeout(check, 0); // first check right after the panel opens
-    const timer = window.setInterval(check, POLL_MS);
+    // A hidden tab does not poll; it checks once as soon as it is shown again.
+    const timer = window.setInterval(() => { if (!document.hidden) check(); }, POLL_MS);
+    const onVisible = () => { if (!document.hidden) check(); };
     window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(timer);
       window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [check]);
 

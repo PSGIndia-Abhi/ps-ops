@@ -8,6 +8,7 @@ import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
 import { groupByCustomer, savePayment, showDate, todayYmd, useAccountantData } from "./data";
 import { rescheduleFollowUp, showDue } from "./followups";
+import DateInput from "../../components/accountant/DateInput";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -462,7 +463,7 @@ export default function RecordPayment() {
         <div className="ac-card" style={{ order: 1 }}>
           <h3 className="ac-section-title"><span className="ac-sec-ic"><FiCreditCard /></span>2. Payment Details</h3>
           <div className="ac-fields-3" style={{ marginBottom: 14 }}>
-            <div className="ac-field"><label><span className="ac-lab-ic"><FiCalendar /></span>Payment Date *</label><input className="ac-input" type="date" value={form.date} onChange={set("date")} /></div>
+            <div className="ac-field"><label><span className="ac-lab-ic"><FiCalendar /></span>Payment Date *</label><DateInput ariaLabel="Payment date" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} /></div>
             <div className="ac-field">
               <label><span className="ac-lab-ic"><FiCreditCard /></span>Payment Mode *</label>
               <select className="ac-select" value={form.mode} onChange={set("mode")}>
@@ -605,7 +606,7 @@ function NextReminderPrompt({ reminder, owed, onSaved }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
         <div className="ac-field">
           <label>Next Reminder Date *</label>
-          <input className="ac-input" type="date" min={todayYmd()} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Next reminder date" />
+          <DateInput ariaLabel="Next reminder date" value={date} onChange={setDate} />
         </div>
         <div className="ac-field">
           <label>Time *</label>
