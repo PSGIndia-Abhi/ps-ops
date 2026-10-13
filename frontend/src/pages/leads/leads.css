@@ -320,6 +320,8 @@
     .lm-btn.primary { background: #fff; color: var(--lm-primary-600); box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
     .lm-btn.primary:hover:not(:disabled) { background: #f1f6ff; }
     .lm-date-pick, .lm-select { border-color: transparent; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); }
+    /* The banner's white text must not reach the dropdown, or its choices are white on white. */
+    .lm-select, .lm-select option { color: var(--lm-text); background-color: #fff; }
     .lm-seg { background: rgba(255, 255, 255, .16); }
     .lm-seg button { color: #dbe7ff; &:hover { color: #fff; } &.on { background: #fff; color: var(--lm-primary-600); } }
   }
