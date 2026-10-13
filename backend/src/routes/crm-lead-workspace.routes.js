@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
-const { hasPerm, resolveVisibleUserIds } = require("../utils/crmLeadManagement");
+const { hasPerm, resolveVisibleUserIds, salesOwnLeadFilter } = require("../utils/crmLeadManagement");
 
 function sendError(res, err, fallback) {
   console.error(fallback, err);
@@ -44,6 +44,12 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
     if (visibleIds !== null) {
       where.push("(l.created_by_user_id IN (?) OR l.assigned_telecaller_id IN (?) OR l.assigned_sales_employee_id IN (?))");
       params.push(visibleIds, visibleIds, visibleIds);
+    }
+    // Other people's sales-own leads stay with them and lead managers.
+    const salesOwn = salesOwnLeadFilter(req, "l");
+    if (salesOwn) {
+      where.push(salesOwn.sql);
+      params.push(...salesOwn.params);
     }
 
     const [leadRows] = await pool.query(

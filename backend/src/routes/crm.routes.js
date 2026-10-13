@@ -10,7 +10,10 @@ const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
-const { nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead } = require("../utils/crmLeadManagement");
+const {
+  nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
+  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead,
+} = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
@@ -116,9 +119,6 @@ function canViewAllLeads(req) {
   return req.user.role === "admin" || !!req.user.permissions?.includes("CRM_VIEW_ALL_LEADS");
 }
 
-// The commercial sales executive roles: their own leads start verified and assigned to them.
-const SALES_EXECUTIVE_ROLES = ["commercial_sales", "sales"];
-
 const LEAD_WITH_CREATOR_SQL = `SELECT l.*, u.name AS created_by_name
                                  FROM crm_leads l LEFT JOIN users u ON u.id = l.created_by_user_id`;
 
@@ -189,6 +189,12 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
         where.push("(l.created_by_user_id IN (?) OR l.assigned_telecaller_id IN (?) OR l.assigned_sales_employee_id IN (?))");
         params.push(visibleIds, visibleIds, visibleIds);
       }
+      // Other people's sales-own leads stay with them and lead managers.
+      const salesOwn = salesOwnLeadFilter(req, "l");
+      if (salesOwn) {
+        where.push(salesOwn.sql);
+        params.push(...salesOwn.params);
+      }
       if (req.query.pipeline_stage) { where.push("l.pipeline_stage = ?"); params.push(String(req.query.pipeline_stage)); }
       if (req.query.assigned_telecaller_id) { where.push("l.assigned_telecaller_id = ?"); params.push(Number(req.query.assigned_telecaller_id)); }
       if (req.query.assigned_sales_employee_id) { where.push("l.assigned_sales_employee_id = ?"); params.push(Number(req.query.assigned_sales_employee_id)); }
@@ -236,6 +242,7 @@ router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, r
       if (visibleIds !== null && !isOwnLead(row, req.user.id) && !visibleIds.some((id) => isOwnLead(row, id))) {
         return res.status(404).json({ error: "Lead not found" });
       }
+      if (await isHiddenSalesOwnLead(pool, req, row)) return res.status(404).json({ error: "Lead not found" });
     } else if (!canViewAllLeads(req) && Number(row.created_by_user_id) !== Number(req.user.id)) {
       return res.status(404).json({ error: "Lead not found" });
     }

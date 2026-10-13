@@ -62,11 +62,47 @@ function isOwnLead(lead, userId) {
   );
 }
 
+// A commercial lead a sales executive added themselves stays with them and with whoever manages
+// leads (sales manager, admin). Everyone else - a telecaller, even with VIEW_ALL_LEADS, or a lead
+// provider - never sees it unless they are on the lead (creator, telecaller or sales rep).
+// Only commercial_sales: "sales" is the residential CRM role, and the commercial leads it created
+// earlier belong to the telecaller queue.
+const SALES_EXECUTIVE_ROLES = ["commercial_sales"];
+const SALES_EXECUTIVE_USER_IDS_SQL =
+  "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name IN (?)";
+
+function seesSalesOwnLeads(req) {
+  return req.user.role === "admin" || hasPerm(req, "MANAGE_LEADS");
+}
+
+// SQL for a crm_leads alias that drops other people's sales-own leads -> { sql, params }, or null
+// when this requester sees them all.
+function salesOwnLeadFilter(req, alias = "l") {
+  if (seesSalesOwnLeads(req)) return null;
+  const me = Number(req.user.id);
+  return {
+    sql: `(${alias}.created_by_user_id = ? OR ${alias}.assigned_telecaller_id = ? OR ${alias}.assigned_sales_employee_id = ?
+           OR ${alias}.created_by_user_id NOT IN (${SALES_EXECUTIVE_USER_IDS_SQL}))`,
+    params: [me, me, me, SALES_EXECUTIVE_ROLES],
+  };
+}
+
+// True if this lead is another person's sales-own lead the requester must not see.
+async function isHiddenSalesOwnLead(executor, req, lead) {
+  if (!lead || seesSalesOwnLeads(req) || isOwnLead(lead, req.user.id)) return false;
+  const [[creator]] = await executor.query(
+    "SELECT r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?",
+    [lead.created_by_user_id]
+  );
+  return !!creator && SALES_EXECUTIVE_ROLES.includes(creator.role);
+}
+
 const PIPELINE_STAGES = [
   "NEW", "TO_CALL", "QUALIFIED", "MEETING_SCHEDULED", "VISIT_COMPLETED",
   "QUOTATION_SENT", "WON", "CONVERTED", "NEED_MORE_INFO", "NOT_GENUINE", "LOST", "CANCELLED",
 ];
 
 module.exports = {
-  uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead, PIPELINE_STAGES,
+  uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
+  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
 };
