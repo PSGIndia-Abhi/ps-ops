@@ -7,6 +7,7 @@ const {
   uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead,
 } = require("../utils/crmLeadManagement");
 const { logHistory: logTaskHistory, isValidTime } = require("../utils/workTasks");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -114,6 +115,9 @@ router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), a
          FROM work_tasks WHERE id = ?`,
       [taskId]
     );
+    if (Number(assignedTo) !== Number(req.user.id)) {
+      notifyLead(lead.id, "FOLLOW_UP_ASSIGNED", { actorId: req.user.id, extra: { assignedTo, dueAt: `${body.nextActionDate} ${body.nextActionTime || "09:00"}` } });
+    }
     res.status(201).json(task);
   } catch (err) {
     sendError(res, err, "Failed to schedule follow-up");

@@ -19,11 +19,19 @@ export function useViewer() {
  * Always a new array, so a caller may sort it without touching the stored list.
  */
 export function visibleLeads(leads, viewer) {
-  const { persona, me } = viewer;
+  const { persona, me, canPick } = viewer;
   if (persona === "lead_provider") return leads.filter((l) => l.providerId === me.providerId);
-  if (persona === "sales") return leads.filter((l) => l.salesId === me.id || l.createdBy === me.id);
-  return [...leads]; // telecaller: the shared queue; sales manager: everything
+  // Sales: leads given to them, plus the ones they added themselves (to follow their verification).
+  // An admin previewing this dashboard is not the sales person, so their own leads do not count.
+  if (persona === "sales") return leads.filter((l) => l.salesId === me.id || (!canPick && l.createdBy === me.id));
+  // Sales manager: only what the telecallers have verified - the calling queue stays with them.
+  if (persona === "sales_manager") return leads.filter((l) => !UNVERIFIED.includes(l.stage));
+  // Telecaller: the shared queue - every lead except a sales executive's own, which needs no call.
+  return leads.filter((l) => !l.salesOwn);
 }
+
+/** Stages a lead is in before (or instead of) a telecaller marking it genuine. */
+export const UNVERIFIED = ["NEW", "TO_CALL", "NEED_MORE_INFO", "NOT_GENUINE"];
 
 export function visibleMeetings(meetings, viewer) {
   return viewer.persona === "sales" ? meetings.filter((m) => m.salesId === viewer.me.id) : [...meetings];

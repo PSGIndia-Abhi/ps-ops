@@ -1,44 +1,37 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiChevronRight, FiPhoneCall, FiPlus, FiSearch } from "react-icons/fi";
+import { FiCheckSquare, FiChevronRight, FiPlus, FiSearch } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { AddLeadModal, CallVerifyModal, ScheduleMeetingModal } from "./dialogs";
-import { providerName, useLeadData } from "./leadsApi";
-import { SOURCES } from "./constants";
+import { providerName, providerSources, useLeadData } from "./leadsApi";
 import { compactMoney, dayLabel, nextAction } from "./format";
 import { useLoaded, usePaged } from "./hooks";
 import { Button, Card, Empty, Pager, SkeletonRows, StageBadge, Tabs } from "./ui";
 import { useViewer, visibleLeads } from "./viewer";
 
 const QUEUE = ["NEW", "TO_CALL", "NEED_MORE_INFO"];
-const OPEN = ["QUALIFIED", "MEETING_SCHEDULED", "VISIT_COMPLETED", "QUOTATION_SENT"];
 
 /** The tabs each persona gets above the list. */
 function tabsFor(persona) {
-  if (persona === "lead_provider") {
-    return [
-      { key: "all", label: "All", match: () => true },
-      { key: "review", label: "Under Review", match: (l) => QUEUE.includes(l.stage) },
-      { key: "progress", label: "In Progress", match: (l) => OPEN.includes(l.stage) },
-      { key: "converted", label: "Converted", match: (l) => l.stage === "WON" },
-      { key: "rejected", label: "Rejected", match: (l) => l.stage === "NOT_GENUINE" || l.stage === "LOST" },
-    ];
-  }
+  // The provider never learns a lead's status, so they get one list with no status tabs.
+  if (persona === "lead_provider") return [{ key: "all", label: "All", match: () => true }];
+  // The sales manager only ever sees verified leads, so the calling-queue tabs would always be empty.
+  const queue = persona !== "sales_manager";
   return [
     { key: "all", label: "All Leads", match: () => true },
-    { key: "new", label: "New", match: (l) => l.stage === "NEW" },
-    { key: "call", label: "To Call", match: (l) => l.stage === "TO_CALL" || l.stage === "NEED_MORE_INFO" },
+    ...(queue ? [{ key: "new", label: "New", match: (l) => l.stage === "NEW" }] : []),
+    ...(queue ? [{ key: "call", label: "To Call", match: (l) => l.stage === "TO_CALL" || l.stage === "NEED_MORE_INFO" }] : []),
     { key: "qualified", label: "Qualified", match: (l) => l.stage === "QUALIFIED" },
     { key: "meeting", label: "Meeting Scheduled", match: (l) => l.stage === "MEETING_SCHEDULED" },
     { key: "progress", label: "In Progress", match: (l) => l.stage === "VISIT_COMPLETED" || l.stage === "QUOTATION_SENT" },
     { key: "closed", label: "Converted", match: (l) => l.stage === "WON" },
-    { key: "rejected", label: "Rejected", match: (l) => l.stage === "NOT_GENUINE" || l.stage === "LOST" },
+    { key: "rejected", label: queue ? "Rejected" : "Lost", match: (l) => l.stage === "NOT_GENUINE" || l.stage === "LOST" },
   ];
 }
 
 /**
- * The leads table. `persona` decides the columns: a provider sees status and
- * feedback only; staff see source, owner and the next action.
+ * The leads table. `persona` decides the columns: a provider sees only what they
+ * submitted (never the status); staff see status, source, owner and the next action.
  * `onCall` / `onSchedule` add the quick action button for telecallers.
  * `compact` drops the secondary columns, for the narrower cards on a dashboard.
  */
@@ -57,8 +50,8 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false 
             <th>Company</th>
             <th>Phone</th>
             {full && <th>Source</th>}
-            <th>Status</th>
-            {provider ? <th>Feedback</th> : full && <th>Next Action</th>}
+            {!provider && <th>Status</th>}
+            {full && <th>Next Action</th>}
             {full && <th>Quote</th>}
             <th aria-label="Open" />
           </tr>
@@ -77,15 +70,19 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false 
               </td>
               <td className="num">{lead.phone}</td>
               {full && <td className="muted">{lead.providerId ? providerName(lead.providerId) : lead.source}</td>}
-              <td>
-                <StageBadge stage={lead.stage} />
-              </td>
-              {provider ? <td className="muted">{lead.providerFeedback || "-"}</td> : full && <td className="muted">{nextAction(lead)}</td>}
+              {/* The provider never sees how their lead is progressing. */}
+              {!provider && (
+                <td>
+                  <StageBadge stage={lead.stage} />
+                </td>
+              )}
+              {full && <td className="muted">{nextAction(lead)}</td>}
               {full && <td className="num">{compactMoney(lead.quote)}</td>}
               <td onClick={(e) => e.stopPropagation()}>
                 {onCall && QUEUE.includes(lead.stage) ? (
-                  <Button size="sm" icon={<FiPhoneCall />} onClick={() => onCall(lead)}>
-                    Call
+                  // Opens the verification form (record the call's result), so it says so.
+                  <Button size="sm" icon={<FiCheckSquare />} onClick={() => onCall(lead)}>
+                    Verify Lead
                   </Button>
                 ) : onSchedule && lead.stage === "QUALIFIED" ? (
                   <Button size="sm" variant="ghost" onClick={() => onSchedule(lead)}>
@@ -121,6 +118,8 @@ export default function LeadsList() {
   const [scheduling, setScheduling] = useState(null);
 
   const mine = useMemo(() => visibleLeads(leads, viewer), [leads, viewer]);
+  // The master list plus any source an older lead still carries (an old code, or a source since switched off).
+  const sourceOptions = useMemo(() => [...new Set([...providerSources(), ...mine.map((l) => l.source).filter(Boolean)])].sort(), [mine]);
   const tabs = useMemo(() => tabsFor(persona).map((t) => ({ ...t, count: mine.filter(t.match).length })), [persona, mine]);
   const active = tabs.find((t) => t.key === tab) || tabs[0];
 
@@ -146,7 +145,7 @@ export default function LeadsList() {
           <h1>{persona === "sales_manager" ? "All Leads" : persona === "telecaller" ? "Leads" : "My Leads"}</h1>
           <p>
             {persona === "lead_provider"
-              ? "Every lead you have submitted, with its current status."
+              ? "Every lead you have submitted."
               : persona === "telecaller"
                 ? "The shared queue - call new leads and verify them."
                 : persona === "sales"
@@ -162,14 +161,16 @@ export default function LeadsList() {
       </div>
 
       <Card flush>
-        <Tabs
-          tabs={tabs}
-          value={active.key}
-          onChange={(key) => {
-            setTab(key);
-            paged.onPage(1);
-          }}
-        />
+        {staff && (
+          <Tabs
+            tabs={tabs}
+            value={active.key}
+            onChange={(key) => {
+              setTab(key);
+              paged.onPage(1);
+            }}
+          />
+        )}
         <div className="lm-tools">
           <label className="lm-search">
             <FiSearch />
@@ -183,7 +184,7 @@ export default function LeadsList() {
           {staff && (
             <select className="lm-select" value={source} onChange={(e) => setSource(e.target.value)} aria-label="Filter by source">
               <option value="">All sources</option>
-              {SOURCES.map((s) => (
+              {sourceOptions.map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>

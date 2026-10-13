@@ -11,6 +11,7 @@ const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 const { nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead } = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -114,6 +115,9 @@ function toLead(row) {
 function canViewAllLeads(req) {
   return req.user.role === "admin" || !!req.user.permissions?.includes("CRM_VIEW_ALL_LEADS");
 }
+
+// The commercial sales executive roles: their own leads start verified and assigned to them.
+const SALES_EXECUTIVE_ROLES = ["commercial_sales", "sales"];
 
 const LEAD_WITH_CREATOR_SQL = `SELECT l.*, u.name AS created_by_name
                                  FROM crm_leads l LEFT JOIN users u ON u.id = l.created_by_user_id`;
@@ -394,8 +398,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
 // app version from before they existed can still save.
 // Reads and checks the commercial-only fields of a lead - shared by create and edit.
 // `lead` carries what the caller already read (location, referenceBy, amount, leadStatus).
-// -> { error } when something is wrong, otherwise { values }.
-function readCommercialFields(body, lead) {
+// -> { error } when something is wrong, otherwise { values }. Async: the source may come from the master.
+async function readCommercialFields(body, lead) {
   const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
   const alternatePhone = typeof body.alternate_phone === "string" ? body.alternate_phone.replace(/\D/g, "") : "";
   const leadSource = body.lead_source || null;
@@ -421,7 +425,14 @@ function readCommercialFields(body, lead) {
   if (alternatePhone && alternatePhone.length !== 10) {
     return { error: "Alternate number must be a valid 10-digit phone number" };
   }
-  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return { error: "Source of lead is required" };
+  // The fixed codes the mobile app sends, or any active source from the lead source master.
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) {
+    let master = null;
+    if (typeof leadSource === "string") {
+      [[master]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ? AND is_active = 1", [leadSource]);
+    }
+    if (!master) return { error: "Source of lead is required" };
+  }
   if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
     return { error: "A valid approximate quote is required" };
   }
@@ -433,7 +444,13 @@ function readCommercialFields(body, lead) {
 }
 
 async function createCommercialLead(req, res, lead) {
-  const read = readCommercialFields(req.body || {}, lead);
+  let read;
+  try {
+    read = await readCommercialFields(req.body || {}, lead);
+  } catch (err) {
+    console.error("CRM lead source lookup error:", err);
+    return res.status(500).json({ error: "Failed to save lead" });
+  }
   if (read.error) return res.status(400).json({ error: read.error });
   const { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude } =
     read.values;
@@ -453,7 +470,10 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const id = uuid();
-    // One transaction: the lead number, the new commercial fields, the pipeline start and the history row.
+    // A sales executive's own lead skips the telecaller: they met or know the customer, so it starts
+    // verified (QUALIFIED) and assigned to them. Every other lead joins the telecaller queue as NEW.
+    // One transaction: the lead number, the commercial fields, the pipeline start and the history rows.
+    const salesOwn = SALES_EXECUTIVE_ROLES.includes(req.user.role);
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -464,8 +484,9 @@ async function createCommercialLead(req, res, lead) {
            phone, alternate_phone, customer_email,
            house_type, service_name, plan_type, standard_amount, amount, services_requested,
            location, latitude, longitude, lead_source, reference_by, notes,
-           payment_method, payment_status, lead_status, pipeline_stage, created_by_user_id, external_ref)
-         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, 'NEW', ?, ?)`,
+           payment_method, payment_status, lead_status, pipeline_stage, assigned_sales_employee_id,
+           created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?)`,
         [
           id,
           leadNumber,
@@ -485,11 +506,16 @@ async function createCommercialLead(req, res, lead) {
           lead.referenceBy || null,
           lead.notes || null,
           lead.leadStatus,
+          salesOwn ? "QUALIFIED" : "NEW",
+          salesOwn ? req.user.id : null,
           req.user.id,
           lead.clientRef,
         ]
       );
       await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      if (salesOwn) {
+        await logLeadHistory(conn, id, "QUALIFY", { note: "Marked GENUINE - the sales executive's own lead, no telecaller call needed", changedBy: req.user.id });
+      }
       await conn.commit();
     } catch (err) {
       await conn.rollback().catch(() => {});
@@ -499,6 +525,8 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    // Best effort, after the change is saved: never holds up or fails the request.
+    notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
     res.status(201).json(toLead(created));
   } catch (err) {
     if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {
@@ -551,7 +579,7 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
     if (!existing) return res.status(404).json({ error: "Lead not found" });
 
     if (existing.lead_type === "commercial") {
-      const read = readCommercialFields(body, { location, referenceBy, amount, leadStatus });
+      const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus });
       if (read.error) return res.status(400).json({ error: read.error });
       const v = read.values;
 

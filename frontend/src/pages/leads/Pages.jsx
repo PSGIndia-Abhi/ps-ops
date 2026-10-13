@@ -60,7 +60,6 @@ export function SubmitLead() {
               ["Submitted", "Your lead reaches our telecalling team straight away."],
               ["Verified", "A telecaller calls the customer to confirm the requirement."],
               ["Sales visit", "Genuine leads get a meeting with our sales team."],
-              ["Outcome", "You see whether it converted, with feedback, in My Leads."],
             ].map(([title, text], i) => (
               <li key={title} className="lm-event" style={{ "--i": i }}>
                 <span className="lm-event-dot tone-info" style={{ "--i": i }}>
@@ -204,7 +203,7 @@ export function Meetings() {
           <Empty title="No meetings here" text="Meetings appear once a telecaller schedules one for a genuine lead." icon={<FiCalendar />} />
         ) : (
           <div key={tab}>
-            <Agenda meetings={groups[tab]} leads={leads} showOwner={everyone} showDay={tab !== "today"} />
+            <Agenda meetings={groups[tab]} leads={visibleLeads(leads, viewer)} showOwner={everyone} showDay={tab !== "today"} />
           </div>
         )}
       </Card>
