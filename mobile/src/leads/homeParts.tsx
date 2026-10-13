@@ -199,7 +199,7 @@ export function HomeBand({
           onPress={onBell}
           style={({ pressed }) => [styles.bell, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={alerts ? `Follow-ups due today, ${alerts}` : 'Follow-ups due today'}
+          accessibilityLabel={alerts ? `Notifications, ${alerts} unread` : 'Notifications'}
         >
           <BellIcon size={20} color="#FFFFFF" />
           {alerts > 0 && (

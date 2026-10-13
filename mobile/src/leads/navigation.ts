@@ -9,6 +9,8 @@ import type { PipelineStage } from './types';
  * the CRM stack's own names.
  */
 export type LeadStackParamList = {
+  /** A tap on a lead opens this first: details, contact buttons, then Manage lead / Follow-up. */
+  LeadDetail: { leadId: string };
   LeadWork: { leadId: string };
   LeadList: { group?: StageGroup } | undefined;
   LeadNew: undefined;
@@ -24,6 +26,12 @@ export type LeadStackParamList = {
   LeadMeetings: undefined;
   LeadMeeting: { meetingId: string };
   LeadTasks: undefined;
+  /** Sales manager: one day's visits by the team, with start / end times and GPS. */
+  LeadTeamVisits: undefined;
+  /** More -> Profile in the sales apps (CRM and Lead Management). */
+  LeadProfile: undefined;
+  /** The bell on Home: lead notifications, newest first. */
+  LeadNotifications: undefined;
   /** No employeeId = the signed-in user's own numbers. */
   LeadPerformance: { employeeId?: number; name?: string } | undefined;
 };

@@ -80,6 +80,13 @@ export function canSwitchToSales(role: string | null | undefined): boolean {
   return !!role && SALES_SWITCH_ROLES.includes(role.toLowerCase().trim());
 }
 
+/** A role as people read it: "Sales Manager", "Commercial Sales", "Managing Director". */
+export function displayRole(role: string | null | undefined): string {
+  const known = normalizeRole(role);
+  if (known) return roleLabel(known);
+  return (role ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */
 export function useRawRole(): string | null {
   const { user, session } = useAuth();

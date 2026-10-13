@@ -16,6 +16,7 @@ import {
   CloseIcon,
   DocumentIcon,
   PhoneIcon,
+  PersonIcon,
   PinIcon,
   SparkleIcon,
   TagIcon,
@@ -27,7 +28,7 @@ import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import { StatusBadge, toneColors, type Tone } from '../crm/ui/StatusBadge';
 import { fmtDateShort, fmtTime, initials, todayStr } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
-import { leadPersonaForRole, nextStepLabel, STAGE_META } from './stage';
+import { leadPersonaForRole, STAGE_META } from './stage';
 import type { LeadPersona, Meeting, PipelineLead, PipelineStage } from './types';
 
 /** Shared building blocks for the lead screens - same look as the CRM and Task apps (CRM theme). */
@@ -367,28 +368,74 @@ export function LeadAvatar({ name, stage }: { name: string; stage: PipelineStage
   );
 }
 
-/** One lead in a list: contact and company on the left, stage and what to do next on the right. */
+const leadRowFactory = (t: CrmTheme) => ({
+  card: {
+    flexDirection: 'row' as const,
+    backgroundColor: t.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    marginBottom: spacing.sm,
+    overflow: 'hidden' as const,
+    ...t.cardShadow,
+  },
+  pressed: { opacity: 0.9 },
+  accent: { width: 4 },
+  body: { flex: 1, paddingVertical: spacing.md, paddingLeft: spacing.md, paddingRight: spacing.sm },
+  top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  company: { ...typography.bodyMedium, fontSize: 16, color: t.textPrimary, flex: 1 },
+  amount: { ...typography.bodyMedium, color: t.textPrimary },
+  sub: { ...typography.body, color: t.textSecondary, flex: 1 },
+  bottom: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm },
+  byRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginTop: 3 },
+  by: { ...typography.caption, color: t.textMuted, flex: 1 },
+  chevron: { justifyContent: 'center' as const, paddingRight: spacing.sm },
+});
+
+/**
+ * One lead in a list, read top to bottom: the company and its quote, who to talk to, then where it
+ * stands. The coloured edge is the stage's colour, so a list scans at a glance.
+ */
 export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => void }) {
-  const { styles } = useCrmStyles(factory);
+  const { styles, theme } = useCrmStyles(leadRowFactory);
+  const { myId } = useMe();
+  const tone = (STAGE_META[lead.stage] ?? { tone: 'neutral' as Tone }).tone;
+  // Someone else's lead says who added it (a sales executive, telecaller or provider).
+  const by = lead.createdByName && lead.createdById !== myId ? lead.createdByName : '';
+  const company = lead.companyName || lead.contactPerson;
+  const sub = lead.contactPerson && lead.contactPerson !== company ? lead.contactPerson : '';
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
-      <View style={styles.row}>
-        <LeadAvatar name={lead.contactPerson || lead.companyName} stage={lead.stage} />
-        <View style={styles.rowBody}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {lead.contactPerson || lead.companyName}
-          </Text>
-          <Text style={styles.rowSub} numberOfLines={1}>
-            {lead.companyName}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${company}, ${STAGE_META[lead.stage]?.label ?? lead.stage}, ${formatINR(lead.amount)}`}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
+      <View style={[styles.accent, { backgroundColor: toneColors(theme, tone).fg }]} />
+      <View style={styles.body}>
+        <View style={styles.top}>
+          <Text style={styles.company} numberOfLines={1}>
+            {company}
           </Text>
           <Text style={styles.amount}>{formatINR(lead.amount)}</Text>
         </View>
-        <View style={styles.rowRight}>
-          <StageBadge stage={lead.stage} />
-          <Text style={styles.nextStep} numberOfLines={1}>
-            {nextStepLabel(lead.stage)}
+        {!!by && (
+          <View style={styles.byRow}>
+            <PersonIcon size={12} color={theme.textMuted} />
+            <Text style={styles.by} numberOfLines={1}>
+              Added by {by}
+            </Text>
+          </View>
+        )}
+        <View style={styles.bottom}>
+          <Text style={styles.sub} numberOfLines={1}>
+            {sub}
           </Text>
+          <StageBadge stage={lead.stage} />
         </View>
+      </View>
+      <View style={styles.chevron}>
+        <ChevronRightIcon size={16} color={theme.textMuted} />
       </View>
     </Pressable>
   );

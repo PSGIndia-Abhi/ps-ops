@@ -99,6 +99,12 @@ export async function listLeads(): Promise<Lead[]> {
   return data.map(toLead);
 }
 
+/** GET /api/crm/leads/:id - one lead, as far as the server lets this user see it. */
+export async function getLead(leadId: string): Promise<Lead> {
+  const { data } = await httpClient.get<ApiLead>(`/api/crm/leads/${leadId}`);
+  return toLead(data);
+}
+
 /** A lead as POST / PUT /api/crm/leads take it. */
 function toApiBody(input: NewLeadInput) {
   return {

@@ -6,8 +6,8 @@ import type { LeadStackParamList } from '../navigation';
 
 /**
  * New Lead for the Lead Management roles: the production commercial form (industry, designation,
- * services, GPS location, photos) without its Residential tab. A saved lead opens straight into
- * its Next Steps; one kept on the phone for lack of a connection has no server id yet, so the
+ * services, GPS location, photos) without its Residential tab. A saved lead opens on its details
+ * page; one kept on the phone for lack of a connection has no server id yet, so the
  * form just closes (the CRM outbox sends it later).
  */
 export function LeadNewCommercialScreen() {
@@ -15,7 +15,7 @@ export function LeadNewCommercialScreen() {
   return (
     <CrmNewCommercialLeadScreen
       commercialOnly
-      onCreated={(lead) => (lead.pendingSync ? navigation.goBack() : navigation.replace('LeadWork', { leadId: lead.id }))}
+      onCreated={(lead) => (lead.pendingSync ? navigation.goBack() : navigation.replace('LeadDetail', { leadId: lead.id }))}
     />
   );
 }

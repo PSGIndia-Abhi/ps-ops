@@ -52,6 +52,7 @@ function toLead(row: Row): PipelineLead {
     stage: (row.pipeline_stage as PipelineStage | null) ?? 'NEW',
     providerId: idOrNull(row.provider_id),
     createdById: idOrNull(row.created_by_user_id),
+    createdByName: str(row.created_by_name),
     telecallerId: idOrNull(row.assigned_telecaller_id),
     salesEmployeeId: idOrNull(row.assigned_sales_employee_id),
     createdAt: str(row.created_at),
@@ -230,6 +231,58 @@ export interface NewMeeting {
   notes: string;
 }
 
+/** One meeting of a lead with who it was given to - a line of the lead's visit history. */
+export type LeadVisit = Meeting & { salesName: string };
+
+/** GET /api/crm/leads/:id/meetings - every meeting of the lead, newest first. */
+export async function leadVisits(leadId: string): Promise<LeadVisit[]> {
+  const { data } = await httpClient.get<Row[]>(`/api/crm/leads/${leadId}/meetings`);
+  return data.map((row) => ({ ...toMeeting(row), salesName: str(row.sales_employee_name) }));
+}
+
+/** One visit in the sales manager's Team visits: the meeting, who it was given to and for which lead. */
+export type TeamVisit = Meeting & { salesName: string; company: string; leadNumber: string; leadBy: string };
+
+/** GET /api/crm/team-visits?date= - the team's visits on one day (sales managers only). */
+export async function teamVisits(date: string): Promise<TeamVisit[]> {
+  const { data } = await httpClient.get<Row[]>('/api/crm/team-visits', { params: { date } });
+  return data.map((row) => ({
+    ...toMeeting(row),
+    salesName: str(row.sales_employee_name),
+    company: str(row.company_name) || str(row.customer_name),
+    leadNumber: str(row.lead_number),
+    leadBy: str(row.lead_created_by_name),
+  }));
+}
+
+/** The lead's meeting that is still open (scheduled, not yet done or cancelled). */
+export interface OpenMeeting {
+  id: string;
+  /** Wall-clock 'YYYY-MM-DD' and 'HH:MM:SS'. */
+  date: string;
+  time: string;
+  type: MeetingType;
+  salesName: string;
+  started: boolean;
+}
+
+/** GET /api/crm/leads/:id/meetings/open - null when the lead has no open meeting. */
+export async function openMeeting(leadId: string): Promise<OpenMeeting | null> {
+  const { data } = await httpClient.get<{ meeting: Row | null }>(`/api/crm/leads/${leadId}/meetings/open`);
+  const m = data?.meeting;
+  if (!m) return null;
+  const [date, time] = String(m.scheduled_at ?? '').split(' ');
+  return {
+    id: String(m.id),
+    date: date ?? '',
+    time: time ?? '',
+    type: (m.meeting_type as MeetingType) ?? 'SITE_VISIT',
+    salesName: String(m.sales_employee_name ?? ''),
+    started: !!m.check_in_at,
+  };
+}
+
+/** POST /api/crm/leads/:id/meetings - 409 when the lead already has an open meeting. */
 export async function scheduleMeeting(leadId: string, m: NewMeeting): Promise<Meeting> {
   const { data } = await httpClient.post<Row>(`/api/crm/leads/${leadId}/meetings`, {
     salesEmployeeId: m.salesEmployeeId,

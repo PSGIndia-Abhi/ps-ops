@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -7,81 +7,256 @@ import {
   BriefcaseIcon,
   CalendarIcon,
   CheckCircleIcon,
+  ChevronRightIcon,
   ClockIcon,
   CloseIcon,
   DocumentIcon,
   PersonIcon,
   PhoneIcon,
+  PinIcon,
   SendIcon,
+  SparkleIcon,
   UsersIcon,
 } from '../../components/icons';
 import { formatINR, formatLeadWhen } from '../../crm/format';
+import { whatsappUrl } from '../../crm/leadHelpers';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
-import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner, SectionLabel } from '../../crm/ui/CrmScreen';
-import { StatusBadge, type Tone } from '../../crm/ui/StatusBadge';
+import { WhatsAppIcon } from '../../crm/ui/crmIcons';
+import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner } from '../../crm/ui/CrmScreen';
+import { StatusBadge, toneColors, type Tone } from '../../crm/ui/StatusBadge';
+import { fmtDateShort, fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import { actionLabel, leadActions, sourceLabel, type LeadAction } from '../stage';
-import type { PipelineLead } from '../types';
-import { ActionRow, Card, errorMessage, InfoLine, StageBadge, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
+import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
+import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
+
+const HISTORY_PREVIEW = 5;
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  card: {
+    backgroundColor: t.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...t.cardShadow,
+  },
+  cardTitle: { ...typography.overline, color: t.textMuted, marginBottom: spacing.sm },
+  sectionTitle: { ...typography.overline, color: t.textMuted, marginBottom: spacing.sm, marginTop: spacing.xs },
+
+  // Who, how much, where it stands
+  hero: { borderLeftWidth: 5, borderLeftColor: t.primary, ...t.raisedShadow },
+  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
   heroIcon: {
     width: 52,
     height: 52,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     backgroundColor: t.primarySoftBg,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
   heroText: { flex: 1 },
-  company: { ...typography.subtitle, color: t.textPrimary },
-  contact: { ...typography.caption, color: t.textMuted, marginTop: 2 },
-  heroFoot: {
+  company: { ...typography.title, color: t.textPrimary },
+  contactRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 3 },
+  contact: { ...typography.body, color: t.textSecondary, flex: 1 },
+  quoteRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
     marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: t.border,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   quoteLabel: { ...typography.caption, color: t.textMuted },
   quote: { ...typography.title, color: t.textPrimary },
-  callButton: { marginBottom: spacing.md },
-  viewOnly: { ...typography.caption, color: t.textMuted },
-  quoteRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingVertical: spacing.xs },
+  progress: { marginTop: spacing.md },
+  progressBar: { flexDirection: 'row' as const, gap: 4 },
+  progressSeg: { flex: 1, height: 6, borderRadius: 3, backgroundColor: t.border },
+  progressDone: { backgroundColor: t.success },
+  progressNow: { backgroundColor: t.primary },
+  progressClosed: { backgroundColor: t.danger },
+  progressText: { ...typography.caption, color: t.textMuted, marginTop: 6 },
+
+  // Contact buttons
+  contactBtns: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.lg },
+  contactBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: radii.lg,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.xs,
+  },
+  contactCall: { backgroundColor: t.primary },
+  contactWa: { backgroundColor: '#25D366' },
+  contactPressed: { opacity: 0.85 },
+  contactLabel: { ...typography.captionMedium, color: '#FFFFFF' },
+
+  // The recommended next step
+  primary: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: t.primary,
+    ...t.raisedShadow,
+  },
+  primaryIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  primaryText: { flex: 1 },
+  primaryKicker: { ...typography.overline, color: 'rgba(255,255,255,0.8)' },
+  primaryTitle: { ...typography.subtitle, color: '#FFFFFF', marginTop: 2 },
+  primaryHint: { ...typography.caption, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+
+  // The other steps
+  grid: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, justifyContent: 'space-between' as const, rowGap: spacing.sm, marginBottom: spacing.md },
+  tile: {
+    width: '48.5%' as const,
+    minHeight: 62,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    ...t.cardShadow,
+  },
+  tileIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center' as const, justifyContent: 'center' as const },
+  tileTitle: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
+  pressed: { opacity: 0.85 },
+  busy: { opacity: 0.5 },
+  closeRow: { flexDirection: 'row' as const, justifyContent: 'center' as const, gap: spacing.lg, marginBottom: spacing.lg },
+  closeBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  closeText: { ...typography.bodyMedium, color: t.danger },
+  waiting: {
+    ...typography.body,
+    color: t.textSecondary,
+    textAlign: 'center' as const,
+    backgroundColor: t.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderStyle: 'dashed' as const,
+    borderColor: t.border,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+
+  // Customer + quotations
+  infoRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, paddingVertical: 6 },
+  infoLabel: { ...typography.caption, color: t.textMuted },
+  infoValue: { ...typography.bodyMedium, color: t.textPrimary },
+  quoteItem: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.sm },
+  quoteDivider: { borderTopWidth: 1, borderTopColor: t.border },
+  quoteIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: t.accentBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  quoteBody: { flex: 1 },
   quoteNumber: { ...typography.bodyMedium, color: t.textPrimary },
-  quoteMeta: { ...typography.caption, color: t.textMuted },
-  entry: { flexDirection: 'row' as const, gap: spacing.sm, paddingVertical: spacing.xs },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: t.primary, marginTop: 5 },
-  entryBody: { flex: 1 },
+  quoteMeta: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+
+  // Activity
+  entry: { flexDirection: 'row' as const, gap: spacing.sm },
+  entryRail: { alignItems: 'center' as const, width: 32 },
+  entryIcon: { width: 32, height: 32, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
+  entryLine: { flex: 1, width: 2, backgroundColor: t.border, marginVertical: 2 },
+  entryBody: { flex: 1, paddingBottom: spacing.md },
   entryTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  entryNote: { ...typography.caption, color: t.textSecondary, marginTop: 2 },
-  entryMeta: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  entryNote: { ...typography.caption, color: t.textSecondary, marginTop: 2, lineHeight: 18 },
+  entryMeta: { ...typography.caption, color: t.textMuted, marginTop: 3 },
+  showAll: { alignSelf: 'center' as const, paddingVertical: spacing.xs, paddingHorizontal: spacing.md },
+  showAllText: { ...typography.captionMedium, color: t.primary },
+  empty: { ...typography.caption, color: t.textMuted },
 });
 
-const ACTION_META: Record<LeadAction, { title: string; hint: string; tone: Tone; icon: (c: string) => React.ReactNode }> = {
+type IconFn = (c: string) => React.ReactNode;
+
+const ACTION_META: Record<LeadAction, { title: string; hint: string; tone: Tone; icon: IconFn }> = {
   claim: { title: 'Start verification', hint: 'Take this lead to call and verify', tone: 'info', icon: (c) => <PersonIcon size={20} color={c} /> },
-  call: { title: 'Log a call', hint: 'Save the call outcome and notes', tone: 'info', icon: (c) => <PhoneIcon size={20} color={c} /> },
+  call: { title: 'Log a call', hint: 'Save how the call went', tone: 'info', icon: (c) => <PhoneIcon size={20} color={c} /> },
   genuine: { title: 'Mark as genuine', hint: 'Qualified - ready for a sales meeting', tone: 'success', icon: (c) => <CheckCircleIcon size={20} color={c} /> },
-  needInfo: { title: 'Need more information', hint: 'Keep it open and call again later', tone: 'warning', icon: (c) => <AlertCircleIcon size={20} color={c} /> },
-  meeting: { title: 'Schedule meeting', hint: 'Assign a sales person and set the time', tone: 'accent', icon: (c) => <CalendarIcon size={20} color={c} /> },
-  followUp: { title: 'Schedule follow-up', hint: 'Creates a reminder task for you', tone: 'info', icon: (c) => <ClockIcon size={20} color={c} /> },
-  quote: { title: 'Upload quotation', hint: 'Attach the quotation PDF and its amount', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
+  needInfo: { title: 'Need more info', hint: 'Keep it open and call again later', tone: 'warning', icon: (c) => <AlertCircleIcon size={20} color={c} /> },
+  meeting: { title: 'Schedule meeting', hint: 'Pick the sales person and the time', tone: 'accent', icon: (c) => <CalendarIcon size={20} color={c} /> },
+  followUp: { title: 'Follow-up', hint: 'Set a reminder to get back to them', tone: 'warning', icon: (c) => <ClockIcon size={20} color={c} /> },
+  quote: { title: 'Upload quotation', hint: 'Attach the quotation PDF and amount', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
   convert: { title: 'Convert to customer', hint: 'Creates the customer record', tone: 'success', icon: (c) => <UsersIcon size={20} color={c} /> },
-  lost: { title: 'Mark as lost', hint: 'Close this opportunity with a reason', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
+  lost: { title: 'Mark as lost', hint: 'Close with a reason', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
   reject: { title: 'Reject lead', hint: 'Not genuine - a reason is required', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
-  feedback: { title: 'Send feedback to provider', hint: 'Visible to the lead provider', tone: 'neutral', icon: (c) => <SendIcon size={20} color={c} /> },
+  feedback: { title: 'Feedback to provider', hint: 'Visible to the lead provider', tone: 'neutral', icon: (c) => <SendIcon size={20} color={c} /> },
 };
 
+/** The step a lead at this stage most likely needs next - shown as the big card. */
+const RECOMMENDED: Partial<Record<PipelineStage, LeadAction[]>> = {
+  NEW: ['claim', 'call'],
+  TO_CALL: ['call'],
+  NEED_MORE_INFO: ['call'],
+  QUALIFIED: ['meeting'],
+  MEETING_SCHEDULED: ['followUp', 'call'],
+  VISIT_COMPLETED: ['quote'],
+  QUOTATION_SENT: ['convert'],
+};
+const CLOSING: LeadAction[] = ['lost', 'reject'];
+
+/** The road a commercial lead travels, for the progress bar. */
+const JOURNEY: { label: string; stages: PipelineStage[] }[] = [
+  { label: 'New', stages: ['NEW', 'TO_CALL', 'NEED_MORE_INFO'] },
+  { label: 'Verified', stages: ['QUALIFIED'] },
+  { label: 'Meeting', stages: ['MEETING_SCHEDULED'] },
+  { label: 'Visited', stages: ['VISIT_COMPLETED'] },
+  { label: 'Quoted', stages: ['QUOTATION_SENT'] },
+  { label: 'Won', stages: ['WON', 'CONVERTED'] },
+];
+
+/** History rows in plain words. */
+const HISTORY_META: Record<string, { title: string; tone: Tone; icon: IconFn }> = {
+  CREATE: { title: 'Lead added', tone: 'info', icon: (c) => <SparkleIcon size={15} color={c} /> },
+  ASSIGN_TELECALLER: { title: 'Picked up for verification', tone: 'info', icon: (c) => <PersonIcon size={15} color={c} /> },
+  CALL_LOGGED: { title: 'Call logged', tone: 'info', icon: (c) => <PhoneIcon size={15} color={c} /> },
+  QUALIFY: { title: 'Verified as genuine', tone: 'success', icon: (c) => <CheckCircleIcon size={15} color={c} /> },
+  REJECT: { title: 'Marked not genuine', tone: 'danger', icon: (c) => <CloseIcon size={15} color={c} /> },
+  MEETING_SCHEDULED: { title: 'Meeting scheduled', tone: 'accent', icon: (c) => <CalendarIcon size={15} color={c} /> },
+  MEETING_RESCHEDULED: { title: 'Meeting moved', tone: 'accent', icon: (c) => <CalendarIcon size={15} color={c} /> },
+  MEETING_CANCELLED: { title: 'Meeting cancelled', tone: 'neutral', icon: (c) => <CloseIcon size={15} color={c} /> },
+  VISIT_CHECK_IN: { title: 'Visit started', tone: 'accent', icon: (c) => <PinIcon size={15} color={c} /> },
+  VISIT_COMPLETED: { title: 'Visit completed', tone: 'accent', icon: (c) => <PinIcon size={15} color={c} /> },
+  FOLLOW_UP_SCHEDULED: { title: 'Follow-up set', tone: 'warning', icon: (c) => <ClockIcon size={15} color={c} /> },
+  QUOTATION_SENT: { title: 'Quotation sent', tone: 'accent', icon: (c) => <DocumentIcon size={15} color={c} /> },
+  CONVERTED: { title: 'Converted to customer', tone: 'success', icon: (c) => <UsersIcon size={15} color={c} /> },
+  MARK_LOST: { title: 'Marked lost', tone: 'danger', icon: (c) => <CloseIcon size={15} color={c} /> },
+  FEEDBACK_SENT: { title: 'Feedback sent to provider', tone: 'neutral', icon: (c) => <SendIcon size={15} color={c} /> },
+};
+
+const historyFallbackIcon: IconFn = (c) => <ClockIcon size={15} color={c} />;
+
+/** Server notes in plain words: dates read as dates, raw GPS as "location recorded". */
+function humanNote(note: string): string {
+  const text = note
+    .replace(/\bat -?\d+\.\d+\s*,\s*-?\d+\.\d+/g, 'location recorded')
+    .replace(/\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?\b/g, (_m, d: string, t: string) => `${fmtDateShort(d)}, ${fmtTime(t)}`)
+    .replace(/\bSubmitted by user #\d+\b/, '')
+    .trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /**
- * One commercial lead in the pipeline: who it is, where it stands, what can be
- * done next, its quotations and its full history. The single screen every lead
- * role works a lead from.
+ * Manage lead: one commercial lead's pipeline - where it stands, the step it needs next (big
+ * and obvious), every other step it allows, its quotations and its history. Lead details live
+ * on the screen before this one.
  */
 export function LeadWorkScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
@@ -91,6 +266,7 @@ export function LeadWorkScreen() {
   const [busy, setBusy] = useState<LeadAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   const loader = useCallback(async () => {
     const lead = await api.getLead(leadId);
@@ -155,12 +331,23 @@ export function LeadWorkScreen() {
     }
   };
 
+  const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
+
   const lead = data?.lead;
   const actions = lead ? leadActions(lead, persona, myId) : [];
+  const recommended = lead ? (RECOMMENDED[lead.stage] ?? []).find((a) => actions.includes(a)) ?? actions.find((a) => !CLOSING.includes(a)) : undefined;
+  const others = actions.filter((a) => a !== recommended && !CLOSING.includes(a));
+  const closing = actions.filter((a) => CLOSING.includes(a));
+
+  const journeyIndex = lead ? JOURNEY.findIndex((s) => s.stages.includes(lead.stage)) : -1;
+  const closedBadly = !!lead && isTerminal(lead.stage) && journeyIndex === -1;
+
+  const history = data ? [...data.timeline].reverse() : [];
+  const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
-      <TopBar title={lead?.leadNumber || 'Lead'} subtitle={lead?.companyName} onBack={() => navigation.goBack()} />
+      <TopBar title="Manage lead" subtitle={lead?.leadNumber || undefined} onBack={() => navigation.goBack()} />
       <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
@@ -168,8 +355,9 @@ export function LeadWorkScreen() {
 
         {loading && !lead && (
           <>
-            <CrmSkeleton height={140} radius={radii.lg} style={{ marginBottom: spacing.md }} />
-            <CrmSkeleton height={220} radius={radii.lg} />
+            <CrmSkeleton height={190} radius={radii.xl} style={{ marginBottom: spacing.md }} />
+            <CrmSkeleton height={96} radius={radii.xl} style={{ marginBottom: spacing.md }} />
+            <CrmSkeleton height={200} radius={radii.xl} />
           </>
         )}
 
@@ -177,7 +365,8 @@ export function LeadWorkScreen() {
 
         {lead && (
           <>
-            <Card>
+            {/* Who, how much, where it stands */}
+            <View style={[styles.card, styles.hero]}>
               <View style={styles.heroTop}>
                 <View style={styles.heroIcon}>
                   <BriefcaseIcon size={26} color={theme.primary} />
@@ -186,121 +375,201 @@ export function LeadWorkScreen() {
                   <Text style={styles.company} numberOfLines={2}>
                     {lead.companyName}
                   </Text>
-                  <Text style={styles.contact} numberOfLines={1}>
-                    {lead.contactPerson}
-                  </Text>
+                  {!!lead.contactPerson && (
+                    <View style={styles.contactRow}>
+                      <PersonIcon size={15} color={theme.textMuted} />
+                      <Text style={styles.contact} numberOfLines={1}>
+                        {lead.contactPerson}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
-              <View style={styles.heroFoot}>
+              <View style={styles.quoteRow}>
                 <View>
                   <Text style={styles.quoteLabel}>Approximate quote</Text>
                   <Text style={styles.quote}>{formatINR(lead.amount)}</Text>
                 </View>
                 <StageBadge stage={lead.stage} />
               </View>
-            </Card>
-
-            <PrimaryButton
-              label={`Call ${lead.contactPerson || 'customer'}`}
-              icon={<PhoneIcon size={18} color={theme.textOnPrimary} />}
-              onPress={() => Linking.openURL(`tel:${lead.phone}`).catch(() => setActionError('This phone cannot place calls.'))}
-              style={styles.callButton}
-            />
-
-            <SectionLabel>NEXT STEP</SectionLabel>
-            <Card>
-              {actions.length === 0 ? (
-                <Text style={styles.viewOnly}>
-                  {lead.stage === 'NEW'
-                    ? 'Waiting for a telecaller to verify this lead.'
-                    : 'No actions available - this lead is closed or is being handled by someone else.'}
-                </Text>
-              ) : (
-                actions.map((action, i) => {
-                  const meta = ACTION_META[action];
-                  return (
-                    <ActionRow
-                      key={action}
-                      icon={meta.icon}
-                      title={busy === action ? 'Saving…' : meta.title}
-                      hint={meta.hint}
-                      tone={meta.tone}
-                      divider={i > 0}
-                      disabled={busy !== null}
-                      onPress={() => onAction(action, lead)}
+              <View style={styles.progress}>
+                <View style={styles.progressBar}>
+                  {JOURNEY.map((step, i) => (
+                    <View
+                      key={step.label}
+                      style={[
+                        styles.progressSeg,
+                        closedBadly ? styles.progressClosed : i < journeyIndex ? styles.progressDone : i === journeyIndex ? styles.progressNow : null,
+                        i === journeyIndex && journeyIndex === JOURNEY.length - 1 && styles.progressDone,
+                      ]}
                     />
-                  );
-                })
-              )}
-            </Card>
+                  ))}
+                </View>
+                <Text style={styles.progressText}>
+                  {closedBadly ? 'Closed' : `Step ${journeyIndex + 1} of ${JOURNEY.length} · ${JOURNEY[journeyIndex]?.label ?? ''}`}
+                </Text>
+              </View>
+            </View>
+
+            {/* Reach the customer */}
+            <View style={styles.contactBtns}>
+              <Pressable
+                onPress={() => open(`tel:${lead.phone}`, 'This phone cannot place calls.')}
+                disabled={!lead.phone}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${lead.contactPerson || 'customer'}`}
+                style={({ pressed }) => [styles.contactBtn, styles.contactCall, pressed && styles.contactPressed]}
+              >
+                <PhoneIcon size={17} color="#FFFFFF" />
+                <Text style={styles.contactLabel}>Call</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => open(whatsappUrl(lead.phone), 'Could not open WhatsApp on this phone.')}
+                disabled={!lead.phone}
+                accessibilityRole="button"
+                accessibilityLabel={`WhatsApp ${lead.contactPerson || 'customer'}`}
+                style={({ pressed }) => [styles.contactBtn, styles.contactWa, pressed && styles.contactPressed]}
+              >
+                <WhatsAppIcon size={18} color="#FFFFFF" />
+                <Text style={styles.contactLabel}>WhatsApp</Text>
+              </Pressable>
+            </View>
+
+            {/* What to do next */}
+            <Text style={styles.sectionTitle}>NEXT STEP</Text>
+            {actions.length === 0 ? (
+              <Text style={styles.waiting}>
+                {lead.stage === 'NEW'
+                  ? 'Waiting for a telecaller to verify this lead.'
+                  : isTerminal(lead.stage)
+                  ? 'This lead is closed.'
+                  : 'Someone else is handling this lead right now.'}
+              </Text>
+            ) : (
+              <>
+                {recommended && (
+                  <Pressable
+                    onPress={() => onAction(recommended, lead)}
+                    disabled={busy !== null}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.primary, (pressed || busy === recommended) && styles.pressed]}
+                    testID="next-step"
+                  >
+                    <View style={styles.primaryIcon}>{ACTION_META[recommended].icon('#FFFFFF')}</View>
+                    <View style={styles.primaryText}>
+                      <Text style={styles.primaryKicker}>RECOMMENDED</Text>
+                      <Text style={styles.primaryTitle}>{busy === recommended ? 'Saving...' : ACTION_META[recommended].title}</Text>
+                      <Text style={styles.primaryHint}>{ACTION_META[recommended].hint}</Text>
+                    </View>
+                    <ChevronRightIcon size={20} color="#FFFFFF" />
+                  </Pressable>
+                )}
+                {others.length > 0 && (
+                  <View style={styles.grid}>
+                    {others.map((action) => {
+                      const meta = ACTION_META[action];
+                      const c = toneColors(theme, meta.tone);
+                      return (
+                        <Pressable
+                          key={action}
+                          onPress={() => onAction(action, lead)}
+                          disabled={busy !== null}
+                          accessibilityRole="button"
+                          accessibilityLabel={meta.title}
+                          style={({ pressed }) => [styles.tile, pressed && styles.pressed, busy === action && styles.busy]}
+                        >
+                          <View style={[styles.tileIcon, { backgroundColor: c.bg }]}>{meta.icon(c.fg)}</View>
+                          <Text style={styles.tileTitle}>{busy === action ? 'Saving...' : meta.title}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+                {closing.length > 0 && (
+                  <View style={styles.closeRow}>
+                    {closing.map((action) => (
+                      <Pressable key={action} onPress={() => onAction(action, lead)} disabled={busy !== null} accessibilityRole="button" style={styles.closeBtn}>
+                        <CloseIcon size={16} color={theme.danger} />
+                        <Text style={styles.closeText}>{ACTION_META[action].title}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
 
             {data?.conversion && (
-              <>
-                <SectionLabel>CUSTOMER</SectionLabel>
-                <Card>
-                  <InfoLine label="Customer" value={data.conversion.companyName} />
-                  <InfoLine label="Customer ID" value={data.conversion.companyId} />
-                  <InfoLine label="Converted by" value={data.conversion.convertedBy} />
-                </Card>
-              </>
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>CUSTOMER</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Customer</Text>
+                  <Text style={styles.infoValue}>{data.conversion.companyName}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Customer ID</Text>
+                  <Text style={styles.infoValue}>{data.conversion.companyId}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Converted by</Text>
+                  <Text style={styles.infoValue}>{data.conversion.convertedBy}</Text>
+                </View>
+              </View>
             )}
-
-            <SectionLabel>LEAD DETAILS</SectionLabel>
-            <Card>
-              <InfoLine label="Phone" value={lead.phone} onPress={() => Linking.openURL(`tel:${lead.phone}`).catch(() => {})} />
-              {!!lead.alternatePhone && (
-                <InfoLine label="Alternate" value={lead.alternatePhone} onPress={() => Linking.openURL(`tel:${lead.alternatePhone}`).catch(() => {})} />
-              )}
-              {!!lead.email && <InfoLine label="Email" value={lead.email} onPress={() => Linking.openURL(`mailto:${lead.email}`).catch(() => {})} />}
-              <InfoLine
-                label="Address"
-                value={lead.address}
-                onPress={lead.address ? () => Linking.openURL(`geo:0,0?q=${encodeURIComponent(lead.address)}`).catch(() => {}) : undefined}
-              />
-              <InfoLine label="Source" value={lead.providerId ? `${sourceLabel(lead.source)} (lead provider)` : sourceLabel(lead.source)} />
-              <InfoLine label="Requirement" value={lead.notes} />
-              <InfoLine label="Created" value={formatLeadWhen(lead.createdAt)} />
-            </Card>
 
             {data && data.quotations.length > 0 && (
-              <>
-                <SectionLabel>QUOTATIONS</SectionLabel>
-                <Card>
-                  {data.quotations.map((q) => (
-                    <View key={q.id} style={styles.quoteRow}>
-                      <View>
-                        <Text style={styles.quoteNumber}>{q.number}</Text>
-                        <Text style={styles.quoteMeta}>
-                          {formatINR(q.total)}
-                          {q.hasPdf ? ' · PDF attached' : ''}
-                        </Text>
-                      </View>
-                      <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>QUOTATIONS</Text>
+                {data.quotations.map((q, i) => (
+                  <View key={q.id} style={[styles.quoteItem, i > 0 && styles.quoteDivider]}>
+                    <View style={styles.quoteIcon}>
+                      <DocumentIcon size={18} color={theme.accent} />
                     </View>
-                  ))}
-                </Card>
-              </>
+                    <View style={styles.quoteBody}>
+                      <Text style={styles.quoteNumber}>{q.number}</Text>
+                      <Text style={styles.quoteMeta}>
+                        {formatINR(q.total)}
+                        {q.sentAt ? ` · ${formatLeadWhen(q.sentAt)}` : ''}
+                        {q.hasPdf ? ' · PDF' : ''}
+                      </Text>
+                    </View>
+                    <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
+                  </View>
+                ))}
+              </View>
             )}
 
-            <SectionLabel>HISTORY</SectionLabel>
-            <Card>
-              {data && data.timeline.length === 0 && <Text style={styles.viewOnly}>No activity yet.</Text>}
-              {/* The server sends oldest first; the latest activity is what matters most on a phone. */}
-              {data &&
-                [...data.timeline].reverse().map((entry) => (
+            {/* What has happened, newest first */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>ACTIVITY</Text>
+              {history.length === 0 && <Text style={styles.empty}>No activity yet.</Text>}
+              {shownHistory.map((entry: TimelineEntry, i) => {
+                const meta = HISTORY_META[entry.action] ?? { title: actionLabel(entry.action), tone: 'neutral' as Tone, icon: historyFallbackIcon };
+                const c = toneColors(theme, meta.tone);
+                const note = entry.note ? humanNote(entry.note) : '';
+                const last = i === shownHistory.length - 1;
+                return (
                   <View key={entry.id} style={styles.entry}>
-                    <View style={styles.dot} />
+                    <View style={styles.entryRail}>
+                      <View style={[styles.entryIcon, { backgroundColor: c.bg }]}>{meta.icon(c.fg)}</View>
+                      {!last && <View style={styles.entryLine} />}
+                    </View>
                     <View style={styles.entryBody}>
-                      <Text style={styles.entryTitle}>{actionLabel(entry.action)}</Text>
-                      {!!entry.note && <Text style={styles.entryNote}>{entry.note}</Text>}
+                      <Text style={styles.entryTitle}>{meta.title}</Text>
+                      {!!note && <Text style={styles.entryNote}>{note}</Text>}
                       <Text style={styles.entryMeta}>
                         {formatLeadWhen(entry.at)}
                         {entry.by ? ` · ${entry.by}` : ''}
                       </Text>
                     </View>
                   </View>
-                ))}
-            </Card>
+                );
+              })}
+              {history.length > HISTORY_PREVIEW && (
+                <Pressable onPress={() => setShowAllHistory((v) => !v)} accessibilityRole="button" style={styles.showAll}>
+                  <Text style={styles.showAllText}>{showAllHistory ? 'Show less' : `Show all ${history.length} updates`}</Text>
+                </Pressable>
+              )}
+            </View>
           </>
         )}
       </CrmScreen>

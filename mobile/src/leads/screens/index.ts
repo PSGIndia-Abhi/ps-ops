@@ -9,11 +9,16 @@ import {
   LeadMeetingNewScreen,
   LeadQuoteScreen,
 } from './LeadActionScreens';
-import { LeadListScreen, LeadTasksScreen } from './LeadBrowseScreens';
+import { LeadListScreen } from './LeadBrowseScreens';
+import { LeadTasksScreen } from './LeadTodayScreen';
+import { LeadDetailScreen } from './LeadDetailScreen';
 import { LeadNewCommercialScreen } from './LeadNewCommercialScreen';
+import { LeadNotificationsScreen } from './LeadNotificationsScreen';
+import { LeadProfileScreen } from './LeadProfileScreen';
 import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
 import { PerformanceScreen } from './ReportScreens';
+import { TeamVisitsScreen } from './TeamVisitsScreen';
 
 /**
  * Every pushed lead screen, in one list, so the two navigators that host them
@@ -25,6 +30,7 @@ export const LEAD_STACK_SCREENS: {
   /** Forms slide up like the CRM's New Lead form. */
   modal?: boolean;
 }[] = [
+  { name: 'LeadDetail', component: LeadDetailScreen },
   { name: 'LeadWork', component: LeadWorkScreen },
   { name: 'LeadList', component: LeadListScreen },
   // The production commercial form (see LeadNewCommercialScreen).
@@ -40,4 +46,7 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadMeeting', component: MeetingScreen },
   { name: 'LeadTasks', component: LeadTasksScreen },
   { name: 'LeadPerformance', component: PerformanceScreen },
+  { name: 'LeadNotifications', component: LeadNotificationsScreen },
+  { name: 'LeadProfile', component: LeadProfileScreen },
+  { name: 'LeadTeamVisits', component: TeamVisitsScreen },
 ];

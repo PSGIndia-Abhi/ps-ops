@@ -2,10 +2,9 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
-import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
 import { CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
 import type { LeadStackParamList } from '../../leads/navigation';
-import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
@@ -101,7 +100,6 @@ function MenuRow({ icon, label, onPress, soon, danger, divider }: MenuRowProps) 
 }
 
 export function CrmMoreScreen() {
-  const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
   // The lead screens live on whichever stack hosts this screen (CRM or Lead Management).
   const leadNavigation = useNavigation<NavigationProp<LeadStackParamList>>();
   const { user, logout } = useAuth();
@@ -111,7 +109,7 @@ export function CrmMoreScreen() {
   const name = user?.name ?? 'Account';
   // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
   // lead roles such as "commercial_sales" read as "Commercial Sales".
-  const roleText = role ? roleLabel(role) : (rawRole ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const roleText = role ? roleLabel(role) : displayRole(rawRole);
 
   return (
     <CrmScreen>
@@ -138,7 +136,7 @@ export function CrmMoreScreen() {
         <MenuRow
           icon={<PersonIcon size={18} color={theme.primary} />}
           label="Profile"
-          onPress={() => navigation.navigate('Profile')}
+          onPress={() => leadNavigation.navigate('LeadProfile')}
         />
         <MenuRow icon={<SettingsIcon size={18} color={theme.textMuted} />} label="Settings" soon divider />
       </View>

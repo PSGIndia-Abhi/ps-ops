@@ -6,13 +6,14 @@ import { errorCodes, isErrorWithCode, pick, types } from '@react-native-document
 import { CalendarIcon, ClockIcon, DocumentIcon, PersonIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
-import { CrmErrorBanner, CrmScreen } from '../../crm/ui/CrmScreen';
+import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { SelectField } from '../../crm/ui/SelectField';
 import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { spacing, typography } from '../../theme';
+import { refreshReminders } from '../../reminders-engine/useReminders';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
@@ -34,6 +35,20 @@ const factory = (t: CrmTheme) => ({
   switchLabel: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
   gap: { height: spacing.md },
   notes: { minHeight: 96, textAlignVertical: 'top' as const },
+  busyCard: { alignItems: 'center' as const, paddingVertical: spacing.lg },
+  busyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: t.accentBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: spacing.md,
+  },
+  busyTitle: { ...typography.subtitle, color: t.textPrimary, textAlign: 'center' as const },
+  busyWhen: { ...typography.bodyMedium, color: t.textPrimary, textAlign: 'center' as const, marginTop: spacing.sm },
+  busyMeta: { ...typography.body, color: t.textSecondary, textAlign: 'center' as const, marginTop: 2 },
+  busyHelp: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.md, lineHeight: 18 },
 });
 
 function FormShell({
@@ -81,6 +96,8 @@ function useSubmit() {
     setError(null);
     try {
       await work();
+      // A meeting / follow-up set, or a lead closed: re-arm its reminders now.
+      refreshReminders();
       navigation.goBack();
     } catch (err) {
       setError(errorMessage(err, 'Could not save. Check your connection and try again.'));
@@ -265,6 +282,21 @@ export function LeadMeetingNewScreen() {
   const [address, setAddress] = useState(leadAddress);
   const [notes, setNotes] = useState('');
   const [sheet, setSheet] = useState<'date' | 'time' | 'person' | null>(null);
+  // A lead has one open meeting at a time: undefined while checking, null when there is none.
+  const [existing, setExisting] = useState<api.OpenMeeting | null | undefined>(undefined);
+  const navigation = useNavigation<Nav>();
+  const { styles } = useCrmStyles(factory);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .openMeeting(leadId)
+      .then((m) => alive && setExisting(m))
+      .catch(() => alive && setExisting(null));
+    return () => {
+      alive = false;
+    };
+  }, [leadId]);
 
   useEffect(() => {
     let alive = true;
@@ -287,6 +319,50 @@ export function LeadMeetingNewScreen() {
       await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: address.trim(), notes: notes.trim() });
     });
   };
+
+  if (existing === undefined) {
+    return (
+      <LeadScreen edges={['top', 'bottom']}>
+        <TopBar title="Schedule meeting" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <CrmScreen edges={[]} transparent contentStyle={styles.body}>
+          <CrmSkeleton height={64} radius={16} />
+          <View style={styles.gap} />
+          <CrmSkeleton height={64} radius={16} />
+        </CrmScreen>
+      </LeadScreen>
+    );
+  }
+
+  if (existing) {
+    const office = existing.type === 'OFFICE';
+    return (
+      <LeadScreen edges={['top', 'bottom']}>
+        <TopBar title="Schedule meeting" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <CrmScreen edges={[]} transparent contentStyle={styles.body}>
+          <Card>
+            <View style={styles.busyCard}>
+              <View style={styles.busyIcon}>
+                <CalendarIcon size={30} color={theme.accent} />
+              </View>
+              <Text style={styles.busyTitle}>{existing.started ? 'A visit is in progress' : 'A meeting is already scheduled'}</Text>
+              <Text style={styles.busyWhen}>
+                {office ? 'Office meeting' : 'Site visit'} · {fmtDateShort(existing.date)}
+                {existing.time ? `, ${fmtTime(existing.time)}` : ''}
+              </Text>
+              {!!existing.salesName && <Text style={styles.busyMeta}>with {existing.salesName}</Text>}
+              <Text style={styles.busyHelp}>
+                A lead can have one open meeting. Complete, reschedule or cancel this one before setting a new one.
+              </Text>
+            </View>
+          </Card>
+          <View style={styles.gap} />
+          <PrimaryButton label="Open meeting" onPress={() => navigation.replace('LeadMeeting', { meetingId: existing.id })} />
+          <View style={styles.gap} />
+          <PrimaryButton label="Back" variant="secondary" onPress={() => navigation.goBack()} />
+        </CrmScreen>
+      </LeadScreen>
+    );
+  }
 
   return (
     <FormShell title="Schedule meeting" subtitle={name} error={error} submitLabel="Schedule meeting" onSubmit={onSave} saving={saving}>

@@ -3,7 +3,7 @@ import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { httpClient } from '../../api/httpClient';
-import { ChevronRightIcon, UsersIcon } from '../../components/icons';
+import { ChevronRightIcon, PinIcon, UsersIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -33,6 +33,7 @@ const factory = (t: CrmTheme) => ({
   },
   avatarText: { ...typography.bodyMedium, color: t.primary },
   personBody: { flex: 1 },
+  visitsIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center' as const, justifyContent: 'center' as const },
   personName: { ...typography.bodyMedium, color: t.textPrimary },
   personRole: { ...typography.caption, color: t.textMuted, marginTop: 2 },
 });
@@ -154,7 +155,25 @@ export function TeamScreen() {
         keyExtractor={(p) => String(p.id)}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
-        ListHeaderComponent={<CrmErrorBanner message={error} onRetry={reload} />}
+        ListHeaderComponent={
+          <>
+            <CrmErrorBanner message={error} onRetry={reload} />
+            <Pressable accessibilityRole="button" onPress={() => navigation.navigate('LeadTeamVisits')} style={({ pressed }) => pressed && { opacity: 0.75 }}>
+              <Card>
+                <View style={styles.person}>
+                  <View style={[styles.visitsIcon, { backgroundColor: theme.accentBg }]}>
+                    <PinIcon size={20} color={theme.accent} />
+                  </View>
+                  <View style={styles.personBody}>
+                    <Text style={styles.personName}>Team visits</Text>
+                    <Text style={styles.personRole}>Who visited where today - start, end and GPS</Text>
+                  </View>
+                  <ChevronRightIcon size={16} color={theme.textMuted} />
+                </View>
+              </Card>
+            </Pressable>
+          </>
+        }
         ListEmptyComponent={
           loading ? (
             <CrmSkeleton height={76} radius={radii.lg} />
