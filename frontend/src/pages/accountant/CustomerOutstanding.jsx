@@ -1,9 +1,11 @@
 import { Fragment, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { FiChevronDown, FiChevronRight, FiDownload, FiPlusCircle } from "react-icons/fi";
+import { useLocation, useNavigate } from "react-router-dom";
+import { FiCalendar, FiChevronDown, FiChevronRight, FiDownload, FiPlus, FiPlusCircle } from "react-icons/fi";
+import FollowUpModal from "../../components/accountant/FollowUpModal";
 import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
+import { byDue, daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
+import { showDue } from "./followups";
 import { exportCsv } from "./exportCsv";
 
 const SORTS = [
@@ -30,15 +32,27 @@ function compare(sort) {
 
 export default function CustomerOutstanding() {
   const navigate = useNavigate();
-  const { invoices, payments, loading, error, reload } = useAccountantData();
-  const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
+  const location = useLocation();
+  const { invoices, payments, followUps, loading, error, reload } = useAccountantData();
+  // "View Outstanding" on a follow-up opens this page already searched to that customer.
+  const [search, setSearch] = useState(location.state?.search || "");
+  const [followUpFor, setFollowUpFor] = useState(""); // customer id the Create Follow-up dialog is open for
+  const [view, setView] = useState("");
   const [sort, setSort] = useState("OUTSTANDING");
   const [minAmount, setMinAmount] = useState("");
   const [open, setOpen] = useState(null); // id of the expanded row
 
   const customers = useMemo(() => groupByCustomer(invoices, payments), [invoices, payments]);
   const withDues = useMemo(() => customers.filter((c) => c.outstanding > 0), [customers]);
+  // Each customer's next open follow-up (their own, or one on any of their invoices), soonest first.
+  const nextFollowUp = useMemo(() => {
+    const map = new Map();
+    for (const f of followUps.filter((x) => x.active).sort(byDue)) {
+      if (f.customer_id && !map.has(f.customer_id)) map.set(f.customer_id, f);
+    }
+    return map;
+  }, [followUps]);
   const hasData = withDues.length > 0;
   const customerOptions = [...withDues].sort(compare("NAME"));
 
@@ -75,11 +89,12 @@ export default function CustomerOutstanding() {
       { header: "Oldest Due", value: (c) => c.oldest_due },
       { header: "Unpaid Invoices", value: (c) => c.unpaid_count },
       { header: "Last Payment", value: (c) => c.last_payment_date },
+      { header: "Next Follow-up", value: (c) => { const f = nextFollowUp.get(c.id); return f ? `${f.due_date} ${f.due_time}`.trim() : ""; } },
     ], rows);
   }
 
   return (
-    <div className="ac-page">
+    <div className="ac-page ac-custout">
       <div className="ac-head">
         <div>
           <h2 className="ac-title">Customer Outstanding</h2>
@@ -121,7 +136,7 @@ export default function CustomerOutstanding() {
                 <th>Customer</th>
                 <th className="ac-num">Total Invoiced</th><th className="ac-num">Paid</th>
                 <th className="ac-num">Outstanding</th><th className="ac-num">Overdue</th>
-                <th>Oldest Due</th><th className="ac-num">Unpaid Invoices</th><th>Last Payment</th><th>Action</th>
+                <th>Oldest Due</th><th className="ac-num">Unpaid Invoices</th><th>Last Payment</th><th>Follow-up</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -149,6 +164,13 @@ export default function CustomerOutstanding() {
                       <td className="ac-num">{c.unpaid_count}</td>
                       <td>{showDate(c.last_payment_date) || "—"}</td>
                       <td>
+                        <FollowUpCell
+                          followUp={nextFollowUp.get(c.id)}
+                          onOpen={(f) => navigate(`/accountant/follow-ups/${f.id}`)}
+                          onCreate={() => setFollowUpFor(c.id)}
+                        />
+                      </td>
+                      <td>
                         <div className="ac-actions" style={{ flexWrap: "nowrap" }}>
                           <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
                             onClick={() => navigate("/accountant/payments/record", { state: { customerId: c.id } })}><FiPlusCircle /></button>
@@ -158,7 +180,7 @@ export default function CustomerOutstanding() {
                     {expanded && (
                       <tr className="ac-expand-row">
                         <td />
-                        <td colSpan={9}>
+                        <td colSpan={10}>
                           <div className="ac-expand-box">
                             <h4>Unpaid invoices</h4>
                             {c.invoices?.length ? (
@@ -187,7 +209,7 @@ export default function CustomerOutstanding() {
                     )}
                   </Fragment>
                 );
-              }) : <EmptyRow cols={10} loading={loading} text="No customers with outstanding amounts" />}
+              }) : <EmptyRow cols={11} loading={loading} text="No customers with outstanding amounts" />}
             </tbody>
             <tfoot>
               <tr>
@@ -196,7 +218,7 @@ export default function CustomerOutstanding() {
                 <td className="ac-num">{money(sum(rows, "total_paid"))}</td>
                 <td className="ac-num ac-money-red">{money(sum(rows, "outstanding"))}</td>
                 <td className="ac-num">{money(sum(rows, "overdue_amount"))}</td>
-                <td colSpan={4} />
+                <td colSpan={5} />
               </tr>
             </tfoot>
           </table>
@@ -204,6 +226,39 @@ export default function CustomerOutstanding() {
 
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
+
+      <FollowUpModal
+        key={followUpFor || "closed"}
+        open={Boolean(followUpFor)}
+        onClose={() => setFollowUpFor("")}
+        onCreated={reload}
+        invoices={invoices}
+        followUps={followUps}
+        customerId={followUpFor}
+        lockCustomer
+      />
     </div>
+  );
+}
+
+// "+ Follow-up" when the customer has no open follow-up, otherwise its date (opens it).
+function FollowUpCell({ followUp, onOpen, onCreate }) {
+  if (!followUp) {
+    return (
+      <button type="button" className="ac-fu-add" onClick={onCreate}>
+        <FiPlus /> Follow-up
+      </button>
+    );
+  }
+  const late = followUp.display_status === "OVERDUE";
+  return (
+    <button type="button" className={`ac-fu-chip${late ? " late" : ""}`} onClick={() => onOpen(followUp)}
+      title={`${followUp.scope === "INVOICE" ? `Follow-up for ${followUp.invoice_number}` : "Follow-up for the whole outstanding"} · ${showDue(followUp.due_date, followUp.due_time)}`}>
+      <FiCalendar />
+      <span>
+        {showDue(followUp.due_date, followUp.due_time, { short: true })}
+        <small>{followUp.scope === "INVOICE" ? followUp.invoice_number || "Invoice" : "Whole customer"}</small>
+      </span>
+    </button>
   );
 }

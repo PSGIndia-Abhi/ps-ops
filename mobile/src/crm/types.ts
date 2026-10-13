@@ -2,8 +2,20 @@ export type PaymentMethod = 'cash' | 'online' | 'other';
 export type PaymentStatus = 'paid' | 'pending';
 export type LeadStatus = 'new' | 'contacted' | 'converted' | 'lost';
 export type LeadSource = 'website' | 'apartment' | 'referral' | 'social_media' | 'google' | 'other';
-/** Consumer = a household service with a payment. Commercial = a business enquiry with a quote and photos, no payment. */
+/**
+ * Consumer (shown to users as "Residential") = a household service with a payment.
+ * Commercial = a business enquiry with a quote and photos, no payment.
+ */
 export type LeadType = 'consumer' | 'commercial';
+export type IndustryType = 'restaurant' | 'apartment' | 'hospital' | 'it' | 'qsr' | 'builder' | 'other';
+export type CommercialService =
+  | 'gpc'
+  | 'rodent_control'
+  | 'cockroach_control'
+  | 'ant_treatment'
+  | 'honeybee_control'
+  | 'snake_control'
+  | 'fly_control';
 
 /** A photo picked on this phone that has not reached the server yet. */
 export interface LocalLeadPhoto {
@@ -24,10 +36,25 @@ export interface Lead {
   id: string;
   /** Missing means consumer (leads saved before commercial leads existed). */
   leadType?: LeadType;
-  /** Commercial only. For a commercial lead `customerName` is the contact person, `location` the address and `amount` the approximate quote. */
+  /**
+   * Commercial only. For a commercial lead `customerName` is the contact person and `amount` the
+   * approximate quote. Where the business is comes from the phone's GPS (`latitude` / `longitude`);
+   * `location` is an address typed by hand when the GPS could not be read.
+   */
   companyName?: string;
   /** Commercial only. */
+  industryType?: IndustryType | null;
+  /** Commercial only: the contact person's designation. */
+  designation?: string;
+  /** Commercial only. */
   alternatePhone?: string;
+  /** Commercial only: one or more services the business asked about. */
+  servicesRequested?: CommercialService[];
+  /** Commercial only: where the lead was taken. */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Who added the lead - shown to the roles that see everyone's leads. Empty for website leads. */
+  createdByName?: string;
   /** Commercial only: photos of a lead still waiting on this phone to be sent. */
   localPhotos?: LocalLeadPhoto[];
   customerName: string;
@@ -82,8 +109,35 @@ export const COMMERCIAL_LEAD_SOURCES: Option<LeadSource>[] = [
   { value: 'other', label: 'Other' },
 ];
 
+export const INDUSTRY_TYPES: Option<IndustryType>[] = [
+  { value: 'restaurant', label: 'Restaurant' },
+  { value: 'apartment', label: 'Apartment' },
+  { value: 'hospital', label: 'Hospital' },
+  { value: 'it', label: 'IT' },
+  { value: 'qsr', label: 'QSR' },
+  { value: 'builder', label: 'Builder' },
+  { value: 'other', label: 'Other' },
+];
+
+export const COMMERCIAL_SERVICES: Option<CommercialService>[] = [
+  { value: 'gpc', label: 'GPC' },
+  { value: 'rodent_control', label: 'Rodent Control' },
+  { value: 'cockroach_control', label: 'Cockroach Control' },
+  { value: 'ant_treatment', label: 'Ant Treatment' },
+  { value: 'honeybee_control', label: 'Honeybee Control' },
+  { value: 'snake_control', label: 'Snake Control' },
+  { value: 'fly_control', label: 'Fly Control' },
+];
+
+/** "GPC, Rodent Control" - the chosen services in the order the form lists them. */
+export function servicesLabel(services: CommercialService[] | undefined): string {
+  return COMMERCIAL_SERVICES.filter(s => (services ?? []).includes(s.value))
+    .map(s => s.label)
+    .join(', ');
+}
+
 export const LEAD_TYPES: Option<LeadType>[] = [
-  { value: 'consumer', label: 'Consumer' },
+  { value: 'consumer', label: 'Residential' },
   { value: 'commercial', label: 'Commercial' },
 ];
 

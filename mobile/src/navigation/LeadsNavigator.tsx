@@ -1,5 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useReminders } from '../reminders-engine/useReminders';
 import {
   createBottomTabNavigator,
   type BottomTabBarButtonProps,
@@ -8,12 +10,14 @@ import {
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChartIcon, ClockIcon, HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
+import { LeadsProvider } from '../crm/LeadsContext';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import type { LeadRootStackParamList, LeadTabParamList } from '../leads/navigation';
 import { LEAD_STACK_SCREENS } from '../leads/screens';
-import { LeadListScreen, LeadTasksScreen } from '../leads/screens/LeadBrowseScreens';
+import { LeadListScreen } from '../leads/screens/LeadBrowseScreens';
+import { LeadTasksScreen } from '../leads/screens/LeadTodayScreen';
 import { LeadHomeScreen } from '../leads/screens/LeadHomeScreen';
 import { TeamScreen } from '../leads/screens/ReportScreens';
 import { useMe } from '../leads/ui';
@@ -65,7 +69,14 @@ function RaisedNewLeadButton({ onPress, onLongPress, accessibilityState, testID 
 function LeadTabs() {
   const theme = useCrmTheme();
   const insets = useSafeAreaInsets();
-  const { persona } = useMe();
+  const { persona, myId } = useMe();
+  // LeadTabs stays mounted under every pushed lead screen, so it keeps the reminders armed and is
+  // where a tapped reminder opens its lead from.
+  const stackNavigation = useNavigation<NativeStackNavigationProp<LeadRootStackParamList>>();
+  useReminders(myId, 'lead', (route) => {
+    const leadId = route.params?.leadId;
+    if (route.screen === 'LeadDetail' && typeof leadId === 'string') stackNavigation.navigate('LeadDetail', { leadId });
+  });
 
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,
@@ -86,17 +97,20 @@ function LeadTabs() {
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={LeadHomeScreen} options={{ tabBarIcon: homeIcon }} />
       <Tab.Screen name="Leads" component={LeadListScreen} options={{ tabBarIcon: leadsIcon }} />
-      <Tab.Screen
-        name="NewLeadTab"
-        component={NewLeadPlaceholder}
-        options={{ title: 'New Lead', tabBarLabel: () => null, tabBarButton: RaisedNewLeadButton }}
-        listeners={({ navigation }) => ({
-          tabPress: (event) => {
-            event.preventDefault();
-            navigation.getParent<NativeStackNavigationProp<LeadRootStackParamList>>()?.navigate('LeadNew');
-          },
-        })}
-      />
+      {/* Telecallers verify leads; they do not add them (the server refuses it too). */}
+      {persona !== 'telecaller' && (
+        <Tab.Screen
+          name="NewLeadTab"
+          component={NewLeadPlaceholder}
+          options={{ title: 'New Lead', tabBarLabel: () => null, tabBarButton: RaisedNewLeadButton }}
+          listeners={({ navigation }) => ({
+            tabPress: (event) => {
+              event.preventDefault();
+              navigation.getParent<NativeStackNavigationProp<LeadRootStackParamList>>()?.navigate('LeadNew');
+            },
+          })}
+        />
+      )}
       {/* The fourth slot is the one thing that differs by role: a telecaller's
           day is their follow-up calls, a manager's is their team's numbers. */}
       {persona === 'sales_manager' ? (
@@ -117,13 +131,17 @@ function LeadTabs() {
  */
 export function LeadsNavigator() {
   const theme = useCrmTheme();
+  // LeadsProvider: the New Lead form is the CRM's commercial form, which saves through the CRM's
+  // lead store (offline outbox, photo uploads).
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
-      <Stack.Screen name="LeadTabs" component={LeadTabs} />
-      {LEAD_STACK_SCREENS.map((s) => (
-        <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
-      ))}
-    </Stack.Navigator>
+    <LeadsProvider>
+      <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
+        <Stack.Screen name="LeadTabs" component={LeadTabs} />
+        {LEAD_STACK_SCREENS.map((s) => (
+          <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
+        ))}
+      </Stack.Navigator>
+    </LeadsProvider>
   );
 }
 

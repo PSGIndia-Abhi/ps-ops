@@ -27,6 +27,7 @@ const lead = (stage: PipelineStage, over: Partial<PipelineLead> = {}): PipelineL
   stage,
   providerId: null,
   createdById: null,
+  createdByName: '',
   telecallerId: null,
   salesEmployeeId: null,
   createdAt: '2026-10-08T05:00:00.000Z',

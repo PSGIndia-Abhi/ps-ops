@@ -28,6 +28,16 @@ export function isCrmRole(role: AppRole | null): boolean {
 }
 
 /**
+ * The residential sales roles: the CRM app exactly as it was before commercial leads - residential
+ * leads, form and payments only. Commercial leads belong to the Lead Management roles (telecaller,
+ * commercial_sales, sales_manager). Matched on the raw role, so MD / PA in the Sales app still see both.
+ */
+export function isResidentialRole(role: string | null | undefined): boolean {
+  const r = (role || '').toLowerCase().trim();
+  return r === 'sales' || r === 'marketing';
+}
+
+/**
  * The real org-hierarchy designations that land in Task Management - the
  * exact list the web app routes to /taskpro on login (frontend/src/auth/
  * roleBasePath.js ROLE_HOME, frontend/src/pages/taskpro/access.js). These
@@ -57,6 +67,24 @@ const TASK_ROLES = [
 
 export function isTaskRole(role: string | null | undefined): boolean {
   return !!role && TASK_ROLES.includes(role.toLowerCase().trim());
+}
+
+/**
+ * Task Management roles that also work in the Sales (CRM) app and switch between the two without
+ * signing out. They see every lead, not only their own - the backend grants these two roles the
+ * CRM permissions plus CRM_VIEW_ALL_LEADS.
+ */
+const SALES_SWITCH_ROLES = ['managing director', 'personal assistant'];
+
+export function canSwitchToSales(role: string | null | undefined): boolean {
+  return !!role && SALES_SWITCH_ROLES.includes(role.toLowerCase().trim());
+}
+
+/** A role as people read it: "Sales Manager", "Commercial Sales", "Managing Director". */
+export function displayRole(role: string | null | undefined): string {
+  const known = normalizeRole(role);
+  if (known) return roleLabel(known);
+  return (role ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */

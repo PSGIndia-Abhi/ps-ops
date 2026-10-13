@@ -26,6 +26,15 @@ const factory = (t: CrmTheme) => ({
   title: { ...typography.subtitle, color: t.textPrimary },
   subtitle: { ...typography.caption, color: t.textMuted },
   spacer: { width: 40 },
+  action: {
+    minHeight: 40,
+    justifyContent: 'center' as const,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    backgroundColor: t.primarySoftBg,
+  },
+  actionPressed: { opacity: 0.75 },
+  actionText: { ...typography.captionMedium, color: t.primary },
 });
 
 interface TopBarProps {
@@ -34,9 +43,11 @@ interface TopBarProps {
   onBack: () => void;
   /** 'close' (X) for the New Lead form, 'back' (chevron) for drill-in screens. */
   icon?: 'back' | 'close';
+  /** A text action at the right end, e.g. Edit. */
+  action?: { label: string; onPress: () => void };
 }
 
-export function TopBar({ title, subtitle, onBack, icon = 'back' }: TopBarProps) {
+export function TopBar({ title, subtitle, onBack, icon = 'back', action }: TopBarProps) {
   const { styles, theme } = useCrmStyles(factory);
   return (
     <View style={styles.bar}>
@@ -63,7 +74,20 @@ export function TopBar({ title, subtitle, onBack, icon = 'back' }: TopBarProps) 
           </Text>
         )}
       </View>
-      <View style={styles.spacer} />
+      {action ? (
+        <Pressable
+          onPress={action.onPress}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={action.label}
+          testID="topbar-action"
+          style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+        >
+          <Text style={styles.actionText}>{action.label}</Text>
+        </Pressable>
+      ) : (
+        <View style={styles.spacer} />
+      )}
     </View>
   );
 }

@@ -213,6 +213,10 @@ const salesServices = [
   "Invoice Submission"
 ];
 
+const operationServices = [
+  "CRM"
+];
+
   const visibleSubServices =
     form.serviceType === "PEST"
       ? pestServices
@@ -220,7 +224,9 @@ const salesServices = [
         ? deepCleaningServices
         : form.serviceType === "SALES"
           ? salesServices
-          : [...pestServices, ...deepCleaningServices];
+          : form.serviceType === "OPERATION"
+            ? operationServices
+            : [...pestServices, ...deepCleaningServices];
 
   function update(key, value) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -309,6 +315,18 @@ const salesServices = [
     if (!form.subServices.length) {
       setStatus({ type: "error", message: "Please select at least one service" });
       return;
+    }
+
+    // Clients don't assign a team; a supervisor's bookings are assigned to themselves by the backend.
+    if (role !== "client") {
+      if (role !== "supervisor" && !assignedSupervisorId) {
+        setStatus({ type: "error", message: "Please assign a supervisor (use Assign Team)" });
+        return;
+      }
+      if (!assignedTechnicianIds?.length) {
+        setStatus({ type: "error", message: "Please assign at least one technician (use Assign Team)" });
+        return;
+      }
     }
     const schedulePayload = {};
     let earliestStart = null;
@@ -476,7 +494,7 @@ const salesServices = [
 
     } catch (err) {
       console.error("Create booking failed", err);
-      setStatus({ type: "error", message: "Failed to create booking" });
+      setStatus({ type: "error", message: err?.message || "Failed to create booking" });
     }
   }
 
@@ -793,6 +811,7 @@ const salesServices = [
                 { key: "DEEP", label: "Deep Cleaning" },
                 { key: "BOTH", label: "Both" },
                 { key: "SALES", label: "Sales" },
+                { key: "OPERATION", label: "Operation" },
               ].map(s => (
                 <div
                   key={s.key}

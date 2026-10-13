@@ -2,19 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { CalendarIcon, CheckCircleIcon, PhoneIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SearchIcon } from '../../crm/ui/crmIcons';
-import { completeTask } from '../../tasks/api';
-import { fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
-import type { LeadTask, PipelineLead } from '../types';
-import { Card, errorMessage, LeadRow, useLoad, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import type { PipelineLead } from '../types';
+import { LeadRow, useLoad, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
@@ -133,90 +130,7 @@ export function LeadListScreen() {
             <CrmEmptyState title="No leads here" subtitle={query ? 'Nothing matches your search.' : 'There are no leads at this stage.'} />
           )
         }
-        renderItem={({ item }) => <LeadRow lead={item} onPress={() => navigation.navigate('LeadWork', { leadId: item.id })} />}
-      />
-    </LeadScreen>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Today's lead tasks (follow-ups and meeting reminders)
-// ---------------------------------------------------------------------------
-
-export function LeadTasksScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
-  const route = useRoute();
-  const pushed = route.name === 'LeadTasks';
-  const { styles, theme } = useCrmStyles(factory);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  const loader = useCallback(() => api.myTasksToday(), []);
-  const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, "Could not load today's tasks.");
-
-  const markDone = async (task: LeadTask) => {
-    setBusy(task.id);
-    setActionError(null);
-    try {
-      await completeTask(task.id);
-      reload();
-    } catch (err) {
-      setActionError(errorMessage(err, 'Could not mark this done.'));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <LeadScreen edges={['top']}>
-      {pushed ? <TopBar title="Today's follow-ups" onBack={() => navigation.goBack()} /> : <Text style={styles.title}>Today</Text>}
-      <FlatList
-        data={data ?? []}
-        keyExtractor={(t) => t.id}
-        contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
-        ListHeaderComponent={
-          <>
-            <CrmErrorBanner message={error} onRetry={reload} />
-            <CrmErrorBanner message={actionError} />
-          </>
-        }
-        ListEmptyComponent={
-          loading ? (
-            <CrmSkeleton height={96} radius={radii.lg} />
-          ) : error ? undefined : (
-            <CrmEmptyState title="Nothing due today" subtitle="Follow-ups you schedule on a lead will show up here on their day." icon={<CheckCircleIcon size={30} color={theme.textMuted} />} />
-          )
-        }
-        renderItem={({ item }) => (
-          <Card>
-            <View style={styles.taskRow}>
-              <View style={styles.taskIcon}>
-                {item.taskType === 'LEAD_MEETING' ? <CalendarIcon size={18} color={theme.warningText} /> : <PhoneIcon size={18} color={theme.warningText} />}
-              </View>
-              <Pressable
-                style={styles.taskBody}
-                disabled={!item.leadId}
-                accessibilityRole="button"
-                onPress={() => item.leadId && navigation.navigate('LeadWork', { leadId: item.leadId })}
-              >
-                <Text style={styles.taskTitle} numberOfLines={2}>
-                  {item.title}
-                </Text>
-                <Text style={styles.taskSub} numberOfLines={2}>
-                  {[item.dueTime ? fmtTime(item.dueTime) : null, item.leadNumber, item.description].filter(Boolean).join(' · ') || 'Open lead'}
-                </Text>
-              </Pressable>
-              {/* A meeting reminder is closed by completing the visit itself, not from here. */}
-              {item.taskType !== 'LEAD_MEETING' && (
-                <Pressable onPress={() => markDone(item)} disabled={busy !== null} accessibilityRole="button" accessibilityLabel="Mark done" style={styles.done}>
-                  <CheckCircleIcon size={16} color={theme.successText} />
-                  <Text style={styles.doneText}>{busy === item.id ? 'Saving' : 'Done'}</Text>
-                </Pressable>
-              )}
-            </View>
-          </Card>
-        )}
+        renderItem={({ item }) => <LeadRow lead={item} onPress={() => navigation.navigate('LeadDetail', { leadId: item.id })} />}
       />
     </LeadScreen>
   );

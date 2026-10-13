@@ -78,7 +78,7 @@ const NAV_ITEMS = [
       },
     ],
   },
-  { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell },
+  { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell, also: ["/accountant/follow-ups"] },
   { label: "TDS", path: "/accountant/settings", icon: FiPercent },
 ];
 
@@ -111,10 +111,12 @@ export default function AccountantLayout() {
     navigate("/login");
   }
 
+  // `also`: other pages that belong to this item (e.g. a follow-up opened from Tasks & Reminders).
   const isPathActive = (item) =>
     item.exact
       ? location.pathname === item.path
-      : location.pathname.startsWith(item.path);
+      : location.pathname.startsWith(item.path) ||
+        Boolean(item.also?.some((p) => location.pathname.startsWith(p)));
 
   const groupHasActiveChild = (group) => group.children.some(isPathActive);
 
@@ -210,6 +212,7 @@ export default function AccountantLayout() {
       {/* BODY */}
       <div className="app-body">
         {!isMobile && <aside className="sidebar acc-sidebar">{nav}</aside>}
+
 
         <main className="main-content" ref={mainRef}>
           {/* The sidebar is hidden on phones, so offer the same menu above the page */}

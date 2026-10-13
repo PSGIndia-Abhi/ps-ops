@@ -1,12 +1,13 @@
 import { formatINR, initialsOf } from '../src/crm/format';
-import { computeMonthlyAchievements } from '../src/crm/stats';
+import { computeCommercialAchievements, computeMonthlyAchievements } from '../src/crm/stats';
 import { confirmationMessage, findLeadByPhone, newClientRef, suggestReferences, whatsappUrl } from '../src/crm/leadHelpers';
 import { outboxToLead } from '../src/crm/outbox';
 import { friendlyPaymentMessage } from '../src/crm/payment';
 import { getGreeting } from '../src/utils/date';
 import { getHouseTypes, getPlans, getPrice, getServices, type ServiceMasterRow } from '../src/crm/serviceMaster';
 import { computeLeadStats } from '../src/crm/stats';
-import { isCommercial, type Lead } from '../src/crm/types';
+import { isCommercial, servicesLabel, type Lead } from '../src/crm/types';
+import { canSwitchToSales } from '../src/auth/role';
 import { cleanPhoneInput, normalizePhone, parseAmount, phoneError, validateCommercialLead, validateLead, type CommercialLeadFormValues, type LeadFormValues } from '../src/crm/validation';
 
 describe('formatINR', () => {
@@ -295,31 +296,59 @@ describe('computeMonthlyAchievements', () => {
 
 describe('commercial leads', () => {
   const good: CommercialLeadFormValues = {
-    customerName: 'Ramesh Kumar',
+    industryType: 'builder',
     companyName: 'Skyline Builders',
-    address: '123, Industrial Area, Whitefield, Bengaluru',
+    address: '',
+    customerName: 'Ramesh Kumar',
+    designation: '',
     phone: '9876543210',
     alternatePhone: '',
     email: '',
     source: 'google',
+    referenceBy: '',
+    services: ['gpc', 'rodent_control'],
     amount: '150000',
     notes: '',
   };
 
   it('accepts a complete form and needs no service, plan or payment', () => {
-    expect(validateCommercialLead(good)).toEqual({});
-    expect(validateCommercialLead({ ...good, alternatePhone: '9988776655', email: 'ramesh@skyline.com' })).toEqual({});
+    expect(validateCommercialLead(good, true)).toEqual({});
+    expect(validateCommercialLead({ ...good, alternatePhone: '9988776655', email: 'ramesh@skyline.com' }, true)).toEqual({});
   });
 
-  it('requires name, company, address, phone, source and quote', () => {
-    const errors = validateCommercialLead({ ...good, customerName: '', companyName: ' ', address: '', phone: '', source: null, amount: '0' });
-    expect(Object.keys(errors).sort()).toEqual(['address', 'amount', 'companyName', 'customerName', 'phone', 'source']);
+  it('requires industry, company, contact person, phone, source, a service and quote', () => {
+    const errors = validateCommercialLead(
+      { ...good, industryType: null, customerName: '', companyName: ' ', phone: '', source: null, services: [], amount: '0' },
+      true,
+    );
+    expect(Object.keys(errors).sort()).toEqual([
+      'amount', 'companyName', 'customerName', 'industryType', 'phone', 'services', 'source',
+    ]);
+  });
+
+  it('needs a typed address only when the location could not be read', () => {
+    expect(validateCommercialLead(good, true).address).toBeUndefined();
+    expect(validateCommercialLead(good, false).address).toBeDefined();
+    expect(validateCommercialLead({ ...good, address: 'Whitefield, Bengaluru' }, false)).toEqual({});
+  });
+
+  it('lists the chosen services in the order the form shows them', () => {
+    expect(servicesLabel(['fly_control', 'gpc'])).toBe('GPC, Fly Control');
+    expect(servicesLabel(undefined)).toBe('');
+  });
+
+  it('lets only Managing Director and Personal Assistant switch to the Sales app', () => {
+    expect(canSwitchToSales('Managing Director')).toBe(true);
+    expect(canSwitchToSales(' personal assistant ')).toBe(true);
+    expect(canSwitchToSales('Sales Head')).toBe(false);
+    expect(canSwitchToSales('sales')).toBe(false);
+    expect(canSwitchToSales(null)).toBe(false);
   });
 
   it('checks the optional alternate number and email only when filled in', () => {
-    expect(validateCommercialLead({ ...good, alternatePhone: '12345' }).alternatePhone).toBeDefined();
-    expect(validateCommercialLead({ ...good, alternatePhone: good.phone }).alternatePhone).toBeDefined();
-    expect(validateCommercialLead({ ...good, email: 'ramesh@' }).email).toBeDefined();
+    expect(validateCommercialLead({ ...good, alternatePhone: '12345' }, true).alternatePhone).toBeDefined();
+    expect(validateCommercialLead({ ...good, alternatePhone: good.phone }, true).alternatePhone).toBeDefined();
+    expect(validateCommercialLead({ ...good, email: 'ramesh@' }, true).email).toBeDefined();
   });
 
   it('keeps a queued commercial lead and its photos together until it is sent', () => {
@@ -346,32 +375,28 @@ describe('commercial leads', () => {
   });
 });
 
-describe('computeMonthlyAchievements with commercial leads', () => {
+describe('computeCommercialAchievements', () => {
   const now = new Date(2026, 9, 5, 12);
   const lead = (over: Partial<Lead>): Lead =>
-    ({ amount: 1000, paymentStatus: 'pending', leadStatus: 'new', createdAt: new Date(2026, 9, 2).toISOString(), ...over } as Lead);
+    ({ leadType: 'commercial', amount: 1000, leadStatus: 'new', createdAt: new Date(2026, 9, 2).toISOString(), ...over } as Lead);
 
-  it('counts them as leads and converted, but never in the money or the paid percent', () => {
-    const consumer = [lead({ paymentStatus: 'paid' }), lead({})];
-    const commercial = [
-      lead({ leadType: 'commercial', amount: 150000, leadStatus: 'converted' }),
-      lead({ leadType: 'commercial', amount: 10000 }),
-      lead({ leadType: 'commercial', createdAt: new Date(2026, 8, 20).toISOString() }),
-    ];
-    const a = computeMonthlyAchievements(consumer, now, commercial);
-    expect(a.monthLeads).toBe(4);
-    expect(a.convertedLeads).toBe(1);
-    expect(a.paidLeads).toBe(1);
-    expect(a.paidPercent).toBe(50);
-    expect(a.collected).toBe(1000);
-    expect(a.totalValue).toBe(2000);
-    expect(a.collectedPercent).toBe(50);
+  it('counts this month only: leads, converted, still new and the value quoted', () => {
+    const a = computeCommercialAchievements(
+      [
+        lead({ amount: 150000, leadStatus: 'converted' }),
+        lead({ amount: 10000 }),
+        lead({ amount: 5000, leadStatus: 'contacted' }),
+        lead({ amount: 2000, leadStatus: 'lost' }),
+        lead({ amount: 99999, createdAt: new Date(2026, 8, 20).toISOString() }),
+      ],
+      now,
+    );
+    expect(a).toEqual({ monthLeads: 4, convertedLeads: 1, newLeads: 1, quoted: 167000, convertedPercent: 25 });
   });
 
-  it('shows the leads even when the month has only commercial ones', () => {
-    const a = computeMonthlyAchievements([], now, [lead({ leadType: 'commercial' }), lead({ leadType: 'commercial' })]);
-    expect(a.monthLeads).toBe(2);
-    expect(a.totalValue).toBe(0);
-    expect(a.paidPercent).toBe(0);
+  it('is all zeros (no divide-by-zero) when nothing was added this month', () => {
+    expect(computeCommercialAchievements([], now)).toEqual({
+      monthLeads: 0, convertedLeads: 0, newLeads: 0, quoted: 0, convertedPercent: 0,
+    });
   });
 });

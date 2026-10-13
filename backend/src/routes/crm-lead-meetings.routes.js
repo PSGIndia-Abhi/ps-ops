@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
-  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead,
+  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { logHistory: logTaskHistory } = require("../utils/workTasks");
@@ -73,6 +73,8 @@ async function loadVisibleLead(req, leadId) {
   if (visibleIds !== null && !isOwnLead(lead, req.user.id) && !visibleIds.some((id) => isOwnLead(lead, id))) {
     throw new HttpError(404, "Lead not found");
   }
+  // A sales executive's own lead stays with them and lead managers.
+  if (await isHiddenSalesOwnLead(pool, req, lead)) throw new HttpError(404, "Lead not found");
   return lead;
 }
 function canManageLead(req, lead) {
@@ -106,6 +108,7 @@ async function loadVisibleMeeting(req, meetingId) {
   if (visibleIds !== null && lead && !isOwnLead(lead, req.user.id) && !visibleIds.some((id) => isOwnLead(lead, id))) {
     throw new HttpError(404, "Meeting not found");
   }
+  if (await isHiddenSalesOwnLead(pool, req, lead)) throw new HttpError(404, "Meeting not found");
   return meeting;
 }
 
@@ -140,12 +143,107 @@ router.get("/sales-employees", auth, requirePermission("CRM_VIEW_LEAD"), async (
 // Also creates the linked Task Management follow-up (source_module='LEAD',
 // task_type='LEAD_MEETING'), in the same transaction as the meeting row.
 // ---------------------------------------------------------------------------
+// The lead's meeting that is still open (SCHEDULED - not yet completed or cancelled), with the
+// sales person's name, or null. A lead has at most one: it must be completed, rescheduled or
+// cancelled before another can be set.
+async function findOpenMeeting(leadId) {
+  const [[row]] = await pool.query(
+    `SELECT m.id, DATE_FORMAT(m.scheduled_at, '%Y-%m-%d %H:%i:%s') AS scheduled_at, m.meeting_type,
+            m.sales_employee_id, u.name AS sales_employee_name,
+            DATE_FORMAT(m.check_in_at, '%Y-%m-%d %H:%i:%s') AS check_in_at
+       FROM crm_lead_meetings m LEFT JOIN users u ON u.id = m.sales_employee_id
+      WHERE m.lead_id = ? AND m.status = 'SCHEDULED'
+      ORDER BY m.scheduled_at ASC LIMIT 1`,
+    [leadId]
+  );
+  return row || null;
+}
+
+// GET /api/crm/team-visits?date=YYYY-MM-DD -- the sales manager's view of one day's visits by the
+// team: who went where, when each visit was started and ended, the GPS point recorded at each,
+// and the outcome. Lead managers (MANAGE_LEADS) and admin only; limited to the people they may see.
+router.get("/team-visits", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    if (!hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "Only sales managers can see team visits");
+    const date = String(req.query.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "date is required (YYYY-MM-DD)");
+
+    const where = ["DATE(m.scheduled_at) = ?", "l.lead_type = 'commercial'"];
+    const params = [date];
+    const visibleIds = await resolveVisibleUserIds(pool, req);
+    if (visibleIds !== null) {
+      where.push("m.sales_employee_id IN (?)");
+      params.push(visibleIds);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT m.id, m.lead_id, m.sales_employee_id, u.name AS sales_employee_name,
+              l.company_name, l.customer_name, l.lead_number, cu.name AS lead_created_by_name,
+              DATE_FORMAT(m.scheduled_at, '%Y-%m-%d %H:%i:%s') AS scheduled_at,
+              m.meeting_type, m.meeting_address, m.status,
+              DATE_FORMAT(m.check_in_at, '%Y-%m-%d %H:%i:%s') AS check_in_at, m.check_in_lat, m.check_in_lng,
+              DATE_FORMAT(m.check_out_at, '%Y-%m-%d %H:%i:%s') AS check_out_at, m.check_out_lat, m.check_out_lng,
+              m.outcome_notes
+         FROM crm_lead_meetings m
+         JOIN crm_leads l ON l.id = m.lead_id
+         LEFT JOIN users u ON u.id = m.sales_employee_id
+         LEFT JOIN users cu ON cu.id = l.created_by_user_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY m.scheduled_at ASC, u.name ASC
+        LIMIT 500`,
+      params
+    );
+    res.json(rows.map((r) => ({ ...r, sales_employee_id: String(r.sales_employee_id) })));
+  } catch (err) {
+    sendError(res, err, "Failed to load team visits");
+  }
+});
+
+// GET /api/crm/leads/:id/meetings -- every meeting of one lead, newest first, with the sales
+// person's name: the lead's visit history (when, who, where the visit started and ended, outcome).
+router.get("/leads/:id/meetings", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    const [rows] = await pool.query(
+      `SELECT ${MEETING_COLUMNS},
+              (SELECT u.name FROM users u WHERE u.id = crm_lead_meetings.sales_employee_id) AS sales_employee_name
+         FROM crm_lead_meetings
+        WHERE lead_id = ?
+        ORDER BY scheduled_at DESC
+        LIMIT 50`,
+      [lead.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load the lead's meetings");
+  }
+});
+
+// GET /api/crm/leads/:id/meetings/open -- { meeting } (or { meeting: null }): what the
+// Schedule meeting form checks first, so it can say a meeting is already set.
+router.get("/leads/:id/meetings/open", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    res.json({ meeting: await findOpenMeeting(lead.id) });
+  } catch (err) {
+    sendError(res, err, "Failed to load the open meeting");
+  }
+});
+
 router.post("/leads/:id/meetings", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
     if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot schedule a meeting for this lead");
     if (!ACTIVE_MEETING_STAGES.includes(lead.pipeline_stage)) {
       throw new HttpError(400, `Cannot schedule a meeting for a lead that is ${lead.pipeline_stage}`);
+    }
+    // One open meeting per lead: a second one would double-book the visit.
+    const open = await findOpenMeeting(lead.id);
+    if (open) {
+      return res.status(409).json({
+        error: `A meeting is already scheduled for this lead${open.sales_employee_name ? ` with ${open.sales_employee_name}` : ""}. Reschedule or complete it first.`,
+        meeting: open,
+      });
     }
 
     const body = req.body || {};

@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiActivity, FiAlertTriangle, FiBell, FiBellOff, FiCalendar, FiClock, FiDownload, FiFileText, FiList, FiPlusCircle, FiSearch } from "react-icons/fi";
-import SetReminderModal from "../../components/accountant/SetReminderModal";
+import FollowUpModal from "../../components/accountant/FollowUpModal";
 import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { createReminder, daysOverdue, followUpsByInvoice, showDate, useAccountantData, usePaged } from "./data";
+import { daysOverdue, followUpForInvoice, followUpIndex, showDate, useAccountantData, usePaged } from "./data";
+import { showDue } from "./followups";
 import { exportCsv } from "./exportCsv";
 
 const CHIPS = [
@@ -13,7 +14,7 @@ const CHIPS = [
   { key: "TODAY", label: "Due Today", icon: <FiClock />, test: (i) => daysOverdue(i.due_date) === 0 },
   { key: "WEEK", label: "Due This Week", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; } },
   { key: "MONTH", label: "Due This Month", icon: <FiCalendar />, test: (i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -30; } },
-  { key: "NOFOLLOW", label: "No Follow-up Set", icon: <FiBellOff />, test: (i) => !i.next_follow_up },
+  { key: "NOFOLLOW", label: "No Follow-up Set", icon: <FiBellOff />, test: (i) => !i.follow_up },
 ];
 
 const BUCKETS = [
@@ -35,7 +36,7 @@ function severity(days) {
 
 export default function Outstanding() {
   const navigate = useNavigate();
-  const { invoices, tasks, loading, error, reload } = useAccountantData();
+  const { invoices, followUps, loading, error, reload } = useAccountantData();
   const [chip, setChip] = useState("ALL");
   const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
@@ -43,18 +44,19 @@ export default function Outstanding() {
   const [bucket, setBucket] = useState("");
   const [minAmount, setMinAmount] = useState("");
   const [selected, setSelected] = useState([]);
-  const [reminderIds, setReminderIds] = useState([]); // invoices the reminder dialog is for (empty = closed)
+  const [followUpIds, setFollowUpIds] = useState([]); // invoices the follow-up dialog is for (empty = closed)
 
-  const followUps = useMemo(() => followUpsByInvoice(tasks), [tasks]);
+  const index = useMemo(() => followUpIndex(followUps), [followUps]);
 
-  // Unpaid invoices only, most overdue first.
+  // Unpaid invoices only, most overdue first. follow_up: the open follow-up covering the
+  // invoice (its own, otherwise its customer's).
   const unpaid = useMemo(
     () =>
       invoices
         .filter((i) => i.status !== "CANCELLED" && i.pending_amount > 0)
-        .map((i) => ({ ...i, next_follow_up: followUps.get(i.id)?.next_follow_up || "", last_action: followUps.get(i.id)?.last_action || "" }))
+        .map((i) => ({ ...i, follow_up: followUpForInvoice(index, i) }))
         .sort((a, b) => (daysOverdue(b.due_date) ?? -Infinity) - (daysOverdue(a.due_date) ?? -Infinity)),
-    [invoices, followUps]
+    [invoices, index]
   );
 
   const customers = useMemo(() => [...new Set(unpaid.map((i) => i.customer_name))].sort(), [unpaid]);
@@ -124,19 +126,12 @@ export default function Outstanding() {
       { header: "Invoice Amount", value: (i) => i.invoice_amount },
       { header: "Paid", value: (i) => i.paid_amount },
       { header: "Pending", value: (i) => i.pending_amount },
-      { header: "Last Action", value: (i) => i.last_action },
-      { header: "Next Follow-up", value: (i) => i.next_follow_up },
+      { header: "Follow-up For", value: (i) => (i.follow_up ? (i.follow_up.scope === "INVOICE" ? "Invoice" : "Customer") : "") },
+      { header: "Next Follow-up", value: (i) => (i.follow_up ? `${i.follow_up.due_date} ${i.follow_up.due_time}`.trim() : "") },
     ], rows);
   }
 
-  // One reminder for a single invoice, or one for each ticked invoice.
-  async function saveReminder(form) {
-    const ids = reminderIds.length > 1 ? reminderIds : [form.invoice_id];
-    for (const id of ids) {
-      const invoice = unpaid.find((i) => i.id === id);
-      if (!invoice) throw new Error("Please select an invoice");
-      await createReminder(form, invoice);
-    }
+  async function afterFollowUp() {
     setSelected([]);
     await reload();
   }
@@ -192,7 +187,7 @@ export default function Outstanding() {
           <div className="ac-bulk">
             <span>{selected.length} invoice{selected.length > 1 ? "s" : ""} selected</span>
             <div className="ac-actions">
-              <button type="button" className="ac-btn ac-btn-primary" onClick={() => setReminderIds(selected)}><FiBell /> Add Reminder</button>
+              <button type="button" className="ac-btn ac-btn-primary" onClick={() => setFollowUpIds(selected)}><FiBell /> Add Follow-ups</button>
               <button type="button" className="ac-btn" onClick={() => setSelected([])}>Clear</button>
             </div>
           </div>
@@ -224,15 +219,23 @@ export default function Outstanding() {
                     <td className="ac-num">{money(i.paid_amount)}</td>
                     <td className="ac-num ac-money-red">{money(i.pending_amount)}</td>
                     <td>
-                      <div>{i.last_action || "—"}</div>
-                      <div className="ac-sub">{i.next_follow_up ? `Next: ${showDate(i.next_follow_up)}` : "No follow-up set"}</div>
+                      {i.follow_up ? (
+                        <button type="button" className={`ac-fu-chip${i.follow_up.display_status === "OVERDUE" ? " late" : ""}`}
+                          onClick={() => navigate(`/accountant/follow-ups/${i.follow_up.id}`)}>
+                          <FiCalendar />
+                          <span>
+                            {showDue(i.follow_up.due_date, i.follow_up.due_time, { short: true })}
+                            <small>{i.follow_up.scope === "INVOICE" ? "This invoice" : "Whole customer"}</small>
+                          </span>
+                        </button>
+                      ) : <span className="ac-sub">No follow-up set</span>}
                     </td>
                     <td>
                       <div className="ac-actions" style={{ flexWrap: "nowrap" }}>
                         <button type="button" className="ac-link" title="Record payment" aria-label="Record payment"
                           onClick={() => navigate("/accountant/payments/record", { state: { customerId: i.customer_id } })}><FiPlusCircle /></button>
-                        <button type="button" className="ac-link" title="Add reminder" aria-label="Add reminder"
-                          onClick={() => setReminderIds([i.id])}><FiBell /></button>
+                        <button type="button" className="ac-link" title="Add follow-up" aria-label="Add follow-up"
+                          onClick={() => setFollowUpIds([i.id])}><FiBell /></button>
                       </div>
                     </td>
                   </tr>
@@ -252,14 +255,16 @@ export default function Outstanding() {
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
       </div>
 
-      <SetReminderModal
-        key={reminderIds.join(",") || "none"}
-        open={reminderIds.length > 0}
-        onClose={() => setReminderIds([])}
-        invoices={unpaid}
-        defaultInvoiceId={reminderIds[0] || ""}
-        note={reminderIds.length > 1 ? `This reminder will be added to all ${reminderIds.length} selected invoices.` : ""}
-        onSave={saveReminder}
+      <FollowUpModal
+        key={followUpIds.join(",") || "none"}
+        open={followUpIds.length > 0}
+        onClose={() => setFollowUpIds([])}
+        onCreated={afterFollowUp}
+        invoices={invoices}
+        followUps={followUps}
+        invoiceId={followUpIds.length === 1 ? followUpIds[0] : ""}
+        invoiceIds={followUpIds.length > 1 ? followUpIds : []}
+        lockCustomer
       />
     </div>
   );

@@ -39,6 +39,8 @@ export interface PipelineLead {
   /** Set when an external lead provider submitted it. */
   providerId: string | null;
   createdById: string | null;
+  /** Who added the lead (a sales executive, telecaller, provider...). */
+  createdByName: string;
   telecallerId: string | null;
   salesEmployeeId: string | null;
   createdAt: string;

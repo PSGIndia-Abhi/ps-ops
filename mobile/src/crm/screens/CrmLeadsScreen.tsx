@@ -14,6 +14,7 @@ import {
 } from '@react-navigation/native';
 import { radii, spacing, touchTarget, typography } from '../../theme';
 import { formatINR } from '../format';
+import { isResidentialRole, useRawRole } from '../../auth/role';
 import { useLeads } from '../LeadsContext';
 import type {
   CrmTabParamList,
@@ -198,7 +199,9 @@ export function CrmLeadsScreen() {
   const paramFilter = route.params?.filter;
   const paramKind = route.params?.kind;
   const paramAt = route.params?.at;
-  const commercial = kind === 'commercial';
+  // Residential sales roles (sales / marketing) only work residential leads: no Commercial switch.
+  const residential = isResidentialRole(useRawRole());
+  const commercial = !residential && kind === 'commercial';
   const leads = commercial ? commercialLeads : consumerLeads;
 
   // Home's "Paid" tile / "View all" open this tab (which stays mounted), so re-apply the requested filter each time.
@@ -255,13 +258,15 @@ export function CrmLeadsScreen() {
       />
       <CrmErrorBanner message={error} onRetry={refresh} />
 
-      <View style={styles.kindSwitch}>
-        <SegmentedControl
-          options={LEAD_TYPES}
-          value={kind}
-          onChange={changeKind}
-        />
-      </View>
+      {!residential && (
+        <View style={styles.kindSwitch}>
+          <SegmentedControl
+            options={LEAD_TYPES}
+            value={kind}
+            onChange={changeKind}
+          />
+        </View>
+      )}
 
       <View style={styles.summary}>
         <View style={styles.blobA} />

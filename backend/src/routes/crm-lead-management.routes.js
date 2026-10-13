@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
-  uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead,
+  uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 
@@ -53,6 +53,8 @@ async function loadVisibleLead(req, leadId) {
   if (visibleIds !== null && !isOwnLead(lead, req.user.id) && !visibleIds.some((id) => isOwnLead(lead, id))) {
     throw new HttpError(404, "Lead not found");
   }
+  // A sales executive's own lead stays with them and lead managers.
+  if (await isHiddenSalesOwnLead(pool, req, lead)) throw new HttpError(404, "Lead not found");
   return lead;
 }
 function canManageLead(req, lead) {

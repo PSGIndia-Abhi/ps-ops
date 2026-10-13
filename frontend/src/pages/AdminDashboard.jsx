@@ -149,7 +149,16 @@ export default function AdminDashboard() {
   }, [technicians, jobs]);
 
   const companyOptions = useMemo(() => getCompanyOptions(jobs), [jobs]);
-  const filteredJobs = useMemo(() => filterJobs(jobs, filters), [jobs, filters]);
+  // Newest-created job first, so a just-created booking shows at the top.
+  const filteredJobs = useMemo(
+    () =>
+      filterJobs(jobs, filters).sort(
+        (a, b) =>
+          (new Date(b.created_at).getTime() || 0) - (new Date(a.created_at).getTime() || 0) ||
+          String(b.code || "").localeCompare(String(a.code || ""), undefined, { numeric: true })
+      ),
+    [jobs, filters]
+  );
   // Never past the last page (e.g. after a refresh returns fewer jobs).
   const currentPage = Math.min(page, getTotalPages(filteredJobs.length, JOBS_PER_PAGE));
   const pagedJobs = useMemo(
@@ -214,14 +223,14 @@ export default function AdminDashboard() {
         errorMsg = data.error || errorMsg;
       } catch { }
 
-      alert(errorMsg);
-      return;
+      // Thrown so the booking form shows the reason in its error popup instead of a success message.
+      throw new Error(errorMsg);
     }
 
     await res.json();
 
     await fetchJobs();
-    setIsCreateOpen(false);
+    // The form stays open to show its "Booking created" popup and closes when that is dismissed.
   }
 
 

@@ -249,6 +249,7 @@ export function MyJobsScreen() {
   }, [visits, filter]);
 
   const isCompletedView = filter === 'completed';
+  const isPendingView = filter === 'pending';
   const list = isCompletedView ? completedJobs : filteredVisits;
 
   // Job and TechnicianVisit are different API shapes; map each to the one row shape the list renders.
@@ -275,7 +276,12 @@ export function MyJobsScreen() {
       });
     }
     return (list as TechnicianVisit[]).map((visit): JobQueueRow => {
-      const [timeMain, timeSub] = splitTime(formatTime(visit.scheduled_date));
+      // Pending has no day headings (it's ordered by assignment), so show the visit's date instead of its time.
+      const d = visit.scheduled_date ? new Date(visit.scheduled_date) : null;
+      const [timeMain, timeSub] =
+        isPendingView && d && !Number.isNaN(d.getTime())
+          ? [String(d.getDate()), d.toLocaleDateString([], { month: 'short' })]
+          : splitTime(formatTime(visit.scheduled_date));
       return {
         rowKey: visit.id,
         jobId: visit.job_id,
@@ -285,19 +291,24 @@ export function MyJobsScreen() {
         siteArea: visit.sitename ?? undefined,
         address: visit.address,
         sortDate: visit.scheduled_date,
+        createdAt: visit.created_at ?? null,
         status: visit.status,
         timeMain,
         timeSub,
       };
     });
-  }, [list, isCompletedView]);
+  }, [list, isCompletedView, isPendingView]);
 
-  // "Time": soonest first (newest first on Completed, which is history); "Status": actionable work first.
+  // "Time": soonest first (newest first on Completed, which is history; most recently assigned first on
+  // Pending); "Status": actionable work first.
   const sortedRows = useMemo(() => {
     if (!rows) return null;
     const copy = [...rows];
     if (sortBy === 'status') {
       copy.sort((a, b) => (STATUS_SORT_RANK[a.status ?? ''] ?? 9) - (STATUS_SORT_RANK[b.status ?? ''] ?? 9));
+    } else if (isPendingView) {
+      const ts = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() || 0 : 0);
+      copy.sort((a, b) => ts(b.createdAt) - ts(a.createdAt) || ts(b.sortDate) - ts(a.sortDate));
     } else {
       const direction = isCompletedView ? -1 : 1;
       copy.sort((a, b) => {
@@ -308,9 +319,9 @@ export function MyJobsScreen() {
       });
     }
     return copy;
-  }, [rows, sortBy, isCompletedView]);
+  }, [rows, sortBy, isCompletedView, isPendingView]);
 
-  const items = useMemo(() => (sortedRows ? buildQueueItems(sortedRows, sortBy === 'time') : []), [sortedRows, sortBy]);
+  const items = useMemo(() => (sortedRows ? buildQueueItems(sortedRows, sortBy === 'time' && !isPendingView) : []), [sortedRows, sortBy, isPendingView]);
 
   const accent = FILTER_COLOR[filter];
   const activeMore = inMoreFilters ? filter : null;
