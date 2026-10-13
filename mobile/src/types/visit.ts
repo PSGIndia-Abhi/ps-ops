@@ -18,6 +18,8 @@ export interface TechnicianVisit {
   scheduled_date: string | null;
   status: VisitStatus;
   job_id: string;
+  /** When the visit was created/assigned. */
+  created_at?: string | null;
   job_code: string;
   sub_service: string;
   job_status: string;

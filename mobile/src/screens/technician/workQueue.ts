@@ -32,6 +32,8 @@ export interface JobQueueRow {
   address: string | null | undefined;
   /** Raw date - what the list sorts and groups on. */
   sortDate: string | null;
+  /** When the visit was created/assigned - Pending sorts newest first on this. */
+  createdAt?: string | null;
   status: string | null | undefined;
   /** "02:07" + "AM" for a visit; "7" + "Sep" for a finished job (which only has a date). */
   timeMain: string;
