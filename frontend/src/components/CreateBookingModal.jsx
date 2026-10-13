@@ -316,6 +316,18 @@ const operationServices = [
       setStatus({ type: "error", message: "Please select at least one service" });
       return;
     }
+
+    // Clients don't assign a team; a supervisor's bookings are assigned to themselves by the backend.
+    if (role !== "client") {
+      if (role !== "supervisor" && !assignedSupervisorId) {
+        setStatus({ type: "error", message: "Please assign a supervisor (use Assign Team)" });
+        return;
+      }
+      if (!assignedTechnicianIds?.length) {
+        setStatus({ type: "error", message: "Please assign at least one technician (use Assign Team)" });
+        return;
+      }
+    }
     const schedulePayload = {};
     let earliestStart = null;
     let latestEnd = null;
@@ -482,7 +494,7 @@ const operationServices = [
 
     } catch (err) {
       console.error("Create booking failed", err);
-      setStatus({ type: "error", message: "Failed to create booking" });
+      setStatus({ type: "error", message: err?.message || "Failed to create booking" });
     }
   }
 

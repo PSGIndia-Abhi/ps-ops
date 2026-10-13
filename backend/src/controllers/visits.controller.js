@@ -911,9 +911,10 @@ async function getMyVisits(req, res) {
 SELECT
   v.id,
   v.visit_number,
-  v.scheduled_date, 
+  v.scheduled_date,
   v.status,
   v.job_id,
+  v.created_at,
 
   j.code AS job_code,
   j.sub_service,

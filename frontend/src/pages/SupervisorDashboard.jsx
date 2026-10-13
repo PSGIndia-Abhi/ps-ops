@@ -210,7 +210,7 @@ export default function SupervisorDashboard() {
     await res.json();
 
     await fetchJobs();
-    setIsCreateOpen(false);
+    // The form stays open to show its "Booking created" popup and closes when that is dismissed.
   }
 
 
