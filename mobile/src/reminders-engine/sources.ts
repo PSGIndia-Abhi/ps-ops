@@ -23,11 +23,17 @@ function kindOf(t: WorkTask): ReminderKind {
   const source = String(t.source_module ?? '').toUpperCase();
   if (type === 'LEAD_MEETING') return 'meeting';
   if (type === 'LEAD_FOLLOW_UP') return 'followup';
+  if (type === 'PERSONAL_REMINDER') return 'personal';
   if (type.includes('PAYMENT') || source === 'PAYMENT' || source === 'INVOICE') return 'payment';
   return 'task';
 }
 
 function routeOf(t: WorkTask, kind: ReminderKind): ReminderRoute | null {
+  if (kind === 'personal') {
+    return t.source_id
+      ? { app: 'lead', screen: 'LeadDetail', params: { leadId: t.source_id } }
+      : { app: 'lead', screen: 'LeadReminders' };
+  }
   if ((kind === 'meeting' || kind === 'followup') && t.source_id) return { app: 'lead', screen: 'LeadDetail', params: { leadId: t.source_id } };
   if (kind === 'payment') return { app: 'payment', screen: 'Home' };
   return { app: 'task', screen: 'TaskDetail', params: { taskId: t.id } };
@@ -46,7 +52,16 @@ export function taskToReminder(t: WorkTask, myId: string): ReminderItem {
     key: `task:${t.id}`,
     kind,
     title: cleanTitle(t, kind),
-    detail: kind === 'meeting' ? (/^meeting/i.test(t.title) ? 'Office meeting' : 'Site visit') : kind === 'followup' ? 'Call back' : undefined,
+    detail:
+      kind === 'meeting'
+        ? /^meeting/i.test(t.title)
+          ? 'Office meeting'
+          : 'Site visit'
+        : kind === 'followup'
+        ? 'Call back'
+        : kind === 'personal'
+        ? t.description || undefined
+        : undefined,
     date: String(t.due_date).slice(0, 10),
     time: t.due_time ? String(t.due_time).slice(0, 8) : null,
     fromSomeoneElse: String(t.created_by) !== String(myId),

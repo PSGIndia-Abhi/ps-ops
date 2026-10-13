@@ -26,6 +26,10 @@ export type LeadStackParamList = {
   LeadMeetings: undefined;
   LeadMeeting: { meetingId: string };
   LeadTasks: undefined;
+  /** Everything that will ring for me: my reminders, meetings, follow-ups. */
+  LeadReminders: undefined;
+  /** New reminder (optionally for a lead), or edit one (taskId). */
+  LeadReminderEdit: { taskId?: string; leadId?: string; leadName?: string } | undefined;
   /** Sales manager: one day's visits by the team, with start / end times and GPS. */
   LeadTeamVisits: undefined;
   /** More -> Profile in the sales apps (CRM and Lead Management). */

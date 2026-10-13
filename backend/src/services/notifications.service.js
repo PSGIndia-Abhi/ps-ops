@@ -1,5 +1,6 @@
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../db");
+const { sendPush } = require("./push.service");
 
 function normalizeUserIds(userIds = []) {
   return Array.from(
@@ -49,6 +50,16 @@ async function insertNotifications(executor, userIds, payload) {
       ]
     );
   }
+
+  // Also to the people's phones. Deferred, so a notification saved inside a transaction is only
+  // pushed after the caller's work has finished; best effort - never affects the caller.
+  setImmediate(() => {
+    sendPush(recipientIds, {
+      title: payload.title,
+      body: payload.message,
+      data: { type: payload.type, entityType: payload.entityType, entityId: payload.entityId },
+    });
+  });
 
   return recipientIds.length;
 }

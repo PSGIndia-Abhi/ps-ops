@@ -76,6 +76,7 @@ function LeadTabs() {
   useReminders(myId, 'lead', (route) => {
     const leadId = route.params?.leadId;
     if (route.screen === 'LeadDetail' && typeof leadId === 'string') stackNavigation.navigate('LeadDetail', { leadId });
+    if (route.screen === 'LeadReminders') stackNavigation.navigate('LeadReminders');
   });
 
   const screenOptions: BottomTabNavigationOptions = {

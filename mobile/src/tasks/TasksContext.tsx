@@ -145,7 +145,8 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     async (silent = false) => {
       if (!silent) setRefreshing(true);
       try {
-        const list = await api.listTasks();
+        // Personal reminders are tasks underneath, but they live on the Reminders screen, not here.
+        const list = (await api.listTasks()).filter((t) => t.task_type !== 'PERSONAL_REMINDER');
         setTasks((prev) => mergeTasks(prev, list));
         setError(null);
         await stateLoaded;

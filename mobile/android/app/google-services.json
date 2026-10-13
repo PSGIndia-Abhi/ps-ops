@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "802843740416",
+    "project_id": "bestserve-7dfd4",
+    "storage_bucket": "bestserve-7dfd4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:802843740416:android:03b63b1b1b59ea6d170be5",
+        "android_client_info": {
+          "package_name": "com.bestserve.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDCV07v8Wz-HRMGQX9GedbspEDuoyXf5CE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
