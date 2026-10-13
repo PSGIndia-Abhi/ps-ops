@@ -4,6 +4,7 @@ import {
   FiAlertTriangle,
   FiArrowLeft,
   FiAward,
+  FiBell,
   FiBriefcase,
   FiCalendar,
   FiCheck,
@@ -45,6 +46,8 @@ import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads } from "./viewer";
+import { ReminderPopup } from "./Reminders";
+import { SiteVisitsTab } from "./visits";
 
 const EVENT = {
   CREATED: { icon: <FiPlus />, tone: "info" },
@@ -421,9 +424,6 @@ function DetailsPanel({ lead, provider, onCall }) {
   );
 }
 
-const MEETING_TONE = { SCHEDULED: "info", IN_PROGRESS: "warn", FOLLOW_UP: "violet", COMPLETED: "success" };
-const MEETING_LABEL = { SCHEDULED: "Scheduled", IN_PROGRESS: "In Progress", FOLLOW_UP: "Follow-up", COMPLETED: "Completed" };
-
 export default function LeadDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -477,7 +477,7 @@ export default function LeadDetail() {
     : [
         { key: "details", label: "Details" },
         { key: "activity", label: "Activities", count: events.length },
-        { key: "meetings", label: "Meetings", count: leadMeetings.length },
+        { key: "meetings", label: "Site Visits", count: leadMeetings.length },
         { key: "quotations", label: "Quotations" },
       ];
 
@@ -573,9 +573,12 @@ export default function LeadDetail() {
                   Convert to Customer
                 </Button>
               )}
-              <Button variant="ghost" icon={<FiCalendar />} onClick={() => setDialog("meeting")}>
-                Schedule Another Meeting
-              </Button>
+              {/* One open meeting per lead: another is set once this one is done or cancelled. */}
+              {!openMeeting && (
+                <Button variant="ghost" icon={<FiCalendar />} onClick={() => setDialog("meeting")}>
+                  Schedule Another Meeting
+                </Button>
+              )}
             </>
           )}
           {canSell && ["MEETING_SCHEDULED", "VISIT_COMPLETED", "QUOTATION_SENT"].includes(lead.stage) && (
@@ -588,6 +591,9 @@ export default function LeadDetail() {
               Add Follow-up
             </Button>
           )}
+          <Button variant="ghost" icon={<FiBell />} onClick={() => setDialog("reminder")}>
+            Set Reminder
+          </Button>
           {canManage && !!lead.providerId && (
             <Button variant="ghost" icon={<FiSend />} onClick={() => setDialog("providerUpdate")}>
               Update Provider
@@ -633,41 +639,16 @@ export default function LeadDetail() {
               </ol>
             ))}
 
-          {tab === "meetings" &&
-            (leadMeetings.length === 0 ? (
-              <Empty title="No meetings yet" text="A meeting is scheduled once the lead is verified as genuine." icon={<FiCalendar />} />
-            ) : (
-              <div className="lm-agenda" style={{ margin: "-18px -20px -20px" }}>
-                {leadMeetings.map((m, i) => (
-                  <div key={m.id} className="lm-slot" style={{ "--i": i }}>
-                    <div className="lm-slot-time">
-                      {new Date(m.scheduledAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                      <small>{dateTime(m.scheduledAt).split(",")[0]}</small>
-                    </div>
-                    <div className="lm-slot-main">
-                      <strong>
-                        {m.type === "SITE_VISIT" ? "Site Visit" : "Meeting"} with {userName(m.salesId)}
-                      </strong>
-                      <small>
-                        <FiMapPin /> {m.address}
-                      </small>
-                      {!!m.outcome && <small>Outcome: {m.outcome}</small>}
-                      {canManage && !closed && m.status === "SCHEDULED" && (
-                        <span style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                          <Button size="sm" variant="ghost" icon={<FiCalendar />} onClick={() => setDialog({ move: m })}>
-                            Reschedule
-                          </Button>
-                          <Button size="sm" variant="ghost" icon={<FiXCircle />} onClick={() => setDialog({ cancel: m })}>
-                            Cancel
-                          </Button>
-                        </span>
-                      )}
-                    </div>
-                    <Badge tone={MEETING_TONE[m.status]}>{MEETING_LABEL[m.status]}</Badge>
-                  </div>
-                ))}
-              </div>
-            ))}
+          {tab === "meetings" && (
+            // The visit history from the server: start and end time and place, as the Android app records them.
+            <SiteVisitsTab
+              lead={lead}
+              refreshKey={timeline.length}
+              canChange={canManage && !closed}
+              onMove={(m) => setDialog({ move: m })}
+              onCancel={(m) => setDialog({ cancel: m })}
+            />
+          )}
 
           {tab === "quotations" && (
             <QuotationsTab
@@ -691,6 +672,7 @@ export default function LeadDetail() {
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "edit" && <EditLeadModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "followup" && <FollowUpModal lead={lead} onClose={() => setDialog(null)} />}
+      {dialog === "reminder" && <ReminderPopup lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "providerUpdate" && <ProviderUpdateModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog?.cancelQuote && <CancelQuotationModal lead={lead} quotation={dialog.cancelQuote} onClose={() => setDialog(null)} />}
       {dialog?.move && <MeetingChangeModal meeting={dialog.move} lead={lead} mode="move" onClose={() => setDialog(null)} />}

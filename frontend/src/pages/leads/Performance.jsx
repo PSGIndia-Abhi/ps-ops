@@ -1,6 +1,6 @@
 // The performance report (GET /api/crm/reports/sales-performance). Telecallers
-// and sales executives see their own numbers; the sales manager picks anyone
-// on the team and also gets the whole team side by side.
+// see their own numbers; the sales manager picks anyone on the team and also
+// gets the whole team side by side. Sales executives have no performance page.
 
 import { useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
@@ -90,7 +90,8 @@ export default function Performance() {
     };
   }, [manager, team, badCustom, from, to, teamKey]);
 
-  if (viewer.persona === "lead_provider") return <Navigate to={LEADS_HOME} replace />;
+  // Not for a lead provider, and not for a sales executive (their menu has no performance page).
+  if (viewer.persona === "lead_provider" || viewer.persona === "sales") return <Navigate to={LEADS_HOME} replace />;
 
   const current = result.key === key ? result : null;
   const report = current?.data;

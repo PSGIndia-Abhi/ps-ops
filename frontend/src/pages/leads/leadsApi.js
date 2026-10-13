@@ -15,7 +15,7 @@
 
 import { useSyncExternalStore } from "react";
 import { API_BASE, apiFetch, safeJson } from "../../api";
-import { PERSONAS } from "./access";
+import { PERSONAS, ROLE_ALIASES } from "./access";
 import { KNOWN_VISIT_OUTCOMES, PROVIDER_SOURCE, sourceLabel } from "./constants";
 
 const EMPTY = { ready: false, error: "", me: null, leads: [], meetings: [], activities: [], providers: [], people: [], leadSources: [], lossReasons: [] };
@@ -44,7 +44,7 @@ const isProviderLogin = () => localStorage.getItem("role") === "lead_provider";
 // ---- talking to the server --------------------------------------------------
 
 /** Calls the API and returns its JSON; a refusal becomes an Error carrying the server's own message. */
-async function request(endpoint, { method = "GET", body, form } = {}) {
+export async function request(endpoint, { method = "GET", body, form } = {}) {
   const res = await apiFetch(endpoint, { method, body: form || (body === undefined ? undefined : JSON.stringify(body)) });
   // apiFetch has already sent the browser to /login when the session has ended.
   if (!res) throw new Error("Your session has ended. Please sign in again.");
@@ -225,7 +225,7 @@ async function loadStaff() {
   }
 
   // A lead a sales executive added for themselves never goes through a telecaller.
-  const salesIds = new Set(data.people.filter((p) => p.role === "sales").map((p) => p.id));
+  const salesIds = new Set(data.people.filter((p) => p.role === "sales" || ROLE_ALIASES[p.role] === "sales").map((p) => p.id));
   const leads = data.leads.map((row) => ({
     ...toLead(row, closingNote.get(row.id)),
     salesOwn: !row.provider_id && !row.assigned_telecaller_id && salesIds.has(row.created_by_user_id),
@@ -376,7 +376,7 @@ export const userName = (id) => state.people.find((u) => u.id === id)?.name || s
 export const providerName = (id) => state.providers.find((p) => p.id === id)?.name || state.people.find((u) => u.id === id)?.name || "";
 /** A role as people read it: "sales_manager" -> "Sales Manager", "sales" -> "Sales Executive". */
 export const roleLabel = (role) =>
-  PERSONAS[role]?.label || String(role || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  PERSONAS[ROLE_ALIASES[role] || role]?.label || String(role || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 /** Who a meeting can be given to, each with their role. */
 export const salesTeam = () => state.people.filter((u) => u.can_visit).map((u) => ({ id: u.id, name: u.name, role: u.role, title: roleLabel(u.role) }));
 export const telecallers = () => state.people.filter((u) => u.role === "telecaller").map((u) => ({ id: u.id, name: u.name, role: "telecaller" }));
@@ -539,7 +539,53 @@ export async function sendProviderUpdate(leadId, message) {
   await loadWorkspace();
 }
 
-/** POST /leads/{id}/meetings - also creates the sales person's task in Task Management. */
+/** A GPS point the app recorded, or null. */
+const pointOf = (lat, lng) => (lat !== null && lat !== undefined && lng !== null && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : null);
+
+/** One visit with where it started and ended, as the visit history and Team Visits show it. */
+function toVisit(row) {
+  return {
+    ...toMeeting(row),
+    salesName: row.sales_employee_name || "",
+    startedAt: wall(row.check_in_at),
+    endedAt: wall(row.check_out_at),
+    startPoint: pointOf(row.check_in_lat, row.check_in_lng),
+    endPoint: pointOf(row.check_out_lat, row.check_out_lng),
+    outcomeText: row.outcome_notes || "",
+  };
+}
+
+/** GET /leads/{id}/meetings - every meeting of the lead, newest first, cancelled ones included. */
+export async function leadVisits(leadId) {
+  const rows = await request(`/api/crm/leads/${leadId}/meetings`);
+  return rows.map(toVisit);
+}
+
+/** GET /team-visits?date= - one day's visits by the team (sales managers only). */
+export async function teamVisits(date) {
+  const rows = await request(`/api/crm/team-visits?date=${encodeURIComponent(date)}`);
+  return rows.map((row) => ({
+    ...toVisit(row),
+    company: row.company_name || row.customer_name || "",
+    leadNumber: row.lead_number || "",
+    leadBy: row.lead_created_by_name || "",
+  }));
+}
+
+/** GET /leads/{id}/meetings/open - the lead's meeting still to happen, or null. A lead has at most one. */
+export async function getOpenMeeting(leadId) {
+  const { meeting } = await request(`/api/crm/leads/${leadId}/meetings/open`);
+  if (!meeting) return null;
+  return {
+    id: meeting.id,
+    scheduledAt: wall(meeting.scheduled_at),
+    type: meeting.meeting_type === "OFFICE" ? "MEETING" : "SITE_VISIT",
+    salesName: meeting.sales_employee_name || "",
+    started: !!meeting.check_in_at,
+  };
+}
+
+/** POST /leads/{id}/meetings - also creates the sales person's task in Task Management. 409 when one is already open. */
 export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationType, address, notes }) {
   if (!salesId) throw new Error("Choose the sales person for this meeting.");
   if (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() - 60000) throw new Error("Choose a meeting time in the future.");

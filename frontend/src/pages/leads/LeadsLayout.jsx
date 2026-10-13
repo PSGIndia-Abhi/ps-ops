@@ -24,6 +24,7 @@ import {
   FiThumbsDown,
   FiTrendingUp,
   FiUserCheck,
+  FiX,
   FiXCircle,
 } from "react-icons/fi";
 import logo from "../../assets/logo.png";
@@ -33,7 +34,9 @@ import { LEADS_HOME, PERSONAS, resolvePersona, roleIsPersona } from "./access";
 import { getNotifications, loadWorkspace, markNotificationRead, markNotificationsRead, resetWorkspace, useLeadData } from "./leadsApi";
 import { isPast, isToday } from "./format";
 import { dayLabel, timeLabel } from "./format";
+import { kindLabel, todayKey } from "./remindersApi";
 import { Avatar, ToastProvider } from "./ui";
+import { useMyReminders } from "./useMyReminders";
 import { ViewerContext, visibleLeads, visibleMeetings } from "./viewer";
 import "./leads.css";
 
@@ -94,7 +97,6 @@ function navFor(persona, counts) {
         home,
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
-        { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
       ];
     default:
       return [
@@ -102,6 +104,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/all`, label: "All Leads", icon: <FiList />, count: counts.leads },
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
+        { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
         { to: `${LEADS_HOME}/providers`, label: "Lead Providers", icon: <FiBriefcase /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
@@ -131,6 +134,10 @@ export default function LeadsLayout() {
       .then(setNotes)
       .catch(() => {}); // the bell just stays as it was
   }, []);
+
+  // The staff's lead reminders, for the bell's Reminders tab, and the cards that pop up on the page
+  // when one reaches its time or is newly set for them. No sound or browser notification.
+  const { reminders, popups, dismiss } = useMyReminders(persona === "lead_provider" ? "" : me?.id, leads);
 
   // Read on opening, after every change to the leads (a save here can notify someone), and once a minute.
   useEffect(() => {
@@ -164,6 +171,20 @@ export default function LeadsLayout() {
     };
   }, [leads, meetings, viewer]);
 
+  // A click anywhere outside an open popover (the bell or the profile menu), or Escape, closes it.
+  // Listened for on the document: a layer inside the top bar could not cover the page below it.
+  useEffect(() => {
+    if (!popover) return undefined;
+    const onDown = (e) => !e.target.closest?.(".lm-pop-anchor") && setPopover(null);
+    const onKey = (e) => e.key === "Escape" && setPopover(null);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [popover]);
+
   // Each page starts at the top, like a fresh page load would.
   useEffect(() => {
     mainRef.current?.scrollTo(0, 0);
@@ -186,30 +207,25 @@ export default function LeadsLayout() {
     navigate(path);
   }
 
-  // What the bell lists: calls due for whoever verifies leads, today's meetings for sales,
-  // and the latest feedback for a provider.
+  // What the bell's Reminders tab lists: the Reminders page's own list, cut down to what is due
+  // today or overdue - meetings, follow-ups, tasks and personal reminders alike, for every staff
+  // login. (A lead provider has no bell.)
   const alerts = useMemo(() => {
-    const mine = visibleLeads(leads, viewer);
-    if (persona === "lead_provider") {
-      return mine
-        .filter((l) => l.providerFeedback)
-        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-        .slice(0, 5)
-        .map((l) => ({ id: l.id, title: l.company, text: l.providerFeedback, when: dayLabel(l.updatedAt), to: `${LEADS_HOME}/${l.id}` }));
-    }
-    if (persona === "sales") {
-      return visibleMeetings(meetings, viewer)
-        .filter((m) => isToday(m.scheduledAt) && m.status !== "COMPLETED")
-        .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))
-        .slice(0, 5)
-        .map((m) => ({ id: m.id, title: leads.find((l) => l.id === m.leadId)?.company || "Meeting", text: m.type === "SITE_VISIT" ? "Site visit today" : "Meeting today", when: timeLabel(m.scheduledAt), to: `${LEADS_HOME}/${m.leadId}` }));
-    }
-    return mine
-      .filter((l) => l.nextFollowUpAt && (isToday(l.nextFollowUpAt) || isPast(l.nextFollowUpAt)))
-      .sort((a, b) => new Date(a.nextFollowUpAt) - new Date(b.nextFollowUpAt))
-      .slice(0, 5)
-      .map((l) => ({ id: l.id, title: l.company, text: isPast(l.nextFollowUpAt) ? "Follow-up call overdue" : "Follow-up call due today", when: timeLabel(l.nextFollowUpAt), to: `${LEADS_HOME}/${l.id}` }));
-  }, [leads, meetings, viewer, persona]);
+    const today = todayKey();
+    return reminders
+      .filter((r) => r.date <= today)
+      .map((r) => {
+        const at = `${r.date}T${r.time || "09:00"}`;
+        const detail = r.detail && r.kind !== "personal" ? ` · ${r.detail}` : "";
+        return {
+          id: r.key,
+          title: r.title,
+          text: `${kindLabel(r.kind)}${detail}`,
+          when: r.date < today ? `Overdue · ${dayLabel(at)}` : r.time ? `Today, ${timeLabel(at)}` : "Today",
+          to: r.leadId ? `${LEADS_HOME}/${r.leadId}` : `${LEADS_HOME}/reminders`,
+        };
+      });
+  }, [reminders]);
 
   function openNote(n) {
     if (!n.read) {
@@ -241,7 +257,11 @@ export default function LeadsLayout() {
 
   const info = PERSONAS[persona];
   // Lead staff open Task Management from here with the same login (it has its own login for everyone else).
-  const nav = [...navFor(persona, counts), ...(LEAD_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : [])];
+  const nav = [
+    ...navFor(persona, counts),
+    ...(persona !== "lead_provider" ? [{ to: `${LEADS_HOME}/reminders`, label: "Reminders", icon: <FiBell /> }] : []),
+    ...(LEAD_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : []),
+  ];
 
   return (
     <ViewerContext.Provider value={viewer}>
@@ -360,21 +380,28 @@ export default function LeadsLayout() {
                               </button>
                             ))
                           )
-                        ) : alerts.length === 0 ? (
-                          <div className="lm-pop-empty">Nothing needs your attention right now.</div>
                         ) : (
-                          alerts.map((n, i) => (
-                            <button key={n.id} type="button" className="lm-note" style={{ "--i": i }} onClick={() => go(n.to)}>
-                              <span className="lm-note-icon tone-warn">
-                                <FiClock />
-                              </span>
-                              <span className="lm-note-text">
-                                <strong>{n.title}</strong>
-                                <small>{n.text}</small>
-                                <em>{n.when}</em>
-                              </span>
+                          <>
+                            {alerts.length === 0 ? (
+                              <div className="lm-pop-empty">Nothing due today.</div>
+                            ) : (
+                              alerts.map((n, i) => (
+                                <button key={n.id} type="button" className="lm-note" style={{ "--i": i }} onClick={() => go(n.to)}>
+                                  <span className="lm-note-icon tone-warn">
+                                    <FiClock />
+                                  </span>
+                                  <span className="lm-note-text">
+                                    <strong>{n.title}</strong>
+                                    <small>{n.text}</small>
+                                    <em>{n.when}</em>
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                            <button type="button" className="lm-link lm-bell-all" onClick={() => go(`${LEADS_HOME}/reminders`)}>
+                              See all reminders{reminders.length > alerts.length ? ` (${reminders.length - alerts.length} upcoming)` : ""}
                             </button>
-                          ))
+                          </>
                         )}
                       </div>
                     </div>
@@ -408,8 +435,6 @@ export default function LeadsLayout() {
                   </div>
                 )}
               </div>
-              {/* A click anywhere else closes whichever popover is open. */}
-              {popover && <button type="button" className="lm-pop-shade" aria-label="Close" onClick={() => setPopover(null)} />}
             </header>
 
             {/* The content area. Full-page forms open over it (not over the top bar), so the
@@ -423,6 +448,34 @@ export default function LeadsLayout() {
               </main>
             </div>
           </div>
+
+          {popups.length > 0 && (
+            <div className="lm-popups" role="status" aria-live="polite">
+              {popups.map((p) => (
+                <div key={p.id} className="lm-popup">
+                  <span className="lm-popup-icon">{p.kind === "meeting" ? <FiCalendar /> : p.kind === "followup" ? <FiPhoneCall /> : <FiBell />}</span>
+                  <div className="lm-popup-text">
+                    <small>{p.title}</small>
+                    <strong>{p.text}</strong>
+                    {!!p.sub && <span>{p.sub}</span>}
+                    <button
+                      type="button"
+                      className="lm-link"
+                      onClick={() => {
+                        dismiss(p.id);
+                        navigate(p.leadId ? `${LEADS_HOME}/${p.leadId}` : `${LEADS_HOME}/reminders`);
+                      }}
+                    >
+                      {p.leadId ? "Open lead" : "Open reminders"}
+                    </button>
+                  </div>
+                  <button type="button" className="lm-popup-x" onClick={() => dismiss(p.id)} aria-label="Dismiss">
+                    <FiX />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </ToastProvider>
     </ViewerContext.Provider>

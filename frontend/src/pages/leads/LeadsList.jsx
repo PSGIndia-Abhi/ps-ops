@@ -153,11 +153,14 @@ export default function LeadsList() {
                   : "Every commercial lead across the team."}
           </p>
         </div>
-        <div className="lm-head-actions">
-          <Button icon={<FiPlus />} onClick={() => setAdding(true)}>
-            {persona === "lead_provider" ? "Submit Lead" : "Add Lead"}
-          </Button>
-        </div>
+        {/* Telecallers verify leads; they do not add them (the Android app and the server agree). */}
+        {persona !== "telecaller" && (
+          <div className="lm-head-actions">
+            <Button icon={<FiPlus />} onClick={() => setAdding(true)}>
+              {persona === "lead_provider" ? "Submit Lead" : "Add Lead"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <Card flush>

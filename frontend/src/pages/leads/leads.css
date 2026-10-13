@@ -266,7 +266,6 @@
   }
   .lm-pop-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--lm-primary); box-shadow: 0 0 0 4px var(--lm-primary-soft); }
   .lm-pop-empty { padding: 18px 12px 20px; text-align: center; color: var(--lm-muted); }
-  .lm-pop-shade { position: fixed; inset: 0; z-index: 50; cursor: default; }
 
   /* the bell: an unread count, two tabs (Updates from the server, Reminders worked out here) and the list */
   .lm-bell-count {
@@ -276,6 +275,7 @@
   }
   .lm-pop.lm-bell { width: 380px; padding: 0; overflow: hidden; }
   .lm-bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 10px; strong { font-size: 15px; } .lm-link { font-size: 12.5px; font-weight: 600; } }
+  .lm-bell-all { display: block; width: 100%; padding: 12px 16px; border-top: 1px solid var(--lm-line); font-size: 13px; text-align: center; }
   .lm-bell-tabs {
     display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--lm-line);
     button {
@@ -303,7 +303,6 @@
     em { font-style: normal; font-size: 11.5px; color: var(--lm-soft); }
   }
   .lm-note:not(.unread) strong { font-weight: 600; color: #334155; }
-  .lm-today { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 12px; background: #fff; border: 1px solid var(--lm-border); color: #475569; font-weight: 500; }
   /* The dashboard welcome banner - the same as Task Management's .tp-hero. */
   .lm-welcome {
     display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
@@ -332,6 +331,83 @@
     .lm-welcome h1 { font-size: 23px; }
     .lm-welcome-side { width: 100%; }
   }
+  /* ---- cards that pop up on the page when a reminder reaches its time or a new one is set for you ---- */
+  .lm-popups { position: fixed; top: 78px; right: 22px; z-index: 70; display: grid; gap: 10px; width: min(360px, calc(100vw - 28px)); }
+  .lm-popup {
+    display: flex; gap: 12px; padding: 14px 12px 14px 14px; border-radius: 16px; background: #fff;
+    border: 1px solid var(--lm-border); border-left: 4px solid var(--lm-primary); box-shadow: var(--lm-shadow-lg);
+    animation: lm-toast-in .35s var(--lm-ease) both;
+  }
+  .lm-popup-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--lm-primary-soft); color: var(--lm-primary); font-size: 18px; }
+  .lm-popup-text {
+    flex: 1; min-width: 0; display: grid; gap: 2px; justify-items: start;
+    small { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--lm-primary-600); }
+    strong { font-size: 14.5px; }
+    span { font-size: 12.5px; color: var(--lm-muted); }
+    .lm-link { margin-top: 6px; font-size: 13px; }
+  }
+  .lm-popup-x { flex: none; align-self: flex-start; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--lm-muted); &:hover { background: var(--lm-bg); color: var(--lm-text); } }
+
+  /* ---- reminders: one row per thing that will ring, grouped by day ---- */
+  .lm-reminders {
+    padding: 0 20px 20px;
+    section + section { margin-top: 18px; }
+    h4 { margin-bottom: 4px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--lm-muted); }
+  }
+  .lm-reminder {
+    display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--lm-line);
+    animation: lm-rise .4s var(--lm-ease) both; animation-delay: calc(var(--i, 0) * 40ms);
+    .lm-event-dot { position: static; flex: none; }
+  }
+  .lm-reminder-time { flex: none; width: 82px; display: grid; font-weight: 700; font-size: 13px; small { font-weight: 600; color: var(--lm-danger); } }
+  .lm-reminder-main { flex: 1; min-width: 0; display: grid; gap: 2px; strong { font-size: 14.5px; } small { color: var(--lm-muted); } }
+  .lm-reminder-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  @media (max-width: 860px) {
+    .lm-reminder { flex-wrap: wrap; }
+    .lm-reminder > .lm-badge { display: none; }
+    .lm-reminder-actions { width: 100%; justify-content: flex-start; padding-left: 94px; }
+  }
+
+  /* ---- site visits: start / end place lines, the visit list and Team Visits ---- */
+  .lm-visits { display: grid; }
+  .lm-visit {
+    display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--lm-line);
+    animation: lm-rise .4s var(--lm-ease) both; animation-delay: calc(var(--i, 0) * 50ms);
+    &:first-child { border-top: 0; padding-top: 0; }
+  }
+  .lm-visit-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--lm-primary-soft); color: var(--lm-primary); font-size: 17px; }
+  .lm-visit-time { flex: none; width: 70px; padding-top: 2px; font-weight: 700; font-size: 13px; color: var(--lm-text); }
+  .lm-visit-body { flex: 1; min-width: 0; display: grid; gap: 4px; small svg { vertical-align: -2px; } }
+  .lm-visit-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; strong { font-size: 14.5px; } }
+  .lm-visit-note { margin-top: 4px; padding: 8px 12px; border-radius: 10px; background: var(--lm-bg); color: #334155; font-size: 13px; white-space: pre-line; }
+  .lm-places { display: grid; gap: 8px; margin-top: 6px; }
+  .lm-place { display: flex; align-items: center; gap: 10px; }
+  .lm-place-dot {
+    flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-size: 14px;
+    &.tone-success { background: var(--lm-success-soft); color: var(--lm-success); }
+    &.tone-info { background: var(--lm-primary-soft); color: var(--lm-primary); }
+  }
+  .lm-place-text { flex: 1; min-width: 0; display: grid; line-height: 1.35; small { color: var(--lm-muted); font-size: 11.5px; } strong { font-size: 13px; } span { font-size: 12.5px; color: #334155; } span.muted { color: var(--lm-muted); font-style: italic; } }
+  .lm-pills { display: flex; gap: 6px; flex-wrap: wrap; &:empty { display: none; } }
+  .lm-pill {
+    display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+    &.tone-success { background: var(--lm-success-soft); color: var(--lm-success); }
+    &.tone-warn { background: var(--lm-warn-soft); color: var(--lm-warn); }
+    &.tone-info { background: var(--lm-primary-soft); color: var(--lm-primary-600); }
+    &.tone-danger { background: var(--lm-danger-soft); color: var(--lm-danger); }
+  }
+  .lm-team-visits { display: grid; gap: 14px; padding: 4px 20px 20px; }
+  .lm-person-visits {
+    border: 1px solid var(--lm-border); border-radius: 14px; padding: 14px 16px;
+    header { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--lm-line); }
+    .lm-visit:first-of-type { border-top: 0; padding-top: 0; }
+  }
+  .lm-day-pick {
+    display: inline-flex; align-items: center; height: 42px; border-radius: 12px; background: #fff; border: 1px solid var(--lm-border);
+    > button { display: grid; place-items: center; width: 38px; height: 100%; color: #475569; font-size: 17px; &:hover { color: var(--lm-primary); } }
+    label { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; font-weight: 600; color: var(--lm-text); cursor: pointer; }
+    input { width: 128px; border: 0; outline: 0; background: none; font: inherit; font-weight: 500; color: #475569; cursor: pointer; }
+  }
   .lm-date-pick {
     display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 10px 0 14px; border-radius: 12px;
     background: #fff; border: 1px solid var(--lm-border); color: #475569; font-weight: 500; cursor: pointer;
@@ -342,7 +418,8 @@
 
   .lm-stage { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .lm-main { flex: 1; overflow-y: auto; padding: 26px; scrollbar-gutter: stable; }
-  .lm-page { max-width: 1320px; margin: 0 auto; animation: lm-rise .5s var(--lm-ease) both; }
+  /* The page uses the full width of the screen; .lm-main's padding is the only margin. */
+  .lm-page { animation: lm-rise .5s var(--lm-ease) both; }
 
   /* ================= page heading ================= */
   .lm-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
@@ -389,6 +466,11 @@
   .lm-grid.two { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
   .lm-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lm-grid.half { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* `fill`: the cards in a row share one height, so a short card leaves no gap under it. */
+  .lm-grid.fill { align-items: stretch; }
+  /* A chart in a card taller than it sits in the middle, not stuck to the top. */
+  .lm-grid.fill > .lm-card { display: flex; flex-direction: column; }
+  .lm-grid.fill > .lm-card > .lm-card-body { flex: 1; display: grid; align-content: center; }
   .lm-stack { display: grid; gap: 18px; align-content: start; }
 
   .lm-kpi {
@@ -718,7 +800,7 @@
     &.nav-open .lm-side-scrim { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(10, 26, 51, .45); animation: lm-fade .25s both; }
     .lm-main { padding: 18px 14px; }
     .lm-top { padding: 10px 14px; }
-    .lm-me-text, .lm-caret, .lm-top .lm-search, .lm-today { display: none; }
+    .lm-me-text, .lm-caret, .lm-top .lm-search { display: none; }
     .lm-pf-head, .lm-pf-scroll, .lm-pf-foot { padding-left: 14px; padding-right: 14px; }
     .lm-pf-head { gap: 10px; }
     .lm-pf-back { padding: 0 9px; font-size: 0; gap: 0; }

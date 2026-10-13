@@ -157,7 +157,6 @@ function TelecallerHome() {
   const navigate = useNavigate();
   const { leads } = useLeadData();
   const ready = useLoaded();
-  const [adding, setAdding] = useState(false);
   const [calling, setCalling] = useState(null);
   const [scheduling, setScheduling] = useState(null);
   const [date, setDate] = useState(""); // a picked day: leads added and follow-ups due that day
@@ -188,11 +187,7 @@ function TelecallerHome() {
         }
         date={date}
         onDate={setDate}
-      >
-        <Button icon={<FiPlus />} onClick={() => setAdding(true)}>
-          Add Lead
-        </Button>
-      </Hello>
+      />
 
       {/* `key` replays the numbers when the date changes. */}
       <div className="lm-grid kpi" key={date}>
@@ -277,7 +272,6 @@ function TelecallerHome() {
         </div>
       </div>
 
-      {adding && <AddLeadModal onClose={() => setAdding(false)} />}
       {calling && <CallVerifyModal lead={fresh(calling.id) || calling} onClose={() => setCalling(null)} onScheduleMeeting={setScheduling} />}
       {scheduling && <ScheduleMeetingModal lead={fresh(scheduling.id) || scheduling} onClose={() => setScheduling(null)} />}
     </>
@@ -534,7 +528,7 @@ function ManagerHome() {
           <Kpi index={4} label="Converted" value={won} icon={<FiAward />} tone="teal" foot={`${pct(won, total)}% of leads`} />
         </div>
 
-        <div className="lm-grid two" style={{ marginBottom: 18 }}>
+        <div className="lm-grid two fill" style={{ marginBottom: 18 }}>
           <Card title="Team Performance" sub="Ranked by conversions" index={2} flush>
             <div style={{ height: 14 }} />
             {!ready ? (
@@ -587,7 +581,7 @@ function ManagerHome() {
           </Card>
         </div>
 
-        <div className="lm-grid half">
+        <div className="lm-grid half fill">
           <Card title="Pipeline" sub="How far leads get" index={4}>
             <Funnel
               steps={[

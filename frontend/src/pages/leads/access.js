@@ -37,13 +37,23 @@ export const PERSONAS = {
 export const PERSONA_KEYS = Object.keys(PERSONAS);
 
 /**
+ * Login roles that open a persona under another name. `commercial_sales` is the
+ * commercial sales executive (the server's SALES_EXECUTIVE_ROLES; the Android app
+ * maps it the same way); "sales" stays the sales persona as before.
+ */
+export const ROLE_ALIASES = { commercial_sales: "sales" };
+
+/** Every login role that is a lead persona, by its own name or an alias. */
+const LEAD_ROLE_NAMES = [...PERSONA_KEYS, ...Object.keys(ROLE_ALIASES)];
+
+/**
  * Roles allowed through the route guard. `admin` is here so an administrator
  * can open the area from the admin panel; it is not a persona itself.
  */
-export const LEADS_ROLES = [...PERSONA_KEYS, "admin"];
+export const LEADS_ROLES = [...LEAD_ROLE_NAMES, "admin"];
 
 /** True when the signed-in role is one of the four personas (so it is fixed). */
-export const roleIsPersona = (role) => PERSONA_KEYS.includes(role);
+export const roleIsPersona = (role) => LEAD_ROLE_NAMES.includes(role);
 
 /**
  * The persona to render. A real lead role always gets its own dashboard; an
@@ -51,5 +61,6 @@ export const roleIsPersona = (role) => PERSONA_KEYS.includes(role);
  * (Each other dashboard is seen by signing in with that role.)
  */
 export function resolvePersona(role) {
-  return roleIsPersona(role) ? role : "sales_manager";
+  if (ROLE_ALIASES[role]) return ROLE_ALIASES[role];
+  return PERSONA_KEYS.includes(role) ? role : "sales_manager";
 }

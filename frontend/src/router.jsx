@@ -70,6 +70,8 @@ import LeadDetail from "./pages/leads/LeadDetail";
 import { FollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
 import LeadsPerformance from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
+import TeamVisits from "./pages/leads/TeamVisits";
+import LeadReminders from "./pages/leads/Reminders";
 import { LEADS_HOME, LEADS_ROLES } from "./pages/leads/access";
 import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
@@ -270,6 +272,8 @@ const router = createBrowserRouter([
       { index: true, element: <LeadsHome /> },
       { path: "submit", element: <SubmitLead /> },
       { path: "all", element: <LeadsList /> },
+      { path: "team-visits", element: <TeamVisits /> },
+      { path: "reminders", element: <LeadReminders /> },
       { path: "follow-ups", element: <FollowUps /> },
       { path: "meetings", element: <Meetings /> },
       { path: "providers", element: <Providers /> },
