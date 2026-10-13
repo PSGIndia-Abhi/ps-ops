@@ -302,6 +302,7 @@ export default function RecordPayment() {
               <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${location.state.followUpId}`)}>Back to Reminder</button>
             )}
             <button type="button" className="ac-btn" onClick={recordAnother}>Record Another Payment</button>
+            <button type="button" className="ac-btn" onClick={() => navigate("/accountant/tasks")}>Go to Tasks &amp; Reminders</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/payments/list")}>Go to Payment List</button>
           </div>
         </div>

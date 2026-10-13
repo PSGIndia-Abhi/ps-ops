@@ -1,5 +1,5 @@
 import { apiFetch } from "../../api";
-import { FOLLOWUP_MODULE, FOLLOWUP_TYPE, getJson, send } from "./data";
+import { FOLLOWUP_MODULE, FOLLOWUP_TYPE, getJson, send, todayYmd } from "./data";
 
 // Payment reminder actions. Everything goes through the existing Task Management
 // API (/api/work-tasks); the only payment-specific call is the customer's phone.
@@ -66,13 +66,19 @@ export const repeatEnd = (schedule) => (schedule?.end_type === "ON_DATE" && sche
 // One reminder's schedule ({ status, recurrence: {...} }), for the reminder page.
 export const fetchReminderSchedule = (seriesId) => getJson(`/api/work-task-series/${seriesId}`);
 
-// The accountant's repeating payment reminders that are still running.
+// The accountant's repeating payment reminders: running (ACTIVE) and stopped (PAUSED). A stopped
+// one stays listed so it can be resumed; one that has ended for good (CANCELLED) is left out.
 export async function fetchReminderSchedules() {
-  const rows = await getJson("/api/work-task-series?status=ACTIVE");
-  return rows.filter((s) => s.source_module === FOLLOWUP_MODULE.CUSTOMER || s.source_module === FOLLOWUP_MODULE.INVOICE);
+  const rows = await getJson("/api/work-task-series");
+  return rows.filter((s) =>
+    (s.status === "ACTIVE" || s.status === "PAUSED") &&
+    (s.source_module === FOLLOWUP_MODULE.CUSTOMER || s.source_module === FOLLOWUP_MODULE.INVOICE));
 }
-// Stops a reminder from repeating. The reminder itself stays as it is, on its current date.
-export const stopReminderSchedule = (id) => send("POST", `/api/work-task-series/${id}/stop`);
+// Stops a reminder from repeating until it is resumed (a pause with no end date, from today).
+// The reminder itself stays as it is, on its current date.
+export const stopReminderSchedule = (id) => send("POST", `/api/work-task-series/${id}/pause`, { pause_from: todayYmd() });
+// Starts a stopped reminder repeating again. Dates that passed while it was stopped are skipped.
+export const resumeReminderSchedule = (id) => send("POST", `/api/work-task-series/${id}/resume`);
 
 // scope: "CUSTOMER" (the customer's whole outstanding) or "INVOICE" (one invoice).
 // repeat: "ONCE" (default), "DAILY", "WEEKLY" or "MONTHLY" -- see REPEATS. endDate: the last
@@ -88,7 +94,7 @@ export async function createFollowUp({ scope, customer, invoice, date, time, pri
     // Two schedules for the same customer or invoice would send every reminder twice.
     const running = (await fetchReminderSchedules()).find((s) => s.source_module === source.module && s.source_id === source.id);
     if (running) {
-      throw new Error(`${forInvoice ? invoice.invoice_number : customer.name} already has a repeating reminder (${repeatText(running).replace(/^E/, "e")}). Stop it first in Tasks & Reminders, Repeating tab.`);
+      throw new Error(`${forInvoice ? invoice.invoice_number : customer.name} already has a repeating reminder (${repeatText(running).replace(/^E/, "e")}). Find it in Tasks & Reminders, Repeating tab.`);
     }
   }
   return send("POST", "/api/work-tasks", {

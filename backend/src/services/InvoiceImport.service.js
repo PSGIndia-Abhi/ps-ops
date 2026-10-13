@@ -179,36 +179,6 @@ async function validateRows(rows, user) {
     return { customer: unique[0] };
   }
 
-  // sites -- same idea: matched by id (global, checked against the row's
-  // customer afterwards) or by name (scoped to that customer, like before).
-  const typedSites = [...new Set(rows.map((r) => String(r.site || "").trim()).filter(Boolean))];
-  const sitesById = new Map(); // upper(id) -> site
-  const sitesByNameKey = new Map(); // lower(name) -> [site]
-  if (typedSites.length) {
-    const lowerVals = typedSites.map(lower);
-    const upperVals = typedSites.map(upper);
-    const [sites] = await pool.query(
-      `SELECT id, company_id, name, branch_id, is_active FROM sites WHERE UPPER(TRIM(id)) IN (?) OR LOWER(TRIM(name)) IN (?)`,
-      [upperVals, lowerVals]
-    );
-    for (const s of sites) {
-      sitesById.set(upper(s.id), s);
-      const key = lower(s.name);
-      if (!sitesByNameKey.has(key)) sitesByNameKey.set(key, []);
-      sitesByNameKey.get(key).push(s);
-    }
-  }
-
-  function resolveSite(typed, customerId) {
-    const byId = sitesById.get(upper(typed));
-    if (byId) return { site: byId, byId: true };
-    if (!customerId) return { error: `Site "${typed}" was not found` };
-    const matches = (sitesByNameKey.get(lower(typed)) || []).filter((s) => s.company_id === customerId);
-    if (matches.length === 0) return { error: `Site "${typed}" was not found for this customer` };
-    if (matches.length > 1) return { error: "More than one site of this customer has this name. Please use the Site ID instead." };
-    return { site: matches[0] };
-  }
-
   // invoice numbers that already exist
   const existing = new Set();
   const numbers = [...new Set(rows.map((r) => r.invoice_number).filter(Boolean))];
@@ -227,8 +197,8 @@ async function validateRows(rows, user) {
     userBranchId = row?.branch_id || null;
   }
 
-  // Rows without a site: outside admin, the customer must have an active site in the
-  // user's branch (the same rule payments use), so nobody imports another branch's invoices.
+  // Customers with an active site in the user's branch. Only used to choose between several
+  // customers with the same name (see pickCustomer); it no longer blocks a row.
   const customersInBranch = new Set();
   if (userBranchId && allCustomerIds.length) {
     const [inBranch] = await pool.query(
@@ -289,29 +259,9 @@ async function validateRows(rows, user) {
     // When the name matched several customers, the id that was taken is shown with it.
     result.customer_display = customer && ambiguous ? `${customerName} (${customer.id})` : customerName;
 
-    // site -- resolved from either the name (scoped to this row's customer)
-    // or the id (checked against this row's customer afterwards, so a valid
-    // site id from a different customer is still an error).
-    let site = null;
-    if (row.site) {
-      const resolved = resolveSite(row.site, customer?.id || null);
-      if (resolved.error) {
-        errors.push(resolved.error);
-      } else if (resolved.byId && customer && resolved.site.company_id !== customer.id) {
-        errors.push(`Site "${row.site}" does not belong to this customer`);
-      } else if (!resolved.site.is_active) {
-        errors.push("Site is inactive");
-      } else if (user.role !== "admin" && (!userBranchId || resolved.site.branch_id !== userBranchId)) {
-        errors.push("This site belongs to another branch, so you cannot create invoices for it");
-      } else {
-        site = resolved.site;
-        result.matched_site_id = site.id;
-      }
-    }
-    result.site_display = site ? site.name : row.site;
-    if (!row.site && customer && user.role !== "admin" && !customersInBranch.has(customer.id)) {
-      errors.push("This customer has no site in your branch, so you cannot create invoices for it");
-    }
+    // Sites are not looked up or checked: a Site column, if the file has one, is shown as typed
+    // and the invoice is created without a site.
+    result.site_display = row.site;
 
     // duplicates
     if (customer && row.invoice_number) {

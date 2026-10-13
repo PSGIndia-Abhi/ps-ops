@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiAlertCircle, FiCalendar, FiRepeat, FiX } from "react-icons/fi";
 import DateInput from "./DateInput";
+import SearchSelect from "./SearchSelect";
 import { money } from "../../pages/accountant/format";
 import { byDue, followUpIndex, groupByCustomer, showDate, todayYmd } from "../../pages/accountant/data";
 import { createFollowUp, REPEATS, repeatText, showDue } from "../../pages/accountant/followups";
@@ -113,11 +114,14 @@ export default function FollowUpModal({
             {lockCustomer && customer ? (
               <div className="ac-fu-readonly">{customer.name}{customer.code ? ` (${customer.code})` : ""}</div>
             ) : (
-              <select className="ac-select" value={form.customer}
-                onChange={(e) => setForm((f) => ({ ...f, customer: e.target.value, picks: [] }))}>
-                <option value="">Select customer</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
-              </select>
+              <SearchSelect
+                ariaLabel="Customer"
+                listId="fu-customer-list"
+                placeholder="Search or select customer"
+                options={customers.map((c) => ({ value: c.id, label: `${c.name}${c.code ? ` (${c.code})` : ""}`, search: c.id }))}
+                value={form.customer}
+                onChange={(id) => setForm((f) => ({ ...f, customer: id, picks: [] }))}
+              />
             )}
           </div>
 

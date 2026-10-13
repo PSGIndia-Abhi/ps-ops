@@ -4,7 +4,7 @@ const { sendDueReminderAlerts } = require("../services/PaymentFollowUp.service")
 let running = false;
 
 // Sends the "payment reminder due" notifications. A run that is still going when the next
-// minute starts is skipped, so the same reminder is never picked up twice.
+// run starts is skipped, so the same reminder is never picked up twice.
 async function runPaymentReminderAlerts() {
   if (running) return;
   running = true;
@@ -20,7 +20,9 @@ async function runPaymentReminderAlerts() {
 
 function startPaymentReminderCron() {
   runPaymentReminderAlerts(); // immediate run, so a reminder that came due while the server was down is not missed
-  cron.schedule("* * * * *", runPaymentReminderAlerts); // every minute, so the alert arrives at the chosen time
+  // Every 30 seconds (node-cron's optional seconds field). With the Accountant Panel checking for new
+  // alerts every 30 seconds too, the pop-up arrives within 60 seconds of the reminder's time.
+  cron.schedule("*/30 * * * * *", runPaymentReminderAlerts);
 }
 
 module.exports = { startPaymentReminderCron };

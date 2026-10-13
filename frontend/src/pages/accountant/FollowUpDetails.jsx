@@ -27,7 +27,8 @@ const TABS = [
 const HISTORY_LABEL = {
   CREATE: "Reminder created", START: "Started", UPDATE: "Update", RESCHEDULE: "Rescheduled", COMPLETE: "Completed",
   REOPEN: "Reopened", ATTACH: "File attached", DETACH: "File removed", PAUSE: "Paused", RESUME: "Resumed", REASSIGN: "Reassigned", EDIT: "Edited", CANCEL: "Cancelled",
-  RESCHEDULE_REQUEST: "Reschedule requested",
+  RESCHEDULE_REQUEST: "Reschedule requested", SERIES_PAUSE: "Repeating stopped", SERIES_RESUME: "Repeating resumed",
+  PART_PAYMENT: "Part payment received",
 };
 
 const dash = (v) => (v == null || v === "" ? "—" : v);

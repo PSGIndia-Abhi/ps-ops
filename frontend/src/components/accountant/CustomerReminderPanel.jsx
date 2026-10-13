@@ -27,6 +27,9 @@ const EVENT = {
   CANCEL: { title: "Reminder cancelled", tone: "red" },
   ATTACH: { title: "File attached", tone: "blue" },
   DETACH: { title: "File removed", tone: "amber" },
+  SERIES_PAUSE: { title: "Repeating stopped", tone: "amber" },
+  SERIES_RESUME: { title: "Repeating resumed", tone: "blue" },
+  PART_PAYMENT: { title: "Part payment received", tone: "green" },
 };
 
 const MAX_HISTORY_TASKS = 10; // history is loaded for the customer's 10 most recent reminders

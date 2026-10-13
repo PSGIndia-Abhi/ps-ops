@@ -54,13 +54,41 @@ async function closeClearedFollowUps(customerId, { userId = null, paymentNumber 
     }
 
     const note = `Outstanding cleared${paymentNumber ? ` (payment ${paymentNumber})` : ""}`;
+
+    // What this payment put on each invoice (cash + TDS), so a reminder it did not clear can
+    // still record the part payment in its history.
+    const paidByInvoice = new Map();
+    if (paymentNumber) {
+      const [allocs] = await connection.query(
+        `SELECT pa.invoice_id, SUM(pa.allocated_amount + pa.tds_amount) AS amount
+           FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
+          WHERE p.payment_number = ? GROUP BY pa.invoice_id`,
+        [paymentNumber]
+      );
+      for (const a of allocs) paidByInvoice.set(a.invoice_id, Number(a.amount) || 0);
+    }
     let closed = 0;
     for (const task of tasks) {
       const cleared =
         task.source_module === FOLLOWUP_MODULES.CUSTOMER
           ? customerPending <= EPS
           : customerPending <= EPS || (pendingById.get(task.source_id) ?? 0) <= EPS;
-      if (!cleared) continue;
+      if (!cleared) {
+        // Part payment: money came in for what this reminder chases, but some is still owed.
+        // The reminder stays open; its history says how much came in and how much is left.
+        const forCustomer = task.source_module === FOLLOWUP_MODULES.CUSTOMER;
+        const received = forCustomer
+          ? [...paidByInvoice.values()].reduce((s, v) => s + v, 0)
+          : paidByInvoice.get(task.source_id) || 0;
+        const left = forCustomer ? customerPending : pendingById.get(task.source_id) ?? 0;
+        if (received > EPS) {
+          await logHistory(connection, task.id, "PART_PAYMENT", {
+            note: `Part payment received: ${inr(received)} (payment ${paymentNumber}). ${inr(left)} still outstanding`.slice(0, 500),
+            changedBy: userId,
+          });
+        }
+        continue;
+      }
 
       // paused_seconds/paused_at are set before status, so the IF still sees the old status.
       const [result] = await connection.query(

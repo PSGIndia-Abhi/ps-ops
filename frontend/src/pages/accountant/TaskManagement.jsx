@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiCheckCircle, FiChevronDown, FiChevronRight, FiPlus, FiRepeat } from "react-icons/fi";
+import DateInput from "../../components/accountant/DateInput";
 import FollowUpModal from "../../components/accountant/FollowUpModal";
+import SearchSelect from "../../components/accountant/SearchSelect";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { byDue, showDate, useAccountantData, usePaged, ymd } from "./data";
-import { fetchReminderSchedules, repeatEnd, repeatText, showDue, stopReminderSchedule } from "./followups";
+import { fetchReminderSchedules, repeatEnd, repeatText, resumeReminderSchedule, showDue, stopReminderSchedule } from "./followups";
 
 // Tasks & Reminders: the accountant's payment reminders. Each one is a Task
 // Management task pointing at a customer or an invoice (see data.js).
@@ -111,12 +113,26 @@ export default function TaskManagement() {
     setBusy(true);
     try {
       await stopReminderSchedule(stopping.id);
-      setNotice(`The repeating reminder for ${stopping.invoice_number || stopping.customer_name} was stopped.`);
+      setNotice(`The repeating reminder for ${stopping.invoice_number || stopping.customer_name} was stopped. Use Resume to start it again.`);
       setStopping(null);
       await loadSchedules();
     } catch (err) {
       setScheduleError(err.message || "The repeating reminder could not be stopped.");
       setStopping(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  // Starts a stopped repeating reminder again (no confirmation: Stop can undo it).
+  async function resume(s) {
+    setBusy(true);
+    setScheduleError("");
+    try {
+      await resumeReminderSchedule(s.id);
+      setNotice(`The repeating reminder for ${s.invoice_number || s.customer_name} was resumed.`);
+      await Promise.all([loadSchedules(), reload()]);
+    } catch (err) {
+      setScheduleError(err.message || "The repeating reminder could not be resumed.");
     } finally {
       setBusy(false);
     }
@@ -160,16 +176,27 @@ export default function TaskManagement() {
                 </div>
                 <div className="ac-field">
                   <label>Customer</label>
-                  <select className="ac-select" value={filters.customer} onChange={setFilter("customer")}>
-                    <option value="">All customers</option>
-                    {customerOptions.map((c) => <option key={c}>{c}</option>)}
-                  </select>
+                  <SearchSelect
+                    ariaLabel="Customer"
+                    listId="tm-customer-filter"
+                    allLabel="All customers"
+                    options={customerOptions.map((c) => ({ value: c, label: c }))}
+                    value={filters.customer}
+                    onChange={(v) => setFilter("customer")({ target: { value: v } })}
+                  />
                 </div>
                 <div className="ac-field">
                   <label>Due date</label>
-                  <div className="ac-grid-2" style={{ gap: 8 }}>
-                    <input className="ac-input" type="date" value={filters.from} onChange={setFilter("from")} aria-label="Due from" />
-                    <input className="ac-input" type="date" value={filters.to} onChange={setFilter("to")} aria-label="Due to" />
+                  {/* one box per line: two side by side do not fit the panel's width */}
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div className="ac-date-field">
+                      <span style={{ width: 36 }}>From</span>
+                      <DateInput ariaLabel="Due from" value={filters.from} onChange={(v) => setFilter("from")({ target: { value: v } })} />
+                    </div>
+                    <div className="ac-date-field">
+                      <span style={{ width: 36 }}>To</span>
+                      <DateInput ariaLabel="Due to" value={filters.to} onChange={(v) => setFilter("to")({ target: { value: v } })} />
+                    </div>
                   </div>
                 </div>
                 <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
@@ -211,13 +238,23 @@ export default function TaskManagement() {
                       {s.description && <div className="ac-sub ac-fu-note">{s.description}</div>}
                     </td>
                     <td>{s.scope === "INVOICE" ? "Invoice" : "Customer"}</td>
-                    <td>{repeatText(s)}</td>
+                    <td>
+                      {repeatText(s)}
+                      {s.status === "PAUSED" && <div><span className="ac-badge pending">Stopped</span></div>}
+                    </td>
                     <td>{s.reminder ? showDue(s.reminder.due_date, s.reminder.due_time) : <span className="ac-sub">—</span>}</td>
                     <td>{repeatEnd(s) ? showDate(repeatEnd(s)) : <span className="ac-sub">No end date</span>}</td>
                     <td>
                       <div className="ac-actions" style={{ flexWrap: "nowrap", gap: 8 }}>
                         {s.reminder && <button type="button" className="ac-link" onClick={() => open(s.reminder)}>Open <FiChevronRight style={{ verticalAlign: "-2px" }} /></button>}
-                        <button type="button" className="ac-btn ac-btn-sm" onClick={() => setStopping(s)}>Stop</button>
+                        {s.status === "PAUSED" ? (
+                          <button type="button" className="ac-btn ac-btn-primary ac-btn-sm" disabled={busy} onClick={() => resume(s)}>Resume</button>
+                        ) : s.reminder && s.reminder.status !== "OPEN" ? (
+                          <button type="button" className="ac-btn ac-btn-sm" disabled={busy} onClick={() => setStopping(s)}>Stop</button>
+                        ) : (
+                          // Stop is offered only once the reminder has been started (Open it and press Start).
+                          <span className="ac-sub" style={{ whiteSpace: "nowrap" }}>Start it to stop</span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -275,7 +312,7 @@ export default function TaskManagement() {
             <h3>Stop this repeating reminder?</h3>
             <p className="ac-sub" style={{ fontSize: 14 }}>
               {stopping.invoice_number ? `Invoice ${stopping.invoice_number} (${stopping.customer_name})` : stopping.customer_name}: {repeatText(stopping).replace(/^E/, "e")}
-              {repeatEnd(stopping) ? `, until ${showDate(repeatEnd(stopping))}` : ""}. It will not come due again. The reminder itself stays open on its current date.
+              {repeatEnd(stopping) ? `, until ${showDate(repeatEnd(stopping))}` : ""}. It will not come due again until you resume it. The reminder itself stays open on its current date.
             </p>
             <div className="ac-modal-foot">
               <button type="button" className="ac-btn" onClick={() => setStopping(null)} disabled={busy}>Cancel</button>
