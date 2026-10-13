@@ -13,6 +13,16 @@ jest.mock('react-native-keychain', () => ({
   resetGenericPassword: jest.fn(() => Promise.resolve(true)),
 }));
 
+jest.mock('@react-native-firebase/messaging', () => ({
+  getMessaging: jest.fn(() => ({})),
+  getToken: jest.fn(() => Promise.resolve('test-token')),
+  getInitialNotification: jest.fn(() => Promise.resolve(null)),
+  onMessage: jest.fn(() => () => {}),
+  onNotificationOpenedApp: jest.fn(() => () => {}),
+  onTokenRefresh: jest.fn(() => () => {}),
+  setBackgroundMessageHandler: jest.fn(),
+}));
+
 jest.mock('@react-native-community/geolocation', () => ({
   getCurrentPosition: jest.fn(),
   watchPosition: jest.fn(),

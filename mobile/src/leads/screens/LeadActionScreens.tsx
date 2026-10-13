@@ -13,7 +13,11 @@ import { SelectField } from '../../crm/ui/SelectField';
 import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { spacing, typography } from '../../theme';
+import { openFollowUpsFor } from '../../reminders-engine/personal';
 import { refreshReminders } from '../../reminders-engine/useReminders';
+import { rescheduleTask } from '../../tasks/api';
+import type { WorkTask } from '../../tasks/types';
+import { confirmClash, loadAllReminderItems } from './RemindersScreens';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
@@ -231,23 +235,100 @@ export function LeadCallScreen() {
 
 export function LeadFollowUpScreen() {
   const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadFollowUp'>>().params;
+  const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
-  const { saving, error, submit } = useSubmit();
+  const { myId } = useMe();
+  const { saving, error, setError, submit } = useSubmit();
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('10:00');
   const [note, setNote] = useState('');
-  const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+  const [sheet, setSheet] = useState<'date' | 'time' | 'moveDate' | 'moveTime' | null>(null);
+  // Follow-ups already open on this lead: undefined while checking.
+  const [existing, setExisting] = useState<WorkTask[] | undefined>(undefined);
+  const [addAnother, setAddAnother] = useState(false);
+  const [moveDate, setMoveDate] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    openFollowUpsFor(leadId)
+      .then((list) => alive && setExisting(list))
+      .catch(() => alive && setExisting([]));
+    return () => {
+      alive = false;
+    };
+  }, [leadId]);
+
+  const onSave = async () => {
+    // "Already something at this time?" - against everything that rings for me.
+    const items = await loadAllReminderItems(myId).catch(() => []);
+    if (!(await confirmClash(items, date, time))) return;
+    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim() }));
+  };
+
+  const current = existing?.[0];
+  const moveTo = async (newTime: string | null) => {
+    if (!current || !moveDate) return;
+    setMoving(true);
+    try {
+      await rescheduleTask(current.id, moveDate, newTime);
+      refreshReminders();
+      navigation.goBack();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not change the follow-up.'));
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  if (existing === undefined) {
+    return (
+      <LeadScreen edges={['top', 'bottom']}>
+        <TopBar title="Schedule follow-up" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <CrmScreen edges={[]} transparent contentStyle={styles.body}>
+          <CrmSkeleton height={64} radius={16} />
+          <View style={styles.gap} />
+          <CrmSkeleton height={64} radius={16} />
+        </CrmScreen>
+      </LeadScreen>
+    );
+  }
+
+  if (current && !addAnother) {
+    const when = `${fmtDateShort(String(current.due_date).slice(0, 10))}${current.due_time ? `, ${fmtTime(current.due_time)}` : ''}`;
+    return (
+      <LeadScreen edges={['top', 'bottom']}>
+        <TopBar title="Schedule follow-up" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <CrmScreen edges={[]} transparent contentStyle={styles.body}>
+          <CrmErrorBanner message={error} />
+          <Card>
+            <View style={styles.busyCard}>
+              <View style={[styles.busyIcon, { backgroundColor: theme.warningBg }]}>
+                <ClockIcon size={30} color={theme.warning} />
+              </View>
+              <Text style={styles.busyTitle}>A follow-up is already set</Text>
+              <Text style={styles.busyWhen}>{when}</Text>
+              {!!current.assigned_to_name && <Text style={styles.busyMeta}>for {current.assigned_to_name}</Text>}
+              {!!current.description && <Text style={styles.busyMeta}>“{current.description}”</Text>}
+              <Text style={styles.busyHelp}>
+                {existing.length > 1 ? `${existing.length} follow-ups are open on this lead. ` : ''}Change its time, or add another one if you really need a second.
+              </Text>
+            </View>
+          </Card>
+          <View style={styles.gap} />
+          <PrimaryButton label="Change date / time" onPress={() => setSheet('moveDate')} loading={moving} />
+          <View style={styles.gap} />
+          <PrimaryButton label="Add another anyway" variant="secondary" onPress={() => setAddAnother(true)} disabled={moving} />
+          <DateSheet visible={sheet === 'moveDate'} onClose={() => setSheet(null)} value={String(current.due_date).slice(0, 10)} minDate={todayStr()} title="New follow-up date" onPick={(d) => { setMoveDate(d); setSheet('moveTime'); }} />
+          <TimeSheet visible={sheet === 'moveTime'} onClose={() => setSheet(null)} value={current.due_time ? current.due_time.slice(0, 5) : null} onPick={(t) => { setSheet(null); moveTo(t); }} />
+        </CrmScreen>
+      </LeadScreen>
+    );
+  }
 
   return (
-    <FormShell
-      title="Schedule follow-up"
-      subtitle={name}
-      error={error}
-      submitLabel="Save follow-up"
-      saving={saving}
-      onSubmit={() => submit(() => api.addFollowUp(leadId, { date, time, note: note.trim() }))}
-    >
-      <Text style={styles.help}>This creates a reminder task for you on the chosen day.</Text>
+    <FormShell title="Schedule follow-up" subtitle={name} error={error} submitLabel="Save follow-up" saving={saving} onSubmit={onSave}>
+      <Text style={styles.help}>Your phone rings 30 minutes before, so you do not miss it.</Text>
       <FieldRow>
         <PickField label="Next follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />

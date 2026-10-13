@@ -3,6 +3,7 @@ import { Alert, AppState } from 'react-native';
 import { kvGet, kvSet } from '../crm/secureKv';
 import { syncReminders, type ReminderRoute } from './engine';
 import { canScheduleExactAlarms, consumeOpenedRoute, onReminderOpened, openExactAlarmSettings, remindersAvailable } from './native';
+import { listenForPush, registerForPush } from './push';
 import { myUpcomingTasks, taskToReminder } from './sources';
 
 /** While an app is open its reminders are refreshed this often (plus on open and on return). */
@@ -77,6 +78,18 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
     });
     return off;
   }, [app]);
+
+  // Push notifications: register this phone, and open the right screen when a push is tapped.
+  useEffect(() => {
+    if (!myId) return;
+    registerForPush();
+    return listenForPush(
+      (route) => {
+        if (route.app === app) openRef.current(route);
+      },
+      () => refreshReminders(),
+    );
+  }, [myId, app]);
 
   useEffect(() => {
     currentSync = sync;
