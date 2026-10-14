@@ -32,6 +32,8 @@ export type LeadStackParamList = {
   LeadReminderEdit: { taskId?: string; leadId?: string; leadName?: string } | undefined;
   /** Sales manager: one day's visits by the team, with start / end times and GPS. */
   LeadTeamVisits: undefined;
+  /** Sales manager: residential (home-service) leads, read-only. */
+  LeadResidential: undefined;
   /** More -> Profile in the sales apps (CRM and Lead Management). */
   LeadProfile: undefined;
   /** The bell on Home: lead notifications, newest first. */

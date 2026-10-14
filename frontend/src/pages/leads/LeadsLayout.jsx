@@ -11,6 +11,7 @@ import {
   FiClock,
   FiFileText,
   FiGrid,
+  FiHome,
   FiInbox,
   FiList,
   FiLogOut,
@@ -110,6 +111,8 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
         { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
+        // Residential (home-service) leads, for reference: no pipeline or follow-ups here.
+        { to: `${LEADS_HOME}/residential`, label: "Residential Leads", icon: <FiHome /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
   }

@@ -37,11 +37,12 @@ export const PERSONAS = {
 export const PERSONA_KEYS = Object.keys(PERSONAS);
 
 /**
- * Login roles that open a persona under another name. `commercial_sales` is the
- * commercial sales executive (the server's SALES_EXECUTIVE_ROLES; the Android app
- * maps it the same way); "sales" stays the sales persona as before.
+ * Login roles that open a persona under another name. "Sales Executive" (the
+ * org-hierarchy role, which also works in Task Management) is the commercial sales
+ * executive - the server's SALES_EXECUTIVE_ROLES; the Android app maps it the same
+ * way. "sales" stays the sales persona as before.
  */
-export const ROLE_ALIASES = { commercial_sales: "sales" };
+export const ROLE_ALIASES = { "Sales Executive": "sales" };
 
 /** Every login role that is a lead persona, by its own name or an alias. */
 const LEAD_ROLE_NAMES = [...PERSONA_KEYS, ...Object.keys(ROLE_ALIASES)];

@@ -3,7 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
 import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
-import { BellIcon, CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import { BellIcon, CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, HomeIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
 import type { LeadStackParamList } from '../../leads/navigation';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
@@ -110,10 +110,12 @@ export function CrmMoreScreen() {
   const { styles, theme } = useCrmStyles(factory);
   const name = user?.name ?? 'Account';
   // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
-  // lead roles such as "commercial_sales" read as "Commercial Sales".
+  // lead roles such as "sales_manager" read as "Sales Manager".
   const roleText = role ? roleLabel(role) : displayRole(rawRole);
   // Telecallers verify leads by phone: no site visits, no sales performance numbers.
   const telecaller = (rawRole ?? '').toLowerCase().trim() === 'telecaller';
+  // The sales manager also looks over residential leads (read-only).
+  const salesManager = (rawRole ?? '').toLowerCase().trim() === 'sales_manager';
   // Lead roles also have Task Management (and MD / PA the Sales app).
   const { canSwitch, current, openSwitcher } = useAppSwitch();
 
@@ -183,6 +185,14 @@ export function CrmMoreScreen() {
             label="My performance"
             divider
             onPress={() => leadNavigation.navigate('LeadPerformance')}
+          />
+        )}
+        {salesManager && (
+          <MenuRow
+            icon={<HomeIcon size={18} color={theme.primary} />}
+            label="Residential leads"
+            divider
+            onPress={() => leadNavigation.navigate('LeadResidential')}
           />
         )}
       </View>

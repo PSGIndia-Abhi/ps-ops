@@ -19,6 +19,7 @@ import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
 import { ReminderEditScreen, RemindersScreen } from './RemindersScreens';
 import { PerformanceScreen } from './ReportScreens';
+import { ResidentialLeadsScreen } from './ResidentialLeadsScreen';
 import { TeamVisitsScreen } from './TeamVisitsScreen';
 
 /**
@@ -50,6 +51,7 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadNotifications', component: LeadNotificationsScreen },
   { name: 'LeadProfile', component: LeadProfileScreen },
   { name: 'LeadTeamVisits', component: TeamVisitsScreen },
+  { name: 'LeadResidential', component: ResidentialLeadsScreen },
   { name: 'LeadReminders', component: RemindersScreen },
   { name: 'LeadReminderEdit', component: ReminderEditScreen, modal: true },
 ];

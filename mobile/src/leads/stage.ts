@@ -112,13 +112,14 @@ export function leadActions(lead: PipelineLead, persona: LeadPersona, myId: stri
 }
 
 /**
- * The lead roles that get the lead screens as their whole app. commercial_sales is the
- * commercial sales executive; the residential "sales" and "marketing" roles keep the CRM app.
+ * The lead roles that get the lead screens as their whole app. "Sales Executive" (the org-hierarchy
+ * role, which also has Task Management) is the commercial sales executive; the residential "sales"
+ * and "marketing" roles keep the CRM app.
  */
 export function leadPersonaForRole(role: string | null | undefined): LeadPersona | null {
   const r = (role || '').toLowerCase().trim();
   if (r === 'telecaller') return 'telecaller';
-  if (r === 'commercial_sales') return 'sales';
+  if (r === 'sales executive') return 'sales';
   if (r === 'sales_manager') return 'sales_manager';
   return null;
 }

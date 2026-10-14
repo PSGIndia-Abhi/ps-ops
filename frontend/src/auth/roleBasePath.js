@@ -25,8 +25,8 @@ export const ROLE_HOME = {
   sales_manager: "/leads",
   // The sales executive works their leads, meetings and quotations there too.
   sales: "/leads",
-  // The commercial sales executive's own role name (the Android app uses it too).
-  commercial_sales: "/leads",
+  // The commercial sales executive ("Sales Executive", listed with the hierarchy roles
+  // below) lands in Lead Management too, and opens Task Management from its sidebar.
 
   // The real org-hierarchy designations (see user_hierarchy / Roles &
   // Permissions) land in Task Management. Deliberately NOT "supervisor" —
@@ -40,7 +40,7 @@ export const ROLE_HOME = {
   "Marketing Head": "/taskpro",
   "Marketing Executive": "/taskpro",
   "Sales Head": "/taskpro",
-  "Sales Executive": "/taskpro",
+  "Sales Executive": "/leads",
   "Operations Head": "/taskpro",
   "Operations Manager": "/taskpro",
   "Service Coordinator": "/taskpro",

@@ -30,7 +30,7 @@ export function isCrmRole(role: AppRole | null): boolean {
 /**
  * The residential sales roles: the CRM app exactly as it was before commercial leads - residential
  * leads, form and payments only. Commercial leads belong to the Lead Management roles (telecaller,
- * commercial_sales, sales_manager). Matched on the raw role, so MD / PA in the Sales app still see both.
+ * Sales Executive, sales_manager). Matched on the raw role, so MD / PA in the Sales app still see both.
  */
 export function isResidentialRole(role: string | null | undefined): boolean {
   const r = (role || '').toLowerCase().trim();

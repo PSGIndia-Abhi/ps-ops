@@ -8,7 +8,7 @@
 // The Lead Management staff roles. They log in to /leads but also open Task
 // Management from there, with the same login (their visits and follow-ups
 // are tasks), and get a link back to Lead Management in this sidebar.
-export const LEAD_ROLES = ["telecaller", "sales", "commercial_sales", "sales_manager"];
+export const LEAD_ROLES = ["telecaller", "sales", "Sales Executive", "sales_manager"];
 
 export const TASKPRO_ROLES = [
   ...LEAD_ROLES,

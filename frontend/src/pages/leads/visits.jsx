@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { FiBriefcase, FiCalendar, FiExternalLink, FiMapPin, FiUsers, FiXCircle } from "react-icons/fi";
 import { leadVisits } from "./leadsApi";
+import { mapLink, placeOf } from "./places";
 import { dateTime, timeLabel } from "./format";
 import { Badge, Button, Empty, SkeletonRows } from "./ui";
 
@@ -16,28 +17,6 @@ const VISIT_STATE = {
   CANCELLED: { label: "Cancelled", tone: "neutral" },
   RESCHEDULED: { label: "Rescheduled", tone: "violet" },
 };
-
-const mapLink = (p) => `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
-
-// One address lookup per point for the whole session - lists re-render, and each lookup is a request.
-const placeCache = new Map();
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-/** The written place for a GPS point ("4th Cross, Jayanagar, Bengaluru"), or null if it cannot be found. */
-function placeOf({ lat, lng }) {
-  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-  if (!placeCache.has(key)) {
-    const lookup = !MAPS_KEY
-      ? Promise.resolve(null)
-      : fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${MAPS_KEY}`)
-          .then((r) => r.json())
-          // Drop a leading Google plus code ("WHJM+8GF, ..."), as the Android app does.
-          .then((d) => (d.status === "OK" && d.results?.[0]?.formatted_address ? d.results[0].formatted_address.replace(/^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3},?\s*/i, "") : null))
-          .catch(() => null);
-    placeCache.set(key, lookup);
-  }
-  return placeCache.get(key);
-}
 
 /** "Started 11:34 am" with the place in words and a Map button for the exact point. */
 export function PlaceLine({ label, at, point, tone }) {

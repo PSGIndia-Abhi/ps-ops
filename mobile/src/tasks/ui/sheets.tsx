@@ -46,10 +46,15 @@ const factory = (t: CrmTheme) => ({
   monthBar: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.xs },
   monthNav: { width: 40, height: 40, borderRadius: radii.pill, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
   monthLabel: { ...typography.subtitle, color: t.textPrimary },
-  grid: { flexDirection: 'row' as const, flexWrap: 'wrap' as const },
-  cell: { width: `${100 / 7}%` as const, height: 46, alignItems: 'center' as const, justifyContent: 'center' as const },
+  // The month is drawn as week rows of exactly 7 equal cells that share the row's width, so a date
+  // always sits under its own weekday on every screen width. (A wrapping grid of 1/7-wide cells
+  // rounds to more than the row on some phones and pushes the 7th day down a line.)
+  grid: { width: '100%' as const },
+  week: { flexDirection: 'row' as const },
+  cell: { flex: 1, height: 46, alignItems: 'center' as const, justifyContent: 'center' as const },
   weekday: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const },
-  day: { width: 40, height: 40, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
+  // As big as the cell allows, never more than 40 - a narrow phone gets smaller circles, not overlap.
+  day: { width: '90%' as const, maxWidth: 40, aspectRatio: 1, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
   dayToday: { borderWidth: 1.5, borderColor: t.primary },
   daySelected: { backgroundColor: t.primary },
   dayText: { ...typography.body, color: t.textPrimary },
@@ -175,10 +180,13 @@ export function DateSheet({
   const cells = useMemo(() => {
     const first = new Date(cursor.y, cursor.m, 1);
     const daysIn = new Date(cursor.y, cursor.m + 1, 0).getDate();
-    const blanks = Array.from({ length: first.getDay() }, () => null);
+    const blanks: (string | null)[] = Array.from({ length: first.getDay() }, () => null);
     const days = Array.from({ length: daysIn }, (_, i) => toDateStr(new Date(cursor.y, cursor.m, i + 1)));
-    return [...blanks, ...days];
+    const all = [...blanks, ...days];
+    while (all.length % 7) all.push(null); // the last week is filled out so every row has 7 cells
+    return all;
   }, [cursor]);
+  const weeks = useMemo(() => Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7)), [cells]);
 
   const shift = (n: number) =>
     setCursor(({ y, m }) => {
@@ -200,33 +208,39 @@ export function DateSheet({
         </Pressable>
       </View>
       <View style={styles.grid}>
-        {WEEKDAYS.map((w) => (
-          <View key={w} style={styles.cell}>
-            <Text style={styles.weekday}>{w.slice(0, 2)}</Text>
+        <View style={styles.week}>
+          {WEEKDAYS.map((w) => (
+            <View key={w} style={styles.cell}>
+              <Text style={styles.weekday}>{w.slice(0, 2)}</Text>
+            </View>
+          ))}
+        </View>
+        {weeks.map((week, wi) => (
+          <View key={`w${wi}`} style={styles.week}>
+            {week.map((d, i) => {
+              if (!d) return <View key={`b${wi}-${i}`} style={styles.cell} />;
+              const disabled = !!minDate && d < minDate;
+              const selected = d === value;
+              return (
+                <Pressable
+                  key={d}
+                  disabled={disabled}
+                  onPress={() => {
+                    onPick(d);
+                    onClose();
+                  }}
+                  style={styles.cell}
+                  accessibilityRole="button"
+                  accessibilityLabel={d}
+                >
+                  <View style={[styles.day, d === today && styles.dayToday, selected && styles.daySelected]}>
+                    <Text style={[styles.dayText, disabled && styles.dayDisabled, selected && styles.onPrimary]}>{Number(d.slice(8))}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
         ))}
-        {cells.map((d, i) => {
-          if (!d) return <View key={`b${i}`} style={styles.cell} />;
-          const disabled = !!minDate && d < minDate;
-          const selected = d === value;
-          return (
-            <Pressable
-              key={d}
-              disabled={disabled}
-              onPress={() => {
-                onPick(d);
-                onClose();
-              }}
-              style={styles.cell}
-              accessibilityRole="button"
-              accessibilityLabel={d}
-            >
-              <View style={[styles.day, d === today && styles.dayToday, selected && styles.daySelected]}>
-                <Text style={[styles.dayText, disabled && styles.dayDisabled, selected && styles.onPrimary]}>{Number(d.slice(8))}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
       </View>
       <Pressable
         onPress={() => {

@@ -15,7 +15,6 @@ import {
   ClockIcon,
   DocumentIcon,
   ExternalLinkIcon,
-  PersonIcon,
   PinIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -28,9 +27,9 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import { HomeBand, HomeTile, QuickAction, SectionTitle, TILE_OVERLAP } from '../homeParts';
 import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
-import { countByGroup, inGroup, type StageGroup } from '../stage';
-import type { LeadTask, Meeting, PipelineLead } from '../types';
-import { LeadRow, LeadWash, meetingWhen, StageBadge, useLoad, useMe } from '../ui';
+import { countByGroup, type StageGroup } from '../stage';
+import type { LeadTask, Meeting } from '../types';
+import { LeadRow, LeadWash, meetingWhen, useLoad, useMe } from '../ui';
 
 const RECENT_LIMIT = 3;
 const WHITE = '#FFFFFF';
@@ -289,12 +288,6 @@ export function SalesManagerHome() {
 
   const leads = useMemo(() => data?.leads ?? [], [data]);
   const counts = useMemo(() => countByGroup(leads), [leads]);
-  // Verified, but nobody has booked a meeting yet - the manager's first job.
-  const waiting = useMemo(
-    () => leads.filter((l: PipelineLead) => inGroup(l, 'qualified')).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [leads],
-  );
-  const firstWaiting = waiting[0];
   const visitStats = useMemo(() => {
     const v = (data?.visits ?? []).filter((x) => x.status !== 'CANCELLED');
     const now = new Date();
@@ -338,57 +331,6 @@ export function SalesManagerHome() {
         <View style={styles.body}>
           <CrmErrorBanner message={error} onRetry={reload} />
           <CrmErrorBanner message={actionError} />
-
-          {/* Verified leads still waiting for a meeting */}
-          {loading && !data ? (
-            <CrmSkeleton height={170} radius={radii.xl} />
-          ) : firstWaiting ? (
-            <View style={[styles.focus, { borderLeftColor: theme.success }]}>
-              <Text style={[styles.kicker, { color: theme.successText }]}>
-                {waiting.length === 1 ? '1 VERIFIED LEAD NEEDS A MEETING' : `${waiting.length} VERIFIED LEADS NEED A MEETING`}
-              </Text>
-              <View style={styles.focusTop}>
-                <Text style={styles.focusTitle} numberOfLines={1}>
-                  {firstWaiting.companyName}
-                </Text>
-                <StageBadge stage={firstWaiting.stage} />
-              </View>
-              {!!firstWaiting.contactPerson && (
-                <View style={styles.meta}>
-                  <PersonIcon size={15} color={theme.textMuted} />
-                  <Text style={styles.metaText} numberOfLines={1}>
-                    {firstWaiting.contactPerson}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.btns}>
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate('LeadMeetingNew', { leadId: firstWaiting.id, name: firstWaiting.companyName, address: firstWaiting.address })
-                  }
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.btn, { backgroundColor: theme.primary }, pressed && styles.pressed]}
-                >
-                  <CalendarIcon size={17} color={WHITE} />
-                  <Text style={styles.btnTextOn}>Schedule meeting</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => (waiting.length > 1 ? openGroup('qualified') : navigation.navigate('LeadDetail', { leadId: firstWaiting.id }))}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.btn, styles.btnSoft, pressed && styles.pressed]}
-                >
-                  <Text style={styles.btnTextSoft}>{waiting.length > 1 ? 'See all' : 'Open lead'}</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            !!data && (
-              <View style={styles.calm}>
-                <CheckCircleIcon size={24} color={theme.success} />
-                <Text style={styles.calmText}>Every verified lead has a meeting booked.</Text>
-              </View>
-            )
-          )}
 
           {/* Today's team visits at a glance */}
           <View style={styles.section}>
