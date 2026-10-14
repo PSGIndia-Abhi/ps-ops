@@ -11,6 +11,7 @@ const {
   TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
 } = require("../utils/workTasks");
 const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate } = require("../utils/workTaskRecurrence");
+const { syncReminders } = require("../services/push.service");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -254,6 +255,7 @@ router.post("/reschedule-requests/:rid/approve", auth, requireRealUser, async (r
       await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
     });
     const [[row]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [request.id]);
+    syncReminders([task.assigned_to]); // the phone re-arms its alarms
     res.json(row);
   } catch (err) {
     sendError(res, err, "Failed to approve request");
@@ -529,6 +531,7 @@ router.post("/", auth, requireRealUser, async (req, res) => {
         { ...rec, occurrences_created: created, last_generated_until: tasks.length ? tasks[tasks.length - 1].due_date : null },
         todayStr
       );
+      syncReminders([assignedTo]);
       return res.status(201).json({ success: true, series_id: seriesId, occurrences_created: created, next_occurrence_date: nextDate, tasks });
     }
 
@@ -556,6 +559,7 @@ router.post("/", auth, requireRealUser, async (req, res) => {
     } finally {
       conn.release();
     }
+    syncReminders([assignedTo]); // the phone arms its alarms, also when it was set on the web
     res.status(201).json(await loadTask(pool, taskId));
   } catch (err) {
     sendError(res, err, "Failed to create task");
@@ -766,6 +770,7 @@ router.post("/:id/complete", auth, requireRealUser, async (req, res) => {
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "COMPLETE", { fromStatus: task.status, toStatus: "COMPLETED", note, changedBy: req.user.id });
     });
+    syncReminders([task.assigned_to]); // its alarms are dropped
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to complete task");
@@ -794,6 +799,7 @@ router.post("/:id/reopen", auth, requireRealUser, async (req, res) => {
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "REOPEN", { fromStatus: "COMPLETED", toStatus: "IN_PROGRESS", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id });
     });
+    syncReminders([task.assigned_to]);
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to reopen task");
@@ -870,6 +876,7 @@ router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "REASSIGN", { note: historyNote.slice(0, 500), changedBy: req.user.id });
     });
+    syncReminders([task.assigned_to, newAssignee]); // off one phone, onto the other
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to reassign task");
@@ -903,6 +910,7 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
       );
       await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
     });
+    syncReminders([task.assigned_to]); // the alarms move to the new time
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to reschedule task");
@@ -929,6 +937,7 @@ router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
         fromStatus: task.status, toStatus: "CANCELLED", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id,
       });
     });
+    syncReminders([task.assigned_to]);
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to skip occurrence");
@@ -964,6 +973,7 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
         console.error(`Failed to remove attachment file ${object_key}:`, err.message);
       }
     }
+    syncReminders([task.assigned_to]);
     res.json({ success: true });
   } catch (err) {
     sendError(res, err, "Failed to delete task");

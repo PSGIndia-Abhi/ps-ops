@@ -9,8 +9,10 @@ import {
 } from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
 import { httpClient } from '../api/httpClient';
-import type { ReminderRoute } from './engine';
+import { loadSession } from '../auth/tokenStorage';
+import { syncReminders, type ReminderRoute } from './engine';
 import { showReminderNow } from './native';
+import { myUpcomingTasks, taskToReminder } from './sources';
 
 /**
  * Push notifications (Firebase Cloud Messaging). The server sends a push whenever it saves a
@@ -74,6 +76,11 @@ export function listenForPush(onOpen: (route: ReminderRoute) => void, onArrive: 
   getInitialNotification(messaging).then(open).catch(() => {});
   const offOpened = onNotificationOpenedApp(messaging, open);
   const offMessage = onMessage(messaging, (msg) => {
+    // "Sync your reminders" carries nothing to show: just re-arm the alarms.
+    if (isSync(msg.data)) {
+      onArrive();
+      return;
+    }
     const route = routeOfPush(msg.data);
     showReminderNow({
       id: `push:${msg.messageId ?? Date.now()}`,
@@ -95,8 +102,33 @@ export function listenForPush(onOpen: (route: ReminderRoute) => void, onArrive: 
   };
 }
 
-/** Must be set at start-up (index.js): Android shows the notification itself; nothing else to do. */
+/**
+ * The server's silent "sync your reminders" push (backend push.service syncReminders): something
+ * with a due time was added, moved or closed for me - often on the web - so the alarms are armed
+ * again from the server's list, without waiting for the app to be opened.
+ */
+const isSync = (data: Record<string, unknown> | undefined) => data?.type === 'REMINDERS_SYNC';
+
+/** Re-arms every alarm for the signed-in person, with no screen open. Never throws. */
+async function syncInBackground(): Promise<void> {
+  try {
+    const session = await loadSession();
+    const myId = session?.userId ? String(session.userId) : '';
+    if (!myId) return;
+    const tasks = await myUpcomingTasks(myId);
+    await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
+  } catch {
+    // Offline or signed out: the alarms already armed stay; the next sync catches up.
+  }
+}
+
+/**
+ * Must be set at start-up (index.js). A push with a notification is shown by Android itself; the
+ * silent "sync your reminders" one re-arms the alarms, even with the app closed.
+ */
 export function setupBackgroundPush(): void {
   if (Platform.OS !== 'android') return;
-  setBackgroundMessageHandler(getMessaging(), async () => {});
+  setBackgroundMessageHandler(getMessaging(), async (msg) => {
+    if (isSync(msg.data)) await syncInBackground();
+  });
 }

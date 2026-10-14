@@ -8,6 +8,7 @@ const {
 } = require("../utils/crmLeadManagement");
 const { logHistory: logTaskHistory, isValidTime } = require("../utils/workTasks");
 const { notifyLead } = require("../utils/crmLeadNotifications");
+const { syncReminders } = require("../services/push.service");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -120,6 +121,7 @@ router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), a
     if (Number(assignedTo) !== Number(req.user.id)) {
       notifyLead(lead.id, "FOLLOW_UP_ASSIGNED", { actorId: req.user.id, extra: { assignedTo, dueAt: `${body.nextActionDate} ${body.nextActionTime || "09:00"}` } });
     }
+    syncReminders([assignedTo]); // the follow-up rings on the phone, also when it was set on the web
     res.status(201).json(task);
   } catch (err) {
     sendError(res, err, "Failed to schedule follow-up");
