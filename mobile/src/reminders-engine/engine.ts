@@ -87,21 +87,10 @@ function bodyOf(item: ReminderItem): string {
 /** The alarm for one item, or null when its moment has passed. */
 export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = Date.now()): NativeReminder | null {
   const due = dueAt(item).getTime();
-  // A personal reminder rings at the very time the person chose; everything else rings early.
-  const personal = item.kind === 'personal';
-  const fireAt = item.time && !personal ? due - settings.leadMinutes * 60_000 : due;
+  // Every timed item rings early; dueAlarmFor adds the ring at the time itself where it applies.
+  const fireAt = item.time ? due - settings.leadMinutes * 60_000 : due;
   if (fireAt <= now) return null;
   const text = KIND_TEXT[item.kind];
-  if (personal) {
-    return {
-      id: `alarm:${item.key}:${item.date}T${item.time ?? ''}`,
-      kind: 'alarm',
-      title: `⏰ ${item.title}`,
-      body: item.detail ? item.detail : `Reminder · ${item.time ? fmtTime(item.time) : 'today'}`,
-      fireAt,
-      route: item.route ? JSON.stringify(item.route) : '',
-    };
-  }
   return {
     id: `alarm:${item.key}:${item.date}T${item.time ?? ''}`,
     kind: 'alarm',
@@ -112,21 +101,32 @@ export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = D
   };
 }
 
+/** The second alarm's title, for the kinds that ring again at their own time. */
+const DUE_TITLE: Partial<Record<ReminderKind, string>> = {
+  payment: 'Payment reminder due',
+  meeting: 'Meeting now',
+  followup: 'Follow-up due',
+  personal: '⏰',
+};
+
 /**
- * A payment reminder rings a second time, at its own time: that is when the accountant calls the
- * customer, so the early alarm alone is not enough (and one set a few minutes ahead has no early
- * alarm at all). Null for other kinds, for a reminder with no time (its one alarm is already on
- * the day) and when the time has passed.
+ * Payment reminders, lead meetings, lead follow-ups and personal reminders ring a second time, at
+ * their own time: that is when the call or the visit happens, so the early alarm alone is not
+ * enough (and one set a few minutes ahead has no early alarm at all). Null for Task Management
+ * tasks (they ring once, for now), for an item with no time (its one alarm is already on the day)
+ * and when the time has passed.
  */
 export function dueAlarmFor(item: ReminderItem, now = Date.now()): NativeReminder | null {
-  if (item.kind !== 'payment' || !item.time) return null;
+  const title = DUE_TITLE[item.kind];
+  if (!title || !item.time) return null;
   const fireAt = dueAt(item).getTime();
   if (fireAt <= now) return null;
   return {
     id: `due:${item.key}:${item.date}T${item.time}`,
     kind: 'alarm',
-    title: 'Payment reminder due',
-    body: `${bodyOf(item)} · ${fmtTime(item.time)}`,
+    // A personal reminder is announced by its own words: "⏰ Call Ravi about the quotation".
+    title: item.kind === 'personal' ? `${title} ${item.title}` : title,
+    body: item.kind === 'personal' ? item.detail || `Reminder · ${fmtTime(item.time)}` : `${bodyOf(item)} · ${fmtTime(item.time)}`,
     fireAt,
     route: item.route ? JSON.stringify(item.route) : '',
   };

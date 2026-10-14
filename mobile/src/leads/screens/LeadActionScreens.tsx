@@ -17,7 +17,7 @@ import { openFollowUpsFor } from '../../reminders-engine/personal';
 import { refreshReminders } from '../../reminders-engine/useReminders';
 import { rescheduleTask } from '../../tasks/api';
 import type { WorkTask } from '../../tasks/types';
-import { confirmClash, loadAllReminderItems } from './RemindersScreens';
+import { ClashNotice, confirmClash, loadAllReminderItems, useClashes } from './RemindersScreens';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
@@ -251,6 +251,7 @@ export function LeadFollowUpScreen() {
   const [addAnother, setAddAnother] = useState(false);
   const [moveDate, setMoveDate] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  const clashes = useClashes(myId, date, time);
 
   useEffect(() => {
     let alive = true;
@@ -331,11 +332,12 @@ export function LeadFollowUpScreen() {
 
   return (
     <FormShell title="Schedule follow-up" subtitle={name} error={error} submitLabel="Save follow-up" saving={saving} onSubmit={onSave}>
-      <Text style={styles.help}>Your phone rings 30 minutes before, so you do not miss it.</Text>
+      <Text style={styles.help}>Your phone rings 30 minutes before and again at the time, so you do not miss it.</Text>
       <FieldRow>
         <PickField label="Next follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
       </FieldRow>
+      <ClashNotice clashes={clashes} date={date} time={time} />
       <NotesField label="Note" value={note} onChangeText={setNote} placeholder="What needs to be followed up?" />
       <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} onPick={(d) => { setDate(d); setSheet(null); }} />
       <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={time} onPick={(t) => { setTime(t); setSheet(null); }} />
@@ -355,7 +357,7 @@ const MEETING_TYPES: Option<MeetingType>[] = [
 export function LeadMeetingNewScreen() {
   const { leadId, name, address: leadAddress } = useRoute<RouteProp<LeadStackParamList, 'LeadMeetingNew'>>().params;
   const { theme } = useCrmStyles(factory);
-  const { myIdNum, persona } = useMe();
+  const { myId, myIdNum, persona } = useMe();
   const { saving, error, setError, submit } = useSubmit();
   const [people, setPeople] = useState<Person[]>([]);
   // A sales executive scheduling their own visit is the common case; others must choose.
@@ -395,10 +397,17 @@ export function LeadMeetingNewScreen() {
 
   const person = people.find((p) => p.id === personId);
   const personLabel = person?.name ?? (personId === myIdNum ? 'Me' : null);
+  // Only my own reminders can be read, so the "already at this time" check is for a meeting I attend.
+  const forMe = personId === myIdNum;
+  const clashes = useClashes(myId, date, time, undefined, forMe);
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!personId) return setError('Choose the sales person for this meeting.');
     if (!time) return setError('Choose a time for the meeting.');
+    if (forMe) {
+      const items = await loadAllReminderItems(myId).catch(() => []);
+      if (!(await confirmClash(items, date, time))) return;
+    }
     let created: string | null = null;
     submit(
       async () => {
@@ -461,6 +470,7 @@ export function LeadMeetingNewScreen() {
         <PickField label="Meeting date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Pick a time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
       </FieldRow>
+      <ClashNotice clashes={clashes} date={date} time={time} />
       <FieldLabel>Meeting location</FieldLabel>
       <SegmentedControl options={MEETING_TYPES} value={type} onChange={setType} />
       <View style={{ height: spacing.md }} />

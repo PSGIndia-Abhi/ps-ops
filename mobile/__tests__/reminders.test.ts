@@ -34,8 +34,22 @@ describe('dueAlarmFor', () => {
     expect(dueAlarmFor(payment, soon)).not.toBeNull();
   });
 
-  it('is only for timed payment reminders that are still ahead', () => {
-    expect(dueAlarmFor(meeting, now)).toBeNull();
+  it('rings a personal reminder 30 minutes before and at its time', () => {
+    const mine: ReminderItem = { ...meeting, kind: 'personal', title: 'Call Ravi', detail: undefined };
+    expect(alarmFor(mine, DEFAULT_SETTINGS, now)!.title).toBe('Reminder in 30 min');
+    expect(alarmFor(mine, DEFAULT_SETTINGS, now)!.fireAt).toBe(new Date(2030, 0, 15, 10, 30).getTime());
+    expect(dueAlarmFor(mine, now)!.title).toBe('⏰ Call Ravi');
+    expect(dueAlarmFor(mine, now)!.fireAt).toBe(new Date(2030, 0, 15, 11, 0).getTime());
+  });
+
+  it('rings lead meetings and follow-ups again at their time too', () => {
+    expect(dueAlarmFor(meeting, now)!.title).toBe('Meeting now');
+    expect(dueAlarmFor(meeting, now)!.fireAt).toBe(new Date(2030, 0, 15, 11, 0).getTime());
+    expect(dueAlarmFor({ ...meeting, kind: 'followup' }, now)!.title).toBe('Follow-up due');
+  });
+
+  it('is only for timed payment reminders, meetings and follow-ups that are still ahead', () => {
+    expect(dueAlarmFor({ ...meeting, kind: 'task' }, now)).toBeNull();
     expect(dueAlarmFor({ ...payment, time: null }, now)).toBeNull();
     expect(dueAlarmFor(payment, new Date(2030, 0, 15, 11, 1).getTime())).toBeNull();
   });

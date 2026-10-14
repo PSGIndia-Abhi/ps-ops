@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { BellIcon, BriefcaseIcon, CalendarIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, PhoneIcon, PlusIcon } from '../../components/icons';
+import { AlertTriangleIcon, BellIcon, BriefcaseIcon, CalendarIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, PhoneIcon, PlusIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
@@ -129,6 +129,63 @@ function confirmClash(items: ReminderItem[], date: string, time: string | null, 
   );
 }
 
+/**
+ * What already rings at the chosen minute, worked out while the form is open: everything of mine
+ * is loaded once, then checked against each date and time picked. `exceptKey` leaves out the item
+ * being edited. Off (no request, nothing shown) when `on` is false.
+ */
+function useClashes(myId: string, date: string, time: string | null, exceptKey?: string, on = true): ReminderItem[] {
+  const [items, setItems] = useState<ReminderItem[]>([]);
+  useEffect(() => {
+    if (!on || !myId) return;
+    let alive = true;
+    loadAll(myId)
+      .then((list) => alive && setItems(list))
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+  }, [myId, on]);
+  return useMemo(() => (on ? clashesAt(items, date, time, exceptKey) : []), [on, items, date, time, exceptKey]);
+}
+
+const clashFactory = (t: CrmTheme) => ({
+  box: {
+    flexDirection: 'row' as const,
+    gap: spacing.sm,
+    backgroundColor: t.warningBg,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  body: { flex: 1, gap: 2 },
+  title: { ...typography.bodyMedium, color: t.warningText },
+  line: { ...typography.caption, color: t.textPrimary },
+  hint: { ...typography.caption, color: t.textSecondary, marginTop: 2 },
+});
+
+/** "Already at 10:00 AM on Oct 14: Follow-up: Client cradle" - nothing when the minute is free. */
+function ClashNotice({ clashes, date, time }: { clashes: ReminderItem[]; date: string; time: string | null }) {
+  const { styles, theme } = useCrmStyles(clashFactory);
+  if (clashes.length === 0 || !time) return null;
+  return (
+    <View style={styles.box} accessibilityRole="alert">
+      <AlertTriangleIcon size={18} color={theme.warningText} />
+      <View style={styles.body}>
+        <Text style={styles.title}>
+          Already at {fmtTime(time)} on {fmtDateShort(date)}:
+        </Text>
+        {clashes.map((c) => (
+          <Text key={c.key} style={styles.line} numberOfLines={1}>
+            • {KIND_LOOK[c.kind].label}: {c.title}
+          </Text>
+        ))}
+        <Text style={styles.hint}>Pick another time, or keep both.</Text>
+      </View>
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Reminders: everything that will ring
 // ---------------------------------------------------------------------------
@@ -185,7 +242,7 @@ export function RemindersScreen() {
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
         {!!data && data.length > 0 && (
-          <Text style={styles.intro}>Your reminders ring at their time. Meetings and follow-ups ring 30 minutes before.</Text>
+          <Text style={styles.intro}>Your reminders, meetings and follow-ups ring 30 minutes before and again at their time. Tasks ring 30 minutes before.</Text>
         )}
         {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={76} radius={radii.lg} style={{ marginBottom: spacing.sm }} />)}
 
@@ -303,6 +360,7 @@ export function ReminderEditScreen() {
   }, [taskId]);
 
   const linkedLead = leadId ?? task?.source_id ?? null;
+  const clashes = useClashes(myId, date, time, taskId ? `task:${taskId}` : undefined);
 
   const save = async () => {
     const t = title.trim();
@@ -367,12 +425,13 @@ export function ReminderEditScreen() {
           <PickField label="Date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
           <PickField label="Time" value={fmtTime(time)} placeholder="Pick a time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
         </FieldRow>
+        <ClashNotice clashes={clashes} date={date} time={time} />
         <CrmTextField label="Note (optional)" value={note} onChangeText={setNote} placeholder="Anything to remember" multiline maxLength={1000} style={styles.notes} />
 
         <View style={styles.how}>
           <BellIcon size={18} color={theme.primary} />
           <Text style={styles.howText}>
-            At {fmtTime(time)} on {fmtDateShort(date)} your phone rings like an alarm - even with the app closed - with Snooze 10 min and Dismiss.
+            Your phone rings like an alarm 30 minutes before and again at {fmtTime(time)} on {fmtDateShort(date)} - even with the app closed - with Snooze 10 min and Dismiss.
           </Text>
         </View>
 
@@ -386,4 +445,4 @@ export function ReminderEditScreen() {
   );
 }
 
-export { confirmClash, loadAll as loadAllReminderItems };
+export { ClashNotice, confirmClash, loadAll as loadAllReminderItems, useClashes };
