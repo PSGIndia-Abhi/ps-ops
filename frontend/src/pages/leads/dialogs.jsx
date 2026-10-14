@@ -8,15 +8,16 @@ import {
   cancelMeeting,
   cancelQuotation,
   FOLLOW_UP_OUTCOMES,
-  loadWorkspace,
   sendProviderUpdate,
   closeLead,
   completeVisit,
   findDuplicates,
   getOpenMeeting,
   leadTeam,
+  loadWorkspace,
   lossReasons,
   providerSources,
+  request,
   rescheduleMeeting,
   salesTeam,
   saveCall,
@@ -25,9 +26,10 @@ import {
   updateLead,
   uploadQuotation,
 } from "./leadsApi";
+import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
 import { FORM_SOURCES, REASONS, VISIT_OUTCOMES } from "./constants";
 import { dateTime, toLocalInput, tomorrowInput } from "./format";
-import { clashesAt, kindLabel, moveTask, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
+import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
 import { useViewer } from "./viewer";
@@ -168,7 +170,13 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
           <input className={cls("email")} value={values.email} onChange={set("email")} type="email" placeholder="name@company.com (optional)" />
         </Field>
         <Field label="Address" required error={errors.address}>
-          <input className={cls("address")} value={values.address} onChange={set("address")} placeholder="Plot / building, area, city" maxLength={255} />
+          {/* Google suggestions while typing; a picked place fills in its full address. Typed text is kept as it is too. */}
+          <PlacesSearchInput
+            value={values.address}
+            onInput={(text) => set("address")({ target: { value: text } })}
+            onSelect={(place) => set("address")({ target: { value: place.address.slice(0, 255) } })}
+            inputProps={{ className: cls("address"), placeholder: "Start typing - pick the address from Google", maxLength: 255 }}
+          />
         </Field>
         <Field label="Source of Lead" required error={errors.source}>
           <select className={`lm-select${errors.source ? " bad" : ""}`} value={values.source} onChange={set("source")} disabled={!!fixedSource}>
@@ -405,7 +413,13 @@ export function ScheduleMeetingModal({ lead, onClose }) {
           </div>
         </Field>
         <Field label="Address" required wide>
-          <input className="lm-input" value={address} onChange={(e) => setAddress(e.target.value)} />
+          {/* Filled in from the lead (or our office) and editable; Google suggests addresses while typing. */}
+          <PlacesSearchInput
+            value={address}
+            onInput={setAddress}
+            onSelect={(place) => setAddress(place.address.slice(0, 255))}
+            inputProps={{ className: "lm-input", placeholder: "Start typing - pick the address from Google", maxLength: 255 }}
+          />
         </Field>
         <Field label="Meeting Notes" wide>
           <textarea className="lm-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Discuss annual pest control contract and site visit." />
@@ -823,10 +837,10 @@ export function FollowUpModal({ lead, onClose }) {
   const [assignedTo, setAssignedTo] = useState(() => viewer.me.id);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  // Follow-ups already open on this lead (undefined while checking). One is usually enough, so
-  // the form offers to move it before adding a second - the same check as the Android app.
+  // Follow-ups already open on this lead (undefined while checking). A lead keeps ONE follow-up
+  // task per person: when that person already has one, the form moves it (the server keeps every
+  // earlier time and note in its history) - the same as the Android app.
   const [existing, setExisting] = useState(undefined);
-  const [another, setAnother] = useState(false);
   const [mine, setMine] = useState([]); // my other reminders, for the same-time warning
 
   useEffect(() => {
@@ -835,7 +849,8 @@ export function FollowUpModal({ lead, onClose }) {
       .then((list) => {
         if (!alive) return;
         setExisting(list);
-        if (list[0]) setWhen(`${list[0].date}T${list[0].time || "09:00"}`);
+        const own = list.find((f) => f.forId === String(viewer.me.id));
+        if (own) setWhen(`${own.date}T${own.time || "09:00"}`);
       })
       .catch(() => alive && setExisting([]));
     myReminders(viewer.me.id)
@@ -846,7 +861,8 @@ export function FollowUpModal({ lead, onClose }) {
     };
   }, [lead.id, viewer.me.id]);
 
-  const current = another ? null : existing?.[0];
+  // The follow-up this one would join: the chosen person's own open one on this lead.
+  const current = existing?.find((f) => f.forId === String(assignedTo)) || null;
   const [date, time] = when.split("T");
   // The same-time warning only makes sense for a follow-up that lands on my own list.
   const clash = String(assignedTo) === String(viewer.me.id) ? clashesAt(mine, date, time, current ? `task:${current.id}` : undefined) : [];
@@ -866,14 +882,13 @@ export function FollowUpModal({ lead, onClose }) {
     }
   }
 
-  /** Moves the follow-up that is already there instead of adding a second. */
+  /** Moves the follow-up that is already there (the server keeps the old time and the note in its history). */
   async function move(close) {
     if (busy) return;
     if (new Date(when) <= new Date()) return toast("Choose a follow-up time in the future.", true);
     setBusy(true);
     try {
-      await moveTask(current.id, date, time);
-      await loadWorkspace();
+      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
       toast("Follow-up moved");
       close();
     } catch (err) {
@@ -899,16 +914,6 @@ export function FollowUpModal({ lead, onClose }) {
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                setAnother(true);
-                setWhen(tomorrowInput());
-              }}
-            >
-              Add Another Anyway
-            </Button>
             <Button busy={busy} icon={<FiCalendar />} onClick={() => move(close)}>
               Change Date / Time
             </Button>
@@ -919,12 +924,14 @@ export function FollowUpModal({ lead, onClose }) {
         <Note tone="warn">
           A follow-up is already set for {dateTime(`${current.date}T${current.time || "09:00"}`)}
           {current.forName ? ` for ${current.forName}` : ""}
-          {current.note ? ` - "${current.note}"` : ""}. {existing.length > 1 ? `${existing.length} follow-ups are open on this lead. ` : ""}
-          Change its time, or add another one if you really need a second.
+          {current.note ? ` - "${current.note}"` : ""}. A lead keeps one follow-up: set its next date and time here - the earlier ones stay in its history.
         </Note>
         <div className="lm-form">
           <Field label="New Date & Time" required>
             <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
+          </Field>
+          <Field label="Note" wide>
+            <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should the next call cover?" />
           </Field>
         </div>
         {clashNote}
@@ -975,6 +982,106 @@ export function FollowUpModal({ lead, onClose }) {
       </div>
       {clashNote}
       <Note tone="info">It appears in Follow-ups, Reminders and Today&apos;s Tasks on that day, and in Task Management.</Note>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------ follow-up call */
+
+const CALL_RESULTS = [
+  { value: "DONE", label: "Done", sub: "Nothing more to follow up", tone: "success" },
+  { value: "AGAIN", label: "Call Again", sub: "Set the next date and time", tone: "warn" },
+];
+
+/**
+ * The call on a follow-up of a lead that is already past verification. It never qualifies the
+ * lead again: the follow-up is either done (closed in Task Management) or set for a later time.
+ */
+export function FollowUpCallModal({ lead, onClose }) {
+  const viewer = useViewer();
+  const toast = useToast();
+  const [result, setResult] = useState("DONE");
+  const [note, setNote] = useState("");
+  const [when, setWhen] = useState(tomorrowInput);
+  const [busy, setBusy] = useState(false);
+  // The follow-up this call answers: my own open one on the lead, else the first open one (undefined while checking).
+  const [current, setCurrent] = useState(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    openFollowUpsFor(lead.id)
+      .then((list) => alive && setCurrent(list.find((f) => f.forId === String(viewer.me.id)) || list[0] || null))
+      .catch(() => alive && setCurrent(null));
+    return () => {
+      alive = false;
+    };
+  }, [lead.id, viewer.me.id]);
+
+  // Only the person a follow-up is for can close it (the server's rule), so anyone else can only move it.
+  const mine = !!current && current.forId === String(viewer.me.id);
+  const choice = mine ? result : "AGAIN";
+
+  async function save(close) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (choice === "DONE") {
+        await request(`/api/work-tasks/${current.id}/complete`, { method: "POST", body: { completion_note: note.trim() || undefined } });
+        await loadWorkspace();
+        toast("Follow-up done");
+      } else {
+        const assignedTo = viewer.persona === "sales_manager" && current ? current.forId : viewer.me.id;
+        await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
+        toast("Next follow-up set");
+      }
+      close();
+    } catch (err) {
+      toast(err.message || "Could not save the follow-up.", true);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Follow-up Call"
+      sub="Record how this follow-up call went"
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} disabled={current === undefined} icon={choice === "DONE" ? <FiCheck /> : <FiCalendar />} onClick={() => save(close)}>
+            {choice === "DONE" ? "Mark Done" : "Set Next Follow-up"}
+          </Button>
+        </>
+      )}
+    >
+      <LeadBar lead={lead} />
+      {current && (
+        <Note tone="info">
+          Follow-up due {dateTime(`${current.date}T${current.time || "09:00"}`)}
+          {current.forName ? ` for ${current.forName}` : ""}
+          {current.note ? ` - "${current.note}"` : ""}
+        </Note>
+      )}
+      {mine ? (
+        <Field label="Result" required>
+          <Choice name="result" value={result} onChange={setResult} options={CALL_RESULTS} />
+        </Field>
+      ) : (
+        current !== undefined && (
+          <Note tone="warn">{current ? `Only ${current.forName || "the person it is for"} can mark this follow-up done. You can set its next date and time.` : "This lead has no open follow-up. Set one below."}</Note>
+        )
+      )}
+      <Field label="Call Notes" hint="Internal only - the lead provider never sees these.">
+        <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="e.g. Customer will confirm after their board meeting." />
+      </Field>
+      {choice === "AGAIN" && (
+        <Field label="Next Follow-up" required hint="The lead stays in Follow-ups until then.">
+          <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
+        </Field>
+      )}
     </Modal>
   );
 }

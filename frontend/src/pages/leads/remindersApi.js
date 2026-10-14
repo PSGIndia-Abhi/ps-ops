@@ -127,5 +127,5 @@ export async function openFollowUpsFor(leadId) {
   const rows = await request(`/api/work-tasks?source_id=${encodeURIComponent(leadId)}&task_type=LEAD_FOLLOW_UP`);
   return rows
     .filter((t) => OPEN.includes(String(t.status)))
-    .map((t) => ({ id: t.id, date: String(t.due_date).slice(0, 10), time: t.due_time ? String(t.due_time).slice(0, 5) : null, forName: t.assigned_to_name || "", note: t.description || "" }));
+    .map((t) => ({ id: t.id, date: String(t.due_date).slice(0, 10), time: t.due_time ? String(t.due_time).slice(0, 5) : null, forId: String(t.assigned_to), forName: t.assigned_to_name || "", note: t.description || "" }));
 }

@@ -73,6 +73,11 @@ function canManageLead(req, lead) {
 // row in the existing Task Management module (work_tasks, task_type=
 // 'LEAD_FOLLOW_UP', source_module='LEAD', source_id=lead.id). No separate
 // follow-up table or reminder engine -- exactly the point of reusing it.
+//
+// One lead has ONE follow-up task per person: when this person already has an
+// open follow-up on the lead, that task moves to the new date and time (the old
+// time and the note go into its history) instead of a second task being made.
+// The lead's own history still records every follow-up that was set.
 // ---------------------------------------------------------------------------
 router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -97,15 +102,33 @@ router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), a
     const [[assignee]] = await pool.query("SELECT id FROM users WHERE id = ? AND is_active = 1", [assignedTo]);
     if (!assignee) throw new HttpError(400, "Invalid assignedTo");
 
-    const taskId = uuid();
+    const [[open]] = await pool.query(
+      `SELECT id, DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date, due_time
+         FROM work_tasks
+        WHERE source_module = 'LEAD' AND task_type = 'LEAD_FOLLOW_UP' AND source_id = ? AND assigned_to = ?
+          AND status IN ('OPEN','IN_PROGRESS','PAUSED')
+        ORDER BY due_date ASC, due_time ASC LIMIT 1`,
+      [lead.id, assignedTo]
+    );
+    const taskId = open ? open.id : uuid();
     const title = `Follow up - ${lead.company_name || lead.customer_name}`.slice(0, 200);
     await inTransaction(async (conn) => {
-      await conn.query(
-        `INSERT INTO work_tasks (id, title, description, task_type, priority, source_module, source_id, assigned_to, created_by, due_date, due_time)
-         VALUES (?, ?, ?, 'LEAD_FOLLOW_UP', 'NORMAL', 'LEAD', ?, ?, ?, ?, ?)`,
-        [taskId, title, note, lead.id, assignedTo, req.user.id, body.nextActionDate, body.nextActionTime || null]
-      );
-      await logTaskHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: req.user.id, note: "Created from a lead follow-up" });
+      if (open) {
+        // The lead's follow-up task moves on: same task, new time; the latest note becomes its description.
+        await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ?, description = COALESCE(?, description) WHERE id = ?", [
+          body.nextActionDate, body.nextActionTime || null, note, open.id,
+        ]);
+        const from = `${open.due_date}${open.due_time ? ` ${open.due_time}` : ""}`;
+        const to = `${body.nextActionDate}${body.nextActionTime ? ` ${body.nextActionTime}` : ""}`;
+        await logTaskHistory(conn, open.id, "RESCHEDULE", { changedBy: req.user.id, note: `Due ${from} moved to ${to}: Next follow-up${note ? ` - ${note}` : ""}`.slice(0, 500) });
+      } else {
+        await conn.query(
+          `INSERT INTO work_tasks (id, title, description, task_type, priority, source_module, source_id, assigned_to, created_by, due_date, due_time)
+           VALUES (?, ?, ?, 'LEAD_FOLLOW_UP', 'NORMAL', 'LEAD', ?, ?, ?, ?, ?)`,
+          [taskId, title, note, lead.id, assignedTo, req.user.id, body.nextActionDate, body.nextActionTime || null]
+        );
+        await logTaskHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: req.user.id, note: "Created from a lead follow-up" });
+      }
       await logLeadHistory(conn, lead.id, "FOLLOW_UP_SCHEDULED", {
         note: `Due ${body.nextActionDate}${body.nextActionTime ? ` ${body.nextActionTime}` : ""}${note ? `: ${note}` : ""}`.slice(0, 500),
         changedBy: req.user.id,

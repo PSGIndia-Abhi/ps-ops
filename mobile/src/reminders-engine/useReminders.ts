@@ -45,16 +45,28 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
   const openRef = useRef(open);
   openRef.current = open;
   const busy = useRef(false);
+  // Asked for while a sync was running (a push for a just-saved follow-up, say): one more after it,
+  // so the newest item is never lost to a sync that had already read the list.
+  const again = useRef(false);
 
   const sync = useCallback(async () => {
-    if (!remindersAvailable || !myId || busy.current) return;
+    if (!remindersAvailable || !myId) return;
+    if (busy.current) {
+      again.current = true;
+      return;
+    }
     busy.current = true;
     try {
-      const tasks = await myUpcomingTasks(myId);
-      await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
-      askExactOnce();
-    } catch {
-      // Offline or the server is down: the alarms already armed stay armed; try again later.
+      do {
+        again.current = false;
+        try {
+          const tasks = await myUpcomingTasks(myId);
+          await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
+          askExactOnce();
+        } catch {
+          // Offline or the server is down: the alarms already armed stay armed; try again later.
+        }
+      } while (again.current);
     } finally {
       busy.current = false;
     }

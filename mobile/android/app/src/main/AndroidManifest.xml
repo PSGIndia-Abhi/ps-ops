@@ -68,6 +68,18 @@
         </intent-filter>
       </activity>
 
+      <!-- Reminders: the alarm's own screen over the lock screen (Open / Snooze / Dismiss), so an
+           alarm on a locked phone never launches the app by itself. Its own task, kept out of Recents. -->
+      <activity
+        android:name=".reminders.AlarmActivity"
+        android:exported="false"
+        android:launchMode="singleTop"
+        android:taskAffinity=""
+        android:excludeFromRecents="true"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
       <!-- Reminders: AlarmManager delivers here; also the Snooze / Dismiss buttons. -->
       <receiver android:name=".reminders.ReminderReceiver" android:exported="false" />
       <!-- Re-arms reminders after a reboot, an app update, or the exact-alarm switch changing. -->

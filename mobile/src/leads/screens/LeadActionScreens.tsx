@@ -15,7 +15,6 @@ import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { spacing, typography } from '../../theme';
 import { openFollowUpsFor } from '../../reminders-engine/personal';
 import { refreshReminders } from '../../reminders-engine/useReminders';
-import { rescheduleTask } from '../../tasks/api';
 import type { WorkTask } from '../../tasks/types';
 import { ClashNotice, confirmClash, loadAllReminderItems, useClashes } from './RemindersScreens';
 import * as api from '../api';
@@ -248,7 +247,6 @@ export function LeadFollowUpScreen() {
   const [sheet, setSheet] = useState<'date' | 'time' | 'moveDate' | 'moveTime' | null>(null);
   // Follow-ups already open on this lead: undefined while checking.
   const [existing, setExisting] = useState<WorkTask[] | undefined>(undefined);
-  const [addAnother, setAddAnother] = useState(false);
   const [moveDate, setMoveDate] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const clashes = useClashes(myId, date, time);
@@ -270,12 +268,14 @@ export function LeadFollowUpScreen() {
     submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum }));
   };
 
-  const current = existing?.[0];
+  // A lead keeps ONE follow-up per person: mine, if I already have one open here. Saving a new time
+  // moves it (the server keeps the earlier time in its history) instead of adding a second.
+  const current = existing?.find((t) => Number(t.assigned_to) === myIdNum);
   const moveTo = async (newTime: string | null) => {
     if (!current || !moveDate) return;
     setMoving(true);
     try {
-      await rescheduleTask(current.id, moveDate, newTime);
+      await api.addFollowUp(leadId, { date: moveDate, time: newTime, note: '', assignedTo: myIdNum });
       refreshReminders();
       navigation.goBack();
     } catch (err) {
@@ -298,7 +298,7 @@ export function LeadFollowUpScreen() {
     );
   }
 
-  if (current && !addAnother) {
+  if (current) {
     const when = `${fmtDateShort(String(current.due_date).slice(0, 10))}${current.due_time ? `, ${fmtTime(current.due_time)}` : ''}`;
     return (
       <LeadScreen edges={['top', 'bottom']}>
@@ -315,14 +315,12 @@ export function LeadFollowUpScreen() {
               {!!current.assigned_to_name && <Text style={styles.busyMeta}>for {current.assigned_to_name}</Text>}
               {!!current.description && <Text style={styles.busyMeta}>“{current.description}”</Text>}
               <Text style={styles.busyHelp}>
-                {existing.length > 1 ? `${existing.length} follow-ups are open on this lead. ` : ''}Change its time, or add another one if you really need a second.
+                A lead keeps one follow-up: change its date and time - the earlier ones stay in its history.
               </Text>
             </View>
           </Card>
           <View style={styles.gap} />
           <PrimaryButton label="Change date / time" onPress={() => setSheet('moveDate')} loading={moving} />
-          <View style={styles.gap} />
-          <PrimaryButton label="Add another anyway" variant="secondary" onPress={() => setAddAnother(true)} disabled={moving} />
           <DateSheet visible={sheet === 'moveDate'} onClose={() => setSheet(null)} value={String(current.due_date).slice(0, 10)} minDate={todayStr()} title="New follow-up date" onPick={(d) => { setMoveDate(d); setSheet('moveTime'); }} />
           <TimeSheet visible={sheet === 'moveTime'} onClose={() => setSheet(null)} value={current.due_time ? current.due_time.slice(0, 5) : null} onPick={(t) => { setSheet(null); moveTo(t); }} />
         </CrmScreen>

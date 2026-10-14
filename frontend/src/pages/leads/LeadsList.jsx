@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiCheckSquare, FiChevronRight, FiPlus, FiSearch } from "react-icons/fi";
+import { FiCheckSquare, FiChevronRight, FiPlus, FiSearch, FiX } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { AddLeadModal, CallVerifyModal, ScheduleMeetingModal } from "./dialogs";
-import { providerName, providerSources, useLeadData } from "./leadsApi";
+import { providerName, providerSources, useLeadData, userName } from "./leadsApi";
 import { compactMoney, dayLabel, nextAction } from "./format";
 import { useLoaded, usePaged } from "./hooks";
 import { Button, Card, Empty, Pager, SkeletonRows, StageBadge, Tabs } from "./ui";
@@ -102,6 +102,29 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false 
   );
 }
 
+/** "Created" choices on the manager's list: how far back a lead's creation date may be. */
+const CREATED_RANGES = [
+  { key: "", label: "Any date" },
+  { key: "today", label: "Created today" },
+  { key: "week", label: "Last 7 days" },
+  { key: "month", label: "This month" },
+];
+
+function createdIn(range, createdAt) {
+  if (!range) return true;
+  const d = new Date(String(createdAt).replace(" ", "T"));
+  const now = new Date();
+  if (range === "today") return d.toDateString() === now.toDateString();
+  if (range === "week") return now - d <= 7 * 86400000;
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
+
+/** The people a list of leads mentions in one field (who created it, its telecaller, its sales person), by name. */
+function peopleIn(leads, field) {
+  const ids = [...new Set(leads.map((l) => l[field]).filter(Boolean).map(String))];
+  return ids.map((id) => ({ id, name: userName(id) || providerName(id) || `User ${id}` })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function LeadsList() {
   const viewer = useViewer();
   const { persona } = viewer;
@@ -113,6 +136,11 @@ export default function LeadsList() {
   const query = params.get("q") || "";
   const setQuery = (text) => setParams(text ? { q: text } : {}, { replace: true });
   const [source, setSource] = useState("");
+  // The sales manager's extra filters: who created the lead, its telecaller, its sales executive, when it was created.
+  const [creator, setCreator] = useState("");
+  const [telecaller, setTelecaller] = useState("");
+  const [salesPerson, setSalesPerson] = useState("");
+  const [created, setCreated] = useState("");
   const [adding, setAdding] = useState(false);
   const [calling, setCalling] = useState(null);
   const [scheduling, setScheduling] = useState(null);
@@ -122,15 +150,33 @@ export default function LeadsList() {
   const sourceOptions = useMemo(() => [...new Set([...providerSources(), ...mine.map((l) => l.source).filter(Boolean)])].sort(), [mine]);
   const tabs = useMemo(() => tabsFor(persona).map((t) => ({ ...t, count: mine.filter(t.match).length })), [persona, mine]);
   const active = tabs.find((t) => t.key === tab) || tabs[0];
+  const manager = persona === "sales_manager";
+  const people = useMemo(
+    () => (manager ? { creators: peopleIn(mine, "createdBy"), telecallers: peopleIn(mine, "telecallerId"), sales: peopleIn(mine, "salesId") } : null),
+    [manager, mine],
+  );
+  const filtered = !!(source || creator || telecaller || salesPerson || created);
+  const clearFilters = () => {
+    setSource("");
+    setCreator("");
+    setTelecaller("");
+    setSalesPerson("");
+    setCreated("");
+    paged.onPage(1);
+  };
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return mine
       .filter(active.match)
       .filter((l) => !source || l.source === source)
+      .filter((l) => !creator || String(l.createdBy) === creator)
+      .filter((l) => !telecaller || String(l.telecallerId) === telecaller)
+      .filter((l) => !salesPerson || String(l.salesId) === salesPerson)
+      .filter((l) => createdIn(created, l.createdAt))
       .filter((l) => !q || [l.company, l.contact, l.phone, l.number, l.area].some((v) => String(v).toLowerCase().includes(q)))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [mine, active, source, query]);
+  }, [mine, active, source, creator, telecaller, salesPerson, created, query]);
 
   const paged = usePaged(shown, 8);
   const staff = persona !== "lead_provider";
@@ -192,14 +238,50 @@ export default function LeadsList() {
               ))}
             </select>
           )}
+          {manager && (
+            <>
+              {[
+                ["Filter by who created the lead", "Created by anyone", creator, setCreator, people.creators],
+                ["Filter by telecaller", "Any telecaller", telecaller, setTelecaller, people.telecallers],
+                ["Filter by sales executive", "Any sales executive", salesPerson, setSalesPerson, people.sales],
+              ].map(([label, all, value, set, options]) => (
+                <select key={label} className="lm-select" value={value} onChange={(e) => {
+                    set(e.target.value);
+                    paged.onPage(1);
+                  }} aria-label={label}>
+                  <option value="">{all}</option>
+                  {options.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              ))}
+              <select className="lm-select" value={created} onChange={(e) => {
+                  setCreated(e.target.value);
+                  paged.onPage(1);
+                }} aria-label="Filter by date created">
+                {CREATED_RANGES.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          {filtered && (
+            <Button variant="ghost" size="sm" icon={<FiX />} onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
         </div>
 
         {!ready ? (
           <SkeletonRows rows={6} />
         ) : shown.length === 0 ? (
           <Empty
-            title={query || source || active.key !== "all" ? "No matching leads" : "No leads yet"}
-            text={query || source || active.key !== "all" ? "Try a different search, source or tab." : "Leads appear here as soon as they are added."}
+            title={query || filtered || active.key !== "all" ? "No matching leads" : "No leads yet"}
+            text={query || filtered || active.key !== "all" ? "Try a different search, filter or tab." : "Leads appear here as soon as they are added."}
           />
         ) : (
           <>

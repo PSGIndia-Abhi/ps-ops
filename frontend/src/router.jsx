@@ -68,7 +68,7 @@ import LeadsLayout from "./pages/leads/LeadsLayout";
 import LeadsHome from "./pages/leads/Home";
 import LeadsList from "./pages/leads/LeadsList";
 import LeadDetail from "./pages/leads/LeadDetail";
-import { FollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
+import { FollowUps, LeadFollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
 import LeadsPerformance from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
 import TeamVisits from "./pages/leads/TeamVisits";
@@ -277,6 +277,7 @@ const router = createBrowserRouter([
       { path: "team-visits", element: <TeamVisits /> },
       { path: "reminders", element: <LeadReminders /> },
       { path: "follow-ups", element: <FollowUps /> },
+      { path: "follow-ups/lead/:id", element: <LeadFollowUps /> },
       { path: "meetings", element: <Meetings /> },
       { path: "providers", element: <Providers /> },
       { path: "performance", element: <LeadsPerformance /> },

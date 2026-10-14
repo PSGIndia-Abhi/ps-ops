@@ -76,9 +76,10 @@ export function listenForPush(onOpen: (route: ReminderRoute) => void, onArrive: 
   getInitialNotification(messaging).then(open).catch(() => {});
   const offOpened = onNotificationOpenedApp(messaging, open);
   const offMessage = onMessage(messaging, (msg) => {
-    // "Sync your reminders" carries nothing to show: just re-arm the alarms.
+    // "Sync your reminders" carries nothing to show: just re-arm the alarms - straight away, not on a
+    // timer, because JS timers stop when the app goes to the background (as it may right now).
     if (isSync(msg.data)) {
-      onArrive();
+      syncInBackground();
       return;
     }
     const route = routeOfPush(msg.data);
@@ -109,8 +110,18 @@ export function listenForPush(onOpen: (route: ReminderRoute) => void, onArrive: 
  */
 const isSync = (data: Record<string, unknown> | undefined) => data?.type === 'REMINDERS_SYNC';
 
-/** Re-arms every alarm for the signed-in person, with no screen open. Never throws. */
-async function syncInBackground(): Promise<void> {
+/**
+ * Re-arms every alarm for the signed-in person, with no screen open. Never throws. Pushes that
+ * arrive together (several follow-ups saved in a row) are handled one after another, so an older
+ * read of the list can never overwrite a newer one.
+ */
+let backgroundQueue: Promise<void> = Promise.resolve();
+function syncInBackground(): Promise<void> {
+  backgroundQueue = backgroundQueue.then(syncNow, syncNow);
+  return backgroundQueue;
+}
+
+async function syncNow(): Promise<void> {
   try {
     const session = await loadSession();
     const myId = session?.userId ? String(session.userId) : '';

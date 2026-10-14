@@ -437,6 +437,42 @@
   }
   .lm-stat-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 11px; background: var(--tone); color: #fff; font-size: 17px; }
   .lm-row { margin-bottom: 18px; }
+  /* Follow-ups page: one row per lead; its follow-up count opens that lead's follow-up history. */
+  .lm-fu-link {
+    display: inline-flex; align-items: center; gap: 2px; justify-self: start; margin-top: 2px;
+    font-size: 12.5px; font-weight: 600; color: var(--lm-primary); transition: gap .2s var(--lm-ease);
+    &:hover { gap: 6px; }
+  }
+  /* One lead's follow-up history: a timeline beside the next follow-up and the lead's details. */
+  .lm-fu-story { list-style: none; margin: 0; padding: 14px 20px 18px; }
+  .lm-fu-step {
+    position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding-bottom: 16px;
+    animation: lm-rise .45s var(--lm-ease) both; animation-delay: calc(var(--i, 0) * 50ms);
+    &:not(:last-child)::before { content: ""; position: absolute; left: 16px; top: 34px; bottom: 0; width: 2px; background: var(--lm-line); }
+    &:last-child { padding-bottom: 0; }
+  }
+  .lm-fu-dot {
+    display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+    background: var(--lm-primary-soft); color: var(--lm-primary); font-size: 15px;
+  }
+  .lm-fu-step.done .lm-fu-dot { background: #e7f7ee; color: #15803d; }
+  .lm-fu-body { min-width: 0; display: grid; gap: 4px; padding: 10px 14px; border: 1px solid var(--lm-line); border-radius: 12px; background: #fff; }
+  .lm-fu-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; strong { font-size: 14px; } }
+  .lm-fu-note { margin: 0; font-size: 13.5px; color: #334155; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lm-fu-body small { font-size: 12px; color: var(--lm-muted); }
+  .lm-fu-side { display: grid; gap: 18px; align-content: start; }
+  .lm-fu-next {
+    display: grid; justify-items: start; gap: 4px;
+    strong { font-size: 24px; letter-spacing: -.4px; font-variant-numeric: tabular-nums; }
+    span { color: var(--lm-muted); }
+  }
+  .lm-fu-none { margin: 0; color: var(--lm-muted); }
+  .lm-fu-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .lm-fu-facts {
+    display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font-size: 13.5px;
+    dt { color: var(--lm-muted); } dd { margin: 0; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+    a { color: var(--lm-primary); }
+  }
   /* A dashboard table (the calling queue, team performance) gets the wider share of its row and tighter cells, so it fits a laptop screen. */
   .lm-grid.two.wide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
   .lm-tight .lm-table th, .lm-tight .lm-table td { padding-left: 12px; padding-right: 12px; }

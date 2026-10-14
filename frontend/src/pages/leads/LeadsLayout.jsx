@@ -5,7 +5,6 @@ import {
   FiAward,
   FiBarChart2,
   FiBell,
-  FiBriefcase,
   FiCalendar,
   FiCheckSquare,
   FiChevronDown,
@@ -54,6 +53,8 @@ const NOTE_ICON = {
   LEAD_CONVERTED: <FiAward />,
   LEAD_LOST: <FiThumbsDown />,
   LEAD_FOLLOW_UP: <FiPhoneCall />,
+  LEAD_FOLLOW_UP_DUE: <FiPhoneCall />,
+  LEAD_MEETING_DUE: <FiCalendar />,
   LEAD_PROVIDER_UPDATE: <FiBell />,
 };
 const NOTE_TONE = {
@@ -69,6 +70,8 @@ const NOTE_TONE = {
   LEAD_CONVERTED: "success",
   LEAD_LOST: "danger",
   LEAD_FOLLOW_UP: "warn",
+  LEAD_FOLLOW_UP_DUE: "warn",
+  LEAD_MEETING_DUE: "violet",
   LEAD_PROVIDER_UPDATE: "info",
 };
 
@@ -96,6 +99,7 @@ function navFor(persona, counts) {
       return [
         home,
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
+        { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
       ];
     default:
@@ -105,7 +109,6 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
         { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
-        { to: `${LEADS_HOME}/providers`, label: "Lead Providers", icon: <FiBriefcase /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
@@ -129,22 +132,35 @@ export default function LeadsLayout() {
   // What happened on leads, from the server (unread first), and which bell tab is open.
   const [notes, setNotes] = useState({ items: [], unread: 0 });
   const [bellTab, setBellTab] = useState("updates");
+  // A new notification (a lead to verify, a meeting given to you...) also pops up as a card. The ones
+  // read on opening are only remembered; "due now" ones are left out - the reminder cards cover those.
+  const seenNotes = useRef(null);
+  const [notePopups, setNotePopups] = useState([]);
   const refreshNotes = useCallback(() => {
     getNotifications()
-      .then(setNotes)
+      .then((next) => {
+        setNotes(next);
+        const known = seenNotes.current;
+        if (known) {
+          const fresh = next.items.filter((n) => !n.read && !known.has(n.id) && !/_DUE$/.test(n.type));
+          if (fresh.length) setNotePopups((cur) => [...fresh.map((n) => ({ ...n, id: `note-${n.id}`, noteId: n.id })), ...cur].slice(0, 3));
+        }
+        seenNotes.current = new Set([...(known || []), ...next.items.map((n) => n.id)]);
+      })
       .catch(() => {}); // the bell just stays as it was
   }, []);
+  const dismissNote = (id) => setNotePopups((cur) => cur.filter((p) => p.id !== id));
 
   // The staff's lead reminders, for the bell's Reminders tab, and the cards that pop up on the page
   // when one reaches its time or is newly set for them. No sound or browser notification.
   const { reminders, popups, dismiss } = useMyReminders(persona === "lead_provider" ? "" : me?.id, leads);
 
-  // Read on opening, after every change to the leads (a save here can notify someone), and once a minute.
+  // Read on opening, after every change to the leads (a save here can notify someone), and every 15 seconds.
   useEffect(() => {
     refreshNotes();
   }, [leads, refreshNotes]);
   useEffect(() => {
-    const timer = setInterval(refreshNotes, 60000);
+    const timer = setInterval(refreshNotes, 15000);
     return () => clearInterval(timer);
   }, [refreshNotes]);
 
@@ -449,8 +465,34 @@ export default function LeadsLayout() {
             </div>
           </div>
 
-          {popups.length > 0 && (
+          {popups.length + notePopups.length > 0 && (
             <div className="lm-popups" role="status" aria-live="polite">
+              {notePopups.map((p) => (
+                <div key={p.id} className="lm-popup">
+                  <span className="lm-popup-icon">{NOTE_ICON[p.type] || <FiBell />}</span>
+                  <div className="lm-popup-text">
+                    <small>New notification</small>
+                    <strong>{p.title}</strong>
+                    {!!p.text && <span>{p.text}</span>}
+                    {!!p.leadId && (
+                      <button
+                        type="button"
+                        className="lm-link"
+                        onClick={() => {
+                          dismissNote(p.id);
+                          markNotificationRead(p.noteId).then(refreshNotes, () => {});
+                          navigate(`${LEADS_HOME}/${p.leadId}`);
+                        }}
+                      >
+                        Open lead
+                      </button>
+                    )}
+                  </div>
+                  <button type="button" className="lm-popup-x" onClick={() => dismissNote(p.id)} aria-label="Dismiss">
+                    <FiX />
+                  </button>
+                </div>
+              ))}
               {popups.map((p) => (
                 <div key={p.id} className="lm-popup">
                   <span className="lm-popup-icon">{p.kind === "meeting" ? <FiCalendar /> : p.kind === "followup" ? <FiPhoneCall /> : <FiBell />}</span>
