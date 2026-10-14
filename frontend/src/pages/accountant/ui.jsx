@@ -1,4 +1,4 @@
-import { FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight } from "react-icons/fi";
 import "./accountant.css";
 
 // Small shared pieces for the accountant screens.
@@ -83,11 +83,13 @@ export function Pager({ total = 0, pageSize = 10, page = 0, onPage }) {
     <div className="ac-pager">
       <span>Showing {from} to {to} of {total}</span>
       <div className="ac-pager-btns">
+        <button type="button" className="ac-pager-arrow" disabled={current === 0} onClick={() => onPage?.(0)} aria-label="First page" title="First page"><FiChevronsLeft /></button>
         <button type="button" className="ac-pager-arrow" disabled={current === 0} onClick={() => onPage?.(current - 1)} aria-label="Previous page"><FiChevronLeft /></button>
         {numbers.map((n) => (
           <button key={n} type="button" className={n === current ? "active" : ""} onClick={() => onPage?.(n)}>{n + 1}</button>
         ))}
         <button type="button" className="ac-pager-arrow" disabled={current >= pages - 1} onClick={() => onPage?.(current + 1)} aria-label="Next page"><FiChevronRight /></button>
+        <button type="button" className="ac-pager-arrow" disabled={current >= pages - 1} onClick={() => onPage?.(pages - 1)} aria-label="Last page" title="Last page"><FiChevronsRight /></button>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard, FiDollarSign, FiDownload, FiPlusCircle, FiSearch } from "react-icons/fi";
+import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard, FiDownload, FiPlusCircle, FiSearch, FiPercent } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { fetchPayment, showDate, todayYmd, useAccountantData, usePaged } from "./data";
@@ -44,7 +44,7 @@ export default function PaymentList() {
     const q = search.trim().toLowerCase();
     return !q || `${p.payment_number} ${p.customer_name} ${p.reference_number}`.toLowerCase().includes(q);
   });
-  const { pageRows, page, setPage, pageSize } = usePaged(rows);
+  const { pageRows, page, setPage, pageSize } = usePaged(rows, 25); // 25 payments a page
 
   // The 4 tiles reflect whatever is currently filtered/searched, not the whole list.
   const shown = rows.filter((p) => p.status !== "CANCELLED");
@@ -55,7 +55,7 @@ export default function PaymentList() {
     { key: "green", icon: <FiCheckCircle />, label: "Total Received", value: money(sum(shown, "received_amount")) },
     { key: "blue", icon: <FiCalendar />, label: "Received This Month", value: money(sum(thisMonth, "received_amount")) },
     { key: "purple", icon: <FiCreditCard />, label: "Payments", value: shown.length },
-    { key: "orange", icon: <FiDollarSign />, label: "Unallocated (Advance)", value: money(sum(shown, "received_amount") - sum(shown, "allocated_amount")) },
+    { key: "orange", icon: <FiPercent />, label: "TDS Deducted", value: money(sum(shown, "tds_amount")) },
   ];
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
