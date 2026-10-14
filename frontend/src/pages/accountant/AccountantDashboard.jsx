@@ -379,8 +379,9 @@ export default function AccountantDashboard() {
                     <button type="button" onClick={() => navigate(`/accountant/follow-ups/${f.id}`)}>
                       <span className={`ac-fu-list-icon${f.display_status === "OVERDUE" ? " late" : ""}`} aria-hidden="true"><FiBell /></span>
                       <span className="ac-fu-list-main">
-                        <strong>{f.customer_name || f.title}</strong>
-                        <span>{money(amount)} · {line}</span>
+                        {/* No customer name found: the reminder's title without its "Payment Reminder - " prefix. */}
+                        <strong>{f.customer_name || f.title.replace(/^Payment Reminder\s*-\s*/i, "")}</strong>
+                        <span>{amount > 0 ? `${money(amount)} · ${line}` : line}</span>
                       </span>
                       <span className="ac-fu-list-side">
                         <span>{f.display_status === "OVERDUE" ? showDate(f.due_date) : showDue(f.due_date, f.due_time).split(", ").pop()}</span>

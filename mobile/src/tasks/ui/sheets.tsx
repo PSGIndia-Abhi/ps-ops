@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeftIcon, ChevronRightIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -14,6 +14,10 @@ import { CheckIcon, SearchIcon } from './taskIcons';
  * Bottom sheets in the app's own style. Date/time are picked with in-app
  * sheets rather than a new native date-picker dependency.
  */
+/** Time-wheel row height and how many rows show (the middle one is the chosen row). */
+const WHEEL_ITEM = 46;
+const WHEEL_ROWS = 5;
+
 const factory = (t: CrmTheme) => ({
   flex: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: t.overlay },
@@ -54,15 +58,17 @@ const factory = (t: CrmTheme) => ({
   todayLink: { alignSelf: 'center' as const, padding: spacing.sm },
   todayText: { ...typography.bodyMedium, color: t.primary },
   timePreview: { ...typography.display, fontSize: 36, color: t.textPrimary, textAlign: 'center' as const, marginBottom: spacing.sm },
-  ampm: { flexDirection: 'row' as const, alignSelf: 'center' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 4 },
-  ampmBtn: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs, borderRadius: radii.pill },
-  ampmOn: { backgroundColor: t.primary },
-  ampmText: { ...typography.bodyMedium, color: t.textPrimary },
-  timeLabel: { ...typography.caption, color: t.textMuted, marginTop: spacing.md, marginBottom: spacing.xs },
-  timeGrid: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs },
-  timeCell: { width: '14.5%' as const, height: 42, borderRadius: radii.pill, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
-  timeCellOn: { backgroundColor: t.primary },
-  timeCellText: { ...typography.bodyMedium, color: t.textPrimary },
+  // Time picker: three scroll wheels (hour, minute, AM/PM) over one highlighted row.
+  wheels: { flexDirection: 'row' as const, justifyContent: 'center' as const, alignItems: 'center' as const, gap: spacing.xs, height: WHEEL_ITEM * WHEEL_ROWS },
+  wheelBand: {
+    position: 'absolute' as const, left: 0, right: 0, top: WHEEL_ITEM * Math.floor(WHEEL_ROWS / 2), height: WHEEL_ITEM,
+    borderRadius: radii.md, backgroundColor: t.primarySoftBg,
+  },
+  wheel: { width: 76, height: WHEEL_ITEM * WHEEL_ROWS },
+  wheelItem: { height: WHEEL_ITEM, alignItems: 'center' as const, justifyContent: 'center' as const },
+  wheelText: { ...typography.subtitle, fontSize: 20, color: t.textMuted },
+  wheelTextOn: { fontSize: 24, fontWeight: '700' as const, color: t.primary },
+  wheelColon: { ...typography.subtitle, fontSize: 24, fontWeight: '700' as const, color: t.primary },
   sheetButtons: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg },
   search: {
     flexDirection: 'row' as const,
@@ -235,8 +241,63 @@ export function DateSheet({
   );
 }
 
-const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+const HOURS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MINUTES = Array.from({ length: 60 }, (_, i) => i);
+const MERIDIEM = ['AM', 'PM'];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * One scroll wheel: the row in the middle band is the chosen one. It snaps row by row, a tap on a
+ * row scrolls it into the middle, and it follows `index` when that is changed from outside.
+ */
+function Wheel({ items, index, onChange, label }: { items: string[]; index: number; onChange: (i: number) => void; label: string }) {
+  const { styles } = useCrmStyles(factory);
+  const ref = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const shown = useRef(index); // the row the wheel is on now
+  const [ready, setReady] = useState(false);
+  const edge = WHEEL_ITEM * Math.floor(WHEEL_ROWS / 2); // empty space above the first row and below the last
+
+  useEffect(() => {
+    if (ready && index !== shown.current) {
+      shown.current = index;
+      ref.current?.scrollTo({ y: index * WHEEL_ITEM, animated: false });
+    }
+  }, [index, ready]);
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const i = Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / WHEEL_ITEM)));
+    if (i !== shown.current) {
+      shown.current = i;
+      onChange(i);
+    }
+  };
+
+  return (
+    <ScrollView
+      ref={ref}
+      style={styles.wheel}
+      contentContainerStyle={{ paddingVertical: edge }}
+      showsVerticalScrollIndicator={false}
+      snapToInterval={WHEEL_ITEM}
+      decelerationRate="fast"
+      nestedScrollEnabled
+      scrollEventThrottle={16}
+      onScroll={onScroll}
+      onLayout={() => {
+        ref.current?.scrollTo({ y: index * WHEEL_ITEM, animated: false });
+        shown.current = index;
+        setReady(true);
+      }}
+      accessibilityLabel={label}
+    >
+      {items.map((text, i) => (
+        <Pressable key={text} style={styles.wheelItem} onPress={() => ref.current?.scrollTo({ y: i * WHEEL_ITEM, animated: true })} accessibilityRole="button" accessibilityLabel={`${label} ${text}`}>
+          <Text style={[styles.wheelText, i === index && styles.wheelTextOn]}>{text}</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
 
 /** value/onPick use 'HH:MM' (24h) or null for "no specific time". */
 export function TimeSheet({
@@ -255,53 +316,33 @@ export function TimeSheet({
   const { styles } = useCrmStyles(factory);
   const [h24, m] = (value || '10:00').split(':').map(Number);
   const [hour, setHour] = useState(h24 % 12 || 12);
-  const [minute, setMinute] = useState(m - (m % 5));
+  const [minute, setMinute] = useState(m);
   const [pm, setPm] = useState(h24 >= 12);
-  const pad = (n: number) => String(n).padStart(2, '0');
 
   useEffect(() => {
     if (!visible) return;
     const [vh, vm] = (value || '10:00').split(':').map(Number);
     setHour(vh % 12 || 12);
-    setMinute(vm - (vm % 5));
+    setMinute(vm);
     setPm(vh >= 12);
   }, [visible, value]);
 
   function confirm() {
-    onPick(`${pad((hour % 12) + (pm ? 12 : 0))}:${pad(minute)}`);
+    onPick(`${pad2((hour % 12) + (pm ? 12 : 0))}:${pad2(minute)}`);
     onClose();
   }
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Pick a time">
       <Text style={styles.timePreview}>
-        {hour}:{pad(minute)} {pm ? 'PM' : 'AM'}
+        {hour}:{pad2(minute)} {pm ? 'PM' : 'AM'}
       </Text>
-      <View style={styles.ampm}>
-        {['AM', 'PM'].map((x) => {
-          const on = (x === 'PM') === pm;
-          return (
-            <Pressable key={x} onPress={() => setPm(x === 'PM')} style={[styles.ampmBtn, on && styles.ampmOn]}>
-              <Text style={[styles.ampmText, on && styles.onPrimary]}>{x}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-      <Text style={styles.timeLabel}>Hour</Text>
-      <View style={styles.timeGrid}>
-        {HOURS.map((h) => (
-          <Pressable key={h} onPress={() => setHour(h)} style={[styles.timeCell, hour === h && styles.timeCellOn]}>
-            <Text style={[styles.timeCellText, hour === h && styles.onPrimary]}>{h}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.timeLabel}>Minute</Text>
-      <View style={styles.timeGrid}>
-        {MINUTES.map((x) => (
-          <Pressable key={x} onPress={() => setMinute(x)} style={[styles.timeCell, minute === x && styles.timeCellOn]}>
-            <Text style={[styles.timeCellText, minute === x && styles.onPrimary]}>{pad(x)}</Text>
-          </Pressable>
-        ))}
+      <View style={styles.wheels}>
+        <View style={styles.wheelBand} pointerEvents="none" />
+        <Wheel label="Hour" items={HOURS.map(String)} index={HOURS.indexOf(hour)} onChange={(i) => setHour(HOURS[i])} />
+        <Text style={styles.wheelColon}>:</Text>
+        <Wheel label="Minute" items={MINUTES.map(pad2)} index={minute} onChange={setMinute} />
+        <Wheel label="AM or PM" items={MERIDIEM} index={pm ? 1 : 0} onChange={(i) => setPm(i === 1)} />
       </View>
       <View style={styles.sheetButtons}>
         {allowNone && (

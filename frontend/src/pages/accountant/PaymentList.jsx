@@ -1,10 +1,12 @@
 import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard, FiDollarSign, FiDownload, FiPlusCircle, FiSearch } from "react-icons/fi";
+import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard, FiDownload, FiPlusCircle, FiSearch } from "react-icons/fi";
+import { MdEventAvailable } from "react-icons/md";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { fetchPayment, showDate, todayYmd, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
+import DateInput from "../../components/accountant/DateInput";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -43,18 +45,19 @@ export default function PaymentList() {
     const q = search.trim().toLowerCase();
     return !q || `${p.payment_number} ${p.customer_name} ${p.reference_number}`.toLowerCase().includes(q);
   });
-  const { pageRows, page, setPage, pageSize } = usePaged(rows);
+  const { pageRows, page, setPage, pageSize } = usePaged(rows, 25); // 25 payments a page
 
   // The 4 tiles reflect whatever is currently filtered/searched, not the whole list.
   const shown = rows.filter((p) => p.status !== "CANCELLED");
   const monthKey = todayYmd().slice(0, 7);
   const thisMonth = shown.filter((p) => p.payment_date.startsWith(monthKey));
+  const today = shown.filter((p) => p.payment_date === todayYmd());
 
   const cards = [
     { key: "green", icon: <FiCheckCircle />, label: "Total Received", value: money(sum(shown, "received_amount")) },
     { key: "blue", icon: <FiCalendar />, label: "Received This Month", value: money(sum(thisMonth, "received_amount")) },
     { key: "purple", icon: <FiCreditCard />, label: "Payments", value: shown.length },
-    { key: "orange", icon: <FiDollarSign />, label: "Unallocated (Advance)", value: money(sum(shown, "received_amount") - sum(shown, "allocated_amount")) },
+    { key: "orange", icon: <MdEventAvailable />, label: "Received Today", value: money(sum(today, "received_amount")), note: `${today.length} payment${today.length === 1 ? "" : "s"}` },
   ];
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
@@ -113,6 +116,7 @@ export default function PaymentList() {
             <span className="ac-kpi-icon" aria-hidden="true">{c.icon}</span>
             <div className="ac-kpi-label">{c.label}</div>
             <div className="ac-kpi-value" style={{ fontSize: 20 }}>{loading ? <Skeleton width="60%" height={22} /> : hasData ? c.value : "—"}</div>
+            {!!c.note && !loading && hasData && <div className="ac-kpi-note">{c.note}</div>}
           </div>
         ))}
       </div>
@@ -133,8 +137,8 @@ export default function PaymentList() {
             <option value="POSTED">Posted</option>
           </select>
           <div className="ac-grid-2" style={{ gap: 6 }}>
-            <input className="ac-input" type="date" value={from} onChange={filterChange(setFrom)} aria-label="From date" />
-            <input className="ac-input" type="date" value={to} onChange={filterChange(setTo)} aria-label="To date" />
+            <DateInput ariaLabel="From date" style={{ width: "100%", minWidth: 0 }} value={from} onChange={(v) => filterChange(setFrom)({ target: { value: v } })} />
+            <DateInput ariaLabel="To date" style={{ width: "100%", minWidth: 0 }} value={to} onChange={(v) => filterChange(setTo)({ target: { value: v } })} />
           </div>
         </div>
 

@@ -145,7 +145,7 @@ const factory = (t: CrmTheme) => ({
 });
 
 /** The header's blue gradient with its soft decorative circles. */
-function BandBackground() {
+export function BandBackground() {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -185,7 +185,7 @@ function CountUp({ value, style }: { value: number; style: object }) {
 }
 
 /** One Quick Actions shortcut: gradient icon square with a live count, label on a white card. */
-function QuickAction({
+export function QuickAction({
   icon,
   label,
   tone,
@@ -227,7 +227,7 @@ function QuickAction({
   );
 }
 
-function Tile({ icon, value, label, tone, onPress }: { icon: React.ReactNode; value: number; label: string; tone: 'info' | 'danger' | 'success'; onPress: () => void }) {
+export function Tile({ icon, value, label, tone, onPress }: { icon: React.ReactNode; value: number; label: string; tone: 'info' | 'danger' | 'success'; onPress: () => void }) {
   const { styles } = useCrmStyles(factory);
   const colors = TONE_GRADIENT[tone];
   const scale = useRef(new Animated.Value(1)).current;

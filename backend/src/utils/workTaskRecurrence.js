@@ -9,14 +9,25 @@
 
 const { v4: uuid } = require("uuid");
 const { today: dbToday } = require("./hierarchy");
-const { logHistory, isRealDate: isValidDate } = require("./workTasks");
+const { logHistory, isRealDate: isValidDate, isValidTime } = require("./workTasks");
+const { followTask } = require("./taskReminders");
 
 const FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
 const END_TYPES = ["NEVER", "ON_DATE", "AFTER_COUNT"];
-const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
 const MAX_BACKDATE_DAYS = 366; // a new series may start at most this far in the past
 const MAX_PER_RUN = 100; // occurrences created per series per run; the rest catch up next run
 const SCAN_DAYS = 4 * 366;
+
+// Every recurring series is ONE task that carries on: instead of a new task on each date, its
+// due date moves to the next date. How it moves on differs:
+//  - payment reminders (the Accountant Panel): each date it falls due again it moves to that
+//    date (the person is alerted again); when it is completed the schedule ends.
+//  - Task Management's repeating tasks: completing it records "Done for <date>" and moves it
+//    to the next date (advanceSeriesTask); a date that passes without that records "Missed
+//    <date>" and moves it on. Each date's Done / Missed / Skipped is in the task's history, so
+//    the task shows every occurrence in one place. Series made before this change carry on as
+//    their latest open task; their older rows stay as they were.
+const PAYMENT_MODULES = ["PAYMENT_CUSTOMER", "PAYMENT_INVOICE"];
 
 const DATE_FMT = (col) => `DATE_FORMAT(${col}, '%Y-%m-%d')`;
 
@@ -140,7 +151,7 @@ function validateRecurrence(r, todayStr) {
 
   let timeOfDay = "09:00:00";
   if (r.time_of_day !== undefined && r.time_of_day !== null) {
-    if (!TIME_RE.test(String(r.time_of_day))) return { error: "recurrence.time_of_day must be HH:MM or HH:MM:SS" };
+    if (!isValidTime(r.time_of_day)) return { error: "recurrence.time_of_day must be a valid HH:MM or HH:MM:SS" };
     timeOfDay = String(r.time_of_day).length === 5 ? `${r.time_of_day}:00` : String(r.time_of_day);
   }
 
@@ -230,13 +241,48 @@ async function generateDueOccurrences(conn, seriesId, todayStr) {
   let created = 0;
   let moved = false;
 
+  // The series' one task that carries on (see the comment on PAYMENT_MODULES).
+  const isPayment = PAYMENT_MODULES.includes(series.source_module);
+  let [[openTask]] = await conn.query(
+    `SELECT id, ${DATE_FMT("due_date")} AS due_date, due_time FROM work_tasks
+      WHERE series_id = ? AND status IN ('OPEN','IN_PROGRESS','PAUSED')
+      ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+    [seriesId]
+  );
+  // A payment reminder completed (by hand, or because the money came in) or cancelled: the
+  // schedule has done its job, so it ends rather than starting a new reminder. (A repeating
+  // task never completes while dates remain - advanceSeriesTask moves it on - so one with no
+  // open task left simply starts again on its next date.)
+  if (isPayment && !openTask && total > 0) {
+    await conn.query("UPDATE work_task_series SET status = 'CANCELLED', pause_from = NULL, pause_until = NULL WHERE id = ?", [seriesId]);
+    return 0;
+  }
+
   while (created < MAX_PER_RUN) {
     if (rec.end_type === "AFTER_COUNT" && total >= rec.end_count) break;
     const next = findNextOccurrenceDate(rec, cursor);
-    if (!next || next > todayStr) break;
+    // The task is made straight away for its first date, even when that is still ahead, so it
+    // shows as "Upcoming" from the moment the schedule is saved.
+    const firstAhead = total === 0 && !openTask && next && next > todayStr && !inPauseWindow(series, next);
+    if (!next || (next > todayStr && !firstAhead)) break;
     cursor = next;
     moved = true;
     if (inPauseWindow(series, next)) continue; // paused day: skipped for good
+
+    if (openTask) {
+      // The same task comes due again: move it to this date and say so in its history. For a
+      // repeating task the date it was on passed without being done: that date was missed.
+      const note = isPayment
+        ? `Due ${openTask.due_date}${openTask.due_time ? ` ${openTask.due_time}` : ""} moved to ${next} ${String(rec.time_of_day).slice(0, 5)}: Repeating reminder`
+        : `Missed ${openTask.due_date} - next due ${next}`;
+      await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [next, rec.time_of_day, openTask.id]);
+      await logHistory(conn, openTask.id, "RESCHEDULE", { note: note.slice(0, 500), changedBy: series.created_by });
+      await followTask(conn, openTask.id); // its reminder, if it has one, moves along
+      openTask = { ...openTask, due_date: next, due_time: rec.time_of_day };
+      total += 1;
+      created += 1;
+      continue;
+    }
 
     const taskId = uuid();
     await conn.query(
@@ -247,6 +293,7 @@ async function generateDueOccurrences(conn, seriesId, todayStr) {
        series.source_module, series.source_id, series.assigned_to, series.created_by, next, rec.time_of_day]
     );
     await logHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: series.created_by, note: "Created from recurring schedule" });
+    openTask = { id: taskId, due_date: next, due_time: rec.time_of_day };
     total += 1;
     created += 1;
   }
@@ -259,6 +306,60 @@ async function generateDueOccurrences(conn, seriesId, todayStr) {
     await conn.query("UPDATE work_task_series SET status = 'ACTIVE', pause_from = NULL, pause_until = NULL WHERE id = ?", [seriesId]);
   }
   return created;
+}
+
+/**
+ * A repeating Task Management task was done (or its date skipped): it moves on to its next date
+ * as the same task, open again, and its history records "Done for <date>" (or "Skipped <date>").
+ * Returns the next date, or null when the task is not a repeating task or its schedule has no
+ * more dates - then the caller completes / cancels it as an ordinary task. `conn` must be inside
+ * a transaction.
+ */
+async function advanceSeriesTask(conn, task, userId, { skipped = false, note = null } = {}) {
+  if (!task.series_id) return null;
+  const [[series]] = await conn.query(
+    `SELECT status, source_module, ${DATE_FMT("pause_from")} AS pause_from, ${DATE_FMT("pause_until")} AS pause_until
+       FROM work_task_series WHERE id = ? FOR UPDATE`,
+    [task.series_id]
+  );
+  if (!series || series.status === "CANCELLED" || PAYMENT_MODULES.includes(series.source_module)) return null;
+  const [[rec]] = await conn.query(`SELECT ${REC_COLUMNS} FROM work_task_recurrence WHERE series_id = ? FOR UPDATE`, [task.series_id]);
+  if (!rec) return null;
+
+  let cursor = maxStr(rec.last_generated_until, task.due_date);
+  let next = null;
+  for (let i = 0; i < 500; i++) {
+    if (rec.end_type === "AFTER_COUNT" && rec.end_count && rec.occurrences_created >= rec.end_count) break;
+    const date = findNextOccurrenceDate(rec, cursor);
+    if (!date) break;
+    cursor = date;
+    if (!inPauseWindow(series, date)) {
+      next = date;
+      break;
+    }
+    if (!series.pause_until) break; // stopped with no end date: nothing comes next for now
+  }
+  if (!next) return null;
+
+  const [result] = await conn.query(
+    `UPDATE work_tasks
+        SET status = 'OPEN', due_date = ?, due_time = ?, started_at = NULL, started_by = NULL, paused_at = NULL,
+            paused_seconds = 0, completed_at = NULL, completed_by = NULL, completion_note = NULL
+      WHERE id = ? AND status = ?`,
+    [next, rec.time_of_day, task.id, task.status]
+  );
+  if (!result.affectedRows) return null;
+  const what = skipped ? `Skipped ${task.due_date}` : `Done for ${task.due_date}`;
+  await logHistory(conn, task.id, skipped ? "SKIP" : "COMPLETE", {
+    fromStatus: task.status,
+    toStatus: "OPEN",
+    note: `${what} - next due ${next}${note ? `: ${note}` : ""}`.slice(0, 500),
+    changedBy: userId,
+  });
+  await conn.query("UPDATE work_task_recurrence SET last_generated_until = ?, occurrences_created = occurrences_created + 1 WHERE series_id = ?", [
+    next, task.series_id,
+  ]);
+  return next;
 }
 
 // Runs shortly after boot, then hourly. Cheap (one query + only series with
@@ -297,5 +398,5 @@ function startWorkTaskScheduler(pool) {
 
 module.exports = {
   DATE_FMT, REC_COLUMNS, addDays, maxStr, matchesRecurrence, findNextOccurrenceDate, inPauseWindow,
-  nextOccurrenceDate, validateRecurrence, generateDueOccurrences, startWorkTaskScheduler,
+  nextOccurrenceDate, validateRecurrence, generateDueOccurrences, advanceSeriesTask, startWorkTaskScheduler,
 };

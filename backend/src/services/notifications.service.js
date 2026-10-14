@@ -1,5 +1,6 @@
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../db");
+const { sendPush } = require("./push.service");
 
 function normalizeUserIds(userIds = []) {
   return Array.from(
@@ -49,6 +50,16 @@ async function insertNotifications(executor, userIds, payload) {
       ]
     );
   }
+
+  // Also to the people's phones. Deferred, so a notification saved inside a transaction is only
+  // pushed after the caller's work has finished; best effort - never affects the caller.
+  setImmediate(() => {
+    sendPush(recipientIds, {
+      title: payload.title,
+      body: payload.message,
+      data: { type: payload.type, entityType: payload.entityType, entityId: payload.entityId },
+    });
+  });
 
   return recipientIds.length;
 }
@@ -535,7 +546,28 @@ async function notifyInvoiceImport({ userId, importId, fileName, total, imported
   });
 }
 
+// A notification for a set of users, without the person whose action caused it.
+async function notifyUsers(userIds, payload, { exceptUserId = null } = {}) {
+  const except = exceptUserId === null || exceptUserId === undefined ? null : String(exceptUserId);
+  const recipients = normalizeUserIds(userIds).filter((id) => id !== except);
+  return insertNotifications(pool, recipients, payload);
+}
+
+// A payment reminder has reached its date and time: tells the accountant it is assigned to.
+// entity_id is the reminder (work_tasks.id), so the bell can open it.
+async function notifyPaymentReminderDue({ userId, taskId, title, message }) {
+  return insertNotifications(pool, [userId], {
+    type: "PAYMENT_REMINDER",
+    title,
+    message,
+    entityType: "payment_reminder",
+    entityId: taskId,
+  });
+}
+
 module.exports = {
+  notifyUsers,
+  notifyPaymentReminderDue,
   listNotificationsForUser,
   getUnreadNotificationCount,
   markNotificationRead,

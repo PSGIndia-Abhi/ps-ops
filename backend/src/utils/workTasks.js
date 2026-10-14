@@ -1,6 +1,7 @@
 // Shared helpers for the generic Task Management module (work_tasks and its
 // work_task_* tables). Separate from the Accountant module's `tasks` table.
 
+const { REMINDER_ID_SQL } = require("./taskReminders");
 const PERMISSIONS = require("../access/permissions");
 const { getTeamUserIds } = require("./hierarchy");
 
@@ -34,6 +35,16 @@ function isRealDate(value) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
+// Checks the shape AND the actual ranges -- "99:99" matches /^\d{2}:\d{2}$/
+// but isn't a real time, and MySQL rejects it with an unhandled 500 instead
+// of a clean validation error.
+function isValidTime(value) {
+  const m = typeof value === "string" && value.match(/^(\d{2}):(\d{2})(:(\d{2}))?$/);
+  if (!m) return false;
+  const [, h, mi, , s] = m;
+  return Number(h) <= 23 && Number(mi) <= 59 && (s === undefined || Number(s) <= 59);
+}
+
 // Same shape everywhere a single task is returned (GET one, create, start,
 // progress, complete, reassign, reschedule, skip) — including the assignee's
 // and creator's names, exactly like the list endpoint already does, so the
@@ -43,7 +54,8 @@ async function loadTask(executor, id) {
   // more tables that also have an `id` column, so the bare names in
   // TASK_COLUMNS would be ambiguous the moment they're joined in.
   const [[row]] = await executor.query(
-    `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name
+    `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
+            ${REMINDER_ID_SQL} AS reminder_id
        FROM work_tasks t
        LEFT JOIN users ua ON ua.id = t.assigned_to
        LEFT JOIN users uc ON uc.id = t.created_by
@@ -77,4 +89,4 @@ async function resolveVisibleUserIds(executor, req) {
   return [...ids];
 }
 
-module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, loadTask, logHistory, hasPerm, resolveVisibleUserIds };
+module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds };

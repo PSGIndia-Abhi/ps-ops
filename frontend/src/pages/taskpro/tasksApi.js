@@ -227,6 +227,23 @@ export async function reopenTask(id, reason) {
   return data;
 }
 
+/**
+ * A reminder on the task: it rings for the task's assignee 30 minutes before and at the due time,
+ * on the web and the phone (the server keeps it in step with the task). `task.reminder_id` says
+ * whether one is set. Needs a due time.
+ */
+export async function setTaskReminder(id) {
+  const data = await call("POST", `/api/work-tasks/${id}/reminder`);
+  patchList(data);
+  return data;
+}
+
+export async function removeTaskReminder(id) {
+  const data = await call("DELETE", `/api/work-tasks/${id}/reminder`);
+  patchList(data);
+  return data;
+}
+
 // ---- delete with undo ------------------------------------------------------
 // Deleting is permanent on the server, so the request is held back for
 // UNDO_MS: the task leaves the list at once, and only if nobody presses Undo

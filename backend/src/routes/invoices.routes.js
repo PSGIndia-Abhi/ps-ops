@@ -10,8 +10,16 @@ const {
   createInvoice,
   updateInvoice,
   cancelInvoice,
-  getCustomerContact,
 } = require("../controllers/invoices.controller");
+
+const {
+  getCustomerContact,
+  createCustomerContact,
+  updateCustomerContact,
+  listCustomerContacts,
+  archiveCustomerContact,
+  restoreCustomerContact,
+} = require("../controllers/customerPaymentContacts.controller");
 
 const { listTdsSettings, updateTdsSettings } = require("../controllers/tds.controller");
 
@@ -31,8 +39,15 @@ const {
 router.get("/tds-settings", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), listTdsSettings);
 router.put("/tds-settings/:customerId", auth, requirePermission(PERMISSIONS.UPDATE_INVOICE), updateTdsSettings);
 
-// A customer's phone for the payment follow-up "Call customer" button. Declared before "/:id".
+// The accountant's own phone list for a customer (who to call about payments), kept in
+// customer_payment_contacts -- not the admin's `contacts`. Declared before "/:id".
 router.get("/customers/:customerId/contact", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), getCustomerContact);
+router.post("/customers/:customerId/contacts", auth, requirePermission(PERMISSIONS.CREATE_PAYMENT), createCustomerContact);
+router.put("/customers/:customerId/contacts/:contactId", auth, requirePermission(PERMISSIONS.CREATE_PAYMENT), updateCustomerContact);
+router.post("/customers/:customerId/contacts/:contactId/archive", auth, requirePermission(PERMISSIONS.CREATE_PAYMENT), archiveCustomerContact);
+router.post("/customers/:customerId/contacts/:contactId/restore", auth, requirePermission(PERMISSIONS.CREATE_PAYMENT), restoreCustomerContact);
+// Every saved number, for the accountant's Contacts page.
+router.get("/customer-contacts", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), listCustomerContacts);
 
 router.get("/import", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), listImportHistory);
 router.get("/import/template", auth, requirePermission(PERMISSIONS.CREATE_INVOICE), downloadTemplate);

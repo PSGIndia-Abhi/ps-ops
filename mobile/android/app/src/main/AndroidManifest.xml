@@ -21,6 +21,18 @@
     <!-- Job update voice notes: microphone recording. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Reminders (meetings, follow-ups, tasks, payments): the alarm before something is due and
+         the popup when something is set for you. POST_NOTIFICATIONS is asked at runtime (Android 13+).
+         SCHEDULE_EXACT_ALARM lets the alarm ring on the minute (the person can allow it in
+         "Alarms & reminders"; without it Android may deliver a few minutes late). The boot
+         permission re-arms reminders after a restart. USE_FULL_SCREEN_INTENT shows the alarm over
+         the lock screen where Android allows it; elsewhere it falls back to a heads-up banner. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Declaring CAMERA/ACCESS_FINE_LOCATION above makes Android's manifest
          merger auto-add these as required="true" hardware features unless
          overridden here - which would make Play Store reject the app as
@@ -55,5 +67,28 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Reminders: the alarm's own screen over the lock screen (Open / Snooze / Dismiss), so an
+           alarm on a locked phone never launches the app by itself. Its own task, kept out of Recents. -->
+      <activity
+        android:name=".reminders.AlarmActivity"
+        android:exported="false"
+        android:launchMode="singleTop"
+        android:taskAffinity=""
+        android:excludeFromRecents="true"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+      <!-- Reminders: AlarmManager delivers here; also the Snooze / Dismiss buttons. -->
+      <receiver android:name=".reminders.ReminderReceiver" android:exported="false" />
+      <!-- Re-arms reminders after a reboot, an app update, or the exact-alarm switch changing. -->
+      <receiver android:name=".reminders.ReminderBootReceiver" android:exported="true">
+        <intent-filter>
+          <action android:name="android.intent.action.BOOT_COMPLETED" />
+          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+          <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+        </intent-filter>
+      </receiver>
     </application>
 </manifest>

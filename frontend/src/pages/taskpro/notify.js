@@ -3,6 +3,7 @@
 // say the same thing. Events come from GET /api/work-tasks/notifications.
 
 import {
+  FiBell,
   FiCalendar,
   FiCheckCircle,
   FiEdit3,
@@ -42,6 +43,9 @@ const KINDS = {
   },
   request_approved: { icon: FiCheckCircle, tone: "green", text: (e) => ["approved your request to move", `to ${date(e)}`] },
   request_rejected: { icon: FiX, tone: "red", text: () => ["rejected your request to move", ""] },
+  // A reminder set on the task (shown as "Reminder · <task> is due in 30 minutes").
+  reminder_soon: { icon: FiBell, tone: "amber", text: () => ["·", "is due in 30 minutes"] },
+  reminder_due: { icon: FiBell, tone: "red", text: () => ["·", "is due now"] },
 };
 
 // The server writes a due-date change as "Due 2026-09-25 10:00:00 moved to

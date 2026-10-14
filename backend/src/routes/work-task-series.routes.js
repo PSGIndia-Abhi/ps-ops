@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { today: dbToday, getTeamUserIds } = require("../utils/hierarchy");
-const { hasPerm, resolveVisibleUserIds, isRealDate: isValidDate } = require("../utils/workTasks");
+const { hasPerm, resolveVisibleUserIds, isRealDate: isValidDate, logHistory } = require("../utils/workTasks");
 const {
   DATE_FMT, REC_COLUMNS, addDays, maxStr, nextOccurrenceDate, generateDueOccurrences,
 } = require("../utils/workTaskRecurrence");
@@ -61,6 +61,18 @@ async function loadRecurrence(executor, seriesId) {
     [seriesId]
   );
   return row || null;
+}
+
+// A payment reminder (accountant panel) is ONE task that a schedule keeps moving, so stopping or
+// resuming its schedule is written to that reminder's own history, where the accountant looks.
+// Other schedules (TaskPro) are left as they were.
+async function logScheduleChange(conn, series, action, note, userId) {
+  if (!["PAYMENT_CUSTOMER", "PAYMENT_INVOICE"].includes(series.source_module)) return;
+  const [open] = await conn.query(
+    "SELECT id FROM work_tasks WHERE series_id = ? AND status IN ('OPEN','IN_PROGRESS','PAUSED')",
+    [series.id]
+  );
+  for (const t of open) await logHistory(conn, t.id, action, { note, changedBy: userId });
 }
 
 // 404 (never 403) for a series the requester can't see.
@@ -169,6 +181,7 @@ router.post("/:id/pause", auth, requireRealUser, async (req, res) => {
         [from, until || null, series.id]
       );
       if (!result.affectedRows) throw new HttpError(409, "This schedule was just changed by someone else. Reload and try again.");
+      await logScheduleChange(conn, series, "SERIES_PAUSE", until ? `Repeating stopped until ${until}` : "Repeating stopped", req.user.id);
     });
     res.json(await loadSeries(pool, series.id));
   } catch (err) {
@@ -191,6 +204,7 @@ router.post("/:id/resume", auth, requireRealUser, async (req, res) => {
         [series.id]
       );
       if (!result.affectedRows) throw new HttpError(409, "This schedule was just changed by someone else. Reload and try again.");
+      await logScheduleChange(conn, series, "SERIES_RESUME", "Repeating resumed", req.user.id);
       if (series.pause_from && series.pause_from <= todayStr) {
         // The pause was in effect: everything up to yesterday is settled, don't back-fill it.
         const [[rec]] = await conn.query(`SELECT ${DATE_FMT("last_generated_until")} AS last_generated_until FROM work_task_recurrence WHERE series_id = ?`, [series.id]);

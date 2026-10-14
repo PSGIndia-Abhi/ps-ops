@@ -12,7 +12,7 @@ services:
       - ../backend/.env
     depends_on:
       mysql:
-        condition: service_healthy
+        condition: service_healthy  
       redis:
         condition: service_started
       minio:
@@ -70,7 +70,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: quay.io/minio/minio:latest
+    image: minio/minio:latest
     container_name: ps-minio
     command: server /data --console-address ":9001"
     environment:

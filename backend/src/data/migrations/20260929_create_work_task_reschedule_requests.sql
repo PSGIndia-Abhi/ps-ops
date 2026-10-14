@@ -1,4 +1,4 @@
--- Reschedule requests for the generic Task Management module.
+                                                            -- Reschedule requests for the generic Task Management module.
 --
 -- An assignee who didn't create a task can't move its due date themselves;
 -- they ask instead. The task's creator, or a manager of the assignee (anyone

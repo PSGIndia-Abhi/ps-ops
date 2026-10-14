@@ -35,6 +35,7 @@ import PaymentList from "./pages/accountant/PaymentList";
 import CustomerOutstanding from "./pages/accountant/CustomerOutstanding";
 import TdsSettings from "./pages/accountant/TdsSettings";
 import FollowUpDetails from "./pages/accountant/FollowUpDetails";
+import CustomerContactsPage from "./pages/accountant/CustomerContactsPage";
 import ClientJobsPage from "./pages/ClientJobsPage";
 import ClientJobUpdates from "./pages/ClientJobUpdates";
 import ClientTickets from "./pages/ClientTickets";
@@ -62,7 +63,17 @@ import TaskProRequests from "./pages/taskpro/RescheduleRequests";
 import TaskProReports from "./pages/taskpro/TaskReports";
 import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
-import { TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
+import { ACCOUNTANT_PANEL_ROLES, TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
+import LeadsLayout from "./pages/leads/LeadsLayout";
+import LeadsHome from "./pages/leads/Home";
+import LeadsList from "./pages/leads/LeadsList";
+import LeadDetail from "./pages/leads/LeadDetail";
+import { FollowUps, LeadFollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
+import LeadsPerformance from "./pages/leads/Performance";
+import LeadSources from "./pages/leads/LeadSources";
+import TeamVisits from "./pages/leads/TeamVisits";
+import LeadReminders from "./pages/leads/Reminders";
+import { LEADS_HOME, LEADS_ROLES } from "./pages/leads/access";
 import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
@@ -211,7 +222,7 @@ const router = createBrowserRouter([
   {
     path: "/accountant",
     element: (
-      <ProtectedRoute allowedRoles={["accountant"]}>
+      <ProtectedRoute allowedRoles={ACCOUNTANT_PANEL_ROLES}>
         <AccountantLayout />
       </ProtectedRoute>
     ),
@@ -243,7 +254,35 @@ const router = createBrowserRouter([
       },
       { path: "tasks", element: <TaskManagement /> },
       { path: "follow-ups/:taskId", element: <FollowUpDetails /> },
+      { path: "contacts", element: <CustomerContactsPage /> },
       { path: "settings", element: <TdsSettings /> },
+    ],
+  },
+
+  // LEADS — lead management: provider portal, telecaller, sales and sales manager
+  // dashboards (protected; roles in pages/leads/access.js). The index page shows
+  // the dashboard that matches the signed-in role.
+  // -------------------------
+  {
+    path: LEADS_HOME,
+    element: (
+      <ProtectedRoute allowedRoles={LEADS_ROLES}>
+        <LeadsLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <LeadsHome /> },
+      { path: "submit", element: <SubmitLead /> },
+      { path: "all", element: <LeadsList /> },
+      { path: "team-visits", element: <TeamVisits /> },
+      { path: "reminders", element: <LeadReminders /> },
+      { path: "follow-ups", element: <FollowUps /> },
+      { path: "follow-ups/lead/:id", element: <LeadFollowUps /> },
+      { path: "meetings", element: <Meetings /> },
+      { path: "providers", element: <Providers /> },
+      { path: "performance", element: <LeadsPerformance /> },
+      { path: "sources", element: <LeadSources /> },
+      { path: ":id", element: <LeadDetail /> },
     ],
   },
 

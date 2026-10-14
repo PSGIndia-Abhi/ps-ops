@@ -1,7 +1,7 @@
 import React from 'react';
 import { AchievementCard as SharedAchievementCard } from '../../components/AchievementCard';
 import { formatINR } from '../format';
-import type { CommercialAchievements } from '../stats';
+import type { CommercialAchievements, MonthlyAchievements } from '../stats';
 
 interface AchievementCardProps {
   achievements: CommercialAchievements;
@@ -31,6 +31,35 @@ export function AchievementCard({ achievements, monthLabel, replayKey }: Achieve
         { value: `${newLeads} new`, label: 'to follow up' },
       ]}
       accessibilityLabel={`${convertedPercent} percent of this month's commercial leads converted`}
+      replayKey={replayKey}
+    />
+  );
+}
+
+interface ResidentialAchievementCardProps extends Omit<AchievementCardProps, 'achievements'> {
+  achievements: MonthlyAchievements;
+}
+
+/**
+ * The residential sales roles' Home card, as the CRM had it before commercial leads: how this
+ * month's leads are going (share of lead value collected, leads, paid, converted).
+ */
+export function ResidentialAchievementCard({ achievements, monthLabel, replayKey }: ResidentialAchievementCardProps) {
+  const { monthLeads, paidLeads, convertedLeads, collected, totalValue, collectedPercent, paidPercent } = achievements;
+  return (
+    <SharedAchievementCard
+      title="Your Achievements"
+      chip={monthLabel}
+      percent={collectedPercent}
+      centerPrimary={totalValue > 0 ? formatINR(collected) : undefined}
+      centerSecondary={totalValue > 0 ? `of ${formatINR(totalValue)}` : undefined}
+      centerEmpty={totalValue > 0 ? undefined : monthLeads > 0 ? 'no payments yet' : 'no leads yet'}
+      tiles={[
+        { value: monthLeads === 1 ? '1 lead' : `${monthLeads} leads`, label: 'this month' },
+        { value: `${paidLeads} paid${monthLeads > 0 ? ` · ${paidPercent}%` : ''}`, label: 'collected' },
+        { value: `${convertedLeads} converted`, label: 'won' },
+      ]}
+      accessibilityLabel={`${collectedPercent} percent of this month's lead value collected`}
       replayKey={replayKey}
     />
   );

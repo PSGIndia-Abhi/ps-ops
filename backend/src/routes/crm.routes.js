@@ -10,6 +10,11 @@ const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
+const {
+  nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
+  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead,
+} = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -96,6 +101,14 @@ function toLead(row) {
     created_by_name: row.created_by_name || "",
     created_at: row.created_at,
     paid_at: row.paid_at || null,
+    // Lead Management fields -- always present, but only ever set for lead_type='commercial'.
+    lead_number: row.lead_number || null,
+    provider_id: row.provider_id === null || row.provider_id === undefined ? null : String(row.provider_id),
+    pipeline_stage: row.pipeline_stage || null,
+    assigned_telecaller_id: row.assigned_telecaller_id === null || row.assigned_telecaller_id === undefined ? null : String(row.assigned_telecaller_id),
+    assigned_sales_employee_id: row.assigned_sales_employee_id === null || row.assigned_sales_employee_id === undefined ? null : String(row.assigned_sales_employee_id),
+    loss_reason_id: row.loss_reason_id || null,
+    row_version: row.row_version === undefined ? null : Number(row.row_version),
   };
 }
 
@@ -165,6 +178,37 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
   try {
     const wanted = req.query.lead_type;
     const leadType = wanted === "commercial" || wanted === "all" ? wanted : "consumer";
+    // Commercial leads get Lead Management's visibility scoping + filters.
+    // Consumer leads (and lead_type=all, which includes consumer rows) keep
+    // their original behaviour, for backward compatibility with the existing mobile app.
+    if (leadType === "commercial") {
+      const where = ["l.lead_type = 'commercial'"];
+      const params = [];
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null) {
+        where.push("(l.created_by_user_id IN (?) OR l.assigned_telecaller_id IN (?) OR l.assigned_sales_employee_id IN (?))");
+        params.push(visibleIds, visibleIds, visibleIds);
+      }
+      // Other people's sales-own leads stay with them and lead managers.
+      const salesOwn = salesOwnLeadFilter(req, "l");
+      if (salesOwn) {
+        where.push(salesOwn.sql);
+        params.push(...salesOwn.params);
+      }
+      if (req.query.pipeline_stage) { where.push("l.pipeline_stage = ?"); params.push(String(req.query.pipeline_stage)); }
+      if (req.query.assigned_telecaller_id) { where.push("l.assigned_telecaller_id = ?"); params.push(Number(req.query.assigned_telecaller_id)); }
+      if (req.query.assigned_sales_employee_id) { where.push("l.assigned_sales_employee_id = ?"); params.push(Number(req.query.assigned_sales_employee_id)); }
+      if (req.query.lead_source) { where.push("l.lead_source = ?"); params.push(String(req.query.lead_source)); }
+      if (req.query.from_date) { where.push("DATE(l.created_at) >= ?"); params.push(String(req.query.from_date)); }
+      if (req.query.to_date) { where.push("DATE(l.created_at) <= ?"); params.push(String(req.query.to_date)); }
+
+      const [rows] = await pool.query(
+        `${LEAD_WITH_CREATOR_SQL} WHERE ${where.join(" AND ")} ORDER BY l.created_at DESC LIMIT ${LIST_LIMIT}`,
+        params
+      );
+      return res.json(rows.map(toLead));
+    }
+
     const where = [];
     const params = [];
     if (leadType !== "all") {
@@ -190,8 +234,18 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
 // GET /api/crm/leads/:id
 router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
-    const row = await loadVisibleLead(req, req.params.id);
+    const [[row]] = await pool.query(`${LEAD_WITH_CREATOR_SQL} WHERE l.id = ? LIMIT 1`, [req.params.id]);
     if (!row) return res.status(404).json({ error: "Lead not found" });
+    if (row.lead_type === "commercial") {
+      // Commercial: Lead Management's visibility (own, assigned, or a visible team member's).
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null && !isOwnLead(row, req.user.id) && !visibleIds.some((id) => isOwnLead(row, id))) {
+        return res.status(404).json({ error: "Lead not found" });
+      }
+      if (await isHiddenSalesOwnLead(pool, req, row)) return res.status(404).json({ error: "Lead not found" });
+    } else if (!canViewAllLeads(req) && Number(row.created_by_user_id) !== Number(req.user.id)) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     res.json(toLead(row));
   } catch (err) {
     console.error("CRM lead fetch error:", err);
@@ -351,8 +405,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
 // app version from before they existed can still save.
 // Reads and checks the commercial-only fields of a lead - shared by create and edit.
 // `lead` carries what the caller already read (location, referenceBy, amount, leadStatus).
-// -> { error } when something is wrong, otherwise { values }.
-function readCommercialFields(body, lead) {
+// -> { error } when something is wrong, otherwise { values }. Async: the source may come from the master.
+async function readCommercialFields(body, lead) {
   const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
   const alternatePhone = typeof body.alternate_phone === "string" ? body.alternate_phone.replace(/\D/g, "") : "";
   const leadSource = body.lead_source || null;
@@ -378,7 +432,14 @@ function readCommercialFields(body, lead) {
   if (alternatePhone && alternatePhone.length !== 10) {
     return { error: "Alternate number must be a valid 10-digit phone number" };
   }
-  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return { error: "Source of lead is required" };
+  // The fixed codes the mobile app sends, or any active source from the lead source master.
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) {
+    let master = null;
+    if (typeof leadSource === "string") {
+      [[master]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ? AND is_active = 1", [leadSource]);
+    }
+    if (!master) return { error: "Source of lead is required" };
+  }
   if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
     return { error: "A valid approximate quote is required" };
   }
@@ -390,7 +451,13 @@ function readCommercialFields(body, lead) {
 }
 
 async function createCommercialLead(req, res, lead) {
-  const read = readCommercialFields(req.body || {}, lead);
+  let read;
+  try {
+    read = await readCommercialFields(req.body || {}, lead);
+  } catch (err) {
+    console.error("CRM lead source lookup error:", err);
+    return res.status(500).json({ error: "Failed to save lead" });
+  }
   if (read.error) return res.status(400).json({ error: read.error });
   const { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude } =
     read.values;
@@ -410,38 +477,63 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const id = uuid();
-    await pool.query(
-      `INSERT INTO crm_leads
-        (id, lead_type, customer_name, company_name, industry_type, contact_designation,
-         phone, alternate_phone, customer_email,
-         house_type, service_name, plan_type, standard_amount, amount, services_requested,
-         location, latitude, longitude, lead_source, reference_by, notes,
-         payment_method, payment_status, lead_status, created_by_user_id, external_ref)
-       VALUES (?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
-      [
-        id,
-        lead.customerName,
-        companyName,
-        industryType,
-        designation || null,
-        lead.phone,
-        alternatePhone || null,
-        lead.email || null,
-        lead.amount,
-        services.length ? services.join(",") : null,
-        lead.location || null,
-        latitude,
-        longitude,
-        leadSource,
-        lead.referenceBy || null,
-        lead.notes || null,
-        lead.leadStatus,
-        req.user.id,
-        lead.clientRef,
-      ]
-    );
+    // A sales executive's own lead skips the telecaller: they met or know the customer, so it starts
+    // verified (QUALIFIED) and assigned to them. Every other lead joins the telecaller queue as NEW.
+    // One transaction: the lead number, the commercial fields, the pipeline start and the history rows.
+    const salesOwn = SALES_EXECUTIVE_ROLES.includes(req.user.role);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const leadNumber = await nextLeadNumber(conn);
+      await conn.query(
+        `INSERT INTO crm_leads
+          (id, lead_number, lead_type, customer_name, company_name, industry_type, contact_designation,
+           phone, alternate_phone, customer_email,
+           house_type, service_name, plan_type, standard_amount, amount, services_requested,
+           location, latitude, longitude, lead_source, reference_by, notes,
+           payment_method, payment_status, lead_status, pipeline_stage, assigned_sales_employee_id,
+           created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?)`,
+        [
+          id,
+          leadNumber,
+          lead.customerName,
+          companyName,
+          industryType,
+          designation || null,
+          lead.phone,
+          alternatePhone || null,
+          lead.email || null,
+          lead.amount,
+          services.length ? services.join(",") : null,
+          lead.location || null,
+          latitude,
+          longitude,
+          leadSource,
+          lead.referenceBy || null,
+          lead.notes || null,
+          lead.leadStatus,
+          salesOwn ? "QUALIFIED" : "NEW",
+          salesOwn ? req.user.id : null,
+          req.user.id,
+          lead.clientRef,
+        ]
+      );
+      await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      if (salesOwn) {
+        await logLeadHistory(conn, id, "QUALIFY", { note: "Marked GENUINE - the sales executive's own lead, no telecaller call needed", changedBy: req.user.id });
+      }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    // Best effort, after the change is saved: never holds up or fails the request.
+    notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
     res.status(201).json(toLead(created));
   } catch (err) {
     if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {
@@ -494,7 +586,7 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
     if (!existing) return res.status(404).json({ error: "Lead not found" });
 
     if (existing.lead_type === "commercial") {
-      const read = readCommercialFields(body, { location, referenceBy, amount, leadStatus });
+      const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus });
       if (read.error) return res.status(400).json({ error: read.error });
       const v = read.values;
 

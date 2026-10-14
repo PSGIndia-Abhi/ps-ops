@@ -7,14 +7,17 @@ import {
   FiChevronDown,
   FiCheckSquare,
   FiChevronUp,
+  FiClipboard,
   FiClock,
   FiCreditCard,
   FiEdit2,
   FiFileText,
   FiGrid,
   FiList,
+  FiLogOut,
   FiMenu,
   FiPercent,
+  FiPhone,
   FiUploadCloud,
   FiUsers,
 } from "react-icons/fi";
@@ -22,6 +25,7 @@ import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import useStackedTables from "../hooks/useStackedTables";
 import NotificationsMenu from "../components/NotificationsMenu";
+import ReminderAlerts from "../components/accountant/ReminderAlerts";
 import UserMenu from "../components/UserMenu";
 import "./AccountantLayout.css";
 import "../pages/accountant/accountant.css";
@@ -79,6 +83,9 @@ const NAV_ITEMS = [
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell, also: ["/accountant/follow-ups"] },
+  // The shared Task Management area (same login); it has an "Accountant Panel" link back here.
+  { label: "Task Management", path: "/taskpro", icon: FiClipboard },
+  { label: "Contacts", path: "/accountant/contacts", icon: FiPhone },
   { label: "TDS", path: "/accountant/settings", icon: FiPercent },
 ];
 
@@ -187,6 +194,12 @@ export default function AccountantLayout() {
           </div>
         );
       })}
+      <div className="acc-foot">
+        <button type="button" className="acc-item" onClick={logout}>
+          <FiLogOut className="acc-icon" />
+          <span className="acc-label">Logout</span>
+        </button>
+      </div>
     </nav>
   );
 
@@ -229,6 +242,8 @@ export default function AccountantLayout() {
             </>
           )}
           <Outlet />
+          {/* pop-ups for payment reminders that have just come due */}
+          <ReminderAlerts />
         </main>
       </div>
     </div>

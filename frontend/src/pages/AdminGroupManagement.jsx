@@ -208,7 +208,7 @@ export default function AdminGroupManagement() {
     const query = companySearch.trim().toLowerCase();
     const matches = query
       ? companies.filter((company) => {
-          const haystack = `${company.name || ""} ${company.group_name || ""} ${company.code || ""}`.toLowerCase();
+          const haystack = `${company.name || ""} ${company.display_name || ""} ${company.group_name || ""} ${company.code || ""}`.toLowerCase();
           return haystack.includes(query);
         })
       : companies;
@@ -621,6 +621,7 @@ export default function AdminGroupManagement() {
           <div className="group-mgmt-card">
             <div className="group-mgmt-row group-mgmt-row-header group-mgmt-row-companies">
               <div>Company Name</div>
+              <div>Display Name</div>
               <div>Group</div>
               <div>Created</div>
               <div>Type</div>
@@ -636,6 +637,9 @@ export default function AdminGroupManagement() {
                 <div key={company.id} className="group-mgmt-row group-mgmt-row-companies">
                   <div className="group-mgmt-cell" data-label="Company Name">
                     {company.name || "Unnamed company"}
+                  </div>
+                  <div className="group-mgmt-cell" data-label="Display Name">
+                    {company.display_name || "-"}
                   </div>
                   <div className="group-mgmt-cell" data-label="Group">
                     {company.group_name || "No group"}

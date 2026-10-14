@@ -54,6 +54,7 @@ import {
   ScreenHeader,
 } from '../ui/parts';
 import { DateSheet, PeopleSheet, TimeSheet } from '../ui/sheets';
+import { BellIcon } from '../../components/icons';
 import { ChevronDownIcon, RepeatIcon } from '../ui/taskIcons';
 
 const FREQUENCIES: RecurrenceFrequency[] = [
@@ -251,6 +252,8 @@ export function NewTaskScreen() {
   const [typeFocused, setTypeFocused] = useState(false);
 
   const [repeat, setRepeat] = useState(false);
+  // Off unless asked for: only a task with a reminder rings (for its assignee, 30 min before and at the time).
+  const [remind, setRemind] = useState(false);
   const [freq, setFreq] = useState<RecurrenceFrequency>('WEEKLY');
   const [interval, setIntervalValue] = useState('1');
   const [weekdays, setWeekdays] = useState<number[]>([new Date().getDay()]);
@@ -406,10 +409,21 @@ export function NewTaskScreen() {
       payload.due_date = dueDate;
       if (dueTime) payload.due_time = `${dueTime}:00`;
     }
+    if (remind && !repeat && !dueTime)
+      return setError('Pick a time - the reminder rings 30 minutes before it.');
 
     setSaving(true);
     try {
       const created = await api.createTask(payload);
+      // The reminder goes on the task once it exists (a schedule's one task, or the task itself).
+      const made = repeat ? (created as CreateSeriesResponse).tasks?.[0] : (created as WorkTask);
+      if (remind && made) {
+        try {
+          await api.setTaskReminder(made.id);
+        } catch (err) {
+          showToast(`Task created, but the reminder was not set: ${errorMessage(err)}`);
+        }
+      }
       if (repeat) {
         const series = created as CreateSeriesResponse;
         const first = series.tasks?.[0];
@@ -588,6 +602,29 @@ export function NewTaskScreen() {
 
               {!editId && (
                 <>
+                  <View style={styles.optRow}>
+                    <View style={[styles.optIcon, { backgroundColor: theme.warningBg }]}>
+                      <BellIcon size={18} color={theme.warningText} />
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={styles.optTitle}>Reminder</Text>
+                      <Text style={styles.optSub}>
+                        {remind
+                          ? 'Rings 30 min before and at the time'
+                          : 'Off - this task will not ring'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={remind}
+                      onValueChange={setRemind}
+                      trackColor={{
+                        true: theme.primarySoft,
+                        false: theme.border,
+                      }}
+                      thumbColor={remind ? theme.primary : theme.surface}
+                    />
+                  </View>
+
                   <View style={styles.optRow}>
                     <View
                       style={[

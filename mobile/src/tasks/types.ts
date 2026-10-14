@@ -36,6 +36,11 @@ export interface WorkTask {
   completed_at: string | null;
   completed_by: number | null;
   completion_note: string | null;
+  /**
+   * The task's live reminder (a PERSONAL_REMINDER work task linked to it), or null. It rings for
+   * the assignee only, 30 minutes before and at the due time, on the phone and the web.
+   */
+  reminder_id?: string | null;
   created_at: string;
   updated_at: string;
   is_overdue?: boolean;

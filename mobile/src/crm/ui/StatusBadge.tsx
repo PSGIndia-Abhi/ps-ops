@@ -193,7 +193,11 @@ export function LeadStatusIcon({ status }: { status: LeadStatus }) {
  * "paid or not", so this slot is more useful surfacing the channel than the stage. */
 export function LeadSourceIcon({ source }: { source: LeadSource | null }) {
   const { styles } = useCrmStyles(factory);
-  const meta = source ? LEAD_SOURCE_META[source] : UNKNOWN_SOURCE_META;
+  // The server can hold a source this app has no entry for - a lead submitted through the web
+  // provider portal is stored as "Lead Provider", "Field Visit", ... Such a lead gets the
+  // neutral tag (announced by its own name) rather than taking the whole list down.
+  const known = source ? LEAD_SOURCE_META[source] : undefined;
+  const meta = known ?? { ...UNKNOWN_SOURCE_META, label: source || UNKNOWN_SOURCE_META.label };
   return (
     <IconBadge tone={meta.tone} label={meta.label}>
       {() => <Text style={styles.sourceEmoji}>{meta.emoji}</Text>}

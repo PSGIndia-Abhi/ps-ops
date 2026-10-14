@@ -2,14 +2,16 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
-import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
-import { ChartIcon, ChevronRightIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
-import type { AuthenticatedStackParamList } from '../../navigation/types';
+import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { BellIcon, CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import type { LeadStackParamList } from '../../leads/navigation';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { CrmScreen } from '../ui/CrmScreen';
 import { StatusBadge } from '../ui/StatusBadge';
+import { ClipboardListIcon } from '../ui/crmIcons';
+import { useAppSwitch } from '../../navigation/AppSwitchContext';
 
 const factory = (t: CrmTheme) => ({
   title: { ...typography.display, color: t.textPrimary, marginBottom: spacing.md },
@@ -100,14 +102,20 @@ function MenuRow({ icon, label, onPress, soon, danger, divider }: MenuRowProps) 
 }
 
 export function CrmMoreScreen() {
-  const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  // The lead screens live on whichever stack hosts this screen (CRM or Lead Management).
+  const leadNavigation = useNavigation<NavigationProp<LeadStackParamList>>();
   const { user, logout } = useAuth();
   const role = useUserRole();
   const rawRole = useRawRole();
   const { styles, theme } = useCrmStyles(factory);
   const name = user?.name ?? 'Account';
-  // A Managing Director / Personal Assistant in the Sales app keeps their own role name.
-  const roleText = role ? roleLabel(role) : rawRole ?? '';
+  // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
+  // lead roles such as "commercial_sales" read as "Commercial Sales".
+  const roleText = role ? roleLabel(role) : displayRole(rawRole);
+  // Telecallers verify leads by phone: no site visits, no sales performance numbers.
+  const telecaller = (rawRole ?? '').toLowerCase().trim() === 'telecaller';
+  // Lead roles also have Task Management (and MD / PA the Sales app).
+  const { canSwitch, current, openSwitcher } = useAppSwitch();
 
   return (
     <CrmScreen>
@@ -134,10 +142,49 @@ export function CrmMoreScreen() {
         <MenuRow
           icon={<PersonIcon size={18} color={theme.primary} />}
           label="Profile"
-          onPress={() => navigation.navigate('Profile')}
+          onPress={() => leadNavigation.navigate('LeadProfile')}
         />
         <MenuRow icon={<SettingsIcon size={18} color={theme.textMuted} />} label="Settings" soon divider />
-        <MenuRow icon={<ChartIcon size={18} color={theme.textMuted} />} label="Reports" soon divider />
+      </View>
+
+      {canSwitch && (
+        <View style={styles.group}>
+          <MenuRow
+            icon={<ClipboardListIcon size={18} color={theme.primary} />}
+            label={current === 'leads' ? 'Task Management' : 'Switch app'}
+            onPress={() => openSwitcher()}
+          />
+        </View>
+      )}
+
+      <View style={styles.group}>
+        <MenuRow
+          icon={<BellIcon size={18} color={theme.primary} />}
+          label="Reminders"
+          onPress={() => leadNavigation.navigate('LeadReminders')}
+        />
+        {!telecaller && (
+          <MenuRow
+            icon={<CalendarIcon size={18} color={theme.primary} />}
+            label="My meetings"
+            divider
+            onPress={() => leadNavigation.navigate('LeadMeetings')}
+          />
+        )}
+        <MenuRow
+          icon={<ClockIcon size={18} color={theme.primary} />}
+          label="Today's follow-ups"
+          divider
+          onPress={() => leadNavigation.navigate('LeadTasks')}
+        />
+        {!telecaller && (
+          <MenuRow
+            icon={<ChartIcon size={18} color={theme.primary} />}
+            label="My performance"
+            divider
+            onPress={() => leadNavigation.navigate('LeadPerformance')}
+          />
+        )}
       </View>
 
       <View style={styles.group}>

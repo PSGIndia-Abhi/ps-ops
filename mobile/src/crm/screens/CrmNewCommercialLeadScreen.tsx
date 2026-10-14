@@ -306,8 +306,17 @@ function ReviewSection({
  * Opened with `editLeadId` it is the same form filled in with that lead, to change it: the saved
  * location is kept unless the rep asks for the current one, the lead status can be changed, and
  * saved photos can be removed as well as new ones added.
+ *
+ * The Lead Management app reuses this same form for its commercial roles: `commercialOnly` hides
+ * the Residential tab, and `onCreated` replaces the CRM's "lead saved" screen after a new lead.
  */
-export function CrmNewCommercialLeadScreen() {
+export function CrmNewCommercialLeadScreen({
+  commercialOnly = false,
+  onCreated,
+}: {
+  commercialOnly?: boolean;
+  onCreated?: (lead: Lead) => void;
+} = {}) {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewCommercialLead'>>();
@@ -574,6 +583,10 @@ export function CrmNewCommercialLeadScreen() {
         return;
       }
       const saved = await addLead(input, photos);
+      if (onCreated) {
+        onCreated(saved);
+        return;
+      }
       navigation.replace('CrmLeadSaved', { leadId: saved.id });
     } catch (err) {
       setSaveError(
@@ -616,7 +629,7 @@ export function CrmNewCommercialLeadScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {!reviewing && !editing && (
+        {!reviewing && !editing && !commercialOnly && (
           <View style={styles.typeSwitch}>
             <SegmentedControl
               options={LEAD_TYPES}
