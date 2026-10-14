@@ -139,6 +139,11 @@ export default function FollowUpDetails() {
   // reminder"); only a move made by a person counts as rescheduled.
   const rescheduled = history.some((h) =>
     h.action === "RESCHEDULE" && !/: Repeating reminder$/.test(h.note || "") && (!partPaid || ymd(h.changed_at) >= paidOn));
+  // Customer Contacted: a call outcome was saved -- or the customer was clearly dealt with:
+  // money came in after the reminder was made, or a person moved the reminder to a new date.
+  const paidSinceCreated = Boolean(task) && Boolean(paidOn) && paidOn >= ymd(task.created_at);
+  const movedByPerson = history.some((h) => h.action === "RESCHEDULE" && !/: Repeating reminder$/.test(h.note || ""));
+  const contacted = history.some((h) => h.action === "UPDATE") || paidSinceCreated || movedByPerson;
 
   async function run(label, action, message) {
     setBusy(label);
@@ -262,7 +267,7 @@ export default function FollowUpDetails() {
         {task && isPaymentFollowUp && (
           <ReminderTrack
             task={task}
-            contacted={history.some((h) => h.action === "UPDATE")}
+            contacted={contacted}
             rescheduled={rescheduled}
             partPaid={partPaid}
             paid={!dataLoading && (task.scope !== "INVOICE" || Boolean(invoice)) && outstanding <= 0}
@@ -469,7 +474,8 @@ function ReminderTrack({ task, contacted, rescheduled, partPaid, paid, history =
   const doneNote = [
     when(task.created_at, task.created_by_name),
     when(startedAt?.changed_at || task.started_at, startedAt?.changed_by_name),
-    when(contactedAt?.changed_at, contactedAt?.changed_by_name),
+    // a call outcome; else the payment or the date move that showed the customer was dealt with
+    when(contactedAt?.changed_at, contactedAt?.changed_by_name) || (paidOn && paidOn >= ymd(task.created_at) ? `Paid ${showDate(paidOn)}` : "") || when(movedAt?.changed_at, movedAt?.changed_by_name),
     when(movedAt?.changed_at, movedAt?.changed_by_name),
     paidOn ? `Paid ${showDate(paidOn)}` : "",
     when(task.completed_at),
