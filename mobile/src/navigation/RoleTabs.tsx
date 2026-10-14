@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { canSwitchToSales, isTaskRole, useRawRole, useUserRole } from '../auth/role';
 import { leadPersonaForRole } from '../leads/stage';
 import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
@@ -9,6 +10,7 @@ import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
+import { colors } from '../theme';
 
 /**
  * Picks the one bottom-tab navigator that matches the signed-in user's
@@ -27,15 +29,30 @@ import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
  * temporary_worker, or nothing decoded yet) gets the same safe fallback -
  * never a crash, never the wrong role's dashboard.
  */
+/** How long the screen stays blank between unmounting one app and mounting the other. */
+const SWAP_MS = 80;
+
 export function RoleTabs() {
   const role = useUserRole();
   const rawRole = useRawRole();
 
-  // Managing Director / Personal Assistant open in Task Management like every org-hierarchy role,
-  // and can move to the Sales app and back without signing out.
-  const canSwitch = canSwitchToSales(rawRole);
-  const [inSales, setInSales] = useState(false);
-  const current: AppKind = canSwitch && inSales ? 'sales' : 'tasks';
+  // Which apps this person has, and the one they open in:
+  //  - Managing Director / Personal Assistant: Task Management, can switch to Sales;
+  //  - lead roles (telecaller, commercial sales, sales manager): Lead Management, can switch to
+  //    Task Management - same as the web, where their follow-ups and visits are tasks too;
+  //  - other org-hierarchy roles: Task Management only.
+  const leadRole = !!leadPersonaForRole(rawRole);
+  const taskRole = isTaskRole(rawRole);
+  const apps = useMemo<AppKind[]>(
+    () => (leadRole ? ['leads', 'tasks'] : taskRole ? (canSwitchToSales(rawRole) ? ['tasks', 'sales'] : ['tasks']) : []),
+    [leadRole, taskRole, rawRole],
+  );
+  const canSwitch = apps.length > 1;
+  const [picked, setPicked] = useState<AppKind | null>(null);
+  const current: AppKind = picked && apps.includes(picked) ? picked : apps[0] ?? 'tasks';
+  // The app being left is unmounted first and the other one mounted a moment later: replacing one
+  // navigator with the other in a single step leaves the native screen stack unable to open screens.
+  const [swapping, setSwapping] = useState(false);
   const [sheet, setSheet] = useState<{ onProfile?: () => void } | null>(null);
   const appSwitch = useMemo(
     () => ({
@@ -46,18 +63,30 @@ export function RoleTabs() {
     [canSwitch, current],
   );
 
-  // Org-hierarchy designations get Task Management - same login split as the web app.
-  if (isTaskRole(rawRole)) {
+  if (apps.length > 0) {
     return (
       <AppSwitchProvider value={appSwitch}>
-        {current === 'sales' ? <CrmNavigator /> : <TaskNavigator />}
+        {swapping ? (
+          <View style={styles.blank} />
+        ) : current === 'leads' ? (
+          <LeadsNavigator />
+        ) : current === 'sales' ? (
+          <CrmNavigator />
+        ) : (
+          <TaskNavigator />
+        )}
         {canSwitch && (
           <AppSwitchSheet
             visible={sheet !== null}
             current={current}
+            apps={apps}
             onPick={app => {
               setSheet(null);
-              setInSales(app === 'sales');
+              setSwapping(true);
+              setTimeout(() => {
+                setPicked(app);
+                setSwapping(false);
+              }, SWAP_MS);
             }}
             onProfile={sheet?.onProfile}
             onClose={() => setSheet(null)}
@@ -66,9 +95,6 @@ export function RoleTabs() {
       </AppSwitchProvider>
     );
   }
-  // Telecallers, commercial sales executives and sales managers get Lead Management.
-  // The residential "sales" and "marketing" roles keep the CRM app below.
-  if (leadPersonaForRole(rawRole)) return <LeadsNavigator />;
 
   switch (role) {
     case 'supervisor':
@@ -83,3 +109,5 @@ export function RoleTabs() {
       return <UnsupportedRoleScreen />;
   }
 }
+
+const styles = StyleSheet.create({ blank: { flex: 1, backgroundColor: colors.background } });

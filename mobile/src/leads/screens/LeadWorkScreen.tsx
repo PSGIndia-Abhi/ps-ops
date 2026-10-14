@@ -271,12 +271,14 @@ export function LeadWorkScreen() {
   const loader = useCallback(async () => {
     const lead = await api.getLead(leadId);
     // The lead is what the screen needs; a failure in one of the extras must not hide it.
-    const [timeline, quotations, conversion] = await Promise.all([
+    const [timeline, quotations, conversion, openMeeting] = await Promise.all([
       api.getTimeline(leadId).catch(() => []),
       api.getQuotations(leadId).catch(() => []),
       lead.stage === 'CONVERTED' ? api.getConversion(leadId).catch(() => null) : Promise.resolve(null),
+      // A scheduled meeting turns "Schedule meeting" into "View meeting".
+      api.openMeeting(leadId).catch(() => null),
     ]);
-    return { lead, timeline, quotations, conversion };
+    return { lead, timeline, quotations, conversion, openMeeting };
   }, [leadId]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load this lead.');
 
@@ -315,6 +317,8 @@ export function LeadWorkScreen() {
           canQualify: lead.stage === 'TO_CALL' || lead.stage === 'NEED_MORE_INFO',
         });
       case 'meeting':
+        // One open meeting per lead: open it rather than offering a second one.
+        if (data?.openMeeting) return navigation.navigate('LeadMeeting', { meetingId: data.openMeeting.id });
         return navigation.navigate('LeadMeetingNew', { leadId: lead.id, name, address: lead.address });
       case 'followUp':
         return navigation.navigate('LeadFollowUp', { leadId: lead.id, name });
@@ -334,8 +338,24 @@ export function LeadWorkScreen() {
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
 
   const lead = data?.lead;
-  const actions = lead ? leadActions(lead, persona, myId) : [];
-  const recommended = lead ? (RECOMMENDED[lead.stage] ?? []).find((a) => actions.includes(a)) ?? actions.find((a) => !CLOSING.includes(a)) : undefined;
+  const openMeeting = data?.openMeeting ?? null;
+  const baseActions = lead ? leadActions(lead, persona, myId) : [];
+  // An open meeting is always reachable from here (as "View meeting"), whoever runs the visit.
+  const actions: LeadAction[] = openMeeting && !baseActions.includes('meeting') ? ['meeting', ...baseActions] : baseActions;
+  const recommended = lead
+    ? openMeeting && lead.stage === 'MEETING_SCHEDULED'
+      ? 'meeting'
+      : (RECOMMENDED[lead.stage] ?? []).find((a) => actions.includes(a)) ?? actions.find((a) => !CLOSING.includes(a))
+    : undefined;
+  /** An action's title and hint - "Schedule meeting" reads "View meeting" once one is set. */
+  const metaOf = (action: LeadAction) =>
+    action === 'meeting' && openMeeting
+      ? {
+          ...ACTION_META.meeting,
+          title: openMeeting.started ? 'Visit in progress' : 'View meeting',
+          hint: `${fmtDateShort(openMeeting.date)}${openMeeting.time ? `, ${fmtTime(openMeeting.time)}` : ''}${openMeeting.salesName ? ` · ${openMeeting.salesName}` : ''}`,
+        }
+      : ACTION_META[action];
   const others = actions.filter((a) => a !== recommended && !CLOSING.includes(a));
   const closing = actions.filter((a) => CLOSING.includes(a));
 
@@ -455,11 +475,11 @@ export function LeadWorkScreen() {
                     style={({ pressed }) => [styles.primary, (pressed || busy === recommended) && styles.pressed]}
                     testID="next-step"
                   >
-                    <View style={styles.primaryIcon}>{ACTION_META[recommended].icon('#FFFFFF')}</View>
+                    <View style={styles.primaryIcon}>{metaOf(recommended).icon('#FFFFFF')}</View>
                     <View style={styles.primaryText}>
                       <Text style={styles.primaryKicker}>RECOMMENDED</Text>
-                      <Text style={styles.primaryTitle}>{busy === recommended ? 'Saving...' : ACTION_META[recommended].title}</Text>
-                      <Text style={styles.primaryHint}>{ACTION_META[recommended].hint}</Text>
+                      <Text style={styles.primaryTitle}>{busy === recommended ? 'Saving...' : metaOf(recommended).title}</Text>
+                      <Text style={styles.primaryHint}>{metaOf(recommended).hint}</Text>
                     </View>
                     <ChevronRightIcon size={20} color="#FFFFFF" />
                   </Pressable>
@@ -467,7 +487,7 @@ export function LeadWorkScreen() {
                 {others.length > 0 && (
                   <View style={styles.grid}>
                     {others.map((action) => {
-                      const meta = ACTION_META[action];
+                      const meta = metaOf(action);
                       const c = toneColors(theme, meta.tone);
                       return (
                         <Pressable

@@ -208,11 +208,20 @@ export async function convertLead(id: string, notes: string): Promise<Conversion
 }
 
 /** POST /follow-ups - creates a LEAD_FOLLOW_UP task in Task Management, assigned to yourself. */
-export async function addFollowUp(id: string, body: { date: string; time: string | null; note: string }): Promise<void> {
+/**
+ * POST /api/crm/leads/:id/follow-ups. `assignedTo` = who the follow-up task belongs to; the app sends
+ * the person adding it, so it lands in their own Task Management (without it the server picks the
+ * lead's telecaller first).
+ */
+export async function addFollowUp(
+  id: string,
+  body: { date: string; time: string | null; note: string; assignedTo?: number },
+): Promise<void> {
   await httpClient.post(`/api/crm/leads/${id}/follow-ups`, {
     nextActionDate: body.date,
     nextActionTime: body.time || undefined,
     note: body.note,
+    assignedTo: body.assignedTo || undefined,
   });
 }
 

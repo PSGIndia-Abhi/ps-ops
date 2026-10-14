@@ -10,6 +10,8 @@ import { initialsOf } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { CrmScreen } from '../ui/CrmScreen';
 import { StatusBadge } from '../ui/StatusBadge';
+import { ClipboardListIcon } from '../ui/crmIcons';
+import { useAppSwitch } from '../../navigation/AppSwitchContext';
 
 const factory = (t: CrmTheme) => ({
   title: { ...typography.display, color: t.textPrimary, marginBottom: spacing.md },
@@ -110,6 +112,10 @@ export function CrmMoreScreen() {
   // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
   // lead roles such as "commercial_sales" read as "Commercial Sales".
   const roleText = role ? roleLabel(role) : displayRole(rawRole);
+  // Telecallers verify leads by phone: no site visits, no sales performance numbers.
+  const telecaller = (rawRole ?? '').toLowerCase().trim() === 'telecaller';
+  // Lead roles also have Task Management (and MD / PA the Sales app).
+  const { canSwitch, current, openSwitcher } = useAppSwitch();
 
   return (
     <CrmScreen>
@@ -141,30 +147,44 @@ export function CrmMoreScreen() {
         <MenuRow icon={<SettingsIcon size={18} color={theme.textMuted} />} label="Settings" soon divider />
       </View>
 
+      {canSwitch && (
+        <View style={styles.group}>
+          <MenuRow
+            icon={<ClipboardListIcon size={18} color={theme.primary} />}
+            label={current === 'leads' ? 'Task Management' : 'Switch app'}
+            onPress={() => openSwitcher()}
+          />
+        </View>
+      )}
+
       <View style={styles.group}>
         <MenuRow
           icon={<BellIcon size={18} color={theme.primary} />}
           label="Reminders"
           onPress={() => leadNavigation.navigate('LeadReminders')}
         />
-        <MenuRow
-          icon={<CalendarIcon size={18} color={theme.primary} />}
-          label="My meetings"
-          divider
-          onPress={() => leadNavigation.navigate('LeadMeetings')}
-        />
+        {!telecaller && (
+          <MenuRow
+            icon={<CalendarIcon size={18} color={theme.primary} />}
+            label="My meetings"
+            divider
+            onPress={() => leadNavigation.navigate('LeadMeetings')}
+          />
+        )}
         <MenuRow
           icon={<ClockIcon size={18} color={theme.primary} />}
           label="Today's follow-ups"
           divider
           onPress={() => leadNavigation.navigate('LeadTasks')}
         />
-        <MenuRow
-          icon={<ChartIcon size={18} color={theme.primary} />}
-          label="My performance"
-          divider
-          onPress={() => leadNavigation.navigate('LeadPerformance')}
-        />
+        {!telecaller && (
+          <MenuRow
+            icon={<ChartIcon size={18} color={theme.primary} />}
+            label="My performance"
+            divider
+            onPress={() => leadNavigation.navigate('LeadPerformance')}
+          />
+        )}
       </View>
 
       <View style={styles.group}>

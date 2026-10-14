@@ -819,7 +819,8 @@ export function FollowUpModal({ lead, onClose }) {
   const canAssign = viewer.persona === "sales_manager";
   const team = canAssign ? leadTeam() : [];
   const [when, setWhen] = useState(tomorrowInput);
-  const [assignedTo, setAssignedTo] = useState(() => (canAssign ? lead.salesId || lead.telecallerId || viewer.me.id : viewer.me.id));
+  // Your own task by default (it shows in your Task Management); a manager can give it to someone else.
+  const [assignedTo, setAssignedTo] = useState(() => viewer.me.id);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   // Follow-ups already open on this lead (undefined while checking). One is usually enough, so

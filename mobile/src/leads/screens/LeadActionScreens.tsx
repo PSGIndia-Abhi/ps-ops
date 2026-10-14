@@ -94,7 +94,8 @@ function useSubmit() {
   const navigation = useNavigation<Nav>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const submit = async (work: () => Promise<void>) => {
+  /** `then` replaces the usual "back to the lead" (e.g. open the meeting just scheduled). */
+  const submit = async (work: () => Promise<void>, then?: () => void) => {
     if (saving) return;
     setSaving(true);
     setError(null);
@@ -102,7 +103,8 @@ function useSubmit() {
       await work();
       // A meeting / follow-up set, or a lead closed: re-arm its reminders now.
       refreshReminders();
-      navigation.goBack();
+      if (then) then();
+      else navigation.goBack();
     } catch (err) {
       setError(errorMessage(err, 'Could not save. Check your connection and try again.'));
     } finally {
@@ -147,6 +149,7 @@ const QUALITIES: { value: Qualification; label: string }[] = [
 export function LeadCallScreen() {
   const { leadId, name, contact, stage, canQualify } = useRoute<RouteProp<LeadStackParamList, 'LeadCall'>>().params;
   const { styles, theme } = useCrmStyles(factory);
+  const { myIdNum } = useMe();
   const { saving, error, setError, submit } = useSubmit();
   const [outcome, setOutcome] = useState<CallOutcome>('CONNECTED');
   const [quality, setQuality] = useState<Qualification | null>(null);
@@ -178,7 +181,7 @@ export function LeadCallScreen() {
       if (askQuality && quality === 'GENUINE') await api.qualifyLead(leadId, 'GENUINE');
       if (askQuality && quality === 'NEEDS_INFO') await api.qualifyLead(leadId, 'NEEDS_INFO');
       if (rejecting) await api.rejectLead(leadId, notes);
-      if (followUp && !rejecting) await api.addFollowUp(leadId, { date, time, note: notes });
+      if (followUp && !rejecting) await api.addFollowUp(leadId, { date, time, note: notes, assignedTo: myIdNum });
     });
   };
 
@@ -237,7 +240,7 @@ export function LeadFollowUpScreen() {
   const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadFollowUp'>>().params;
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
-  const { myId } = useMe();
+  const { myId, myIdNum } = useMe();
   const { saving, error, setError, submit } = useSubmit();
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('10:00');
@@ -263,7 +266,7 @@ export function LeadFollowUpScreen() {
     // "Already something at this time?" - against everything that rings for me.
     const items = await loadAllReminderItems(myId).catch(() => []);
     if (!(await confirmClash(items, date, time))) return;
-    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim() }));
+    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum }));
   };
 
   const current = existing?.[0];
@@ -396,9 +399,15 @@ export function LeadMeetingNewScreen() {
   const onSave = () => {
     if (!personId) return setError('Choose the sales person for this meeting.');
     if (!time) return setError('Choose a time for the meeting.');
-    submit(async () => {
-      await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: address.trim(), notes: notes.trim() });
-    });
+    let created: string | null = null;
+    submit(
+      async () => {
+        const meeting = await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: address.trim(), notes: notes.trim() });
+        created = meeting.id;
+      },
+      // Straight to the meeting just set - its time, place, Directions and Start visit.
+      () => (created ? navigation.replace('LeadMeeting', { meetingId: created }) : navigation.goBack()),
+    );
   };
 
   if (existing === undefined) {

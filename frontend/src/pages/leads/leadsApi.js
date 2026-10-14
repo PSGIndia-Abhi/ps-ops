@@ -483,7 +483,8 @@ export async function submitLead(input, actor) {
  * outcome: "GENUINE" | "NEED_MORE_INFO" | "NOT_GENUINE" | "CALL_BACK" | "NO_ANSWER" | "INVALID_NUMBER"
  * The last three only log the call: the lead stays with the telecaller.
  */
-export async function saveCall(leadId, { outcome, notes, reason, followUpAt, feedback }) {
+// `me`: the caller - a follow-up set from the call is their own task (it shows in their Task Management).
+export async function saveCall(leadId, { outcome, notes, reason, followUpAt, feedback }, me) {
   if (outcome === "NOT_GENUINE" && !reason) throw new Error("Choose a reason for marking this lead not genuine.");
   const lead = leadById(leadId);
   const base = `/api/crm/leads/${leadId}`;
@@ -506,7 +507,10 @@ export async function saveCall(leadId, { outcome, notes, reason, followUpAt, fee
 
     if (followUpAt && FOLLOW_UP_OUTCOMES.includes(outcome)) {
       const [date, time] = toWallClock(followUpAt).split("T");
-      await request(`${base}/follow-ups`, { method: "POST", body: { nextActionDate: date, nextActionTime: time, note: notes?.trim() || "" } });
+      await request(`${base}/follow-ups`, {
+        method: "POST",
+        body: { nextActionDate: date, nextActionTime: time, note: notes?.trim() || "", assignedTo: me?.id ? Number(me.id) : undefined },
+      });
     }
     if (feedback?.trim() && lead?.providerId) await request(`${base}/feedback`, { method: "POST", body: { message: feedback.trim() } });
   } finally {

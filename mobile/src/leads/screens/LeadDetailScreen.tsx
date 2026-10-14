@@ -4,7 +4,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { crmApi } from '../../api';
 import { CommercialLeadDetail } from '../../crm/screens/CrmCommercialLeadDetail';
-import { BellIcon, ChevronRightIcon } from '../../components/icons';
+import { BellIcon, CalendarIcon, ChevronRightIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
@@ -12,7 +12,7 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { SiteVisitsCard } from '../SiteVisitsCard';
 import { leadActions } from '../stage';
-import { StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { meetingWhen, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, gap: spacing.md },
@@ -28,6 +28,19 @@ const factory = (t: CrmTheme) => ({
     marginBottom: spacing.md,
     ...t.cardShadow,
   },
+  meet: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    backgroundColor: t.accentBg,
+    borderRadius: radii.xl,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  meetIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: t.accent, alignItems: 'center' as const, justifyContent: 'center' as const },
+  meetKicker: { ...typography.overline, color: t.accentText },
+  meetWhen: { ...typography.bodyMedium, color: t.textPrimary, marginTop: 1 },
+  meetOpen: { ...typography.bodyMedium, color: t.accent },
   remindIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   remindText: { flex: 1 },
   remindTitle: { ...typography.bodyMedium, color: t.textPrimary },
@@ -48,13 +61,14 @@ export function LeadDetailScreen() {
   // Both read GET /api/crm/leads/:id: the CRM shape has every field of the form, the pipeline
   // shape has the stage and who may act on it. Reloaded on every focus, so it is current after Manage lead.
   const loader = useCallback(async () => {
-    const [lead, pipeline, visits] = await Promise.all([
+    const [lead, pipeline, visits, openMeeting] = await Promise.all([
       crmApi.getLead(leadId),
       api.getLead(leadId),
       // The visit history is extra: if it cannot load, the lead still shows.
       api.leadVisits(leadId).catch(() => [] as api.LeadVisit[]),
+      api.openMeeting(leadId).catch(() => null),
     ]);
-    return { lead, pipeline, visits };
+    return { lead, pipeline, visits, openMeeting };
   }, [leadId]);
   const { data, error, reload } = useLoad(loader, 'Could not load this lead.');
 
@@ -76,7 +90,7 @@ export function LeadDetailScreen() {
     );
   }
 
-  const { lead, pipeline, visits } = data;
+  const { lead, pipeline, visits, openMeeting } = data;
   const name = pipeline.companyName || lead.companyName || lead.customerName;
   const canFollowUp = leadActions(pipeline, persona, myId).includes('followUp');
 
@@ -87,6 +101,28 @@ export function LeadDetailScreen() {
       onManage={() => navigation.navigate('LeadWork', { leadId })}
       onFollowUp={canFollowUp ? () => navigation.navigate('LeadFollowUp', { leadId, name }) : undefined}
       onEdit={null}
+      afterActions={
+        openMeeting ? (
+          <Pressable
+            onPress={() => navigation.navigate('LeadMeeting', { meetingId: openMeeting.id })}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.meet, pressed && { opacity: 0.9 }]}
+          >
+            <View style={styles.meetIcon}>
+              <CalendarIcon size={20} color="#FFFFFF" />
+            </View>
+            <View style={styles.remindText}>
+              <Text style={styles.meetKicker}>{openMeeting.started ? 'VISIT IN PROGRESS' : openMeeting.type === 'OFFICE' ? 'OFFICE MEETING' : 'SITE VISIT'}</Text>
+              <Text style={styles.meetWhen} numberOfLines={1}>
+                {meetingWhen(openMeeting)}
+                {openMeeting.salesName ? ` · ${openMeeting.salesName}` : ''}
+              </Text>
+            </View>
+            <Text style={styles.meetOpen}>Open</Text>
+            <ChevronRightIcon size={16} color={theme.accent} />
+          </Pressable>
+        ) : null
+      }
       // Lead providers and telecallers add no photos, so the card only appears on your own leads.
       showPhotos={pipeline.createdById === myId}
       extra={

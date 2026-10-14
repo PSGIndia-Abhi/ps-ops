@@ -56,13 +56,16 @@ const factory = (t: CrmTheme) => ({
 });
 
 const APPS: { kind: AppKind; name: string; about: string }[] = [
-  { kind: 'tasks', name: 'Task Management', about: 'Your tasks, your team and the calendar' },
+  { kind: 'leads', name: 'Lead Management', about: 'Your leads, calls, meetings and follow-ups' },
+  { kind: 'tasks', name: 'Task Management', about: 'Your tasks, follow-ups and the calendar' },
   { kind: 'sales', name: 'Sales', about: 'Leads, quotes and payments' },
 ];
 
 interface AppSwitchSheetProps {
   visible: boolean;
   current: AppKind;
+  /** The apps this person has (the sheet lists only these). */
+  apps: AppKind[];
   onPick: (app: AppKind) => void;
   /** Absent when the opener has no profile screen to offer. */
   onProfile?: () => void;
@@ -70,14 +73,14 @@ interface AppSwitchSheetProps {
 }
 
 /** The "Switch app" sheet: the two apps as cards, the one showing now marked Current. */
-export function AppSwitchSheet({ visible, current, onPick, onProfile, onClose }: AppSwitchSheetProps) {
+export function AppSwitchSheet({ visible, current, apps, onPick, onProfile, onClose }: AppSwitchSheetProps) {
   const { styles, theme } = useCrmStyles(factory);
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Switch app">
       <Text style={styles.intro}>You stay signed in - pick where you want to work.</Text>
 
-      {APPS.map(app => {
+      {APPS.filter(app => apps.includes(app.kind)).map(app => {
         const on = app.kind === current;
         return (
           <Pressable

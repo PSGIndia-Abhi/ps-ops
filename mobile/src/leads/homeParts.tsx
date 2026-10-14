@@ -8,6 +8,7 @@ import type { Tone } from '../crm/ui/StatusBadge';
 import { initials } from '../tasks/format';
 import { TONE_GRADIENT } from '../tasks/theme';
 import { GradientBlock } from '../tasks/ui/parts';
+import { SwapIcon } from '../tasks/ui/taskIcons';
 import { radii, spacing, typography } from '../theme';
 
 /**
@@ -80,6 +81,19 @@ const factory = (t: CrmTheme) => ({
   badgeText: { fontSize: 10, fontWeight: '700' as const, color: '#FFFFFF' },
   me: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center' as const, justifyContent: 'center' as const },
   meText: { ...typography.bodyMedium, fontWeight: '800' as const, color: t.primary },
+  switchBadge: {
+    position: 'absolute' as const,
+    right: -3,
+    bottom: -3,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: t.primarySoftBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
   tile: {
     flex: 1,
     alignItems: 'center' as const,
@@ -170,6 +184,7 @@ export function HomeBand({
   topInset,
   onBell,
   onProfile,
+  onLogo,
 }: {
   name: string;
   role: string;
@@ -177,15 +192,23 @@ export function HomeBand({
   topInset: number;
   onBell: () => void;
   onProfile: () => void;
+  /** When set (people with more than one app), the logo opens "Switch app". */
+  onLogo?: () => void;
 }) {
-  const { styles } = useCrmStyles(factory);
+  const { styles, theme } = useCrmStyles(factory);
   return (
     <View style={[styles.band, { paddingTop: topInset + spacing.md }]}>
       <BandBackground />
       <View style={styles.ident}>
-        <View style={styles.logo}>
+        <Pressable
+          onPress={onLogo}
+          disabled={!onLogo}
+          accessibilityRole={onLogo ? 'button' : undefined}
+          accessibilityLabel={onLogo ? 'Switch app' : undefined}
+          style={({ pressed }) => [styles.logo, pressed && styles.pressed]}
+        >
           <BrandMark size={38} />
-        </View>
+        </Pressable>
         <View style={styles.flex1}>
           <Text style={styles.hi}>Welcome back</Text>
           <Text style={styles.name} numberOfLines={1}>
@@ -208,8 +231,19 @@ export function HomeBand({
             </View>
           )}
         </Pressable>
-        <Pressable onPress={onProfile} style={({ pressed }) => [styles.me, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Profile">
+        <Pressable
+          onPress={onProfile}
+          style={({ pressed }) => [styles.me, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={onLogo ? 'Switch app' : 'Profile'}
+        >
           <Text style={styles.meText}>{initials(name)}</Text>
+          {/* People with more than one app: the ⇄ says the avatar switches apps. */}
+          {!!onLogo && (
+            <View style={styles.switchBadge}>
+              <SwapIcon size={12} color={theme.primary} />
+            </View>
+          )}
         </Pressable>
       </View>
     </View>

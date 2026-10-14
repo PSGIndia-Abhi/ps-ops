@@ -4,6 +4,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   BriefcaseIcon,
+  ChevronRightIcon,
   ClockIcon,
   EmailIcon,
   PersonIcon,
@@ -43,47 +44,46 @@ const factory = (t: CrmTheme) => ({
     borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: t.border,
-    borderLeftWidth: 5,
+    borderLeftWidth: 4,
     borderLeftColor: t.primary,
-    padding: spacing.lg,
-    ...t.raisedShadow,
+    padding: spacing.md,
+    ...t.cardShadow,
   },
-  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   companyTile: {
-    width: 52,
-    height: 52,
-    borderRadius: radii.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: t.primarySoftBg,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
   heroText: { flex: 1 },
-  company: { ...typography.title, color: t.textPrimary },
-  contactPerson: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 3 },
-  contactPersonText: { ...typography.body, color: t.textSecondary, flex: 1 },
-  quoteBox: {
-    marginTop: spacing.md,
-    borderRadius: radii.lg,
-    backgroundColor: t.surfaceAlt,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  company: { ...typography.subtitle, color: t.textPrimary },
+  contactPerson: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, marginTop: 1 },
+  contactPersonText: { ...typography.caption, color: t.textSecondary, flex: 1 },
+  quoteRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
-  },
-  quoteLabel: { ...typography.caption, color: t.textMuted },
-  quote: { ...typography.title, color: t.textPrimary },
-  reach: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-around' as const,
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: t.border,
   },
-  reachItem: { alignItems: 'center' as const, gap: 6, minWidth: 72 },
-  reachCircle: { width: 50, height: 50, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
-  reachLabel: { ...typography.captionMedium, color: t.textSecondary },
+  quoteLabel: { ...typography.caption, color: t.textMuted },
+  quote: { ...typography.subtitle, color: t.textPrimary },
+  reach: { flexDirection: 'row' as const, gap: spacing.xs, marginTop: spacing.sm },
+  reachItem: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 6,
+    height: 40,
+    borderRadius: radii.lg,
+  },
+  reachLabel: { ...typography.captionMedium, color: '#FFFFFF' },
   pressed: { opacity: 0.8 },
 
   syncBanner: { borderRadius: radii.lg, padding: spacing.md, marginTop: spacing.md, backgroundColor: t.warningBg },
@@ -109,6 +109,14 @@ const factory = (t: CrmTheme) => ({
     ...t.cardShadow,
   },
   cardTitle: { ...typography.overline, color: t.textMuted, marginTop: spacing.xs, marginBottom: spacing.xs },
+  subBlock: { borderTopWidth: 1, borderTopColor: t.border, paddingTop: spacing.sm, marginTop: spacing.xs, paddingBottom: spacing.sm },
+  subTitle: { ...typography.caption, color: t.textMuted, marginBottom: spacing.xs },
+  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, minHeight: 48 },
+  foldText: { flex: 1 },
+  foldTitle: { marginBottom: 0 },
+  foldHint: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  foldChevron: { width: 32, height: 32, borderRadius: 16, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const, transform: [{ rotate: '90deg' }] },
+  foldChevronOpen: { transform: [{ rotate: '-90deg' }] },
   infoRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.sm },
   infoDivider: { borderTopWidth: 1, borderTopColor: t.border },
   infoIcon: {
@@ -161,8 +169,13 @@ function InfoRow({
 function ReachButton({ icon, label, color, onPress }: { icon: React.ReactNode; label: string; color: string; onPress: () => void }) {
   const { styles } = useCrmStyles(factory);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.reachItem, pressed && styles.pressed]}>
-      <View style={[styles.reachCircle, { backgroundColor: color }]}>{icon}</View>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.reachItem, { backgroundColor: color }, pressed && styles.pressed]}
+    >
+      {icon}
       <Text style={styles.reachLabel}>{label}</Text>
     </Pressable>
   );
@@ -186,6 +199,7 @@ export function CommercialLeadDetail({
   onEdit,
   showPhotos = true,
   extra,
+  afterActions,
 }: {
   lead: Lead;
   stage?: React.ReactNode;
@@ -195,6 +209,8 @@ export function CommercialLeadDetail({
   showPhotos?: boolean;
   /** More cards shown after Details (the Lead Management app's site visits). */
   extra?: React.ReactNode;
+  /** Shown right under Manage lead / Follow-up (the Lead Management app's open meeting). */
+  afterActions?: React.ReactNode;
 }) {
   const navigation = useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const manage = onManage ?? (() => navigation.navigate('LeadWork', { leadId: lead.id }));
@@ -203,6 +219,7 @@ export function CommercialLeadDetail({
   const { showNotice, discardQueued } = useLeads();
   // Photos can change in the edit form, so they are loaded again each time this screen comes back.
   const [photosKey, setPhotosKey] = useState(0);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   useFocusEffect(
     useCallback(() => {
       setPhotosKey(k => k + 1);
@@ -261,40 +278,38 @@ export function CommercialLeadDetail({
         <View style={styles.hero}>
           <View style={styles.heroTop}>
             <View style={styles.companyTile}>
-              <BriefcaseIcon size={26} color={theme.primary} />
+              <BriefcaseIcon size={20} color={theme.primary} />
             </View>
             <View style={styles.heroText}>
-              <Text style={styles.company} numberOfLines={2}>
+              <Text style={styles.company} numberOfLines={1}>
                 {lead.companyName || lead.customerName}
               </Text>
               <View style={styles.contactPerson}>
-                <PersonIcon size={15} color={theme.textMuted} />
+                <PersonIcon size={13} color={theme.textMuted} />
                 <Text style={styles.contactPersonText} numberOfLines={1}>
                   {lead.customerName}
                 </Text>
               </View>
             </View>
-          </View>
-
-          <View style={styles.quoteBox}>
-            <View>
-              <Text style={styles.quoteLabel}>Approximate quote</Text>
-              <Text style={styles.quote}>{formatINR(lead.amount)}</Text>
-            </View>
             {stage ?? <LeadStatusBadge status={lead.leadStatus} />}
           </View>
 
+          <View style={styles.quoteRow}>
+            <Text style={styles.quoteLabel}>Approx. quote</Text>
+            <Text style={styles.quote}>{formatINR(lead.amount)}</Text>
+          </View>
+
           <View style={styles.reach}>
-            <ReachButton icon={<PhoneIcon size={20} color="#FFFFFF" />} label="Call" color={theme.primary} onPress={() => call(lead.phone)} />
+            <ReachButton icon={<PhoneIcon size={16} color="#FFFFFF" />} label="Call" color={theme.primary} onPress={() => call(lead.phone)} />
             <ReachButton
-              icon={<WhatsAppIcon size={21} color="#FFFFFF" />}
+              icon={<WhatsAppIcon size={17} color="#FFFFFF" />}
               label="WhatsApp"
               color={WHATSAPP}
               onPress={() => open(whatsappUrl(lead.phone), 'Could not open WhatsApp on this device.')}
             />
             {!!lead.email && (
               <ReachButton
-                icon={<EmailIcon size={20} color="#FFFFFF" />}
+                icon={<EmailIcon size={16} color="#FFFFFF" />}
                 label="Email"
                 color={theme.crestRed}
                 onPress={() => open(`mailto:${lead.email}`, 'No email app found on this device.')}
@@ -344,36 +359,59 @@ export function CommercialLeadDetail({
           <PrimaryButton label="Manage lead" onPress={manage} style={styles.manage} testID="manage-lead" />
         )}
 
+        {afterActions}
+
+        {/* Details fold away (closed at first): the header above already has what is used most. */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>DETAILS</Text>
-          {rows.map((r, i) => (
-            <InfoRow key={r.key} first={i === 0} icon={r.icon} label={r.label} value={r.value} onPress={r.onPress} />
-          ))}
+          <Pressable
+            onPress={() => setDetailsOpen((o) => !o)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: detailsOpen }}
+            style={styles.foldHead}
+          >
+            <View style={styles.foldText}>
+              <Text style={[styles.cardTitle, styles.foldTitle]}>DETAILS</Text>
+              {!detailsOpen && (
+                <Text style={styles.foldHint} numberOfLines={1}>
+                  {[...rows.map((r) => r.label), ...(lead.notes ? ['Requirement'] : []), ...(showPhotos ? ['Photos'] : [])].join(' · ')}
+                </Text>
+              )}
+            </View>
+            <View style={[styles.foldChevron, detailsOpen && styles.foldChevronOpen]}>
+              <ChevronRightIcon size={18} color={theme.textMuted} />
+            </View>
+          </Pressable>
+          {detailsOpen && (
+            <>
+              {rows.map((r, i) => (
+                <InfoRow key={r.key} first={i === 0} icon={r.icon} label={r.label} value={r.value} onPress={r.onPress} />
+              ))}
+              {!!lead.notes && (
+                <View style={styles.subBlock}>
+                  <Text style={styles.subTitle}>Requirement</Text>
+                  <Text style={styles.notes}>{lead.notes}</Text>
+                </View>
+              )}
+              {showPhotos && (
+                <View style={styles.subBlock}>
+                  <Text style={styles.subTitle}>Photos</Text>
+                  {lead.pendingSync ? (
+                    localPhotos.length > 0 ? (
+                      <LocalLeadPhotos photos={localPhotos} />
+                    ) : (
+                      <Text style={styles.notes}>No photos were added to this lead.</Text>
+                    )
+                  ) : (
+                    <ServerLeadPhotos key={photosKey} leadId={lead.id} />
+                  )}
+                </View>
+              )}
+            </>
+          )}
         </View>
 
         {extra}
 
-        {!!lead.notes && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>REQUIREMENT</Text>
-            <Text style={styles.notes}>{lead.notes}</Text>
-          </View>
-        )}
-
-        {showPhotos && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>PHOTOS</Text>
-            {lead.pendingSync ? (
-              localPhotos.length > 0 ? (
-                <LocalLeadPhotos photos={localPhotos} />
-              ) : (
-                <Text style={styles.notes}>No photos were added to this lead.</Text>
-              )
-            ) : (
-              <ServerLeadPhotos key={photosKey} leadId={lead.id} />
-            )}
-          </View>
-        )}
       </ScrollView>
     </CrmScreen>
   );

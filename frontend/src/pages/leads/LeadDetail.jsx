@@ -555,7 +555,9 @@ export default function LeadDetail() {
               Call &amp; Verify
             </Button>
           )}
-          {((canVerify && lead.stage === "QUALIFIED") || (canManage && lead.stage === "MEETING_SCHEDULED" && !openMeeting)) && (
+          {(((canVerify || (canSell && canManage)) && lead.stage === "QUALIFIED") || (canManage && lead.stage === "MEETING_SCHEDULED" && !openMeeting)) && (
+            // A verified lead: the telecaller / manager books it, and so does the sales executive on a
+            // lead of their own (their own leads start verified, with no telecaller in between).
             // The second case: the only meeting was cancelled, so the lead needs a new one.
             <Button icon={<FiCalendar />} onClick={() => setDialog("meeting")}>
               Schedule Meeting
