@@ -212,3 +212,20 @@ export function showDue(date, time, { short = false } = {}) {
   const t = new Date(2000, 0, 1, h, min).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
   return `${day}, ${t.toUpperCase()}`;
 }
+
+// Gmail's compose window (opened in a new tab) with To, Subject and the text already filled in;
+// the accountant edits and sends it there. Used instead of a "mailto:" link, which does nothing
+// on a computer that has no mail app set up for email links.
+export function gmailComposeLink(to, subject = "", body = "") {
+  const params = new URLSearchParams({ view: "cm", fs: "1", to: String(to || "").trim(), su: subject, body });
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+// A WhatsApp link (wa.me): opens WhatsApp web or the desktop app with a chat to `phone` and the
+// text already typed. A 10-digit Indian number gets the 91 country code; others are used as typed.
+export function whatsappLink(phone, text = "") {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10) digits = `91${digits}`;
+  return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+}

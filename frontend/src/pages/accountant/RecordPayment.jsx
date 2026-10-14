@@ -380,7 +380,8 @@ export default function RecordPayment() {
                   <th className="ac-num">Invoice Amount</th><th className="ac-num">Pending Amount</th>
                   {tdsOn && <><th className="ac-num ac-col-lo">TDS Rate</th><th className="ac-num">TDS</th></>}
                   <th className="ac-num">Amount Received</th>
-                  {tdsOn && <><th className="ac-num">Balance</th><th className="ac-num ac-col-lo">Total Allocation</th></>}
+                  <th className="ac-num">Balance</th>
+                  {tdsOn && <th className="ac-num ac-col-lo">Total Allocation</th>}
                   <th className="ac-col-lo">Status</th>
                 </tr>
               </thead>
@@ -417,20 +418,16 @@ export default function RecordPayment() {
                           disabled={saved || !on || !isOpen(inv)} value={on ? cash[inv.id] ?? "" : ""}
                           onChange={(e) => changeCashAmount(inv.id, e.target.value, Math.max(0, r2(inv.pending_amount - t)))} />
                       </td>
-                      {tdsOn && (
-                        <>
-                          {/* Balance is never typed -- it's just what's left of the invoice once TDS and the
-                              amount received are taken out (pending - TDS - Amount Received). */}
-                          <td className={`ac-num ${r2(inv.pending_amount - t - c) < -0.005 ? "ac-money-red" : ""}`}>
-                            {money(r2(inv.pending_amount - t - c))}
-                          </td>
-                          <td className="ac-num ac-col-lo">{on ? inr(r2(c + t)) : "0"}</td>
-                        </>
-                      )}
+                      {/* Balance is never typed -- it's just what's left of the invoice once TDS (when the
+                          customer has TDS) and the amount received are taken out (pending - TDS - Amount Received). */}
+                      <td className={`ac-num ${r2(inv.pending_amount - t - c) < -0.005 ? "ac-money-red" : ""}`}>
+                        {money(r2(inv.pending_amount - t - c))}
+                      </td>
+                      {tdsOn && <td className="ac-num ac-col-lo">{on ? inr(r2(c + t)) : "0"}</td>}
                       <td className="ac-col-lo"><Badge value={inv.status} /></td>
                     </tr>
                   );
-                }) : <EmptyRow cols={tdsOn ? 12 : 8} text={customer ? "No invoices to show" : "Select a customer to see their invoices"} />}
+                }) : <EmptyRow cols={tdsOn ? 12 : 9} text={customer ? "No invoices to show" : "Select a customer to see their invoices"} />}
                 {selectedInvoices.length > 0 && (
                   <tr>
                     <td colSpan={2} style={{ fontWeight: 700 }}>Total ({selectedInvoices.length} selected)</td>
@@ -445,12 +442,8 @@ export default function RecordPayment() {
                       </>
                     )}
                     <td className="ac-num" style={{ fontWeight: 700 }}>{money(cashTotal)}</td>
-                    {tdsOn && (
-                      <>
-                        <td className={`ac-num ${balanceTotal < -0.005 ? "ac-money-red" : ""}`} style={{ fontWeight: 700 }}>{money(balanceTotal)}</td>
-                        <td className="ac-num ac-col-lo" style={{ fontWeight: 700 }}>{money(settlement)}</td>
-                      </>
-                    )}
+                    <td className={`ac-num ${balanceTotal < -0.005 ? "ac-money-red" : ""}`} style={{ fontWeight: 700 }}>{money(balanceTotal)}</td>
+                    {tdsOn && <td className="ac-num ac-col-lo" style={{ fontWeight: 700 }}>{money(settlement)}</td>}
                     <td className="ac-col-lo" />
                   </tr>
                 )}

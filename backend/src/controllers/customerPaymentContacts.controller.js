@@ -12,8 +12,9 @@ function withStatus(message, status = 400) {
 }
 
 // Admin sees every customer. Anyone else only customers of their own branch: one with a
-// site in the branch, or with an invoice at a site in the branch (the same customers
-// whose invoices they can see).
+// site in the branch, or with an invoice at a site in the branch -- plus customers with an
+// imported invoice that has no site, which every branch sees (the same customers whose
+// invoices they can see).
 async function assertCustomerAccess(connection, req, customerId) {
   const { role, id: userId } = req.user;
   if (role === "client") throw withStatus("Forbidden", 403);
@@ -27,8 +28,9 @@ async function assertCustomerAccess(connection, req, customerId) {
   const [[ok]] = await connection.query(
     `SELECT (EXISTS (SELECT 1 FROM sites s WHERE s.company_id = ? AND s.branch_id = ?)
           OR EXISTS (SELECT 1 FROM invoices i JOIN sites s ON s.id = i.site_id
-                      WHERE i.customer_id = ? AND s.branch_id = ?)) AS ok`,
-    [customerId, me.branch_id, customerId, me.branch_id]
+                      WHERE i.customer_id = ? AND s.branch_id = ?)
+          OR EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ? AND i.site_id IS NULL)) AS ok`,
+    [customerId, me.branch_id, customerId, me.branch_id, customerId]
   );
   if (!ok?.ok) throw withStatus("Forbidden", 403);
 }
@@ -184,7 +186,8 @@ async function listCustomerContacts(req, res) {
       if (!me?.branch_id) return res.status(403).json({ error: "Branch not assigned" });
       branchFilter = `AND (EXISTS (SELECT 1 FROM sites s WHERE s.company_id = c.customer_id AND s.branch_id = ?)
                         OR EXISTS (SELECT 1 FROM invoices i JOIN sites s ON s.id = i.site_id
-                                    WHERE i.customer_id = c.customer_id AND s.branch_id = ?))`;
+                                    WHERE i.customer_id = c.customer_id AND s.branch_id = ?)
+                        OR EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = c.customer_id AND i.site_id IS NULL))`;
       params.push(me.branch_id, me.branch_id);
     }
 

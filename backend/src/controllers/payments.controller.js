@@ -33,7 +33,9 @@ async function listPayments(req, res) {
     } else if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
       if (!branchId) return res.status(403).json({ error: "Branch not assigned" });
-      where = "WHERE EXISTS (SELECT 1 FROM sites s WHERE s.company_id = p.customer_id AND s.branch_id = ?)";
+      // Customers of the branch (a site there), plus customers with an imported invoice that has no site.
+      where = `WHERE (EXISTS (SELECT 1 FROM sites s WHERE s.company_id = p.customer_id AND s.branch_id = ?)
+                  OR EXISTS (SELECT 1 FROM invoices ni WHERE ni.customer_id = p.customer_id AND ni.site_id IS NULL))`;
       params = [branchId];
     }
 
@@ -79,8 +81,9 @@ async function getPayment(req, res) {
     } else if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
       const [[hasSite]] = await connection.query(
-        "SELECT 1 AS ok FROM sites WHERE company_id = ? AND branch_id = ? LIMIT 1",
-        [payment.customer_id, branchId]
+        `SELECT 1 AS ok FROM DUAL WHERE EXISTS (SELECT 1 FROM sites WHERE company_id = ? AND branch_id = ?)
+           OR EXISTS (SELECT 1 FROM invoices WHERE customer_id = ? AND site_id IS NULL)`,
+        [payment.customer_id, branchId, payment.customer_id]
       );
       if (!hasSite) return res.status(404).json({ error: "Payment not found" });
     }
@@ -119,8 +122,9 @@ async function createPayment(req, res) {
     try {
       const branchId = await getUserBranchId(connection, userId);
       const [[hasSite]] = await connection.query(
-        "SELECT 1 AS ok FROM sites WHERE company_id = ? AND branch_id = ? LIMIT 1",
-        [customer_id, branchId]
+        `SELECT 1 AS ok FROM DUAL WHERE EXISTS (SELECT 1 FROM sites WHERE company_id = ? AND branch_id = ?)
+           OR EXISTS (SELECT 1 FROM invoices WHERE customer_id = ? AND site_id IS NULL)`,
+        [customer_id, branchId, customer_id]
       );
       if (!hasSite) return res.status(403).json({ error: "Cannot record a payment for another branch's customer" });
     } finally {

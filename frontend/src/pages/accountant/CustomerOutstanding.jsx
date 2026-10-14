@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiBell, FiChevronDown, FiChevronRight, FiClock, FiCreditCard, FiDownload, FiEye, FiZap } from "react-icons/fi";
 import CustomerReminderPanel from "../../components/accountant/CustomerReminderPanel";
-import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
+import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { byDue, daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
 import { showDue } from "./followups";
@@ -35,6 +35,17 @@ export default function CustomerOutstanding() {
   const [customer, setCustomer] = useState("");
   const location = useLocation();
   const { invoices, payments, followUps, loading, error, reminderError, reload } = useAccountantData();
+  // Every invoice of each customer (paid ones too, cancelled left out), by due date, for the expanded row.
+  const invoicesByCustomer = useMemo(() => {
+    const map = new Map();
+    for (const i of invoices) {
+      if (i.status === "CANCELLED") continue;
+      if (!map.has(i.customer_id)) map.set(i.customer_id, []);
+      map.get(i.customer_id).push(i);
+    }
+    for (const list of map.values()) list.sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));
+    return map;
+  }, [invoices]);
   // "View Outstanding" on a follow-up opens this page already searched to that customer.
   const [search, setSearch] = useState(location.state?.search || "");
   const [panel, setPanel] = useState(null); // { id, mode: "reminder" | "history" } -- the side panel that is open
@@ -64,7 +75,7 @@ export default function CustomerOutstanding() {
       return !q || `${c.name} ${c.code || ""}`.toLowerCase().includes(q);
     })
     .sort(compare(sort));
-  const { pageRows, page, setPage, pageSize } = usePaged(rows);
+  const { pageRows, page, setPage, pageSize } = usePaged(rows, 25); // 25 customers a page
 
   // The cards reflect whatever is currently filtered/searched, not the whole list.
   const top = [...rows].sort(compare("OUTSTANDING"))[0];
@@ -176,7 +187,7 @@ export default function CustomerOutstanding() {
                       </td>
                       <td>
                         <button type="button" className="ac-icon-btn" onClick={() => setPanel({ id: c.id, mode: "history" })}
-                          title={`Activity history for ${c.name}`} aria-label={`Activity history for ${c.name}`}>
+                          title="History" aria-label={`Activity history for ${c.name}`}>
                           <FiClock />
                         </button>
                       </td>
@@ -186,20 +197,34 @@ export default function CustomerOutstanding() {
                         <td />
                         <td colSpan={11}>
                           <div className="ac-expand-box">
-                            <h4>Unpaid invoices</h4>
-                            {c.invoices?.length ? (
-                              <table className="ac-table">
-                                <thead><tr><th>Invoice No</th><th>Due Date</th><th className="ac-num">Pending</th></tr></thead>
+                            <h4>Invoices</h4>
+                            {invoicesByCustomer.get(c.id)?.length ? (
+                              // Fixed column widths so every row lines up under its heading.
+                              <table className="ac-table" style={{ tableLayout: "fixed", width: "100%" }}>
+                                <colgroup>
+                                  <col style={{ width: "24%" }} /><col style={{ width: "14%" }} /><col style={{ width: "16%" }} />
+                                  <col style={{ width: "16%" }} /><col style={{ width: "16%" }} /><col style={{ width: "14%" }} />
+                                </colgroup>
+                                <thead>
+                                  <tr>
+                                    <th style={{ textAlign: "left" }}>Invoice No</th><th style={{ textAlign: "left" }}>Due Date</th>
+                                    <th className="ac-num">Invoice Amount</th><th className="ac-num">Paid</th><th className="ac-num">Pending</th>
+                                    <th style={{ textAlign: "left" }}>Status</th>
+                                  </tr>
+                                </thead>
                                 <tbody>
-                                  {c.invoices.map((i) => (
+                                  {invoicesByCustomer.get(c.id).map((i) => (
                                     <tr key={i.id}>
-                                      <td>
-                                        <button type="button" className="ac-link" onClick={() => navigate(`/accountant/invoices/${i.id}`)}>
+                                      <td style={{ textAlign: "left" }}>
+                                        <button type="button" className="ac-link" style={{ textAlign: "left" }} onClick={() => navigate(`/accountant/invoices/${i.id}`)}>
                                           {i.invoice_number}
                                         </button>
                                       </td>
-                                      <td>{showDate(i.due_date) || "—"}</td>
-                                      <td className="ac-num ac-money-red">{money(i.pending_amount)}</td>
+                                      <td style={{ textAlign: "left" }}>{showDate(i.due_date) || "—"}</td>
+                                      <td className="ac-num">{money(i.invoice_amount)}</td>
+                                      <td className="ac-num" style={i.paid_amount > 0 ? { color: "#15803d" } : undefined}>{money(i.paid_amount)}</td>
+                                      <td className={`ac-num ${i.pending_amount > 0 ? "ac-money-red" : ""}`}>{money(i.pending_amount)}</td>
+                                      <td style={{ textAlign: "left" }}><Badge value={i.status} /></td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -291,7 +316,7 @@ function ActionMenu({ customerName, expanded, onViewDetails, onRecordPayment }) 
   return (
     <>
       <button type="button" ref={btnRef} className={`ac-icon-btn${pos ? " active" : ""}`} onClick={toggle}
-        aria-haspopup="menu" aria-expanded={Boolean(pos)} title={`Actions for ${customerName}`} aria-label={`Actions for ${customerName}`}>
+        aria-haspopup="menu" aria-expanded={Boolean(pos)} title="Action" aria-label={`Actions for ${customerName}`}>
         <FiZap />
       </button>
       {pos && (
@@ -312,8 +337,10 @@ function ReminderCell({ followUp, customerName, onOpen }) {
   const label = followUp
     ? `Reminder ${showDue(followUp.due_date, followUp.due_time)} for ${customerName}${late ? " (overdue)" : ""}`
     : `Set a reminder for ${customerName}`;
+  // Hover text: short, without the customer's name (the screen-reader label above keeps it).
+  const tip = followUp ? `Reminder ${showDue(followUp.due_date, followUp.due_time)}${late ? " (overdue)" : ""}` : "Set reminder";
   return (
-    <button type="button" className={`ac-icon-btn ac-bell-icon${followUp ? (late ? " late" : " on") : ""}`} onClick={onOpen} title={label} aria-label={label}>
+    <button type="button" className={`ac-icon-btn ac-bell-icon${followUp ? (late ? " late" : " on") : ""}`} onClick={onOpen} title={tip} aria-label={label}>
       <FiBell />
     </button>
   );

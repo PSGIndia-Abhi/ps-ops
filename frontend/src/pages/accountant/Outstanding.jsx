@@ -75,7 +75,7 @@ export default function Outstanding() {
     const q = search.trim().toLowerCase();
     return !q || `${i.invoice_number} ${i.customer_name}`.toLowerCase().includes(q);
   });
-  const { pageRows, page, setPage, pageSize } = usePaged(rows);
+  const { pageRows, page, setPage, pageSize } = usePaged(rows, 25); // 25 invoices a page
 
   // The 5 tiles reflect whatever is currently filtered (chip, search, customer,
   // site, ageing bucket, min. pending) -- the same set the table below shows.
