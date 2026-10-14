@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  FiAlertCircle, FiArrowLeft, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiEdit3, FiFileText, FiMessageSquare,
-  FiPaperclip, FiPhone, FiPlay, FiPlusCircle, FiRepeat, FiRotateCcw, FiTrash2, FiUpload, FiUser, FiX,
+  FiAlertCircle, FiArrowLeft, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiEdit3, FiFileText, FiHash, FiMessageSquare,
+  FiMail, FiMessageCircle, FiPaperclip, FiPhone, FiPlay, FiPlusCircle, FiRepeat, FiRotateCcw, FiTrash2, FiUpload, FiUser, FiX,
 } from "react-icons/fi";
 import CallDialog from "../../components/accountant/CallDialog";
 import CustomerContacts from "../../components/accountant/CustomerContacts";
 import FollowUpOutcomeModal from "../../components/accountant/FollowUpOutcomeModal";
 import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, cleanFollowUp, showDate, useAccountantData, ymd } from "./data";
+import { byDue, cleanFollowUp, showDate, todayYmd, useAccountantData, ymd } from "./data";
 import {
   addFollowUpComment, completeFollowUp, deleteFollowUpAttachment, fetchCustomerContact, fetchFollowUp, fetchFollowUpAttachments,
   fetchFollowUpComments, fetchFollowUpHistory, fetchReminderSchedule, MAX_ATTACHMENT_MB, repeatEnd, repeatText, openFollowUpAttachment, uploadFollowUpAttachment,
-  reopenFollowUp, showDue, startFollowUp,
+  gmailComposeLink, reopenFollowUp, showDue, startFollowUp, whatsappLink,
 } from "./followups";
 
 const TABS = [
@@ -36,6 +36,11 @@ const showDateTime = (v) => {
   if (!v) return "—";
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+};
+// "13 Oct, 7:48 pm" -- the year left out, for the short notes under the progress steps.
+const showShort = (v) => {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
 };
 
 export default function FollowUpDetails() {
@@ -175,6 +180,30 @@ export default function FollowUpDetails() {
   const active = task?.active;
   const started = active && task.status !== "OPEN"; // in progress (or paused)
   const phone = contact?.phone;
+  // WhatsApp and Email: open WhatsApp / the mail app with a payment reminder already written
+  // for this reminder's invoice (or the customer's whole outstanding). The accountant sends it.
+  const dueText = task?.scope === "INVOICE"
+    ? (invoice?.due_date && invoice.due_date > todayYmd()
+      ? `invoice ${task.invoice_number} (${money(outstanding)}) is due on ${showDate(invoice.due_date)}`
+      : `invoice ${task.invoice_number} (${money(outstanding)}) was due on ${showDate(invoice?.due_date) || "—"} and is still pending`)
+    : `${money(outstanding)} is outstanding across ${customerUnpaid.length} invoice${customerUnpaid.length === 1 ? "" : "s"}`;
+  const reminderText = [
+    `Dear ${contact?.name || "Sir/Madam"},`,
+    "",
+    `This is a reminder that ${dueText}.`,
+    "Please arrange the payment at the earliest, or reply with the expected payment date.",
+    "",
+    "Regards,",
+    "Accounts Team",
+    "BestServe Pest Management Pvt. Ltd.",
+  ].join("\n");
+  const reminderSubject = task?.scope === "INVOICE"
+    ? `Payment reminder: Invoice ${task.invoice_number} · ${money(outstanding)} pending`
+    : `Payment reminder: ${money(outstanding)} outstanding`;
+  const whatsappHref = task && phone ? whatsappLink(phone, reminderText) : "";
+  // Always opens Gmail (new tab): addressed to the contact when an email is saved, otherwise with
+  // an empty "To" for the accountant to fill in. Subject and text are filled in either way.
+  const emailHref = task ? gmailComposeLink(contact?.email || "", reminderSubject, reminderText) : "";
 
   return (
     <div className="ac-page ac-fu-page">
@@ -185,31 +214,38 @@ export default function FollowUpDetails() {
       {notice && <div className="ac-info ok" role="status"><FiCheckCircle style={{ flexShrink: 0 }} /><span>{notice}</span></div>}
 
       <div className="ac-card ac-fu-hero">
-        <div className="ac-fu-hero-main">
-          <span className="ac-fu-hero-icon" aria-hidden="true"><FiCalendar /></span>
-          <div style={{ minWidth: 0 }}>
-            <h2 className="ac-title">{task ? task.title : <Skeleton width={260} height={24} />}</h2>
-            <div className="ac-sub">
-              {task ? (
-                <>
-                  {task.customer_name || "Customer"}{customerCode ? ` (${customerCode})` : ""}
-                  {" · "}{task.scope === "INVOICE" ? `Invoice ${task.invoice_number || ""}` : "Entire customer outstanding"}
-                </>
-              ) : <Skeleton width={180} />}
+        {/* Left: status pills, title, one line of facts, the actions. Right: what is still owed. */}
+        <div className="ac-fu-hero-body">
+          {task && (
+            <div className="ac-fu-top">
+              <Badge value={task.display_status} />
+              <Badge value={task.priority} />
+              {repeats && <span className="ac-fu-repeat" title="This reminder repeats"><FiRepeat /> {repeats}</span>}
             </div>
-            {task && (
-              <div className="ac-fu-badges">
-                <Badge value={task.display_status} />
-                <Badge value={task.priority} />
-                {repeats && <span className="ac-fu-repeat" title="This reminder repeats"><FiRepeat /> {repeats}</span>}
-              </div>
-            )}
-          </div>
+          )}
+          <h2 className="ac-title">{task ? task.title : <Skeleton width={260} height={24} />}</h2>
+          {task ? (
+            <div className="ac-fu-meta">
+              <span><FiHash aria-hidden="true" /> {task.scope === "INVOICE" ? `Invoice ${task.invoice_number || ""}` : `Entire outstanding${customerCode ? ` · ${customerCode}` : ""}`}</span>
+              {contact?.phone && <span><FiPhone aria-hidden="true" /> {[contact.name, contact.phone].filter(Boolean).join(" · ")}</span>}
+              <span><FiCalendar aria-hidden="true" /> {task.status === "COMPLETED" ? `Completed ${showDateTime(task.completed_at)}` : `Next reminder ${showDue(task.due_date, task.due_time)}`}</span>
+            </div>
+          ) : <Skeleton width={180} />}
         </div>
+
+        {task && (
+          <div className="ac-fu-amount">
+            <span>{task.scope === "INVOICE" ? "Invoice outstanding" : "Total outstanding"}</span>
+            <strong className={outstanding > 0 ? "ac-money-red" : ""}>{dataLoading ? "…" : money(outstanding)}</strong>
+            {!dataLoading && task.scope !== "INVOICE" && <small>{customerUnpaid.length} unpaid invoice{customerUnpaid.length === 1 ? "" : "s"}</small>}
+          </div>
+        )}
 
         {task && isPaymentFollowUp && (
           <div className="ac-actions ac-fu-actions">
-            {phone && <button type="button" className="ac-btn" onClick={() => setDialog("call")}><FiPhone /> Call Customer</button>}
+            {phone && <button type="button" className="ac-btn" onClick={() => setDialog("call")}><FiPhone /> Call</button>}
+            {whatsappHref && <a className="ac-btn" href={whatsappHref} target="_blank" rel="noopener noreferrer"><FiMessageCircle /> WhatsApp</a>}
+            {emailHref && <a className="ac-btn" href={emailHref} target="_blank" rel="noopener noreferrer"><FiMail /> Email</a>}
             {task.status === "OPEN" && (
               <button type="button" className="ac-btn" disabled={Boolean(busy)} onClick={() => run("start", () => startFollowUp(task.id), "Reminder started.")}>
                 <FiPlay /> {busy === "start" ? "Starting…" : "Start"}
@@ -230,6 +266,8 @@ export default function FollowUpDetails() {
             rescheduled={rescheduled}
             partPaid={partPaid}
             paid={!dataLoading && (task.scope !== "INVOICE" || Boolean(invoice)) && outstanding <= 0}
+            history={history}
+            paidOn={paidOn}
           />
         )}
       </div>
@@ -400,7 +438,9 @@ export default function FollowUpDetails() {
 // Rescheduled is ticked once the reminder date has been moved. Normally it is never the "next"
 // step, because a reminder does not have to be rescheduled. After a part payment it is: the
 // rest is still owed, so the reminder must be given its next date.
-function ReminderTrack({ task, contacted, rescheduled, partPaid, paid }) {
+// Each step also carries a short note under its name: when it happened (and by whom, where the
+// history says), or, for the step to do next, what is waiting.
+function ReminderTrack({ task, contacted, rescheduled, partPaid, paid, history = [], paidOn = "" }) {
   const cancelled = task.status === "CANCELLED";
   const closed = task.status === "COMPLETED" || cancelled;
   // Paid in full and completed: the reminder has done its job, so the whole track is ticked,
@@ -419,15 +459,36 @@ function ReminderTrack({ task, contacted, rescheduled, partPaid, paid }) {
     : partPaid && !rescheduled ? steps.findIndex((s) => s.label === "Rescheduled")
     : steps.findIndex((s) => !s.done && !s.optional);
 
+  // When each step happened, from the reminder and its history ("13 Oct, 7:48 pm · testcust4").
+  const when = (v, who) => (v ? `${showShort(v)}${who ? ` · ${who}` : ""}` : "");
+  const first = (pred) => history.find(pred);
+  const last = (pred) => [...history].reverse().find(pred);
+  const contactedAt = first((h) => h.action === "UPDATE");
+  const movedAt = last((h) => h.action === "RESCHEDULE" && !/: Repeating reminder$/.test(h.note || ""));
+  const startedAt = first((h) => h.action === "START");
+  const doneNote = [
+    when(task.created_at, task.created_by_name),
+    when(startedAt?.changed_at || task.started_at, startedAt?.changed_by_name),
+    when(contactedAt?.changed_at, contactedAt?.changed_by_name),
+    when(movedAt?.changed_at, movedAt?.changed_by_name),
+    paidOn ? `Paid ${showDate(paidOn)}` : "",
+    when(task.completed_at),
+  ];
+  const nextNote = ["", "Waiting to start", "Call the customer", "Set the next date", partPaid ? "Part paid" : "Waiting for payment", ""];
+
   return (
     <ol className="ac-track" aria-label="Reminder progress">
-      {steps.map((s, i) => (
-        <li key={s.label} className={`${s.done ? "done" : ""}${i === next ? " current" : ""}${i <= reached ? " reached" : ""}`}
-          aria-current={i === next ? "step" : undefined}>
-          <span className="ac-track-dot" aria-hidden="true">{s.done ? <FiCheck /> : i + 1}</span>
-          <span className="ac-track-label">{s.label}<span className="ac-track-sr">{s.done ? " (done)" : i === next ? " (next)" : ""}</span></span>
-        </li>
-      ))}
+      {steps.map((s, i) => {
+        const note = s.done ? doneNote[i] : i === next ? nextNote[i] : "";
+        return (
+          <li key={s.label} className={`${s.done ? "done" : ""}${i === next ? " current" : ""}${i <= reached ? " reached" : ""}`}
+            aria-current={i === next ? "step" : undefined}>
+            <span className="ac-track-dot" aria-hidden="true">{s.done ? <FiCheck /> : i + 1}</span>
+            <span className="ac-track-label">{s.label}<span className="ac-track-sr">{s.done ? " (done)" : i === next ? " (next)" : ""}</span></span>
+            {note && <span className="ac-track-note">{note}</span>}
+          </li>
+        );
+      })}
     </ol>
   );
 }

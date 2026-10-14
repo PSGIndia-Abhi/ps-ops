@@ -28,20 +28,13 @@ async function getClientCompanyId(connection, userId) {
   return row?.company_id || null;
 }
 
-// Whether an invoice belongs to the given branch: through its site, or -- for an
-// invoice without a site (imported files no longer carry one) -- through its
-// customer having a site in that branch.
+// Whether an invoice belongs to the given branch: through its site. An invoice without a
+// site (imported files no longer carry one) belongs to no branch, so every branch sees it.
 async function invoiceInBranch(connection, invoice, branchId) {
   if (!branchId) return false;
-  if (invoice.site_id) {
-    const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
-    return Boolean(site && site.branch_id === branchId);
-  }
-  const [[hasSite]] = await connection.query(
-    "SELECT 1 AS ok FROM sites WHERE company_id = ? AND branch_id = ? LIMIT 1",
-    [invoice.customer_id, branchId]
-  );
-  return Boolean(hasSite);
+  if (!invoice.site_id) return true;
+  const [[site]] = await connection.query("SELECT branch_id FROM sites WHERE id = ?", [invoice.site_id]);
+  return Boolean(site && site.branch_id === branchId);
 }
 
 function computeInvoiceView(row) {
@@ -68,9 +61,9 @@ async function listInvoices(req, res) {
     } else if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
       if (!branchId) return res.status(403).json({ error: "Branch not assigned" });
-      where = `WHERE (s.branch_id = ?
-                  OR (i.site_id IS NULL AND EXISTS (SELECT 1 FROM sites cs WHERE cs.company_id = i.customer_id AND cs.branch_id = ?)))`;
-      params = [branchId, branchId];
+      // An invoice with a site: only that site's branch. Without a site (imported): everyone.
+      where = "WHERE (s.branch_id = ? OR i.site_id IS NULL)";
+      params = [branchId];
     }
 
     const [rows] = await connection.query(
