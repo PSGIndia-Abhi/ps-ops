@@ -414,6 +414,35 @@
     input { border: 0; outline: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
     button { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: #f1f5f9; color: #475569; cursor: pointer; &:hover { background: #e2e8f0; } }
   }
+  /* The dashboard's day: "Pick a day", or the picked day with a cross. The date input stays hidden; the chip opens its calendar. */
+  .lm-day-chip {
+    position: relative; display: inline-flex; align-items: center; height: 42px; border-radius: 12px;
+    background: #fff; border: 1px solid var(--lm-border); color: #334155;
+    &.on { color: var(--lm-primary-600); }
+  }
+  .lm-day-chip-main { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 14px; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+  .lm-day-chip-clear { display: inline-grid; place-items: center; width: 26px; height: 26px; margin-right: 8px; border: 0; border-radius: 8px; background: #f1f5f9; color: #475569; cursor: pointer; &:hover { background: #e2e8f0; } }
+  .lm-day-chip-input { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+  .lm-welcome .lm-day-chip { border-color: transparent; box-shadow: 0 6px 18px rgba(0, 0, 0, .12); }
+  /* A dashboard's filters in one row, under the banner. */
+  .lm-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+  .lm-toolbar .lm-seg { background: #fff; border: 1px solid var(--lm-border); }
+  /* Small numbers in tinted tiles (My Activity). */
+  .lm-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px 20px 20px; }
+  .lm-stat {
+    display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; background: var(--tone-soft);
+    animation: lm-rise .45s var(--lm-ease) both; animation-delay: calc(var(--i, 0) * 60ms);
+    b { display: block; font-size: 24px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    span:not(.lm-stat-icon) { font-size: 12.5px; color: var(--lm-muted); }
+  }
+  .lm-stat-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 11px; background: var(--tone); color: #fff; font-size: 17px; }
+  .lm-row { margin-bottom: 18px; }
+  /* A dashboard table (the calling queue, team performance) gets the wider share of its row and tighter cells, so it fits a laptop screen. */
+  .lm-grid.two.wide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  .lm-tight .lm-table th, .lm-tight .lm-table td { padding-left: 12px; padding-right: 12px; }
+  .lm-tight .lm-table td > .lm-who-text { min-width: 140px; }
+  @media (max-width: 1080px) { .lm-grid.two.wide { grid-template-columns: minmax(0, 1fr); } }
+  .lm-table tr.on td { background: var(--lm-primary-soft); }
   .lm-me-text { display: grid; line-height: 1.2; strong { font-size: 13.5px; } small { font-size: 11.5px; color: var(--lm-muted); } }
 
   .lm-stage { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; flex-direction: column; }

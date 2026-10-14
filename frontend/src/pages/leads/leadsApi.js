@@ -159,7 +159,8 @@ function toActivity(row) {
   const by = row.changed_by_name || "";
   const note = row.note || "";
   const who = by ? ` by ${by}` : "";
-  const base = { id: `a-${row.id}`, leadId: row.lead_id, by, at: row.changed_at, note: "" };
+  // byId / action: who did it and the raw step, for counting (the dashboard's "My Activity").
+  const base = { id: `a-${row.id}`, leadId: row.lead_id, by, byId: row.changed_by ?? null, action: row.action, at: row.changed_at, note: "" };
   switch (row.action) {
     case "CREATE":
       return { ...base, type: "CREATED", text: note.includes("provider portal") ? `Lead submitted${who} (Lead Provider)` : `Lead created${who}` };
