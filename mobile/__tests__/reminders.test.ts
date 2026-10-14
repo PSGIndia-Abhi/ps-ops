@@ -1,4 +1,4 @@
-import { alarmFor, DEFAULT_SETTINGS, type ReminderItem } from '../src/reminders-engine/engine';
+import { alarmFor, DEFAULT_SETTINGS, dueAlarmFor, type ReminderItem } from '../src/reminders-engine/engine';
 import { taskToReminder } from '../src/reminders-engine/sources';
 import type { WorkTask } from '../src/tasks/types';
 
@@ -14,6 +14,32 @@ const meeting: ReminderItem = {
   fromSomeoneElse: true,
   route: { app: 'lead', screen: 'LeadDetail', params: { leadId: 'L1' } },
 };
+
+describe('dueAlarmFor', () => {
+  const payment: ReminderItem = { ...meeting, key: 'task:9', kind: 'payment', title: 'Payment Reminder - Kims', detail: undefined, route: null };
+  const now = new Date(2030, 0, 15, 8, 0).getTime();
+
+  it('rings a payment reminder again at its own time', () => {
+    const early = alarmFor(payment, DEFAULT_SETTINGS, now)!;
+    const due = dueAlarmFor(payment, now)!;
+    expect(early.title).toBe('Payment reminder in 30 min');
+    expect(due.title).toBe('Payment reminder due');
+    expect(due.fireAt).toBe(new Date(2030, 0, 15, 11, 0).getTime());
+    expect(due.id).not.toBe(early.id);
+  });
+
+  it('still rings at the time when the early alarm has already passed', () => {
+    const soon = new Date(2030, 0, 15, 10, 57).getTime();
+    expect(alarmFor(payment, DEFAULT_SETTINGS, soon)).toBeNull();
+    expect(dueAlarmFor(payment, soon)).not.toBeNull();
+  });
+
+  it('is only for timed payment reminders that are still ahead', () => {
+    expect(dueAlarmFor(meeting, now)).toBeNull();
+    expect(dueAlarmFor({ ...payment, time: null }, now)).toBeNull();
+    expect(dueAlarmFor(payment, new Date(2030, 0, 15, 11, 1).getTime())).toBeNull();
+  });
+});
 
 describe('alarmFor', () => {
   const now = new Date(2030, 0, 15, 8, 0).getTime();

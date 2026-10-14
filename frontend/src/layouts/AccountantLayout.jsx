@@ -15,6 +15,7 @@ import {
   FiList,
   FiMenu,
   FiPercent,
+  FiPhone,
   FiUploadCloud,
   FiUsers,
 } from "react-icons/fi";
@@ -22,6 +23,7 @@ import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import useStackedTables from "../hooks/useStackedTables";
 import NotificationsMenu from "../components/NotificationsMenu";
+import ReminderAlerts from "../components/accountant/ReminderAlerts";
 import UserMenu from "../components/UserMenu";
 import "./AccountantLayout.css";
 import "../pages/accountant/accountant.css";
@@ -79,6 +81,7 @@ const NAV_ITEMS = [
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell, also: ["/accountant/follow-ups"] },
+  { label: "Contacts", path: "/accountant/contacts", icon: FiPhone },
   { label: "TDS", path: "/accountant/settings", icon: FiPercent },
 ];
 
@@ -229,6 +232,8 @@ export default function AccountantLayout() {
             </>
           )}
           <Outlet />
+          {/* pop-ups for payment reminders that have just come due */}
+          <ReminderAlerts />
         </main>
       </div>
     </div>

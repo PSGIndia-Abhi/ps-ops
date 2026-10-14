@@ -32,7 +32,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(true); // ticked by default; unticking it disables Sign in
 
   // Shown on the page instead of pop-up alerts; `busy` stops double submits.
   const [error, setError] = useState("");

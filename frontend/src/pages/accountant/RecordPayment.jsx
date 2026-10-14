@@ -7,6 +7,8 @@ import {
 import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
 import { groupByCustomer, savePayment, showDate, todayYmd, useAccountantData } from "./data";
+import { rescheduleFollowUp, showDue } from "./followups";
+import DateInput from "../../components/accountant/DateInput";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -30,7 +32,7 @@ const canPick = (inv) => isOpen(inv) || (inv.tds_applicable && inv.pending_tds >
 export default function RecordPayment() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { invoices, payments, loading, error, reload } = useAccountantData();
+  const { invoices, payments, followUps, loading, error, reload } = useAccountantData();
 
   // Coming from an invoice or customer screen pre-selects that customer.
   const [customerId, setCustomerId] = useState(location.state?.customerId || "");
@@ -43,6 +45,10 @@ export default function RecordPayment() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false); // true once a payment has been saved; stays on this page until the accountant chooses what to do next
+  // The invoices of the payment just saved, as they were before it (set together with `saved`).
+  // The page reloads after a save, so their pending amounts already have this payment taken off;
+  // working the table out from the reloaded invoices would take it off a second time.
+  const [savedInvoices, setSavedInvoices] = useState(null);
 
   // Customers the accountant can record payments for: the ones that have invoices in their branch.
   const customers = useMemo(
@@ -50,6 +56,14 @@ export default function RecordPayment() {
     [invoices, payments]
   );
   const customer = customers.find((c) => c.id === customerId) || null;
+
+  // Opened from a payment reminder: after a part payment the reminder is still open (the server
+  // only completes it once its outstanding is cleared), so the accountant is asked when to be
+  // reminded next. `reminderOwed` is what that reminder is still chasing, read from the invoices.
+  const reminder = followUps.find((f) => f.id === location.state?.followUpId && f.active && f.customer_id === customerId) || null;
+  const reminderOwed = !reminder ? 0
+    : reminder.scope === "INVOICE" ? amt(invoices.find((i) => i.id === reminder.invoice_id)?.pending_amount)
+    : amt(customer?.outstanding);
 
   // The customer's invoices, oldest first.
   const allInvoices = useMemo(
@@ -59,7 +73,12 @@ export default function RecordPayment() {
         .sort((a, b) => (a.due_date || a.invoice_date).localeCompare(b.due_date || b.invoice_date)),
     [invoices, customerId]
   );
-  const visibleInvoices = allInvoices.filter((i) => showPaid || isOpen(i));
+  // After a save the table shows just the invoices that were paid, with the amounts as entered
+  // and each one's new status; it cannot be edited until "Record Another Payment".
+  const paidRows = saved && savedInvoices
+    ? savedInvoices.map((inv) => ({ ...inv, status: allInvoices.find((i) => i.id === inv.id)?.status || inv.status }))
+    : null;
+  const visibleInvoices = paidRows || allInvoices.filter((i) => showPaid || isOpen(i));
   const history = payments.filter((p) => p.customer_id === customerId && p.status !== "CANCELLED").slice(0, 5);
 
   // The customer's TDS setting, read from their newest invoice that has TDS.
@@ -68,7 +87,7 @@ export default function RecordPayment() {
   const previousCandidates = allInvoices.filter((i) => !isOpen(i) && i.tds_applicable && i.pending_tds > 0);
 
   const received = amt(form.received);
-  const selectedInvoices = selected.map((id) => allInvoices.find((i) => i.id === id)).filter(Boolean);
+  const selectedInvoices = paidRows || selected.map((id) => allInvoices.find((i) => i.id === id)).filter(Boolean);
   const cashTotal = r2(selectedInvoices.reduce((s, i) => s + amt(cash[i.id]), 0));
   const tdsTotal = r2(selectedInvoices.reduce((s, i) => s + amt(tds[i.id]), 0));
   const balanceTotal = r2(selectedInvoices.reduce((s, i) => s + (Number(i.pending_amount) - amt(tds[i.id]) - amt(cash[i.id])), 0));
@@ -118,6 +137,7 @@ export default function RecordPayment() {
     setTds({});
     setSaveError("");
     setSaved(false);
+    setSavedInvoices(null);
   }
 
   // Typing a TDS amount for a row recalculates that row's Amount Received to
@@ -222,6 +242,7 @@ export default function RecordPayment() {
     }
     setSaving(true);
     setSaveError("");
+    const paid = selectedInvoices.filter((inv) => amt(cash[inv.id]) + amt(tds[inv.id]) > 0);
     try {
       await savePayment({
         customer_id: customerId,
@@ -242,6 +263,7 @@ export default function RecordPayment() {
       // Stay on this page -- no automatic redirect. The accountant chooses what to
       // do next from the confirmation below (record another, or go to Payment List).
       await reload();
+      setSavedInvoices(paid);
       setSaved(true);
     } catch (err) {
       setSaveError(err.message || "The payment could not be saved. Please try again.");
@@ -259,6 +281,7 @@ export default function RecordPayment() {
     setForm({ date: todayYmd(), mode: "NEFT", reference: "", received: "", remarks: "" });
     setSaveError("");
     setSaved(false);
+    setSavedInvoices(null);
   }
 
   return (
@@ -277,12 +300,17 @@ export default function RecordPayment() {
           <span><FiCheckCircle style={{ marginRight: 6 }} />Payment saved successfully.</span>
           <div className="ac-actions">
             {location.state?.followUpId && (
-              <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${location.state.followUpId}`)}>Back to Follow-up</button>
+              <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${location.state.followUpId}`)}>Back to Reminder</button>
             )}
             <button type="button" className="ac-btn" onClick={recordAnother}>Record Another Payment</button>
+            <button type="button" className="ac-btn" onClick={() => navigate("/accountant/tasks")}>Go to Tasks &amp; Reminders</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/payments/list")}>Go to Payment List</button>
           </div>
         </div>
+      )}
+
+      {saved && reminder && reminderOwed > 0.005 && (
+        <NextReminderPrompt key={reminder.id} reminder={reminder} owed={reminderOwed} onSaved={reload} />
       )}
 
       {/* 1. Customer */}
@@ -334,9 +362,9 @@ export default function RecordPayment() {
             <span className="ac-note"><FiInfo /> Invoices are listed from oldest to newest. You can edit cash and TDS for each invoice.</span>
             <div className="ac-rp-tools-row">
               <label className="ac-checkline">
-                <input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} /> Show fully paid invoices
+                <input type="checkbox" checked={showPaid} disabled={saved} onChange={(e) => setShowPaid(e.target.checked)} /> Show fully paid invoices
               </label>
-              <button type="button" className="ac-btn ac-btn-primary ac-prev-tds" disabled={!tdsOn} onClick={() => setPrevOpen(true)}
+              <button type="button" className="ac-btn ac-btn-primary ac-prev-tds" disabled={!tdsOn || saved} onClick={() => setPrevOpen(true)}
                 title={tdsOn ? "" : "TDS is not applicable for this customer"}>
                 <FiPlus /> Add Previous TDS
               </button>
@@ -346,7 +374,7 @@ export default function RecordPayment() {
             <table className="ac-table ac-stack">
               <thead>
                 <tr>
-                  <th><input type="checkbox" aria-label="Select all"
+                  <th><input type="checkbox" aria-label="Select all" disabled={saved}
                     checked={pickable.length > 0 && pickable.every((i) => selected.includes(i.id))} onChange={toggleAll} /></th>
                   <th>Invoice No</th><th className="ac-col-lo">Invoice Date</th><th>Due Date</th>
                   <th className="ac-num">Invoice Amount</th><th className="ac-num">Pending Amount</th>
@@ -365,7 +393,7 @@ export default function RecordPayment() {
                     <tr key={inv.id}>
                       <td>
                         <input type="checkbox" aria-label={`Select ${inv.invoice_number}`} checked={on}
-                          disabled={!canPick(inv)} onChange={() => toggleInvoice(inv)} />
+                          disabled={saved || !canPick(inv)} onChange={() => toggleInvoice(inv)} />
                       </td>
                       <td>{inv.invoice_number}</td>
                       <td className="ac-col-lo">{showDate(inv.invoice_date)}</td>
@@ -378,7 +406,7 @@ export default function RecordPayment() {
                           <td className="ac-num">
                             {inv.tds_applicable ? (
                               <input className="ac-alloc-input" type="number" min="0" aria-label={`TDS for ${inv.invoice_number}`}
-                                disabled={!on} value={on ? tds[inv.id] ?? "" : ""}
+                                disabled={saved || !on} value={on ? tds[inv.id] ?? "" : ""}
                                 onChange={(e) => changeTdsAmount(inv, e.target.value)} />
                             ) : "—"}
                           </td>
@@ -386,7 +414,7 @@ export default function RecordPayment() {
                       )}
                       <td className="ac-num">
                         <input className="ac-alloc-input" type="number" min="0" aria-label={`Amount received for ${inv.invoice_number}`}
-                          disabled={!on || !isOpen(inv)} value={on ? cash[inv.id] ?? "" : ""}
+                          disabled={saved || !on || !isOpen(inv)} value={on ? cash[inv.id] ?? "" : ""}
                           onChange={(e) => changeCashAmount(inv.id, e.target.value, Math.max(0, r2(inv.pending_amount - t)))} />
                       </td>
                       {tdsOn && (
@@ -435,7 +463,7 @@ export default function RecordPayment() {
         <div className="ac-card" style={{ order: 1 }}>
           <h3 className="ac-section-title"><span className="ac-sec-ic"><FiCreditCard /></span>2. Payment Details</h3>
           <div className="ac-fields-3" style={{ marginBottom: 14 }}>
-            <div className="ac-field"><label><span className="ac-lab-ic"><FiCalendar /></span>Payment Date *</label><input className="ac-input" type="date" value={form.date} onChange={set("date")} /></div>
+            <div className="ac-field"><label><span className="ac-lab-ic"><FiCalendar /></span>Payment Date *</label><DateInput ariaLabel="Payment date" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} /></div>
             <div className="ac-field">
               <label><span className="ac-lab-ic"><FiCreditCard /></span>Payment Mode *</label>
               <select className="ac-select" value={form.mode} onChange={set("mode")}>
@@ -447,7 +475,7 @@ export default function RecordPayment() {
           <div className="ac-grid-2" style={{ alignItems: "end", marginBottom: 14 }}>
             <div className="ac-field">
               <label><span className="ac-lab-ic"><FiDollarSign /></span>Amount Received (₹) *</label>
-              <input className="ac-input" type="number" min="0" value={form.received} onChange={set("received")}
+              <input className="ac-input" type="number" min="0" value={form.received} disabled={saved} onChange={set("received")}
                 onBlur={fillCashFromReceived} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} placeholder="0" />
             </div>
             {received > 0 && (
@@ -527,6 +555,66 @@ export default function RecordPayment() {
 
       {prevOpen && <PreviousTdsModal invoices={previousCandidates} current={tds} onClose={() => setPrevOpen(false)} onApply={applyPrevious} />}
     </div>
+  );
+}
+
+// Shown after a part payment recorded from a reminder: the reminder stays open, and this asks
+// when to be reminded for the rest. Saving moves that same reminder to the new date and time
+// (a reschedule, so its track shows Rescheduled); nothing new is created.
+function NextReminderPrompt({ reminder, owed, onSaved }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState(reminder.due_time || "10:00");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [movedTo, setMovedTo] = useState(""); // set once the reminder has been rescheduled
+
+  async function save(e) {
+    e.preventDefault();
+    if (!date) return setError("Please choose the next reminder date.");
+    if (date < todayYmd()) return setError("The reminder date can't be in the past.");
+    if (!time) return setError("Please choose a time.");
+    setSaving(true);
+    setError("");
+    try {
+      await rescheduleFollowUp(reminder.id, date, time, `Part payment received, ${money(owed)} still outstanding`);
+      setMovedTo(showDue(date, time));
+      await onSaved?.();
+    } catch (err) {
+      setError(err.message || "The reminder could not be rescheduled. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (movedTo) {
+    return (
+      <div className="ac-info ok" style={{ marginBottom: 16 }} role="status">
+        <FiCheckCircle style={{ flexShrink: 0, marginTop: 2 }} /><span>Reminder rescheduled to {movedTo} for the remaining {money(owed)}.</span>
+      </div>
+    );
+  }
+
+  return (
+    <form className="ac-info" style={{ marginBottom: 16, flexDirection: "column", gap: 12 }} onSubmit={save} noValidate>
+      <span>
+        <FiClock style={{ marginRight: 6, verticalAlign: "-2px" }} />
+        Part payment recorded. <strong>{money(owed)}</strong> is still outstanding
+        {reminder.scope === "INVOICE" ? ` on invoice ${reminder.invoice_number}` : " for this customer"}, so the reminder stays open.
+        Choose when to be reminded next.
+      </span>
+      {error && <div className="ac-info error" role="alert"><FiAlertCircle style={{ flexShrink: 0, marginTop: 2 }} /><span>{error}</span></div>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+        <div className="ac-field">
+          <label>Next Reminder Date *</label>
+          <DateInput ariaLabel="Next reminder date" value={date} onChange={setDate} />
+        </div>
+        <div className="ac-field">
+          <label>Time *</label>
+          <input className="ac-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Next reminder time" />
+        </div>
+        <button type="submit" className="ac-btn ac-btn-primary" disabled={saving}>{saving ? "Saving…" : "Reschedule Reminder"}</button>
+      </div>
+    </form>
   );
 }
 

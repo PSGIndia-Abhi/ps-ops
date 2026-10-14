@@ -5,6 +5,7 @@ import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
+import DateInput from "../../components/accountant/DateInput";
 
 const TABS = [
   { key: "ALL", label: "All Invoices", icon: <FiList /> },
@@ -78,7 +79,7 @@ export default function InvoiceList() {
             <option value="">All Customers</option>
             {customers.map((c) => <option key={c}>{c}</option>)}
           </select>
-          <input className="ac-input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setPage(0); }} aria-label="Invoice date" />
+          <DateInput ariaLabel="Invoice date" style={{ width: "100%" }} value={date} onChange={(v) => { setDate(v); setPage(0); }} />
           <select className="ac-select" value={status} onChange={(e) => { setStatus(e.target.value); setPage(0); }}>
             <option value="">All Status</option>
             <option value="PENDING">Pending</option>

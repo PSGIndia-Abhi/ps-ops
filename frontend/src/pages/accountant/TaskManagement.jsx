@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FiChevronDown, FiChevronRight, FiPlus } from "react-icons/fi";
+import { FiCheckCircle, FiChevronDown, FiChevronRight, FiPlus, FiRepeat } from "react-icons/fi";
+import DateInput from "../../components/accountant/DateInput";
 import FollowUpModal from "../../components/accountant/FollowUpModal";
+import SearchSelect from "../../components/accountant/SearchSelect";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
-import { byDue, useAccountantData, usePaged, ymd } from "./data";
-import { showDue } from "./followups";
+import { byDue, showDate, useAccountantData, usePaged, ymd } from "./data";
+import { fetchReminderSchedules, repeatEnd, repeatText, resumeReminderSchedule, showDue, stopReminderSchedule } from "./followups";
 
-// Tasks & Reminders: the accountant's payment follow-ups. Each one is a Task
+// Tasks & Reminders: the accountant's payment reminders. Each one is a Task
 // Management task pointing at a customer or an invoice (see data.js).
 const TABS = [
   { key: "ALL", label: "All", test: () => true },
@@ -16,18 +18,37 @@ const TABS = [
   { key: "UPCOMING", label: "Upcoming", test: (f) => f.active && f.display_status === "UPCOMING" },
   { key: "COMPLETED", label: "Completed", test: (f) => f.status === "COMPLETED" },
 ];
+const REPEATING = "REPEATING"; // the tab that lists repeating reminders (schedules), not reminders
 const EMPTY_FILTERS = { priority: "", scope: "", customer: "", from: "", to: "" };
 const uniq = (list, key) => [...new Set(list.map((i) => i[key]).filter(Boolean))].sort();
 
 export default function TaskManagement() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { invoices, followUps, loading, error, reload } = useAccountantData();
+  const { invoices, followUps, loading, error, reminderError, reload } = useAccountantData();
   const [tab, setTab] = useState(location.state?.tab || "ALL");
   const [createOpen, setCreateOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const filterRef = useRef(null);
+
+  // Repeating reminders: each is one reminder that comes due again on a schedule.
+  const [schedules, setSchedules] = useState([]);
+  const [stopping, setStopping] = useState(null); // the schedule the "Stop?" dialog is open for
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
+  const loadSchedules = useCallback(async () => {
+    try {
+      setSchedules(await fetchReminderSchedules());
+      setScheduleError("");
+    } catch (err) {
+      setScheduleError(err.message || "Could not load the repeating reminders");
+    }
+  }, []);
+  useEffect(() => {
+    loadSchedules();
+  }, [loadSchedules]);
 
   // Close the dropdown when the user clicks outside it or presses Escape.
   useEffect(() => {
@@ -46,7 +67,7 @@ export default function TaskManagement() {
   const activeFilters = Object.values(filters).filter(Boolean).length;
   const customerOptions = useMemo(() => uniq(followUps, "customer_name"), [followUps]);
 
-  // Live outstanding per follow-up: the invoice's pending, or the customer's total pending.
+  // Live outstanding per reminder: the invoice's pending, or the customer's total pending.
   const outstandingOf = useMemo(() => {
     const byInvoice = new Map(invoices.map((i) => [i.id, i]));
     const byCustomer = new Map();
@@ -71,6 +92,51 @@ export default function TaskManagement() {
     // Open ones first, soonest due on top; finished ones after.
     .sort((a, b) => (a.active === b.active ? (a.active ? byDue(a, b) : byDue(b, a)) : a.active ? -1 : 1));
   const { pageRows, page, setPage, pageSize } = usePaged(rows);
+
+  // Who each schedule is for (from the invoices already loaded) and the reminder it keeps going.
+  const scheduleRows = useMemo(() => {
+    const invoiceById = new Map(invoices.map((i) => [i.id, i]));
+    const customerName = new Map(invoices.map((i) => [i.customer_id, i.customer_name]));
+    return schedules.map((s) => {
+      const inv = s.source_module === "PAYMENT_INVOICE" ? invoiceById.get(s.source_id) : null;
+      return {
+        ...s,
+        reminder: followUps.find((f) => f.series_id === s.id && f.active) || null,
+        customer_name: inv ? inv.customer_name : customerName.get(s.source_id) || s.title.replace(/^Payment (Reminder|Follow-up) - /, ""),
+        invoice_number: inv?.invoice_number || "",
+        scope: s.source_module === "PAYMENT_INVOICE" ? "INVOICE" : "CUSTOMER",
+      };
+    });
+  }, [schedules, invoices, followUps]);
+
+  async function stop() {
+    setBusy(true);
+    try {
+      await stopReminderSchedule(stopping.id);
+      setNotice(`The repeating reminder for ${stopping.invoice_number || stopping.customer_name} was stopped. Use Resume to start it again.`);
+      setStopping(null);
+      await loadSchedules();
+    } catch (err) {
+      setScheduleError(err.message || "The repeating reminder could not be stopped.");
+      setStopping(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  // Starts a stopped repeating reminder again (no confirmation: Stop can undo it).
+  async function resume(s) {
+    setBusy(true);
+    setScheduleError("");
+    try {
+      await resumeReminderSchedule(s.id);
+      setNotice(`The repeating reminder for ${s.invoice_number || s.customer_name} was resumed.`);
+      await Promise.all([loadSchedules(), reload()]);
+    } catch (err) {
+      setScheduleError(err.message || "The repeating reminder could not be resumed.");
+    } finally {
+      setBusy(false);
+    }
+  }
   const open = (f) => navigate(`/accountant/follow-ups/${f.id}`);
 
   return (
@@ -78,10 +144,10 @@ export default function TaskManagement() {
       <div className="ac-head">
         <div>
           <h2 className="ac-title">Tasks &amp; Reminders</h2>
-          <p className="ac-sub">Payment follow-ups for your customers and invoices</p>
+          <p className="ac-sub">Payment reminders for your customers and invoices</p>
         </div>
         <div className="ac-actions">
-          <button type="button" className="ac-btn ac-btn-primary" onClick={() => setCreateOpen(true)}><FiPlus /> Create Follow-up</button>
+          <button type="button" className="ac-btn ac-btn-primary" onClick={() => setCreateOpen(true)}><FiPlus /> Create Reminder</button>
 
           <div className="ac-dropdown-wrap" ref={filterRef}>
             <button type="button" className={`ac-btn ${showFilters ? "ac-btn-primary" : ""}`} onClick={() => setShowFilters((s) => !s)}
@@ -92,7 +158,7 @@ export default function TaskManagement() {
             {showFilters && (
               <div className="ac-dropdown" role="dialog" aria-label="Filters">
                 <div className="ac-field">
-                  <label>Follow-up for</label>
+                  <label>Reminder for</label>
                   <select className="ac-select" value={filters.scope} onChange={setFilter("scope")}>
                     <option value="">Customer and invoice</option>
                     <option value="CUSTOMER">Entire customer</option>
@@ -110,16 +176,27 @@ export default function TaskManagement() {
                 </div>
                 <div className="ac-field">
                   <label>Customer</label>
-                  <select className="ac-select" value={filters.customer} onChange={setFilter("customer")}>
-                    <option value="">All customers</option>
-                    {customerOptions.map((c) => <option key={c}>{c}</option>)}
-                  </select>
+                  <SearchSelect
+                    ariaLabel="Customer"
+                    listId="tm-customer-filter"
+                    allLabel="All customers"
+                    options={customerOptions.map((c) => ({ value: c, label: c }))}
+                    value={filters.customer}
+                    onChange={(v) => setFilter("customer")({ target: { value: v } })}
+                  />
                 </div>
                 <div className="ac-field">
                   <label>Due date</label>
-                  <div className="ac-grid-2" style={{ gap: 8 }}>
-                    <input className="ac-input" type="date" value={filters.from} onChange={setFilter("from")} aria-label="Due from" />
-                    <input className="ac-input" type="date" value={filters.to} onChange={setFilter("to")} aria-label="Due to" />
+                  {/* one box per line: two side by side do not fit the panel's width */}
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div className="ac-date-field">
+                      <span style={{ width: 36 }}>From</span>
+                      <DateInput ariaLabel="Due from" value={filters.from} onChange={(v) => setFilter("from")({ target: { value: v } })} />
+                    </div>
+                    <div className="ac-date-field">
+                      <span style={{ width: 36 }}>To</span>
+                      <DateInput ariaLabel="Due to" value={filters.to} onChange={(v) => setFilter("to")({ target: { value: v } })} />
+                    </div>
                   </div>
                 </div>
                 <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
@@ -132,7 +209,9 @@ export default function TaskManagement() {
         </div>
       </div>
 
-      <DataError error={error} onRetry={reload} />
+      <DataError error={error || reminderError} onRetry={reload} />
+      <DataError error={scheduleError} onRetry={loadSchedules} />
+      {notice && <div className="ac-info ok" role="status"><FiCheckCircle style={{ flexShrink: 0 }} /><span>{notice}</span></div>}
 
       <div className="ac-card">
         <div className="ac-tabs" style={{ marginBottom: 14 }}>
@@ -141,13 +220,55 @@ export default function TaskManagement() {
               {t.label} ({followUps.filter(t.test).length})
             </button>
           ))}
+          <button type="button" className={`ac-tab ${tab === REPEATING ? "active" : ""}`} onClick={() => setTab(REPEATING)}>
+            <FiRepeat className="ac-tab-icon" />Repeating ({schedules.length})
+          </button>
         </div>
+
+        {tab === REPEATING ? (
+          <div className="ac-table-wrap">
+            <table className="ac-table ac-stack">
+              <thead><tr><th>Customer / Invoice</th><th>For</th><th>Repeats</th><th>Reminder Due</th><th>Ends</th><th>Action</th></tr></thead>
+              <tbody>
+                {scheduleRows.length ? scheduleRows.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      {s.customer_name || "—"}
+                      {s.invoice_number && <div className="ac-sub">{s.invoice_number}</div>}
+                      {s.description && <div className="ac-sub ac-fu-note">{s.description}</div>}
+                    </td>
+                    <td>{s.scope === "INVOICE" ? "Invoice" : "Customer"}</td>
+                    <td>
+                      {repeatText(s)}
+                      {s.status === "PAUSED" && <div><span className="ac-badge pending">Stopped</span></div>}
+                    </td>
+                    <td>{s.reminder ? showDue(s.reminder.due_date, s.reminder.due_time) : <span className="ac-sub">—</span>}</td>
+                    <td>{repeatEnd(s) ? showDate(repeatEnd(s)) : <span className="ac-sub">No end date</span>}</td>
+                    <td>
+                      <div className="ac-actions" style={{ flexWrap: "nowrap", gap: 8 }}>
+                        {s.reminder && <button type="button" className="ac-link" onClick={() => open(s.reminder)}>Open <FiChevronRight style={{ verticalAlign: "-2px" }} /></button>}
+                        {s.status === "PAUSED" ? (
+                          <button type="button" className="ac-btn ac-btn-primary ac-btn-sm" disabled={busy} onClick={() => resume(s)}>Resume</button>
+                        ) : s.reminder && s.reminder.status !== "OPEN" ? (
+                          <button type="button" className="ac-btn ac-btn-sm" disabled={busy} onClick={() => setStopping(s)}>Stop</button>
+                        ) : (
+                          // Stop is offered only once the reminder has been started (Open it and press Start).
+                          <span className="ac-sub" style={{ whiteSpace: "nowrap" }}>Start it to stop</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )) : <EmptyRow cols={6} loading={loading} text="No repeating reminders — choose Daily, Weekly or Monthly under Repeat when creating a reminder" />}
+              </tbody>
+            </table>
+          </div>
+        ) : (<>
 
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack">
             <thead>
               <tr>
-                <th>Next Follow-up</th><th>Customer / Invoice</th><th>For</th><th className="ac-num">Outstanding</th>
+                <th>Next Reminder</th><th>Customer / Invoice</th><th>For</th><th className="ac-num">Outstanding</th>
                 <th>Priority</th><th>Status</th><th>Action</th>
               </tr>
             </thead>
@@ -169,7 +290,6 @@ export default function TaskManagement() {
                   <td><Badge value={f.priority} /></td>
                   <td>
                     <Badge value={f.display_status} />
-                    {(f.status === "IN_PROGRESS" || f.status === "PAUSED") && <div style={{ marginTop: 4 }}><Badge value={f.status} /></div>}
                   </td>
                   <td>
                     <button type="button" className="ac-link" onClick={(e) => { e.stopPropagation(); open(f); }}>
@@ -177,19 +297,36 @@ export default function TaskManagement() {
                     </button>
                   </td>
                 </tr>
-              )) : <EmptyRow cols={7} loading={loading} text={followUps.length ? "No follow-ups match" : "No follow-ups yet — create one from Customer Outstanding or here"} />}
+              )) : <EmptyRow cols={7} loading={loading} text={followUps.length ? "No reminders match" : "No reminders yet — create one from Customer Outstanding or here"} />}
             </tbody>
           </table>
         </div>
 
         <Pager total={rows.length} page={page} pageSize={pageSize} onPage={setPage} />
+        </>)}
       </div>
+
+      {stopping && (
+        <div className="ac-overlay" onMouseDown={() => !busy && setStopping(null)}>
+          <div className="ac-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <h3>Stop this repeating reminder?</h3>
+            <p className="ac-sub" style={{ fontSize: 14 }}>
+              {stopping.invoice_number ? `Invoice ${stopping.invoice_number} (${stopping.customer_name})` : stopping.customer_name}: {repeatText(stopping).replace(/^E/, "e")}
+              {repeatEnd(stopping) ? `, until ${showDate(repeatEnd(stopping))}` : ""}. It will not come due again until you resume it. The reminder itself stays open on its current date.
+            </p>
+            <div className="ac-modal-foot">
+              <button type="button" className="ac-btn" onClick={() => setStopping(null)} disabled={busy}>Cancel</button>
+              <button type="button" className="ac-btn ac-btn-primary" onClick={stop} disabled={busy}>{busy ? "Stopping…" : "Stop Repeating"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <FollowUpModal
         key={createOpen ? "open" : "closed"}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={reload}
+        onCreated={async () => { setNotice(""); await Promise.all([reload(), loadSchedules()]); }}
         invoices={invoices}
         followUps={followUps}
       />

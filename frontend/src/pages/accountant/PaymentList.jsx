@@ -5,6 +5,7 @@ import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
 import { fetchPayment, showDate, todayYmd, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
+import DateInput from "../../components/accountant/DateInput";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -133,8 +134,8 @@ export default function PaymentList() {
             <option value="POSTED">Posted</option>
           </select>
           <div className="ac-grid-2" style={{ gap: 6 }}>
-            <input className="ac-input" type="date" value={from} onChange={filterChange(setFrom)} aria-label="From date" />
-            <input className="ac-input" type="date" value={to} onChange={filterChange(setTo)} aria-label="To date" />
+            <DateInput ariaLabel="From date" style={{ width: "100%", minWidth: 0 }} value={from} onChange={(v) => filterChange(setFrom)({ target: { value: v } })} />
+            <DateInput ariaLabel="To date" style={{ width: "100%", minWidth: 0 }} value={to} onChange={(v) => filterChange(setTo)({ target: { value: v } })} />
           </div>
         </div>
 

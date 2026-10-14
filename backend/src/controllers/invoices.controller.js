@@ -286,44 +286,4 @@ async function cancelInvoice(req, res) {
   }
 }
 
-// GET /api/invoices/customers/:customerId/contact
-// The customer's phone for the "Call customer" button: the primary active contact
-// at one of the customer's sites (contacts.company_id holds a sites.id). Read only.
-// Outside admin, only contacts at sites in the user's own branch.
-async function getCustomerContact(req, res) {
-  const { role, id: userId } = req.user;
-  const { customerId } = req.params;
-  if (role === "client") return res.status(403).json({ error: "Forbidden" });
-
-  const connection = await pool.getConnection();
-  try {
-    let branchFilter = "";
-    const params = [customerId];
-    if (role !== "admin") {
-      const branchId = await getUserBranchId(connection, userId);
-      if (!branchId) return res.status(403).json({ error: "Branch not assigned" });
-      branchFilter = "AND s.branch_id = ?";
-      params.push(branchId);
-    }
-
-    const [[contact]] = await connection.query(
-      `SELECT c.name, c.phone, c.email
-         FROM contacts c
-         JOIN sites s ON s.id = c.company_id
-        WHERE s.company_id = ? ${branchFilter}
-          AND COALESCE(c.is_active, 1) = 1
-          AND c.phone IS NOT NULL AND TRIM(c.phone) <> ''
-        ORDER BY c.is_primary DESC, c.created_at ASC
-        LIMIT 1`,
-      params
-    );
-    res.json(contact ? { name: contact.name, phone: contact.phone, email: contact.email || null } : { name: null, phone: null, email: null });
-  } catch (err) {
-    console.error("Failed to load customer contact:", err);
-    res.status(500).json({ error: "Failed to load the customer's contact" });
-  } finally {
-    connection.release();
-  }
-}
-
-module.exports = { listInvoices, getInvoice, createInvoice, updateInvoice, cancelInvoice, getCustomerContact };
+module.exports = { listInvoices, getInvoice, createInvoice, updateInvoice, cancelInvoice };

@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { FiCheckSquare, FiPhone, FiPlusCircle } from "react-icons/fi";
-import FollowUpModal from "../../components/accountant/FollowUpModal";
+import { FiPhone, FiPlusCircle } from "react-icons/fi";
 import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
-import { byDue, fetchInvoice, showDate, ymd, useAccountantData } from "./data";
-import { fetchCustomerContact, showDue } from "./followups";
+import { fetchInvoice, showDate, ymd } from "./data";
+import { fetchCustomerContact } from "./followups";
 
 const dash = (v) => (v == null || v === "" ? "—" : v);
 const MODE_LABEL = { CASH: "Cash", UPI: "UPI", BANK_TRANSFER: "Bank Transfer", NEFT: "NEFT", CHEQUE: "Cheque", CARD: "Card", OTHER: "Other" };
@@ -13,10 +12,8 @@ const MODE_LABEL = { CASH: "Cash", UPI: "UPI", BANK_TRANSFER: "Bank Transfer", N
 export default function InvoiceDetails() {
   const navigate = useNavigate();
   const { invoiceId } = useParams();
-  const { invoices, followUps: allFollowUps, reload: reloadFollowUps } = useAccountantData();
   const [invoice, setInvoice] = useState(null);
   const [error, setError] = useState("");
-  const [followUpOpen, setFollowUpOpen] = useState(false);
   const [phone, setPhone] = useState(null);
 
   const [attempt, setAttempt] = useState(0); // bumped by "Try again" to load the invoice again
@@ -65,11 +62,6 @@ export default function InvoiceDetails() {
     received_by: a.received_by || "",
   }));
 
-  // Follow-ups on this invoice, and the customer's whole-outstanding follow-ups (which cover it too).
-  const followUps = allFollowUps
-    .filter((f) => (f.scope === "INVOICE" && f.invoice_id === invoiceId) || (f.scope === "CUSTOMER" && customerId && f.customer_id === customerId))
-    .sort((a, b) => (a.active === b.active ? byDue(b, a) : a.active ? -1 : 1));
-  const openFollowUp = followUps.find((f) => f.active && f.scope === "INVOICE");
 
   const info = [
     ["Invoice Date", showDate(invoice?.invoice_date)],
@@ -101,15 +93,6 @@ export default function InvoiceDetails() {
             onClick={() => navigate("/accountant/payments/record", { state: { customerId: invoice.customer_id } })}>
             <FiPlusCircle /> Record Payment
           </button>
-          {openFollowUp ? (
-            <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${openFollowUp.id}`)}>
-              <FiCheckSquare /> Follow-up {showDue(openFollowUp.due_date, openFollowUp.due_time)}
-            </button>
-          ) : (
-            <button type="button" className="ac-btn" disabled={!invoice || pending <= 0 || status === "CANCELLED"} onClick={() => setFollowUpOpen(true)}>
-              <FiCheckSquare /> + Follow-up
-            </button>
-          )}
           {phone ? (
             <a className="ac-btn" href={`tel:${phone.replace(/[^\d+]/g, "")}`}><FiPhone /> Call Customer</a>
           ) : (
@@ -183,39 +166,8 @@ export default function InvoiceDetails() {
               <p className="ac-sub">TDS is not applicable for this invoice.</p>
             )}
           </div>
-
-          <div className="ac-card">
-            <h3 className="ac-card-title">Follow-up History</h3>
-            <div className="ac-table-wrap">
-              <table className="ac-table">
-                <thead><tr><th>Due</th><th>For</th><th>Notes</th><th>Status</th></tr></thead>
-                <tbody>
-                  {followUps.length ? followUps.map((f) => (
-                    <tr key={f.id} className="ac-fu-click" onClick={() => navigate(`/accountant/follow-ups/${f.id}`)}>
-                      <td>{showDue(f.due_date, f.due_time)}</td>
-                      <td>{f.scope === "INVOICE" ? "This invoice" : "Whole customer"}</td>
-                      <td>{dash(f.completion_note || f.notes)}</td>
-                      <td><Badge value={f.display_status} /></td>
-                    </tr>
-                  )) : <EmptyRow cols={4} text="No follow-ups yet" />}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       </div>
-
-      <FollowUpModal
-        key={followUpOpen ? "open" : "closed"}
-        open={followUpOpen}
-        onClose={() => setFollowUpOpen(false)}
-        onCreated={reloadFollowUps}
-        invoices={invoices}
-        followUps={allFollowUps}
-        customerId={customerId}
-        invoiceId={invoiceId}
-        lockCustomer
-      />
     </div>
   );
 }

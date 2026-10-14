@@ -28,6 +28,8 @@ export function routeOfPush(data: Record<string, unknown> | undefined): Reminder
   const type = String(data?.entityType ?? '');
   const id = String(data?.entityId ?? '');
   if (!id) return null;
+  // The "payment reminder due" notification (backend PaymentFollowUp.service) is about the reminder's task.
+  if (type === 'payment_reminder') return { app: 'payment', screen: 'ReminderDetail', params: { reminderId: id } };
   if (type === 'lead') return { app: 'lead', screen: 'LeadDetail', params: { leadId: id } };
   if (type === 'work_task' || type === 'task') return { app: 'task', screen: 'TaskDetail', params: { taskId: id } };
   return null;

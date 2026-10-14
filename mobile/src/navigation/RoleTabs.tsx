@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { canSwitchToSales, isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { canSwitchToSales, isAccountantRole, isTaskRole, useRawRole, useUserRole } from '../auth/role';
 import { leadPersonaForRole } from '../leads/stage';
 import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
 import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
 import { LeadsNavigator } from './LeadsNavigator';
+import { RemindersNavigator } from './RemindersNavigator';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
@@ -40,12 +41,23 @@ export function RoleTabs() {
   //  - Managing Director / Personal Assistant: Task Management, can switch to Sales;
   //  - lead roles (telecaller, commercial sales, sales manager): Lead Management, can switch to
   //    Task Management - same as the web, where their follow-ups and visits are tasks too;
+  //  - accountant: Payment Reminders (the web's Accountant Panel), can switch to Task Management;
   //  - other org-hierarchy roles: Task Management only.
   const leadRole = !!leadPersonaForRole(rawRole);
+  const accountant = isAccountantRole(rawRole);
   const taskRole = isTaskRole(rawRole);
   const apps = useMemo<AppKind[]>(
-    () => (leadRole ? ['leads', 'tasks'] : taskRole ? (canSwitchToSales(rawRole) ? ['tasks', 'sales'] : ['tasks']) : []),
-    [leadRole, taskRole, rawRole],
+    () =>
+      leadRole
+        ? ['leads', 'tasks']
+        : accountant
+        ? ['reminders', 'tasks']
+        : taskRole
+        ? canSwitchToSales(rawRole)
+          ? ['tasks', 'sales']
+          : ['tasks']
+        : [],
+    [leadRole, accountant, taskRole, rawRole],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);
@@ -72,6 +84,8 @@ export function RoleTabs() {
           <LeadsNavigator />
         ) : current === 'sales' ? (
           <CrmNavigator />
+        ) : current === 'reminders' ? (
+          <RemindersNavigator />
         ) : (
           <TaskNavigator />
         )}

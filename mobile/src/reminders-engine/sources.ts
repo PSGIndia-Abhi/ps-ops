@@ -35,7 +35,7 @@ function routeOf(t: WorkTask, kind: ReminderKind): ReminderRoute | null {
       : { app: 'lead', screen: 'LeadReminders' };
   }
   if ((kind === 'meeting' || kind === 'followup') && t.source_id) return { app: 'lead', screen: 'LeadDetail', params: { leadId: t.source_id } };
-  if (kind === 'payment') return { app: 'payment', screen: 'Home' };
+  if (kind === 'payment') return { app: 'payment', screen: 'ReminderDetail', params: { reminderId: t.id } };
   return { app: 'task', screen: 'TaskDetail', params: { taskId: t.id } };
 }
 

@@ -52,7 +52,7 @@ const KIND_TEXT: Record<ReminderKind, { soon: string; dueToday: string; isNew: s
   meeting: { soon: 'Meeting', dueToday: 'Meeting today', isNew: 'New meeting scheduled' },
   followup: { soon: 'Follow-up', dueToday: 'Follow-up due today', isNew: 'New follow-up for you' },
   task: { soon: 'Task due', dueToday: 'Task due today', isNew: 'New task assigned' },
-  payment: { soon: 'Payment follow-up', dueToday: 'Payment follow-up today', isNew: 'New payment follow-up' },
+  payment: { soon: 'Payment reminder', dueToday: 'Payment reminder today', isNew: 'New payment reminder' },
   personal: { soon: 'Reminder', dueToday: 'Reminder', isNew: 'New reminder' },
 };
 
@@ -112,6 +112,26 @@ export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = D
   };
 }
 
+/**
+ * A payment reminder rings a second time, at its own time: that is when the accountant calls the
+ * customer, so the early alarm alone is not enough (and one set a few minutes ahead has no early
+ * alarm at all). Null for other kinds, for a reminder with no time (its one alarm is already on
+ * the day) and when the time has passed.
+ */
+export function dueAlarmFor(item: ReminderItem, now = Date.now()): NativeReminder | null {
+  if (item.kind !== 'payment' || !item.time) return null;
+  const fireAt = dueAt(item).getTime();
+  if (fireAt <= now) return null;
+  return {
+    id: `due:${item.key}:${item.date}T${item.time}`,
+    kind: 'alarm',
+    title: 'Payment reminder due',
+    body: `${bodyOf(item)} · ${fmtTime(item.time)}`,
+    fireAt,
+    route: item.route ? JSON.stringify(item.route) : '',
+  };
+}
+
 let asked = false;
 /** Android 13+ needs the person's yes before any notification shows. Asked once per app run. */
 async function ensurePermission(): Promise<boolean> {
@@ -144,7 +164,7 @@ export async function syncReminders(userId: string, items: ReminderItem[]): Prom
   if (!(await ensurePermission())) return;
 
   const now = Date.now();
-  const alarms = items.map((i) => alarmFor(i, settings, now)).filter((r): r is NativeReminder => r !== null);
+  const alarms = items.flatMap((i) => [alarmFor(i, settings, now), dueAlarmFor(i, now)]).filter((r): r is NativeReminder => r !== null);
   await replaceAllReminders(alarms);
 
   const seenKey = `seen.${userId}`;

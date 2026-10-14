@@ -87,6 +87,14 @@ export function displayRole(role: string | null | undefined): string {
   return (role ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * The accountant opens in Payment Reminders (the mobile part of the web's Accountant Panel), and
+ * switches to Task Management and back without signing out.
+ */
+export function isAccountantRole(role: string | null | undefined): boolean {
+  return !!role && role.toLowerCase().trim() === 'accountant';
+}
+
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */
 export function useRawRole(): string | null {
   const { user, session } = useAuth();
