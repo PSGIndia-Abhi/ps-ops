@@ -12,14 +12,16 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchCamera, launchImageLibrary, type ImagePickerResponse } from 'react-native-image-picker';
 import { errorCodes, isErrorWithCode, pick } from '@react-native-documents/picker';
 import { getToken } from '../../auth/tokenStorage';
-import { CalendarIcon, CameraIcon, ClockIcon, DocumentIcon, GalleryIcon, PhoneIcon } from '../../components/icons';
+import { CalendarIcon, CameraIcon, ClockIcon, DocumentIcon, EmailIcon, GalleryIcon, PhoneIcon } from '../../components/icons';
 import { API_BASE_URL } from '../../config/env';
 import { formatINR } from '../../crm/format';
+import { whatsappUrl } from '../../crm/leadHelpers';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
@@ -89,6 +91,27 @@ const factory = (t: CrmTheme) => ({
     height: 44,
     borderRadius: radii.pill,
     backgroundColor: t.successBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  // WhatsApp / Email, side by side under Call Customer.
+  reachRow: { flexDirection: 'row' as const, gap: spacing.sm },
+  reach: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: radii.lg,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.xs,
+  },
+  reachWhatsApp: { backgroundColor: '#E7F8EE' },
+  reachEmail: { backgroundColor: t.primarySoftBg },
+  reachText: { ...typography.button, color: t.textPrimary },
+  reachSmall: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
@@ -185,6 +208,33 @@ type Dialog = null | 'update' | 'complete' | 'reschedule' | 'contact' | 'attach'
  * things the accountant does after a call - Update Reminder (log the outcome, optionally
  * move the date) and Mark Complete. Every action is an existing Task Management endpoint.
  */
+
+const WHATSAPP_GREEN = '#25D366';
+
+/** WhatsApp's speech-bubble mark, in the icon set's 24x24 style. */
+function WhatsAppIcon({ size = 20, color = WHATSAPP_GREEN }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4.3 19.7l1.1-3.9A8.2 8.2 0 1 1 8.6 19l-4.3.7z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      <Path
+        d="M9.2 8.4c.2-.5.5-.5.8-.5h.5c.2 0 .4.1.5.4l.6 1.5c.1.2 0 .4-.1.6l-.5.6c.4.9 1.2 1.7 2.1 2.1l.6-.5c.2-.1.4-.2.6-.1l1.5.6c.3.1.4.3.4.5v.5c0 .3-.1.6-.5.8-.6.3-1.4.4-2.3 0-1.7-.7-3.2-2.2-3.9-3.9-.4-.9-.3-1.7 0-2.3z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
+/** The payment reminder the accountant sends by WhatsApp or email; they can edit it before sending. */
+function paymentMessage(contactName: string, customerName: string, amount: number, invoiceNumber: string) {
+  const pending = amount > 0 ? `${formatINR(amount)} is pending` : 'a payment is pending';
+  const against = invoiceNumber ? ` against invoice ${invoiceNumber}` : '';
+  return `Dear ${contactName || 'Sir/Madam'},
+
+This is a gentle reminder from BestServe that ${pending}${against} for ${customerName}. Kindly arrange the payment at the earliest.
+
+Thank you.`;
+}
+
 export function ReminderDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ReminderStackParamList>>();
   const { reminderId } = useRoute<RouteProp<ReminderStackParamList, 'ReminderDetail'>>().params;
@@ -328,6 +378,21 @@ export function ReminderDetailScreen() {
   const call = (phone: string) =>
     Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`).catch(() => showToast('Could not open the phone dialer.', 'error'));
 
+  // WhatsApp and email open with the reminder already written, ready to edit and send.
+  const customerName = reminder.customer_name || 'your account';
+  const invoiceNumber = reminder.scope === 'INVOICE' ? reminder.invoice_number || '' : '';
+  const whatsapp = (c: CustomerContact) =>
+    Linking.openURL(whatsappUrl(c.phone, paymentMessage(c.name, customerName, outstanding, invoiceNumber))).catch(() =>
+      showToast('Could not open WhatsApp on this device.', 'error'),
+    );
+  const email = (c: CustomerContact) => {
+    const subject = `Payment reminder - ${customerName}${invoiceNumber ? ` (${invoiceNumber})` : ''}`;
+    const body = paymentMessage(c.name, customerName, outstanding, invoiceNumber);
+    Linking.openURL(`mailto:${c.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`).catch(() =>
+      showToast('No email app found on this device.', 'error'),
+    );
+  };
+
   // A file can only be added to a started reminder, so an open one is started first (as Update Reminder does).
   const upload = (file: { uri: string; name: string; type: string } | null) => {
     if (!file) return;
@@ -467,9 +532,17 @@ export function ReminderDetailScreen() {
                   <Text style={styles.phone}>{c.phone}</Text>
                 </View>
                 {i > 0 && (
-                  <Pressable onPress={() => call(c.phone)} accessibilityRole="button" accessibilityLabel={`Call ${c.name}`} style={({ pressed }) => [styles.callSmall, pressed && styles.pressed]}>
-                    <PhoneIcon size={20} color={theme.successText} />
-                  </Pressable>
+                  <>
+                    <Pressable onPress={() => whatsapp(c)} accessibilityRole="button" accessibilityLabel={`WhatsApp ${c.name}`} style={({ pressed }) => [styles.reachSmall, styles.reachWhatsApp, pressed && styles.pressed]}>
+                      <WhatsAppIcon size={20} />
+                    </Pressable>
+                    <Pressable onPress={() => email(c)} accessibilityRole="button" accessibilityLabel={`Email ${c.name}`} style={({ pressed }) => [styles.reachSmall, styles.reachEmail, pressed && styles.pressed]}>
+                      <EmailIcon size={20} color={theme.primary} />
+                    </Pressable>
+                    <Pressable onPress={() => call(c.phone)} accessibilityRole="button" accessibilityLabel={`Call ${c.name}`} style={({ pressed }) => [styles.callSmall, pressed && styles.pressed]}>
+                      <PhoneIcon size={20} color={theme.successText} />
+                    </Pressable>
+                  </>
                 )}
               </View>
             ))
@@ -479,6 +552,18 @@ export function ReminderDetailScreen() {
               <PhoneIcon size={20} color="#FFFFFF" />
               <Text style={styles.callText}>Call Customer</Text>
             </Pressable>
+          )}
+          {!!primary && (
+            <View style={styles.reachRow}>
+              <Pressable onPress={() => whatsapp(primary)} accessibilityRole="button" testID="whatsapp-customer" style={({ pressed }) => [styles.reach, styles.reachWhatsApp, pressed && styles.pressed]}>
+                <WhatsAppIcon size={20} />
+                <Text style={styles.reachText}>WhatsApp</Text>
+              </Pressable>
+              <Pressable onPress={() => email(primary)} accessibilityRole="button" testID="email-customer" style={({ pressed }) => [styles.reach, styles.reachEmail, pressed && styles.pressed]}>
+                <EmailIcon size={20} color={theme.primary} />
+                <Text style={styles.reachText}>Email</Text>
+              </Pressable>
+            </View>
           )}
         </View>
 

@@ -75,6 +75,17 @@ export async function completeTask(id: string, completionNote?: string): Promise
   return data;
 }
 
+/** Sets a reminder on the task (needs a due time); it rings for the assignee only. */
+export async function setTaskReminder(id: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/reminder`);
+  return data;
+}
+
+export async function removeTaskReminder(id: string): Promise<WorkTask> {
+  const { data } = await httpClient.delete<WorkTask>(`/api/work-tasks/${id}/reminder`);
+  return data;
+}
+
 export async function reassignTask(id: string, assignedTo: number, note?: string): Promise<WorkTask> {
   const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/reassign`, {
     assigned_to: assignedTo,

@@ -31,6 +31,7 @@ import {
 } from '@react-native-documents/picker';
 import {
   AlertCircleIcon,
+  BellIcon,
   CalendarIcon,
   CameraIcon,
   CheckCircleIcon,
@@ -151,6 +152,14 @@ const factory = (t: CrmTheme) => ({
   // Shrinks and wraps next to the avatar instead of running past the card edge.
   personName: { ...typography.bodyMedium, color: t.textPrimary, flexShrink: 1 },
   link: { ...typography.bodyMedium, color: t.primary },
+  // A repeating task's dates (Occurrences card): Done / Missed / Skipped, newest first.
+  occHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
+  occTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  occSum: { ...typography.caption, color: t.textMuted },
+  occLine: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.xs },
+  occIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center' as const, justifyContent: 'center' as const },
+  occDate: { ...typography.bodyMedium, color: t.textPrimary },
+  occSub: { ...typography.caption, color: t.textMuted },
   person: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -308,6 +317,14 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
   },
 });
+
+// A repeating task's history notes: "Done for 2026-10-15 - next due …", "Missed 2026-10-15 - …", "Skipped …".
+const OCCURRENCE = /^(Done for|Missed|Skipped) (\d{4}-\d{2}-\d{2})(?: - next due \d{4}-\d{2}-\d{2})?(?::\s*([\s\S]*))?/;
+const OCCURRENCE_KIND = {
+  'Done for': { label: 'Done', color: (t: CrmTheme) => t.successText, bg: (t: CrmTheme) => t.successBg },
+  Missed: { label: 'Missed', color: (t: CrmTheme) => t.dangerText, bg: (t: CrmTheme) => t.dangerBg },
+  Skipped: { label: 'Skipped', color: (t: CrmTheme) => t.textMuted, bg: (t: CrmTheme) => t.surfaceAlt },
+} as const;
 
 export function TaskDetailScreen() {
   const navigation =
@@ -494,6 +511,26 @@ export function TaskDetailScreen() {
     viewer.isAdmin ||
     viewer.team.some(m => m.id === task.assigned_to);
   const canDecideRequest = !!pendingReq && !isRequester && managesTask;
+  // The reminder rings for the assignee only, 30 minutes before and at the due time (phone and web).
+  const canSetReminder = !finished && (task.assigned_to === viewer.id || managesTask);
+  const toggleReminder = () => {
+    if (task.reminder_id) return run(() => api.removeTaskReminder(task.id), 'Reminder removed');
+    if (!task.due_time)
+      return showToast('Give the task a due time first - the reminder rings 30 minutes before it.', 'validation');
+    return run(() => api.setTaskReminder(task.id), 'Reminder set - 30 min before and at the time');
+  };
+  // A repeating task is ONE task that moves to its next date; each date's outcome is in its history.
+  const occurrences = (history ?? [])
+    .map(h => ({ h, m: OCCURRENCE.exec(h.note || '') }))
+    .filter((x): x is { h: TaskHistoryEntry; m: RegExpExecArray } => !!x.m)
+    .map(({ h, m }) => ({
+      id: h.id,
+      kind: m[1] as keyof typeof OCCURRENCE_KIND,
+      date: m[2],
+      note: m[3] || '',
+      by: m[1] === 'Missed' ? '' : h.changed_by_name || '',
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const state = taskState(task);
   const explainFinished = (what: string) =>
     showToast(
@@ -810,6 +847,21 @@ export function TaskDetailScreen() {
               {fmtDateTime(task.due_date, task.due_time)}
             </InfoRow>
             <InfoRow
+              icon={<BellIcon size={18} color={theme.textMuted} />}
+              label="Reminder"
+            >
+              <View style={styles.person}>
+                <Text style={styles.personName}>
+                  {task.reminder_id && !finished ? '30 min before & at the time' : 'Off'}
+                </Text>
+                {canSetReminder && (
+                  <Pressable onPress={toggleReminder} disabled={busy} accessibilityRole="button">
+                    <Text style={styles.link}>{task.reminder_id ? 'Remove' : 'Set'}</Text>
+                  </Pressable>
+                )}
+              </View>
+            </InfoRow>
+            <InfoRow
               icon={<PersonIcon size={18} color={theme.textMuted} />}
               label="Created By"
             >
@@ -874,6 +926,52 @@ export function TaskDetailScreen() {
                 )}
               </View>
             )}
+          </Card>
+        )}
+
+        {tab === 'details' && !!task.series_id && (
+          <Card>
+            <View style={styles.occHead}>
+              <Text style={styles.occTitle}>Occurrences</Text>
+              <Text style={styles.occSum}>
+                {occurrences.filter(o => o.kind === 'Done for').length} done ·{' '}
+                {occurrences.filter(o => o.kind === 'Missed').length} missed
+              </Text>
+            </View>
+            {!finished && (
+              <View style={styles.occLine}>
+                <View style={[styles.occIcon, { backgroundColor: theme.primarySoftBg }]}>
+                  <ClockIcon size={16} color={theme.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.occDate}>{fmtDateShort(String(task.due_date).slice(0, 10))}</Text>
+                  <Text style={styles.occSub}>Current - {STATE_META[state].label}</Text>
+                </View>
+              </View>
+            )}
+            {occurrences.map(o => {
+              const k = OCCURRENCE_KIND[o.kind];
+              return (
+                <View key={o.id} style={styles.occLine}>
+                  <View style={[styles.occIcon, { backgroundColor: k.bg(theme) }]}>
+                    {o.kind === 'Done for' ? (
+                      <CheckCircleIcon size={16} color={k.color(theme)} />
+                    ) : (
+                      <CloseIcon size={16} color={k.color(theme)} />
+                    )}
+                  </View>
+                  <View style={styles.flex}>
+                    <Text style={styles.occDate}>{fmtDateShort(o.date)}</Text>
+                    <Text style={styles.occSub}>
+                      <Text style={{ color: k.color(theme) }}>{k.label}</Text>
+                      {o.by ? ` by ${o.by}` : ''}
+                      {o.note ? ` - ${o.note}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            {history === null && <ActivityIndicator color={theme.primary} />}
           </Card>
         )}
 
@@ -1082,7 +1180,7 @@ export function TaskDetailScreen() {
                   const done = await api.completeTask(task.id);
                   notifyLocal(done, 'completed');
                   return done;
-                }, null)
+                }, task.series_id ? 'Done for this date - moved to its next date' : null)
               }
             />
           </View>
@@ -1253,8 +1351,8 @@ export function TaskDetailScreen() {
         title="Skip this occurrence?"
       >
         <Text style={styles.sheetText}>
-          Only this one is cancelled — the schedule and its other occurrences
-          stay as they are.
+          {fmtDateShort(String(task.due_date).slice(0, 10))} is skipped and the
+          task moves to its next date. The schedule stays as it is.
         </Text>
         <TextInput
           value={reason}

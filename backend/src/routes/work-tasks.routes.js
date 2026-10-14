@@ -10,7 +10,8 @@ const { getTeamUserIds, today: dbToday } = require("../utils/hierarchy");
 const {
   TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
 } = require("../utils/workTasks");
-const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate } = require("../utils/workTaskRecurrence");
+const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate, advanceSeriesTask } = require("../utils/workTaskRecurrence");
+const { REMINDER_ID_SQL, TASK_REMINDER_MODULE, addReminder, removeReminder, followTask } = require("../utils/taskReminders");
 const { syncReminders } = require("../services/push.service");
 
 class HttpError extends Error {
@@ -253,6 +254,7 @@ router.post("/reschedule-requests/:rid/approve", auth, requireRealUser, async (r
       if (!result.affectedRows) throw new HttpError(409, "This request was just changed by someone else. Reload and try again.");
       await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [request.to_due_date, request.to_due_time, task.id]);
       await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
+      await followTask(conn, task.id);
     });
     const [[row]] = await pool.query(`${REQUEST_SQL} WHERE r.id = ?`, [request.id]);
     syncReminders([task.assigned_to]); // the phone re-arms its alarms
@@ -358,6 +360,17 @@ router.get("/notifications", auth, requireRealUser, async (req, res) => {
       [...incomingParams, limit]
     );
 
+    // My task reminders (jobs/taskReminder.cron.js): 30 minutes before and at the due time.
+    const [reminders] = await pool.query(
+      `SELECT n.id, n.type, n.message, n.created_at AS at, n.entity_id AS task_id, t.title AS task_title
+         FROM notifications n
+         JOIN work_tasks t ON t.id = n.entity_id
+        WHERE n.user_id = ? AND n.entity_type = 'work_task' AND n.type IN ('TASK_REMINDER_SOON','TASK_REMINDER_DUE')
+          AND n.created_at >= ${since}
+        ORDER BY n.created_at DESC LIMIT ?`,
+      [me, limit]
+    );
+
     const TYPE = {
       CREATE: "assigned", REASSIGN: "reassigned", RESCHEDULE: "rescheduled", UPDATE: "edited", REOPEN: "reopened",
       SKIP: "skipped", CANCEL: "cancelled", ATTACH: "attached", START: "started", COMPLETE: "completed",
@@ -381,6 +394,10 @@ router.get("/notifications", auth, requireRealUser, async (req, res) => {
         id: `d${r.id}`, type: r.status === "APPROVED" ? "request_approved" : "request_rejected", at: r.decided_at,
         task_id: r.task_id, task_title: r.task_title, actor_id: r.decided_by, actor_name: r.decided_by_name,
         note: r.decision_note, to_due_date: r.to_due_date, to_due_time: r.to_due_time,
+      })),
+      ...reminders.map((n) => ({
+        id: `n${n.id}`, type: n.type === "TASK_REMINDER_SOON" ? "reminder_soon" : "reminder_due", at: n.at,
+        task_id: n.task_id, task_title: n.task_title, actor_id: null, actor_name: "Reminder", note: n.message,
       })),
       ...incoming.map((r) => ({
         id: `r${r.id}`, type: "request_received", at: r.created_at, task_id: r.task_id, task_title: r.task_title,
@@ -433,6 +450,12 @@ router.get("/", auth, requireRealUser, async (req, res) => {
       params.push(visibleIds, Number(req.user.id));
     }
 
+    // A task's reminder is a work_tasks row too (utils/taskReminders.js): left out of every list
+    // unless asked for - only the phone's reminder engine asks, to arm its alarms.
+    if (req.query.include_task_reminders !== "1") {
+      where.push("NOT (t.source_module <=> ?)");
+      params.push(TASK_REMINDER_MODULE);
+    }
     if (req.query.status) { where.push("t.status = ?"); params.push(String(req.query.status)); }
     if (req.query.priority) { where.push("t.priority = ?"); params.push(String(req.query.priority)); }
     if (req.query.task_type) { where.push("t.task_type = ?"); params.push(String(req.query.task_type)); }
@@ -451,6 +474,7 @@ router.get("/", auth, requireRealUser, async (req, res) => {
     const [rows] = await pool.query(
       `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
               (t.status IN ('OPEN','IN_PROGRESS','PAUSED') AND t.due_date < CURDATE()) AS is_overdue,
+              ${REMINDER_ID_SQL} AS reminder_id,
               (SELECT r.id FROM work_task_reschedule_requests r
                 WHERE r.task_id = t.id AND r.status = 'PENDING'
                 ORDER BY r.created_at DESC LIMIT 1) AS pending_reschedule_request_id
@@ -627,6 +651,7 @@ router.put("/:id", auth, requireRealUser, async (req, res) => {
         [next.title, next.description, next.task_type, next.priority, task.id]
       );
       await logHistory(conn, task.id, "UPDATE", { changedBy: req.user.id });
+      await followTask(conn, task.id);
       await conn.commit();
     } catch (err) {
       await conn.rollback().catch(() => {});
@@ -763,14 +788,20 @@ router.post("/:id/complete", auth, requireRealUser, async (req, res) => {
     const note = optionalText(req.body?.completion_note);
 
     await inTransaction(async (conn) => {
+      // A repeating task is one task: done for this date, it moves on to its next date.
+      if (await advanceSeriesTask(conn, task, req.user.id, { note })) {
+        await followTask(conn, task.id);
+        return;
+      }
       const [result] = await conn.query(
         "UPDATE work_tasks SET status = 'COMPLETED', completed_at = NOW(), completed_by = ?, completion_note = ? WHERE id = ? AND status = ?",
         [req.user.id, note, task.id, task.status]
       );
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "COMPLETE", { fromStatus: task.status, toStatus: "COMPLETED", note, changedBy: req.user.id });
+      await followTask(conn, task.id);
     });
-    syncReminders([task.assigned_to]); // its alarms are dropped
+    syncReminders([task.assigned_to]); // its alarms are dropped (or moved to the next date)
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to complete task");
@@ -798,6 +829,7 @@ router.post("/:id/reopen", auth, requireRealUser, async (req, res) => {
       );
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "REOPEN", { fromStatus: "COMPLETED", toStatus: "IN_PROGRESS", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id });
+      await followTask(conn, task.id); // its reminder comes back
     });
     syncReminders([task.assigned_to]);
     res.json(await loadTask(pool, task.id));
@@ -875,6 +907,7 @@ router.post("/:id/reassign", auth, requireRealUser, async (req, res) => {
       );
       if (!result.affectedRows) throw new HttpError(409, "This task was just changed by someone else. Reload and try again.");
       await logHistory(conn, task.id, "REASSIGN", { note: historyNote.slice(0, 500), changedBy: req.user.id });
+      await followTask(conn, task.id); // its reminder goes to the new assignee
     });
     syncReminders([task.assigned_to, newAssignee]); // off one phone, onto the other
     res.json(await loadTask(pool, task.id));
@@ -909,6 +942,7 @@ router.post("/:id/reschedule", auth, requireRealUser, async (req, res) => {
         [req.user.id, task.id]
       );
       await logHistory(conn, task.id, "RESCHEDULE", { note: historyNote.slice(0, 500), changedBy: req.user.id });
+      await followTask(conn, task.id);
     });
     syncReminders([task.assigned_to]); // the alarms move to the new time
     res.json(await loadTask(pool, task.id));
@@ -928,6 +962,11 @@ router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
     const reason = optionalText(req.body?.reason);
 
     await inTransaction(async (conn) => {
+      // One task per repeating series: skipping this date moves it on to the next one.
+      if (await advanceSeriesTask(conn, task, req.user.id, { skipped: true, note: reason })) {
+        await followTask(conn, task.id);
+        return;
+      }
       const [result] = await conn.query(
         "UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ? AND status = ?",
         [task.id, task.status]
@@ -936,6 +975,7 @@ router.post("/:id/skip", auth, requireRealUser, async (req, res) => {
       await logHistory(conn, task.id, "SKIP", {
         fromStatus: task.status, toStatus: "CANCELLED", note: reason ? reason.slice(0, 500) : null, changedBy: req.user.id,
       });
+      await followTask(conn, task.id);
     });
     syncReminders([task.assigned_to]);
     res.json(await loadTask(pool, task.id));
@@ -964,6 +1004,7 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
       await conn.query("DELETE FROM work_task_history WHERE task_id = ?", [task.id]);
       const [result] = await conn.query("DELETE FROM work_tasks WHERE id = ?", [task.id]);
       if (!result.affectedRows) throw new HttpError(404, "Task not found");
+      await removeReminder(conn, task.id);
     });
     // Files go after the DB commit; a failed removal leaves an unreferenced file, never a broken task.
     for (const { object_key } of attachments) {
@@ -977,6 +1018,41 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     sendError(res, err, "Failed to delete task");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reminder on a task (utils/taskReminders.js) -- anyone who works the task or manages it may set
+// or remove it; it always rings for the task's ASSIGNEE only, 30 minutes before and at the due
+// time, on the web and the phone (the phone re-arms straight away through the sync push).
+// ---------------------------------------------------------------------------
+
+// POST /api/work-tasks/:id/reminder
+router.post("/:id/reminder", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    if (task.source_module === TASK_REMINDER_MODULE) throw new HttpError(400, "This is already a reminder");
+    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot set a reminder on this task");
+    assertNotFinished(task, "set a reminder on");
+    if (!task.due_time) throw new HttpError(400, "Give the task a due time first - the reminder rings 30 minutes before it.");
+    await inTransaction((conn) => addReminder(conn, task, req.user.id));
+    syncReminders([task.assigned_to]);
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to set the reminder");
+  }
+});
+
+// DELETE /api/work-tasks/:id/reminder
+router.delete("/:id/reminder", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    if (!canManageTask(req, task)) throw new HttpError(403, "You cannot change this task's reminder");
+    await removeReminder(pool, task.id);
+    syncReminders([task.assigned_to]);
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to remove the reminder");
   }
 });
 

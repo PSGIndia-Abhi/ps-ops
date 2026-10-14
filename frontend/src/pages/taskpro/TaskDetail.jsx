@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   FiAlignLeft,
   FiArrowRight,
+  FiBell,
+  FiBellOff,
   FiCalendar,
   FiCheck,
   FiCheckCircle,
@@ -57,11 +59,13 @@ import {
   pauseTask,
   reassignTask,
   rejectRequest,
+  removeTaskReminder,
   reopenTask,
   requestReschedule,
   rescheduleTask,
   resumeTask,
   scheduleDelete,
+  setTaskReminder,
   skipTask,
   startTask,
   undoDelete,
@@ -209,6 +213,75 @@ function Timeline({ history, ready }) {
               </li>
             );
           })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+// A repeating task is ONE task that moves to its next date; the server writes each date's outcome
+// into its history as "Done for 2026-10-15 - next due …", "Missed 2026-10-15 - …" or "Skipped …".
+const OCCURRENCE = /^(Done for|Missed|Skipped) (\d{4}-\d{2}-\d{2})(?: - next due \d{4}-\d{2}-\d{2})?(?::\s*([\s\S]*))?/;
+const OCCURRENCE_KIND = {
+  "Done for": { label: "Done", color: "#16a34a", soft: "#e7f7ee", icon: FiCheckCircle },
+  Missed: { label: "Missed", color: "#dc2626", soft: "#fdecec", icon: FiX },
+  Skipped: { label: "Skipped", color: "#64748b", soft: "#eef2f7", icon: FiSkipForward },
+};
+
+function Occurrences({ task, history, ready }) {
+  const items = useMemo(
+    () =>
+      history
+        .map((h) => ({ h, m: OCCURRENCE.exec(h.note || "") }))
+        .filter((x) => x.m)
+        .map(({ h, m }) => ({ id: h.id, kind: OCCURRENCE_KIND[m[1]], date: m[2], note: m[3] || "", by: m[1] === "Missed" ? "" : h.changed_by_name, at: h.changed_at }))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [history],
+  );
+  const done = items.filter((i) => i.kind.label === "Done").length;
+  const missed = items.filter((i) => i.kind.label === "Missed").length;
+  const finished = task.status === "COMPLETED" || task.status === "CANCELLED";
+  return (
+    <section className="tp-card">
+      <div className="tp-card-head">
+        <h3>
+          <FiRepeat style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          Occurrences
+        </h3>
+        <small className="tp-occ-sum">
+          {done} done · {missed} missed
+        </small>
+      </div>
+      {!ready && [0, 1].map((i) => <Skeleton key={i} height={36} style={{ marginBottom: 8 }} />)}
+      {ready && (
+        <ol className="tp-occ">
+          {!finished && (
+            <li className="tp-occ-row now">
+              <span className="tp-occ-icon" style={{ background: "#eef2fb", color: "#2563eb" }}>
+                <FiClock />
+              </span>
+              <div>
+                <strong>{fmtDate(task.due_date)}</strong>
+                <small>Current - {STATUS[task.status]?.label || task.status}</small>
+              </div>
+            </li>
+          )}
+          {items.map((o) => (
+            <li key={o.id} className="tp-occ-row">
+              <span className="tp-occ-icon" style={{ background: o.kind.soft, color: o.kind.color }}>
+                <o.kind.icon />
+              </span>
+              <div>
+                <strong>{fmtDate(o.date)}</strong>
+                <small>
+                  <span style={{ color: o.kind.color, fontWeight: 600 }}>{o.kind.label}</span>
+                  {o.by ? ` by ${o.by}` : ""}
+                  {o.note ? ` - ${o.note}` : ""}
+                </small>
+              </div>
+            </li>
+          ))}
+          {items.length === 0 && finished && <li className="tp-timeline-empty">No dates recorded.</li>}
         </ol>
       )}
     </section>
@@ -1054,12 +1127,32 @@ export default function TaskDetail() {
     reloadComments();
   }
 
+  // The reminder rings for the assignee only, 30 minutes before and at the due time (web and phone).
+  async function toggleReminder() {
+    if (task.reminder_id) {
+      await run(() => removeTaskReminder(task.id), { title: "Reminder removed" });
+      return;
+    }
+    if (!task.due_time) {
+      toast.push({ type: "error", title: "Add a due time first", text: "The reminder rings 30 minutes before the task's due time. Reschedule it with a time." });
+      return;
+    }
+    await run(() => setTaskReminder(task.id), {
+      title: "Reminder set",
+      text: isAssignee ? "You'll be reminded 30 minutes before and at the due time." : `${task.assigned_to_name || "The assignee"} will be reminded 30 minutes before and at the due time.`,
+    });
+  }
+
   async function doComplete() {
     const ok = await run(() => completeTask(task.id));
     if (ok) {
       setBurst(true);
       setTimeout(() => setBurst(false), 1700);
-      toast.push({ type: "success", title: "Task completed", text: task.title });
+      toast.push(
+        task.series_id
+          ? { type: "success", title: "Done for this date", text: "The task moved to its next date." }
+          : { type: "success", title: "Task completed", text: task.title },
+      );
     }
   }
 
@@ -1151,6 +1244,12 @@ export default function TaskDetail() {
                   Recurring
                 </span>
               )}
+              {task.reminder_id && !finished && (
+                <span className="tp-tag tp-tag-reminder">
+                  <FiBell style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  Reminder on
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1199,6 +1298,17 @@ export default function TaskDetail() {
                 title={pendingReq ? "Waiting for a decision on your request" : "Ask for a new due date"}
               >
                 <FiCalendar /> {pendingReq ? "Reschedule requested" : "Request reschedule"}
+              </button>
+            )}
+            {!finished && (isAssignee || managesTask) && (
+              <button
+                type="button"
+                className={`tp-btn outline${task.reminder_id ? " tp-btn-reminder-on" : ""}`}
+                onClick={toggleReminder}
+                disabled={busy}
+                title={task.reminder_id ? "Rings 30 minutes before and at the due time - click to remove" : "Remind the assignee 30 minutes before and at the due time"}
+              >
+                {task.reminder_id ? <FiBellOff /> : <FiBell />} {task.reminder_id ? "Remove reminder" : "Set reminder"}
               </button>
             )}
             {task.status === "IN_PROGRESS" && panelHidden && canWork && (
@@ -1576,6 +1686,7 @@ export default function TaskDetail() {
           {showPanel && (
             <StartedPanel key={task.started_at} task={task} busy={busy} onClose={() => setPanelHidden(true)} onSaveProgress={doSaveProgress} onComplete={() => setDialog("complete")} />
           )}
+          {task.series_id && <Occurrences task={task} history={history} ready={historyReady} />}
           <Timeline history={history} ready={historyReady} />
 
           <section className="tp-card">
@@ -1640,9 +1751,13 @@ export default function TaskDetail() {
         <ConfirmDialog
           tone="success"
           icon={FiCheckCircle}
-          title="Complete this task?"
-          text="The task moves to Completed. You can't add progress updates after this."
-          confirmLabel="Complete Task"
+          title={task.series_id ? "Done for this date?" : "Complete this task?"}
+          text={
+            task.series_id
+              ? `It is marked done for ${fmtDate(task.due_date)} and moves to its next date, as the same task. Every date stays under Occurrences.`
+              : "The task moves to Completed. You can't add progress updates after this."
+          }
+          confirmLabel={task.series_id ? "Mark Done" : "Complete Task"}
           onClose={() => setDialog(null)}
           onConfirm={doComplete}
         />
@@ -1652,7 +1767,7 @@ export default function TaskDetail() {
           tone="danger"
           icon={FiSkipForward}
           title="Skip this occurrence?"
-          text="This one occurrence is cancelled. The schedule and every other occurrence are untouched."
+          text={`${fmtDate(task.due_date)} is skipped and the task moves to its next date. The schedule is untouched.`}
           confirmLabel="Skip Occurrence"
           onClose={() => setDialog(null)}
           onConfirm={() => run(() => skipTask(task.id), { title: "Occurrence skipped" })}

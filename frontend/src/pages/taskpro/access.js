@@ -35,4 +35,8 @@ export const TASKPRO_ROLES = [
   "Admin Executive",
 ];
 
+// The Accountant Panel (payments, invoices, payment reminders) belongs to the Collection Executive,
+// who also opens Task Management from its sidebar and comes back with the "Accountant Panel" link.
+export const ACCOUNTANT_PANEL_ROLES = ["Collection Executive"];
+
 export const TASKPRO_HOME = "/taskpro";

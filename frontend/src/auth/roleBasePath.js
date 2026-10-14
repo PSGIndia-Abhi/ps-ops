@@ -12,7 +12,8 @@ export const ROLE_HOME = {
   branch_admin: "/admin",
   supervisor: "/supervisor",
   technician: "/technician",
-  accountant: "/accountant",
+  // The Accountant Panel belongs to "Collection Executive" (below); the old "accountant" role has no
+  // panel of its own any more and falls through to /staff.
   client: "/client",
   temporary_worker: "/temp",
   staff: "/staff",
@@ -46,7 +47,8 @@ export const ROLE_HOME = {
   "Quality Head": "/taskpro",
   "Accounts Head": "/taskpro",
   "Accounts Executive": "/taskpro",
-  "Collection Executive": "/taskpro",
+  // Works in the Accountant Panel (payments); Task Management is a link from its sidebar.
+  "Collection Executive": "/accountant",
   "Admin Executive": "/taskpro",
 };
 

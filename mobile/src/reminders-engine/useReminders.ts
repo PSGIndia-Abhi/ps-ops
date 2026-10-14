@@ -60,7 +60,7 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
       do {
         again.current = false;
         try {
-          const tasks = await myUpcomingTasks(myId);
+          const tasks = await myUpcomingTasks(myId, { withTaskReminders: true });
           await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
           askExactOnce();
         } catch {

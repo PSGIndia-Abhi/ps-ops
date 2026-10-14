@@ -88,11 +88,11 @@ export function displayRole(role: string | null | undefined): string {
 }
 
 /**
- * The accountant opens in Payment Reminders (the mobile part of the web's Accountant Panel), and
- * switches to Task Management and back without signing out.
+ * The Collection Executive opens in Payment Reminders (the mobile part of the web's Accountant
+ * Panel, which is theirs), and switches to Task Management and back without signing out.
  */
 export function isAccountantRole(role: string | null | undefined): boolean {
-  return !!role && role.toLowerCase().trim() === 'accountant';
+  return !!role && role.toLowerCase().trim() === 'collection executive';
 }
 
 /** The signed-in user's role exactly as the backend sent it (no normalizing). */

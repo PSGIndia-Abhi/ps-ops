@@ -126,7 +126,7 @@ async function syncNow(): Promise<void> {
     const session = await loadSession();
     const myId = session?.userId ? String(session.userId) : '';
     if (!myId) return;
-    const tasks = await myUpcomingTasks(myId);
+    const tasks = await myUpcomingTasks(myId, { withTaskReminders: true });
     await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
   } catch {
     // Offline or signed out: the alarms already armed stay; the next sync catches up.

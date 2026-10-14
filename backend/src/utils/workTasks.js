@@ -1,6 +1,7 @@
 // Shared helpers for the generic Task Management module (work_tasks and its
 // work_task_* tables). Separate from the Accountant module's `tasks` table.
 
+const { REMINDER_ID_SQL } = require("./taskReminders");
 const PERMISSIONS = require("../access/permissions");
 const { getTeamUserIds } = require("./hierarchy");
 
@@ -53,7 +54,8 @@ async function loadTask(executor, id) {
   // more tables that also have an `id` column, so the bare names in
   // TASK_COLUMNS would be ambiguous the moment they're joined in.
   const [[row]] = await executor.query(
-    `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name
+    `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
+            ${REMINDER_ID_SQL} AS reminder_id
        FROM work_tasks t
        LEFT JOIN users ua ON ua.id = t.assigned_to
        LEFT JOIN users uc ON uc.id = t.created_by

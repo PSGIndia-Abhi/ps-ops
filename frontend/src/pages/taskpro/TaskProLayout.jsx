@@ -21,9 +21,10 @@ import {
   FiUser,
   FiRefreshCw,
 } from "react-icons/fi";
-import { LEAD_ROLES, TASKPRO_HOME } from "./access";
+import { ACCOUNTANT_PANEL_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
+import TaskReminderAlerts from "./TaskReminderAlerts";
 import { countsFor } from "./selectors";
 import { refreshNotifications, useIncomingRequests, useNotifications, useTaskStore } from "./tasksApi";
 import { MarkAllRead, NotificationRow } from "./Notifications";
@@ -215,6 +216,13 @@ function TaskProShell() {
               <span className="tp-nav-label">Lead Management</span>
             </button>
           )}
+          {/* The Collection Executive comes here from the Accountant Panel: the same way back. */}
+          {ACCOUNTANT_PANEL_ROLES.includes(localStorage.getItem("role")) && (
+            <button type="button" className="tp-nav-item" onClick={() => navigate("/accountant")} title={collapsed ? "Accountant Panel" : undefined}>
+              <FiArrowLeft className="tp-nav-icon" />
+              <span className="tp-nav-label">Accountant Panel</span>
+            </button>
+          )}
           <button type="button" className="tp-nav-item tp-exit" onClick={logout} title="Log out">
             <FiLogOut className="tp-nav-icon" />
             <span className="tp-nav-label">Log out</span>
@@ -311,6 +319,8 @@ function TaskProShell() {
           <main className="tp-content">
             <div key={location.pathname} className="tp-page">
               <Outlet />
+              {/* pop-ups for task reminders that have just come due (assignee only) */}
+              <TaskReminderAlerts />
             </div>
           </main>
         </div>

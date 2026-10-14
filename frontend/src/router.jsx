@@ -63,7 +63,7 @@ import TaskProRequests from "./pages/taskpro/RescheduleRequests";
 import TaskProReports from "./pages/taskpro/TaskReports";
 import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
-import { TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
+import { ACCOUNTANT_PANEL_ROLES, TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
 import LeadsLayout from "./pages/leads/LeadsLayout";
 import LeadsHome from "./pages/leads/Home";
 import LeadsList from "./pages/leads/LeadsList";
@@ -222,7 +222,7 @@ const router = createBrowserRouter([
   {
     path: "/accountant",
     element: (
-      <ProtectedRoute allowedRoles={["accountant"]}>
+      <ProtectedRoute allowedRoles={ACCOUNTANT_PANEL_ROLES}>
         <AccountantLayout />
       </ProtectedRoute>
     ),

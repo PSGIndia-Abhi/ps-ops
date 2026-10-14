@@ -34,6 +34,8 @@ export interface ReminderItem {
   time: string | null;
   /** True when someone else set it for you - only those announce themselves with a popup. */
   fromSomeoneElse: boolean;
+  /** False for an item that must not ring (a Task Management task with no reminder set). */
+  ring?: boolean;
   route: ReminderRoute | null;
 }
 
@@ -86,6 +88,7 @@ function bodyOf(item: ReminderItem): string {
 
 /** The alarm for one item, or null when its moment has passed. */
 export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = Date.now()): NativeReminder | null {
+  if (item.ring === false) return null;
   const due = dueAt(item).getTime();
   // Every timed item rings early; dueAlarmFor adds the ring at the time itself where it applies.
   const fireAt = item.time ? due - settings.leadMinutes * 60_000 : due;
@@ -107,18 +110,19 @@ const DUE_TITLE: Partial<Record<ReminderKind, string>> = {
   meeting: 'Meeting now',
   followup: 'Follow-up due',
   personal: '⏰',
+  task: 'Task due now',
 };
 
 /**
- * Payment reminders, lead meetings, lead follow-ups and personal reminders ring a second time, at
- * their own time: that is when the call or the visit happens, so the early alarm alone is not
- * enough (and one set a few minutes ahead has no early alarm at all). Null for Task Management
- * tasks (they ring once, for now), for an item with no time (its one alarm is already on the day)
- * and when the time has passed.
+ * Payment reminders, lead meetings, lead follow-ups, personal reminders and Task Management tasks
+ * with a reminder set ring a second time, at their own time: that is when the call, the visit or
+ * the work happens, so the early alarm alone is not enough (and one set a few minutes ahead has no
+ * early alarm at all). Null for an item that must not ring, for one with no time (its one alarm is
+ * already on the day) and when the time has passed.
  */
 export function dueAlarmFor(item: ReminderItem, now = Date.now()): NativeReminder | null {
   const title = DUE_TITLE[item.kind];
-  if (!title || !item.time) return null;
+  if (!title || !item.time || item.ring === false) return null;
   const fireAt = dueAt(item).getTime();
   if (fireAt <= now) return null;
   return {

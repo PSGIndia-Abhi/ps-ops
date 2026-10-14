@@ -543,7 +543,9 @@
 .ac-fu-row-focus td { background: #eff6ff; }
 
 /* dashboard "Today's Follow-ups" */
-.ac-fu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+/* minmax(0, 1fr): a long name is cut with "..." instead of pushing the time and badge out of the card. */
+.ac-fu-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.ac-fu-list li { min-width: 0; }
 .ac-fu-list button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 8px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
 .ac-fu-list button:hover { background: #f8fafc; }
 .ac-fu-list-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; background: #ffedd5; color: #c2410c; }
