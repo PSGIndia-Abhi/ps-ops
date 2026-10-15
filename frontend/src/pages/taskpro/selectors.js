@@ -3,7 +3,16 @@ import { deptOf } from "./hierarchy";
 
 // Still to do: not started, being worked on, or paused.
 export const isActive = (t) => t.status === "OPEN" || t.status === "IN_PROGRESS" || t.status === "PAUSED";
-export const isOverdue = (t) => isActive(t) && isPastDue(t.due_date);
+// Past its date - or a repeating task with a missed day still on today's date (the server's rule:
+// once today's is done it moves on, and only the Missed flag stays).
+export const isOverdue = (t) => isActive(t) && (isPastDue(t.due_date) || (!!t.missed_dates?.length && t.due_date <= todayStr()));
+
+/** "Missed 15 Oct" / "Missed 2 days" for a repeating task's missed dates (last 7 days, not done late), or "". */
+export const missedText = (t, fmt) => {
+  const m = t.missed_dates || [];
+  if (!m.length) return "";
+  return m.length === 1 ? `Missed ${fmt(m[0])}` : `Missed ${m.length} days`;
+};
 
 /**
  * The list screens: one component, six filters. `tasks` is already the full

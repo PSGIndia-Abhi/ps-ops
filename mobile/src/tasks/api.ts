@@ -75,9 +75,15 @@ export async function completeTask(id: string, completionNote?: string): Promise
   return data;
 }
 
-/** Sets a reminder on the task (needs a due time); it rings for the assignee only. */
-export async function setTaskReminder(id: string): Promise<WorkTask> {
-  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/reminder`);
+/** Sets (or moves) the task's reminder to ring once at `date` 'YYYY-MM-DD', `time` 'HH:MM' - for the assignee only. */
+export async function setTaskReminder(id: string, date: string, time: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/reminder`, { date, time });
+  return data;
+}
+
+/** A repeating task's missed date, marked done afterwards. */
+export async function markDoneLate(id: string, date: string, note?: string): Promise<WorkTask> {
+  const { data } = await httpClient.post<WorkTask>(`/api/work-tasks/${id}/done-late`, { date, note: note || undefined });
   return data;
 }
 

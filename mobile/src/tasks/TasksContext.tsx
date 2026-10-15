@@ -22,7 +22,8 @@ import type { TeamMember, WorkTask } from './types';
 import { NotificationToast } from './ui/NotificationToast';
 
 /** How often the task list is quietly re-fetched to pick up other people's changes. */
-const POLL_MS = 60000;
+// While the app is open; returning to it, pulling down and every action refresh at once anyway.
+const POLL_MS = 120000;
 
 /**
  * The signed-in person plus one shared, cached task list - the mobile twin

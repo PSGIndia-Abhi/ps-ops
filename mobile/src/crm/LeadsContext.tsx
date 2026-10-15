@@ -262,7 +262,9 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
   const waiting = outbox.some(i => !i.error);
   useEffect(() => {
     if (!waiting) return;
+    // Retried only while the app is open; reopening the app or the network coming back sends it at once.
     const timer = setInterval(() => {
+      if (AppState.currentState !== 'active') return;
       syncOutbox().then(sent => {
         if (sent) load();
       });

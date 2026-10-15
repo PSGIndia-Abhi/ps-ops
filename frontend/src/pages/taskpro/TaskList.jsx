@@ -4,11 +4,11 @@ import { FiAlertCircle, FiArrowRight, FiCalendar, FiChevronRight, FiClock, FiFil
 import { TASKPRO_HOME } from "./access";
 import { PRIORITY, STATUS } from "./data";
 import PeopleFilters from "./Filters";
-import { daysFromToday, dueInfo, fmtDateTime, todayStr } from "./format";
+import { daysFromToday, dueInfo, fmtDate, fmtDateTime, todayStr } from "./format";
 import { assignedByText, deptOf } from "./hierarchy";
 import NotStartedSeries from "./NotStartedSeries";
 import SeriesDialog from "./SeriesDialog";
-import { COMPLETED_PERIODS, completedIn, FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, readFilters, withParam } from "./selectors";
+import { COMPLETED_PERIODS, completedIn, FILTER_KEYS, LIST_MODES, applyPeopleFilters, availableScopes, isOverdue, missedText, readFilters, withParam } from "./selectors";
 import { useTaskStore } from "./tasksApi";
 import { useViewer } from "./viewerContext";
 import { Avatar, EmptyState, PriorityBadge, Skeleton, StatusBadge } from "./ui";
@@ -60,6 +60,7 @@ function TaskRow({ task, index, showAssignee, dept }) {
               <FiRepeat /> Recurring
             </span>
           )}
+          {!!missedText(task, fmtDate) && <span className="tp-missed">{missedText(task, fmtDate)}</span>}
         </div>
       </div>
 

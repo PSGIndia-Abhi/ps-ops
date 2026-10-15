@@ -216,6 +216,7 @@ export default function TaskReports() {
                   <th className="num">Paused</th>
                   <th className="num">Open</th>
                   <th className="num">Overdue</th>
+                  <th className="num" title="Repeating tasks: days missed in the last 7 days">Missed days</th>
                   <th className="num">Completion</th>
                 </tr>
               </thead>
@@ -238,6 +239,7 @@ export default function TaskReports() {
                     <td className="num">{g.stats.paused}</td>
                     <td className="num">{g.stats.open}</td>
                     <td className={`num ${g.stats.overdue ? "tp-tone-late" : ""}`}>{g.stats.overdue}</td>
+                    <td className={`num ${g.stats.missed ? "tp-tone-late" : ""}`}>{g.stats.missed}</td>
                     <td className="num">
                       <span className="tp-rep-rate">
                         <span className="tp-rep-rate-track">

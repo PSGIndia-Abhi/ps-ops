@@ -330,7 +330,7 @@ export function LeadFollowUpScreen() {
 
   return (
     <FormShell title="Schedule follow-up" subtitle={name} error={error} submitLabel="Save follow-up" saving={saving} onSubmit={onSave}>
-      <Text style={styles.help}>Your phone rings 30 minutes before and again at the time, so you do not miss it.</Text>
+      <Text style={styles.help}>Your phone rings at the time you set, so you do not miss it.</Text>
       <FieldRow>
         <PickField label="Next follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />

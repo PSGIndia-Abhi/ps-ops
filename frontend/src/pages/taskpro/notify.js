@@ -43,9 +43,10 @@ const KINDS = {
   },
   request_approved: { icon: FiCheckCircle, tone: "green", text: (e) => ["approved your request to move", `to ${date(e)}`] },
   request_rejected: { icon: FiX, tone: "red", text: () => ["rejected your request to move", ""] },
-  // A reminder set on the task (shown as "Reminder · <task> is due in 30 minutes").
+  // A reminder set on the task, at its own time ("Reminder · <task>"). reminder_soon is only on
+  // older notifications, from when reminders also rang 30 minutes before.
   reminder_soon: { icon: FiBell, tone: "amber", text: () => ["·", "is due in 30 minutes"] },
-  reminder_due: { icon: FiBell, tone: "red", text: () => ["·", "is due now"] },
+  reminder_due: { icon: FiBell, tone: "red", text: () => ["·", ""] },
 };
 
 // The server writes a due-date change as "Due 2026-09-25 10:00:00 moved to

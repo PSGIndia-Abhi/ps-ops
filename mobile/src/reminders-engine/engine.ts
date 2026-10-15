@@ -6,7 +6,8 @@ import { replaceAllReminders, showReminderNow, type NativeReminder } from './nat
 /**
  * The shared reminders engine. Any module (lead meetings and follow-ups, Task Management, payment
  * follow-ups) describes what is coming up as ReminderItems; the engine turns them into:
- *  - an ALARM `leadMinutes` before each one (09:00 on the day for items with no time), and
+ *  - an ALARM exactly at each one's date and time - once, no early warning (09:00 on the day for
+ *    an item with no time), and
  *  - a POPUP the first time an item set for you by someone else is seen.
  * Each sync hands the phone the complete list, so rescheduled items move and finished or cancelled
  * ones simply drop out.
@@ -86,12 +87,14 @@ function bodyOf(item: ReminderItem): string {
   return [item.detail, item.title].filter(Boolean).join(' · ');
 }
 
-/** The alarm for one item, or null when its moment has passed. */
+/**
+ * The day alarm for an item with no time of its own (09:00 on its day), or null. A timed item rings
+ * once, exactly at its time - dueAlarmFor - with no early warning.
+ */
 export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = Date.now()): NativeReminder | null {
-  if (item.ring === false) return null;
+  if (item.ring === false || item.time) return null;
   const due = dueAt(item).getTime();
-  // Every timed item rings early; dueAlarmFor adds the ring at the time itself where it applies.
-  const fireAt = item.time ? due - settings.leadMinutes * 60_000 : due;
+  const fireAt = due;
   if (fireAt <= now) return null;
   const text = KIND_TEXT[item.kind];
   return {
@@ -104,21 +107,20 @@ export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = D
   };
 }
 
-/** The second alarm's title, for the kinds that ring again at their own time. */
+/** The alarm's title, by kind. */
 const DUE_TITLE: Partial<Record<ReminderKind, string>> = {
-  payment: 'Payment reminder due',
+  payment: 'Payment reminder',
   meeting: 'Meeting now',
   followup: 'Follow-up due',
   personal: '⏰',
-  task: 'Task due now',
+  task: '⏰ Task reminder',
 };
 
 /**
- * Payment reminders, lead meetings, lead follow-ups, personal reminders and Task Management tasks
- * with a reminder set ring a second time, at their own time: that is when the call, the visit or
- * the work happens, so the early alarm alone is not enough (and one set a few minutes ahead has no
- * early alarm at all). Null for an item that must not ring, for one with no time (its one alarm is
- * already on the day) and when the time has passed.
+ * The alarm for a timed item, exactly at its date and time - once: payment reminders, lead
+ * meetings, lead follow-ups, personal reminders and Task Management reminders (each at the date and
+ * time it was set for). Null for an item that must not ring, for one with no time (alarmFor rings
+ * it on the day) and when the time has passed.
  */
 export function dueAlarmFor(item: ReminderItem, now = Date.now()): NativeReminder | null {
   const title = DUE_TITLE[item.kind];

@@ -7,7 +7,9 @@ import { listenForPush, registerForPush } from './push';
 import { myUpcomingTasks, taskToReminder } from './sources';
 
 /** While an app is open its reminders are refreshed this often (plus on open and on return). */
-const SYNC_EVERY_MS = 5 * 60_000;
+// A safety net only: a push re-arms the alarms the moment something changes, and opening the app
+// re-syncs too. So this reads the list just every 15 minutes, and only while the app is open.
+const SYNC_EVERY_MS = 15 * 60_000;
 
 let currentSync: (() => Promise<void>) | null = null;
 /**
@@ -28,7 +30,7 @@ async function askExactOnce() {
   await kvSet('reminders', 'exactAsked', true);
   Alert.alert(
     'Ring reminders on time',
-    'Allow "Alarms & reminders" for BestServe so meeting and task alarms ring exactly 30 minutes before.',
+    'Allow "Alarms & reminders" for BestServe so meeting and task alarms ring at exactly the right time.',
     [
       { text: 'Not now', style: 'cancel' },
       { text: 'Allow', onPress: openExactAlarmSettings },
@@ -106,7 +108,9 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
   useEffect(() => {
     currentSync = sync;
     sync();
-    const timer = setInterval(sync, SYNC_EVERY_MS);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') sync();
+    }, SYNC_EVERY_MS);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') sync();
     });

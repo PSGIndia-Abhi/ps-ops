@@ -242,7 +242,7 @@ export function RemindersScreen() {
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
         {!!data && data.length > 0 && (
-          <Text style={styles.intro}>Your reminders, meetings and follow-ups ring 30 minutes before and again at their time. Tasks ring 30 minutes before.</Text>
+          <Text style={styles.intro}>Your reminders, meetings, follow-ups and task reminders ring at their time.</Text>
         )}
         {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={76} radius={radii.lg} style={{ marginBottom: spacing.sm }} />)}
 
@@ -431,7 +431,7 @@ export function ReminderEditScreen() {
         <View style={styles.how}>
           <BellIcon size={18} color={theme.primary} />
           <Text style={styles.howText}>
-            Your phone rings like an alarm 30 minutes before and again at {fmtTime(time)} on {fmtDateShort(date)} - even with the app closed - with Snooze 10 min and Dismiss.
+            Your phone rings like an alarm at {fmtTime(time)} on {fmtDateShort(date)} - even with the app closed - with Snooze 10 min and Dismiss.
           </Text>
         </View>
 

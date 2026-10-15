@@ -228,12 +228,19 @@ export async function reopenTask(id, reason) {
 }
 
 /**
- * A reminder on the task: it rings for the task's assignee 30 minutes before and at the due time,
- * on the web and the phone (the server keeps it in step with the task). `task.reminder_id` says
- * whether one is set. Needs a due time.
+ * A reminder on the task: it rings once, at the date ('YYYY-MM-DD') and time ('HH:MM') chosen, for
+ * the task's assignee, on the web and the phone. `task.reminder_id` / `task.reminder_at` say whether
+ * one is set and when. Setting it again moves it.
  */
-export async function setTaskReminder(id) {
-  const data = await call("POST", `/api/work-tasks/${id}/reminder`);
+export async function setTaskReminder(id, { date, time }) {
+  const data = await call("POST", `/api/work-tasks/${id}/reminder`, { date, time });
+  patchList(data);
+  return data;
+}
+
+/** A repeating task's missed date, marked done afterwards (clears its Missed flag). */
+export async function markDoneLate(id, date, note) {
+  const data = await call("POST", `/api/work-tasks/${id}/done-late`, { date, note: note || undefined });
   patchList(data);
   return data;
 }

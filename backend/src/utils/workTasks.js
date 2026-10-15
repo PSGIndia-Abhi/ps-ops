@@ -1,7 +1,7 @@
 // Shared helpers for the generic Task Management module (work_tasks and its
 // work_task_* tables). Separate from the Accountant module's `tasks` table.
 
-const { REMINDER_ID_SQL } = require("./taskReminders");
+const { REMINDER_ID_SQL, REMINDER_AT_SQL } = require("./taskReminders");
 const PERMISSIONS = require("../access/permissions");
 const { getTeamUserIds } = require("./hierarchy");
 
@@ -49,20 +49,45 @@ function isValidTime(value) {
 // progress, complete, reassign, reschedule, skip) — including the assignee's
 // and creator's names, exactly like the list endpoint already does, so the
 // UI never has to guess who "assigned_to: 209" is.
+// A repeating task is one task that moves on; a date that passed without it being done is written
+// into its history as "Missed YYYY-MM-DD - ...", and marking it done afterwards as "Done late for
+// YYYY-MM-DD". This lists the missed dates of the last 7 days not yet done late (t = the task's
+// alias), comma separated - the task shows a "Missed" flag for them. Older ones stay in its history.
+const MISSED_DATES_SQL = `(SELECT GROUP_CONCAT(SUBSTRING(h.note, 8, 10) ORDER BY h.id)
+   FROM work_task_history h
+  WHERE h.task_id = t.id AND h.note LIKE 'Missed %'
+    AND SUBSTRING(h.note, 8, 10) >= DATE_FORMAT(CURDATE() - INTERVAL 7 DAY, '%Y-%m-%d')
+    AND NOT EXISTS (SELECT 1 FROM work_task_history d
+                     WHERE d.task_id = t.id AND d.note LIKE CONCAT('Done late for ', SUBSTRING(h.note, 8, 10), '%')))`;
+
+// Overdue: past its date, or a repeating task with a missed day that is still on today's date
+// (once today's is done it moves on, and only the Missed flag remains).
+const IS_OVERDUE_SQL = `(t.status IN ('OPEN','IN_PROGRESS','PAUSED')
+   AND (t.due_date < CURDATE() OR (t.due_date <= CURDATE() AND ${MISSED_DATES_SQL} IS NOT NULL)))`;
+
+/** A task row as the API sends it: the missed dates as a list, overdue as a boolean. */
+function shapeTask(row) {
+  if (!row) return row;
+  const shaped = { ...row, missed_dates: row.missed_dates ? String(row.missed_dates).split(",") : [] };
+  if (row.is_overdue !== undefined) shaped.is_overdue = Boolean(row.is_overdue);
+  return shaped;
+}
+
 async function loadTask(executor, id) {
   // TASK_COLUMNS_T (t.-prefixed), not TASK_COLUMNS: the join brings in two
   // more tables that also have an `id` column, so the bare names in
   // TASK_COLUMNS would be ambiguous the moment they're joined in.
   const [[row]] = await executor.query(
     `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
-            ${REMINDER_ID_SQL} AS reminder_id
+            ${REMINDER_ID_SQL} AS reminder_id, ${REMINDER_AT_SQL} AS reminder_at,
+            ${MISSED_DATES_SQL} AS missed_dates, ${IS_OVERDUE_SQL} AS is_overdue
        FROM work_tasks t
        LEFT JOIN users ua ON ua.id = t.assigned_to
        LEFT JOIN users uc ON uc.id = t.created_by
       WHERE t.id = ?`,
     [id]
   );
-  return row || null;
+  return row ? shapeTask(row) : null;
 }
 
 async function logHistory(executor, taskId, action, { fromStatus = null, toStatus = null, note = null, changedBy = null } = {}) {
@@ -89,4 +114,7 @@ async function resolveVisibleUserIds(executor, req) {
   return [...ids];
 }
 
-module.exports = { TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds };
+module.exports = {
+  TASK_COLUMNS, TASK_COLUMNS_T, MISSED_DATES_SQL, IS_OVERDUE_SQL, shapeTask, isRealDate, isValidTime, loadTask, logHistory, hasPerm,
+  resolveVisibleUserIds,
+};

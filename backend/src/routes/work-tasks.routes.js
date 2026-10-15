@@ -8,10 +8,11 @@ const multer = require("multer");
 const minioClient = require("../lib/minio");
 const { getTeamUserIds, today: dbToday } = require("../utils/hierarchy");
 const {
-  TASK_COLUMNS, TASK_COLUMNS_T, isRealDate, isValidTime, loadTask, logHistory, hasPerm, resolveVisibleUserIds,
+  TASK_COLUMNS, TASK_COLUMNS_T, MISSED_DATES_SQL, IS_OVERDUE_SQL, shapeTask, isRealDate, isValidTime, loadTask, logHistory, hasPerm,
+  resolveVisibleUserIds,
 } = require("../utils/workTasks");
 const { validateRecurrence, generateDueOccurrences, nextOccurrenceDate, advanceSeriesTask } = require("../utils/workTaskRecurrence");
-const { REMINDER_ID_SQL, TASK_REMINDER_MODULE, addReminder, removeReminder, followTask } = require("../utils/taskReminders");
+const { REMINDER_ID_SQL, REMINDER_AT_SQL, TASK_REMINDER_MODULE, setReminder, removeReminder, followTask } = require("../utils/taskReminders");
 const { syncReminders } = require("../services/push.service");
 
 class HttpError extends Error {
@@ -473,8 +474,8 @@ router.get("/", auth, requireRealUser, async (req, res) => {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [rows] = await pool.query(
       `SELECT ${TASK_COLUMNS_T}, ua.name AS assigned_to_name, uc.name AS created_by_name,
-              (t.status IN ('OPEN','IN_PROGRESS','PAUSED') AND t.due_date < CURDATE()) AS is_overdue,
-              ${REMINDER_ID_SQL} AS reminder_id,
+              ${IS_OVERDUE_SQL} AS is_overdue,
+              ${REMINDER_ID_SQL} AS reminder_id, ${REMINDER_AT_SQL} AS reminder_at, ${MISSED_DATES_SQL} AS missed_dates,
               (SELECT r.id FROM work_task_reschedule_requests r
                 WHERE r.task_id = t.id AND r.status = 'PENDING'
                 ORDER BY r.created_at DESC LIMIT 1) AS pending_reschedule_request_id
@@ -485,7 +486,7 @@ router.get("/", auth, requireRealUser, async (req, res) => {
         ORDER BY t.due_date ASC, t.due_time ASC, t.created_at DESC`,
       params
     );
-    res.json(rows.map((r) => ({ ...r, is_overdue: Boolean(r.is_overdue) })));
+    res.json(rows.map(shapeTask));
   } catch (err) {
     sendError(res, err, "Failed to load tasks");
   }
@@ -1022,20 +1023,25 @@ router.delete("/:id", auth, requireRealUser, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Reminder on a task (utils/taskReminders.js) -- anyone who works the task or manages it may set
-// or remove it; it always rings for the task's ASSIGNEE only, 30 minutes before and at the due
-// time, on the web and the phone (the phone re-arms straight away through the sync push).
+// Reminder on a task (utils/taskReminders.js) -- anyone who works the task or manages it may set,
+// move or remove it. It rings once, at the date and time chosen, for the task's ASSIGNEE only, on
+// the web and the phone (the phone re-arms straight away through the sync push).
 // ---------------------------------------------------------------------------
 
-// POST /api/work-tasks/:id/reminder
+// POST /api/work-tasks/:id/reminder   body: { date: 'YYYY-MM-DD', time: 'HH:MM' }
 router.post("/:id/reminder", auth, requireRealUser, async (req, res) => {
   try {
     const task = await loadVisibleTask(req, req.params.id);
     if (task.source_module === TASK_REMINDER_MODULE) throw new HttpError(400, "This is already a reminder");
     if (!canManageTask(req, task)) throw new HttpError(403, "You cannot set a reminder on this task");
     assertNotFinished(task, "set a reminder on");
-    if (!task.due_time) throw new HttpError(400, "Give the task a due time first - the reminder rings 30 minutes before it.");
-    await inTransaction((conn) => addReminder(conn, task, req.user.id));
+    const body = req.body || {};
+    if (!isValidDate(body.date)) throw new HttpError(400, "Pick the reminder date");
+    if (!body.time || !isValidTime(body.time)) throw new HttpError(400, "Pick the reminder time");
+    const time = String(body.time).length === 5 ? `${body.time}:00` : String(body.time);
+    const [[{ future }]] = await pool.query("SELECT TIMESTAMP(?, ?) > NOW() AS future", [body.date, time]);
+    if (!future) throw new HttpError(400, "Pick a reminder time in the future");
+    await inTransaction((conn) => setReminder(conn, task, req.user.id, { date: body.date, time }));
     syncReminders([task.assigned_to]);
     res.json(await loadTask(pool, task.id));
   } catch (err) {
@@ -1053,6 +1059,35 @@ router.delete("/:id/reminder", auth, requireRealUser, async (req, res) => {
     res.json(await loadTask(pool, task.id));
   } catch (err) {
     sendError(res, err, "Failed to remove the reminder");
+  }
+});
+
+// POST /api/work-tasks/:id/done-late   body: { date: 'YYYY-MM-DD', note? }
+// A repeating task's missed date marked done afterwards: written into its history as "Done late for
+// <date>", which clears the Missed flag for that date. The task itself stays on its current date.
+router.post("/:id/done-late", auth, requireRealUser, async (req, res) => {
+  try {
+    const task = await loadVisibleTask(req, req.params.id);
+    requireAssignee(req, task, "mark a missed day done on");
+    const body = req.body || {};
+    if (!isValidDate(body.date)) throw new HttpError(400, "date is required (YYYY-MM-DD)");
+    const note = optionalText(body.note);
+    const [[missed]] = await pool.query(
+      "SELECT id FROM work_task_history WHERE task_id = ? AND note LIKE CONCAT('Missed ', ?, '%') LIMIT 1",
+      [task.id, body.date]
+    );
+    if (!missed) throw new HttpError(400, "That date was not missed");
+    const [[already]] = await pool.query(
+      "SELECT id FROM work_task_history WHERE task_id = ? AND note LIKE CONCAT('Done late for ', ?, '%') LIMIT 1",
+      [task.id, body.date]
+    );
+    if (already) throw new HttpError(400, "That date is already marked done");
+    await inTransaction((conn) =>
+      logHistory(conn, task.id, "DONE_LATE", { note: `Done late for ${body.date}${note ? `: ${note}` : ""}`.slice(0, 500), changedBy: req.user.id })
+    );
+    res.json(await loadTask(pool, task.id));
+  } catch (err) {
+    sendError(res, err, "Failed to mark the day done");
   }
 });
 

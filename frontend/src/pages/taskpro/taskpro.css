@@ -1152,6 +1152,11 @@
   .tp-occ-sum { color: var(--tp-muted); font-size: 12.5px; font-weight: 600; }
   /* Reminder on a task. */
   .tp-tag.tp-tag-reminder { background: #fff4e5; color: #b45309; }
+  /* A repeating task's missed days (last 7, not done late). */
+  .tp-tag.tp-tag-missed { background: #fdecec; color: #b91c1c; }
+  .tp-missed { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; background: #fdecec; color: #b91c1c; font-size: 12px; font-weight: 600; }
+  .tp-occ-row .tp-occ-late { margin-left: auto; height: 30px; padding: 0 10px; font-size: 12.5px; }
+  .tp-btn.danger-text { color: #b91c1c; margin-right: auto; }
   .tp-btn.tp-btn-reminder-on { color: #b45309; border-color: #f5c27a; }
   /* Task reminder pop-ups (TaskReminderAlerts), top right. */
   .tp-alert-stack { position: fixed; top: 84px; right: 20px; z-index: 1300; display: flex; flex-direction: column; gap: 10px; width: 380px; max-width: calc(100vw - 32px); }

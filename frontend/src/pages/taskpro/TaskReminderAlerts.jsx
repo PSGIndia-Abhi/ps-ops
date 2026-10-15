@@ -25,10 +25,10 @@ function saveSeen(ids) {
   }
 }
 
-// Pop-ups for task reminders. The backend (jobs/taskReminder.cron.js) adds a notification for the
-// task's assignee - only them - 30 minutes before (TASK_REMINDER_SOON) and at the due time
-// (TASK_REMINDER_DUE) of a task that has a reminder set; this shows each new one once while Task
-// Management is open (they also stay in its bell). "Open task" goes to the task.
+// Pop-ups for task reminders. The backend (jobs/taskReminder.cron.js) adds a TASK_REMINDER_DUE
+// notification for the task's assignee - only them - at the date and time the reminder was set for;
+// this shows each new one once while Task Management is open (they also stay in its bell). "Open
+// task" goes to the task. (TASK_REMINDER_SOON is only on older notifications.)
 const TYPES = ["TASK_REMINDER_SOON", "TASK_REMINDER_DUE"];
 export default function TaskReminderAlerts() {
   const navigate = useNavigate();
