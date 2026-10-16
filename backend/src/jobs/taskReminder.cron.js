@@ -28,7 +28,8 @@ const day = (ymd) => {
 async function sendTaskDueAlerts() {
   const remindAt = "TIMESTAMP(r.due_date, r.due_time)";
   const [due] = await pool.query(
-    `SELECT r.source_id AS task_id, r.assigned_to, t.title, t.description,
+    `SELECT r.source_id AS task_id, r.assigned_to, t.title, t.description, t.task_type,
+            t.source_module AS task_source, t.source_id AS task_source_id,
             DATE_FORMAT(t.due_date, '%Y-%m-%d') AS task_date, t.due_time AS task_time
        FROM work_tasks r
        JOIN work_tasks t ON t.id = r.source_id
@@ -37,20 +38,24 @@ async function sendTaskDueAlerts() {
         AND ${remindAt} BETWEEN NOW() - INTERVAL ${LOOKBACK_MINUTES} MINUTE AND NOW() - INTERVAL ${DELAY_MINUTES} MINUTE
         AND NOT EXISTS (
           SELECT 1 FROM notifications n
-           WHERE n.type = 'TASK_REMINDER_DUE' AND n.entity_type = 'work_task'
-             AND n.entity_id = r.source_id AND n.user_id = r.assigned_to
-             AND n.created_at >= ${remindAt})`,
+           WHERE n.type = 'TASK_REMINDER_DUE' AND n.user_id = r.assigned_to AND n.created_at >= ${remindAt}
+             AND ((n.entity_type = 'work_task' AND n.entity_id = r.source_id)
+               OR (n.entity_type = 'lead' AND t.source_module = 'LEAD' AND n.entity_id = t.source_id)))`,
     [TASK_REMINDER_MODULE]
   );
 
   for (const t of due) {
     const name = String(t.title || "Task").trim();
+    const when = `${day(t.task_date)}${t.task_time ? `, ${clock(t.task_time)}` : ""}`;
+    // A lead meeting's / follow-up's reminder opens the lead (the web's Lead Management bell, the app).
+    const lead = String(t.task_source || "").toUpperCase() === "LEAD" && !!t.task_source_id;
+    const what = t.task_type === "LEAD_MEETING" ? "Meeting" : t.task_type === "LEAD_FOLLOW_UP" ? "Follow-up" : "Task";
     await notifyUsers([t.assigned_to], {
       type: "TASK_REMINDER_DUE",
       title: `Reminder: ${name}`.slice(0, 255),
-      message: `Task due ${day(t.task_date)}${t.task_time ? `, ${clock(t.task_time)}` : ""}${t.description ? ` · ${t.description}` : ""}`.slice(0, 500),
-      entityType: "work_task",
-      entityId: t.task_id,
+      message: `${what} due ${when}${t.description ? ` · ${t.description}` : ""}`.slice(0, 500),
+      entityType: lead ? "lead" : "work_task",
+      entityId: lead ? t.task_source_id : t.task_id,
     });
   }
   return due.length;

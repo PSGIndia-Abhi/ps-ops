@@ -63,6 +63,10 @@ const factory = (t: CrmTheme) => ({
   addrBtnOff: { opacity: 0.4 },
   addrBtnText: { ...typography.captionMedium, color: t.primary },
   reviewCard: { marginBottom: spacing.md },
+  // "Set a reminder" (ReminderField)
+  reminderBox: { marginTop: spacing.sm, marginBottom: spacing.sm },
+  reminderText: { flex: 1, paddingRight: spacing.sm },
+  reminderHint: { ...typography.caption, color: t.textMuted, marginTop: 1 },
   // An open follow-up on the Follow-ups screen
   fuCard: { marginBottom: spacing.sm },
   fuRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
@@ -148,6 +152,79 @@ function NotesField({ label, value, onChangeText, placeholder }: { label: string
   );
 }
 
+/**
+ * "Set a reminder" on a meeting / follow-up / next call: off by default - nothing rings unless it
+ * is turned on. On, the phone rings once, only at the date and time picked here.
+ */
+type ReminderChoice = { on: boolean; date: string; time: string | null };
+const reminderOff = (date: string): ReminderChoice => ({ on: false, date, time: '09:00' });
+
+/** Why the reminder cannot be saved, or null. */
+function reminderProblem(r: ReminderChoice): string | null {
+  if (!r.on) return null;
+  if (!r.time) return 'Pick the reminder time.';
+  if (new Date(`${r.date}T${r.time}:00`).getTime() <= Date.now()) {
+    return `The reminder time ${r.date === todayStr() ? 'today' : fmtDateShort(r.date)}, ${fmtTime(r.time)} has already passed. Pick a later time.`;
+  }
+  return null;
+}
+const reminderOf = (r: ReminderChoice): api.LeadReminder | null => (r.on && r.time ? { date: r.date, time: r.time } : null);
+
+/**
+ * Where a reminder starts when it is turned on: an hour before the meeting / follow-up - or, when
+ * that is already past, the next full hour from now.
+ */
+function suggestReminder(date: string, time: string | null): { date: string; time: string } {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const at = new Date(`${date}T${time || '10:00'}:00`);
+  at.setHours(at.getHours() - 1);
+  if (at.getTime() <= Date.now()) {
+    const next = new Date();
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+    return { date: ymd(next), time: `${pad(next.getHours())}:00` };
+  }
+  return { date: ymd(at), time: `${pad(at.getHours())}:${pad(at.getMinutes())}` };
+}
+
+function ReminderField({
+  value,
+  onChange,
+  forDate,
+  forTime,
+}: {
+  value: ReminderChoice;
+  onChange: (next: ReminderChoice) => void;
+  /** The meeting / follow-up's own date and time: turning the reminder on starts an hour before. */
+  forDate: string;
+  forTime: string | null;
+}) {
+  const { styles, theme } = useCrmStyles(factory);
+  const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+  return (
+    <View style={styles.reminderBox}>
+      <View style={styles.switchRow}>
+        <View style={styles.reminderText}>
+          <Text style={styles.switchLabel}>Set a reminder</Text>
+          <Text style={styles.reminderHint}>{value.on ? 'Your phone rings only at this date and time.' : 'Off - nothing will ring for this.'}</Text>
+        </View>
+        <Switch value={value.on} onValueChange={(on) => onChange(on ? { on, ...suggestReminder(forDate, forTime) } : { ...value, on })} trackColor={{ true: theme.primary }} />
+      </View>
+      {value.on && (
+        <>
+          <View style={styles.gap} />
+          <FieldRow>
+            <PickField label="Reminder date" value={fmtDateShort(value.date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
+            <PickField label="Reminder time" value={value.time ? fmtTime(value.time) : null} placeholder="Pick a time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
+          </FieldRow>
+        </>
+      )}
+      <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={value.date} minDate={todayStr()} title="Reminder date" onPick={(d) => { onChange({ ...value, date: d }); setSheet(null); }} />
+      <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={value.time} allowNone={false} onPick={(t) => { onChange({ ...value, time: t }); setSheet(null); }} />
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Log a call
 // ---------------------------------------------------------------------------
@@ -177,6 +254,7 @@ export function LeadCallScreen() {
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('10:00');
   const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+  const [reminder, setReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
   const callLogged = useRef(false);
 
   // Only a real conversation can tell whether the lead is genuine.
@@ -186,6 +264,8 @@ export function LeadCallScreen() {
   const onSave = () => {
     const notes = comments.trim();
     if (rejecting && !notes) return setError('Add a note saying why this lead is not genuine.');
+    const reminderError = followUp && !rejecting ? reminderProblem(reminder) : null;
+    if (reminderError) return setError(reminderError);
     submit(async () => {
       // If a later step fails and Save is pressed again, the call must not be logged twice.
       if (!callLogged.current) {
@@ -200,7 +280,7 @@ export function LeadCallScreen() {
       if (askQuality && quality === 'GENUINE') await api.qualifyLead(leadId, 'GENUINE');
       if (askQuality && quality === 'NEEDS_INFO') await api.qualifyLead(leadId, 'NEEDS_INFO');
       if (rejecting) await api.rejectLead(leadId, notes);
-      if (followUp && !rejecting) await api.addFollowUp(leadId, { date, time, note: notes, assignedTo: myIdNum });
+      if (followUp && !rejecting) await api.addFollowUp(leadId, { date, time, note: notes, assignedTo: myIdNum, reminder: reminderOf(reminder) });
     });
   };
 
@@ -240,6 +320,7 @@ export function LeadCallScreen() {
                 <PickField label="Next follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
                 <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
               </FieldRow>
+              <ReminderField value={reminder} onChange={setReminder} forDate={date} forTime={time} />
             </>
           )}
         </>
@@ -256,7 +337,7 @@ export function LeadCallScreen() {
 // ---------------------------------------------------------------------------
 
 export function LeadFollowUpScreen() {
-  const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadFollowUp'>>().params;
+  const { leadId, name, taskId } = useRoute<RouteProp<LeadStackParamList, 'LeadFollowUp'>>().params;
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
   const { myId, myIdNum } = useMe();
@@ -271,25 +352,38 @@ export function LeadFollowUpScreen() {
   const [editing, setEditing] = useState<WorkTask | null>(null);
   const [moveDate, setMoveDate] = useState(todayStr());
   const [moveTime, setMoveTime] = useState<string | null>(null);
+  const [moveNote, setMoveNote] = useState('');
   const [moving, setMoving] = useState(false);
+  const [reminder, setReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
+  const [moveReminder, setMoveReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
   const clashes = useClashes(myId, date, time);
 
   useEffect(() => {
     let alive = true;
     openFollowUpsFor(leadId)
-      .then((list) => alive && setExisting(list))
+      .then((list) => {
+        if (!alive) return;
+        setExisting(list);
+        // Opened from one follow-up's edit: straight to changing that one.
+        const picked = taskId ? list.find((t) => String(t.id) === taskId) : undefined;
+        if (picked) startMove(picked);
+        else if (taskId) setError('That follow-up is no longer open.');
+      })
       .catch(() => alive && setExisting([]));
     return () => {
       alive = false;
     };
-  }, [leadId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId, taskId]);
 
   // A lead can have several follow-ups: "Add follow-up" always adds a new one next to those open.
   const onSave = async () => {
     // "Already something at this time?" - against everything that rings for me.
+    const reminderError = reminderProblem(reminder);
+    if (reminderError) return setError(reminderError);
     const items = await loadAllReminderItems(myId).catch(() => []);
     if (!(await confirmClash(items, date, time))) return;
-    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum, newTask: true }));
+    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum, newTask: true, reminder: reminderOf(reminder) }));
   };
 
   const startMove = (task: WorkTask) => {
@@ -297,14 +391,25 @@ export function LeadFollowUpScreen() {
     setEditing(task);
     setMoveDate(String(task.due_date).slice(0, 10));
     setMoveTime(task.due_time ? task.due_time.slice(0, 5) : null);
+    setMoveNote(task.description || '');
+    setMoveReminder(reminderOff(todayStr()));
   };
   // "Change date & time" moves only the follow-up picked (the server keeps the earlier time in its history).
   const saveMove = async () => {
     if (!editing) return;
+    const reminderError = reminderProblem(moveReminder);
+    if (reminderError) return setError(reminderError);
     setMoving(true);
     setError(null);
     try {
-      await api.addFollowUp(leadId, { date: moveDate, time: moveTime, note: '', assignedTo: Number(editing.assigned_to) || myIdNum, taskId: editing.id });
+      await api.addFollowUp(leadId, {
+        date: moveDate,
+        time: moveTime,
+        note: moveNote.trim(),
+        assignedTo: Number(editing.assigned_to) || myIdNum,
+        taskId: editing.id,
+        reminder: reminderOf(moveReminder),
+      });
       refreshReminders();
       navigation.goBack();
     } catch (err) {
@@ -331,18 +436,19 @@ export function LeadFollowUpScreen() {
 
   if (editing) {
     return (
-      <FormShell title="Change date & time" subtitle={name} error={error} submitLabel="Save new time" saving={moving} onSubmit={saveMove}>
+      <FormShell title="Change follow-up" subtitle={name} error={error} submitLabel="Save changes" saving={moving} onSubmit={saveMove}>
         <Card>
           <InfoLine label="Now due" value={when(editing)} />
-          {!!editing.description && <InfoLine label="Note" value={editing.description} />}
         </Card>
         <View style={styles.gap} />
         <FieldRow>
           <PickField label="New date" value={fmtDateShort(moveDate)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('moveDate')} />
           <PickField label="New time" value={moveTime ? fmtTime(moveTime) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('moveTime')} />
         </FieldRow>
+        <NotesField label="Note" value={moveNote} onChangeText={setMoveNote} placeholder="What needs to be followed up?" />
+        <ReminderField value={moveReminder} onChange={setMoveReminder} forDate={moveDate} forTime={moveTime} />
         <View style={styles.gap} />
-        <PrimaryButton label="Cancel" variant="secondary" onPress={() => setEditing(null)} />
+        <PrimaryButton label="Cancel" variant="secondary" onPress={() => (taskId ? navigation.goBack() : setEditing(null))} />
         <DateSheet visible={sheet === 'moveDate'} onClose={() => setSheet(null)} value={moveDate} minDate={todayStr()} title="New follow-up date" onPick={(d) => { setMoveDate(d); setSheet(null); }} />
         <TimeSheet visible={sheet === 'moveTime'} onClose={() => setSheet(null)} value={moveTime} onPick={(t) => { setMoveTime(t); setSheet(null); }} />
       </FormShell>
@@ -380,13 +486,13 @@ export function LeadFollowUpScreen() {
         </>
       )}
       <Text style={styles.section}>ADD A FOLLOW-UP</Text>
-      <Text style={styles.help}>Your phone rings at the time you set, so you do not miss it.</Text>
       <FieldRow>
         <PickField label="Follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
       </FieldRow>
       <ClashNotice clashes={clashes} date={date} time={time} />
       <NotesField label="Note" value={note} onChangeText={setNote} placeholder="What needs to be followed up?" />
+      <ReminderField value={reminder} onChange={setReminder} forDate={date} forTime={time} />
       <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} onPick={(d) => { setDate(d); setSheet(null); }} />
       <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={time} onPick={(t) => { setTime(t); setSheet(null); }} />
     </FormShell>
@@ -419,6 +525,7 @@ export function LeadResidentialCallScreen() {
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('10:00');
   const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+  const [reminder, setReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
   const closing = outcome === 'NOT_INTERESTED';
   const clashes = useClashes(myId, date, closing ? null : time);
 
@@ -428,12 +535,20 @@ export function LeadResidentialCallScreen() {
     if (!closing && date === todayStr() && time && new Date(`${date}T${time}:00`).getTime() <= Date.now()) {
       return setError(`${fmtTime(time)} today has already passed. Pick a later time for the next call.`);
     }
+    const reminderError = closing ? null : reminderProblem(reminder);
+    if (reminderError) return setError(reminderError);
     if (!closing) {
       const items = await loadAllReminderItems(myId).catch(() => []);
       if (!(await confirmClash(items, date, time))) return;
     }
     submit(async () => {
-      await api.logResidentialCall(leadId, { outcome, note: note.trim(), nextDate: closing ? undefined : date, nextTime: closing ? null : time });
+      await api.logResidentialCall(leadId, {
+        outcome,
+        note: note.trim(),
+        nextDate: closing ? undefined : date,
+        nextTime: closing ? null : time,
+        reminder: closing ? null : reminderOf(reminder),
+      });
       // The lead's status may have moved (contacted / lost): bring the lead list up to date.
       refresh();
     });
@@ -471,7 +586,8 @@ export function LeadResidentialCallScreen() {
             <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
           </FieldRow>
           <ClashNotice clashes={clashes} date={date} time={time} />
-          <Text style={styles.help}>Your phone rings at this time. Keep calling until the customer is converted.</Text>
+          <ReminderField value={reminder} onChange={setReminder} forDate={date} forTime={time} />
+          <Text style={styles.help}>Keep calling until the customer is converted.</Text>
         </>
       )}
       <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} onPick={(d) => { setDate(d); setSheet(null); }} />
@@ -594,10 +710,13 @@ export function LeadAssignScreen() {
 // Schedule a meeting
 // ---------------------------------------------------------------------------
 
-/** Where the meeting is: the place I am now (read from GPS), the BestServe office, or any other address. */
-type MeetingPlace = 'current' | 'office' | 'other';
+/**
+ * Where the meeting is: the client's address (from the lead form), the BestServe office, or
+ * another place - read from where I am now (GPS), which can be cleared, read again or typed over.
+ */
+type MeetingPlace = 'client' | 'office' | 'other';
 const MEETING_PLACES: Option<MeetingPlace>[] = [
-  { value: 'current', label: 'Current location' },
+  { value: 'client', label: 'Client location' },
   { value: 'office', label: 'BestServe office' },
   { value: 'other', label: 'Other' },
 ];
@@ -613,8 +732,9 @@ export function LeadMeetingNewScreen() {
   const [personId, setPersonId] = useState<number | null>(persona === 'sales' ? myIdNum : null);
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('11:00');
-  const [place, setPlace] = useState<MeetingPlace>('other');
+  const [place, setPlace] = useState<MeetingPlace>('client');
   const [address, setAddress] = useState(leadAddress);
+  const [reminder, setReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
   const [currentAddress, setCurrentAddress] = useState('');
   const [locating, setLocating] = useState(false);
   const type: MeetingType = place === 'office' ? 'OFFICE' : 'SITE_VISIT';
@@ -669,15 +789,17 @@ export function LeadMeetingNewScreen() {
   };
   const pickPlace = (next: MeetingPlace) => {
     setPlace(next);
-    if (next === 'current' && !currentAddress && !locating) readCurrent();
+    if (next === 'other' && !currentAddress && !locating) readCurrent();
   };
-  const meetingAddress = place === 'office' ? BESTSERVE_OFFICE_ADDRESS : place === 'current' ? currentAddress : address;
+  const meetingAddress = place === 'office' ? BESTSERVE_OFFICE_ADDRESS : place === 'other' ? currentAddress : address;
 
   const onSave = async () => {
     if (!personId) return setError('Choose the sales person for this meeting.');
     if (!time) return setError('Choose a time for the meeting.');
-    if (place === 'current' && !currentAddress.trim()) return setError(locating ? 'Reading your location - one moment.' : 'Your location is not read yet. Tap Refresh, or choose Other.');
-    if (place === 'other' && !address.trim()) return setError('Type the meeting address.');
+    if (place === 'other' && !currentAddress.trim()) return setError(locating ? 'Reading your location - one moment.' : 'No address yet. Tap Refresh to read your location, or type it.');
+    if (place === 'client' && !address.trim()) return setError('The lead has no address. Type the client address.');
+    const reminderError = reminderProblem(reminder);
+    if (reminderError) return setError(reminderError);
     if (forMe) {
       const items = await loadAllReminderItems(myId).catch(() => []);
       if (!(await confirmClash(items, date, time))) return;
@@ -685,7 +807,7 @@ export function LeadMeetingNewScreen() {
     let created: string | null = null;
     submit(
       async () => {
-        const meeting = await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: meetingAddress.trim(), notes: notes.trim() });
+        const meeting = await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: meetingAddress.trim(), notes: notes.trim(), reminder: reminderOf(reminder) });
         created = meeting.id;
       },
       // Straight to the meeting just set - its time, place, Directions and Start visit.
@@ -753,13 +875,16 @@ export function LeadMeetingNewScreen() {
           <InfoLine label="BestServe office" value={BESTSERVE_OFFICE_ADDRESS} />
         </Card>
       )}
-      {place === 'current' && (
+      {place === 'client' && (
+        <CrmTextField label="Client address" value={address} onChangeText={setAddress} placeholder="The client's address" maxLength={255} multiline />
+      )}
+      {place === 'other' && (
         <>
           <CrmTextField
             label="Your current location"
             value={currentAddress}
             onChangeText={setCurrentAddress}
-            placeholder={locating ? 'Reading your location…' : 'Tap Refresh to read your location'}
+            placeholder={locating ? 'Reading your location…' : 'Tap Refresh to read your location, or type an address'}
             maxLength={255}
             multiline
           />
@@ -773,11 +898,52 @@ export function LeadMeetingNewScreen() {
           </View>
         </>
       )}
-      {place === 'other' && <CrmTextField label="Address" value={address} onChangeText={setAddress} placeholder="Type the meeting address" maxLength={255} multiline />}
       <NotesField label="Meeting notes" value={notes} onChangeText={setNotes} placeholder="What should be discussed or inspected?" />
+      <ReminderField value={reminder} onChange={setReminder} forDate={date} forTime={time} />
 
       <PeopleSheet visible={sheet === 'person'} onClose={() => setSheet(null)} people={people} selectedId={personId} meId={myIdNum} title="Sales person" onPick={(p) => { setPersonId(p.id); setSheet(null); }} />
       <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} onPick={(d) => { setDate(d); setSheet(null); }} />
+      <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={time} allowNone={false} onPick={(t) => { setTime(t); setSheet(null); }} />
+    </FormShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reschedule a meeting
+// ---------------------------------------------------------------------------
+
+export function LeadMeetingRescheduleScreen() {
+  const { meetingId, title, date: oldDate, time: oldTime } = useRoute<RouteProp<LeadStackParamList, 'LeadMeetingReschedule'>>().params;
+  const { theme } = useCrmStyles(factory);
+  const { saving, error, setError, submit } = useSubmit();
+  const [date, setDate] = useState(oldDate >= todayStr() ? oldDate : todayStr());
+  const [time, setTime] = useState<string | null>(oldTime.slice(0, 5));
+  const [reason, setReason] = useState('');
+  const [reminder, setReminder] = useState<ReminderChoice>(() => reminderOff(todayStr()));
+  const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+
+  const onSave = () => {
+    if (!time) return setError('Choose the new meeting time.');
+    if (new Date(`${date}T${time}:00`).getTime() <= Date.now()) return setError('That time has already passed. Pick a later time for the meeting.');
+    if (date === oldDate && time === oldTime.slice(0, 5)) return setError('Pick a different date or time.');
+    const reminderError = reminderProblem(reminder);
+    if (reminderError) return setError(reminderError);
+    submit(() => api.rescheduleMeeting(meetingId, date, time, { reason: reason.trim(), reminder: reminderOf(reminder) }).then(() => undefined));
+  };
+
+  return (
+    <FormShell title="Reschedule meeting" subtitle={title} error={error} submitLabel="Save new time" onSubmit={onSave} saving={saving}>
+      <Card>
+        <InfoLine label="Now" value={`${fmtDateShort(oldDate)}, ${fmtTime(oldTime)}`} />
+      </Card>
+      <View style={{ height: spacing.md }} />
+      <FieldRow>
+        <PickField label="New date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
+        <PickField label="New time" value={time ? fmtTime(time) : null} placeholder="Pick a time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
+      </FieldRow>
+      <NotesField label="Reason (optional)" value={reason} onChangeText={(v) => setReason(v.slice(0, 500))} placeholder="e.g. Customer asked for another day" />
+      <ReminderField value={reminder} onChange={setReminder} forDate={date} forTime={time} />
+      <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} title="New meeting date" onPick={(d) => { setDate(d); setSheet(null); }} />
       <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={time} allowNone={false} onPick={(t) => { setTime(t); setSheet(null); }} />
     </FormShell>
   );

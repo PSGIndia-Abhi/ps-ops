@@ -564,6 +564,17 @@
   .lm-fu-note { margin: 0; font-size: 13.5px; color: #334155; white-space: pre-wrap; overflow-wrap: anywhere; }
   .lm-fu-body small { font-size: 12px; color: var(--lm-muted); }
   .lm-fu-side { display: grid; gap: 18px; align-content: start; }
+  .lm-fu-main { display: grid; gap: 18px; align-content: start; min-width: 0; }
+  /* Open follow-ups: Start / Pause / Completed / Resume, like a task in Task Management. */
+  .lm-fu-open { list-style: none; margin: 0; padding: 14px 20px 18px; display: grid; gap: 10px; }
+  .lm-fu-open li {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 12px 14px; border: 1px solid var(--lm-line); border-radius: 12px; background: #fff;
+  }
+  .lm-fu-open-main { min-width: 0; display: grid; gap: 4px; strong { font-size: 14px; } }
+  .lm-fu-open-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; small { font-size: 12px; color: var(--lm-muted); } }
+  .lm-fu-open-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .lm-fu-step.start .lm-fu-dot { background: var(--lm-primary-soft); color: var(--lm-primary); }
   .lm-fu-next {
     display: grid; justify-items: start; gap: 4px;
     strong { font-size: 24px; letter-spacing: -.4px; font-variant-numeric: tabular-nums; }
@@ -1057,4 +1068,10 @@
   .lm-target-me { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .lm-target-me > div { display: grid; gap: 2px; small { color: var(--lm-muted); font-size: 12px; } strong { font-size: 22px; } }
   .lm-target-me > .wide { grid-column: 1 / -1; }
+}
+
+/* "Set a reminder" in the lead dialogs (dialogs.jsx ReminderInput) */
+.lm-root, body {
+  .lm-reminder-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .lm-reminder-row .lm-input { max-width: 260px; }
 }

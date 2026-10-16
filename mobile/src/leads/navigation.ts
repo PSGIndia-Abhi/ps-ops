@@ -17,7 +17,14 @@ export type LeadStackParamList = {
   /** `canQualify`: the lead is at a stage where the call can also mark it genuine / not genuine. */
   LeadCall: { leadId: string; name: string; contact: string; stage: PipelineStage; canQualify: boolean };
   LeadMeetingNew: { leadId: string; name: string; address: string };
-  LeadFollowUp: { leadId: string; name: string };
+  /** Move a meeting to a new date and time (with a reason and an optional reminder). */
+  LeadMeetingReschedule: { meetingId: string; title: string; date: string; time: string };
+  /** `taskId`: change that one follow-up (date, time, note) - else the lead's follow-ups + add a new one. */
+  LeadFollowUp: { leadId: string; name: string; taskId?: string };
+  /** One lead's follow-ups (like the web's follow-up page): the open ones and their history. */
+  LeadFollowUpHistory: { leadId: string; name: string; number: string | null; phone: string; leadType?: 'commercial' | 'consumer' };
+  /** The Follow-ups screen pushed from More - the Residential app's (residential leads' follow-ups). */
+  LeadFollowUpsList: { leadType: 'consumer' };
   /** Sales manager: give the lead to a sales executive, a telecaller or themselves. */
   LeadAssign: { leadId: string; name: string; salesId: string | null; telecallerId: string | null };
   /** Residential lead: log a call and set the next one. */
@@ -34,6 +41,8 @@ export type LeadStackParamList = {
   LeadTasks: undefined;
   /** Everything that will ring for me: my reminders, meetings, follow-ups. */
   LeadReminders: undefined;
+  /** Change the reminder set on a follow-up / meeting / task (`parentTaskId` = that task). */
+  LeadReminderTime: { parentTaskId: string; title: string; date: string; time: string | null };
   /** New reminder (optionally for a lead), or edit one (taskId). */
   LeadReminderEdit: { taskId?: string; leadId?: string; leadName?: string } | undefined;
   /** Sales manager: the team's numbers (and their targets). */

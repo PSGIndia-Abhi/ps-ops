@@ -601,6 +601,10 @@ function LogCallModal({ leadId, name, onClose, onSaved }) {
   const [note, setNote] = useState("");
   const [date, setDate] = useState(tomorrowKey());
   const [time, setTime] = useState("10:00");
+  // Optional reminder for the next call: nothing rings unless it is set.
+  const [remind, setRemind] = useState(false);
+  const [remindDate, setRemindDate] = useState(todayKey());
+  const [remindTime, setRemindTime] = useState("09:00");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const closing = outcome === "NOT_INTERESTED";
@@ -611,13 +615,21 @@ function LogCallModal({ leadId, name, onClose, onSaved }) {
     if (!closing) {
       if (!date) return setError("Pick the date of the next call.");
       if (new Date(`${date}T${time || "23:59"}`) <= new Date()) return setError(`${dayText(date)}${time ? `, ${clock(time)}` : ""} has already passed. Pick a later time for the next call.`);
+      if (remind && (!remindDate || !remindTime)) return setError("Pick the reminder date and time.");
+      if (remind && new Date(`${remindDate}T${remindTime}`) <= new Date()) return setError("The reminder time has already passed. Pick a later time.");
     }
     setBusy(true);
     setError("");
     try {
       await request(`/api/crm/leads/${leadId}/residential-calls`, {
         method: "POST",
-        body: { outcome, note: note.trim() || undefined, nextDate: closing ? undefined : date, nextTime: closing ? undefined : time || undefined },
+        body: {
+          outcome,
+          note: note.trim() || undefined,
+          nextDate: closing ? undefined : date,
+          nextTime: closing ? undefined : time || undefined,
+          ...(!closing && remind ? { reminderDate: remindDate, reminderTime: remindTime } : {}),
+        },
       });
       toast(closing ? "Lead closed - not interested" : "Call saved - next call set");
       onSaved();
@@ -660,8 +672,22 @@ function LogCallModal({ leadId, name, onClose, onSaved }) {
             <Field label="Next call - date" required>
               <input className="lm-input" type="date" value={date} min={todayKey()} onChange={(e) => setDate(e.target.value)} />
             </Field>
-            <Field label="Time" hint="It rings on your phone at this time.">
+            <Field label="Time">
               <input className="lm-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            </Field>
+            <Field label="Reminder" wide hint={remind ? "It rings only at this date and time." : "Off - nothing will ring for this call."}>
+              <div className="lm-reminder-row">
+                <label className="lm-check">
+                  <input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} />
+                  Set a reminder
+                </label>
+                {remind && (
+                  <>
+                    <input className="lm-input" type="date" value={remindDate} min={todayKey()} onChange={(e) => setRemindDate(e.target.value)} aria-label="Reminder date" style={{ maxWidth: 170 }} />
+                    <input className="lm-input" type="time" value={remindTime} onChange={(e) => setRemindTime(e.target.value)} aria-label="Reminder time" style={{ maxWidth: 130 }} />
+                  </>
+                )}
+              </div>
             </Field>
           </div>
         )}

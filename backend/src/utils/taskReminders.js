@@ -81,4 +81,35 @@ async function followTask(db, taskId) {
   return [task.assigned_to];
 }
 
-module.exports = { TASK_REMINDER_MODULE, REMINDER_ID_SQL, REMINDER_AT_SQL, findReminder, setReminder, removeReminder, followTask };
+/**
+ * A lead meeting's / follow-up's reminder, as the forms send it: { reminderDate: 'YYYY-MM-DD',
+ * reminderTime: 'HH:MM' }. Optional - nothing rings for a meeting or follow-up unless one is set.
+ * -> null (none asked for), { date, time } ('HH:MM:SS'), or { error }.
+ */
+function readLeadReminder(body = {}) {
+  const date = body.reminderDate;
+  const time = body.reminderTime;
+  if (!date && !time) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) return { error: "Pick the reminder date" };
+  if (!/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(String(time || ""))) return { error: "Pick the reminder time" };
+  const hms = String(time).length === 5 ? `${time}:00` : String(time);
+  const at = new Date(`${date}T${hms}`);
+  if (Number.isNaN(at.getTime())) return { error: "Pick a valid reminder date and time" };
+  if (at.getTime() <= Date.now()) return { error: "Pick a reminder time in the future" };
+  return { date: String(date), time: hms };
+}
+
+/**
+ * Gives a lead meeting's / follow-up's task the reminder asked for - or none: an earlier one is
+ * taken off when no reminder comes with the change (so it never rings for an old time).
+ * `task` = { id, title, assigned_to }.
+ */
+async function applyLeadReminder(db, task, userId, reminder) {
+  await removeReminder(db, task.id);
+  if (reminder) await setReminder(db, task, userId, reminder);
+}
+
+module.exports = {
+  TASK_REMINDER_MODULE, REMINDER_ID_SQL, REMINDER_AT_SQL, findReminder, setReminder, removeReminder, followTask,
+  readLeadReminder, applyLeadReminder,
+};

@@ -3,14 +3,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { FiArrowLeft, FiCalendar, FiCheckCircle, FiChevronRight, FiClock, FiExternalLink, FiPhoneCall, FiPlus, FiShield } from "react-icons/fi";
+import { FiArrowLeft, FiCalendar, FiCheckCircle, FiChevronRight, FiClock, FiExternalLink, FiPause, FiPhoneCall, FiPlay, FiPlus, FiShield } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { CallVerifyModal, FollowUpCallModal, FollowUpModal, LeadForm, ScheduleMeetingModal } from "./dialogs";
 import { Agenda } from "./Home";
 import { request, useLeadData, userName } from "./leadsApi";
 import { compactMoney, dateTime, dayLabel, isPast, isToday, timeLabel } from "./format";
 import { useLoaded, useToast } from "./hooks";
-import { Badge, Button, Card, Done, Empty, SkeletonRows, StageBadge, Tabs, Who } from "./ui";
+import { Badge, Button, Card, Done, Empty, Field, Modal, SkeletonRows, StageBadge, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads, visibleMeetings } from "./viewer";
 
 /** Sends anyone who is not one of `personas` back to their own dashboard. */
@@ -147,14 +147,16 @@ export function FollowUps() {
   const fresh = (id) => leads.find((l) => l.id === id);
   const leadLink = (f) => (f.lead_type === "commercial" ? `${LEADS_HOME}/${f.lead_id}` : `${LEADS_HOME}/residential/${f.lead_id}`);
 
-  async function markDone(f) {
+  // The same steps as a task in Task Management: Start, then Done (Resume first when paused).
+  async function step(f) {
+    const action = f.status === "OPEN" ? "start" : f.status === "PAUSED" ? "resume" : "complete";
     setBusy(f.id);
     try {
-      await request(`/api/work-tasks/${f.id}/complete`, { method: "POST", body: {} });
-      toast("Follow-up done");
+      await followUpStep(f.id, action);
+      toast({ start: "Follow-up started", resume: "Follow-up resumed", complete: "Follow-up done" }[action]);
       load();
     } catch (err) {
-      toast(err.message || "Could not mark it done.", true);
+      toast(err.message || "Could not update the follow-up.", true);
     } finally {
       setBusy("");
     }
@@ -228,6 +230,7 @@ export function FollowUps() {
                   </div>
                   <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {!done && <Badge tone={{ overdue: "danger", today: "warn" }[tab] || "info"}>{{ overdue: "Overdue", today: "Due today" }[tab] || "Scheduled"}</Badge>}
+                    {!done && f.status !== "OPEN" && <Badge tone={WORK_STATUS[f.status]?.tone || "neutral"}>{WORK_STATUS[f.status]?.label || f.status}</Badge>}
                     {!done && lead && (
                       <Button size="sm" icon={<FiPhoneCall />} onClick={() => setCalling(lead)}>
                         {VERIFYING.includes(lead.stage) ? "Call & Verify" : "Call"}
@@ -239,8 +242,14 @@ export function FollowUps() {
                       </a>
                     )}
                     {!done && mine && (
-                      <Button size="sm" variant="ghost" icon={<FiCheckCircle />} busy={busy === f.id} onClick={() => markDone(f)}>
-                        Done
+                      <Button
+                        size="sm"
+                        variant={f.status === "IN_PROGRESS" ? "primary" : "ghost"}
+                        icon={f.status === "IN_PROGRESS" ? <FiCheckCircle /> : <FiPlay />}
+                        busy={busy === f.id}
+                        onClick={() => step(f)}
+                      >
+                        {f.status === "IN_PROGRESS" ? "Done" : f.status === "PAUSED" ? "Resume" : "Start"}
                       </Button>
                     )}
                   </span>
@@ -274,6 +283,32 @@ const shortDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("en-IN
 // A follow-up history note reads "Due 14 Oct, 4:16 pm: what to cover" (the note part is optional).
 const DUE_NOTE = /^Due (.+?)(?:: ([\s\S]*))?$/;
 
+const OPEN_STATUSES = ["OPEN", "IN_PROGRESS", "PAUSED"];
+const WORK_STATUS = {
+  OPEN: { label: "Open", tone: "neutral" },
+  IN_PROGRESS: { label: "In progress", tone: "info" },
+  PAUSED: { label: "Paused", tone: "warn" },
+};
+
+/** Start / pause / resume / complete a follow-up - it is a work task, so Task Management's own endpoints. */
+function followUpStep(taskId, action, body = {}) {
+  return request(`/api/work-tasks/${taskId}/${action}`, { method: "POST", body });
+}
+
+/** Time worked on a follow-up: start -> now (or -> the pause / completion), minus earlier pauses. */
+function workedMs(t) {
+  if (!t.started_at) return 0;
+  const end = t.status === "PAUSED" && t.paused_at ? new Date(t.paused_at).getTime() : t.completed_at ? new Date(t.completed_at).getTime() : Date.now();
+  return Math.max(0, end - new Date(t.started_at).getTime() - (Number(t.paused_seconds) || 0) * 1000);
+}
+function workedText(ms) {
+  const mins = Math.floor(ms / 60000);
+  const h = Math.floor(mins / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+  return h ? `${h}h ${mins % 60}m` : `${mins}m`;
+}
+const dueText = (t) => [shortDay(t.due_date), t.due_time ? clockText(t.due_time) : ""].filter(Boolean).join(", ");
+
 const STORY_STATUS = {
   current: { label: "Current", tone: "info" },
   moved: { label: "Moved", tone: "neutral" },
@@ -294,21 +329,32 @@ function followUpStory(activities, tasks, leadId) {
         return { id: a.id, kind: "set", at: a.at, due: m ? m[1] : "", note: m ? m[2] || "" : a.note || "", by: a.by };
       }),
     ...tasks
+      .filter((t) => t.started_at)
+      .map((t) => ({ id: `start-${t.id}`, kind: "start", at: t.started_at, due: dueText(t), note: "", by: userName(String(t.started_by || t.assigned_to)) })),
+    ...tasks
       .filter((t) => t.status === "COMPLETED" && t.completed_at)
-      .map((t) => ({ id: `done-${t.id}`, kind: "done", at: t.completed_at, note: t.completion_note || "", by: userName(String(t.completed_by)) })),
+      .map((t) => ({
+        id: `done-${t.id}`,
+        kind: "done",
+        at: t.completed_at,
+        due: dueText(t),
+        note: t.completion_note || "",
+        by: userName(String(t.completed_by)),
+        worked: t.started_at ? workedText(workedMs(t)) : "",
+      })),
   ].sort((a, b) => new Date(a.at) - new Date(b.at));
 
-  let pending = null;
+  // A lead can have several follow-ups open at once: each time set is Current while a follow-up is
+  // still open at that time, Done once that one was done, else it was Moved (Closed: none open).
+  const key = (t) => `${t.due_date || ""} ${t.due_time ? String(t.due_time).slice(0, 5) : ""}`;
+  const openKeys = new Set(tasks.filter((t) => OPEN_STATUSES.includes(t.status)).map(key));
+  const doneKeys = new Set(tasks.filter((t) => t.status === "COMPLETED").map(key));
   for (const e of events) {
-    if (e.kind === "set") {
-      if (pending) pending.status = "moved";
-      pending = e;
-    } else {
-      if (pending) pending.status = "done";
-      pending = null;
-    }
+    if (e.kind !== "set") continue;
+    const k = /^(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))?/.exec(e.due);
+    const at = k ? `${k[1]} ${k[2] || ""}` : null;
+    e.status = at && openKeys.has(at) ? "current" : at && doneKeys.has(at) ? "done" : openKeys.size ? "moved" : "closed";
   }
-  if (pending) pending.status = tasks.some((t) => ["OPEN", "IN_PROGRESS", "PAUSED"].includes(t.status)) ? "current" : "closed";
   return events.reverse();
 }
 
@@ -318,20 +364,54 @@ export function LeadFollowUps() {
   const viewer = useViewer();
   const { leads, activities } = useLeadData();
   const ready = useLoaded();
+  const toast = useToast();
   const [tasks, setTasks] = useState(null); // the lead's follow-up tasks, open and done
   const [dialog, setDialog] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [pausing, setPausing] = useState(null); // the follow-up being paused (asks for a reason)
+  const [editing, setEditing] = useState(null); // the follow-up being changed (date, time, note)
+  const [, setTick] = useState(0);
   const lead = visibleLeads(leads, viewer).find((l) => l.id === id);
+  const myId = String(viewer.me.id || "");
 
+  const loadTasks = useCallback(
+    () =>
+      request(`/api/work-tasks?source_id=${encodeURIComponent(id)}&task_type=LEAD_FOLLOW_UP`)
+        .then((rows) => setTasks(Array.isArray(rows) ? rows : []))
+        .catch(() => setTasks((cur) => cur || [])),
+    [id]
+  );
   // Read again whenever the workspace reloads, so a call saved here shows straight away.
   useEffect(() => {
-    let alive = true;
-    request(`/api/work-tasks?source_id=${encodeURIComponent(id)}&task_type=LEAD_FOLLOW_UP`)
-      .then((rows) => alive && setTasks(rows))
-      .catch(() => alive && setTasks([]));
-    return () => {
-      alive = false;
-    };
-  }, [id, activities]);
+    loadTasks();
+  }, [loadTasks, activities]);
+
+  const openTasks = useMemo(
+    () => (tasks || []).filter((t) => OPEN_STATUSES.includes(t.status)).sort((a, b) => `${a.due_date} ${a.due_time || "99"}`.localeCompare(`${b.due_date} ${b.due_time || "99"}`)),
+    [tasks]
+  );
+  // While one is running its "Worked" time moves on.
+  const running = openTasks.some((t) => t.status === "IN_PROGRESS");
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  async function work(t, action, body) {
+    setBusy(t.id);
+    try {
+      await followUpStep(t.id, action, body);
+      toast({ start: "Follow-up started", pause: "Follow-up paused", resume: "Follow-up resumed", complete: "Follow-up done" }[action]);
+      await loadTasks();
+      return true;
+    } catch (err) {
+      toast(err.message || "Could not update the follow-up.", true);
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
 
   const story = useMemo(() => (tasks ? followUpStory(activities, tasks, id) : []), [activities, tasks, id]);
   const back = (
@@ -352,6 +432,35 @@ export function LeadFollowUps() {
   }
 
   const due = lead?.nextFollowUpAt;
+  const next = openTasks[0] || null;
+  const later = openTasks.slice(1);
+  const late = (t) => !!t.due_date && new Date(`${t.due_date}T${String(t.due_time || "23:59").slice(0, 5)}`) < new Date();
+
+  /** Start, then Pause / Completed, or Resume - the same steps as a task in Task Management. */
+  const stepButtons = (t, size) => (
+    <>
+      {t.status === "OPEN" && (
+        <Button size={size} icon={<FiPlay />} busy={busy === t.id} onClick={() => work(t, "start")}>
+          Start
+        </Button>
+      )}
+      {t.status === "IN_PROGRESS" && (
+        <>
+          <Button size={size} variant="ghost" icon={<FiPause />} disabled={!!busy} onClick={() => setPausing(t)}>
+            Pause
+          </Button>
+          <Button size={size} icon={<FiCheckCircle />} busy={busy === t.id} onClick={() => work(t, "complete")}>
+            Completed
+          </Button>
+        </>
+      )}
+      {t.status === "PAUSED" && (
+        <Button size={size} icon={<FiPlay />} busy={busy === t.id} onClick={() => work(t, "resume")}>
+          Resume
+        </Button>
+      )}
+    </>
+  );
   const telecaller = lead?.telecallerId ? userName(String(lead.telecallerId)) : "";
   const sales = lead?.salesId ? userName(String(lead.salesId)) : "";
 
@@ -377,6 +486,38 @@ export function LeadFollowUps() {
           </div>
 
           <div className="lm-grid two wide">
+            <div className="lm-fu-main">
+            {later.length > 0 && (
+              <Card flush title="Later follow-ups" sub={`${later.length} more planned on this lead`} index={0}>
+                <ul className="lm-fu-open">
+                  {later.map((t) => {
+                    const mine = String(t.assigned_to) === myId;
+                    const status = WORK_STATUS[t.status] || { label: t.status, tone: "neutral" };
+                    return (
+                      <li key={t.id}>
+                        <div className="lm-fu-open-main">
+                          <strong>{dueText(t) || "Any day"}</strong>
+                          {!!t.description && <p className="lm-fu-note">{t.description}</p>}
+                          <div className="lm-fu-open-meta">
+                            <Badge tone={status.tone}>{status.label}</Badge>
+                            {!!t.started_at && <small>Worked {workedText(workedMs(t))}</small>}
+                            {!mine && !!t.assigned_to_name && <small>For {t.assigned_to_name}</small>}
+                          </div>
+                        </div>
+                        {mine && (
+                          <div className="lm-fu-open-acts">
+                            {stepButtons(t, "sm")}
+                            <Button size="sm" variant="ghost" icon={<FiCalendar />} disabled={!!busy} onClick={() => setEditing(t)}>
+                              Change
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            )}
             <Card flush title="History" sub={`${story.length} ${story.length === 1 ? "entry" : "entries"}, newest first`} index={0}>
               {tasks === null ? (
                 <SkeletonRows rows={3} />
@@ -388,15 +529,17 @@ export function LeadFollowUps() {
                     const status = e.kind === "set" ? STORY_STATUS[e.status] : null;
                     return (
                       <li key={e.id} className={`lm-fu-step ${e.kind}`} style={{ "--i": i }}>
-                        <span className="lm-fu-dot">{e.kind === "done" ? <FiCheckCircle /> : <FiClock />}</span>
+                        <span className="lm-fu-dot">{e.kind === "done" ? <FiCheckCircle /> : e.kind === "start" ? <FiPlay /> : <FiClock />}</span>
                         <div className="lm-fu-body">
                           <div className="lm-fu-top">
-                            <strong>{e.kind === "done" ? "Follow-up done" : `Call due ${e.due || "-"}`}</strong>
+                            <strong>{e.kind === "done" ? "Follow-up done" : e.kind === "start" ? "Follow-up started" : `Call due ${e.due || "-"}`}</strong>
                             {status && <Badge tone={status.tone}>{status.label}</Badge>}
                           </div>
+                          {e.kind !== "set" && !!e.due && <small>Due {e.due}</small>}
                           {!!e.note && <p className="lm-fu-note">{e.note}</p>}
+                          {!!e.worked && <small>Worked {e.worked}</small>}
                           <small>
-                            {e.kind === "done" ? "Marked done" : "Set"} {dateTime(e.at)}
+                            {e.kind === "done" ? "Marked done" : e.kind === "start" ? "Started" : "Set"} {dateTime(e.at)}
                             {e.by ? ` by ${e.by}` : ""}
                           </small>
                         </div>
@@ -406,10 +549,23 @@ export function LeadFollowUps() {
                 </ol>
               )}
             </Card>
+            </div>
 
             <div className="lm-fu-side">
               <Card title="Next follow-up" index={1}>
-                {due ? (
+                {next ? (
+                  <div className="lm-fu-next">
+                    <strong>{next.due_time ? clockText(next.due_time) : "Any time"}</strong>
+                    <span>{next.due_date === localDay() ? "Today" : shortDay(next.due_date)}</span>
+                    {!!next.description && <p className="lm-fu-note">{next.description}</p>}
+                    <div className="lm-fu-open-meta">
+                      <Badge tone={(WORK_STATUS[next.status] || {}).tone || "neutral"}>{(WORK_STATUS[next.status] || {}).label || next.status}</Badge>
+                      {late(next) && <Badge tone="danger">Overdue</Badge>}
+                      {!!next.started_at && <small>Worked {workedText(workedMs(next))}</small>}
+                      {String(next.assigned_to) !== myId && !!next.assigned_to_name && <small>For {next.assigned_to_name}</small>}
+                    </div>
+                  </div>
+                ) : due ? (
                   <div className="lm-fu-next">
                     <strong>{timeLabel(due)}</strong>
                     <span>{dayLabel(due)}</span>
@@ -418,13 +574,22 @@ export function LeadFollowUps() {
                 ) : (
                   <p className="lm-fu-none">No follow-up is open on this lead.</p>
                 )}
+                {!!next && String(next.assigned_to) === myId && <div className="lm-fu-actions">{stepButtons(next)}</div>}
                 <div className="lm-fu-actions">
-                  <Button icon={<FiPhoneCall />} onClick={() => setDialog("call")}>
+                  <Button variant={next ? "ghost" : "primary"} icon={<FiPhoneCall />} onClick={() => setDialog("call")}>
                     {VERIFYING.includes(lead.stage) ? "Call & Verify" : "Call"}
                   </Button>
-                  <Button variant="ghost" icon={<FiCalendar />} onClick={() => setDialog("followup")}>
-                    {due ? "Change Time" : "Add Follow-up"}
-                  </Button>
+                  {next && String(next.assigned_to) === myId ? (
+                    <Button variant="ghost" icon={<FiCalendar />} onClick={() => setEditing(next)}>
+                      Change
+                    </Button>
+                  ) : (
+                    !next && (
+                      <Button variant="ghost" icon={<FiCalendar />} onClick={() => setDialog("followup")}>
+                        {due ? "Change Time" : "Add Follow-up"}
+                      </Button>
+                    )
+                  )}
                 </div>
               </Card>
 
@@ -462,9 +627,53 @@ export function LeadFollowUps() {
           {dialog === "call" && <CallDialog lead={lead} onClose={() => setDialog(null)} onScheduleMeeting={() => setDialog("meeting")} />}
           {dialog === "followup" && <FollowUpModal lead={lead} onClose={() => setDialog(null)} />}
           {dialog === "meeting" && <ScheduleMeetingModal lead={lead} onClose={() => setDialog(null)} />}
+          {editing && (
+            <FollowUpModal
+              lead={lead}
+              task={editing}
+              onClose={() => {
+                setEditing(null);
+                loadTasks();
+              }}
+            />
+          )}
+          {pausing && <PauseFollowUpModal task={pausing} onPause={(reason) => work(pausing, "pause", { reason })} onClose={() => setPausing(null)} />}
         </>
       )}
     </Only>
+  );
+}
+
+/** Pause a running follow-up: the timer stops until it is resumed; a reason is required (as for a task). */
+function PauseFollowUpModal({ task, onPause, onClose }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save(close) {
+    if (busy || !reason.trim()) return;
+    setBusy(true);
+    if (await onPause(reason.trim())) close();
+    else setBusy(false);
+  }
+  return (
+    <Modal
+      title="Pause Follow-up"
+      sub={`Due ${dueText(task) || "-"} - the timer stops until you resume; the due date does not change`}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Back
+          </Button>
+          <Button busy={busy} disabled={!reason.trim()} icon={<FiPause />} onClick={() => save(close)}>
+            Pause
+          </Button>
+        </>
+      )}
+    >
+      <Field label="Reason" required>
+        <textarea className="lm-textarea" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. Customer asked to call after lunch." />
+      </Field>
+    </Modal>
   );
 }
 

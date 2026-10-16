@@ -9,6 +9,7 @@ const {
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { syncReminders } = require("../services/push.service");
 const { logHistory: logTaskHistory } = require("../utils/workTasks");
+const { readLeadReminder, applyLeadReminder, followTask } = require("../utils/taskReminders");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -262,6 +263,9 @@ router.post("/leads/:id/meetings", auth, requirePermission("CRM_VIEW_LEAD"), asy
     if (meetingAddress === false) throw new HttpError(400, "meetingAddress is too long (max 255 characters)");
     const notes = optionalText(body.notes, 2000);
     if (notes === false) throw new HttpError(400, "notes is too long (max 2000 characters)");
+    // Optional: nothing rings for the meeting unless a reminder is set on it.
+    const reminder = readLeadReminder(body);
+    if (reminder?.error) throw new HttpError(400, reminder.error);
 
     const meetingId = uuid();
     const taskId = uuid();
@@ -275,6 +279,7 @@ router.post("/leads/:id/meetings", auth, requirePermission("CRM_VIEW_LEAD"), asy
         [taskId, taskTitle, notes, lead.id, salesEmployeeId, req.user.id, scheduled.date, scheduled.time]
       );
       await logTaskHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: req.user.id, note: "Created from a scheduled lead meeting" });
+      if (reminder) await applyLeadReminder(conn, { id: taskId, title: taskTitle, assigned_to: salesEmployeeId }, req.user.id, reminder);
 
       await conn.query(
         `INSERT INTO crm_lead_meetings
@@ -348,12 +353,17 @@ router.patch("/meetings/:id/reschedule", auth, requirePermission("CRM_VIEW_LEAD"
     const scheduled = parseLocalDateTime(req.body?.scheduledAt);
     if (!scheduled) throw new HttpError(400, "scheduledAt is required (YYYY-MM-DDTHH:MM)");
     const reason = optionalText(req.body?.reason, 500);
+    // The earlier reminder goes with the old time; a new one is set only if asked for.
+    const rescheduleReminder = readLeadReminder(req.body || {});
+    if (rescheduleReminder?.error) throw new HttpError(400, rescheduleReminder.error);
 
     await inTransaction(async (conn) => {
       await conn.query("UPDATE crm_lead_meetings SET scheduled_at = ?, status = 'RESCHEDULED' WHERE id = ?", [scheduled.sql, meeting.id]);
       await conn.query("UPDATE crm_lead_meetings SET status = 'SCHEDULED' WHERE id = ?", [meeting.id]);
       if (meeting.task_id) {
         await conn.query("UPDATE work_tasks SET due_date = ?, due_time = ? WHERE id = ?", [scheduled.date, scheduled.time, meeting.task_id]);
+        const [[task]] = await conn.query("SELECT id, title, assigned_to FROM work_tasks WHERE id = ?", [meeting.task_id]);
+        if (task) await applyLeadReminder(conn, task, req.user.id, rescheduleReminder);
         await logTaskHistory(conn, meeting.task_id, "RESCHEDULE", { note: `Meeting moved to ${scheduled.sql}${reason ? `: ${reason}` : ""}`, changedBy: req.user.id });
       }
       await logLeadHistory(conn, meeting.lead_id, "MEETING_RESCHEDULED", { note: `Moved to ${scheduled.sql}${reason ? `: ${reason}` : ""}`, changedBy: req.user.id });
@@ -413,6 +423,7 @@ router.post("/meetings/:id/complete", auth, requirePermission("CRM_VIEW_LEAD"), 
       );
       if (meeting.task_id) await logTaskHistory(conn, meeting.task_id, "COMPLETE", { toStatus: "COMPLETED", changedBy: req.user.id, note: outcomeNotes });
       await conn.query("UPDATE work_tasks SET status = 'COMPLETED', completed_at = NOW(), completed_by = ?, completion_note = ? WHERE id = ? AND status IN ('OPEN','IN_PROGRESS')", [req.user.id, outcomeNotes, meeting.task_id]);
+      if (meeting.task_id) await followTask(conn, meeting.task_id);
       await conn.query("UPDATE crm_leads SET pipeline_stage = 'VISIT_COMPLETED', row_version = row_version + 1 WHERE id = ?", [meeting.lead_id]);
       await logLeadHistory(conn, meeting.lead_id, "VISIT_COMPLETED", { note: outcomeNotes, changedBy: req.user.id });
     });
@@ -438,6 +449,7 @@ router.post("/meetings/:id/cancel", auth, requirePermission("CRM_VIEW_LEAD"), as
       await conn.query("UPDATE crm_lead_meetings SET status = 'CANCELLED' WHERE id = ? AND status = 'SCHEDULED'", [meeting.id]);
       if (meeting.task_id) {
         await conn.query("UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ? AND status IN ('OPEN','IN_PROGRESS')", [meeting.task_id]);
+        await followTask(conn, meeting.task_id);
         await logTaskHistory(conn, meeting.task_id, "CANCEL", { toStatus: "CANCELLED", note: reason, changedBy: req.user.id });
       }
       await logLeadHistory(conn, meeting.lead_id, "MEETING_CANCELLED", { note: reason, changedBy: req.user.id });

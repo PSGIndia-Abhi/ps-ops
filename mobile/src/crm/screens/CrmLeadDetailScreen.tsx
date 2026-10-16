@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { crmApi } from '../../api';
+import type { Lead } from '../types';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   useNavigation,
@@ -241,7 +243,22 @@ export function CrmLeadDetailScreen() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [failedReason, setFailedReason] = useState<string | null>(null);
   const { styles, theme } = useCrmStyles(factory);
-  const lead = getLead(route.params.leadId);
+  // Usually already in the lead list; one that is not (added since the list was read, or opened
+  // from a reminder in the other app) is read from the server.
+  const listed = getLead(route.params.leadId);
+  const [fetched, setFetched] = useState<Lead | null | undefined>(undefined);
+  useEffect(() => {
+    if (listed || loading || fetched !== undefined) return;
+    let alive = true;
+    crmApi
+      .getLead(route.params.leadId)
+      .then((l) => alive && setFetched(l))
+      .catch(() => alive && setFetched(null));
+    return () => {
+      alive = false;
+    };
+  }, [listed, loading, fetched, route.params.leadId]);
+  const lead = listed ?? fetched ?? undefined;
   // Lead Management's sales roles follow a residential lead up by phone (the old CRM app does not).
   const persona = leadPersonaForRole(useRawRole());
   const callFollowUps = persona === 'sales' || persona === 'sales_manager';
@@ -283,7 +300,7 @@ export function CrmLeadDetailScreen() {
     // `getLead` is a lookup against the shared leads list, not its own fetch - so when that list
     // is still loading (a fresh app open, or a slow connection), this looks identical to a lead
     // that genuinely doesn't exist. Only show "not found" once loading has actually finished.
-    if (loading) {
+    if (loading || fetched === undefined) {
       return (
         <CrmScreen scroll={false} edges={['top', 'bottom']}>
           <TopBar title="Lead Details" onBack={() => navigation.goBack()} />

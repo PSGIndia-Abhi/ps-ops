@@ -74,7 +74,13 @@ async function runLeadReminderAlerts() {
   }
 }
 
+// Switched off: a lead meeting or follow-up no longer announces itself at its own time - it rings
+// only through a reminder set on it (a reminder on its task; jobs/taskReminder.cron.js tells the
+// person at the reminder's time). Kept so it can be turned back on in one place.
+const DUE_ALERTS_ON = false;
+
 function startLeadReminderCron() {
+  if (!DUE_ALERTS_ON) return;
   runLeadReminderAlerts();
   // Every 30 seconds. A plain timer, not node-cron: its seconds schedule reports "missed execution"
   // and skips runs even on an idle server, which would hold this alert back by minutes.

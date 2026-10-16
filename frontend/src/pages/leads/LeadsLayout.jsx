@@ -154,7 +154,9 @@ export default function LeadsLayout() {
         setNotes(next);
         const known = seenNotes.current;
         if (known) {
-          const fresh = next.items.filter((n) => !n.read && !known.has(n.id) && !/_DUE$/.test(n.type));
+          // The reminder set on a meeting / follow-up pops up when it rings; other "due" notifications
+          // are covered by the reminder cards.
+          const fresh = next.items.filter((n) => !n.read && !known.has(n.id) && (!/_DUE$/.test(n.type) || n.type === "TASK_REMINDER_DUE"));
           if (fresh.length) setNotePopups((cur) => [...fresh.map((n) => ({ ...n, id: `note-${n.id}`, noteId: n.id })), ...cur].slice(0, 3));
         }
         seenNotes.current = new Set([...(known || []), ...next.items.map((n) => n.id)]);

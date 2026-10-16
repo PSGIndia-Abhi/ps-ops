@@ -12,7 +12,7 @@ import { httpClient } from '../api/httpClient';
 import { loadSession } from '../auth/tokenStorage';
 import { syncReminders, type ReminderRoute } from './engine';
 import { showReminderNow } from './native';
-import { myUpcomingTasks, taskToReminder } from './sources';
+import { myUpcomingTasks, tasksToReminders } from './sources';
 
 /**
  * Push notifications (Firebase Cloud Messaging). The server sends a push whenever it saves a
@@ -127,7 +127,7 @@ async function syncNow(): Promise<void> {
     const myId = session?.userId ? String(session.userId) : '';
     if (!myId) return;
     const tasks = await myUpcomingTasks(myId, { withTaskReminders: true });
-    await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
+    await syncReminders(myId, tasksToReminders(tasks, myId));
   } catch {
     // Offline or signed out: the alarms already armed stay; the next sync catches up.
   }

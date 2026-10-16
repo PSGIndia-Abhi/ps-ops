@@ -37,6 +37,8 @@ export interface ReminderItem {
   fromSomeoneElse: boolean;
   /** False for an item that must not ring (a Task Management task with no reminder set). */
   ring?: boolean;
+  /** A reminder set ON a task / meeting / follow-up: that task's id (to change or remove it). */
+  parentTaskId?: string;
   route: ReminderRoute | null;
 }
 
@@ -110,8 +112,9 @@ export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = D
 /** The alarm's title, by kind. */
 const DUE_TITLE: Partial<Record<ReminderKind, string>> = {
   payment: 'Payment reminder',
-  meeting: 'Meeting now',
-  followup: 'Follow-up due',
+  // A meeting / follow-up rings only through a reminder set on it - at the reminder's time.
+  meeting: '⏰ Meeting reminder',
+  followup: '⏰ Follow-up reminder',
   personal: '⏰',
   task: '⏰ Task reminder',
 };

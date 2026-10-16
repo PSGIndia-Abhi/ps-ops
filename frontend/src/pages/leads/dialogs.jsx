@@ -379,6 +379,7 @@ export function ScheduleMeetingModal({ lead, onClose }) {
   const team = salesTeam();
   const [salesId, setSalesId] = useState(lead.salesId || "");
   const [when, setWhen] = useState(tomorrowInput);
+  const [remindAt, setRemindAt] = useState("");
   const [locationType, setLocationType] = useState("CUSTOMER");
   const [address, setAddress] = useState(lead.address);
   const [notes, setNotes] = useState("");
@@ -407,7 +408,7 @@ export function ScheduleMeetingModal({ lead, onClose }) {
     try {
       await scheduleMeeting(
         lead.id,
-        { salesId, scheduledAt: new Date(when).toISOString(), locationType, address, notes, type: locationType === "CUSTOMER" ? "SITE_VISIT" : "MEETING" },
+        { salesId, scheduledAt: new Date(when).toISOString(), locationType, address, notes, remindAt, type: locationType === "CUSTOMER" ? "SITE_VISIT" : "MEETING" },
         viewer.me,
       );
       toast("Meeting scheduled and task created for the sales person");
@@ -483,9 +484,39 @@ export function ScheduleMeetingModal({ lead, onClose }) {
         <Field label="Meeting Notes" wide>
           <textarea className="lm-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Discuss annual pest control contract and site visit." />
         </Field>
+        <ReminderInput value={remindAt} onChange={setRemindAt} suggest={when} />
       </div>
-      <Note tone="info">A task for this visit is added to the sales person&apos;s Task Management list.</Note>
     </Modal>
+  );
+}
+
+/**
+ * "Set a reminder" on a meeting / follow-up: off by default - nothing rings unless it is turned on.
+ * `value` is '' (off) or 'YYYY-MM-DDTHH:MM'; turning it on starts from `suggest`.
+ */
+/** An hour before `at` ('YYYY-MM-DDTHH:MM') - or the next full hour from now when that is past. */
+function hourBefore(at) {
+  const d = at ? new Date(at) : new Date(NaN);
+  if (!Number.isNaN(d.getTime())) d.setHours(d.getHours() - 1);
+  if (Number.isNaN(d.getTime()) || d.getTime() <= Date.now()) {
+    const next = new Date();
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+    return toLocalInput(next);
+  }
+  return toLocalInput(d);
+}
+
+function ReminderInput({ value, onChange, suggest }) {
+  return (
+    <Field label="Reminder" wide hint={value ? "It rings only at this date and time - on the phone and here." : "Off - nothing will ring for this."}>
+      <div className="lm-reminder-row">
+        <label className="lm-check">
+          <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked ? hourBefore(suggest) : "")} />
+          Set a reminder
+        </label>
+        {!!value && <input className="lm-input" type="datetime-local" value={value} min={toLocalInput()} onChange={(e) => onChange(e.target.value)} aria-label="Reminder date and time" />}
+      </div>
+    </Field>
   );
 }
 
@@ -991,15 +1022,17 @@ export function AssignLeadModal({ lead, onClose }) {
   );
 }
 
-export function FollowUpModal({ lead, onClose }) {
+/** Add a follow-up - or, with `task` (a work task row), change that one follow-up's date, time and note. */
+export function FollowUpModal({ lead, task, onClose }) {
   const viewer = useViewer();
   const toast = useToast();
   const canAssign = viewer.persona === "sales_manager";
   const team = canAssign ? salesTeam() : [];
-  const [when, setWhen] = useState(tomorrowInput);
+  const [when, setWhen] = useState(() => (task?.due_date ? `${task.due_date}T${String(task.due_time || "09:00").slice(0, 5)}` : tomorrowInput()));
   // Your own task by default (it shows in your Task Management); a manager can give it to someone else.
   const [assignedTo, setAssignedTo] = useState(() => viewer.me.id);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(task?.description || "");
+  const [remindAt, setRemindAt] = useState("");
   const [busy, setBusy] = useState(false);
   // Follow-ups already open on this lead (undefined while checking). A lead keeps ONE follow-up
   // task per person: when that person already has one, the form moves it (the server keeps every
@@ -1014,7 +1047,7 @@ export function FollowUpModal({ lead, onClose }) {
         if (!alive) return;
         setExisting(list);
         const own = list.find((f) => f.forId === String(viewer.me.id));
-        if (own) setWhen(`${own.date}T${own.time || "09:00"}`);
+        if (own && !task) setWhen(`${own.date}T${own.time || "09:00"}`);
       })
       .catch(() => alive && setExisting([]));
     myReminders(viewer.me.id)
@@ -1023,6 +1056,7 @@ export function FollowUpModal({ lead, onClose }) {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id, viewer.me.id]);
 
   // The follow-up this one would join: the chosen person's own open one on this lead.
@@ -1035,7 +1069,7 @@ export function FollowUpModal({ lead, onClose }) {
     if (busy) return;
     setBusy(true);
     try {
-      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
+      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo, remindAt });
       const forMe = String(assignedTo) === String(viewer.me.id);
       const who = forMe ? "For you" : `For ${team.find((u) => u.id === String(assignedTo))?.name || "the team"}`;
       showReminderCard({ kind: "followup", title: "Follow-up added", text: lead.company, sub: `${who} · ${dateTime(when)}`, leadId: lead.id });
@@ -1052,7 +1086,7 @@ export function FollowUpModal({ lead, onClose }) {
     if (new Date(when) <= new Date()) return toast("Choose a follow-up time in the future.", true);
     setBusy(true);
     try {
-      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
+      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo, remindAt });
       toast("Follow-up moved");
       close();
     } catch (err) {
@@ -1066,6 +1100,53 @@ export function FollowUpModal({ lead, onClose }) {
       You already have {clash.length === 1 ? `"${clash[0].title}" (${kindLabel(clash[0].kind).toLowerCase()})` : `${clash.length} things`} at this time. You can still save.
     </Note>
   );
+
+  /** Changes the one follow-up picked (`task`); the server keeps its earlier time in the history. */
+  async function change(close) {
+    if (busy) return;
+    if (new Date(when) <= new Date()) return toast("Choose a follow-up time in the future.", true);
+    setBusy(true);
+    try {
+      await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo: task.assigned_to, remindAt, taskId: task.id });
+      toast("Follow-up changed");
+      close();
+    } catch (err) {
+      toast(err.message || "Could not change the follow-up.", true);
+      setBusy(false);
+    }
+  }
+
+  if (task) {
+    return (
+      <Modal
+        title="Change Follow-up"
+        sub={`Now due ${dateTime(`${task.due_date}T${String(task.due_time || "09:00").slice(0, 5)}`)}`}
+        onClose={onClose}
+        footer={(close) => (
+          <>
+            <Button variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+            <Button busy={busy} icon={<FiCalendar />} onClick={() => change(close)}>
+              Save Changes
+            </Button>
+          </>
+        )}
+      >
+        <LeadBar lead={lead} />
+        <div className="lm-form">
+          <Field label="New Date & Time" required>
+            <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
+          </Field>
+          <Field label="Note" wide>
+            <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="What should the call cover?" />
+          </Field>
+          <ReminderInput value={remindAt} onChange={setRemindAt} suggest={when} />
+        </div>
+        {clashNote}
+      </Modal>
+    );
+  }
 
   if (current) {
     return (
@@ -1097,6 +1178,7 @@ export function FollowUpModal({ lead, onClose }) {
           <Field label="Note" wide>
             <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should the next call cover?" />
           </Field>
+          <ReminderInput value={remindAt} onChange={setRemindAt} suggest={when} />
         </div>
         {clashNote}
       </Modal>
@@ -1143,9 +1225,10 @@ export function FollowUpModal({ lead, onClose }) {
         <Field label="What to follow up on" wide>
           <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="e.g. Ask whether the quotation was reviewed by their finance team." />
         </Field>
+        <ReminderInput value={remindAt} onChange={setRemindAt} suggest={when} />
       </div>
       {clashNote}
-      <Note tone="info">It appears in Follow-ups, Reminders and Today&apos;s Tasks on that day, and in Task Management.</Note>
+      <Note tone="info">It appears in Follow-ups and Reminders on that day.</Note>
     </Modal>
   );
 }
@@ -1167,6 +1250,7 @@ export function FollowUpCallModal({ lead, onClose }) {
   const [result, setResult] = useState("DONE");
   const [note, setNote] = useState("");
   const [when, setWhen] = useState(tomorrowInput);
+  const [remindAt, setRemindAt] = useState("");
   const [busy, setBusy] = useState(false);
   // The follow-up this call answers: my own open one on the lead, else the first open one (undefined while checking).
   const [current, setCurrent] = useState(undefined);
@@ -1195,7 +1279,7 @@ export function FollowUpCallModal({ lead, onClose }) {
         toast("Follow-up done");
       } else {
         const assignedTo = viewer.persona === "sales_manager" && current ? current.forId : viewer.me.id;
-        await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo });
+        await addFollowUp(lead.id, { at: new Date(when).toISOString(), note, assignedTo, remindAt });
         toast("Next follow-up set");
       }
       close();
@@ -1242,9 +1326,12 @@ export function FollowUpCallModal({ lead, onClose }) {
         <textarea className="lm-textarea" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="e.g. Customer will confirm after their board meeting." />
       </Field>
       {choice === "AGAIN" && (
-        <Field label="Next Follow-up" required hint="The lead stays in Follow-ups until then.">
-          <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
-        </Field>
+        <>
+          <Field label="Next Follow-up" required hint="The lead stays in Follow-ups until then.">
+            <input className="lm-input" type="datetime-local" value={when} min={toLocalInput()} onChange={(e) => setWhen(e.target.value)} />
+          </Field>
+          <ReminderInput value={remindAt} onChange={setRemindAt} suggest={when} />
+        </>
       )}
     </Modal>
   );

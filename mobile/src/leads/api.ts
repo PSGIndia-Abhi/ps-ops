@@ -217,7 +217,7 @@ export async function convertLead(id: string, notes: string, amount?: number): P
  */
 export async function addFollowUp(
   id: string,
-  body: { date: string; time: string | null; note: string; assignedTo?: number; taskId?: string; newTask?: boolean },
+  body: { date: string; time: string | null; note: string; assignedTo?: number; taskId?: string; newTask?: boolean; reminder?: LeadReminder | null },
 ): Promise<void> {
   await httpClient.post(`/api/crm/leads/${id}/follow-ups`, {
     nextActionDate: body.date,
@@ -226,6 +226,7 @@ export async function addFollowUp(
     assignedTo: body.assignedTo || undefined,
     taskId: body.taskId || undefined,
     newTask: body.newTask || undefined,
+    ...reminderBody(body.reminder),
   });
 }
 
@@ -304,9 +305,76 @@ export async function listFollowUps(
   }));
 }
 
+/** DELETE /api/crm/follow-ups/:taskId - the follow-up is taken off (and its reminder with it). */
+export async function deleteFollowUp(taskId: string): Promise<void> {
+  await httpClient.delete(`/api/crm/follow-ups/${taskId}`);
+}
+
+/** POST /api/work-tasks/:id/reminder - set / move the reminder of a follow-up, meeting or task. */
+export async function setTaskReminderTime(taskId: string, date: string, time: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/${taskId}/reminder`, { date, time });
+}
+
+/** DELETE /api/work-tasks/:id/reminder - take that reminder off. */
+export async function removeTaskReminder(taskId: string): Promise<void> {
+  await httpClient.delete(`/api/work-tasks/${taskId}/reminder`);
+}
+
 /** POST /api/work-tasks/:id/complete - the follow-up is done (only its own person can). */
 export async function completeFollowUp(id: string): Promise<void> {
   await httpClient.post(`/api/work-tasks/${id}/complete`, {});
+}
+
+/** POST /api/work-tasks/:id/start - OPEN -> IN_PROGRESS, like a task in Task Management (its clock starts). */
+export async function startFollowUp(id: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/${id}/start`);
+}
+
+/** POST /api/work-tasks/:id/pause - IN_PROGRESS -> PAUSED; a reason is required. */
+export async function pauseFollowUp(id: string, reason: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/${id}/pause`, { reason });
+}
+
+/** POST /api/work-tasks/:id/resume - PAUSED -> IN_PROGRESS (the paused time is not counted as worked). */
+export async function resumeFollowUp(id: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/${id}/resume`);
+}
+
+export interface LeadFollowUpTask {
+  id: string;
+  description: string | null;
+  status: string;
+  assignedTo: string;
+  assignedToName: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  completedAt: string | null;
+  completionNote: string | null;
+  startedAt: string | null;
+  pausedAt: string | null;
+  pausedSeconds: number;
+  /** Its reminder ('YYYY-MM-DD HH:MM:SS'), or null - rings once at that time. */
+  reminderAt: string | null;
+}
+
+/** GET /api/work-tasks?source_id&task_type=LEAD_FOLLOW_UP - one lead's follow-ups, open and done (as the web reads them). */
+export async function leadFollowUpTasks(leadId: string): Promise<LeadFollowUpTask[]> {
+  const { data } = await httpClient.get<Row[]>('/api/work-tasks', { params: { source_id: leadId, task_type: 'LEAD_FOLLOW_UP' } });
+  return data.map((r) => ({
+    id: String(r.id),
+    description: (r.description as string) || null,
+    status: String(r.status),
+    assignedTo: String(r.assigned_to ?? ''),
+    assignedToName: (r.assigned_to_name as string) || '',
+    dueDate: (r.due_date as string) || null,
+    dueTime: (r.due_time as string) || null,
+    completedAt: (r.completed_at as string) || null,
+    completionNote: (r.completion_note as string) || null,
+    startedAt: (r.started_at as string) || null,
+    pausedAt: (r.paused_at as string) || null,
+    pausedSeconds: Number(r.paused_seconds) || 0,
+    reminderAt: (r.reminder_at as string) || null,
+  }));
 }
 
 // ---- Residential call follow-ups -----------------------------------------
@@ -349,13 +417,14 @@ export async function convertResidential(id: string, body: { amount?: number; no
 /** POST /api/crm/leads/:id/residential-calls - log a call; any outcome but Not interested sets the next call. */
 export async function logResidentialCall(
   id: string,
-  body: { outcome: ResidentialOutcome; note: string; nextDate?: string; nextTime?: string | null },
+  body: { outcome: ResidentialOutcome; note: string; nextDate?: string; nextTime?: string | null; reminder?: LeadReminder | null },
 ): Promise<void> {
   await httpClient.post(`/api/crm/leads/${id}/residential-calls`, {
     outcome: body.outcome,
     note: body.note || undefined,
     nextDate: body.nextDate,
     nextTime: body.nextTime || undefined,
+    ...reminderBody(body.reminder),
   });
 }
 
@@ -372,7 +441,16 @@ export interface NewMeeting {
   type: MeetingType;
   address: string;
   notes: string;
+  /** Optional - the meeting rings only if a reminder is set ('YYYY-MM-DD', 'HH:MM'). */
+  reminder?: LeadReminder | null;
 }
+
+/** The reminder of a meeting / follow-up / next call: rings only at this date and time. */
+export interface LeadReminder {
+  date: string;
+  time: string;
+}
+const reminderBody = (r?: LeadReminder | null) => (r ? { reminderDate: r.date, reminderTime: r.time } : {});
 
 /** One meeting of a lead with who it was given to - a line of the lead's visit history. */
 export type LeadVisit = Meeting & { salesName: string };
@@ -433,6 +511,7 @@ export async function scheduleMeeting(leadId: string, m: NewMeeting): Promise<Me
     meetingType: m.type,
     meetingAddress: m.address,
     notes: m.notes,
+    ...reminderBody(m.reminder),
   });
   return toMeeting(data);
 }
@@ -470,8 +549,17 @@ export async function completeMeeting(
   return toMeeting(data);
 }
 
-export async function rescheduleMeeting(id: string, date: string, time: string): Promise<Meeting> {
-  const { data } = await httpClient.patch<Row>(`/api/crm/meetings/${id}/reschedule`, { scheduledAt: `${date}T${time}` });
+export async function rescheduleMeeting(
+  id: string,
+  date: string,
+  time: string,
+  extra: { reason?: string; reminder?: LeadReminder | null } = {},
+): Promise<Meeting> {
+  const { data } = await httpClient.patch<Row>(`/api/crm/meetings/${id}/reschedule`, {
+    scheduledAt: `${date}T${time}`,
+    reason: extra.reason || undefined,
+    ...reminderBody(extra.reminder),
+  });
   return toMeeting(data);
 }
 

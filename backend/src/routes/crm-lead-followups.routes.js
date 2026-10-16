@@ -9,6 +9,7 @@ const {
 const { logHistory: logTaskHistory, isValidTime } = require("../utils/workTasks");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { syncReminders } = require("../services/push.service");
+const { readLeadReminder, applyLeadReminder, followTask } = require("../utils/taskReminders");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -113,6 +114,9 @@ router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), a
     if (body.nextActionTime && !isValidTime(body.nextActionTime)) throw new HttpError(400, "nextActionTime must be a valid HH:MM or HH:MM:SS");
     const note = optionalText(body.note, 2000);
     if (note === false) throw new HttpError(400, "note is too long (max 2000 characters)");
+    // Optional: nothing rings for the follow-up unless a reminder is set on it.
+    const reminder = readLeadReminder(body);
+    if (reminder?.error) throw new HttpError(400, reminder.error);
 
     let assignedTo = parseId(body.assignedTo);
     if (assignedTo === null) {
@@ -162,6 +166,8 @@ router.post("/leads/:id/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), a
         );
         await logTaskHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: req.user.id, note: "Created from a lead follow-up" });
       }
+      // A moved follow-up loses the reminder of its old time; the one asked for (if any) is set.
+      await applyLeadReminder(conn, { id: taskId, title, assigned_to: assignedTo }, req.user.id, reminder);
       await logLeadHistory(conn, lead.id, "FOLLOW_UP_SCHEDULED", {
         note: `Due ${body.nextActionDate}${body.nextActionTime ? ` ${body.nextActionTime}` : ""}${note ? `: ${note}` : ""}`.slice(0, 500),
         changedBy: req.user.id,
@@ -247,6 +253,8 @@ router.post("/leads/:id/residential-calls", auth, requirePermission("CRM_VIEW_LE
     const note = optionalText(body.note, 400);
     if (note === false) throw new HttpError(400, "note is too long (max 400 characters)");
     const closing = outcome === "NOT_INTERESTED";
+    const reminder = closing ? null : readLeadReminder(body);
+    if (reminder?.error) throw new HttpError(400, reminder.error);
     if (!closing) {
       if (!isValidDate(body.nextDate)) throw new HttpError(400, "Pick the date of the next call");
       if (body.nextTime && !isValidTime(body.nextTime)) throw new HttpError(400, "nextTime must be a valid HH:MM");
@@ -267,6 +275,7 @@ router.post("/leads/:id/residential-calls", auth, requirePermission("CRM_VIEW_LE
         for (const t of openTasks) {
           await conn.query("UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ?", [t.id]);
           await logTaskHistory(conn, t.id, "CANCEL", { fromStatus: t.status, toStatus: "CANCELLED", changedBy: me, note: "Customer not interested" });
+          await followTask(conn, t.id);
         }
         await conn.query("UPDATE crm_leads SET lead_status = 'lost' WHERE id = ?", [lead.id]);
         return;
@@ -298,6 +307,7 @@ router.post("/leads/:id/residential-calls", auth, requirePermission("CRM_VIEW_LE
           changedBy: me,
           note: `Due ${open.due_date}${open.due_time ? ` ${open.due_time}` : ""} moved to ${when}: ${CALL_OUTCOMES[outcome]}`.slice(0, 500),
         });
+        await applyLeadReminder(conn, { id: open.id, title: `Call - ${lead.customer_name}`.slice(0, 200), assigned_to: me }, me, reminder);
       } else {
         const id = uuid();
         await conn.query(
@@ -306,6 +316,7 @@ router.post("/leads/:id/residential-calls", auth, requirePermission("CRM_VIEW_LE
           [id, `Call - ${lead.customer_name}`.slice(0, 200), desc, lead.id, me, me, body.nextDate, body.nextTime || null]
         );
         await logTaskHistory(conn, id, "CREATE", { toStatus: "OPEN", changedBy: me, note: "Created from a residential call" });
+        await applyLeadReminder(conn, { id, title: `Call - ${lead.customer_name}`.slice(0, 200), assigned_to: me }, me, reminder);
       }
       await logLeadHistory(conn, lead.id, "FOLLOW_UP_SCHEDULED", { note: `Next call ${when}`, changedBy: me });
     });
@@ -348,6 +359,7 @@ router.post("/leads/:id/residential-convert", auth, requirePermission("CRM_VIEW_
       for (const t of openTasks) {
         await conn.query("UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ?", [t.id]);
         await logTaskHistory(conn, t.id, "CANCEL", { fromStatus: t.status, toStatus: "CANCELLED", changedBy: me, note: "Lead converted to a customer" });
+        await followTask(conn, t.id);
       }
       const changed = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
       await logLeadHistory(conn, lead.id, "CONVERTED", { note: `Converted to a customer${changed}${note ? `: ${note}` : ""}`.slice(0, 500), changedBy: me });
@@ -404,6 +416,40 @@ router.get("/follow-ups", auth, requirePermission("CRM_VIEW_LEAD"), async (req, 
     res.json(rows);
   } catch (err) {
     sendError(res, err, "Failed to load follow-ups");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/crm/follow-ups/:taskId -- take a follow-up off (it was set by mistake or is no longer
+// needed): the person it is for, whoever set it, or a lead manager. It is cancelled, not erased -
+// its history stays - and its reminder stops with it. The lead's history records it.
+// ---------------------------------------------------------------------------
+router.delete("/follow-ups/:taskId", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const [[task]] = await pool.query(
+      `SELECT id, status, assigned_to, created_by, source_id, DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date, due_time
+         FROM work_tasks WHERE id = ? AND source_module = 'LEAD' AND task_type = 'LEAD_FOLLOW_UP'`,
+      [String(req.params.taskId)]
+    );
+    if (!task) throw new HttpError(404, "Follow-up not found");
+    const me = Number(req.user.id);
+    const allowed = Number(task.assigned_to) === me || Number(task.created_by) === me || req.user.role === "admin" || hasPerm(req, "MANAGE_LEADS");
+    if (!allowed) throw new HttpError(403, "You cannot delete this follow-up");
+    if (!["OPEN", "IN_PROGRESS", "PAUSED"].includes(task.status)) throw new HttpError(400, "This follow-up is already closed");
+
+    await inTransaction(async (conn) => {
+      await conn.query("UPDATE work_tasks SET status = 'CANCELLED' WHERE id = ?", [task.id]);
+      await logTaskHistory(conn, task.id, "CANCEL", { fromStatus: task.status, toStatus: "CANCELLED", changedBy: me, note: "Follow-up deleted" });
+      await followTask(conn, task.id);
+      await logLeadHistory(conn, task.source_id, "FOLLOW_UP_DELETED", {
+        note: `Follow-up for ${task.due_date}${task.due_time ? ` ${String(task.due_time).slice(0, 5)}` : ""} deleted`,
+        changedBy: me,
+      });
+    });
+    syncReminders([task.assigned_to]);
+    res.json({ success: true });
+  } catch (err) {
+    sendError(res, err, "Failed to delete the follow-up");
   }
 });
 

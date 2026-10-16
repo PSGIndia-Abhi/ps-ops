@@ -38,7 +38,8 @@ export default function TaskReminderAlerts() {
     try {
       const rows = await getJson("/api/notifications?limit=10&unreadOnly=true");
       const seen = readSeen();
-      const fresh = (Array.isArray(rows) ? rows : []).filter((n) => TYPES.includes(n.type) && !seen.includes(n.id));
+      // A reminder on a lead meeting / follow-up belongs to Lead Management (it opens the lead there).
+      const fresh = (Array.isArray(rows) ? rows : []).filter((n) => TYPES.includes(n.type) && n.entity_type !== "lead" && !seen.includes(n.id));
       if (!fresh.length) return;
       saveSeen([...seen, ...fresh.map((n) => n.id)]);
       setAlerts((list) => [...fresh.filter((n) => !list.some((a) => a.id === n.id)), ...list]);

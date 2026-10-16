@@ -93,8 +93,8 @@ export async function loadTasks(forId, { force = false } = {}) {
   if (loadingPromise) return loadingPromise;
   loadingPromise = (async () => {
     try {
-      // Lead follow-ups are work tasks underneath, but they are worked in Lead Management's Follow-ups.
-      const tasks = (await call("GET", "/api/work-tasks")).filter((t) => t.task_type !== "LEAD_FOLLOW_UP");
+      // Lead follow-ups and meetings are work tasks underneath, but they are worked in Lead Management.
+      const tasks = (await call("GET", "/api/work-tasks")).filter((t) => t.task_type !== "LEAD_FOLLOW_UP" && t.task_type !== "LEAD_MEETING");
       if (state.forId === forId) set({ tasks, ready: true, error: null });
     } catch (err) {
       if (state.forId === forId) set({ ready: true, error: err.message });

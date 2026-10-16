@@ -128,3 +128,19 @@ export async function addCustomerContact(
   });
   return data;
 }
+
+/**
+ * Changes a saved number's name, phone and primary mark. No email is sent, so the saved email
+ * stays as it is (only the web Contacts page edits it). Returns the refreshed list.
+ */
+export async function updateCustomerContact(
+  customerId: string,
+  contactId: string,
+  input: { name: string; phone: string; primary: boolean },
+): Promise<CustomerContactList> {
+  const { data } = await httpClient.put<CustomerContactList>(
+    `/api/invoices/customers/${encodeURIComponent(customerId)}/contacts/${encodeURIComponent(contactId)}`,
+    { name: input.name.trim(), phone: input.phone.trim(), is_primary: input.primary },
+  );
+  return data;
+}

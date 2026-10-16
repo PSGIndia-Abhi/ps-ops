@@ -72,7 +72,9 @@ export function useMyReminders(myId, refreshKey) {
       const shown = readShown(myId);
       const due = list.current
         .map((i) => ({ item: i, id: `due:${i.key}:${i.date}T${i.time || ""}` }))
-        .filter(({ item, id }) => item.at.getTime() <= now && now <= item.at.getTime() + LATE_MS && !shown.includes(id));
+        // A meeting / follow-up does not pop up at its own time - only a reminder set on it does
+        // (that one arrives as a notification). Personal reminders still pop up at their time.
+        .filter(({ item, id }) => item.kind === "personal" && item.at.getTime() <= now && now <= item.at.getTime() + LATE_MS && !shown.includes(id));
       if (due.length === 0) return;
       // Remembered in this browser, so a reload does not show the same one again.
       localStorage.setItem(shownKey(myId), JSON.stringify([...shown, ...due.map((d) => d.id)].slice(-200)));

@@ -242,6 +242,8 @@ const HISTORY_META: Record<string, { title: string; tone: Tone; icon: IconFn }> 
 };
 
 const historyFallbackIcon: IconFn = (c) => <ClockIcon size={15} color={c} />;
+/** A verification call that ended "need more information" (also a QUALIFY row - its note tells). */
+const NEEDS_INFO_META = { title: 'Marked as need more information', tone: 'warning' as Tone, icon: historyFallbackIcon };
 
 /** Server notes in plain words: dates read as dates, raw GPS as "location recorded". */
 function humanNote(note: string): string {
@@ -563,7 +565,11 @@ export function LeadWorkScreen() {
               <Text style={styles.cardTitle}>ACTIVITY</Text>
               {history.length === 0 && <Text style={styles.empty}>No activity yet.</Text>}
               {shownHistory.map((entry: TimelineEntry, i) => {
-                const meta = HISTORY_META[entry.action] ?? { title: actionLabel(entry.action), tone: 'neutral' as Tone, icon: historyFallbackIcon };
+                // A verification call can end "genuine" or "need more information": the note says which.
+                const needsInfo = entry.action === 'QUALIFY' && /NEEDS_INFO/.test(entry.note || '');
+                const meta = needsInfo
+                  ? NEEDS_INFO_META
+                  : HISTORY_META[entry.action] ?? { title: actionLabel(entry.action), tone: 'neutral' as Tone, icon: historyFallbackIcon };
                 const c = toneColors(theme, meta.tone);
                 const note = entry.note ? humanNote(entry.note) : '';
                 const last = i === shownHistory.length - 1;

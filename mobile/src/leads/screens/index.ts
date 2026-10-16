@@ -7,12 +7,15 @@ import {
   LeadFeedbackScreen,
   LeadFollowUpScreen,
   LeadMeetingNewScreen,
+  LeadMeetingRescheduleScreen,
   LeadQuoteScreen,
   LeadAssignScreen,
   LeadResidentialCallScreen,
   LeadResidentialConvertScreen,
 } from './LeadActionScreens';
 import { LeadListScreen } from './LeadBrowseScreens';
+import { LeadFollowUpHistoryScreen } from './LeadFollowUpHistoryScreen';
+import { LeadFollowUpsScreen } from './LeadFollowUpsScreen';
 import { LeadTasksScreen } from './LeadTodayScreen';
 import { LeadDetailScreen } from './LeadDetailScreen';
 import { LeadNewCommercialScreen } from './LeadNewCommercialScreen';
@@ -20,7 +23,7 @@ import { LeadNotificationsScreen } from './LeadNotificationsScreen';
 import { LeadProfileScreen } from './LeadProfileScreen';
 import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
-import { ReminderEditScreen, RemindersScreen } from './RemindersScreens';
+import { ReminderEditScreen, RemindersScreen, ReminderTimeScreen } from './RemindersScreens';
 import { PerformanceScreen, TeamScreen } from './ReportScreens';
 import { ResidentialLeadsScreen } from './ResidentialLeadsScreen';
 import { TeamVisitsScreen } from './TeamVisitsScreen';
@@ -45,7 +48,10 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadAssign', component: LeadAssignScreen, modal: true },
   { name: 'LeadCall', component: LeadCallScreen, modal: true },
   { name: 'LeadMeetingNew', component: LeadMeetingNewScreen, modal: true },
+  { name: 'LeadMeetingReschedule', component: LeadMeetingRescheduleScreen, modal: true },
   { name: 'LeadFollowUp', component: LeadFollowUpScreen, modal: true },
+  { name: 'LeadFollowUpHistory', component: LeadFollowUpHistoryScreen },
+  { name: 'LeadFollowUpsList', component: LeadFollowUpsScreen },
   { name: 'LeadClose', component: LeadCloseScreen, modal: true },
   { name: 'LeadConvert', component: LeadConvertScreen, modal: true },
   { name: 'LeadQuote', component: LeadQuoteScreen, modal: true },
@@ -61,4 +67,5 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadResidential', component: ResidentialLeadsScreen },
   { name: 'LeadReminders', component: RemindersScreen },
   { name: 'LeadReminderEdit', component: ReminderEditScreen, modal: true },
+  { name: 'LeadReminderTime', component: ReminderTimeScreen, modal: true },
 ];

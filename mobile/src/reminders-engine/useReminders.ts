@@ -4,7 +4,7 @@ import { kvGet, kvSet } from '../crm/secureKv';
 import { syncReminders, type ReminderRoute } from './engine';
 import { canScheduleExactAlarms, consumeOpenedRoute, onReminderOpened, openExactAlarmSettings, remindersAvailable } from './native';
 import { listenForPush, registerForPush } from './push';
-import { myUpcomingTasks, taskToReminder } from './sources';
+import { myUpcomingTasks, tasksToReminders } from './sources';
 
 /** While an app is open its reminders are refreshed this often (plus on open and on return). */
 // A safety net only: a push re-arms the alarms the moment something changes, and opening the app
@@ -63,7 +63,7 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
         again.current = false;
         try {
           const tasks = await myUpcomingTasks(myId, { withTaskReminders: true });
-          await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
+          await syncReminders(myId, tasksToReminders(tasks, myId));
           askExactOnce();
         } catch {
           // Offline or the server is down: the alarms already armed stay armed; try again later.

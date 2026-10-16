@@ -94,6 +94,8 @@ const factory = (t: CrmTheme) => ({
   topTitleWrap: { flex: 1, marginHorizontal: spacing.sm },
   topTitle: { ...typography.subtitle, color: t.textPrimary },
   topSubtitle: { ...typography.caption, color: t.textMuted },
+  topAction: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radii.pill, backgroundColor: t.primary },
+  topActionText: { ...typography.captionMedium, color: t.textOnPrimary },
   button: {
     minHeight: 52,
     borderRadius: radii.lg,
@@ -566,7 +568,20 @@ export function MeetingRow({ meeting, title, onPress }: { meeting: Meeting; titl
 }
 
 /** Back / close bar for a lead screen. Has no background of its own, so the screen's wash shows through. */
-export function LeadTopBar({ title, subtitle, onBack, icon = 'back' }: { title: string; subtitle?: string; onBack: () => void; icon?: 'back' | 'close' }) {
+export function LeadTopBar({
+  title,
+  subtitle,
+  onBack,
+  icon = 'back',
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  onBack: () => void;
+  icon?: 'back' | 'close';
+  /** A button on the right (e.g. "+ New") - kept in the bar, so no phone's buttons can cover it. */
+  action?: { label: string; onPress: () => void; icon?: React.ReactNode };
+}) {
   const { styles, theme } = useCrmStyles(factory);
   return (
     <View style={styles.topBar}>
@@ -583,6 +598,12 @@ export function LeadTopBar({ title, subtitle, onBack, icon = 'back' }: { title: 
           </Text>
         )}
       </View>
+      {!!action && (
+        <Pressable onPress={action.onPress} accessibilityRole="button" hitSlop={6} style={({ pressed }) => [styles.topAction, pressed && { opacity: 0.85 }]}>
+          {action.icon}
+          <Text style={styles.topActionText}>{action.label}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

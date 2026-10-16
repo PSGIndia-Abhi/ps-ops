@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, FlatList, Linking, Pressable, RefreshControl, Text, View } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertTriangleIcon,
@@ -22,7 +22,6 @@ import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { StatusBadge, type Tone } from '../../crm/ui/StatusBadge';
 import { fmtTimestamp, todayStr } from '../../tasks/format';
-import { DateSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
 import { getCurrentLocation } from '../../utils/location';
 import { refreshReminders } from '../../reminders-engine/useReminders';
@@ -208,7 +207,8 @@ const TABS: Option<'today' | 'upcoming'>[] = [
   { value: 'upcoming', label: 'Upcoming' },
 ];
 
-export function MeetingsScreen() {
+/** My meetings. `embedded`: the Meetings tab of the Follow-ups screen (no header of its own). */
+export function MeetingsScreen({ embedded = false }: { embedded?: boolean } = {}) {
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
   const [tab, setTab] = useState<'today' | 'upcoming'>('today');
@@ -228,9 +228,8 @@ export function MeetingsScreen() {
   // "Upcoming" is everything still ahead; today's own are already on the Today tab.
   const rows = !data ? [] : tab === 'today' ? data.today : data.upcoming.filter((m) => m.date !== todayStr());
 
-  return (
-    <LeadScreen edges={['top']}>
-      <TopBar title="My meetings" onBack={() => navigation.goBack()} />
+  const content = (
+    <>
       <View style={styles.segment}>
         <SegmentedControl options={TABS} value={tab} onChange={setTab} />
       </View>
@@ -259,6 +258,13 @@ export function MeetingsScreen() {
           />
         )}
       />
+    </>
+  );
+  if (embedded) return <View style={{ flex: 1 }}>{content}</View>;
+  return (
+    <LeadScreen edges={['top']}>
+      <TopBar title="My meetings" onBack={() => navigation.goBack()} />
+      {content}
     </LeadScreen>
   );
 }
@@ -314,8 +320,6 @@ export function MeetingScreen() {
   const [endingEarly, setEndingEarly] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [newDate, setNewDate] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
 
   const loader = useCallback(async () => {
     const meeting = await api.getMeeting(meetingId);
@@ -323,6 +327,13 @@ export function MeetingScreen() {
     return { meeting, lead };
   }, [meetingId]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load this meeting.');
+  // Back from Reschedule: show the meeting's new time.
+  useFocusEffect(
+    useCallback(() => {
+      reload();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
 
   /** Resolves true when the change was saved. */
   const run = async (key: string, work: () => Promise<unknown>, done: string): Promise<boolean> => {
@@ -585,7 +596,13 @@ export function MeetingScreen() {
 
             {canArrange && !cancelling && !endingEarly && (
               <View style={styles.rowButtons}>
-                <PrimaryButton label="Reschedule" variant="secondary" onPress={() => setSheet('date')} loading={busy === 'reschedule'} disabled={busy !== null} style={styles.flex1} />
+                <PrimaryButton
+                  label="Reschedule"
+                  variant="secondary"
+                  onPress={() => navigation.navigate('LeadMeetingReschedule', { meetingId, title: lead?.companyName || meeting.address || 'Meeting', date: meeting.date, time: meeting.time })}
+                  disabled={busy !== null}
+                  style={styles.flex1}
+                />
                 <PrimaryButton label="Cancel meeting" variant="secondary" onPress={() => setCancelling(true)} disabled={busy !== null} style={styles.flex1} />
               </View>
             )}
@@ -620,27 +637,6 @@ export function MeetingScreen() {
           </>
         )}
 
-        <DateSheet
-          visible={sheet === 'date'}
-          onClose={() => setSheet(null)}
-          value={meeting?.date ?? null}
-          minDate={todayStr()}
-          title="New meeting date"
-          onPick={(d) => {
-            setNewDate(d);
-            setSheet('time');
-          }}
-        />
-        <TimeSheet
-          visible={sheet === 'time'}
-          onClose={() => setSheet(null)}
-          value={meeting ? meeting.time.slice(0, 5) : null}
-          allowNone={false}
-          onPick={(t) => {
-            setSheet(null);
-            if (newDate && t) run('reschedule', () => api.rescheduleMeeting(meetingId, newDate, t), 'Meeting rescheduled.');
-          }}
-        />
       </CrmScreen>
 
       {/* The one thing to do now, always in reach. */}

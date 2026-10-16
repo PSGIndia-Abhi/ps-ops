@@ -54,6 +54,7 @@ import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import {
+  addDays,
   fmtDateShort,
   fmtDateTime,
   fmtTime,
@@ -154,6 +155,15 @@ const factory = (t: CrmTheme) => ({
   // Shrinks and wraps next to the avatar instead of running past the card edge.
   personName: { ...typography.bodyMedium, color: t.textPrimary, flexShrink: 1 },
   link: { ...typography.bodyMedium, color: t.primary },
+  // Reminder: the time on one line, its buttons under it - fits any phone width
+  remBox: { gap: 6, flex: 1 },
+  remWhen: { ...typography.bodyMedium, color: t.textPrimary },
+  remOff: { ...typography.bodyMedium, color: t.textMuted },
+  remActions: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6 },
+  remPill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 3, minHeight: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: t.primarySoftBg },
+  remPillDanger: { backgroundColor: t.dangerBg },
+  remPillText: { ...typography.captionMedium, color: t.primary },
+  remPillTextDanger: { color: t.dangerText },
   // A repeating task's dates (Occurrences card): Done / Missed / Skipped, newest first.
   occHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
   occTitle: { ...typography.bodyMedium, color: t.textPrimary },
@@ -522,6 +532,17 @@ export function TaskDetailScreen() {
   const canSetReminder = !finished && (task.assigned_to === viewer.id || managesTask);
   const reminderDate = task.reminder_at ? task.reminder_at.slice(0, 10) : null;
   const reminderTime = task.reminder_at ? task.reminder_at.slice(11, 16) : null;
+  const reminderOn = !!task.reminder_id && !finished && !!reminderDate;
+  // Short, so it stays on one line: "Today, 4:25 PM" / "Tomorrow, 9:00 AM" / "Oct 18, 4:25 PM".
+  const reminderDay = !reminderDate
+    ? ''
+    : reminderDate === todayStr()
+      ? 'Today'
+      : reminderDate === addDays(todayStr(), 1)
+        ? 'Tomorrow'
+        : reminderDate.slice(0, 4) === todayStr().slice(0, 4)
+          ? fmtDateShort(reminderDate).replace(/, \d{4}$/, '')
+          : fmtDateShort(reminderDate);
   const pickReminder = () => {
     setRemDate(reminderDate || (task.due_date && task.due_date >= todayStr() ? task.due_date : todayStr()));
     setRemTime(reminderTime || (task.due_time ? task.due_time.slice(0, 5) : '09:00'));
@@ -867,19 +888,29 @@ export function TaskDetailScreen() {
               icon={<BellIcon size={18} color={theme.textMuted} />}
               label="Reminder"
             >
-              <View style={styles.person}>
-                <Text style={styles.personName}>
-                  {task.reminder_id && !finished && reminderDate ? `${fmtDateShort(reminderDate)}, ${fmtTime(reminderTime || '')}` : 'Off'}
+              <View style={styles.remBox}>
+                <Text style={reminderOn ? styles.remWhen : styles.remOff} numberOfLines={1}>
+                  {reminderOn ? `${reminderDay}, ${fmtTime(reminderTime || '')}` : 'Off'}
                 </Text>
                 {canSetReminder && (
-                  <Pressable onPress={pickReminder} disabled={busy} accessibilityRole="button">
-                    <Text style={styles.link}>{task.reminder_id ? 'Change' : 'Set'}</Text>
-                  </Pressable>
-                )}
-                {canSetReminder && !!task.reminder_id && (
-                  <Pressable onPress={() => run(() => api.removeTaskReminder(task.id), 'Reminder removed')} disabled={busy} accessibilityRole="button">
-                    <Text style={[styles.link, { color: theme.dangerText }]}>Remove</Text>
-                  </Pressable>
+                  <View style={styles.remActions}>
+                    <Pressable onPress={pickReminder} disabled={busy} accessibilityRole="button" hitSlop={4} style={styles.remPill}>
+                      {reminderOn ? <EditIcon size={12} color={theme.primary} /> : <BellIcon size={12} color={theme.primary} />}
+                      <Text style={styles.remPillText}>{reminderOn ? 'Change' : 'Set reminder'}</Text>
+                    </Pressable>
+                    {!!task.reminder_id && (
+                      <Pressable
+                        onPress={() => run(() => api.removeTaskReminder(task.id), 'Reminder removed')}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        hitSlop={4}
+                        style={[styles.remPill, styles.remPillDanger]}
+                      >
+                        <TrashIcon size={12} color={theme.dangerText} />
+                        <Text style={[styles.remPillText, styles.remPillTextDanger]}>Remove</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 )}
               </View>
             </InfoRow>

@@ -1,5 +1,5 @@
 import { httpClient } from '../api/httpClient';
-import { todayStr } from '../tasks/format';
+import { fmtDateShort, fmtTime, todayStr } from '../tasks/format';
 import type { WorkTask } from '../tasks/types';
 import type { ReminderItem, ReminderKind, ReminderRoute } from './engine';
 
@@ -77,8 +77,37 @@ export function taskToReminder(t: WorkTask, myId: string): ReminderItem {
     time: t.due_time ? String(t.due_time).slice(0, 8) : null,
     // The task itself already announced itself when it was given to you; its reminder does not again.
     fromSomeoneElse: !isTaskReminder(t) && String(t.created_by) !== String(myId),
-    // A Task Management task rings only through a reminder set on it.
-    ring: kind !== 'task' || isTaskReminder(t),
+    // A Task Management task, a lead meeting and a lead follow-up ring only through a reminder set
+    // on them (see tasksToReminders) - none rings at its own time by default.
+    ring: (kind !== 'task' && kind !== 'meeting' && kind !== 'followup') || isTaskReminder(t),
     route: routeOf(t, kind),
   };
+}
+
+/**
+ * Every work task (and every reminder set on one) as reminder items. A reminder set on a lead
+ * meeting or follow-up rings at its own date and time as a "Meeting / Follow-up reminder" that
+ * opens the lead; the meeting / follow-up itself does not ring.
+ */
+export function tasksToReminders(tasks: WorkTask[], myId: string): ReminderItem[] {
+  const byId = new Map(tasks.map((t) => [String(t.id), t]));
+  return tasks.map((t) => {
+    const base = taskToReminder(t, myId);
+    if (!isTaskReminder(t) || !t.source_id) return base;
+    const item = { ...base, parentTaskId: String(t.source_id) };
+    const parent = byId.get(String(t.source_id));
+    const parentKind = parent ? kindOf(parent) : null;
+    if (!parent || (parentKind !== 'meeting' && parentKind !== 'followup')) return item;
+    const at = `${fmtDateShort(String(parent.due_date).slice(0, 10)).replace(/, \d{4}$/, '')}${parent.due_time ? `, ${fmtTime(String(parent.due_time))}` : ''}`;
+    const parentItem = taskToReminder(parent, myId);
+    return {
+      ...item,
+      kind: parentKind,
+      title: cleanTitle(parent, parentKind),
+      detail: `${parentItem.detail} · ${at}`,
+      ring: true,
+      fromSomeoneElse: false,
+      route: parent.source_id ? { app: 'lead', screen: 'LeadDetail', params: { leadId: parent.source_id } } : item.route,
+    };
+  });
 }

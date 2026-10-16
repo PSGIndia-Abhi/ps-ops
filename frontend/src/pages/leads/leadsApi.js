@@ -555,12 +555,20 @@ export const FOLLOW_UP_OUTCOMES = ["NEED_MORE_INFO", "CALL_BACK", "NO_ANSWER"];
  * POST /leads/{id}/follow-ups - a follow-up at any time, not only from a verification call.
  * It becomes a task in Task Management for `assignedTo` (the signed-in person when not given).
  */
-export async function addFollowUp(leadId, { at, note, assignedTo }) {
+export async function addFollowUp(leadId, { at, note, assignedTo, remindAt, taskId }) {
   if (!at || new Date(at).getTime() < Date.now() - 60000) throw new Error("Choose a follow-up time in the future.");
   const [date, time] = toWallClock(at).split("T");
   await request(`/api/crm/leads/${leadId}/follow-ups`, {
     method: "POST",
-    body: { nextActionDate: date, nextActionTime: time, note: note?.trim() || "", assignedTo: Number(assignedTo || state.me.id) },
+    body: {
+      nextActionDate: date,
+      nextActionTime: time,
+      note: note?.trim() || "",
+      assignedTo: Number(assignedTo || state.me.id),
+      // `taskId`: that one follow-up moves to the new time (and note) - nothing new is added.
+      ...(taskId ? { taskId: String(taskId) } : {}),
+      ...reminderBody(remindAt),
+    },
   });
   await loadWorkspace();
 }
@@ -619,7 +627,20 @@ export async function getOpenMeeting(leadId) {
 }
 
 /** POST /leads/{id}/meetings - also creates the sales person's task in Task Management. 409 when one is already open. */
-export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationType, address, notes }) {
+/**
+ * The optional reminder of a meeting / follow-up ('YYYY-MM-DDTHH:MM' from the form, or empty): nothing
+ * rings for a meeting or follow-up unless one is set. Checked here so the form shows the reason.
+ */
+function reminderBody(remindAt) {
+  if (!remindAt) return {};
+  const at = new Date(remindAt);
+  if (Number.isNaN(at.getTime())) throw new Error("Pick the reminder date and time.");
+  if (at.getTime() <= Date.now()) throw new Error("The reminder time has already passed. Pick a later time.");
+  const [reminderDate, reminderTime] = toWallClock(at.toISOString()).split("T");
+  return { reminderDate, reminderTime: reminderTime.slice(0, 5) };
+}
+
+export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationType, address, notes, remindAt }) {
   if (!salesId) throw new Error("Choose the sales person for this meeting.");
   if (!scheduledAt || new Date(scheduledAt).getTime() < Date.now() - 60000) throw new Error("Choose a meeting time in the future.");
   const meeting = await request(`/api/crm/leads/${leadId}/meetings`, {
@@ -630,6 +651,7 @@ export async function scheduleMeeting(leadId, { salesId, scheduledAt, locationTy
       meetingType: locationType === "OFFICE" ? "OFFICE" : "SITE_VISIT",
       meetingAddress: address.trim(),
       notes: notes?.trim() || "",
+      ...reminderBody(remindAt),
     },
   });
   await loadWorkspace();

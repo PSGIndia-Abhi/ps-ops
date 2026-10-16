@@ -153,9 +153,13 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       try {
         // Personal reminders are tasks underneath, but they live on the Reminders screen, not here.
         // The accountant's payment reminders are tasks too, but they belong to the Payment Reminders app.
-        // Lead follow-ups are tasks underneath as well; they are worked in the Lead app's Follow-ups tab.
+        // Lead follow-ups and meetings are tasks underneath as well; they are worked in the Lead app.
         const list = (await api.listTasks()).filter(
-          (t) => t.task_type !== 'PERSONAL_REMINDER' && t.task_type !== 'LEAD_FOLLOW_UP' && !(hideReminders && isPaymentReminder(t)),
+          (t) =>
+            t.task_type !== 'PERSONAL_REMINDER' &&
+            t.task_type !== 'LEAD_FOLLOW_UP' &&
+            t.task_type !== 'LEAD_MEETING' &&
+            !(hideReminders && isPaymentReminder(t)),
         );
         setTasks((prev) => mergeTasks(prev, list));
         setError(null);

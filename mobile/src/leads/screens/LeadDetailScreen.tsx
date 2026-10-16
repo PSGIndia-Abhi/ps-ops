@@ -65,23 +65,26 @@ export function LeadDetailScreen() {
   // The sales manager also sees who the lead is with (and can give it to someone else).
   const manager = persona === 'sales_manager';
   const loader = useCallback(async () => {
+    // A residential lead has no pipeline: it opens on its own details page (see below).
+    const first = await crmApi.getLead(leadId);
+    if (first.leadType !== 'commercial') return { lead: first, residential: true as const };
     const [lead, pipeline, visits, openMeeting, people] = await Promise.all([
-      crmApi.getLead(leadId),
+      first,
       api.getLead(leadId),
       // The visit history is extra: if it cannot load, the lead still shows.
       api.leadVisits(leadId).catch(() => [] as api.LeadVisit[]),
       api.openMeeting(leadId).catch(() => null),
       manager ? api.leadAssignees().catch(() => []) : Promise.resolve([]),
     ]);
-    return { lead, pipeline, visits, openMeeting, people };
+    return { lead, pipeline, visits, openMeeting, people, residential: false as const };
   }, [leadId, manager]);
   const { data, error, reload } = useLoad(loader, 'Could not load this lead.');
-  const residential = !!data && data.lead.leadType !== 'commercial';
+  const residential = !!data && data.residential;
   useEffect(() => {
     if (residential) (navigation as unknown as NativeStackNavigationProp<LeadRootStackParamList>).replace('CrmLeadDetail', { leadId });
   }, [residential, navigation, leadId]);
 
-  if (!data) {
+  if (!data || data.residential) {
     return (
       <LeadScreen>
         <TopBar title="Lead details" onBack={() => navigation.goBack()} />
