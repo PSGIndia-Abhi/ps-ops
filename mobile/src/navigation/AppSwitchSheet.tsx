@@ -3,9 +3,9 @@ import { Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { displayRole, useRawRole } from '../auth/role';
-import { BellIcon, BriefcaseIcon, ChevronRightIcon, PersonIcon, PhoneIcon } from '../components/icons';
+import { BellIcon, BriefcaseIcon, ChevronRightIcon, HomeIcon, PersonIcon, PhoneIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
-import { CheckIcon, ClipboardListIcon } from '../crm/ui/crmIcons';
+import { CheckIcon, ClipboardListIcon, StarIcon } from '../crm/ui/crmIcons';
 import { initials } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import type { AppKind } from './AppSwitchContext';
@@ -77,10 +77,35 @@ const factory = (t: CrmTheme) => ({
     paddingHorizontal: spacing.sm,
   },
   profileText: { ...typography.bodyMedium, color: t.textPrimary },
+  // "Default" badge / "Set default" button on each app
+  defaultBadge: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    backgroundColor: t.warningBg,
+    alignSelf: 'flex-start' as const,
+    marginTop: 4,
+  },
+  defaultBadgeText: { ...typography.caption, fontWeight: '700' as const, color: t.warningText },
+  setDefault: {
+    alignSelf: 'flex-start' as const,
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: t.border,
+  },
+  setDefaultText: { ...typography.caption, fontWeight: '600' as const, color: t.primary },
+  hint: { ...typography.caption, color: t.textMuted, paddingHorizontal: spacing.xs, marginTop: spacing.xs },
 });
 
 const APPS: { kind: AppKind; name: string; about: string }[] = [
-  { kind: 'leads', name: 'Lead Management', about: 'Your leads, calls, meetings and follow-ups' },
+  { kind: 'leads', name: 'Commercial Leads', about: 'Business leads, calls, meetings and follow-ups' },
+  { kind: 'residential', name: 'Residential Leads', about: 'Home-service leads, follow-up calls and payments' },
   { kind: 'tasks', name: 'Task Management', about: 'Your tasks, follow-ups and the calendar' },
   { kind: 'sales', name: 'Sales', about: 'Leads, quotes and payments' },
   { kind: 'reminders', name: 'Payment Reminders', about: 'Customer and invoice reminders' },
@@ -91,6 +116,7 @@ function appTint(kind: AppKind, t: CrmTheme): { bg: string; fg: string } {
   if (kind === 'sales') return { bg: t.dangerBg, fg: t.crestRed };
   if (kind === 'reminders') return { bg: t.warningBg, fg: t.warningText };
   if (kind === 'leads') return { bg: t.successBg, fg: t.successText };
+  if (kind === 'residential') return { bg: t.accentBg, fg: t.accent };
   return { bg: t.primarySoftBg, fg: t.primary };
 }
 
@@ -98,6 +124,7 @@ function AppIcon({ kind, color }: { kind: AppKind; color: string }) {
   if (kind === 'sales') return <BriefcaseIcon size={22} color={color} />;
   if (kind === 'reminders') return <BellIcon size={22} color={color} />;
   if (kind === 'leads') return <PhoneIcon size={22} color={color} />;
+  if (kind === 'residential') return <HomeIcon size={22} color={color} />;
   return <ClipboardListIcon size={22} color={color} />;
 }
 
@@ -107,6 +134,9 @@ interface AppSwitchSheetProps {
   /** The apps this user has, in the order shown. */
   apps: AppKind[];
   onPick: (app: AppKind) => void;
+  /** The app this user opens in when they sign in (null: the first of `apps`). */
+  defaultApp: AppKind | null;
+  onSetDefault: (app: AppKind) => void;
   /** Absent when the opener has no profile screen to offer. */
   onProfile?: () => void;
   onClose: () => void;
@@ -116,7 +146,7 @@ interface AppSwitchSheetProps {
  * The "Switch app" menu: a card that drops down from the avatar with who is signed in, the
  * user's apps (the one showing now marked Current) and a link to the profile.
  */
-export function AppSwitchSheet({ visible, current, apps, onPick, onProfile, onClose }: AppSwitchSheetProps) {
+export function AppSwitchSheet({ visible, current, apps, onPick, defaultApp, onSetDefault, onProfile, onClose }: AppSwitchSheetProps) {
   const { styles, theme } = useCrmStyles(factory);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -145,6 +175,7 @@ export function AppSwitchSheet({ visible, current, apps, onPick, onProfile, onCl
 
         {APPS.filter(app => apps.includes(app.kind)).map(app => {
           const on = app.kind === current;
+          const isDefault = app.kind === (defaultApp && apps.includes(defaultApp) ? defaultApp : apps[0]);
           const tint = appTint(app.kind, theme);
           return (
             <Pressable
@@ -162,11 +193,29 @@ export function AppSwitchSheet({ visible, current, apps, onPick, onProfile, onCl
               <View style={styles.text}>
                 <Text style={styles.appName}>{app.name}</Text>
                 <Text style={styles.about}>{on ? 'Current' : app.about}</Text>
+                {isDefault ? (
+                  <View style={styles.defaultBadge}>
+                    <StarIcon size={12} color={theme.warningText} />
+                    <Text style={styles.defaultBadgeText}>Default</Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => onSetDefault(app.kind)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${app.name} when I sign in`}
+                    testID={`default-app-${app.kind}`}
+                    style={({ pressed }) => [styles.setDefault, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.setDefaultText}>Set as default</Text>
+                  </Pressable>
+                )}
               </View>
               {on ? <CheckIcon size={20} color={theme.primary} /> : <ChevronRightIcon size={18} color={theme.textMuted} />}
             </Pressable>
           );
         })}
+        <Text style={styles.hint}>The default app opens when you sign in.</Text>
 
         {!!onProfile && (
           <>

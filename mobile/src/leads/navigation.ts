@@ -18,6 +18,12 @@ export type LeadStackParamList = {
   LeadCall: { leadId: string; name: string; contact: string; stage: PipelineStage; canQualify: boolean };
   LeadMeetingNew: { leadId: string; name: string; address: string };
   LeadFollowUp: { leadId: string; name: string };
+  /** Sales manager: give the lead to a sales executive, a telecaller or themselves. */
+  LeadAssign: { leadId: string; name: string; salesId: string | null; telecallerId: string | null };
+  /** Residential lead: log a call and set the next one. */
+  LeadResidentialCall: { leadId: string; name: string };
+  /** Residential lead: it became a customer. `amount` pre-fills the final amount. */
+  LeadResidentialConvert: { leadId: string; name: string; amount: number };
   LeadClose: { leadId: string; name: string; mode: 'reject' | 'lost' };
   LeadConvert: { leadId: string; name: string };
   /** `amount` pre-fills the total with the lead's approximate quote. */
@@ -30,6 +36,8 @@ export type LeadStackParamList = {
   LeadReminders: undefined;
   /** New reminder (optionally for a lead), or edit one (taskId). */
   LeadReminderEdit: { taskId?: string; leadId?: string; leadName?: string } | undefined;
+  /** Sales manager: the team's numbers (and their targets). */
+  LeadTeam: undefined;
   /** Sales manager: one day's visits by the team, with start / end times and GPS. */
   LeadTeamVisits: undefined;
   /** Sales manager: residential (home-service) leads, read-only. */
@@ -49,10 +57,12 @@ export type LeadTabParamList = {
   Leads: { group?: StageGroup; at?: number } | undefined;
   NewLeadTab: undefined;
   Tasks: undefined;
-  Team: undefined;
   More: undefined;
 };
 
 export type LeadRootStackParamList = {
   LeadTabs: NavigatorScreenParams<LeadTabParamList> | undefined;
+  /** The residential lead's details and its edit form - the CRM's own screens. */
+  CrmLeadDetail: { leadId: string };
+  CrmNewLead: { editLeadId?: string } | undefined;
 } & LeadStackParamList;

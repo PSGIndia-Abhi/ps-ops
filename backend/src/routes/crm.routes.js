@@ -12,9 +12,11 @@ const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 const {
   nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
-  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead,
+  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
+  readCompetitor, COMPETITOR_SET_SQL,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
+const { notifyUsers } = require("../services/notifications.service");
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -70,6 +72,13 @@ function findCoupon(rawCode) {
   return { code, percentage: coupon.percentage };
 }
 
+// A DATE column as 'YYYY-MM-DD' (mysql2 hands it back as a Date at local midnight).
+function toDateOnly(value) {
+  if (!(value instanceof Date)) return String(value).slice(0, 10);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
 function toLead(row) {
   return {
     id: row.id,
@@ -101,6 +110,11 @@ function toLead(row) {
     created_by_name: row.created_by_name || "",
     created_at: row.created_at,
     paid_at: row.paid_at || null,
+    // Competitor details (commercial leads only, all optional).
+    competitor_name: row.competitor_name || "",
+    competitor_amount: row.competitor_amount === null || row.competitor_amount === undefined ? null : Number(row.competitor_amount),
+    competitor_contract_end: row.competitor_contract_end ? toDateOnly(row.competitor_contract_end) : null,
+    competitor_notes: row.competitor_notes || "",
     // Lead Management fields -- always present, but only ever set for lead_type='commercial'.
     lead_number: row.lead_number || null,
     provider_id: row.provider_id === null || row.provider_id === undefined ? null : String(row.provider_id),
@@ -461,6 +475,24 @@ async function createCommercialLead(req, res, lead) {
   if (read.error) return res.status(400).json({ error: read.error });
   const { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude } =
     read.values;
+  const competitor = readCompetitor(req.body || {});
+  if (competitor.error) return res.status(400).json({ error: competitor.error });
+
+  // The sales manager (MANAGE_LEADS) / admin may give the new lead to someone straight away:
+  // `assign_to` = a sales executive, a telecaller, or themselves (see assignmentFor).
+  let assignee = null;
+  if (req.body?.assign_to !== undefined && req.body?.assign_to !== null && req.body?.assign_to !== "") {
+    if (req.user.role !== "admin" && !req.user.permissions?.includes("MANAGE_LEADS")) {
+      return res.status(403).json({ error: "You cannot assign leads" });
+    }
+    try {
+      assignee = await findLeadAssignee(pool, req.body.assign_to);
+    } catch (err) {
+      console.error("CRM lead assignee lookup error:", err);
+      return res.status(500).json({ error: "Failed to save lead" });
+    }
+    if (!assignee) return res.status(400).json({ error: "Choose who to assign this lead to" });
+  }
 
   const findByRef = async () => {
     const [[row]] = await pool.query(
@@ -481,6 +513,11 @@ async function createCommercialLead(req, res, lead) {
     // verified (QUALIFIED) and assigned to them. Every other lead joins the telecaller queue as NEW.
     // One transaction: the lead number, the commercial fields, the pipeline start and the history rows.
     const salesOwn = SALES_EXECUTIVE_ROLES.includes(req.user.role);
+    // Assigned on the form: where it goes instead of the telecaller queue.
+    const plan = assignee ? assignmentFor({ pipeline_stage: "NEW", assigned_telecaller_id: null }, assignee) : null;
+    const startStage = plan ? plan.stage : salesOwn ? "QUALIFIED" : "NEW";
+    const startSales = plan ? plan.salesId : salesOwn ? req.user.id : null;
+    const startTelecaller = plan ? plan.telecallerId : null;
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -492,8 +529,8 @@ async function createCommercialLead(req, res, lead) {
            house_type, service_name, plan_type, standard_amount, amount, services_requested,
            location, latitude, longitude, lead_source, reference_by, notes,
            payment_method, payment_status, lead_status, pipeline_stage, assigned_sales_employee_id,
-           created_by_user_id, external_ref)
-         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?)`,
+           assigned_telecaller_id, created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?, ?)`,
         [
           id,
           leadNumber,
@@ -513,14 +550,21 @@ async function createCommercialLead(req, res, lead) {
           lead.referenceBy || null,
           lead.notes || null,
           lead.leadStatus,
-          salesOwn ? "QUALIFIED" : "NEW",
-          salesOwn ? req.user.id : null,
+          startStage,
+          startSales,
+          startTelecaller,
           req.user.id,
           lead.clientRef,
         ]
       );
+      if (competitor.present) {
+        await conn.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, id]);
+      }
       await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
-      if (salesOwn) {
+      if (assignee) {
+        const who = assignee.id === Number(req.user.id) ? "themselves" : `${assignee.name}${startTelecaller ? " (telecaller)" : ""}`;
+        await logLeadHistory(conn, id, "ASSIGNED", { note: `Assigned to ${who}`.slice(0, 500), changedBy: req.user.id });
+      } else if (salesOwn) {
         await logLeadHistory(conn, id, "QUALIFY", { note: "Marked GENUINE - the sales executive's own lead, no telecaller call needed", changedBy: req.user.id });
       }
       await conn.commit();
@@ -532,8 +576,21 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
-    // Best effort, after the change is saved: never holds up or fails the request.
-    notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
+    // Best effort, after the change is saved: never holds up or fails the request. An assigned lead
+    // is told only to the person it went to (not the whole telecaller queue).
+    if (assignee) {
+      if (assignee.id !== Number(req.user.id)) {
+        notifyUsers([assignee.id], {
+          type: "LEAD_ASSIGNED",
+          title: startTelecaller ? `Lead to verify: ${companyName}` : `New lead for you: ${companyName}`,
+          message: `${created.lead_number || "A lead"} was assigned to you${startTelecaller ? " for a verification call" : ""}.`,
+          entityType: "lead",
+          entityId: id,
+        }).catch(() => {});
+      }
+    } else {
+      notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
+    }
     res.status(201).json(toLead(created));
   } catch (err) {
     if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {
@@ -617,6 +674,11 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
           existing.id,
         ]
       );
+      const competitor = readCompetitor(body);
+      if (competitor.error) return res.status(400).json({ error: competitor.error });
+      if (competitor.present) {
+        await pool.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, existing.id]);
+      }
     } else {
       const leadSource = body.lead_source || null;
       if (leadSource !== null && !LEAD_SOURCES.includes(leadSource)) {

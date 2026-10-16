@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import JobRow from "../components/JobRow";
 import JobDetails from "../components/JobDetails";
+import DeleteBookingDialog from "../components/DeleteBookingDialog";
+import "../components/DeleteBookingDialog.css";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import CreateBookingModal from "../components/CreateBookingModal";
 import { apiFetch } from "../api";
@@ -33,6 +35,10 @@ export default function AdminDashboard() {
 
   // Single expanded row (accordion)
   const [expandedJobId, setExpandedJobId] = useState(null);
+
+  // The job being deleted (admin / branch admin take back a booking made by mistake).
+  const [deleting, setDeleting] = useState(null);
+  const canDelete = ["admin", "branch_admin"].includes(localStorage.getItem("role"));
 
   //job usestates
   const [jobs, setJobs] = useState([]);
@@ -149,15 +155,24 @@ export default function AdminDashboard() {
   }, [technicians, jobs]);
 
   const companyOptions = useMemo(() => getCompanyOptions(jobs), [jobs]);
-  // Newest-created job first, so a just-created booking shows at the top.
+  // Filtered by a date range: in job-date order, earliest first - the order the work happens.
+  // Otherwise the newest-created job first, so a just-created booking shows at the top.
+  const byDate = !!(filters.startDate || filters.endDate);
   const filteredJobs = useMemo(
     () =>
-      filterJobs(jobs, filters).sort(
-        (a, b) =>
+      filterJobs(jobs, filters).sort((a, b) => {
+        if (byDate) {
+          const at = new Date(a.start_date || a.startDate || a.created_at).getTime() || 0;
+          const bt = new Date(b.start_date || b.startDate || b.created_at).getTime() || 0;
+          if (at !== bt) return at - bt;
+          return String(a.code || "").localeCompare(String(b.code || ""), undefined, { numeric: true });
+        }
+        return (
           (new Date(b.created_at).getTime() || 0) - (new Date(a.created_at).getTime() || 0) ||
           String(b.code || "").localeCompare(String(a.code || ""), undefined, { numeric: true })
-      ),
-    [jobs, filters]
+        );
+      }),
+    [jobs, filters, byDate]
   );
   // Never past the last page (e.g. after a refresh returns fewer jobs).
   const currentPage = Math.min(page, getTotalPages(filteredJobs.length, JOBS_PER_PAGE));
@@ -349,9 +364,21 @@ export default function AdminDashboard() {
                 onToggleExpand={() => toggleJobExpansion(job.id)}
               />
 
-              {expandedJobId === job.id && <JobDetails job={job} />}
+              {expandedJobId === job.id && <JobDetails job={job} onDelete={canDelete ? setDeleting : undefined} />}
             </div>
           ))}
+
+          {deleting && (
+            <DeleteBookingDialog
+              job={deleting}
+              onClose={() => setDeleting(null)}
+              onDeleted={() => {
+                setDeleting(null);
+                setExpandedJobId(null);
+                fetchJobs();
+              }}
+            />
+          )}
 
           <Pagination
             page={currentPage}

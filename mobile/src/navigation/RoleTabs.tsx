@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useAuth } from '../auth/AuthContext';
 import { canSwitchToSales, isAccountantRole, isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { loadDefaultApp, saveDefaultApp } from './defaultApp';
 import { leadPersonaForRole } from '../leads/stage';
 import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
 import { AppSwitchSheet } from './AppSwitchSheet';
@@ -43,13 +45,18 @@ export function RoleTabs() {
   //    Task Management - same as the web, where their follow-ups and visits are tasks too;
   //  - accountant: Payment Reminders (the web's Accountant Panel), can switch to Task Management;
   //  - other org-hierarchy roles: Task Management only.
-  const leadRole = !!leadPersonaForRole(rawRole);
+  const leadPersona = leadPersonaForRole(rawRole);
+  const leadRole = !!leadPersona;
+  // A Sales Executive / Sales Manager also works residential leads, in their own app.
+  const residentialToo = leadPersona === 'sales' || leadPersona === 'sales_manager';
   const accountant = isAccountantRole(rawRole);
   const taskRole = isTaskRole(rawRole);
   const apps = useMemo<AppKind[]>(
     () =>
       leadRole
-        ? ['leads', 'tasks']
+        ? residentialToo
+          ? ['leads', 'residential', 'tasks']
+          : ['leads', 'tasks']
         : accountant
         ? ['reminders', 'tasks']
         : taskRole
@@ -57,10 +64,34 @@ export function RoleTabs() {
           ? ['tasks', 'sales']
           : ['tasks']
         : [],
-    [leadRole, accountant, taskRole, rawRole],
+    [leadRole, residentialToo, accountant, taskRole, rawRole],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);
+  // The app this person chose to open in (Switch app -> Set as default). Read once before the first
+  // app is shown, so it opens straight in the right one; undefined while reading.
+  const { user, session } = useAuth();
+  const userId = String(user?.id ?? session?.userId ?? '');
+  const [defaultApp, setDefaultApp] = useState<AppKind | null | undefined>(canSwitch ? undefined : null);
+  useEffect(() => {
+    if (!canSwitch || !userId) {
+      setDefaultApp(null);
+      return;
+    }
+    let alive = true;
+    loadDefaultApp(userId).then(app => {
+      if (!alive) return;
+      setDefaultApp(app);
+      if (app) setPicked(prev => prev ?? app);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canSwitch, userId]);
+  const chooseDefault = (app: AppKind) => {
+    setDefaultApp(app);
+    if (userId) saveDefaultApp(userId, app);
+  };
   const current: AppKind = picked && apps.includes(picked) ? picked : apps[0] ?? 'tasks';
   // The app being left is unmounted first and the other one mounted a moment later: replacing one
   // navigator with the other in a single step leaves the native screen stack unable to open screens.
@@ -78,11 +109,11 @@ export function RoleTabs() {
   if (apps.length > 0) {
     return (
       <AppSwitchProvider value={appSwitch}>
-        {swapping ? (
+        {swapping || defaultApp === undefined ? (
           <View style={styles.blank} />
         ) : current === 'leads' ? (
           <LeadsNavigator />
-        ) : current === 'sales' ? (
+        ) : current === 'sales' || current === 'residential' ? (
           <CrmNavigator />
         ) : current === 'reminders' ? (
           <RemindersNavigator />
@@ -94,6 +125,8 @@ export function RoleTabs() {
             visible={sheet !== null}
             current={current}
             apps={apps}
+            defaultApp={defaultApp ?? null}
+            onSetDefault={chooseDefault}
             onPick={app => {
               setSheet(null);
               setSwapping(true);

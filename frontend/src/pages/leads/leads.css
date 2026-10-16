@@ -996,3 +996,65 @@
     *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; }
   }
 }
+
+/* Residential area (residential.jsx): the Commercial / Residential switch, lists, call follow-up. */
+.lm-root {
+  .lm-area-switch { display: grid !important; grid-template-columns: 1fr 1fr; gap: 4px; margin: 6px 0 12px; align-self: stretch; padding: 4px; border-radius: 12px; background: var(--lm-bg); border: 1px solid var(--lm-border); }
+  .lm-area-switch button { border: 0; border-radius: 9px; padding: 9px 6px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--lm-muted); background: transparent; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .15s, color .15s; }
+  .lm-area-switch button:hover:not(.on) { color: var(--lm-text); }
+  .lm-area-switch button.on { background: var(--lm-surface); color: var(--lm-primary); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
+  &.collapsed .lm-area-switch { grid-template-columns: 1fr; margin: 4px 8px 10px; }
+  &.collapsed .lm-area-switch span { display: none; }
+
+  .lm-form-title { display: flex; align-items: center; gap: 8px; margin: 4px 0 -4px; font-size: 14px; font-weight: 700; color: var(--lm-text); svg { color: var(--lm-primary); } }
+
+  .lm-res-list { list-style: none; margin: 0; padding: 4px 8px 8px; }
+  .lm-res-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; color: inherit; text-decoration: none; transition: background .15s; }
+  .lm-res-row:hover { background: var(--lm-bg); }
+  .lm-res-row .lm-who-text { flex: 1; }
+  .lm-res-amt { font-weight: 700; font-size: 13.5px; color: var(--lm-text); }
+
+  .lm-res-next { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .lm-res-next > div { flex: 1; min-width: 180px; display: grid; small { color: var(--lm-muted); font-size: 12px; } strong { font-size: 17px; } strong.late { color: var(--lm-danger); } }
+  .lm-res-next-icon { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 19px; background: var(--lm-warn-soft); color: var(--lm-warn); }
+  .lm-res-next-icon.late { background: var(--lm-danger-soft); color: var(--lm-danger); }
+
+  .lm-res-history { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--lm-line); }
+  .lm-res-history li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--lm-line); }
+  .lm-res-history li > div { display: grid; small { color: var(--lm-muted); font-size: 12px; } strong { font-weight: 600; font-size: 14px; } }
+  .lm-res-dot { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 14px; }
+  .lm-res-dot.call { background: var(--lm-violet-soft); color: var(--lm-violet); }
+  .lm-res-dot.next { background: var(--lm-warn-soft); color: var(--lm-warn); }
+
+  .lm-res-outcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .lm-res-outcome { border: 1.5px solid var(--lm-border); background: var(--lm-surface); border-radius: 12px; padding: 12px; font: inherit; font-weight: 600; cursor: pointer; color: var(--lm-text); text-align: left; }
+  .lm-res-outcome.on { border-color: var(--lm-primary); background: var(--lm-primary-soft); color: var(--lm-primary); }
+  .lm-res-outcome.danger.on { border-color: var(--lm-danger); background: var(--lm-danger-soft); color: var(--lm-danger); }
+}
+
+/* Assign lead dialog (dialogs.jsx AssignLeadModal) */
+.lm-root, .lm-modal-root, body {
+  .lm-assign-group { display: grid; gap: 6px; h4 { margin: 4px 0 2px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--lm-muted, #64748b); } }
+  .lm-assign-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--lm-border, #e5e9f2); border-radius: 12px; cursor: pointer; background: var(--lm-surface, #fff); }
+  .lm-assign-opt.on { border-color: var(--lm-primary, #2563eb); background: var(--lm-primary-soft, #e8f0ff); }
+  .lm-assign-opt input { accent-color: var(--lm-primary, #2563eb); }
+  .lm-assign-opt span { display: grid; strong { font-size: 14px; font-weight: 600; } small { color: var(--lm-muted, #64748b); font-size: 12px; } }
+}
+
+/* A titled break inside a lead form (the Competitor block in dialogs.jsx). */
+.lm-root, body {
+  .lm-form-split { grid-column: 1 / -1; display: grid; gap: 2px; margin-top: 6px; padding-top: 14px; border-top: 1px dashed var(--lm-border, #e5e9f2); strong { font-size: 14px; color: var(--lm-text, #0f172a); } span { font-size: 12.5px; color: var(--lm-muted, #64748b); } }
+}
+
+/* Monthly targets (Performance.jsx) */
+.lm-root {
+  .lm-target { display: flex; align-items: center; gap: 10px; b { font-size: 13px; min-width: 40px; text-align: right; } }
+  .lm-target-track { flex: 1; height: 8px; border-radius: 4px; background: var(--lm-line); overflow: hidden; }
+  .lm-target-fill { display: block; height: 100%; border-radius: 4px; background: var(--lm-primary); transition: width .6s var(--lm-ease); }
+  .lm-target-fill.done { background: var(--lm-success); }
+  .lm-target-fill.low { background: var(--lm-warn); }
+  .lm-total-row td { background: var(--lm-bg); }
+  .lm-target-me { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .lm-target-me > div { display: grid; gap: 2px; small { color: var(--lm-muted); font-size: 12px; } strong { font-size: 22px; } }
+  .lm-target-me > .wide { grid-column: 1 / -1; }
+}

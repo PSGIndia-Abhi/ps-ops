@@ -354,6 +354,13 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
     const [[already]] = await pool.query("SELECT id FROM crm_lead_conversions WHERE lead_id = ?", [lead.id]);
     if (already) throw new HttpError(409, "This lead has already been converted");
     const notes = optionalText(req.body?.notes, 500);
+    // Optional: the deal's final amount, agreed at conversion - it replaces the lead's approximate quote.
+    let amount = null;
+    if (req.body?.amount !== undefined && req.body?.amount !== null && req.body?.amount !== "") {
+      amount = Number(req.body.amount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) throw new HttpError(400, "Enter a valid amount");
+      amount = Math.round(amount * 100) / 100;
+    }
 
     const conversionId = uuid();
     const companyName = (lead.company_name || lead.customer_name || "Customer").slice(0, 150);
@@ -375,7 +382,11 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
         [lead.id, lead.row_version]
       );
       if (!upd.affectedRows) throw new HttpError(409, "This lead was just changed by someone else. Reload and try again.");
-      await logLeadHistory(conn, lead.id, "CONVERTED", { note: `Converted to company "${companyName}"${notes ? `: ${notes}` : ""}`, changedBy: req.user.id });
+      if (amount !== null && amount !== Number(lead.amount)) {
+        await conn.query("UPDATE crm_leads SET amount = ? WHERE id = ?", [amount, lead.id]);
+      }
+      const amountNote = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
+      await logLeadHistory(conn, lead.id, "CONVERTED", { note: `Converted to company "${companyName}"${amountNote}${notes ? `: ${notes}` : ""}`.slice(0, 500), changedBy: req.user.id });
       return newCompanyId;
     });
 

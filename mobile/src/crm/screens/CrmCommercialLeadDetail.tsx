@@ -15,6 +15,7 @@ import {
 } from '../../components/icons';
 import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
+import { fmtDateShort } from '../../tasks/format';
 import { whatsappUrl } from '../leadHelpers';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
@@ -220,6 +221,7 @@ export function CommercialLeadDetail({
   // Photos can change in the edit form, so they are loaded again each time this screen comes back.
   const [photosKey, setPhotosKey] = useState(0);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const competitor = !!(lead.competitorName || lead.competitorAmount || lead.competitorContractEnd || lead.competitorNotes);
   useFocusEffect(
     useCallback(() => {
       setPhotosKey(k => k + 1);
@@ -373,7 +375,7 @@ export function CommercialLeadDetail({
               <Text style={[styles.cardTitle, styles.foldTitle]}>DETAILS</Text>
               {!detailsOpen && (
                 <Text style={styles.foldHint} numberOfLines={1}>
-                  {[...rows.map((r) => r.label), ...(lead.notes ? ['Requirement'] : []), ...(showPhotos ? ['Photos'] : [])].join(' · ')}
+                  {[...rows.map((r) => r.label), ...(lead.notes ? ['Requirement'] : []), ...(competitor ? ['Competitor'] : []), ...(showPhotos ? ['Photos'] : [])].join(' · ')}
                 </Text>
               )}
             </View>
@@ -390,6 +392,15 @@ export function CommercialLeadDetail({
                 <View style={styles.subBlock}>
                   <Text style={styles.subTitle}>Requirement</Text>
                   <Text style={styles.notes}>{lead.notes}</Text>
+                </View>
+              )}
+              {competitor && (
+                <View style={styles.subBlock}>
+                  <Text style={styles.subTitle}>Competitor</Text>
+                  {!!lead.competitorName && <Text style={styles.notes}>Current provider: {lead.competitorName}</Text>}
+                  {!!lead.competitorAmount && <Text style={styles.notes}>Their price: {formatINR(lead.competitorAmount)}</Text>}
+                  {!!lead.competitorContractEnd && <Text style={styles.notes}>Contract ends: {fmtDateShort(lead.competitorContractEnd)}</Text>}
+                  {!!lead.competitorNotes && <Text style={styles.notes}>{lead.competitorNotes}</Text>}
                 </View>
               )}
               {showPhotos && (

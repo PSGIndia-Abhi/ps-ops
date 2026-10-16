@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   FiArrowLeft,
+  FiBriefcase,
   FiAward,
   FiBarChart2,
   FiBell,
@@ -78,6 +79,15 @@ const NOTE_TONE = {
 
 const COLLAPSE_KEY = "lm.sideCollapsed";
 
+/** The Residential area's menu (residential.jsx). */
+function residentialNav() {
+  return [
+    { to: `${LEADS_HOME}/residential`, end: true, label: "Dashboard", icon: <FiGrid /> },
+    { to: `${LEADS_HOME}/residential/all`, label: "All Residential Leads", icon: <FiList /> },
+    { to: `${LEADS_HOME}/residential/new`, label: "Add Residential Lead", icon: <FiPlusCircle /> },
+  ];
+}
+
 /** The sidebar for each persona. `count` is worked out from what that person can see. */
 function navFor(persona, counts) {
   const home = { to: LEADS_HOME, end: true, label: "Dashboard", icon: <FiGrid /> };
@@ -102,6 +112,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
+        { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
       ];
     default:
       return [
@@ -111,8 +122,6 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
         { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
-        // Residential (home-service) leads, for reference: no pipeline or follow-ups here.
-        { to: `${LEADS_HOME}/residential`, label: "Residential Leads", icon: <FiHome /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
   }
@@ -269,15 +278,21 @@ export default function LeadsLayout() {
     navigate("/login");
   }
 
+  // The sales executive and sales manager (and an admin looking in) work residential leads too, in
+  // their own area: the switch at the top of the sidebar moves between the two.
+  const twoAreas = canPick || persona === "sales" || persona === "sales_manager";
+  const residential = twoAreas && location.pathname.startsWith(`${LEADS_HOME}/residential`);
+
   function search(e) {
     e.preventDefault();
-    navigate(`${LEADS_HOME}/all${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`);
+    const q = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    navigate(residential ? `${LEADS_HOME}/residential/all${q}` : `${LEADS_HOME}/all${q}`);
   }
 
   const info = PERSONAS[persona];
   // Lead staff open Task Management from here with the same login (it has its own login for everyone else).
   const nav = [
-    ...navFor(persona, counts),
+    ...(residential ? residentialNav() : navFor(persona, counts)),
     ...(persona !== "lead_provider" ? [{ to: `${LEADS_HOME}/reminders`, label: "Reminders", icon: <FiBell /> }] : []),
     ...(LEAD_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : []),
   ];
@@ -294,12 +309,23 @@ export default function LeadsLayout() {
               </span>
               <span className="lm-brand-text">
                 <strong>BestServe</strong>
-                <small>{info.area}</small>
+                <small>{residential ? "Residential Leads" : twoAreas ? "Commercial Leads" : info.area}</small>
               </span>
             </div>
 
+            {twoAreas && (
+              <div className="lm-area-switch" role="tablist" aria-label="Lead area">
+                <button type="button" role="tab" aria-selected={!residential} className={residential ? "" : "on"} onClick={() => residential && navigate(LEADS_HOME)} data-tip="Commercial">
+                  <FiBriefcase /> <span>Commercial</span>
+                </button>
+                <button type="button" role="tab" aria-selected={residential} className={residential ? "on" : ""} onClick={() => !residential && navigate(`${LEADS_HOME}/residential`)} data-tip="Residential">
+                  <FiHome /> <span>Residential</span>
+                </button>
+              </div>
+            )}
+
             {/* `key` restarts the menu's entrance when the dashboard being viewed changes. */}
-            <nav className="lm-nav" key={persona} aria-label="Lead management">
+            <nav className="lm-nav" key={`${persona}-${residential}`} aria-label="Lead management">
               {nav.map((item, i) => (
                 <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `lm-nav-item${isActive ? " active" : ""}`} style={{ "--i": i }} onClick={() => setNavOpen(false)} data-tip={item.label}>
                   <span className="lm-nav-icon">{item.icon}</span>
@@ -346,7 +372,7 @@ export default function LeadsLayout() {
               </button>
               <form className="lm-search" onSubmit={search} role="search">
                 <FiSearch />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search leads, company, phone..." aria-label="Search leads" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={residential ? "Search residential leads, phone, area..." : "Search leads, company, phone..."} aria-label="Search leads" />
               </form>
               <span className="lm-top-space" />
               {/* No bell for the provider: every update on their lead would tell them its status. */}

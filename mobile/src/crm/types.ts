@@ -55,6 +55,12 @@ export interface Lead {
   longitude?: number | null;
   /** Who added the lead - shown to the roles that see everyone's leads. Empty for website leads. */
   createdByName?: string;
+  /** Commercial only, all optional: who serves the customer now, their price, contract end, notes. */
+  competitorName?: string;
+  competitorAmount?: number | null;
+  /** 'YYYY-MM-DD' */
+  competitorContractEnd?: string | null;
+  competitorNotes?: string;
   /** Commercial only: photos of a lead still waiting on this phone to be sent. */
   localPhotos?: LocalLeadPhoto[];
   customerName: string;
@@ -82,7 +88,10 @@ export interface Lead {
   syncError?: string;
 }
 
-export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError' | 'localPhotos'>;
+export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError' | 'localPhotos'> & {
+  /** Sales manager only, new commercial leads: who the lead is given to (a sales executive, a telecaller, themselves). */
+  assignTo?: number;
+};
 
 export const isCommercial = (lead: Pick<Lead, 'leadType'>): boolean => lead.leadType === 'commercial';
 

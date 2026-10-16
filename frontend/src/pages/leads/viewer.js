@@ -24,8 +24,11 @@ export function visibleLeads(leads, viewer) {
   // Sales: leads given to them, plus the ones they added themselves (to follow their verification).
   // An admin previewing this dashboard is not the sales person, so their own leads do not count.
   if (persona === "sales") return leads.filter((l) => l.salesId === me.id || (!canPick && l.createdBy === me.id));
-  // Sales manager: only what the telecallers have verified - the calling queue stays with them.
-  if (persona === "sales_manager") return leads.filter((l) => !UNVERIFIED.includes(l.stage));
+  // Sales manager: what the telecallers have verified - the calling queue stays with them - plus the
+  // leads they added themselves, so a lead they just added shows straight away (as in the app).
+  if (persona === "sales_manager") {
+    return leads.filter((l) => !UNVERIFIED.includes(l.stage) || (!canPick && String(l.createdBy) === String(me.id)));
+  }
   // Telecaller: the shared queue - every lead except a sales executive's own, which needs no call.
   return leads.filter((l) => !l.salesOwn);
 }

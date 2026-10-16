@@ -31,6 +31,9 @@ import {
   type PaymentMethod,
 } from '../types';
 import { CommercialLeadDetail } from './CrmCommercialLeadDetail';
+import { useRawRole } from '../../auth/role';
+import { ResidentialCallsCard } from '../../leads/ResidentialCallsCard';
+import { leadPersonaForRole } from '../../leads/stage';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../ui/CrmScreen';
 import { PaymentFailedOverlay, PaymentSuccessOverlay } from '../ui/Celebration';
 import { RupeeIcon, WalletIcon, WhatsAppIcon } from '../ui/crmIcons';
@@ -239,6 +242,9 @@ export function CrmLeadDetailScreen() {
   const [failedReason, setFailedReason] = useState<string | null>(null);
   const { styles, theme } = useCrmStyles(factory);
   const lead = getLead(route.params.leadId);
+  // Lead Management's sales roles follow a residential lead up by phone (the old CRM app does not).
+  const persona = leadPersonaForRole(useRawRole());
+  const callFollowUps = persona === 'sales' || persona === 'sales_manager';
 
   async function open(url: string, failMessage: string) {
     try {
@@ -472,6 +478,10 @@ export function CrmLeadDetailScreen() {
             <Text style={styles.contactLabel}>Email</Text>
           </Pressable>
         </View>
+
+        {callFollowUps && !lead.pendingSync && (
+          <ResidentialCallsCard leadId={lead.id} name={lead.customerName} leadStatus={lead.leadStatus} amount={lead.amount} />
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>SERVICE</Text>

@@ -34,6 +34,10 @@ interface ApiLead {
   latitude?: number | null;
   longitude?: number | null;
   created_by_name?: string;
+  competitor_name?: string;
+  competitor_amount?: number | null;
+  competitor_contract_end?: string | null;
+  competitor_notes?: string;
   phone: string;
   alternate_phone?: string;
   email: string;
@@ -70,6 +74,10 @@ function toLead(row: ApiLead): Lead {
     industryType: row.industry_type ?? null,
     designation: row.contact_designation ?? '',
     servicesRequested: row.services_requested ?? [],
+    competitorName: row.competitor_name ?? '',
+    competitorAmount: row.competitor_amount ?? null,
+    competitorContractEnd: row.competitor_contract_end ?? null,
+    competitorNotes: row.competitor_notes ?? '',
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
     createdByName: row.created_by_name ?? '',
@@ -131,6 +139,15 @@ function toApiBody(input: NewLeadInput) {
     payment_method: input.paymentMethod,
     payment_status: input.paymentStatus,
     lead_status: input.leadStatus,
+    // Competitor details: commercial leads only (a residential save leaves them out).
+    ...(input.leadType === 'commercial'
+      ? {
+          competitor_name: input.competitorName ?? '',
+          competitor_amount: input.competitorAmount ?? null,
+          competitor_contract_end: input.competitorContractEnd ?? null,
+          competitor_notes: input.competitorNotes ?? '',
+        }
+      : {}),
   };
 }
 
@@ -139,6 +156,7 @@ export async function createLead(input: NewLeadInput, clientRef?: string): Promi
   const { data } = await httpClient.post<ApiLead>('/api/crm/leads', {
     client_ref: clientRef,
     ...toApiBody(input),
+    assign_to: input.assignTo || undefined,
   });
   return toLead(data);
 }

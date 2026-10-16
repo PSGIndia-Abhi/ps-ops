@@ -37,7 +37,7 @@ export const STAGE_GROUPS: Record<StageGroup, { label: string; stages: PipelineS
   meeting: { label: 'Meetings', stages: ['MEETING_SCHEDULED', 'VISIT_COMPLETED'] },
   quoted: { label: 'Quoted', stages: ['QUOTATION_SENT'] },
   won: { label: 'Converted', stages: ['WON', 'CONVERTED'] },
-  closed: { label: 'Closed', stages: ['NOT_GENUINE', 'LOST', 'CANCELLED'] },
+  closed: { label: 'Deal Lost', stages: ['NOT_GENUINE', 'LOST', 'CANCELLED'] },
 };
 
 export const STAGE_GROUP_ORDER: StageGroup[] = ['all', 'new', 'to_call', 'qualified', 'meeting', 'quoted', 'won', 'closed'];

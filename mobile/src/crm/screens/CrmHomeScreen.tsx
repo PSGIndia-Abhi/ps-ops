@@ -10,7 +10,8 @@ import {
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useAuth } from '../../auth/AuthContext';
-import { isResidentialRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { useResidentialOnly } from '../../navigation/AppSwitchContext';
 import { GradientCard } from '../../components/GradientCard';
 import {
   BriefcaseIcon,
@@ -470,7 +471,7 @@ export function CrmHomeScreen() {
     useLeads();
   const { styles, theme } = useCrmStyles(factory);
   // sales / marketing: the residential Home as it was before commercial leads.
-  const residential = isResidentialRole(rawRole);
+  const residential = useResidentialOnly(rawRole);
 
   // The slider width is measured (not assumed) so each card is exactly one page wide.
   const [sliderWidth, setSliderWidth] = useState(0);

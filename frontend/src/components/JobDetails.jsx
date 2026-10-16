@@ -69,7 +69,7 @@ function DetailTile({ icon, label, value, fullWidth = false, children }) {
   );
 }
 
-export default function JobDetails({ job }) {
+export default function JobDetails({ job, onDelete }) {
   const [history, setHistory] = useState([]);
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -323,6 +323,12 @@ export default function JobDetails({ job }) {
             >
               View / Update
             </button>
+            {/* Admin only (the dashboard passes it): take back a booking made by mistake. */}
+            {onDelete && (
+              <button type="button" onClick={() => onDelete(job)} className="job-action-btn danger">
+                Delete booking
+              </button>
+            )}
           </div>
         </aside>
       </div>

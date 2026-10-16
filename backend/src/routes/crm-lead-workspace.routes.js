@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
-const { hasPerm, resolveVisibleUserIds, salesOwnLeadFilter } = require("../utils/crmLeadManagement");
+const { hasPerm, resolveVisibleUserIds, salesOwnLeadFilter, LEAD_ASSIGNEE_ROLES } = require("../utils/crmLeadManagement");
 
 function sendError(res, err, fallback) {
   console.error(fallback, err);
@@ -56,7 +56,9 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       `SELECT l.id, l.lead_number, l.company_name, l.customer_name, l.phone, l.alternate_phone, l.customer_email,
               l.location, l.lead_source, l.amount, l.notes, l.pipeline_stage, l.row_version,
               l.provider_id, l.created_by_user_id, l.assigned_telecaller_id, l.assigned_sales_employee_id,
-              l.created_at, l.updated_at, lr.name AS loss_reason
+              l.created_at, l.updated_at, lr.name AS loss_reason,
+              l.competitor_name, l.competitor_amount, DATE_FORMAT(l.competitor_contract_end, '%Y-%m-%d') AS competitor_contract_end,
+              l.competitor_notes
          FROM crm_leads l
          LEFT JOIN crm_lead_loss_reasons lr ON lr.id = l.loss_reason_id
         WHERE ${where.join(" AND ")}
@@ -125,6 +127,10 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       loss_reason: l.loss_reason || null,
       latest_feedback: latestFeedback.get(l.id) || null,
       next_follow_up_at: nextFollowUp.get(l.id) || null,
+      competitor_name: l.competitor_name || "",
+      competitor_amount: l.competitor_amount === null ? null : Number(l.competitor_amount),
+      competitor_contract_end: l.competitor_contract_end || null,
+      competitor_notes: l.competitor_notes || "",
       created_at: l.created_at,
       updated_at: l.updated_at,
     }));
@@ -153,8 +159,8 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       id: String(u.id),
       name: u.name,
       role: u.role || null,
-      // Same rule as GET /api/crm/sales-employees: can work a lead, and is not a telecaller.
-      can_visit: Number(u.works_leads) === 1 && u.role !== "telecaller",
+      // Same rule as GET /api/crm/sales-employees: a sales executive or sales manager who works leads.
+      can_visit: Number(u.works_leads) === 1 && LEAD_ASSIGNEE_ROLES.includes(u.role),
     }));
     const me = people.find((u) => u.id === String(req.user.id)) || { id: String(req.user.id), name: "", role: req.user.role };
 

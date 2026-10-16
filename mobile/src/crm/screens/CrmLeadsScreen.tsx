@@ -14,7 +14,8 @@ import {
 } from '@react-navigation/native';
 import { radii, spacing, touchTarget, typography } from '../../theme';
 import { formatINR } from '../format';
-import { isResidentialRole, useRawRole } from '../../auth/role';
+import { useRawRole } from '../../auth/role';
+import { useResidentialOnly } from '../../navigation/AppSwitchContext';
 import { useLeads } from '../LeadsContext';
 import type {
   CrmTabParamList,
@@ -200,7 +201,7 @@ export function CrmLeadsScreen() {
   const paramKind = route.params?.kind;
   const paramAt = route.params?.at;
   // Residential sales roles (sales / marketing) only work residential leads: no Commercial switch.
-  const residential = isResidentialRole(useRawRole());
+  const residential = useResidentialOnly(useRawRole());
   const commercial = !residential && kind === 'commercial';
   const leads = commercial ? commercialLeads : consumerLeads;
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { httpClient } from '../../api/httpClient';
 import { ChevronRightIcon, PinIcon, UsersIcon } from '../../components/icons';
@@ -15,6 +15,8 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { Performance, Person } from '../types';
 import { Card, StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen, personTone } from '../ui';
+import { formatINR } from '../../crm/format';
+import { TargetCard, targetPercent } from '../TargetCard';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -36,19 +38,27 @@ const factory = (t: CrmTheme) => ({
   visitsIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center' as const, justifyContent: 'center' as const },
   personName: { ...typography.bodyMedium, color: t.textPrimary },
   personRole: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  targetLine: { ...typography.captionMedium, color: t.textSecondary, marginTop: 4 },
+  targetTrack: { height: 6, borderRadius: 3, backgroundColor: t.surfaceAlt, overflow: 'hidden' as const, marginTop: 4 },
+  targetFill: { height: 6, borderRadius: 3 },
+  targetNone: { ...typography.caption, color: t.primary, marginTop: 4 },
 });
 
-type Range = 'today' | 'week' | 'month';
+type Range = 'today' | 'week' | 'month' | 'lifetime';
 const RANGES: Option<Range>[] = [
   { value: 'today', label: 'Today' },
   { value: 'week', label: '7 days' },
-  { value: 'month', label: 'This month' },
+  { value: 'month', label: 'Month' },
+  { value: 'lifetime', label: 'Lifetime' },
 ];
+/** "Lifetime" starts before the first lead was ever added. */
+const LIFETIME_FROM = '2020-01-01';
 
 /** The report's from/to dates for a range, as wall-clock YYYY-MM-DD. */
 export function rangeDates(range: Range, today = todayStr()): { from: string; to: string } {
   if (range === 'today') return { from: today, to: today };
   if (range === 'week') return { from: addDays(today, -6), to: today };
+  if (range === 'lifetime') return { from: LIFETIME_FROM, to: today };
   return { from: `${today.slice(0, 8)}01`, to: today };
 }
 
@@ -79,16 +89,31 @@ export function PerformanceScreen() {
   const [range, setRange] = useState<Range>('month');
   const { from, to } = rangeDates(range);
   const employeeId = params?.employeeId;
+  const { myIdNum, persona } = useMe();
+  const manager = persona === 'sales_manager';
 
   const loader = useCallback(() => api.performance(from, to, employeeId), [from, to, employeeId]);
-  const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the performance report.');
+  const { data, loading, refreshing, error, refresh: refreshReport, reload } = useLoad(loader, 'Could not load the performance report.');
+  // This month's target for the person shown (a manager gets the team's list and picks them out).
+  const targetLoader = useCallback(async () => {
+    const list = await api.listTargets().catch(() => [] as api.SalesTarget[]);
+    return list.find((t) => t.userId === (employeeId ?? myIdNum)) ?? null;
+  }, [employeeId, myIdNum]);
+  const { data: target, refresh: refreshTarget, reload: reloadTarget } = useLoad(targetLoader, '');
+  const refresh = () => {
+    refreshReport();
+    refreshTarget();
+  };
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={params?.name ?? 'My performance'} subtitle="Sales performance" onBack={() => navigation.goBack()} />
       <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+        {!!target && <TargetCard target={target} canSet={manager && !!employeeId} onChanged={reloadTarget} />}
         <SegmentedControl options={RANGES} value={range} onChange={setRange} />
-        <Text style={styles.range}>{from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`}</Text>
+        <Text style={styles.range}>
+          {range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`}
+        </Text>
         <CrmErrorBanner message={error} onRetry={reload} />
         {loading && !data ? (
           <CrmSkeleton height={360} radius={radii.lg} />
@@ -144,12 +169,23 @@ export function TeamScreen() {
   const { styles, theme } = useCrmStyles(factory);
   const { myIdNum } = useMe();
 
-  const loader = useCallback(() => loadTeam(myIdNum), [myIdNum]);
+  const loader = useCallback(async () => {
+    const [team, targets] = await Promise.all([loadTeam(myIdNum), api.listTargets().catch(() => [] as api.SalesTarget[])]);
+    const byId = new Map(targets.map((t) => [t.userId, t]));
+    return team.map((p) => ({ ...p, target: byId.get(Number(p.id)) ?? null }));
+  }, [myIdNum]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the team.');
+  useFocusEffect(
+    useCallback(() => {
+      reload();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
 
   return (
     <LeadScreen edges={['top']}>
-      <Text style={styles.title}>Team</Text>
+      {/* Opened from Home / More (the manager's tab is Follow-ups now). */}
+      <TopBar title="Team report" onBack={() => navigation.goBack()} />
       <FlatList
         data={data ?? []}
         keyExtractor={(p) => String(p.id)}
@@ -195,6 +231,18 @@ export function TeamScreen() {
                     {item.name}
                   </Text>
                   {!!item.role && <Text style={styles.personRole}>{item.role.replace(/_/g, ' ')}</Text>}
+                  {item.target?.target ? (
+                    <>
+                      <Text style={styles.targetLine}>
+                        {formatINR(item.target.achieved)} of {formatINR(item.target.target)} · {targetPercent(item.target)}%
+                      </Text>
+                      <View style={styles.targetTrack}>
+                        <View style={[styles.targetFill, { width: `${Math.min(100, targetPercent(item.target) ?? 0)}%`, backgroundColor: (targetPercent(item.target) ?? 0) >= 100 ? theme.success : theme.primary }]} />
+                      </View>
+                    </>
+                  ) : item.target ? (
+                    <Text style={styles.targetNone}>No target this month - tap to set</Text>
+                  ) : null}
                 </View>
                 <ChevronRightIcon size={16} color={theme.textMuted} />
               </View>

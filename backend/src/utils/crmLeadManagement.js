@@ -117,6 +117,78 @@ async function isHiddenSalesOwnLead(executor, req, lead) {
   return !!creator && SALES_EXECUTIVE_ROLES.includes(creator.role);
 }
 
+// ---------------------------------------------------------------------------
+// The sales manager handing a commercial lead to someone (on the new lead form, or later with
+// "Assign"): a telecaller to verify it, or a sales person (a sales executive, the manager themselves)
+// to work it. Only that person - and the managers, who see everything - then see it.
+// ---------------------------------------------------------------------------
+const UNVERIFIED_STAGES = ["NEW", "TO_CALL", "NEED_MORE_INFO"];
+// The only roles a lead (or a meeting, or a follow-up picked from a list) is given to.
+const LEAD_ASSIGNEE_ROLES = ["Sales Executive", "sales_manager"];
+const CLOSED_STAGES = ["WON", "CONVERTED", "NOT_GENUINE", "LOST", "CANCELLED"];
+
+/** An active user who works leads (CRM_VIEW_LEAD), with their role - or null. */
+async function findLeadAssignee(executor, userId) {
+  const id = Number(userId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const [[user]] = await executor.query(
+    `SELECT DISTINCT u.id, u.name, r.name AS role
+       FROM users u JOIN roles r ON r.id = u.role_id
+       JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id
+      WHERE u.id = ? AND u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name IN (?)`,
+    [id, LEAD_ASSIGNEE_ROLES]
+  );
+  return user || null;
+}
+
+/**
+ * Where a lead goes for this assignee: { stage, telecallerId, salesId } from the lead's current
+ * stage. A telecaller gets it to verify (only before it is verified). A sales person gets it to work:
+ * a lead not verified yet is taken as verified - the manager vouches for it - and leaves the calling queue.
+ * Returns { error } when it cannot be given to them.
+ */
+function assignmentFor(lead, assignee) {
+  const stage = lead.pipeline_stage || "NEW";
+  if (CLOSED_STAGES.includes(stage)) return { error: "This lead is closed, so it cannot be reassigned" };
+  if (String(assignee.role).toLowerCase() === "telecaller") {
+    if (!UNVERIFIED_STAGES.includes(stage)) return { error: "This lead is already verified - assign it to a sales person instead" };
+    return { stage: stage === "NEW" ? "TO_CALL" : stage, telecallerId: assignee.id, salesId: null };
+  }
+  const unverified = UNVERIFIED_STAGES.includes(stage);
+  return {
+    stage: unverified ? "QUALIFIED" : stage,
+    telecallerId: unverified ? null : lead.assigned_telecaller_id || null,
+    salesId: assignee.id,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Competitor details on a commercial lead (all optional): who serves the customer now, their price,
+// when their contract ends, and notes. -> { present, values: [name, amount, contractEnd, notes] } or { error }.
+// `present` is false when the request sends none of the fields (an older app): leave them as they are.
+// ---------------------------------------------------------------------------
+const COMPETITOR_KEYS = ["competitor_name", "competitor_amount", "competitor_contract_end", "competitor_notes"];
+function readCompetitor(body = {}) {
+  const present = COMPETITOR_KEYS.some((k) => body[k] !== undefined);
+  const text = (v, max) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
+  const name = text(body.competitor_name, 150);
+  const notes = text(body.competitor_notes, 500);
+  let amount = null;
+  if (body.competitor_amount !== undefined && body.competitor_amount !== null && body.competitor_amount !== "") {
+    amount = Number(body.competitor_amount);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 99999999) return { error: "Enter a valid competitor price" };
+  }
+  let contractEnd = null;
+  if (body.competitor_contract_end) {
+    contractEnd = String(body.competitor_contract_end).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(contractEnd) || Number.isNaN(new Date(`${contractEnd}T00:00:00Z`).getTime())) {
+      return { error: "Enter a valid contract end date" };
+    }
+  }
+  return { present, values: [name, amount, contractEnd, notes] };
+}
+const COMPETITOR_SET_SQL = "competitor_name = ?, competitor_amount = ?, competitor_contract_end = ?, competitor_notes = ?";
+
 const PIPELINE_STAGES = [
   "NEW", "TO_CALL", "QUALIFIED", "MEETING_SCHEDULED", "VISIT_COMPLETED",
   "QUOTATION_SENT", "WON", "CONVERTED", "NEED_MORE_INFO", "NOT_GENUINE", "LOST", "CANCELLED",
@@ -125,4 +197,5 @@ const PIPELINE_STAGES = [
 module.exports = {
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
+  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
 };

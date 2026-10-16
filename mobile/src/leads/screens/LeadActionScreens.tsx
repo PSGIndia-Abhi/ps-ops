@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Switch, Text, View } from 'react-native';
+import { Pressable, Switch, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { errorCodes, isErrorWithCode, pick, types } from '@react-native-documents/picker';
 import { CalendarIcon, ClockIcon, DocumentIcon, PersonIcon } from '../../components/icons';
+import { formatINR } from '../../crm/format';
+import { useLeads } from '../../crm/LeadsContext';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -14,11 +16,14 @@ import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { spacing, typography } from '../../theme';
 import { openFollowUpsFor } from '../../reminders-engine/personal';
+import { getCurrentLocation } from '../../utils/location';
+import { reverseGeocode } from '../../utils/reverseGeocode';
 import { refreshReminders } from '../../reminders-engine/useReminders';
 import type { WorkTask } from '../../tasks/types';
 import { ClashNotice, confirmClash, loadAllReminderItems, useClashes } from './RemindersScreens';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
+import { SOURCE_LABELS } from '../stage';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
 import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, PickField, RadioRow, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -52,6 +57,21 @@ const factory = (t: CrmTheme) => ({
   busyWhen: { ...typography.bodyMedium, color: t.textPrimary, textAlign: 'center' as const, marginTop: spacing.sm },
   busyMeta: { ...typography.body, color: t.textSecondary, textAlign: 'center' as const, marginTop: 2 },
   busyHelp: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.md, lineHeight: 18 },
+  // Clear / Refresh under an address read from GPS
+  addrActions: { flexDirection: 'row' as const, justifyContent: 'flex-end' as const, gap: spacing.sm, marginTop: -spacing.xs, marginBottom: spacing.md },
+  addrBtn: { minHeight: 40, paddingHorizontal: spacing.md, borderRadius: 20, borderWidth: 1, borderColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  addrBtnOff: { opacity: 0.4 },
+  addrBtnText: { ...typography.captionMedium, color: t.primary },
+  reviewCard: { marginBottom: spacing.md },
+  // An open follow-up on the Follow-ups screen
+  fuCard: { marginBottom: spacing.sm },
+  fuRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  fuIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
+  fuBody: { flex: 1, gap: 2 },
+  fuWhen: { ...typography.bodyMedium, color: t.textPrimary },
+  fuMeta: { ...typography.caption, color: t.textMuted },
+  fuChange: { minHeight: 40, paddingHorizontal: spacing.md, borderRadius: 20, borderWidth: 1, borderColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  fuChangeText: { ...typography.captionMedium, color: t.primary },
 });
 
 function FormShell({
@@ -247,7 +267,10 @@ export function LeadFollowUpScreen() {
   const [sheet, setSheet] = useState<'date' | 'time' | 'moveDate' | 'moveTime' | null>(null);
   // Follow-ups already open on this lead: undefined while checking.
   const [existing, setExisting] = useState<WorkTask[] | undefined>(undefined);
-  const [moveDate, setMoveDate] = useState<string | null>(null);
+  // The open follow-up being moved, and its new date and time.
+  const [editing, setEditing] = useState<WorkTask | null>(null);
+  const [moveDate, setMoveDate] = useState(todayStr());
+  const [moveTime, setMoveTime] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const clashes = useClashes(myId, date, time);
 
@@ -261,21 +284,27 @@ export function LeadFollowUpScreen() {
     };
   }, [leadId]);
 
+  // A lead can have several follow-ups: "Add follow-up" always adds a new one next to those open.
   const onSave = async () => {
     // "Already something at this time?" - against everything that rings for me.
     const items = await loadAllReminderItems(myId).catch(() => []);
     if (!(await confirmClash(items, date, time))) return;
-    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum }));
+    submit(() => api.addFollowUp(leadId, { date, time, note: note.trim(), assignedTo: myIdNum, newTask: true }));
   };
 
-  // A lead keeps ONE follow-up per person: mine, if I already have one open here. Saving a new time
-  // moves it (the server keeps the earlier time in its history) instead of adding a second.
-  const current = existing?.find((t) => Number(t.assigned_to) === myIdNum);
-  const moveTo = async (newTime: string | null) => {
-    if (!current || !moveDate) return;
+  const startMove = (task: WorkTask) => {
+    setError(null);
+    setEditing(task);
+    setMoveDate(String(task.due_date).slice(0, 10));
+    setMoveTime(task.due_time ? task.due_time.slice(0, 5) : null);
+  };
+  // "Change date & time" moves only the follow-up picked (the server keeps the earlier time in its history).
+  const saveMove = async () => {
+    if (!editing) return;
     setMoving(true);
+    setError(null);
     try {
-      await api.addFollowUp(leadId, { date: moveDate, time: newTime, note: '', assignedTo: myIdNum });
+      await api.addFollowUp(leadId, { date: moveDate, time: moveTime, note: '', assignedTo: Number(editing.assigned_to) || myIdNum, taskId: editing.id });
       refreshReminders();
       navigation.goBack();
     } catch (err) {
@@ -288,7 +317,7 @@ export function LeadFollowUpScreen() {
   if (existing === undefined) {
     return (
       <LeadScreen edges={['top', 'bottom']}>
-        <TopBar title="Schedule follow-up" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <TopBar title="Follow-ups" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
         <CrmScreen edges={[]} transparent contentStyle={styles.body}>
           <CrmSkeleton height={64} radius={16} />
           <View style={styles.gap} />
@@ -298,41 +327,62 @@ export function LeadFollowUpScreen() {
     );
   }
 
-  if (current) {
-    const when = `${fmtDateShort(String(current.due_date).slice(0, 10))}${current.due_time ? `, ${fmtTime(current.due_time)}` : ''}`;
+  const when = (t: WorkTask) => `${fmtDateShort(String(t.due_date).slice(0, 10))}${t.due_time ? `, ${fmtTime(t.due_time)}` : ''}`;
+
+  if (editing) {
     return (
-      <LeadScreen edges={['top', 'bottom']}>
-        <TopBar title="Schedule follow-up" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
-        <CrmScreen edges={[]} transparent contentStyle={styles.body}>
-          <CrmErrorBanner message={error} />
-          <Card>
-            <View style={styles.busyCard}>
-              <View style={[styles.busyIcon, { backgroundColor: theme.warningBg }]}>
-                <ClockIcon size={30} color={theme.warning} />
-              </View>
-              <Text style={styles.busyTitle}>A follow-up is already set</Text>
-              <Text style={styles.busyWhen}>{when}</Text>
-              {!!current.assigned_to_name && <Text style={styles.busyMeta}>for {current.assigned_to_name}</Text>}
-              {!!current.description && <Text style={styles.busyMeta}>“{current.description}”</Text>}
-              <Text style={styles.busyHelp}>
-                A lead keeps one follow-up: change its date and time - the earlier ones stay in its history.
-              </Text>
-            </View>
-          </Card>
-          <View style={styles.gap} />
-          <PrimaryButton label="Change date / time" onPress={() => setSheet('moveDate')} loading={moving} />
-          <DateSheet visible={sheet === 'moveDate'} onClose={() => setSheet(null)} value={String(current.due_date).slice(0, 10)} minDate={todayStr()} title="New follow-up date" onPick={(d) => { setMoveDate(d); setSheet('moveTime'); }} />
-          <TimeSheet visible={sheet === 'moveTime'} onClose={() => setSheet(null)} value={current.due_time ? current.due_time.slice(0, 5) : null} onPick={(t) => { setSheet(null); moveTo(t); }} />
-        </CrmScreen>
-      </LeadScreen>
+      <FormShell title="Change date & time" subtitle={name} error={error} submitLabel="Save new time" saving={moving} onSubmit={saveMove}>
+        <Card>
+          <InfoLine label="Now due" value={when(editing)} />
+          {!!editing.description && <InfoLine label="Note" value={editing.description} />}
+        </Card>
+        <View style={styles.gap} />
+        <FieldRow>
+          <PickField label="New date" value={fmtDateShort(moveDate)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('moveDate')} />
+          <PickField label="New time" value={moveTime ? fmtTime(moveTime) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('moveTime')} />
+        </FieldRow>
+        <View style={styles.gap} />
+        <PrimaryButton label="Cancel" variant="secondary" onPress={() => setEditing(null)} />
+        <DateSheet visible={sheet === 'moveDate'} onClose={() => setSheet(null)} value={moveDate} minDate={todayStr()} title="New follow-up date" onPick={(d) => { setMoveDate(d); setSheet(null); }} />
+        <TimeSheet visible={sheet === 'moveTime'} onClose={() => setSheet(null)} value={moveTime} onPick={(t) => { setMoveTime(t); setSheet(null); }} />
+      </FormShell>
     );
   }
 
   return (
-    <FormShell title="Schedule follow-up" subtitle={name} error={error} submitLabel="Save follow-up" saving={saving} onSubmit={onSave}>
+    <FormShell title="Follow-ups" subtitle={name} error={error} submitLabel="Add follow-up" saving={saving} onSubmit={onSave}>
+      {existing.length > 0 && (
+        <>
+          <Text style={styles.section}>{existing.length === 1 ? 'OPEN FOLLOW-UP' : `OPEN FOLLOW-UPS (${existing.length})`}</Text>
+          {existing.map((t) => {
+            const mine = Number(t.assigned_to) === myIdNum;
+            return (
+              <Card key={t.id} style={styles.fuCard}>
+                <View style={styles.fuRow}>
+                  <View style={[styles.fuIcon, { backgroundColor: theme.warningBg }]}>
+                    <ClockIcon size={20} color={theme.warning} />
+                  </View>
+                  <View style={styles.fuBody}>
+                    <Text style={styles.fuWhen}>{when(t)}</Text>
+                    {!!t.description && <Text style={styles.fuMeta} numberOfLines={2}>{t.description}</Text>}
+                    {!mine && !!t.assigned_to_name && <Text style={styles.fuMeta}>for {t.assigned_to_name}</Text>}
+                  </View>
+                  {mine && (
+                    <Pressable onPress={() => startMove(t)} accessibilityRole="button" accessibilityLabel="Change date and time" style={({ pressed }) => [styles.fuChange, pressed && { opacity: 0.8 }]}>
+                      <Text style={styles.fuChangeText}>Change</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </Card>
+            );
+          })}
+          <View style={styles.gap} />
+        </>
+      )}
+      <Text style={styles.section}>ADD A FOLLOW-UP</Text>
       <Text style={styles.help}>Your phone rings at the time you set, so you do not miss it.</Text>
       <FieldRow>
-        <PickField label="Next follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
+        <PickField label="Follow-up date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
         <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
       </FieldRow>
       <ClashNotice clashes={clashes} date={date} time={time} />
@@ -344,13 +394,214 @@ export function LeadFollowUpScreen() {
 }
 
 // ---------------------------------------------------------------------------
+// Residential lead: log a call and set the next one
+// ---------------------------------------------------------------------------
+
+const RESIDENTIAL_OUTCOMES: { value: api.ResidentialOutcome; label: string }[] = [
+  { value: 'INTERESTED', label: 'Interested' },
+  { value: 'CALL_BACK', label: 'Call back later' },
+  { value: 'NOT_REACHABLE', label: 'Not reachable' },
+  { value: 'NOT_INTERESTED', label: 'Not interested' },
+];
+
+/**
+ * Residential leads are followed up by phone only: what the call came to, and when to call next
+ * (it rings at that time). "Not interested" closes the lead and its follow-ups instead.
+ */
+export function LeadResidentialCallScreen() {
+  const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadResidentialCall'>>().params;
+  const { styles, theme } = useCrmStyles(factory);
+  const { myId } = useMe();
+  const { refresh } = useLeads();
+  const { saving, error, setError, submit } = useSubmit();
+  const [outcome, setOutcome] = useState<api.ResidentialOutcome | null>(null);
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(addDays(todayStr(), 1));
+  const [time, setTime] = useState<string | null>('10:00');
+  const [sheet, setSheet] = useState<'date' | 'time' | null>(null);
+  const closing = outcome === 'NOT_INTERESTED';
+  const clashes = useClashes(myId, date, closing ? null : time);
+
+  const onSave = async () => {
+    if (!outcome) return setError('Choose how the call went.');
+    if (closing && !note.trim()) return setError('Add a short note on why the customer is not interested.');
+    if (!closing && date === todayStr() && time && new Date(`${date}T${time}:00`).getTime() <= Date.now()) {
+      return setError(`${fmtTime(time)} today has already passed. Pick a later time for the next call.`);
+    }
+    if (!closing) {
+      const items = await loadAllReminderItems(myId).catch(() => []);
+      if (!(await confirmClash(items, date, time))) return;
+    }
+    submit(async () => {
+      await api.logResidentialCall(leadId, { outcome, note: note.trim(), nextDate: closing ? undefined : date, nextTime: closing ? null : time });
+      // The lead's status may have moved (contacted / lost): bring the lead list up to date.
+      refresh();
+    });
+  };
+
+  return (
+    <FormShell
+      title="Log call"
+      subtitle={name}
+      error={error}
+      submitLabel={closing ? 'Close lead' : 'Save call & next call'}
+      onSubmit={onSave}
+      saving={saving}
+      danger={closing}
+    >
+      <Text style={styles.section}>HOW DID THE CALL GO?</Text>
+      <Card>
+        {RESIDENTIAL_OUTCOMES.map((o) => (
+          <RadioRow key={o.value} label={o.label} selected={outcome === o.value} onPress={() => setOutcome(o.value)} />
+        ))}
+      </Card>
+      <NotesField
+        label={closing ? 'Reason (required)' : 'Call notes'}
+        value={note}
+        onChangeText={(v) => setNote(v.slice(0, 400))}
+        placeholder={closing ? 'Why is the customer not interested?' : 'What did the customer say?'}
+      />
+      {closing ? (
+        <Text style={styles.help}>This closes the lead as not interested and stops its follow-up calls.</Text>
+      ) : (
+        <>
+          <Text style={styles.section}>NEXT CALL</Text>
+          <FieldRow>
+            <PickField label="Date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
+            <PickField label="Time" value={time ? fmtTime(time) : null} placeholder="Any time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
+          </FieldRow>
+          <ClashNotice clashes={clashes} date={date} time={time} />
+          <Text style={styles.help}>Your phone rings at this time. Keep calling until the customer is converted.</Text>
+        </>
+      )}
+      <DateSheet visible={sheet === 'date'} onClose={() => setSheet(null)} value={date} minDate={todayStr()} onPick={(d) => { setDate(d); setSheet(null); }} />
+      <TimeSheet visible={sheet === 'time'} onClose={() => setSheet(null)} value={time} onPick={(t) => { setTime(t); setSheet(null); }} />
+    </FormShell>
+  );
+}
+
+/** A residential lead became a customer: the final amount (changeable) and a note; its calls stop. */
+export function LeadResidentialConvertScreen() {
+  const { leadId, name, amount: leadAmount } = useRoute<RouteProp<LeadStackParamList, 'LeadResidentialConvert'>>().params;
+  const { styles } = useCrmStyles(factory);
+  const { refresh } = useLeads();
+  const { saving, error, setError, submit } = useSubmit();
+  const [amount, setAmount] = useState(leadAmount > 0 ? String(Math.round(leadAmount)) : '');
+  const [note, setNote] = useState('');
+
+  const onSave = () => {
+    const total = amount ? Number(amount) : undefined;
+    if (total !== undefined && (!Number.isFinite(total) || total <= 0)) return setError('Enter a valid amount, or leave it empty.');
+    submit(async () => {
+      await api.convertResidential(leadId, { amount: total, note: note.trim() });
+      // The lead's status changed: bring the lead list and its details up to date.
+      refresh();
+    });
+  };
+
+  return (
+    <FormShell title="Convert to customer" subtitle={name} error={error} submitLabel="Convert to customer" onSubmit={onSave} saving={saving}>
+      <Text style={styles.help}>The lead becomes a customer and its follow-up calls stop. It cannot be undone from the app.</Text>
+      <CrmTextField
+        label="Final amount (₹)"
+        value={amount}
+        onChangeText={(v) => setAmount(v.replace(/\D/g, '').slice(0, 8))}
+        prefix="₹"
+        keyboardType="number-pad"
+        hint={leadAmount > 0 && Number(amount) !== Math.round(leadAmount) ? `Changed from ${formatINR(leadAmount)}` : 'The lead amount - change it if the final amount is different.'}
+      />
+      <NotesField label="Note (optional)" value={note} onChangeText={(v) => setNote(v.slice(0, 400))} placeholder="e.g. Service booked for Saturday" />
+    </FormShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assign / reassign (sales manager)
+// ---------------------------------------------------------------------------
+
+/**
+ * The sales manager gives the lead to a sales executive (or another sales manager) to work, or keeps
+ * it ("Myself"). Only that person - and the
+ * managers - then see it.
+ */
+export function LeadAssignScreen() {
+  const { leadId, name, salesId, telecallerId } = useRoute<RouteProp<LeadStackParamList, 'LeadAssign'>>().params;
+  const { styles } = useCrmStyles(factory);
+  const { myIdNum } = useMe();
+  const { saving, error, setError, submit } = useSubmit();
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .leadAssignees()
+      .then((list) => alive && setPeople(list))
+      .catch((err) => {
+        if (!alive) return;
+        setPeople([]);
+        setError(errorMessage(err, 'Could not load the team.'));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setError]);
+
+  const current = salesId ? Number(salesId) : telecallerId ? Number(telecallerId) : null;
+  const currentName = current === myIdNum ? 'You' : people?.find((p) => p.id === current)?.name;
+  const groups: { title: string; list: Person[] }[] = people
+    ? [
+        { title: 'SALES EXECUTIVES', list: people.filter((p) => p.role === 'Sales Executive') },
+        { title: 'SALES MANAGERS', list: people.filter((p) => p.role === 'sales_manager' && p.id !== myIdNum) },
+      ].filter((g) => g.list.length > 0)
+    : [];
+
+  const onSave = () => {
+    if (!picked) return setError('Choose who this lead goes to.');
+    if (picked === current) return setError('This lead is already with them.');
+    submit(() => api.assignLead(leadId, picked));
+  };
+
+  return (
+    <FormShell title="Assign lead" subtitle={name} error={error} submitLabel="Assign lead" onSubmit={onSave} saving={saving}>
+      <Text style={styles.help}>
+        {currentName ? `Now with ${currentName}. ` : 'Not assigned to anyone yet. '}Only the person you choose (and the managers) will see this lead.
+      </Text>
+      {!people ? (
+        <CrmSkeleton height={180} radius={16} />
+      ) : (
+        <>
+          <Card style={styles.reviewCard}>
+            <RadioRow label={current === myIdNum ? 'Myself (now)' : 'Myself'} selected={picked === myIdNum} onPress={() => setPicked(myIdNum)} />
+          </Card>
+          {groups.map((g) => (
+            <React.Fragment key={g.title}>
+              <Text style={styles.section}>{g.title}</Text>
+              <Card style={styles.reviewCard}>
+                {g.list.map((p) => (
+                  <RadioRow key={p.id} label={p.id === current ? `${p.name} (now)` : p.name} selected={picked === p.id} onPress={() => setPicked(p.id)} />
+                ))}
+              </Card>
+            </React.Fragment>
+          ))}
+        </>
+      )}
+    </FormShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Schedule a meeting
 // ---------------------------------------------------------------------------
 
-const MEETING_TYPES: Option<MeetingType>[] = [
-  { value: 'SITE_VISIT', label: 'Customer site' },
-  { value: 'OFFICE', label: 'Our office' },
+/** Where the meeting is: the place I am now (read from GPS), the BestServe office, or any other address. */
+type MeetingPlace = 'current' | 'office' | 'other';
+const MEETING_PLACES: Option<MeetingPlace>[] = [
+  { value: 'current', label: 'Current location' },
+  { value: 'office', label: 'BestServe office' },
+  { value: 'other', label: 'Other' },
 ];
+export const BESTSERVE_OFFICE_ADDRESS = '1st Floor, Swathi Sankeema, 11, 27th Cross, 7th Block, Jayanagar, Bengaluru, Karnataka 560070';
 
 export function LeadMeetingNewScreen() {
   const { leadId, name, address: leadAddress } = useRoute<RouteProp<LeadStackParamList, 'LeadMeetingNew'>>().params;
@@ -362,8 +613,11 @@ export function LeadMeetingNewScreen() {
   const [personId, setPersonId] = useState<number | null>(persona === 'sales' ? myIdNum : null);
   const [date, setDate] = useState(addDays(todayStr(), 1));
   const [time, setTime] = useState<string | null>('11:00');
-  const [type, setType] = useState<MeetingType>('SITE_VISIT');
+  const [place, setPlace] = useState<MeetingPlace>('other');
   const [address, setAddress] = useState(leadAddress);
+  const [currentAddress, setCurrentAddress] = useState('');
+  const [locating, setLocating] = useState(false);
+  const type: MeetingType = place === 'office' ? 'OFFICE' : 'SITE_VISIT';
   const [notes, setNotes] = useState('');
   const [sheet, setSheet] = useState<'date' | 'time' | 'person' | null>(null);
   // A lead has one open meeting at a time: undefined while checking, null when there is none.
@@ -399,9 +653,31 @@ export function LeadMeetingNewScreen() {
   const forMe = personId === myIdNum;
   const clashes = useClashes(myId, date, time, undefined, forMe);
 
+  // "Current location": the address of where I am now, read once from GPS (it can be corrected by hand).
+  const readCurrent = async () => {
+    setLocating(true);
+    setError(null);
+    try {
+      const loc = await getCurrentLocation();
+      const text = await reverseGeocode(loc.latitude, loc.longitude);
+      setCurrentAddress(text || `${loc.latitude.toFixed(6)}, ${loc.longitude.toFixed(6)}`);
+    } catch {
+      setError('Could not read your location. Turn location on and try again, or choose Other.');
+    } finally {
+      setLocating(false);
+    }
+  };
+  const pickPlace = (next: MeetingPlace) => {
+    setPlace(next);
+    if (next === 'current' && !currentAddress && !locating) readCurrent();
+  };
+  const meetingAddress = place === 'office' ? BESTSERVE_OFFICE_ADDRESS : place === 'current' ? currentAddress : address;
+
   const onSave = async () => {
     if (!personId) return setError('Choose the sales person for this meeting.');
     if (!time) return setError('Choose a time for the meeting.');
+    if (place === 'current' && !currentAddress.trim()) return setError(locating ? 'Reading your location - one moment.' : 'Your location is not read yet. Tap Refresh, or choose Other.');
+    if (place === 'other' && !address.trim()) return setError('Type the meeting address.');
     if (forMe) {
       const items = await loadAllReminderItems(myId).catch(() => []);
       if (!(await confirmClash(items, date, time))) return;
@@ -409,7 +685,7 @@ export function LeadMeetingNewScreen() {
     let created: string | null = null;
     submit(
       async () => {
-        const meeting = await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: address.trim(), notes: notes.trim() });
+        const meeting = await api.scheduleMeeting(leadId, { salesEmployeeId: personId, date, time, type, address: meetingAddress.trim(), notes: notes.trim() });
         created = meeting.id;
       },
       // Straight to the meeting just set - its time, place, Directions and Start visit.
@@ -470,9 +746,34 @@ export function LeadMeetingNewScreen() {
       </FieldRow>
       <ClashNotice clashes={clashes} date={date} time={time} />
       <FieldLabel>Meeting location</FieldLabel>
-      <SegmentedControl options={MEETING_TYPES} value={type} onChange={setType} />
+      <SegmentedControl options={MEETING_PLACES} value={place} onChange={pickPlace} />
       <View style={{ height: spacing.md }} />
-      {type === 'SITE_VISIT' && <CrmTextField label="Address" value={address} onChangeText={setAddress} placeholder="Customer address" maxLength={255} />}
+      {place === 'office' && (
+        <Card>
+          <InfoLine label="BestServe office" value={BESTSERVE_OFFICE_ADDRESS} />
+        </Card>
+      )}
+      {place === 'current' && (
+        <>
+          <CrmTextField
+            label="Your current location"
+            value={currentAddress}
+            onChangeText={setCurrentAddress}
+            placeholder={locating ? 'Reading your location…' : 'Tap Refresh to read your location'}
+            maxLength={255}
+            multiline
+          />
+          <View style={styles.addrActions}>
+            <Pressable onPress={() => setCurrentAddress('')} disabled={locating || !currentAddress} accessibilityRole="button" style={({ pressed }) => [styles.addrBtn, (locating || !currentAddress) && styles.addrBtnOff, pressed && { opacity: 0.8 }]}>
+              <Text style={styles.addrBtnText}>Clear</Text>
+            </Pressable>
+            <Pressable onPress={readCurrent} disabled={locating} accessibilityRole="button" style={({ pressed }) => [styles.addrBtn, locating && styles.addrBtnOff, pressed && { opacity: 0.8 }]}>
+              <Text style={styles.addrBtnText}>{locating ? 'Reading…' : 'Refresh'}</Text>
+            </Pressable>
+          </View>
+        </>
+      )}
+      {place === 'other' && <CrmTextField label="Address" value={address} onChangeText={setAddress} placeholder="Type the meeting address" maxLength={255} multiline />}
       <NotesField label="Meeting notes" value={notes} onChangeText={setNotes} placeholder="What should be discussed or inspected?" />
 
       <PeopleSheet visible={sheet === 'person'} onClose={() => setSheet(null)} people={people} selectedId={personId} meId={myIdNum} title="Sales person" onPick={(p) => { setPersonId(p.id); setSheet(null); }} />
@@ -540,16 +841,22 @@ export function LeadCloseScreen() {
 export function LeadConvertScreen() {
   const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadConvert'>>().params;
   const { styles } = useCrmStyles(factory);
-  const { saving, error, submit } = useSubmit();
+  const { saving, error, setError, submit } = useSubmit();
   const [notes, setNotes] = useState('');
   const [lead, setLead] = useState<PipelineLead | null>(null);
+  // The deal amount, filled with the approximate quote and changeable before converting.
+  const [amount, setAmount] = useState('');
 
   useEffect(() => {
     let alive = true;
     // Only to show what the customer record will contain; converting does not depend on it.
     api
       .getLead(leadId)
-      .then((l) => alive && setLead(l))
+      .then((l) => {
+        if (!alive) return;
+        setLead(l);
+        setAmount((a) => a || (l.amount > 0 ? String(Math.round(l.amount)) : ''));
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -563,23 +870,52 @@ export function LeadConvertScreen() {
       error={error}
       submitLabel="Convert to customer"
       saving={saving}
-      onSubmit={() =>
+      onSubmit={() => {
+        const total = amount ? Number(amount) : undefined;
+        if (total !== undefined && (!Number.isFinite(total) || total <= 0)) return setError('Enter a valid amount, or leave it empty.');
         submit(async () => {
-          await api.convertLead(leadId, notes.trim());
-        })
-      }
+          await api.convertLead(leadId, notes.trim(), total);
+        });
+      }}
     >
       <Text style={styles.help}>
         This creates a customer record for {name} and closes the lead as converted. It cannot be undone from the app.
       </Text>
-      <Text style={styles.section}>NEW CUSTOMER</Text>
-      <Card>
-        <InfoLine label="Customer" value={name} />
-        <InfoLine label="Contact person" value={lead?.contactPerson ?? ''} />
-        <InfoLine label="Phone" value={lead?.phone ?? ''} />
-        <InfoLine label="Email" value={lead?.email ?? ''} />
-        <InfoLine label="Address" value={lead?.address ?? ''} />
-      </Card>
+      {!lead ? (
+        <CrmSkeleton height={220} radius={16} />
+      ) : (
+        <>
+          <Text style={styles.section}>COMPANY</Text>
+          <Card style={styles.reviewCard}>
+            <InfoLine label="Customer (company)" value={lead.companyName || name} />
+            {!!lead.leadNumber && <InfoLine label="Lead no." value={lead.leadNumber} />}
+            <InfoLine label="Address" value={lead.address} />
+            <InfoLine label="Lead source" value={lead.source ? SOURCE_LABELS[lead.source] ?? lead.source : ''} />
+            <InfoLine label="Added by" value={lead.createdByName} />
+          </Card>
+          <Text style={styles.section}>CONTACT</Text>
+          <Card style={styles.reviewCard}>
+            <InfoLine label="Contact person" value={lead.contactPerson} />
+            <InfoLine label="Phone" value={lead.phone ? `+91 ${lead.phone}` : ''} />
+            {!!lead.alternatePhone && <InfoLine label="Alternate phone" value={`+91 ${lead.alternatePhone}`} />}
+            <InfoLine label="Email" value={lead.email} />
+          </Card>
+          <Text style={styles.section}>DEAL</Text>
+          <Card style={styles.reviewCard}>
+            <InfoLine label="Approximate quote" value={lead.amount > 0 ? formatINR(lead.amount) : ''} />
+            {!!lead.notes && <InfoLine label="Requirement" value={lead.notes} />}
+          </Card>
+          <CrmTextField
+            label="Deal amount (₹)"
+            value={amount}
+            onChangeText={(v) => setAmount(v.replace(/\D/g, ''))}
+            prefix="₹"
+            keyboardType="number-pad"
+            maxLength={9}
+            hint={lead.amount > 0 && Number(amount) !== Math.round(lead.amount) ? `Changed from ${formatINR(lead.amount)}` : 'The approximate quote - change it if the final amount is different.'}
+          />
+        </>
+      )}
       <NotesField label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. Annual contract agreed" />
     </FormShell>
   );

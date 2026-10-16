@@ -5,8 +5,10 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
+const { notifyUsers } = require("../services/notifications.service");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -211,7 +213,13 @@ router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
       next.lead_source = source.name;
     }
 
+    const competitor = readCompetitor(body);
+    if (competitor.error) throw new HttpError(400, competitor.error);
+
     await inTransaction(async (conn) => {
+      if (competitor.present) {
+        await conn.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, lead.id]);
+      }
       const [upd] = await conn.query(
         `UPDATE crm_leads SET company_name=?, customer_name=?, phone=?, alternate_phone=?, customer_email=?,
                 location=?, notes=?, amount=?, lead_source=?, row_version = row_version + 1
@@ -256,6 +264,77 @@ router.post("/leads/:id/assign-telecaller", auth, requirePermission("CRM_VIEW_LE
     res.json(updated);
   } catch (err) {
     sendError(res, err, "Failed to assign telecaller");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/crm/lead-assignees -- who the sales manager can give a lead to: active sales executives
+// and sales managers (LEAD_ASSIGNEE_ROLES), with their role.
+// POST /api/crm/leads/:id/assign { user_id } -- give the lead to that person (sales manager / admin
+// only). A telecaller gets it to verify; a sales person to work (see assignmentFor). The person it
+// left stops seeing it unless they added it; the change is in the lead's history and they are told.
+// ---------------------------------------------------------------------------
+function canAssignLeads(req) {
+  return req.user.role === "admin" || hasPerm(req, "MANAGE_LEADS");
+}
+
+router.get("/lead-assignees", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    if (!canAssignLeads(req)) throw new HttpError(403, "You cannot assign leads");
+    const [rows] = await pool.query(
+      `SELECT DISTINCT u.id, u.name, r.name AS role
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         JOIN role_permissions rp ON rp.role_id = r.id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name IN (?)
+        ORDER BY u.name ASC`,
+      [LEAD_ASSIGNEE_ROLES]
+    );
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, "Failed to load people");
+  }
+});
+
+router.post("/leads/:id/assign", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    if (!canAssignLeads(req)) throw new HttpError(403, "You cannot assign leads");
+    const lead = await loadVisibleLead(req, req.params.id);
+    const assignee = await findLeadAssignee(pool, req.body?.user_id);
+    if (!assignee) throw new HttpError(400, "Choose who to assign this lead to");
+    const plan = assignmentFor(lead, assignee);
+    if (plan.error) throw new HttpError(400, plan.error);
+    const me = Number(req.user.id);
+    const toTelecaller = String(assignee.role).toLowerCase() === "telecaller";
+    const already = toTelecaller
+      ? Number(lead.assigned_telecaller_id) === assignee.id && !lead.assigned_sales_employee_id
+      : Number(lead.assigned_sales_employee_id) === assignee.id;
+    if (already) throw new HttpError(400, `This lead is already with ${assignee.id === me ? "you" : assignee.name}`);
+
+    await inTransaction(async (conn) => {
+      await conn.query(
+        `UPDATE crm_leads SET pipeline_stage = ?, assigned_telecaller_id = ?, assigned_sales_employee_id = ?, row_version = row_version + 1 WHERE id = ?`,
+        [plan.stage, plan.telecallerId, plan.salesId, lead.id]
+      );
+      const who = assignee.id === me ? "themselves" : `${assignee.name}${toTelecaller ? " (telecaller)" : ""}`;
+      await logLeadHistory(conn, lead.id, "ASSIGNED", { note: `Assigned to ${who}`.slice(0, 500), changedBy: me });
+    });
+
+    if (assignee.id !== me) {
+      const name = lead.company_name || lead.customer_name || "A lead";
+      notifyUsers([assignee.id], {
+        type: "LEAD_ASSIGNED",
+        title: toTelecaller ? `Lead to verify: ${name}` : `New lead for you: ${name}`,
+        message: `${lead.lead_number || "A lead"} was assigned to you${toTelecaller ? " for a verification call" : ""}.`,
+        entityType: "lead",
+        entityId: lead.id,
+      }).catch(() => {});
+    }
+    const [[updated]] = await pool.query("SELECT * FROM crm_leads WHERE id = ?", [lead.id]);
+    res.json(updated);
+  } catch (err) {
+    sendError(res, err, "Failed to assign the lead");
   }
 });
 

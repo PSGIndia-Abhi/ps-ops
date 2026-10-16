@@ -9,17 +9,18 @@ import {
 } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChartIcon, ClockIcon, HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
+import { ClockIcon, HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
 import { LeadsProvider } from '../crm/LeadsContext';
+import { CrmLeadDetailScreen } from '../crm/screens/CrmLeadDetailScreen';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
+import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import type { LeadRootStackParamList, LeadTabParamList } from '../leads/navigation';
 import { LEAD_STACK_SCREENS } from '../leads/screens';
 import { LeadListScreen } from '../leads/screens/LeadBrowseScreens';
-import { LeadTasksScreen } from '../leads/screens/LeadTodayScreen';
 import { LeadHomeScreen } from '../leads/screens/LeadHomeScreen';
-import { TeamScreen } from '../leads/screens/ReportScreens';
+import { LeadFollowUpsScreen } from '../leads/screens/LeadFollowUpsScreen';
 import { useMe } from '../leads/ui';
 import { radii, shadows } from '../theme';
 
@@ -33,7 +34,6 @@ type TabIconProps = { color: string; size: number };
 const homeIcon = ({ color, size }: TabIconProps) => <HomeIcon size={size} color={color} />;
 const leadsIcon = ({ color, size }: TabIconProps) => <ClipboardListIcon size={size} color={color} />;
 const tasksIcon = ({ color, size }: TabIconProps) => <ClockIcon size={size} color={color} />;
-const teamIcon = ({ color, size }: TabIconProps) => <ChartIcon size={size} color={color} />;
 const moreIcon = ({ color, size }: TabIconProps) => <MoreHorizontalIcon size={size} color={color} />;
 
 /** The centre slot never shows a screen - tapping it opens the New Lead form instead. */
@@ -112,13 +112,9 @@ function LeadTabs() {
           })}
         />
       )}
-      {/* The fourth slot is the one thing that differs by role: a telecaller's
-          day is their follow-up calls, a manager's is their team's numbers. */}
-      {persona === 'sales_manager' ? (
-        <Tab.Screen name="Team" component={TeamScreen} options={{ tabBarIcon: teamIcon }} />
-      ) : (
-        <Tab.Screen name="Tasks" component={LeadTasksScreen} options={{ title: 'Today', tabBarIcon: tasksIcon }} />
-      )}
+      {/* Follow-ups live here, not in Task Management: their own (and their reminders), or for the
+          sales manager the whole team's. */}
+      <Tab.Screen name="Tasks" component={LeadFollowUpsScreen} options={{ title: 'Follow-ups', tabBarIcon: tasksIcon }} />
       <Tab.Screen name="More" component={CrmMoreScreen} options={{ tabBarIcon: moreIcon }} />
     </Tab.Navigator>
   );
@@ -141,6 +137,9 @@ export function LeadsNavigator() {
         {LEAD_STACK_SCREENS.map((s) => (
           <Stack.Screen key={s.name} name={s.name} component={s.component} options={s.modal ? { animation: 'slide_from_bottom' } : undefined} />
         ))}
+        {/* Residential leads (sales executive / manager): the CRM's own details and edit screens. */}
+        <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />
+        <Stack.Screen name="CrmNewLead" component={CrmNewLeadScreen as React.ComponentType} options={{ animation: 'slide_from_bottom' }} />
       </Stack.Navigator>
     </LeadsProvider>
   );

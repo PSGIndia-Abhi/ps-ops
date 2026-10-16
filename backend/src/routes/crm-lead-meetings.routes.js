@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
-  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead, LEAD_ASSIGNEE_ROLES,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { syncReminders } = require("../services/push.service");
@@ -130,8 +130,9 @@ router.get("/sales-employees", auth, requirePermission("CRM_VIEW_LEAD"), async (
          JOIN roles r ON r.id = u.role_id
          JOIN role_permissions rp ON rp.role_id = r.id
          JOIN permissions p ON p.id = rp.permission_id
-        WHERE u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name <> 'telecaller'
-        ORDER BY u.name ASC`
+        WHERE u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name IN (?)
+        ORDER BY u.name ASC`,
+      [LEAD_ASSIGNEE_ROLES]
     );
     res.json(rows);
   } catch (err) {

@@ -11,7 +11,7 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
 import type { PipelineLead } from '../types';
-import { LeadRow, useLoad, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { LeadRow, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
@@ -73,6 +73,10 @@ export function LeadListScreen() {
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load leads.');
 
   const counts = useMemo(() => countByGroup(data ?? []), [data]);
+  // Sales executives and managers get their leads verified already: the calling-queue filters
+  // (New / To call) are only for the telecaller - or while an older lead still sits there.
+  const { persona } = useMe();
+  const groups = STAGE_GROUP_ORDER.filter((g) => persona === 'telecaller' || !['new', 'to_call'].includes(g) || counts[g] > 0);
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (data ?? []).filter(
@@ -101,7 +105,7 @@ export function LeadListScreen() {
       </View>
       <View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {STAGE_GROUP_ORDER.map((g) => (
+          {groups.map((g) => (
             <Pressable
               key={g}
               onPress={() => setGroup(g)}

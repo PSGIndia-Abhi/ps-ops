@@ -103,6 +103,11 @@ function toLead(row, closingNote) {
     source: sourceLabel(row.lead_source),
     quote,
     requirement: row.notes || "",
+    // Competitor details (optional): who serves the customer now, their price, contract end, notes.
+    competitorName: row.competitor_name || "",
+    competitorAmount: row.competitor_amount === null || row.competitor_amount === undefined ? "" : String(Math.round(Number(row.competitor_amount))),
+    competitorEnd: row.competitor_contract_end ? String(row.competitor_contract_end).slice(0, 10) : "",
+    competitorNotes: row.competitor_notes || "",
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,
@@ -382,6 +387,18 @@ export const roleLabel = (role) =>
 export const salesTeam = () => state.people.filter((u) => u.can_visit).map((u) => ({ id: u.id, name: u.name, role: u.role, title: roleLabel(u.role) }));
 export const telecallers = () => state.people.filter((u) => u.role === "telecaller").map((u) => ({ id: u.id, name: u.name, role: "telecaller" }));
 
+/** GET /lead-assignees - who the sales manager can give a lead to: [{ id, name, role }]. */
+export const fetchAssignees = () => request("/api/crm/lead-assignees").then((list) => (Array.isArray(list) ? list.map((p) => ({ ...p, id: String(p.id) })) : []));
+
+/** POST /leads/{id}/assign - the sales manager gives the lead to someone; the lists reload. */
+export async function assignLead(leadId, userId) {
+  await request(`/api/crm/leads/${leadId}/assign`, { method: "POST", body: { user_id: Number(userId) } });
+  await loadWorkspace();
+}
+
+/** "Sales Executive" / "Telecaller" / "Sales Manager" for an assignee's role. */
+export const assigneeRole = (role) => (role === "telecaller" ? "Telecaller" : role === "sales_manager" ? "Sales Manager" : role || "");
+
 /** The active sources from the lead source master - what the lead forms offer. */
 export const providerSources = () => state.leadSources.map((s) => s.name);
 
@@ -429,6 +446,14 @@ const leadById = (id) => state.leads.find((l) => l.id === id);
 /** A reference the server accepts ("APP-" + 8..36 letters, digits or dashes) to recognise a retried save. */
 const newClientRef = () => `APP-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
+/** The competitor fields of a lead form, as the server takes them (all optional). */
+const competitorBody = (input) => ({
+  competitor_name: input.competitorName?.trim() || "",
+  competitor_amount: input.competitorAmount ? Number(input.competitorAmount) : null,
+  competitor_contract_end: input.competitorEnd || null,
+  competitor_notes: input.competitorNotes?.trim() || "",
+});
+
 /** POST /provider/leads (a provider) or POST /leads (staff). New leads go to the telecaller queue. */
 export async function submitLead(input, actor) {
   let created;
@@ -472,6 +497,9 @@ export async function submitLead(input, actor) {
         lead_source: input.source,
         amount: Number(input.quote),
         notes: input.requirement?.trim() || "",
+        // Sales manager: who the lead goes to (a sales executive, or themselves).
+        assign_to: input.assignTo || undefined,
+        ...competitorBody(input),
       },
     });
   }
@@ -649,6 +677,7 @@ export async function updateLead(leadId, input) {
         address: input.address.trim(),
         requirement: input.requirement.trim(),
         approx_quote_amount: Number(input.quote),
+        ...competitorBody(input),
       },
     });
   } finally {
@@ -699,6 +728,12 @@ export const markNotificationsRead = (ids) => Promise.all(ids.map((id) => markNo
  * GET /reports/sales-performance - one person's numbers for a period (YYYY-MM-DD, both days included).
  * No `employeeId` means the signed-in person; anyone else needs a lead-management permission.
  */
+/** GET /targets?month=YYYY-MM - monthly targets: the sales manager gets the team, others themselves. */
+export const getTargets = (month) => request(`/api/crm/targets${month ? `?month=${month}` : ""}`).then((rows) => (Array.isArray(rows) ? rows : []));
+
+/** PUT /targets/{userId} - the sales manager sets a month's target (0 / empty removes it). */
+export const setTarget = (userId, month, amount) => request(`/api/crm/targets/${userId}`, { method: "PUT", body: { month, target_amount: Number(amount) || 0 } });
+
 export async function getPerformance({ from, to, employeeId }) {
   const query = new URLSearchParams({ from, to });
   if (employeeId) query.set("employeeId", String(employeeId));

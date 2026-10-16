@@ -3,7 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
 import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
-import { BellIcon, CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, HomeIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import { BellIcon, CalendarIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
 import type { LeadStackParamList } from '../../leads/navigation';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
@@ -114,10 +114,10 @@ export function CrmMoreScreen() {
   const roleText = role ? roleLabel(role) : displayRole(rawRole);
   // Telecallers verify leads by phone: no site visits, no sales performance numbers.
   const telecaller = (rawRole ?? '').toLowerCase().trim() === 'telecaller';
-  // The sales manager also looks over residential leads (read-only).
-  const salesManager = (rawRole ?? '').toLowerCase().trim() === 'sales_manager';
-  // Lead roles also have Task Management (and MD / PA the Sales app).
+  // Lead roles also have Task Management (and MD / PA the Sales app; sales executives and managers
+  // their Residential app). In the Residential app, meetings and sales numbers are not part of the work.
   const { canSwitch, current, openSwitcher } = useAppSwitch();
+  const residentialApp = current === 'residential';
 
   return (
     <CrmScreen>
@@ -153,7 +153,7 @@ export function CrmMoreScreen() {
         <View style={styles.group}>
           <MenuRow
             icon={<ClipboardListIcon size={18} color={theme.primary} />}
-            label={current === 'leads' ? 'Task Management' : 'Switch app'}
+            label="Switch app"
             onPress={() => openSwitcher()}
           />
         </View>
@@ -165,7 +165,7 @@ export function CrmMoreScreen() {
           label="Reminders"
           onPress={() => leadNavigation.navigate('LeadReminders')}
         />
-        {!telecaller && (
+        {!telecaller && !residentialApp && (
           <MenuRow
             icon={<CalendarIcon size={18} color={theme.primary} />}
             label="My meetings"
@@ -179,20 +179,20 @@ export function CrmMoreScreen() {
           divider
           onPress={() => leadNavigation.navigate('LeadTasks')}
         />
-        {!telecaller && (
+        {(rawRole ?? '').toLowerCase().trim() === 'sales_manager' && !residentialApp && (
+          <MenuRow
+            icon={<ChartIcon size={18} color={theme.primary} />}
+            label="Team report & targets"
+            divider
+            onPress={() => leadNavigation.navigate('LeadTeam')}
+          />
+        )}
+        {!telecaller && !residentialApp && (
           <MenuRow
             icon={<ChartIcon size={18} color={theme.primary} />}
             label="My performance"
             divider
             onPress={() => leadNavigation.navigate('LeadPerformance')}
-          />
-        )}
-        {salesManager && (
-          <MenuRow
-            icon={<HomeIcon size={18} color={theme.primary} />}
-            label="Residential leads"
-            divider
-            onPress={() => leadNavigation.navigate('LeadResidential')}
           />
         )}
       </View>

@@ -14,8 +14,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertCircleIcon,
   BriefcaseIcon,
+  CalendarIcon,
   CameraIcon,
-  CheckCircleIcon,
   DocumentIcon,
   EmailIcon,
   ExternalLinkIcon,
@@ -29,6 +29,12 @@ import { ApiError, crmApi } from '../../api';
 import { radii, spacing, typography } from '../../theme';
 import { getCurrentLocation } from '../../utils/location';
 import { reverseGeocode } from '../../utils/reverseGeocode';
+import { useAuth } from '../../auth/AuthContext';
+import { loadLastChoices, saveLastChoices } from '../draft';
+import { leadAssignees, roleName } from '../../leads/api';
+import { fmtDateShort } from '../../tasks/format';
+import { DateSheet } from '../../tasks/ui/sheets';
+import type { Person } from '../../leads/types';
 import { formatINR } from '../format';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
@@ -139,6 +145,35 @@ const factory = (t: CrmTheme) => ({
     marginTop: spacing.sm,
   },
   addressWrap: { marginTop: spacing.md },
+  competitorHint: { ...typography.caption, color: t.textMuted, marginBottom: spacing.sm },
+  dateField: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    minHeight: 52,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+    marginBottom: spacing.md,
+  },
+  dateFieldPressed: { opacity: 0.85 },
+  dateFieldText: { ...typography.body, color: t.textPrimary, flex: 1 },
+  dateFieldPlaceholder: { color: t.textMuted },
+  dateClear: { ...typography.captionMedium, color: t.primary },
+  addressActions: { flexDirection: 'row' as const, justifyContent: 'flex-end' as const, gap: spacing.sm, marginTop: -spacing.xs },
+  addressButton: {
+    minWidth: 84,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: t.primary,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  addressButtonOff: { opacity: 0.4 },
+  addressButtonPressed: { opacity: 0.8 },
+  addressButtonText: { ...typography.captionMedium, color: t.primary },
 
   chips: {
     flexDirection: 'row' as const,
@@ -313,15 +348,23 @@ function ReviewSection({
 export function CrmNewCommercialLeadScreen({
   commercialOnly = false,
   onCreated,
+  onResidential,
+  assign,
 }: {
   commercialOnly?: boolean;
   onCreated?: (lead: Lead) => void;
+  /** The Lead Management app: its own residential form for the Residential tab. */
+  onResidential?: () => void;
+  /** The sales manager: choose which sales executive the new lead goes to (`myId` is "Myself"). */
+  assign?: { myId: number };
 } = {}) {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewCommercialLead'>>();
   const { addLead, updateLead, getLead, showNotice } = useLeads();
   const { styles, theme } = useCrmStyles(factory);
+  const { session } = useAuth();
+  const scope = session?.userId ?? 'anon';
 
   // The lead being edited, as it was when the form opened (it does not change under the rep's hands).
   const editLeadId = route.params?.editLeadId;
@@ -341,8 +384,6 @@ export function CrmNewCommercialLeadScreen({
       ? { status: 'ok', latitude: editLead.latitude, longitude: editLead.longitude, accuracy: null }
       : { status: 'failed' };
   });
-  /** Shown once there is an address to show: found for the location, or to be typed by the rep. */
-  const [typeAddress, setTypeAddress] = useState(editing);
   /** True while the written address for the location is being looked up. */
   const [findingAddress, setFindingAddress] = useState(false);
   /**
@@ -359,6 +400,38 @@ export function CrmNewCommercialLeadScreen({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Competitor details (optional): who serves the customer now, their price, when the contract ends.
+  const [competitor, setCompetitor] = useState(() => ({
+    name: editLead?.competitorName ?? '',
+    amount: editLead?.competitorAmount ? String(Math.round(editLead.competitorAmount)) : '',
+    contractEnd: editLead?.competitorContractEnd ?? null,
+    notes: editLead?.competitorNotes ?? '',
+  }));
+  const [contractSheet, setContractSheet] = useState(false);
+  const setCompetitorField = (key: 'name' | 'amount' | 'notes', value: string) =>
+    setCompetitor(prev => ({ ...prev, [key]: key === 'amount' ? value.replace(/\D/g, '').slice(0, 9) : value }));
+  const hasCompetitor = !!(competitor.name.trim() || competitor.amount || competitor.contractEnd || competitor.notes.trim());
+
+  // Sales manager: who the new lead goes to - themselves unless they pick someone.
+  const [people, setPeople] = useState<Person[]>([]);
+  const [assignTo, setAssignTo] = useState<string | null>(assign ? String(assign.myId) : null);
+  useEffect(() => {
+    if (!assign || editing) return;
+    let alive = true;
+    leadAssignees()
+      .then(list => alive && setPeople(list))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [assign, editing]);
+  const assignOptions = assign
+    ? [
+        { value: String(assign.myId), label: 'Myself' },
+        ...people.filter(p => p.id !== assign.myId).map(p => ({ value: String(p.id), label: `${p.name} · ${roleName(p.role)}` })),
+      ]
+    : [];
+  const assignLabel = assignOptions.find(o => o.value === assignTo)?.label ?? '';
 
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const designationRef = useRef<React.ComponentRef<typeof TextInput>>(null);
@@ -381,7 +454,7 @@ export function CrmNewCommercialLeadScreen({
   );
 
   const [hasTriedLocation, setHasTriedLocation] = useState(false);
-  const readLocation = useCallback(async () => {
+  const readLocation = useCallback(async (replaceAddress = false) => {
     setHasTriedLocation(true);
     setLocation({ status: 'locating' });
     try {
@@ -401,18 +474,16 @@ export function CrmNewCommercialLeadScreen({
       if (!mounted.current) return;
       setFindingAddress(false);
       const current = latest.current.address.trim();
-      if (found && (!current || current === filledAddress.current)) {
+      if (found && (replaceAddress || !current || current === filledAddress.current)) {
         const address = found.slice(0, 255);
         filledAddress.current = address;
         latest.current = { ...latest.current, address };
         setValues(prev => ({ ...prev, address }));
-        setTypeAddress(true);
       }
     } catch {
       // Permission refused, location switched off, or no fix indoors: the rep types the address instead.
       if (!mounted.current) return;
       setLocation({ status: 'failed' });
-      setTypeAddress(true);
     }
   }, []);
 
@@ -421,6 +492,29 @@ export function CrmNewCommercialLeadScreen({
   useEffect(() => {
     if (!editing) readLocation();
   }, [editing, readLocation]);
+
+  // A new lead opens with the industry type and lead source picked last time (still changeable).
+  useEffect(() => {
+    if (editing) return;
+    let cancelled = false;
+    loadLastChoices(scope).then(last => {
+      if (cancelled) return;
+      const industryType = INDUSTRY_TYPES.some(o => o.value === last.industryType) ? last.industryType : null;
+      const source = COMMERCIAL_LEAD_SOURCES.some(o => o.value === last.commercialSource) ? last.commercialSource : null;
+      setValues(prev => {
+        const next = {
+          ...prev,
+          industryType: prev.industryType ?? (industryType as IndustryType | null),
+          source: prev.source ?? (source as LeadSource | null),
+        };
+        latest.current = next;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, scope]);
 
   useEffect(() => {
     if (!editLead) return;
@@ -492,7 +586,9 @@ export function CrmNewCommercialLeadScreen({
   }
 
   function switchType(type: LeadType) {
-    if (type === 'consumer') navigation.replace('CrmNewLead');
+    if (type !== 'consumer') return;
+    if (onResidential) onResidential();
+    else navigation.replace('CrmNewLead');
   }
 
   function goToReview() {
@@ -547,6 +643,11 @@ export function CrmNewCommercialLeadScreen({
       paymentMethod: 'other',
       paymentStatus: 'pending',
       leadStatus,
+      assignTo: assign && !editing && assignTo ? Number(assignTo) : undefined,
+      competitorName: competitor.name.trim(),
+      competitorAmount: competitor.amount ? Number(competitor.amount) : null,
+      competitorContractEnd: competitor.contractEnd,
+      competitorNotes: competitor.notes.trim(),
     };
 
     setSaving(true);
@@ -583,6 +684,7 @@ export function CrmNewCommercialLeadScreen({
         return;
       }
       const saved = await addLead(input, photos);
+      saveLastChoices(scope, { industryType: input.industryType ?? undefined, commercialSource: input.source ?? undefined }).catch(() => {});
       if (onCreated) {
         onCreated(saved);
         return;
@@ -601,12 +703,18 @@ export function CrmNewCommercialLeadScreen({
 
   const reviewing = step === 'review';
   const savedCount = savedPhotos?.length ?? 0;
-  const locationSummary =
-    location.status === 'ok'
-      ? 'Current location captured'
-      : location.status === 'locating'
-      ? 'Still reading the location...'
-      : '';
+  const addressStatus =
+    location.status === 'locating'
+      ? 'Reading your location...'
+      : findingAddress
+      ? 'Finding the address for your location...'
+      : location.status === 'failed'
+      ? hasTriedLocation
+        ? 'Could not read your location - type the address, or tap Refresh.'
+        : undefined
+      : !!values.address && values.address === filledAddress.current
+      ? 'Filled in from your location - correct it if needed.'
+      : undefined;
 
   return (
     <CrmScreen scroll={false} edges={['top', 'bottom']}>
@@ -654,10 +762,7 @@ export function CrmNewCommercialLeadScreen({
                 value={optionLabel(INDUSTRY_TYPES, values.industryType as IndustryType)}
               />
               <ReviewRow label="Company / Business Name" value={values.companyName.trim()} />
-              <ReviewRow label="Location" value={locationSummary} />
-              {(!hasLocation || !!values.address.trim()) && (
-                <ReviewRow label="Address" value={values.address.trim()} />
-              )}
+              <ReviewRow label="Address" value={values.address.trim()} />
             </ReviewSection>
 
             <ReviewSection title="CONTACT" onEdit={() => setStep('details')}>
@@ -687,8 +792,22 @@ export function CrmNewCommercialLeadScreen({
                 value={servicesLabel(values.services as CommercialService[])}
               />
               <ReviewRow label="Approximate Quote" value={formatINR(amountNumber)} strong />
+              {!!assign && !editing && <ReviewRow label="Assigned To" value={assignLabel} />}
               {editing && <ReviewRow label="Lead Status" value={optionLabel(LEAD_STATUSES, leadStatus)} />}
               <ReviewRow label="Notes" value={values.notes.trim()} />
+            </ReviewSection>
+
+            <ReviewSection title="COMPETITOR" onEdit={() => setStep('details')}>
+              {hasCompetitor ? (
+                <>
+                  <ReviewRow first label="Current Service Provider" value={competitor.name.trim()} />
+                  <ReviewRow label="Their Price" value={competitor.amount ? formatINR(Number(competitor.amount)) : ''} />
+                  <ReviewRow label="Contract Ends On" value={competitor.contractEnd ? fmtDateShort(competitor.contractEnd) : ''} />
+                  <ReviewRow label="Notes" value={competitor.notes.trim()} />
+                </>
+              ) : (
+                <ReviewRow first label="Competitor" value="" />
+              )}
             </ReviewSection>
 
             <ReviewSection
@@ -755,94 +874,53 @@ export function CrmNewCommercialLeadScreen({
                 testID="commercial-company"
               />
 
-              <Text style={styles.fieldLabel}>Location</Text>
-              <View
-                style={[
-                  styles.locationBox,
-                  location.status === 'ok' && styles.locationBoxOk,
-                  location.status === 'failed' && styles.locationBoxFailed,
-                ]}
-                accessibilityLiveRegion="polite"
-                testID="commercial-location"
-              >
-                {location.status === 'locating' ? (
-                  <ActivityIndicator color={theme.primary} />
-                ) : location.status === 'ok' ? (
-                  <CheckCircleIcon size={22} color={theme.successText} />
-                ) : (
-                  <PinIcon size={22} color={theme.warningText} />
-                )}
-                <View style={styles.locationText}>
-                  <Text style={styles.locationTitle}>
-                    {location.status === 'locating'
-                      ? 'Reading your current location...'
-                      : location.status === 'ok'
-                      ? editing && location.accuracy === null
-                        ? 'Location saved with this lead'
-                        : 'Current location captured'
-                      : editing && !hasTriedLocation
-                      ? 'No location saved with this lead'
-                      : 'Could not read your location'}
-                  </Text>
-                  <Text style={styles.locationSub}>
-                    {location.status === 'locating'
-                      ? 'This takes a few seconds.'
-                      : location.status === 'ok'
-                      ? findingAddress
-                        ? 'Finding the address...'
-                        : location.accuracy !== null
-                        ? `Accurate to about ${Math.round(location.accuracy)} m`
-                        : editing
-                        ? 'Tap "Use current" if you are at the site now.'
-                        : 'Saved with this lead'
-                      : 'Type the address below, or try again.'}
-                  </Text>
-                </View>
-                {location.status !== 'locating' && (
+              <View style={styles.addressWrap}>
+                <CrmTextField
+                  label={hasLocation ? 'Address' : 'Address *'}
+                  placeholder={location.status === 'locating' || findingAddress ? 'Reading your location...' : 'Building, area, city'}
+                  hint={addressStatus}
+                  value={values.address}
+                  onChangeText={text => setField('address', text)}
+                  onBlur={() => checkField('address')}
+                  error={errors.address}
+                  icon={<PinIcon size={18} color={theme.textMuted} />}
+                  maxLength={255}
+                  multiline
+                  testID="commercial-address"
+                />
+                <View style={styles.addressActions}>
                   <Pressable
-                    onPress={readLocation}
-                    hitSlop={10}
+                    onPress={() => setField('address', '')}
+                    disabled={!values.address}
+                    hitSlop={6}
                     accessibilityRole="button"
+                    accessibilityLabel="Clear the address"
+                    style={({ pressed }) => [styles.addressButton, !values.address && styles.addressButtonOff, pressed && styles.addressButtonPressed]}
+                    testID="commercial-address-clear"
+                  >
+                    <Text style={styles.addressButtonText}>Clear</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => readLocation(true)}
+                    disabled={location.status === 'locating' || findingAddress}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel="Read the address of my current location"
+                    style={({ pressed }) => [
+                      styles.addressButton,
+                      (location.status === 'locating' || findingAddress) && styles.addressButtonOff,
+                      pressed && styles.addressButtonPressed,
+                    ]}
                     testID="commercial-location-retry"
                   >
-                    <Text style={styles.locationAction}>
-                      {location.status !== 'ok' ? 'Try again' : editing ? 'Use current' : 'Refresh'}
-                    </Text>
+                    {location.status === 'locating' || findingAddress ? (
+                      <ActivityIndicator size="small" color={theme.primary} />
+                    ) : (
+                      <Text style={styles.addressButtonText}>Refresh</Text>
+                    )}
                   </Pressable>
-                )}
-              </View>
-              {typeAddress ? (
-                <View style={styles.addressWrap}>
-                  <CrmTextField
-                    label={hasLocation ? 'Address' : 'Address *'}
-                    placeholder="Building, area, city"
-                    hint={
-                      hasLocation && !!values.address && values.address === filledAddress.current
-                        ? 'Filled in from your location - correct it if needed.'
-                        : undefined
-                    }
-                    value={values.address}
-                    onChangeText={text => setField('address', text)}
-                    onBlur={() => checkField('address')}
-                    error={errors.address}
-                    icon={<PinIcon size={18} color={theme.textMuted} />}
-                    maxLength={255}
-                    multiline
-                    testID="commercial-address"
-                  />
                 </View>
-              ) : location.status === 'locating' || findingAddress ? (
-                <View style={styles.locationGap} />
-              ) : (
-                <Pressable
-                  onPress={() => setTypeAddress(true)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  style={styles.locationGap}
-                >
-                  <Text style={styles.typeLink}>Type the address</Text>
-                </Pressable>
-              )}
+              </View>
             </View>
 
             <View style={styles.section}>
@@ -946,6 +1024,17 @@ export function CrmNewCommercialLeadScreen({
                 icon={<RupeeIcon size={20} color={theme.primary} />}
                 title="Lead Details"
               />
+              {!!assign && !editing && (
+                <SelectField
+                  label="Assign To *"
+                  sheetTitle="Assign this lead to"
+                  icon={<PersonIcon size={18} color={theme.textMuted} />}
+                  placeholder="Choose who works this lead"
+                  options={assignOptions}
+                  value={assignTo}
+                  onChange={value => setAssignTo(value)}
+                />
+              )}
               <SelectField
                 label="Source of Lead *"
                 sheetTitle="Source of Lead"
@@ -1030,6 +1119,70 @@ export function CrmNewCommercialLeadScreen({
                 onChangeText={text => setField('notes', text)}
                 multiline
                 testID="commercial-notes"
+              />
+            </View>
+
+            <View style={styles.section}>
+              <SectionHeader
+                icon={<UsersIcon size={20} color={theme.primary} />}
+                title="Competitor (optional)"
+              />
+              <Text style={styles.competitorHint}>Who looks after the customer today? It helps price and time the offer.</Text>
+              <CrmTextField
+                label="Current Service Provider"
+                placeholder="e.g. ABC Pest Control"
+                value={competitor.name}
+                onChangeText={text => setCompetitorField('name', text)}
+                icon={<BriefcaseIcon size={18} color={theme.textMuted} />}
+                autoCapitalize="words"
+                maxLength={150}
+                testID="commercial-competitor-name"
+              />
+              <CrmTextField
+                label="Their Price / Contract Amount (₹)"
+                placeholder="What the customer pays them"
+                value={competitor.amount}
+                onChangeText={text => setCompetitorField('amount', text)}
+                prefix="₹"
+                keyboardType="number-pad"
+                maxLength={9}
+                testID="commercial-competitor-amount"
+              />
+              <Text style={styles.fieldLabel}>Contract Ends On</Text>
+              <Pressable
+                onPress={() => setContractSheet(true)}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.dateField, pressed && styles.dateFieldPressed]}
+                testID="commercial-competitor-end"
+              >
+                <CalendarIcon size={18} color={theme.textMuted} />
+                <Text style={[styles.dateFieldText, !competitor.contractEnd && styles.dateFieldPlaceholder]}>
+                  {competitor.contractEnd ? fmtDateShort(competitor.contractEnd) : 'Pick a date (optional)'}
+                </Text>
+                {!!competitor.contractEnd && (
+                  <Pressable onPress={() => setCompetitor(prev => ({ ...prev, contractEnd: null }))} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear the date">
+                    <Text style={styles.dateClear}>Clear</Text>
+                  </Pressable>
+                )}
+              </Pressable>
+              <CrmTextField
+                label="Notes on the Competitor"
+                placeholder="What the customer likes or dislikes about them"
+                value={competitor.notes}
+                onChangeText={text => setCompetitorField('notes', text)}
+                multiline
+                maxLength={500}
+                testID="commercial-competitor-notes"
+              />
+              <DateSheet
+                visible={contractSheet}
+                onClose={() => setContractSheet(false)}
+                value={competitor.contractEnd}
+                title="Contract ends on"
+                onPick={d => {
+                  setCompetitor(prev => ({ ...prev, contractEnd: d }));
+                  setContractSheet(false);
+                }}
               />
             </View>
 

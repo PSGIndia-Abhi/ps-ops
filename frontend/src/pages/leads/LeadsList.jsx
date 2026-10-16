@@ -12,11 +12,12 @@ import { useViewer, visibleLeads } from "./viewer";
 const QUEUE = ["NEW", "TO_CALL", "NEED_MORE_INFO"];
 
 /** The tabs each persona gets above the list. */
-function tabsFor(persona) {
+function tabsFor(persona, leads) {
   // The provider never learns a lead's status, so they get one list with no status tabs.
   if (persona === "lead_provider") return [{ key: "all", label: "All", match: () => true }];
-  // The sales manager only ever sees verified leads, so the calling-queue tabs would always be empty.
-  const queue = persona !== "sales_manager";
+  // The calling-queue tabs (New / To Call) are the telecaller's: a sales executive's and a manager's
+  // leads come to them verified, so they only see these while an older lead still waits there.
+  const queue = persona === "telecaller" || leads.some((l) => QUEUE.includes(l.stage));
   return [
     { key: "all", label: "All Leads", match: () => true },
     ...(queue ? [{ key: "new", label: "New", match: (l) => l.stage === "NEW" }] : []),
@@ -25,7 +26,7 @@ function tabsFor(persona) {
     { key: "meeting", label: "Meeting Scheduled", match: (l) => l.stage === "MEETING_SCHEDULED" },
     { key: "progress", label: "In Progress", match: (l) => l.stage === "VISIT_COMPLETED" || l.stage === "QUOTATION_SENT" },
     { key: "closed", label: "Converted", match: (l) => l.stage === "WON" },
-    { key: "rejected", label: queue ? "Rejected" : "Lost", match: (l) => l.stage === "NOT_GENUINE" || l.stage === "LOST" },
+    { key: "rejected", label: "Deal Lost", match: (l) => l.stage === "NOT_GENUINE" || l.stage === "LOST" },
   ];
 }
 
@@ -148,7 +149,7 @@ export default function LeadsList() {
   const mine = useMemo(() => visibleLeads(leads, viewer), [leads, viewer]);
   // The master list plus any source an older lead still carries (an old code, or a source since switched off).
   const sourceOptions = useMemo(() => [...new Set([...providerSources(), ...mine.map((l) => l.source).filter(Boolean)])].sort(), [mine]);
-  const tabs = useMemo(() => tabsFor(persona).map((t) => ({ ...t, count: mine.filter(t.match).length })), [persona, mine]);
+  const tabs = useMemo(() => tabsFor(persona, mine).map((t) => ({ ...t, count: mine.filter(t.match).length })), [persona, mine]);
   const active = tabs.find((t) => t.key === tab) || tabs[0];
   const manager = persona === "sales_manager";
   const people = useMemo(

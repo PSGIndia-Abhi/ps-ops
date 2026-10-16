@@ -1,13 +1,15 @@
-// The performance report (GET /api/crm/reports/sales-performance). Telecallers
-// see their own numbers; the sales manager picks anyone on the team and also
-// gets the whole team side by side. Sales executives have no performance page.
+// The performance report (GET /api/crm/reports/sales-performance). Telecallers and sales
+// executives see their own numbers (and the executive their monthly target); the sales manager
+// picks anyone on the team, sets each person's monthly target and gets the whole team side by side.
 
 import { useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { FiAward, FiCalendar, FiCheckCircle, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
-import { getPerformance, leadTeam, useLeadData } from "./leadsApi";
-import { Card, Empty, Kpi, SkeletonRows, Who } from "./ui";
+import { getPerformance, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
+import { money } from "./format";
+import { useToast } from "./hooks";
+import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, Who } from "./ui";
 import { useViewer } from "./viewer";
 
 /** A YYYY-MM-DD in the user's own time zone (the server reads the dates as wall-clock days). */
@@ -29,6 +31,8 @@ const RANGES = [
     },
   },
   { key: "month", label: "This month", from: () => ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)) },
+  // Everything so far: from before the first lead was ever added.
+  { key: "lifetime", label: "Lifetime", from: () => "2020-01-01" },
   { key: "custom", label: "Custom" },
 ];
 
@@ -90,8 +94,8 @@ export default function Performance() {
     };
   }, [manager, team, badCustom, from, to, teamKey]);
 
-  // Not for a lead provider, and not for a sales executive (their menu has no performance page).
-  if (viewer.persona === "lead_provider" || viewer.persona === "sales") return <Navigate to={LEADS_HOME} replace />;
+  // Not for a lead provider.
+  if (viewer.persona === "lead_provider") return <Navigate to={LEADS_HOME} replace />;
 
   const current = result.key === key ? result : null;
   const report = current?.data;
@@ -144,7 +148,9 @@ export default function Performance() {
         </div>
       )}
 
-      <Card title={whose} sub={period.from === period.to ? period.from : `${period.from} to ${period.to}`} index={0}>
+      {(manager || viewer.persona === "sales") && <Targets manager={manager} myId={String(me?.id || "")} />}
+
+      <Card title={whose} sub={range === "lifetime" ? "All time" : period.from === period.to ? period.from : `${period.from} to ${period.to}`} index={0}>
         {error ? (
           <Empty title="Could not load the report" text={error} icon={<FiCheckCircle />} />
         ) : !report || badCustom ? (
@@ -207,5 +213,200 @@ export default function Performance() {
         </Card>
       )}
     </>
+  );
+}
+
+const thisMonth = () => ymd(new Date()).slice(0, 7);
+const monthLabel = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+const pctOf = (t) => (t.target ? Math.round((Number(t.achieved) / Number(t.target)) * 100) : null);
+
+/** Achieved against target: a bar that turns green at 100%. */
+function TargetBar({ t }) {
+  const pct = pctOf(t);
+  if (pct === null) return <span className="muted">No target</span>;
+  return (
+    <span className="lm-target">
+      <span className="lm-target-track">
+        <span className={`lm-target-fill${pct >= 100 ? " done" : pct < 50 ? " low" : ""}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </span>
+      <b>{pct}%</b>
+    </span>
+  );
+}
+
+/**
+ * Monthly sales targets. The sales manager sees every sales executive's target against what they
+ * converted this month (the amounts of their converted leads) and sets or changes each one; a sales
+ * executive sees their own.
+ */
+function Targets({ manager, myId }) {
+  const [month, setMonth] = useState(thisMonth);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null);
+  const load = () =>
+    getTargets(month)
+      .then((list) => {
+        setRows(list);
+        setError("");
+      })
+      .catch((err) => {
+        setRows([]);
+        setError(err.message || "Could not load the targets.");
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => void load(), [month]);
+
+  const mine = rows?.find((t) => String(t.user_id) === myId);
+  const list = manager ? rows || [] : mine ? [mine] : [];
+  const totals = list.reduce((s, t) => ({ target: s.target + (Number(t.target) || 0), achieved: s.achieved + Number(t.achieved || 0) }), { target: 0, achieved: 0 });
+
+  return (
+    <Card
+      title={manager ? "Monthly Targets" : "My Target"}
+      sub={`${monthLabel(month)} - achieved = the amounts of the leads converted in the month`}
+      index={0}
+      action={<input className="lm-input" type="month" value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" style={{ width: 170 }} />}
+      flush={manager}
+    >
+      {error && <Note tone="warn">{error}</Note>}
+      {rows === null ? (
+        <SkeletonRows rows={manager ? 3 : 1} />
+      ) : manager ? (
+        list.length === 0 ? (
+          <Empty title="No sales executives yet" />
+        ) : (
+          <div className="lm-table-wrap">
+            <table className="lm-table">
+              <thead>
+                <tr>
+                  <th>Sales person</th>
+                  <th className="num">Target</th>
+                  <th className="num">Achieved</th>
+                  <th>Progress</th>
+                  <th className="num">Converted</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((t, i) => (
+                  <tr key={t.user_id} style={{ "--i": i }}>
+                    <td>
+                      <Who name={t.name} sub={ROLE_LABEL[t.role] || t.role} size={34} />
+                    </td>
+                    <td className="num">{t.target ? money(t.target) : "-"}</td>
+                    <td className="num">{money(t.achieved)}</td>
+                    <td style={{ minWidth: 180 }}>
+                      <TargetBar t={t} />
+                    </td>
+                    <td className="num">{t.converted}</td>
+                    <td className="num">
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                        {t.target ? "Change" : "Set target"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="lm-total-row">
+                  <td>
+                    <strong>Team total</strong>
+                  </td>
+                  <td className="num">
+                    <strong>{money(totals.target)}</strong>
+                  </td>
+                  <td className="num">
+                    <strong>{money(totals.achieved)}</strong>
+                  </td>
+                  <td>
+                    <TargetBar t={totals} />
+                  </td>
+                  <td />
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : !mine || !mine.target ? (
+        <Empty title="No target set for this month" text={mine && Number(mine.achieved) > 0 ? `Converted so far: ${money(mine.achieved)}.` : "Your sales manager sets your monthly target."} />
+      ) : (
+        <div className="lm-target-me">
+          <div>
+            <small>Target</small>
+            <strong>{money(mine.target)}</strong>
+          </div>
+          <div>
+            <small>Achieved</small>
+            <strong>{money(mine.achieved)}</strong>
+          </div>
+          <div>
+            <small>{Number(mine.achieved) >= Number(mine.target) ? "Target reached" : "To go"}</small>
+            <strong>{money(Math.max(0, Number(mine.target) - Number(mine.achieved)))}</strong>
+          </div>
+          <div className="wide">
+            <TargetBar t={mine} />
+            <small>
+              {mine.converted} lead{Number(mine.converted) === 1 ? "" : "s"} converted this month
+            </small>
+          </div>
+        </div>
+      )}
+      {editing && (
+        <SetTargetModal
+          target={editing}
+          month={month}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+function SetTargetModal({ target, month, onClose, onSaved }) {
+  const toast = useToast();
+  const [amount, setAmount] = useState(target.target ? String(Math.round(target.target)) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await setTarget(target.user_id, month, amount);
+      toast(amount ? `Target saved for ${target.name}` : `Target removed for ${target.name}`);
+      onSaved();
+    } catch (err) {
+      setError(err.message || "Could not save the target.");
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      title={`Target for ${target.name}`}
+      sub={`${monthLabel(month)} - the amount of leads to convert`}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} onClick={save}>
+            Save target
+          </Button>
+        </>
+      )}
+    >
+      <div style={{ display: "grid", gap: 10 }}>
+        {error && <Note tone="warn">{error}</Note>}
+        <label className="lm-field">
+          <span className="lm-label">Target amount (₹)</span>
+          <input className="lm-input" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="e.g. 500000" autoFocus />
+          <span className="lm-hint">Leave empty to remove the target for this month.</span>
+        </label>
+      </div>
+    </Modal>
   );
 }

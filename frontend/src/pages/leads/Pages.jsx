@@ -1,7 +1,7 @@
 // The smaller Lead Management pages: the provider's submit form, follow-ups,
 // meetings and the provider list.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { FiArrowLeft, FiCalendar, FiCheckCircle, FiChevronRight, FiClock, FiExternalLink, FiPhoneCall, FiPlus, FiShield } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
@@ -9,7 +9,7 @@ import { CallVerifyModal, FollowUpCallModal, FollowUpModal, LeadForm, ScheduleMe
 import { Agenda } from "./Home";
 import { request, useLeadData, userName } from "./leadsApi";
 import { compactMoney, dateTime, dayLabel, isPast, isToday, timeLabel } from "./format";
-import { useLoaded } from "./hooks";
+import { useLoaded, useToast } from "./hooks";
 import { Badge, Button, Card, Done, Empty, SkeletonRows, StageBadge, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads, visibleMeetings } from "./viewer";
 
@@ -101,74 +101,148 @@ function CallDialog({ lead, onClose, onScheduleMeeting }) {
 
 export function FollowUps() {
   const viewer = useViewer();
+  const toast = useToast();
   const { leads, activities } = useLeadData();
-  const ready = useLoaded();
-  const [tab, setTab] = useState("due");
+  // Your own follow-ups on commercial leads - the sales manager too (residential follow-up calls are
+  // in the Residential area). An admin looking in sees everyone's, with a filter by person.
+  const team = viewer.canPick;
+  const myId = String(viewer.me.id || "");
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("today");
+  const [person, setPerson] = useState("");
+  const [busy, setBusy] = useState("");
   const [calling, setCalling] = useState(null);
   const [scheduling, setScheduling] = useState(null);
 
-  const withDate = useMemo(
-    () => visibleLeads(leads, viewer).filter((l) => l.nextFollowUpAt).sort((a, b) => new Date(a.nextFollowUpAt) - new Date(b.nextFollowUpAt)),
-    [leads, viewer],
-  );
+  const load = useCallback(() => {
+    request(`/api/crm/follow-ups?done=1&lead_type=commercial${team ? "&scope=team" : ""}`)
+      .then((list) => {
+        setRows(Array.isArray(list) ? list : []);
+        setError("");
+      })
+      .catch((err) => {
+        setRows((cur) => cur || []);
+        setError(err.message || "Could not load the follow-ups.");
+      });
+  }, [team]);
+  // Read again whenever the leads change (a call logged or a follow-up added from a dialog here).
+  useEffect(load, [load, leads]);
+
+  const local = localDay();
+  const people = useMemo(() => {
+    const seen = new Map();
+    for (const f of rows || []) if (f.assigned_to && !seen.has(String(f.assigned_to))) seen.set(String(f.assigned_to), f.assigned_to_name || "");
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+  const picked = (rows || []).filter((f) => !person || String(f.assigned_to) === person);
+  const open = picked.filter((f) => f.status !== "COMPLETED");
   const groups = {
-    due: withDate.filter((l) => isToday(l.nextFollowUpAt) || isPast(l.nextFollowUpAt)),
-    upcoming: withDate.filter((l) => !isToday(l.nextFollowUpAt) && !isPast(l.nextFollowUpAt)),
+    overdue: open.filter((f) => f.due_date && f.due_date < local),
+    today: open.filter((f) => !f.due_date || f.due_date === local),
+    upcoming: open.filter((f) => f.due_date && f.due_date > local),
+    done: picked.filter((f) => f.status === "COMPLETED").reverse(),
   };
   const shown = groups[tab];
   const fresh = (id) => leads.find((l) => l.id === id);
+  const leadLink = (f) => (f.lead_type === "commercial" ? `${LEADS_HOME}/${f.lead_id}` : `${LEADS_HOME}/residential/${f.lead_id}`);
+
+  async function markDone(f) {
+    setBusy(f.id);
+    try {
+      await request(`/api/work-tasks/${f.id}/complete`, { method: "POST", body: {} });
+      toast("Follow-up done");
+      load();
+    } catch (err) {
+      toast(err.message || "Could not mark it done.", true);
+    } finally {
+      setBusy("");
+    }
+  }
 
   return (
     <Only personas={["telecaller", "sales", "sales_manager"]}>
       <div className="lm-head">
         <div>
           <h1>Follow-ups</h1>
-          <p>Calls promised to customers, in the order they fall due.</p>
+          <p>{team ? "Your team's follow-ups, in the order they fall due." : "Calls promised to customers, in the order they fall due."}</p>
         </div>
+        {team && people.length > 1 && (
+          <select className="lm-select" value={person} onChange={(e) => setPerson(e.target.value)} aria-label="Whose follow-ups" style={{ minWidth: 200 }}>
+            <option value="">Whole team</option>
+            {people.map(([id, name]) => (
+              <option key={id} value={id}>
+                {id === myId ? "Me" : name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <Card flush>
         <Tabs
           tabs={[
-            { key: "due", label: "Due Now", count: groups.due.length },
+            { key: "overdue", label: "Overdue", count: groups.overdue.length },
+            { key: "today", label: "Today", count: groups.today.length },
             { key: "upcoming", label: "Upcoming", count: groups.upcoming.length },
+            { key: "done", label: "Done (7 days)", count: groups.done.length },
           ]}
           value={tab}
           onChange={setTab}
         />
-        {!ready ? (
+        {rows === null ? (
           <SkeletonRows />
+        ) : error && rows.length === 0 ? (
+          <Empty title="Could not load the follow-ups" text={error} />
         ) : shown.length === 0 ? (
-          <Empty title={tab === "due" ? "Nothing due" : "No upcoming follow-ups"} text="A follow-up appears when a call ends with 'call back' or 'need more information'." icon={<FiCheckCircle />} />
+          <Empty
+            title={{ overdue: "Nothing overdue", today: "Nothing due today", upcoming: "No upcoming follow-ups", done: "Nothing done in the last 7 days" }[tab]}
+            text="Add a follow-up from a lead and it shows here - it rings on the phone at its time."
+            icon={<FiCheckCircle />}
+          />
         ) : (
           <div className="lm-agenda" key={tab}>
-            {shown.map((l, i) => {
-              const overdue = isPast(l.nextFollowUpAt);
-              const count = followUpCount(activities, l.id);
+            {shown.map((f, i) => {
+              const lead = f.lead_type === "commercial" ? fresh(f.lead_id) : null;
+              const mine = String(f.assigned_to) === myId;
+              const done = f.status === "COMPLETED";
               return (
-                <div key={l.id} className="lm-slot" style={{ "--i": i }}>
+                <div key={f.id} className="lm-slot" style={{ "--i": i }}>
                   <div className="lm-slot-time">
-                    {timeLabel(l.nextFollowUpAt)}
-                    <small>{dayLabel(l.nextFollowUpAt)}</small>
+                    {done ? "Done" : clockText(f.due_time)}
+                    <small>{done ? shortDay(String(f.completed_at || "").slice(0, 10)) : f.due_date === local ? "Today" : shortDay(f.due_date)}</small>
                   </div>
                   <div className="lm-slot-main">
-                    <Link to={`${LEADS_HOME}/${l.id}`}>
-                      <strong>{l.company}</strong>
+                    <Link to={leadLink(f)}>
+                      <strong>{f.company_name || f.customer_name}</strong>
                     </Link>
                     <small>
-                      {l.contact} · {l.phone} · {compactMoney(l.quote)}
+                      {[f.lead_type === "commercial" ? f.lead_number : "Residential", f.phone, team ? (mine ? "for me" : `for ${f.assigned_to_name}`) : null].filter(Boolean).join(" · ")}
                     </small>
-                    {count > 0 && (
-                      <Link className="lm-fu-link" to={`${LEADS_HOME}/follow-ups/lead/${l.id}`}>
-                        {count} follow-up{count === 1 ? "" : "s"} <FiChevronRight />
+                    {!!f.description && <small>{f.description}</small>}
+                    {lead && followUpCount(activities, lead.id) > 0 && (
+                      <Link className="lm-fu-link" to={`${LEADS_HOME}/follow-ups/lead/${lead.id}`}>
+                        {followUpCount(activities, lead.id)} follow-up{followUpCount(activities, lead.id) === 1 ? "" : "s"} so far <FiChevronRight />
                       </Link>
                     )}
                   </div>
                   <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Badge tone={overdue ? "danger" : tab === "due" ? "warn" : "info"}>{overdue ? "Overdue" : tab === "due" ? "Due today" : "Scheduled"}</Badge>
-                    <Button size="sm" icon={<FiPhoneCall />} onClick={() => setCalling(l)}>
-                      {VERIFYING.includes(l.stage) ? "Call & Verify" : "Call"}
-                    </Button>
+                    {!done && <Badge tone={{ overdue: "danger", today: "warn" }[tab] || "info"}>{{ overdue: "Overdue", today: "Due today" }[tab] || "Scheduled"}</Badge>}
+                    {!done && lead && (
+                      <Button size="sm" icon={<FiPhoneCall />} onClick={() => setCalling(lead)}>
+                        {VERIFYING.includes(lead.stage) ? "Call & Verify" : "Call"}
+                      </Button>
+                    )}
+                    {!done && !lead && !!f.phone && (
+                      <a className="lm-btn primary sm" href={`tel:${f.phone}`}>
+                        <FiPhoneCall /> Call
+                      </a>
+                    )}
+                    {!done && mine && (
+                      <Button size="sm" variant="ghost" icon={<FiCheckCircle />} busy={busy === f.id} onClick={() => markDone(f)}>
+                        Done
+                      </Button>
+                    )}
                   </span>
                 </div>
               );
@@ -182,6 +256,18 @@ export function FollowUps() {
     </Only>
   );
 }
+
+/** Today as "YYYY-MM-DD" in this browser's time zone. */
+function localDay() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+const clockText = (t) => {
+  if (!t) return "Any time";
+  const [h, m] = String(t).split(":").map(Number);
+  return `${h % 12 || 12}:${String(m || 0).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+};
+const shortDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "");
 
 /* ------------------------------------------------------------ one lead's follow-ups */
 

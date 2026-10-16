@@ -190,7 +190,11 @@ function ClashNotice({ clashes, date, time }: { clashes: ReminderItem[]; date: s
 // Reminders: everything that will ring
 // ---------------------------------------------------------------------------
 
-export function RemindersScreen() {
+/**
+ * Everything of mine that rings. `embedded`: shown as the Reminders tab of the Follow-ups screen -
+ * no header of its own, and follow-ups are left out (they have their own tab).
+ */
+export function RemindersScreen({ embedded = false }: { embedded?: boolean } = {}) {
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
   const { myId } = useMe();
@@ -208,9 +212,13 @@ export function RemindersScreen() {
       { title: 'TOMORROW', items: [] },
       { title: 'LATER', items: [] },
     ];
-    for (const i of data ?? []) (i.date === today ? g[0] : i.date === tomorrow ? g[1] : g[2]).items.push(i);
+    for (const i of data ?? []) {
+      if (embedded && i.kind === 'followup') continue;
+      (i.date === today ? g[0] : i.date === tomorrow ? g[1] : g[2]).items.push(i);
+    }
     return g.filter((x) => x.items.length > 0);
-  }, [data]);
+  }, [data, embedded]);
+  const shownCount = groups.reduce((n, g) => n + g.items.length, 0);
 
   const open = (i: ReminderItem) => {
     if (i.kind === 'personal') return navigation.navigate('LeadReminderEdit', { taskId: taskIdOf(i.key) });
@@ -232,21 +240,22 @@ export function RemindersScreen() {
     }
   };
 
-  return (
-    <LeadScreen edges={['top', 'bottom']}>
-      <TopBar title="Reminders" subtitle="Everything that will ring" onBack={() => navigation.goBack()} />
+  const content = (
+    <>
       <ScrollView
         contentContainerStyle={styles.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
       >
         <CrmErrorBanner message={error} onRetry={reload} />
         <CrmErrorBanner message={actionError} />
-        {!!data && data.length > 0 && (
-          <Text style={styles.intro}>Your reminders, meetings, follow-ups and task reminders ring at their time.</Text>
+        {!!data && shownCount > 0 && (
+          <Text style={styles.intro}>
+            {embedded ? 'Your reminders, meetings and task reminders ring at their time.' : 'Your reminders, meetings, follow-ups and task reminders ring at their time.'}
+          </Text>
         )}
         {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={76} radius={radii.lg} style={{ marginBottom: spacing.sm }} />)}
 
-        {!!data && data.length === 0 && !error && (
+        {!!data && shownCount === 0 && !error && (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <BellIcon size={32} color={theme.primary} />
@@ -309,6 +318,14 @@ export function RemindersScreen() {
         <PlusIcon size={20} color={theme.textOnPrimary} />
         <Text style={styles.fabText}>New reminder</Text>
       </Pressable>
+    </>
+  );
+
+  if (embedded) return <View style={{ flex: 1 }}>{content}</View>;
+  return (
+    <LeadScreen edges={['top', 'bottom']}>
+      <TopBar title="Reminders" subtitle="Everything that will ring" onBack={() => navigation.goBack()} />
+      {content}
     </LeadScreen>
   );
 }

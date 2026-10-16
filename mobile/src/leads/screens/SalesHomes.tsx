@@ -373,7 +373,7 @@ export function SalesManagerHome() {
             <View style={styles.quickRow}>
               <QuickAction icon={<PinIcon size={19} color={WHITE} />} label="Team visits" tone="accent" onPress={() => navigation.navigate('LeadTeamVisits')} />
               <QuickAction icon={<DocumentIcon size={19} color={WHITE} />} label="Quoted" tone="info" count={counts.quoted} onPress={() => openGroup('quoted')} />
-              <QuickAction icon={<UsersIcon size={19} color={WHITE} />} label="Team" tone="success" onPress={() => navigation.navigate('Team')} />
+              <QuickAction icon={<UsersIcon size={19} color={WHITE} />} label="Team" tone="success" onPress={() => navigation.navigate('LeadTeam')} />
               <QuickAction icon={<BriefcaseIcon size={19} color={WHITE} />} label="All Leads" tone="warning" count={counts.all} onPress={() => openGroup('all')} />
             </View>
           </View>

@@ -30,6 +30,7 @@ import {
 } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import {
+  AssignLeadModal,
   CallVerifyModal,
   CancelQuotationModal,
   CloseLeadModal,
@@ -384,6 +385,17 @@ function DetailsPanel({ lead, provider, onCall }) {
         </Info>
       </InfoSection>
 
+      {!provider && (lead.competitorName || lead.competitorAmount || lead.competitorEnd || lead.competitorNotes) && (
+        <InfoSection icon={<FiUsers />} title="Competitor">
+          <Info label="Current service provider">{lead.competitorName}</Info>
+          <Info label="Their price">{lead.competitorAmount ? money(Number(lead.competitorAmount)) : ""}</Info>
+          <Info label="Contract ends on">{lead.competitorEnd ? new Date(`${lead.competitorEnd}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}</Info>
+          <Info label="Notes">
+            <span style={{ whiteSpace: "pre-line" }}>{lead.competitorNotes}</span>
+          </Info>
+        </InfoSection>
+      )}
+
       {provider ? (
         // The provider sees what they sent, never how the lead is progressing.
         <InfoSection icon={<FiClock />} title="Submission">
@@ -606,6 +618,12 @@ export default function LeadDetail() {
               Edit Details
             </Button>
           )}
+          {/* The sales manager gives the lead to someone (only they and the managers then see it). */}
+          {(persona === "sales_manager" || viewer.canPick) && (
+            <Button variant="ghost" icon={<FiUserCheck />} onClick={() => setDialog("assign")}>
+              {lead.salesId || lead.telecallerId ? `Reassign (${String(lead.salesId || lead.telecallerId) === myId ? "you" : userName(lead.salesId || lead.telecallerId) || "assigned"})` : "Assign"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -673,6 +691,7 @@ export default function LeadDetail() {
       {dialog === "lost" && <CloseLeadModal lead={lead} won={false} onClose={() => setDialog(null)} />}
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "edit" && <EditLeadModal lead={lead} onClose={() => setDialog(null)} />}
+      {dialog === "assign" && <AssignLeadModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "followup" && <FollowUpModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "reminder" && <ReminderPopup lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "providerUpdate" && <ProviderUpdateModal lead={lead} onClose={() => setDialog(null)} />}

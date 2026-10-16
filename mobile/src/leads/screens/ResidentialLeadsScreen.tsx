@@ -1,6 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useLeads } from '../../crm/LeadsContext';
+import type { LeadRootStackParamList } from '../navigation';
 import { httpClient } from '../../api/httpClient';
 import { HomeIcon, PhoneIcon } from '../../components/icons';
 import { formatINR } from '../../crm/format';
@@ -79,7 +82,8 @@ const factory = (t: CrmTheme) => ({
   },
   searchInput: { flex: 1, minHeight: 46, ...typography.body, color: t.textPrimary },
   filterLabel: { ...typography.caption, color: t.textMuted, marginBottom: 6, fontWeight: '600' as const },
-  chips: { flexDirection: 'row' as const, gap: spacing.xs, paddingBottom: spacing.sm },
+  chipsScroll: { flexGrow: 0 },
+  chips: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, paddingBottom: spacing.sm },
   chip: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radii.pill, backgroundColor: t.surfaceAlt },
   chipOn: { backgroundColor: t.primary },
   chipText: { ...typography.caption, color: t.textPrimary, fontWeight: '600' as const },
@@ -140,7 +144,7 @@ const factory = (t: CrmTheme) => ({
 function Chips({ options, value, onChange }: { options: { key: string; label: string }[]; value: string; onChange: (key: string) => void }) {
   const { styles } = useCrmStyles(factory);
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chips}>
       {options.map(f => {
         const on = value === f.key;
         return (
@@ -155,6 +159,18 @@ function Chips({ options, value, onChange }: { options: { key: string; label: st
 
 export function ResidentialLeadsScreen() {
   const navigation = useNavigation();
+  return <ResidentialLeadsBody header={<ScreenHeader title="Residential Leads" onBack={() => navigation.goBack()} />} />;
+}
+
+/**
+ * The residential list with its search, filters and totals. `header` goes above it (the pushed
+ * screen's title, or the Leads tab's title and Commercial | Residential switch); `embedded` keeps
+ * it inside the Leads tab's own safe area. A lead opens on its full details - with its call
+ * follow-ups - when the phone already holds it, otherwise in the read-only sheet.
+ */
+export function ResidentialLeadsBody({ header, embedded = false }: { header?: React.ReactNode; embedded?: boolean }) {
+  const navigation = useNavigation<NativeStackNavigationProp<LeadRootStackParamList>>();
+  const { getLead, refresh: refreshStore } = useLeads();
   const { styles, theme } = useCrmStyles(factory);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
@@ -165,7 +181,19 @@ export function ResidentialLeadsScreen() {
     const { data } = await httpClient.get<ResidentialLead[]>('/api/crm/leads', { params: { lead_type: 'consumer' } });
     return data;
   }, []);
-  const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load residential leads.');
+  const { data, loading, refreshing, error, refresh: refreshList, reload } = useLoad(loader, 'Could not load residential leads.');
+  const refresh = () => {
+    refreshList();
+    refreshStore();
+  };
+  // Back from a lead's details (a call logged, its status changed): show the list as it is now.
+  useFocusEffect(
+    useCallback(() => {
+      reload();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+  const openLead = (l: ResidentialLead) => (getLead(l.id) ? navigation.navigate('CrmLeadDetail', { leadId: l.id }) : setOpen(l));
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -178,8 +206,8 @@ export function ResidentialLeadsScreen() {
   const collected = paid.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
   return (
-    <CrmScreen refreshing={refreshing} onRefresh={refresh}>
-      <ScreenHeader title="Residential Leads" onBack={() => navigation.goBack()} />
+    <CrmScreen refreshing={refreshing} onRefresh={refresh} {...(embedded ? { edges: [], transparent: true } : null)}>
+      {header}
       <CrmErrorBanner message={error} onRetry={reload} />
 
       <View style={styles.search}>
@@ -221,12 +249,12 @@ export function ResidentialLeadsScreen() {
           {shown.length === 0 ? (
             <CrmEmptyState
               title={data?.length ? 'No matching leads' : 'No residential leads yet'}
-              subtitle={data?.length ? 'Try a different search or filter.' : 'They appear here as the sales app and the website take them in.'}
+              subtitle={data?.length ? 'Try a different search or filter.' : 'Add one with New Lead → Residential. Website leads appear here too.'}
               icon={<HomeIcon size={28} color={theme.textMuted} />}
             />
           ) : (
             shown.map(l => (
-              <Pressable key={l.id} onPress={() => setOpen(l)} style={({ pressed }) => pressed && styles.pressed} accessibilityRole="button" accessibilityLabel={`${l.customer_name}, ${label(l.lead_status)}`}>
+              <Pressable key={l.id} onPress={() => openLead(l)} style={({ pressed }) => pressed && styles.pressed} accessibilityRole="button" accessibilityLabel={`${l.customer_name}, ${label(l.lead_status)}`}>
                 <Card style={styles.card}>
                   <View style={styles.cardTop}>
                     <Text style={styles.name} numberOfLines={1}>

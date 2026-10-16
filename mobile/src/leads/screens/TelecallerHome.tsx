@@ -227,7 +227,7 @@ export function TelecallerHome() {
               <QuickAction icon={<ClockIcon size={19} color={white} />} label="Follow-ups" tone="warning" count={followUps.length} onPress={() => navigation.navigate('Tasks')} />
               <QuickAction icon={<ClipboardListIcon size={19} color={white} />} label="All Leads" tone="info" count={counts.all} onPress={() => openGroup('all')} />
               <QuickAction icon={<BellIcon size={19} color={white} />} label="Reminders" tone="accent" onPress={() => navigation.navigate('LeadReminders')} />
-              <QuickAction icon={<CloseIcon size={19} color={white} />} label="Closed" tone="danger" count={counts.closed} onPress={() => openGroup('closed')} />
+              <QuickAction icon={<CloseIcon size={19} color={white} />} label="Deal Lost" tone="danger" count={counts.closed} onPress={() => openGroup('closed')} />
             </View>
           </View>
         </View>

@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 
-export type AppKind = 'tasks' | 'sales' | 'leads' | 'reminders';
+export type AppKind = 'tasks' | 'sales' | 'leads' | 'reminders' | 'residential';
 
 /**
  * Some Task Management roles (Managing Director, Personal Assistant) also work in the Sales app,
@@ -31,4 +31,14 @@ export const AppSwitchProvider = AppSwitchContext.Provider;
 
 export function useAppSwitch(): AppSwitchValue {
   return useContext(AppSwitchContext);
+}
+
+/**
+ * The CRM app shown as residential only: for the residential sales roles (sales / marketing), and
+ * for a Sales Executive or Sales Manager who switched to their Residential app.
+ */
+export function useResidentialOnly(rawRole: string | null | undefined): boolean {
+  const { current } = useAppSwitch();
+  const r = (rawRole || '').toLowerCase().trim();
+  return r === 'sales' || r === 'marketing' || current === 'residential';
 }

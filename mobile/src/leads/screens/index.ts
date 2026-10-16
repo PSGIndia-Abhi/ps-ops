@@ -8,6 +8,9 @@ import {
   LeadFollowUpScreen,
   LeadMeetingNewScreen,
   LeadQuoteScreen,
+  LeadAssignScreen,
+  LeadResidentialCallScreen,
+  LeadResidentialConvertScreen,
 } from './LeadActionScreens';
 import { LeadListScreen } from './LeadBrowseScreens';
 import { LeadTasksScreen } from './LeadTodayScreen';
@@ -18,7 +21,7 @@ import { LeadProfileScreen } from './LeadProfileScreen';
 import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
 import { ReminderEditScreen, RemindersScreen } from './RemindersScreens';
-import { PerformanceScreen } from './ReportScreens';
+import { PerformanceScreen, TeamScreen } from './ReportScreens';
 import { ResidentialLeadsScreen } from './ResidentialLeadsScreen';
 import { TeamVisitsScreen } from './TeamVisitsScreen';
 
@@ -37,6 +40,9 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadList', component: LeadListScreen },
   // The production commercial form (see LeadNewCommercialScreen).
   { name: 'LeadNew', component: LeadNewCommercialScreen, modal: true },
+  { name: 'LeadResidentialCall', component: LeadResidentialCallScreen, modal: true },
+  { name: 'LeadResidentialConvert', component: LeadResidentialConvertScreen, modal: true },
+  { name: 'LeadAssign', component: LeadAssignScreen, modal: true },
   { name: 'LeadCall', component: LeadCallScreen, modal: true },
   { name: 'LeadMeetingNew', component: LeadMeetingNewScreen, modal: true },
   { name: 'LeadFollowUp', component: LeadFollowUpScreen, modal: true },
@@ -51,6 +57,7 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadNotifications', component: LeadNotificationsScreen },
   { name: 'LeadProfile', component: LeadProfileScreen },
   { name: 'LeadTeamVisits', component: TeamVisitsScreen },
+  { name: 'LeadTeam', component: TeamScreen },
   { name: 'LeadResidential', component: ResidentialLeadsScreen },
   { name: 'LeadReminders', component: RemindersScreen },
   { name: 'LeadReminderEdit', component: ReminderEditScreen, modal: true },

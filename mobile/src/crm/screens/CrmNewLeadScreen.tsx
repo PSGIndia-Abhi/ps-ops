@@ -31,12 +31,16 @@ import {
   clearDraft,
   isDraftEmpty,
   loadDraft,
+  loadLastChoices,
   loadLastSource,
   saveDraft,
+  saveLastChoices,
   saveLastSource,
+  type LastChoices,
 } from '../draft';
 import { findLeadByPhone, suggestReferences } from '../leadHelpers';
-import { isResidentialRole, useRawRole } from '../../auth/role';
+import { useRawRole } from '../../auth/role';
+import { useResidentialOnly } from '../../navigation/AppSwitchContext';
 import { useLeads } from '../LeadsContext';
 import { payForLead } from '../payment';
 import {
@@ -298,11 +302,19 @@ function valuesOf(lead: Lead): LeadFormValues {
  * it: no draft is kept, nothing is paid from here, and once the lead is paid its service, amount
  * and payment are locked (the server enforces the same).
  */
-export function CrmNewLeadScreen() {
+export function CrmNewLeadScreen({
+  onSaved,
+  onCommercial,
+}: {
+  /** The Lead Management app: where to go once a new lead is saved (instead of the CRM's "Saved" screen). */
+  onSaved?: (leadId: string, note?: string) => void;
+  /** The Lead Management app: its own commercial form for the Commercial tab. */
+  onCommercial?: () => void;
+} = {}) {
   const navigation =
     useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewLead'>>();
-  const residential = isResidentialRole(useRawRole());
+  const residential = useResidentialOnly(useRawRole());
   const {
     leads,
     addLead,
@@ -363,6 +375,8 @@ export function CrmNewLeadScreen() {
   const [draftRestored, setDraftRestored] = useState(false);
   /** Set once the lead is saved so the draft is not written back after it was cleared. */
   const submitted = useRef(false);
+  /** The house type / service / plan picked last time, put in once the price list is loaded. */
+  const [lastChoices, setLastChoices] = useState<LastChoices | null>(null);
 
   // Bring back an unfinished lead (or at least the last lead source) when the form opens.
   // Not when editing: the form is the lead itself, and the draft of a new lead is left alone.
@@ -382,6 +396,8 @@ export function CrmNewLeadScreen() {
       } else {
         const last = await loadLastSource(scope);
         if (!cancelled && last) setSource(last as LeadSource);
+        const choices = await loadLastChoices(scope);
+        if (!cancelled) setLastChoices(choices);
       }
       if (!cancelled) setDraftReady(true);
     })();
@@ -511,6 +527,7 @@ export function CrmNewLeadScreen() {
     loadLastSource(scope).then(last =>
       setSource((last as LeadSource | null) ?? null),
     );
+    loadLastChoices(scope).then(setLastChoices);
   }
 
   function setField<K extends keyof LeadFormValues>(
@@ -523,6 +540,21 @@ export function CrmNewLeadScreen() {
   }
 
   /** House type / service / plan drive the price: any change re-fills the standard amount. */
+  // A new lead opens with the house type, service and plan picked last time - only those still on
+  // the price list, and only while the rep has not picked any yet.
+  useEffect(() => {
+    if (!lastChoices || serviceMaster.length === 0) return;
+    const houseType = getHouseTypes(serviceMaster).includes(lastChoices.houseType ?? '') ? lastChoices.houseType : undefined;
+    const service = getServices(serviceMaster).includes(lastChoices.service ?? '') ? lastChoices.service : undefined;
+    const plan = service && getPlans(serviceMaster, service).includes(lastChoices.plan ?? '') ? lastChoices.plan : undefined;
+    setLastChoices(null);
+    const current = latest.current;
+    if (current.houseType || current.service || current.plan) return;
+    if (!houseType && !service) return;
+    applySelection({ houseType: houseType ?? null, service: service ?? null, plan: plan ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastChoices, serviceMaster]);
+
   function applySelection(
     patch: Partial<Pick<LeadFormValues, 'houseType' | 'service' | 'plan'>>,
   ) {
@@ -556,6 +588,7 @@ export function CrmNewLeadScreen() {
 
   /** Leaves the form for the "Saved" screen, where the rep can call, WhatsApp or add another lead. */
   function openSavedScreen(leadId: string, note?: string) {
+    if (onSaved) return onSaved(leadId, note);
     navigation.replace('CrmLeadSaved', { leadId, note });
   }
 
@@ -672,6 +705,11 @@ export function CrmNewLeadScreen() {
     savedLeadId.current = saved.id;
     clearDraft(scope);
     if (source) saveLastSource(scope, source);
+    saveLastChoices(scope, {
+      houseType: values.houseType ?? undefined,
+      service: values.service ?? undefined,
+      plan: values.plan ?? undefined,
+    });
 
     let note: string | undefined;
     if (saved.pendingSync) {
@@ -733,8 +771,9 @@ export function CrmNewLeadScreen() {
             value="consumer"
             onChange={(type: LeadType) => {
               // The commercial form is its own screen; what was typed here stays as the draft.
-              if (type === 'commercial')
-                navigation.replace('CrmNewCommercialLead');
+              if (type !== 'commercial') return;
+              if (onCommercial) onCommercial();
+              else navigation.replace('CrmNewCommercialLead');
             }}
           />
         </View>

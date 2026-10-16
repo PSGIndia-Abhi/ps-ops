@@ -7,6 +7,10 @@ import {
 } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { useReminders } from '../reminders-engine/useReminders';
+import { useMe } from '../leads/ui';
+import { useAppSwitch } from './AppSwitchContext';
 import { HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
 import { LeadsProvider } from '../crm/LeadsContext';
 import type { CrmStackParamList, CrmTabParamList } from '../crm/navigation';
@@ -74,6 +78,24 @@ function RaisedNewLeadButton({ onPress, onLongPress, accessibilityState, testID 
 function CrmTabs() {
   const theme = useCrmTheme();
   const insets = useSafeAreaInsets();
+  const { current } = useAppSwitch();
+  return current === 'residential' ? <ResidentialReminders><CrmTabBar theme={theme} bottom={insets.bottom} /></ResidentialReminders> : <CrmTabBar theme={theme} bottom={insets.bottom} />;
+}
+
+/** Keeps the reminders armed while the Residential app is open; a tapped one opens its lead. */
+function ResidentialReminders({ children }: { children: React.ReactNode }) {
+  const { myId } = useMe();
+  const navigation = useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
+  useReminders(myId, 'lead', (route) => {
+    const leadId = route.params?.leadId;
+    if (route.screen === 'LeadDetail' && typeof leadId === 'string') navigation.navigate('CrmLeadDetail', { leadId });
+    if (route.screen === 'LeadReminders') navigation.navigate('LeadReminders');
+  });
+  return <>{children}</>;
+}
+
+function CrmTabBar({ theme, bottom }: { theme: ReturnType<typeof useCrmTheme>; bottom: number }) {
+  const insets = { bottom };
 
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,

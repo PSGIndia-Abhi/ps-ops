@@ -13,7 +13,6 @@ import {
   completeVisit,
   findDuplicates,
   getOpenMeeting,
-  leadTeam,
   loadWorkspace,
   lossReasons,
   providerSources,
@@ -32,6 +31,7 @@ import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
+import { assigneeRole, assignLead, fetchAssignees } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -80,7 +80,37 @@ function Choice({ name, value, onChange, options }) {
 
 /* ------------------------------------------------------------ lead form */
 
-const BLANK_LEAD = { company: "", contact: "", phone: "", altPhone: "", email: "", address: "", area: "", source: "", quote: "", requirement: "" };
+const BLANK_LEAD = {
+  company: "", contact: "", phone: "", altPhone: "", email: "", address: "", area: "", source: "", quote: "", requirement: "",
+  competitorName: "", competitorAmount: "", competitorEnd: "", competitorNotes: "",
+};
+
+/**
+ * The optional Competitor block of the lead forms (add and edit): who serves the customer now,
+ * their price, when the contract ends, and notes. `set(key)` is the form's own change handler.
+ */
+function CompetitorFields({ values, set }) {
+  return (
+    <>
+      <div className="lm-form-split wide">
+        <strong>Competitor</strong>
+        <span>Optional - who looks after the customer today. It helps price and time the offer.</span>
+      </div>
+      <Field label="Current Service Provider">
+        <input className="lm-input" value={values.competitorName} onChange={set("competitorName")} placeholder="e.g. ABC Pest Control" maxLength={150} />
+      </Field>
+      <Field label="Their Price / Contract Amount (₹)">
+        <input className="lm-input" value={values.competitorAmount} onChange={set("competitorAmount")} inputMode="numeric" placeholder="What the customer pays them" />
+      </Field>
+      <Field label="Contract Ends On">
+        <input className="lm-input" type="date" value={values.competitorEnd} onChange={set("competitorEnd")} />
+      </Field>
+      <Field label="Notes on the Competitor" wide>
+        <textarea className="lm-textarea" value={values.competitorNotes} onChange={set("competitorNotes")} placeholder="What the customer likes or dislikes about them" maxLength={500} />
+      </Field>
+    </>
+  );
+}
 
 /**
  * The commercial lead form. Used as the provider's "Submit New Lead" page and
@@ -89,11 +119,25 @@ const BLANK_LEAD = { company: "", contact: "", phone: "", altPhone: "", email: "
 export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixedSource }) {
   const viewer = useViewer();
   const toast = useToast();
+  // The sales manager decides who a new lead goes to - themselves unless they pick someone.
+  const canAssign = viewer.persona === "sales_manager" && !!viewer.me.id;
+  const [people, setPeople] = useState([]);
+  const [assignTo, setAssignTo] = useState(() => String(viewer.me.id || ""));
+  useEffect(() => {
+    if (!canAssign) return undefined;
+    let alive = true;
+    fetchAssignees()
+      .then((list) => alive && setPeople(list))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [canAssign]);
   const [values, setValues] = useState({ ...BLANK_LEAD, source: fixedSource || "" });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const set = (key) => (e) => {
-    const value = key === "phone" || key === "altPhone" ? digits(e.target.value) : key === "quote" ? e.target.value.replace(/\D/g, "").slice(0, 9) : e.target.value;
+    const value = key === "phone" || key === "altPhone" ? digits(e.target.value) : key === "quote" || key === "competitorAmount" ? e.target.value.replace(/\D/g, "").slice(0, 9) : e.target.value;
     setValues((v) => ({ ...v, [key]: value }));
     setErrors((er) => ({ ...er, [key]: "" }));
   };
@@ -128,7 +172,7 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     if (busy || !validate()) return;
     setBusy(true);
     try {
-      const lead = await submitLead(values, viewer.me);
+      const lead = await submitLead({ ...values, assignTo: canAssign ? assignTo : undefined }, viewer.me);
       toast(`Lead ${lead.number} submitted`);
       setValues({ ...BLANK_LEAD, source: fixedSource || "" });
       onSaved?.(lead);
@@ -188,12 +232,27 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
             ))}
           </select>
         </Field>
+        {canAssign && (
+          <Field label="Assign To" required hint="Only this person (and the managers) will see the lead.">
+            <select className="lm-select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
+              <option value={String(viewer.me.id)}>Myself</option>
+              {people
+                .filter((p) => p.id !== String(viewer.me.id))
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {assigneeRole(p.role)}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        )}
         <Field label="Approximate Quote (₹)" required error={errors.quote}>
           <input className={cls("quote")} value={values.quote} onChange={set("quote")} inputMode="numeric" placeholder="0" />
         </Field>
         <Field label="Requirement / Description" required error={errors.requirement} wide>
           <textarea className={`lm-textarea${errors.requirement ? " bad" : ""}`} value={values.requirement} onChange={set("requirement")} placeholder="e.g. Need pest control contract for factory and warehouse." />
         </Field>
+        {viewer.persona !== "lead_provider" && <CompetitorFields values={values} set={set} />}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         {onCancel && (
@@ -629,11 +688,15 @@ export function EditLeadModal({ lead, onClose }) {
     address: lead.address,
     quote: lead.quote ? String(Math.round(lead.quote)) : "",
     requirement: lead.requirement,
+    competitorName: lead.competitorName || "",
+    competitorAmount: lead.competitorAmount || "",
+    competitorEnd: lead.competitorEnd || "",
+    competitorNotes: lead.competitorNotes || "",
   });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const set = (key) => (e) => {
-    const value = key === "phone" || key === "altPhone" ? digits(e.target.value) : key === "quote" ? e.target.value.replace(/\D/g, "").slice(0, 8) : e.target.value;
+    const value = key === "phone" || key === "altPhone" ? digits(e.target.value) : key === "quote" || key === "competitorAmount" ? e.target.value.replace(/\D/g, "").slice(0, 8) : e.target.value;
     setValues((v) => ({ ...v, [key]: value }));
     setErrors((er) => ({ ...er, [key]: "" }));
   };
@@ -709,6 +772,7 @@ export function EditLeadModal({ lead, onClose }) {
         <Field label="Requirement / Description" required error={errors.requirement} wide>
           <textarea className={`lm-textarea${errors.requirement ? " bad" : ""}`} value={values.requirement} onChange={set("requirement")} />
         </Field>
+        <CompetitorFields values={values} set={set} />
       </div>
     </Modal>
   );
@@ -827,11 +891,111 @@ export function CancelQuotationModal({ lead, quotation, onClose }) {
  * Plans the next call or check-in on a lead, outside a verification call - after a visit, a
  * quotation, or whenever it is needed. A lead manager may give it to someone else.
  */
+/**
+ * The sales manager gives a lead to a sales executive (or another sales manager) to work, or keeps
+ * it ("Myself"). Only that person - and the
+ * managers - then see it.
+ */
+export function AssignLeadModal({ lead, onClose }) {
+  const viewer = useViewer();
+  const toast = useToast();
+  const myId = String(viewer.me.id || "");
+  const [people, setPeople] = useState(null);
+  const [picked, setPicked] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetchAssignees()
+      .then((list) => alive && setPeople(list))
+      .catch((err) => {
+        if (!alive) return;
+        setPeople([]);
+        setError(err.message || "Could not load the team.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const current = String(lead.salesId || lead.telecallerId || "");
+  const currentName = current === myId ? "you" : people?.find((p) => p.id === current)?.name;
+  const groups = people
+    ? [
+        { title: "Sales Executives", list: people.filter((p) => p.role === "Sales Executive") },
+        { title: "Sales Managers", list: people.filter((p) => p.role === "sales_manager" && p.id !== myId) },
+      ].filter((g) => g.list.length > 0)
+    : [];
+
+  async function save(close) {
+    if (!picked) return setError("Choose who this lead goes to.");
+    if (picked === current) return setError("This lead is already with them.");
+    setBusy(true);
+    setError("");
+    try {
+      await assignLead(lead.id, picked);
+      const who = picked === myId ? "you" : people.find((p) => p.id === picked)?.name || "them";
+      toast(`Lead assigned to ${who}`);
+      close();
+    } catch (err) {
+      setError(err.message || "Could not assign the lead.");
+      setBusy(false);
+    }
+  }
+
+  const option = (id, label, sub) => (
+    <label key={id} className={`lm-assign-opt${picked === id ? " on" : ""}`}>
+      <input type="radio" name="assignee" checked={picked === id} onChange={() => setPicked(id)} />
+      <span>
+        <strong>{label}</strong>
+        {sub && <small>{sub}</small>}
+      </span>
+    </label>
+  );
+
+  return (
+    <Modal
+      title="Assign lead"
+      sub={lead.company}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} icon={<FiCheck />} onClick={() => save(close)}>
+            Assign lead
+          </Button>
+        </>
+      )}
+    >
+      <div style={{ display: "grid", gap: 14 }}>
+        {error && <Note tone="warn">{error}</Note>}
+        <p className="lm-hint" style={{ margin: 0 }}>
+          {currentName ? `Now with ${currentName}. ` : "Not assigned to anyone yet. "}Only the person you choose (and the managers) will see this lead.
+        </p>
+        {!people ? (
+          <p className="lm-hint">Loading the team...</p>
+        ) : (
+          <>
+            <div className="lm-assign-group">{option(myId, current === myId ? "Myself (now)" : "Myself", "Keep this lead with you")}</div>
+            {groups.map((g) => (
+              <div key={g.title} className="lm-assign-group">
+                <h4>{g.title}</h4>
+                {g.list.map((p) => option(p.id, p.id === current ? `${p.name} (now)` : p.name, assigneeRole(p.role)))}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function FollowUpModal({ lead, onClose }) {
   const viewer = useViewer();
   const toast = useToast();
   const canAssign = viewer.persona === "sales_manager";
-  const team = canAssign ? leadTeam() : [];
+  const team = canAssign ? salesTeam() : [];
   const [when, setWhen] = useState(tomorrowInput);
   // Your own task by default (it shows in your Task Management); a manager can give it to someone else.
   const [assignedTo, setAssignedTo] = useState(() => viewer.me.id);

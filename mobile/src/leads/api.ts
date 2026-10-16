@@ -202,8 +202,9 @@ export async function markLost(id: string, reason: string, lossReasonId?: number
   await httpClient.post(`/api/crm/leads/${id}/mark-lost`, { reason, loss_reason_id: lossReasonId });
 }
 
-export async function convertLead(id: string, notes: string): Promise<Conversion> {
-  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes });
+/** `amount`: the final deal amount agreed at conversion (replaces the approximate quote). */
+export async function convertLead(id: string, notes: string, amount?: number): Promise<Conversion> {
+  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, amount });
   return toConversion(data);
 }
 
@@ -211,17 +212,150 @@ export async function convertLead(id: string, notes: string): Promise<Conversion
 /**
  * POST /api/crm/leads/:id/follow-ups. `assignedTo` = who the follow-up task belongs to; the app sends
  * the person adding it, so it lands in their own Task Management (without it the server picks the
- * lead's telecaller first).
+ * lead's telecaller first). `taskId` moves that open follow-up to the new time; `newTask` always adds
+ * another one; with neither, the person's open follow-up on the lead moves (or one is made).
  */
 export async function addFollowUp(
   id: string,
-  body: { date: string; time: string | null; note: string; assignedTo?: number },
+  body: { date: string; time: string | null; note: string; assignedTo?: number; taskId?: string; newTask?: boolean },
 ): Promise<void> {
   await httpClient.post(`/api/crm/leads/${id}/follow-ups`, {
     nextActionDate: body.date,
     nextActionTime: body.time || undefined,
     note: body.note,
     assignedTo: body.assignedTo || undefined,
+    taskId: body.taskId || undefined,
+    newTask: body.newTask || undefined,
+  });
+}
+
+// ---- Monthly sales targets -------------------------------------------------
+
+export interface SalesTarget {
+  userId: number;
+  name: string;
+  role: string;
+  /** 'YYYY-MM' */
+  month: string;
+  target: number | null;
+  /** The amounts of the leads they converted that month. */
+  achieved: number;
+  converted: number;
+}
+
+/** GET /api/crm/targets - this month's (or `month`'s): the sales manager gets the team, others themselves. */
+export async function listTargets(month?: string): Promise<SalesTarget[]> {
+  const { data } = await httpClient.get<Row[]>('/api/crm/targets', { params: { month } });
+  return data.map((r) => ({
+    userId: Number(r.user_id),
+    name: str(r.name),
+    role: str(r.role),
+    month: str(r.month),
+    target: r.target === null || r.target === undefined ? null : Number(r.target),
+    achieved: Number(r.achieved) || 0,
+    converted: Number(r.converted) || 0,
+  }));
+}
+
+/** PUT /api/crm/targets/:userId - the sales manager sets (0 removes) a month's target. */
+export async function setTarget(userId: number, month: string, amount: number): Promise<void> {
+  await httpClient.put(`/api/crm/targets/${userId}`, { month, target_amount: amount });
+}
+
+// ---- Follow-ups list (the Lead app's Follow-ups tab) ------------------------
+
+export interface FollowUpRow {
+  id: string;
+  description: string | null;
+  status: string;
+  assignedTo: string;
+  assignedToName: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  completedAt: string | null;
+  leadId: string;
+  leadType: 'commercial' | 'consumer';
+  leadName: string;
+  leadNumber: string | null;
+  phone: string;
+}
+
+/** GET /api/crm/follow-ups - mine, or (sales manager) the whole team's; `done` adds the last 7 days' completed. */
+export async function listFollowUps(
+  opts: { team?: boolean; done?: boolean; leadType?: 'commercial' | 'consumer' } = {},
+): Promise<FollowUpRow[]> {
+  const { data } = await httpClient.get<Row[]>('/api/crm/follow-ups', {
+    params: { scope: opts.team ? 'team' : undefined, done: opts.done ? '1' : undefined, lead_type: opts.leadType },
+  });
+  return data.map((r) => ({
+    id: String(r.id),
+    description: (r.description as string) || null,
+    status: str(r.status),
+    assignedTo: String(r.assigned_to ?? ''),
+    assignedToName: str(r.assigned_to_name),
+    dueDate: (r.due_date as string) || null,
+    dueTime: (r.due_time as string) || null,
+    completedAt: (r.completed_at as string) || null,
+    leadId: String(r.lead_id),
+    leadType: r.lead_type === 'commercial' ? 'commercial' : 'consumer',
+    leadName: str(r.company_name) || str(r.customer_name) || 'Lead',
+    leadNumber: (r.lead_number as string) || null,
+    phone: str(r.phone),
+  }));
+}
+
+/** POST /api/work-tasks/:id/complete - the follow-up is done (only its own person can). */
+export async function completeFollowUp(id: string): Promise<void> {
+  await httpClient.post(`/api/work-tasks/${id}/complete`, {});
+}
+
+// ---- Residential call follow-ups -----------------------------------------
+
+export type ResidentialOutcome = 'INTERESTED' | 'NOT_INTERESTED' | 'CALL_BACK' | 'NOT_REACHABLE';
+
+export interface ResidentialCalls {
+  leadStatus: string;
+  open: { id: string; description: string | null; assignedToName: string | null; dueDate: string; dueTime: string | null }[];
+  history: { id: number; action: 'CALL_LOGGED' | 'FOLLOW_UP_SCHEDULED'; note: string | null; at: string; by: string | null }[];
+}
+
+/** GET /api/crm/leads/:id/residential-calls - a residential lead's next call(s) and its call history. */
+export async function residentialCalls(id: string): Promise<ResidentialCalls> {
+  const { data } = await httpClient.get<{ lead_status: string; open: Row[]; history: Row[] }>(`/api/crm/leads/${id}/residential-calls`);
+  return {
+    leadStatus: String(data.lead_status || 'new'),
+    open: data.open.map((t) => ({
+      id: String(t.id),
+      description: (t.description as string) || null,
+      assignedToName: (t.assigned_to_name as string) || null,
+      dueDate: String(t.due_date),
+      dueTime: (t.due_time as string) || null,
+    })),
+    history: data.history.map((h) => ({
+      id: Number(h.id),
+      action: h.action as 'CALL_LOGGED' | 'FOLLOW_UP_SCHEDULED',
+      note: (h.note as string) || null,
+      at: String(h.changed_at),
+      by: (h.changed_by_name as string) || null,
+    })),
+  };
+}
+
+/** POST /api/crm/leads/:id/residential-convert - the residential lead became a customer (calls stop). */
+export async function convertResidential(id: string, body: { amount?: number; note?: string }): Promise<void> {
+  await httpClient.post(`/api/crm/leads/${id}/residential-convert`, { amount: body.amount, note: body.note || undefined });
+}
+
+/** POST /api/crm/leads/:id/residential-calls - log a call; any outcome but Not interested sets the next call. */
+export async function logResidentialCall(
+  id: string,
+  body: { outcome: ResidentialOutcome; note: string; nextDate?: string; nextTime?: string | null },
+): Promise<void> {
+  await httpClient.post(`/api/crm/leads/${id}/residential-calls`, {
+    outcome: body.outcome,
+    note: body.note || undefined,
+    nextDate: body.nextDate,
+    nextTime: body.nextTime || undefined,
   });
 }
 
@@ -374,6 +508,21 @@ export async function performance(from: string, to: string, employeeId?: number)
   });
   return data;
 }
+
+/** GET /api/crm/lead-assignees - who the sales manager can give a lead to (sales executives, telecallers, managers). */
+export async function leadAssignees(): Promise<Person[]> {
+  const { data } = await httpClient.get<Row[]>('/api/crm/lead-assignees');
+  return data.map((r) => ({ id: Number(r.id), name: str(r.name), role: str(r.role) }));
+}
+
+/** POST /api/crm/leads/:id/assign - the sales manager gives the lead to someone. */
+export async function assignLead(id: string, userId: number): Promise<void> {
+  await httpClient.post(`/api/crm/leads/${id}/assign`, { user_id: userId });
+}
+
+/** "Sales Executive" / "Telecaller" / "Sales Manager" for a person's role. */
+export const roleName = (role?: string) =>
+  (role || '').toLowerCase() === 'telecaller' ? 'Telecaller' : (role || '').toLowerCase() === 'sales_manager' ? 'Sales Manager' : role || '';
 
 /** GET /api/crm/sales-employees - who a meeting can be assigned to. */
 export async function salesEmployees(): Promise<Person[]> {
