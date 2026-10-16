@@ -617,47 +617,6 @@ export function NewTaskScreen() {
               {!editId && (
                 <>
                   <View style={styles.optRow}>
-                    <View style={[styles.optIcon, { backgroundColor: theme.warningBg }]}>
-                      <BellIcon size={18} color={theme.warningText} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Text style={styles.optTitle}>Reminder</Text>
-                      <Text style={styles.optSub}>
-                        {remind
-                          ? 'Rings once at the date and time below'
-                          : 'Off - this task will not ring'}
-                      </Text>
-                    </View>
-                    <Switch
-                      value={remind}
-                      onValueChange={toggleRemind}
-                      trackColor={{
-                        true: theme.primarySoft,
-                        false: theme.border,
-                      }}
-                      thumbColor={remind ? theme.primary : theme.surface}
-                    />
-                  </View>
-                  {remind && (
-                    <View style={[styles.duo, styles.field]}>
-                      <View style={styles.flex}>
-                        <FieldLabel required>Reminder Date</FieldLabel>
-                        <Pressable style={styles.picker} onPress={() => setPicker('remDate')} accessibilityRole="button">
-                          <CalendarIcon size={18} color={theme.textSecondary} />
-                          <Text style={styles.pickerText}>{fmtDateShort(remDate)}</Text>
-                        </Pressable>
-                      </View>
-                      <View style={styles.flex}>
-                        <FieldLabel required>Reminder Time</FieldLabel>
-                        <Pressable style={styles.picker} onPress={() => setPicker('remTime')} accessibilityRole="button">
-                          <ClockIcon size={18} color={theme.textSecondary} />
-                          <Text style={styles.pickerText}>{fmtTime(remTime)}</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
-
-                  <View style={styles.optRow}>
                     <View
                       style={[
                         styles.optIcon,
@@ -916,6 +875,47 @@ export function NewTaskScreen() {
                           <Text style={styles.unit}>times</Text>
                         </View>
                       )}
+                    </View>
+                  )}
+
+                  <View style={styles.optRow}>
+                    <View style={[styles.optIcon, { backgroundColor: theme.warningBg }]}>
+                      <BellIcon size={18} color={theme.warningText} />
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={styles.optTitle}>Reminder</Text>
+                      <Text style={styles.optSub}>
+                        {remind
+                          ? 'Rings once at the date and time below'
+                          : 'Off - this task will not ring'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={remind}
+                      onValueChange={toggleRemind}
+                      trackColor={{
+                        true: theme.primarySoft,
+                        false: theme.border,
+                      }}
+                      thumbColor={remind ? theme.primary : theme.surface}
+                    />
+                  </View>
+                  {remind && (
+                    <View style={[styles.duo, styles.field]}>
+                      <View style={styles.flex}>
+                        <FieldLabel required>Reminder Date</FieldLabel>
+                        <Pressable style={styles.picker} onPress={() => setPicker('remDate')} accessibilityRole="button">
+                          <CalendarIcon size={18} color={theme.textSecondary} />
+                          <Text style={styles.pickerText}>{fmtDateShort(remDate)}</Text>
+                        </Pressable>
+                      </View>
+                      <View style={styles.flex}>
+                        <FieldLabel required>Reminder Time</FieldLabel>
+                        <Pressable style={styles.picker} onPress={() => setPicker('remTime')} accessibilityRole="button">
+                          <ClockIcon size={18} color={theme.textSecondary} />
+                          <Text style={styles.pickerText}>{fmtTime(remTime)}</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   )}
                 </>

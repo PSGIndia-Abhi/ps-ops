@@ -17,6 +17,8 @@ import { radii, shadows } from '../theme';
 import type { TaskStackParamList, TaskTabParamList } from '../tasks/navigation';
 import { TasksProvider, useTasks } from '../tasks/TasksContext';
 import { NewTaskScreen } from '../tasks/screens/NewTaskScreen';
+import { TaskRemindersScreen } from '../tasks/screens/TaskRemindersScreen';
+import { ReminderTimeScreen } from '../leads/screens/RemindersScreens';
 import { ReassignScreen, RescheduleScreen } from '../tasks/screens/TaskActionScreens';
 import { TaskCreatedScreen } from '../tasks/screens/TaskCreatedScreen';
 import { TaskDetailScreen } from '../tasks/screens/TaskDetailScreen';
@@ -165,6 +167,8 @@ export function TaskNavigator() {
         <Stack.Screen name="Reschedule" component={RescheduleScreen} />
         <Stack.Screen name="Profile" component={TaskProfileScreen} />
         <Stack.Screen name="Notifications" component={TaskNotificationsScreen} />
+        <Stack.Screen name="TaskReminders" component={TaskRemindersScreen} />
+        <Stack.Screen name="TaskReminderTime" component={ReminderTimeScreen} options={{ animation: 'slide_from_bottom' }} />
       </Stack.Navigator>
     </TasksProvider>
   );
