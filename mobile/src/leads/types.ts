@@ -43,6 +43,8 @@ export interface PipelineLead {
   createdByName: string;
   telecallerId: string | null;
   salesEmployeeId: string | null;
+  /** Services asked for: Quotation Master service ids (the quotation starts with them ticked). */
+  services: string[];
   createdAt: string;
 }
 

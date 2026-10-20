@@ -55,6 +55,7 @@ function toLead(row: Row): PipelineLead {
     createdByName: str(row.created_by_name),
     telecallerId: idOrNull(row.assigned_telecaller_id),
     salesEmployeeId: idOrNull(row.assigned_sales_employee_id),
+    services: Array.isArray(row.services_requested) ? (row.services_requested as unknown[]).map(String) : [],
     createdAt: str(row.created_at),
   };
 }

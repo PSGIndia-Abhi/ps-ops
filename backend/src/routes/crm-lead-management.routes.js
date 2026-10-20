@@ -6,7 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
-  INDUSTRY_TYPES, COMMERCIAL_SERVICES,
+  INDUSTRY_TYPES, resolveLeadServices,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -215,17 +215,18 @@ router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
       next.lead_source = source.name;
     }
 
-    // Industry and services (optional): the same codes as the app's form.
+    // Industry (optional): the same codes as the app's form.
     let industryType = lead.industry_type ?? null;
     if (body.industry_type !== undefined) {
       industryType = body.industry_type || null;
       if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) throw new HttpError(400, "Invalid industry type");
     }
+    // Services: Quotation Master service ids (old app codes are converted).
     let services = lead.services_requested ?? null;
     if (body.services_requested !== undefined) {
-      const list = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
-      if (list.some((s) => !COMMERCIAL_SERVICES.includes(s))) throw new HttpError(400, "Invalid service requested");
-      services = list.length ? list.join(",") : null;
+      const picked = await resolveLeadServices(pool, body.services_requested);
+      if (picked.error) throw new HttpError(400, picked.error);
+      services = picked.ids.length ? picked.ids.join(",") : null;
     }
 
     const competitor = readCompetitor(body);

@@ -11,6 +11,8 @@ import { AppState } from 'react-native';
 import { ApiError, crmApi } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { newClientRef } from './leadHelpers';
+import { loadLeadSources } from './leadSources';
+import { loadQuoteServices } from './quoteServices';
 import {
   LOCAL_ID_PREFIX,
   loadOutbox,
@@ -84,6 +86,14 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const outboxRef = useRef<OutboxItem[]>([]);
   const outboxLoaded = useRef(false);
+
+  // The New Lead form's services (the Quotation Master) and sources (the lead source master):
+  // loaded now, so the form has them even if the connection drops later.
+  useEffect(() => {
+    if (!session) return;
+    loadQuoteServices().catch(() => undefined);
+    loadLeadSources().catch(() => undefined);
+  }, [session]);
   const syncing = useRef(false);
   const [serviceMaster, setServiceMaster] = useState<ServiceMasterRow[]>([]);
   const [loading, setLoading] = useState(true);

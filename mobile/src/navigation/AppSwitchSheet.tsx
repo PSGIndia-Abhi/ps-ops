@@ -103,12 +103,12 @@ const factory = (t: CrmTheme) => ({
   hint: { ...typography.caption, color: t.textMuted, paddingHorizontal: spacing.xs, marginTop: spacing.xs },
 });
 
-const APPS: { kind: AppKind; name: string; about: string }[] = [
-  { kind: 'leads', name: 'Commercial Leads', about: 'Business leads, calls, meetings and follow-ups' },
-  { kind: 'residential', name: 'Residential Leads', about: 'Home-service leads, follow-up calls and payments' },
-  { kind: 'tasks', name: 'Task Management', about: 'Your tasks, follow-ups and the calendar' },
-  { kind: 'sales', name: 'Sales', about: 'Leads, quotes and payments' },
-  { kind: 'reminders', name: 'Payment Reminders', about: 'Customer and invoice reminders' },
+const APPS: { kind: AppKind; name: string }[] = [
+  { kind: 'leads', name: 'Commercial Leads' },
+  { kind: 'residential', name: 'Residential Leads' },
+  { kind: 'tasks', name: 'Task Management' },
+  { kind: 'sales', name: 'Sales' },
+  { kind: 'reminders', name: 'Payment Reminders' },
 ];
 
 /** Soft tile colour and icon colour per app. */
@@ -192,7 +192,7 @@ export function AppSwitchSheet({ visible, current, apps, onPick, defaultApp, onS
               </View>
               <View style={styles.text}>
                 <Text style={styles.appName}>{app.name}</Text>
-                <Text style={styles.about}>{on ? 'Current' : app.about}</Text>
+                {on && <Text style={styles.about}>Current</Text>}
                 {isDefault ? (
                   <View style={styles.defaultBadge}>
                     <StarIcon size={12} color={theme.warningText} />

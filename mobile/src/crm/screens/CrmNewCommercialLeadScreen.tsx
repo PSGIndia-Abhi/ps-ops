@@ -37,17 +37,16 @@ import { DateSheet } from '../../tasks/ui/sheets';
 import type { Person } from '../../leads/types';
 import { formatINR } from '../format';
 import { useLeads } from '../LeadsContext';
+import { cachedLeadSources, matchLeadSource, useLeadSources } from '../leadSources';
+import { useQuoteServices } from '../quoteServices';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
-  COMMERCIAL_LEAD_SOURCES,
-  COMMERCIAL_SERVICES,
   INDUSTRY_TYPES,
   LEAD_STATUSES,
   LEAD_TYPES,
   MAX_LEAD_PHOTOS,
   optionLabel,
-  servicesLabel,
   type CommercialService,
   type IndustryType,
   type Lead,
@@ -202,6 +201,7 @@ const factory = (t: CrmTheme) => ({
   },
   chipOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
   chipPressed: { opacity: 0.7 },
+  servicesLoading: { paddingVertical: spacing.lg },
   tick: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
   tickOn: { backgroundColor: t.primary, borderColor: t.primary },
   chipText: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
@@ -259,18 +259,6 @@ const INITIAL_VALUES: CommercialLeadFormValues = {
 
 type Step = 'details' | 'review';
 
-/**
- * A stored source as this form's choice: the web saves the name ("Google", "Social Media"), the
- * app the code ("google"). A source the form has no button for (e.g. "Lead Provider") is kept as is.
- */
-function sourceChoice(stored: string | null | undefined): string | null {
-  const raw = (stored ?? '').trim();
-  if (!raw) return null;
-  const key = raw.toLowerCase();
-  const hit = COMMERCIAL_LEAD_SOURCES.find(o => o.value === key || o.label.toLowerCase() === key || o.value === key.replace(/\s+/g, '_'));
-  return hit ? hit.value : raw;
-}
-
 /** The form's values for a lead that is being edited. */
 function valuesOf(lead: Lead): CommercialLeadFormValues {
   return {
@@ -282,7 +270,8 @@ function valuesOf(lead: Lead): CommercialLeadFormValues {
     phone: lead.phone,
     alternatePhone: lead.alternatePhone ?? '',
     email: lead.email ?? '',
-    source: sourceChoice(lead.source) as LeadSource | null,
+    // Shown selected in the source list: an old code ("google") as the master's name ("Google").
+    source: matchLeadSource(lead.source, cachedLeadSources()),
     referenceBy: lead.referenceBy ?? '',
     services: lead.servicesRequested ?? [],
     amount: Number.isFinite(lead.amount) && lead.amount >= 0 ? String(Math.round(lead.amount)) : '',
@@ -399,14 +388,14 @@ export function CrmNewCommercialLeadScreen({
   const [step, setStep] = useState<Step>('details');
   const [values, setValues] = useState<CommercialLeadFormValues>(initialValues);
   const latest = useRef<CommercialLeadFormValues>(initialValues);
-  // The app's sources, plus the lead's own when it came from elsewhere (e.g. "Lead Provider").
-  const sourceOptions = useMemo(
-    () =>
-      values.source && !COMMERCIAL_LEAD_SOURCES.some(o => o.value === values.source)
-        ? [...COMMERCIAL_LEAD_SOURCES, { value: values.source as LeadSource, label: String(values.source) }]
-        : COMMERCIAL_LEAD_SOURCES,
-    [values.source],
-  );
+  // Source of Lead: the lead source master (crm_lead_sources), plus the lead's own source when the
+  // master no longer has it (switched off, or an old one).
+  const leadSources = useLeadSources();
+  const sourceOptions = useMemo(() => {
+    const names = leadSources.sources ?? [];
+    const all = values.source && !names.includes(values.source) ? [...names, values.source] : names;
+    return all.map(name => ({ value: name as LeadSource, label: name }));
+  }, [leadSources.sources, values.source]);
   latest.current = values;
   const [errors, setErrors] = useState<CommercialLeadFormErrors>({});
   const [leadStatus, setLeadStatus] = useState<LeadStatus>(editLead?.leadStatus ?? 'new');
@@ -450,6 +439,10 @@ export function CrmNewCommercialLeadScreen({
   // Sales manager: who the new lead goes to - themselves unless they pick someone.
   const [people, setPeople] = useState<Person[]>([]);
   const [assignTo, setAssignTo] = useState<string | null>(assign ? String(assign.myId) : null);
+  // Service Requested: the Quotation Master's services (a lead saves their ids).
+  const quoteServices = useQuoteServices();
+  const servicesLabel = (ids: CommercialService[]) =>
+    ids.map(id => quoteServices.services?.find(s => s.id === id)?.name).filter(Boolean).join(', ');
   useEffect(() => {
     if (!assign || editing) return;
     let alive = true;
@@ -535,7 +528,10 @@ export function CrmNewCommercialLeadScreen({
     loadLastChoices(scope).then(last => {
       if (cancelled) return;
       const industryType = INDUSTRY_TYPES.some(o => o.value === last.industryType) ? last.industryType : null;
-      const source = COMMERCIAL_LEAD_SOURCES.some(o => o.value === last.commercialSource) ? last.commercialSource : null;
+      // The source used last time, if the master still has it.
+      const names = cachedLeadSources();
+      const lastSource = matchLeadSource(last.commercialSource, names);
+      const source = lastSource && names?.includes(lastSource) ? lastSource : null;
       setValues(prev => {
         const next = {
           ...prev,
@@ -1070,6 +1066,9 @@ export function CrmNewCommercialLeadScreen({
                   onChange={value => setAssignTo(value)}
                 />
               )}
+              {!!leadSources.error && !leadSources.sources && (
+                <CrmErrorBanner message={leadSources.error} onRetry={leadSources.retry} />
+              )}
               <SelectField
                 label="Source of Lead *"
                 sheetTitle="Source of Lead"
@@ -1105,29 +1104,35 @@ export function CrmNewCommercialLeadScreen({
 
               <Text style={styles.fieldLabel}>Service Requested *</Text>
               <View style={styles.chipsWrap}>
+                {quoteServices.error && !quoteServices.services ? (
+                  <CrmErrorBanner message={quoteServices.error} onRetry={quoteServices.retry} />
+                ) : !quoteServices.services ? (
+                  <ActivityIndicator color={theme.primary} style={styles.servicesLoading} />
+                ) : (
                 <View style={styles.chips}>
-                  {COMMERCIAL_SERVICES.map(service => {
-                    const on = values.services.includes(service.value);
+                  {quoteServices.services.map(service => {
+                    const on = values.services.includes(service.id);
                     return (
                       <Pressable
-                        key={service.value}
-                        onPress={() => toggleService(service.value)}
+                        key={service.id}
+                        onPress={() => toggleService(service.id)}
                         accessibilityRole="checkbox"
                         accessibilityState={{ checked: on }}
-                        accessibilityLabel={service.label}
-                        testID={`commercial-service-${service.value}`}
+                        accessibilityLabel={service.name}
+                        testID={`commercial-service-${service.id}`}
                         style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.chipPressed]}
                       >
                         <View style={[styles.tick, on && styles.tickOn]}>
                           {on && <CheckIcon size={12} color={theme.textOnPrimary} />}
                         </View>
                         <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={2}>
-                          {service.label}
+                          {service.name}
                         </Text>
                       </Pressable>
                     );
                   })}
                 </View>
+                )}
                 {!!errors.services && (
                   <Text style={styles.fieldError}>{errors.services}</Text>
                 )}

@@ -26,12 +26,12 @@ import {
   uploadQuotation,
 } from "./leadsApi";
 import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
-import { COMMERCIAL_SERVICES, FORM_SOURCES, INDUSTRY_TYPES, REASONS, VISIT_OUTCOMES } from "./constants";
+import { FORM_SOURCES, INDUSTRY_TYPES, REASONS, VISIT_OUTCOMES } from "./constants";
 import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
-import { assigneeRole, assignLead, fetchAssignees } from "./leadsApi";
+import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -91,12 +91,24 @@ const BLANK_LEAD = {
  * their price, when the contract ends, and notes. `set(key)` is the form's own change handler.
  */
 /**
- * Industry type and the services asked for (both optional) - the same choices as the Android
- * form, so a lead added or edited on either shows them on both.
+ * Industry type and the services asked for (both optional). The services are the Quotation
+ * Master's active services (saved by id), the same list as the Android form - so Create Quotation
+ * can start with them ticked.
  */
 function IndustryServiceFields({ values, setValues }) {
-  const toggle = (code) =>
-    setValues((v) => ({ ...v, services: v.services.includes(code) ? v.services.filter((s) => s !== code) : [...v.services, code] }));
+  const [services, setServices] = useState(null); // null while loading
+  const [loadError, setLoadError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    getActiveQuoteMaster()
+      .then((m) => alive && setServices(m.services || []))
+      .catch((err) => alive && setLoadError(err.message || "Could not load the services."));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const toggle = (id) =>
+    setValues((v) => ({ ...v, services: v.services.includes(id) ? v.services.filter((s) => s !== id) : [...v.services, id] }));
   return (
     <>
       <Field label="Industry Type">
@@ -110,14 +122,20 @@ function IndustryServiceFields({ values, setValues }) {
         </select>
       </Field>
       <Field label="Services Requested" wide>
-        <div className="lm-svc-grid">
-          {COMMERCIAL_SERVICES.map((o) => (
-            <label key={o.value} className={`lm-svc${values.services.includes(o.value) ? " on" : ""}`}>
-              <input type="checkbox" checked={values.services.includes(o.value)} onChange={() => toggle(o.value)} />
-              {o.label}
-            </label>
-          ))}
-        </div>
+        {loadError ? (
+          <Note tone="warn">{loadError}</Note>
+        ) : !services ? (
+          <span className="lm-hint">Loading services...</span>
+        ) : (
+          <div className="lm-svc-grid">
+            {services.map((s) => (
+              <label key={s.id} className={`lm-svc${values.services.includes(s.id) ? " on" : ""}`}>
+                <input type="checkbox" checked={values.services.includes(s.id)} onChange={() => toggle(s.id)} />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        )}
       </Field>
     </>
   );

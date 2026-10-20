@@ -6,7 +6,7 @@ import { friendlyPaymentMessage } from '../src/crm/payment';
 import { getGreeting } from '../src/utils/date';
 import { getHouseTypes, getPlans, getPrice, getServices, type ServiceMasterRow } from '../src/crm/serviceMaster';
 import { computeLeadStats } from '../src/crm/stats';
-import { isCommercial, servicesLabel, type Lead } from '../src/crm/types';
+import { isCommercial, type Lead } from '../src/crm/types';
 import { canSwitchToSales } from '../src/auth/role';
 import { cleanPhoneInput, normalizePhone, parseAmount, phoneError, validateCommercialLead, validateLead, type CommercialLeadFormValues, type LeadFormValues } from '../src/crm/validation';
 
@@ -330,11 +330,6 @@ describe('commercial leads', () => {
     expect(validateCommercialLead(good, true).address).toBeUndefined();
     expect(validateCommercialLead(good, false).address).toBeDefined();
     expect(validateCommercialLead({ ...good, address: 'Whitefield, Bengaluru' }, false)).toEqual({});
-  });
-
-  it('lists the chosen services in the order the form shows them', () => {
-    expect(servicesLabel(['fly_control', 'gpc'])).toBe('GPC, Fly Control');
-    expect(servicesLabel(undefined)).toBe('');
   });
 
   it('lets only Managing Director and Personal Assistant switch to the Sales app', () => {

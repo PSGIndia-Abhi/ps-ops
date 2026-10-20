@@ -77,19 +77,54 @@ export function LeadQuoteBuilderScreen() {
       leadId={leadId}
       master={data.master}
       initial={{ name: data.lead.companyName || name, address: data.lead.address || '', phone: data.lead.phone || '' }}
+      asked={data.lead.services}
       theme={theme}
     />
   );
 }
 
-function Builder({ leadId, master, initial, theme }: { leadId: string; master: QuoteMaster; initial: { name: string; address: string; phone: string }; theme: CrmTheme }) {
+/**
+ * A service as it starts on the quotation: its treatment rows from the master, on the cheapest
+ * monthly plan the price chart offers (else the first priced plan), every row on that plan.
+ */
+function startPick(service: MasterService, plans: QuoteMaster['plans'], perService: boolean): Pick {
+  const priced = plans.filter((p) => service.prices.some((x) => x.plan_id === p.id));
+  const first = priced.find((p) => p.billing === 'MONTHLY') || priced[0];
+  const price = first ? service.prices.find((x) => x.plan_id === first.id)?.price : undefined;
+  const frequency = perService ? first?.name || '' : '';
+  return {
+    planId: first?.id || '',
+    price: price !== undefined ? String(price) : '',
+    rows: service.treatments.length ? service.treatments.map((t) => ({ ...t, frequency: frequency || t.frequency })) : [{ ...BLANK_ROW, frequency }],
+    open: false,
+  };
+}
+
+function Builder({
+  leadId,
+  master,
+  initial,
+  asked,
+  theme,
+}: {
+  leadId: string;
+  master: QuoteMaster;
+  initial: { name: string; address: string; phone: string };
+  /** The services the customer asked for on the lead (master ids) - ticked to start with. */
+  asked: string[];
+  theme: CrmTheme;
+}) {
   const navigation = useNavigation<Nav>();
   const { styles } = useCrmStyles(factory);
 
   const [customer, setCustomer] = useState(initial);
   const [editCustomer, setEditCustomer] = useState(false);
-  const [picks, setPicks] = useState<Record<string, Pick>>({});
-  const [order, setOrder] = useState<string[]>([]);
+  const [order, setOrder] = useState<string[]>(() => asked.filter((id) => master.services.some((s) => s.id === id)));
+  const [picks, setPicks] = useState<Record<string, Pick>>(() =>
+    Object.fromEntries(
+      master.services.filter((s) => asked.includes(s.id)).map((s) => [s.id, startPick(s, master.plans, true)]),
+    ),
+  );
   const [mode, setMode] = useState<'PER_SERVICE' | 'PACKAGE'>('PER_SERVICE');
   const [pkg, setPkg] = useState({ amount: '', billing: 'MONTHLY' as Billing, planLabel: '', description: '' });
   const [subject, setSubject] = useState('');
@@ -134,19 +169,7 @@ function Builder({ leadId, master, initial, theme }: { leadId: string; master: Q
   // ---- services
   function toggleService(service: MasterService) {
     if (picks[service.id]) return removeService(service.id);
-    const priced = master.plans.filter((p) => service.prices.some((x) => x.plan_id === p.id));
-    const first = priced.find((p) => p.billing === 'MONTHLY') || priced[0];
-    const price = first ? service.prices.find((x) => x.plan_id === first.id)?.price : undefined;
-    const frequency = mode === 'PER_SERVICE' ? first?.name || '' : '';
-    setPicks((all) => ({
-      ...all,
-      [service.id]: {
-        planId: first?.id || '',
-        price: price !== undefined ? String(price) : '',
-        rows: service.treatments.length ? service.treatments.map((t) => ({ ...t, frequency: frequency || t.frequency })) : [{ ...BLANK_ROW, frequency }],
-        open: false,
-      },
-    }));
+    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, mode === 'PER_SERVICE') }));
     setOrder((o) => [...o, service.id]);
   }
   function removeService(id: string) {

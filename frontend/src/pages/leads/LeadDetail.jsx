@@ -1,4 +1,4 @@
-import { industryLabel, servicesLabel } from "./constants";
+import { industryLabel } from "./constants";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -387,7 +387,7 @@ function DetailsPanel({ lead, provider, onCall }) {
       <InfoSection icon={<FiBriefcase />} title="Requirement">
         <Info label="Source of lead">{lead.source || "Not added"}</Info>
         <Info label="Industry type">{industryLabel(lead.industry) || "Not added"}</Info>
-        <Info label="Services">{servicesLabel(lead.services) || "Not added"}</Info>
+        <Info label="Services">{lead.serviceNames.join(", ") || "Not added"}</Info>
         <Info label="Approximate quote">{money(lead.quote)}</Info>
         <Info label="Address">{lead.address}</Info>
         <Info label="Requirement">

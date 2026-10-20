@@ -31,6 +31,7 @@ interface ApiLead {
   industry_type?: IndustryType | null;
   contact_designation?: string;
   services_requested?: CommercialService[];
+  services_requested_names?: string[];
   latitude?: number | null;
   longitude?: number | null;
   created_by_name?: string;
@@ -74,6 +75,7 @@ function toLead(row: ApiLead): Lead {
     industryType: row.industry_type ?? null,
     designation: row.contact_designation ?? '',
     servicesRequested: row.services_requested ?? [],
+    serviceNames: row.services_requested_names ?? [],
     competitorName: row.competitor_name ?? '',
     competitorAmount: row.competitor_amount ?? null,
     competitorContractEnd: row.competitor_contract_end ?? null,

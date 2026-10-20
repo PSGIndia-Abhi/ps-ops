@@ -17,14 +17,13 @@ import { radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
 import { fmtDateShort } from '../../tasks/format';
 import { whatsappUrl } from '../leadHelpers';
+import { leadSourceLabel } from '../leadSources';
 import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
-  COMMERCIAL_LEAD_SOURCES,
   INDUSTRY_TYPES,
   optionLabel,
-  servicesLabel,
   type Lead,
 } from '../types';
 import { WhatsAppIcon } from '../ui/crmIcons';
@@ -236,9 +235,9 @@ export function CommercialLeadDetail({
   const localPhotos = lead.localPhotos ?? [];
   const hasPoint = typeof lead.latitude === 'number' && typeof lead.longitude === 'number';
   const industry = optionLabel(INDUSTRY_TYPES, lead.industryType ?? null);
-  const services = lead.servicesRequested?.length ? servicesLabel(lead.servicesRequested) : '';
+  const services = (lead.serviceNames ?? []).join(', ');
   // A source from outside this app's own list (e.g. "Lead Provider") is shown as stored.
-  const source = optionLabel(COMMERCIAL_LEAD_SOURCES, lead.source) || lead.source || '';
+  const source = leadSourceLabel(lead.source);
 
   async function open(url: string, failMessage: string) {
     try {

@@ -109,7 +109,8 @@ function toLead(row, closingNote) {
     competitorEnd: row.competitor_contract_end ? String(row.competitor_contract_end).slice(0, 10) : "",
     competitorNotes: row.competitor_notes || "",
     industry: row.industry_type || "",
-    services: Array.isArray(row.services_requested) ? row.services_requested : [],
+    services: Array.isArray(row.services_requested) ? row.services_requested : [], // Quotation Master service ids
+    serviceNames: Array.isArray(row.services_requested_names) ? row.services_requested_names : [],
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,

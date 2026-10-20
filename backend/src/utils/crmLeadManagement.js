@@ -200,12 +200,68 @@ const PIPELINE_STAGES = [
   "QUOTATION_SENT", "WON", "CONVERTED", "NEED_MORE_INFO", "NOT_GENUINE", "LOST", "CANCELLED",
 ];
 
-// A commercial lead's industry and services - the same codes as crm.routes.js (the app's form).
+// A commercial lead's industry - the same codes as crm.routes.js (the app's form).
 const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
-const COMMERCIAL_SERVICES = ["gpc", "rodent_control", "cockroach_control", "ant_treatment", "honeybee_control", "snake_control", "fly_control"];
+
+// ---------------------------------------------------------------------------
+// The services a commercial lead asks for are the Quotation Master's services (crm_quote_services):
+// crm_leads.services_requested holds their ids, comma-separated, so a quotation can start from them.
+// Apps up to v1.20 still send the old fixed codes - each is taken as the master service it became.
+// The names are cached for a minute (the master changes rarely) so toLead() can stay synchronous.
+// ---------------------------------------------------------------------------
+const LEGACY_SERVICE_NAMES = {
+  gpc: "GPC",
+  rodent_control: "Rat Control",
+  cockroach_control: "Cockroach Control",
+  ant_treatment: "Ant Treatment",
+  honeybee_control: "Honey Bee Removal",
+  snake_control: "Snake Control",
+  fly_control: "Fly Control",
+};
+const SERVICE_CACHE_MS = 60 * 1000;
+let serviceCache = { at: 0, byId: new Map() };
+
+/** Loads every quote service (on or off) into the cache; reuses it for a minute unless `fresh`. */
+async function loadQuoteServices(executor, { fresh = false } = {}) {
+  if (!fresh && Date.now() - serviceCache.at < SERVICE_CACHE_MS) return serviceCache.byId;
+  const [rows] = await executor.query("SELECT id, name, is_active FROM crm_quote_services");
+  serviceCache = { at: Date.now(), byId: new Map(rows.map((r) => [String(r.id), { name: r.name, active: !!r.is_active }])) };
+  return serviceCache.byId;
+}
+
+/** Drops the cache - the Quotation Master calls this after adding or renaming a service. */
+function forgetQuoteServices() {
+  serviceCache = { at: 0, byId: new Map() };
+}
+
+/** The names of these service ids, from the cache (an unknown id gives no name). */
+function quoteServiceNames(ids) {
+  return (ids || []).map((id) => serviceCache.byId.get(String(id))?.name).filter(Boolean);
+}
+
+/**
+ * Checks the services sent for a lead -> { ids } or { error }. Each entry is a quote service id or
+ * an old code (older apps). Services switched off in the master are still accepted, so editing an
+ * older lead does not fail; the forms only offer the active ones.
+ */
+async function resolveLeadServices(executor, list) {
+  const wanted = [...new Set((Array.isArray(list) ? list : []).map((s) => String(s || "").trim()).filter(Boolean))];
+  if (!wanted.length) return { ids: [] };
+  let byId = await loadQuoteServices(executor);
+  if (wanted.some((s) => !byId.has(s) && !LEGACY_SERVICE_NAMES[s])) byId = await loadQuoteServices(executor, { fresh: true });
+  const byName = new Map([...byId].map(([id, s]) => [s.name.toLowerCase(), id]));
+  const ids = [];
+  for (const s of wanted) {
+    const id = byId.has(s) ? s : byName.get(String(LEGACY_SERVICE_NAMES[s] || "").toLowerCase());
+    if (!id) return { error: "Invalid service requested" };
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (ids.join(",").length > 1000) return { error: "Too many services requested" };
+  return { ids };
+}
 
 module.exports = {
-  INDUSTRY_TYPES, COMMERCIAL_SERVICES,
+  INDUSTRY_TYPES, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,

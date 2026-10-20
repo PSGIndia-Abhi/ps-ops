@@ -3,7 +3,9 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
-const { hasPerm, resolveVisibleUserIds, salesOwnLeadFilter, LEAD_ASSIGNEE_ROLES } = require("../utils/crmLeadManagement");
+const {
+  hasPerm, resolveVisibleUserIds, salesOwnLeadFilter, LEAD_ASSIGNEE_ROLES, loadQuoteServices, quoteServiceNames,
+} = require("../utils/crmLeadManagement");
 
 function sendError(res, err, fallback) {
   console.error(fallback, err);
@@ -52,6 +54,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       params.push(...salesOwn.params);
     }
 
+    await loadQuoteServices(pool); // service names for services_requested_names
     const [leadRows] = await pool.query(
       `SELECT l.id, l.lead_number, l.company_name, l.customer_name, l.phone, l.alternate_phone, l.customer_email,
               l.location, l.lead_source, l.amount, l.notes, l.pipeline_stage, l.row_version,
@@ -133,6 +136,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       competitor_notes: l.competitor_notes || "",
       industry_type: l.industry_type || null,
       services_requested: l.services_requested ? String(l.services_requested).split(",").filter(Boolean) : [],
+      services_requested_names: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")) : [],
       created_at: l.created_at,
       updated_at: l.updated_at,
     }));

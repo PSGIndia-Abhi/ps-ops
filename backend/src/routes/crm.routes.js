@@ -13,10 +13,22 @@ const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 const {
   nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
-  readCompetitor, COMPETITOR_SET_SQL,
+  readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
+
+// Lead responses name the services a lead asks for (toLead -> services_requested_names): keep the
+// Quotation Master service names cached. One small query a minute at most; a failure only means
+// the names are left out.
+router.use(async (req, res, next) => {
+  try {
+    await loadQuoteServices(pool);
+  } catch (err) {
+    console.error("CRM quote service names error:", err.message);
+  }
+  next();
+});
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -43,15 +55,7 @@ const LIST_LIMIT = 500;
 // with no house type / service / plan and no payment. Everything else is a consumer lead.
 const COMMERCIAL_LEAD_SOURCES = ["google", "website", "referral", "social_media", "other"];
 const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
-const COMMERCIAL_SERVICES = [
-  "gpc",
-  "rodent_control",
-  "cockroach_control",
-  "ant_treatment",
-  "honeybee_control",
-  "snake_control",
-  "fly_control",
-];
+// Services requested: Quotation Master service ids (crm_quote_services) - see resolveLeadServices.
 const MAX_LEAD_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const PHOTO_TYPES = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -87,7 +91,9 @@ function toLead(row) {
     company_name: row.company_name || "",
     industry_type: row.industry_type || null,
     contact_designation: row.contact_designation || "",
-    services_requested: row.services_requested ? String(row.services_requested).split(",") : [],
+    services_requested: row.services_requested ? String(row.services_requested).split(",").filter(Boolean) : [],
+    // Their names from the Quotation Master (cache warmed for every request - see router.use below).
+    services_requested_names: row.services_requested ? quoteServiceNames(String(row.services_requested).split(",")) : [],
     latitude: row.latitude === null || row.latitude === undefined ? null : Number(row.latitude),
     longitude: row.longitude === null || row.longitude === undefined ? null : Number(row.longitude),
     phone: row.phone,
@@ -428,7 +434,6 @@ async function readCommercialFields(body, lead) {
   const leadSource = body.lead_source || null;
   const industryType = body.industry_type || null;
   const designation = typeof body.contact_designation === "string" ? body.contact_designation.trim() : "";
-  const services = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
   const hasPoint = body.latitude !== null && body.latitude !== undefined && body.latitude !== "" &&
     body.longitude !== null && body.longitude !== undefined && body.longitude !== "";
   const latitude = hasPoint ? Number(body.latitude) : null;
@@ -438,7 +443,8 @@ async function readCommercialFields(body, lead) {
   if (companyName.length > 150) return { error: "Company / business name is too long (max 150)" };
   if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) return { error: "Invalid industry type" };
   if (designation.length > 100) return { error: "Designation is too long (max 100)" };
-  if (services.some((service) => !COMMERCIAL_SERVICES.includes(service))) return { error: "Invalid service requested" };
+  const picked = await resolveLeadServices(pool, body.services_requested);
+  if (picked.error) return { error: picked.error };
   if (lead.referenceBy.length > 100) return { error: "Reference name is too long (max 100)" };
   if (hasPoint && (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180)) {
     return { error: "Invalid location" };
@@ -463,7 +469,7 @@ async function readCommercialFields(body, lead) {
   if (!LEAD_STATUSES.includes(lead.leadStatus)) return { error: "Invalid lead status" };
 
   return {
-    values: { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude },
+    values: { companyName, alternatePhone, leadSource, industryType, designation, services: picked.ids, latitude, longitude },
   };
 }
 

@@ -225,7 +225,26 @@ function ClausePicker({ title, clauses, checked, onToggle, extra, onExtra }) {
   );
 }
 
+// A service as it starts on the quotation: its treatment rows from the master, on the cheapest
+// monthly plan the price chart offers (else the first priced plan), every row on that plan.
+function startPick(service, plans, perService) {
+  const priced = plans.filter((p) => service.prices.some((x) => x.plan_id === p.id));
+  const first = priced.find((p) => p.billing === "MONTHLY") || priced[0];
+  const price = first ? service.prices.find((x) => x.plan_id === first.id)?.price : undefined;
+  const frequency = perService ? first?.name || "" : "";
+  return {
+    planId: first?.id || "",
+    price: price !== undefined ? String(price) : "",
+    rows: service.treatments.length
+      ? service.treatments.map((t) => ({ defense_area: t.defense_area, material_used: t.material_used, treatment_area: t.treatment_area, frequency: frequency || t.frequency }))
+      : [{ ...BLANK_ROW, frequency }],
+    open: false,
+  };
+}
+
 export default function QuotationBuilder({ lead, onClose }) {
+  // The services the customer asked for on the lead (Quotation Master ids) - ticked to start with.
+  const [leadServices] = useState(() => lead.services || []);
   const toast = useToast();
   const [master, setMaster] = useState(null);
   const [loadError, setLoadError] = useState("");
@@ -254,12 +273,17 @@ export default function QuotationBuilder({ lead, onClose }) {
       .then((m) => {
         if (!alive) return;
         setMaster(m);
+        const asked = leadServices.map((id) => m.services.find((s) => s.id === id)).filter(Boolean);
+        if (asked.length) {
+          setPicks(Object.fromEntries(asked.map((s) => [s.id, startPick(s, m.plans, true)])));
+          setOrder(asked.map((s) => s.id));
+        }
       })
       .catch((err) => alive && setLoadError(err.message || "Could not load the quotation master."));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [leadServices]);
   useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl]);
 
   const serviceById = useMemo(() => new Map((master?.services || []).map((s) => [s.id, s])), [master]);
@@ -298,22 +322,7 @@ export default function QuotationBuilder({ lead, onClose }) {
       removeService(service.id);
       return;
     }
-    // Start on the cheapest monthly plan the chart offers, else the first priced plan.
-    const priced = master.plans.filter((p) => service.prices.some((x) => x.plan_id === p.id));
-    const first = priced.find((p) => p.billing === "MONTHLY") || priced[0];
-    const price = first ? service.prices.find((x) => x.plan_id === first.id)?.price : undefined;
-    const frequency = mode === "PER_SERVICE" ? first?.name || "" : "";
-    setPicks((all) => ({
-      ...all,
-      [service.id]: {
-        planId: first?.id || "",
-        price: price !== undefined ? String(price) : "",
-        rows: service.treatments.length
-          ? service.treatments.map((t) => ({ defense_area: t.defense_area, material_used: t.material_used, treatment_area: t.treatment_area, frequency: frequency || t.frequency }))
-          : [{ ...BLANK_ROW, frequency }],
-        open: false,
-      },
-    }));
+    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, mode === "PER_SERVICE") }));
     setOrder((o) => [...o, service.id]);
   }
   function removeService(id) {

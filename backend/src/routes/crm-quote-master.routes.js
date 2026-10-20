@@ -3,7 +3,7 @@ const router = express.Router();
 const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
-const { uuid, hasPerm } = require("../utils/crmLeadManagement");
+const { uuid, hasPerm, forgetQuoteServices } = require("../utils/crmLeadManagement");
 
 // ---------------------------------------------------------------------------
 // Quotation master (crm_quote_*): the services a commercial quotation offers,
@@ -151,6 +151,7 @@ router.post("/quote-services", auth, async (req, res) => {
       "INSERT INTO crm_quote_services (id, name, description, sort_order, is_active) VALUES (?, ?, ?, ?, 1)",
       [id, name, description, order]
     );
+    forgetQuoteServices(); // lead forms and lead pages pick up the new service
     res.status(201).json({ id, name, description, sort_order: order, is_active: true, treatments: [], prices: [] });
   } catch (err) {
     sendError(res, err, "Failed to add the service");
@@ -173,6 +174,7 @@ router.patch("/quote-services/:id", auth, async (req, res) => {
       "UPDATE crm_quote_services SET name = ?, description = ?, sort_order = ?, is_active = ? WHERE id = ?",
       [next.name, next.description, next.sort_order, next.is_active, service.id]
     );
+    forgetQuoteServices();
     res.json(toService({ ...service, ...next }));
   } catch (err) {
     sendError(res, err, "Failed to update the service");

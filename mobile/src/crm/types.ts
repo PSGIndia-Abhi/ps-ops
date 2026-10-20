@@ -1,21 +1,19 @@
 export type PaymentMethod = 'cash' | 'online' | 'other';
 export type PaymentStatus = 'paid' | 'pending';
 export type LeadStatus = 'new' | 'contacted' | 'converted' | 'lost';
-export type LeadSource = 'website' | 'apartment' | 'referral' | 'social_media' | 'google' | 'other';
+/**
+ * Residential leads: one of LEAD_SOURCES' codes. Commercial leads: a name from the lead source
+ * master (crm_lead_sources - see crm/leadSources.ts); older ones may hold an old code.
+ */
+export type LeadSource = string;
 /**
  * Consumer (shown to users as "Residential") = a household service with a payment.
  * Commercial = a business enquiry with a quote and photos, no payment.
  */
 export type LeadType = 'consumer' | 'commercial';
 export type IndustryType = 'restaurant' | 'apartment' | 'hospital' | 'it' | 'qsr' | 'builder' | 'other';
-export type CommercialService =
-  | 'gpc'
-  | 'rodent_control'
-  | 'cockroach_control'
-  | 'ant_treatment'
-  | 'honeybee_control'
-  | 'snake_control'
-  | 'fly_control';
+/** A Quotation Master service id (crm_quote_services) - see crm/quoteServices.ts. */
+export type CommercialService = string;
 
 /** A photo picked on this phone that has not reached the server yet. */
 export interface LocalLeadPhoto {
@@ -50,6 +48,8 @@ export interface Lead {
   alternatePhone?: string;
   /** Commercial only: one or more services the business asked about. */
   servicesRequested?: CommercialService[];
+  /** The services' names from the Quotation Master (sent by the server with the lead). */
+  serviceNames?: string[];
   /** Commercial only: where the lead was taken. */
   latitude?: number | null;
   longitude?: number | null;
@@ -110,14 +110,6 @@ export const LEAD_SOURCES: Option<LeadSource>[] = [
   { value: 'other', label: 'Other' },
 ];
 
-export const COMMERCIAL_LEAD_SOURCES: Option<LeadSource>[] = [
-  { value: 'google', label: 'Google' },
-  { value: 'website', label: 'Website' },
-  { value: 'referral', label: 'Referral' },
-  { value: 'social_media', label: 'Social Media' },
-  { value: 'other', label: 'Other' },
-];
-
 export const INDUSTRY_TYPES: Option<IndustryType>[] = [
   { value: 'restaurant', label: 'Restaurant' },
   { value: 'apartment', label: 'Apartment' },
@@ -127,23 +119,6 @@ export const INDUSTRY_TYPES: Option<IndustryType>[] = [
   { value: 'builder', label: 'Builder' },
   { value: 'other', label: 'Other' },
 ];
-
-export const COMMERCIAL_SERVICES: Option<CommercialService>[] = [
-  { value: 'gpc', label: 'GPC' },
-  { value: 'rodent_control', label: 'Rodent Control' },
-  { value: 'cockroach_control', label: 'Cockroach Control' },
-  { value: 'ant_treatment', label: 'Ant Treatment' },
-  { value: 'honeybee_control', label: 'Honeybee Control' },
-  { value: 'snake_control', label: 'Snake Control' },
-  { value: 'fly_control', label: 'Fly Control' },
-];
-
-/** "GPC, Rodent Control" - the chosen services in the order the form lists them. */
-export function servicesLabel(services: CommercialService[] | undefined): string {
-  return COMMERCIAL_SERVICES.filter(s => (services ?? []).includes(s.value))
-    .map(s => s.label)
-    .join(', ');
-}
 
 export const LEAD_TYPES: Option<LeadType>[] = [
   { value: 'consumer', label: 'Residential' },
