@@ -36,3 +36,7 @@ playwright-report/
 
 # service account keys
 backend/src/secrets/
+
+# Android release builds - keep them outside git (share via GitHub Releases / Drive)
+*.apk
+*.aab
