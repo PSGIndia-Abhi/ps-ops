@@ -2,6 +2,7 @@ const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { redis } = require("../utils/redis");
 const { createVisit } = require("../services/Visit.service");
+const { isBrigadeJob, getVisitPhotoCounts, MIN_VISIT_PHOTOS } = require("../services/brigade.service");
 const {
   notifyVisitCreated,
   notifyVisitTechniciansUpdated,
@@ -820,6 +821,24 @@ async function submitVisit(req, res) {
   const actorUserId = req.user?.id;
 
   try {
+
+    // Brigade jobs only: End Visit needs the before and after work photos.
+    const [[visitRow]] = await pool.query(
+      `SELECT job_id FROM job_visits WHERE id = ?`,
+      [visitId]
+    );
+    if (visitRow && (await isBrigadeJob(pool, visitRow.job_id))) {
+      const counts = await getVisitPhotoCounts(pool, visitId);
+      if (counts.before < MIN_VISIT_PHOTOS || counts.after < MIN_VISIT_PHOTOS) {
+        return res.status(400).json({
+          error: `Please upload at least ${MIN_VISIT_PHOTOS} before and ${MIN_VISIT_PHOTOS} after work photos before ending the visit`,
+          code: "PHOTOS_REQUIRED",
+          required: MIN_VISIT_PHOTOS,
+          before: counts.before,
+          after: counts.after,
+        });
+      }
+    }
 
     await pool.query(
       `UPDATE job_visits

@@ -81,6 +81,9 @@ import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import TasksPage from "./pages/TasksPage";
+// Brigade Executive module — see pages/brigade/
+import BrigadeLayout from "./pages/brigade/BrigadeLayout";
+import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -140,6 +143,30 @@ const router = createBrowserRouter([
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "tracking/history/:technicianId", element: <TrackingHistory /> },
+      { path: "brigade-masters", element: <BrigadeMasters /> },
+    ],
+  },
+
+  // -------------------------
+  // BRIGADE EXECUTIVE (protected) — Brigade Group only (scoped by the backend)
+  // -------------------------
+  {
+    path: "/brigade",
+    element: (
+      <ProtectedRoute allowedRoles={["brigade_executive"]}>
+        <BrigadeLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      // Same dashboard as admin; the backend limits jobs to Brigade Group.
+      { index: true, element: <AdminDashboard /> },
+      { path: "companies", element: <AdminCompanies /> },
+      { path: "group-management", element: <AdminGroupManagement /> },
+      { path: "contacts", element: <ContactsPage /> },
+      { path: "contacts/:contactId", element: <ContactsPage /> },
+      { path: "masters", element: <BrigadeMasters /> },
+      { path: "jobs/:jobId", element: <JobPage /> },
+      { path: "profile", element: <ProfilePage /> },
     ],
   },
 

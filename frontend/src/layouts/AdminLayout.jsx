@@ -256,6 +256,15 @@ export default function AdminLayout() {
                 Tasks
               </button>
 
+              {role === "admin" && (
+                <button
+                  className={`nav-btn ${isActive("/admin/brigade-masters") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/brigade-masters")}
+                >
+                  Brigade Masters
+                </button>
+              )}
+
               {/* Lead Management is its own area (pages/leads); admin can look at every dashboard there. */}
               {role === "admin" && (
                 <button className="nav-btn" onClick={() => navigate("/leads")}>
@@ -388,6 +397,17 @@ export default function AdminLayout() {
           >
             Tasks
           </button>
+
+          {role === "admin" && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/brigade-masters");
+              }}
+            >
+              Brigade Masters
+            </button>
+          )}
 
           <button
             onClick={() => {

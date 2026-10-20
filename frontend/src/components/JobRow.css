@@ -693,3 +693,147 @@
   max-height:90%;
   border-radius:8px;
 }
+
+
+/* =========================================================
+   JOB DETAILS (expanded dashboard card) — REFRESH, design only
+   ========================================================= */
+
+.job-details-card {
+  margin-top: 6px;
+  padding: 18px 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.job-details-header {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.job-details-code {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.job-details-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.job-details-badges {
+  gap: 8px;
+}
+
+.job-details-tag {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+.job-details-layout {
+  gap: 14px;
+}
+
+.job-details-tiles {
+  gap: 10px;
+}
+
+.job-details-tile,
+.job-details-side-card {
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: none;
+}
+
+.job-details-tile-top,
+.job-details-side-title {
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.job-details-icon-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.job-details-icon-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.job-details-tile-label,
+.job-details-side-title {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.job-details-tile-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+/* "Requested by" as a link, not an input-looking box */
+.job-details-requester {
+  display: inline;
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0369a1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-details-requester:hover {
+  text-decoration: underline;
+}
+
+.job-details-visit-service {
+  font-size: 14px;
+}
+
+.job-details-visit-datetime,
+.job-details-update {
+  font-size: 14px;
+}
+
+/* compact action buttons, side by side */
+.job-details-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.job-details-actions .job-action-btn.primary,
+.job-details-actions .job-action-btn.danger {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  box-shadow: none;
+}
+
+.job-details-actions .job-action-btn.primary:hover {
+  background: #0369a1;
+}
+
+
+.job-details-inline-badge.scheduled {
+  background: #e0f2fe;
+  color: #075985;
+}

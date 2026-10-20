@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveGroupTable } = require("../utils/groupTable");
+const { isBrigadeExecutive, getBrigadeGroupId, isBrigadeCompany, isBrigadeSite } = require("../services/brigade.service");
 
 function siteDetailQuery(groupRef) {
   return `
@@ -43,8 +44,10 @@ function siteDetailQuery(groupRef) {
 }
 
 // Non-admins may only see/edit/delete sites in their own branch.
+// A Brigade Executive may only see/edit/delete Brigade Group sites (any branch).
 async function assertSiteInScope(req, site) {
   if (req.user.role === "admin") return true;
+  if (isBrigadeExecutive(req.user)) return isBrigadeSite(pool, site.id);
   const [[me]] = await pool.query("SELECT branch_id FROM users WHERE id = ?", [req.user.id]);
   return Boolean(me?.branch_id) && String(site.branch_id || "") === String(me.branch_id);
 }
@@ -99,8 +102,14 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
       params.push(company_id);
     }
 
-    // 🔥 NEW: branch filter
-    if (req.user.role !== "admin") {
+    if (isBrigadeExecutive(req.user)) {
+      // Brigade Executive: every Brigade Group site, regardless of branch.
+      const brigadeGroupId = await getBrigadeGroupId(pool);
+      if (!brigadeGroupId) return res.json([]);
+      sql += " AND co.group_id = ?";
+      params.push(brigadeGroupId);
+    } else if (req.user.role !== "admin") {
+      // 🔥 NEW: branch filter
       const [[me]] = await pool.query(
         "SELECT branch_id FROM users WHERE id = ?",
         [req.user.id]
@@ -175,6 +184,9 @@ const trimmedCountry =
       [company_id]
     );
     if (!company) {
+      return res.status(400).json({ error: "Invalid company" });
+    }
+    if (isBrigadeExecutive(req.user) && !(await isBrigadeCompany(pool, company_id))) {
       return res.status(400).json({ error: "Invalid company" });
     }
 
@@ -339,6 +351,9 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
 
     const [[company]] = await pool.query("SELECT id FROM companies WHERE id = ?", [company_id]);
     if (!company) {
+      return res.status(400).json({ error: "Invalid company" });
+    }
+    if (isBrigadeExecutive(req.user) && !(await isBrigadeCompany(pool, company_id))) {
       return res.status(400).json({ error: "Invalid company" });
     }
 
