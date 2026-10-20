@@ -489,7 +489,7 @@ async function createCommercialLead(req, res, lead) {
       return res.status(403).json({ error: "You cannot assign leads" });
     }
     try {
-      assignee = await findLeadAssignee(pool, req.body.assign_to);
+      assignee = await findLeadAssignee(pool, req.body.assign_to, req.user.id);
     } catch (err) {
       console.error("CRM lead assignee lookup error:", err);
       return res.status(500).json({ error: "Failed to save lead" });

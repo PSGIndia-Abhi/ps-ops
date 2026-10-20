@@ -316,7 +316,7 @@ router.post("/leads/:id/assign", auth, requirePermission("CRM_VIEW_LEAD"), async
   try {
     if (!canAssignLeads(req)) throw new HttpError(403, "You cannot assign leads");
     const lead = await loadVisibleLead(req, req.params.id);
-    const assignee = await findLeadAssignee(pool, req.body?.user_id);
+    const assignee = await findLeadAssignee(pool, req.body?.user_id, req.user.id);
     if (!assignee) throw new HttpError(400, "Choose who to assign this lead to");
     const plan = assignmentFor(lead, assignee);
     if (plan.error) throw new HttpError(400, plan.error);

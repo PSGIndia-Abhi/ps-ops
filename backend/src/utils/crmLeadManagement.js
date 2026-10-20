@@ -127,16 +127,22 @@ const UNVERIFIED_STAGES = ["NEW", "TO_CALL", "NEED_MORE_INFO"];
 const LEAD_ASSIGNEE_ROLES = ["Sales Executive", "sales_manager"];
 const CLOSED_STAGES = ["WON", "CONVERTED", "NOT_GENUINE", "LOST", "CANCELLED"];
 
-/** An active user who works leads (CRM_VIEW_LEAD), with their role - or null. */
-async function findLeadAssignee(executor, userId) {
+/**
+ * An active user who works leads (CRM_VIEW_LEAD), with their role - or null.
+ * `selfId` = the person assigning: they may always take a lead themselves, whatever their role
+ * (e.g. a Managing Director / Personal Assistant working as a sales manager), without appearing in
+ * anyone else's list of assignees.
+ */
+async function findLeadAssignee(executor, userId, selfId = null) {
   const id = Number(userId);
   if (!Number.isInteger(id) || id <= 0) return null;
+  const self = selfId !== null && Number(selfId) === id;
   const [[user]] = await executor.query(
     `SELECT DISTINCT u.id, u.name, r.name AS role
        FROM users u JOIN roles r ON r.id = u.role_id
        JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id
-      WHERE u.id = ? AND u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name IN (?)`,
-    [id, LEAD_ASSIGNEE_ROLES]
+      WHERE u.id = ? AND u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD'${self ? "" : " AND r.name IN (?)"}`,
+    self ? [id] : [id, LEAD_ASSIGNEE_ROLES]
   );
   return user || null;
 }
