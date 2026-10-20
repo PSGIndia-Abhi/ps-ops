@@ -50,6 +50,7 @@ const crmLeadProviderRoutes = require("./src/routes/crm-lead-provider.routes");
 const crmLeadReportsRoutes = require("./src/routes/crm-lead-reports.routes");
 const crmLeadMobileRoutes = require("./src/routes/crm-lead-mobile.routes");
 const crmLeadWorkspaceRoutes = require("./src/routes/crm-lead-workspace.routes");
+const crmQuoteMasterRoutes = require("./src/routes/crm-quote-master.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
@@ -121,6 +122,7 @@ app.use("/api/crm", crmLeadProviderRoutes);
 app.use("/api/crm", crmLeadReportsRoutes);
 app.use("/api/crm", crmLeadMobileRoutes);
 app.use("/api/crm", crmLeadWorkspaceRoutes);
+app.use("/api/crm", crmQuoteMasterRoutes);
 app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);

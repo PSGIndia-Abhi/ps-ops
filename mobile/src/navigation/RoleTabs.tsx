@@ -40,31 +40,33 @@ export function RoleTabs() {
   const rawRole = useRawRole();
 
   // Which apps this person has, and the one they open in:
-  //  - Managing Director / Personal Assistant: Task Management, can switch to Sales;
+  //  - Managing Director / Personal Assistant: Task Management, can switch to Commercial and
+  //    Residential Leads, where they work as a sales manager (the old Sales app is no longer used);
   //  - lead roles (telecaller, commercial sales, sales manager): Lead Management, can switch to
   //    Task Management - same as the web, where their follow-ups and visits are tasks too;
   //  - accountant: Payment Reminders (the web's Accountant Panel), can switch to Task Management;
   //  - other org-hierarchy roles: Task Management only.
   const leadPersona = leadPersonaForRole(rawRole);
-  const leadRole = !!leadPersona;
+  const salesSwitch = canSwitchToSales(rawRole);
+  const leadRole = !!leadPersona && !salesSwitch;
   // A Sales Executive / Sales Manager also works residential leads, in their own app.
   const residentialToo = leadPersona === 'sales' || leadPersona === 'sales_manager';
   const accountant = isAccountantRole(rawRole);
   const taskRole = isTaskRole(rawRole);
   const apps = useMemo<AppKind[]>(
     () =>
-      leadRole
+      salesSwitch
+        ? ['tasks', 'leads', 'residential']
+        : leadRole
         ? residentialToo
           ? ['leads', 'residential', 'tasks']
           : ['leads', 'tasks']
         : accountant
         ? ['reminders', 'tasks']
         : taskRole
-        ? canSwitchToSales(rawRole)
-          ? ['tasks', 'sales']
-          : ['tasks']
+        ? ['tasks']
         : [],
-    [leadRole, residentialToo, accountant, taskRole, rawRole],
+    [salesSwitch, leadRole, residentialToo, accountant, taskRole],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);

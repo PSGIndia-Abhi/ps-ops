@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { httpClient } from '../../api/httpClient';
 import { ChevronRightIcon, PinIcon, UsersIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
@@ -137,16 +136,12 @@ export function PerformanceScreen() {
  * anyone below the manager in the org hierarchy (which is what brings in
  * telecallers). The server still decides whose numbers may actually be read.
  */
+// The sales team only (Sales Executives and sales managers) - not the whole Task Management
+// hierarchy, which for a Managing Director / Personal Assistant is everyone in the company.
 async function loadTeam(myId: number): Promise<Person[]> {
-  const [sales, team] = await Promise.all([
-    api.salesEmployees().catch(() => [] as Person[]),
-    httpClient
-      .get<{ members: Person[] }>('/api/users/me/team')
-      .then((r) => r.data.members ?? [])
-      .catch(() => [] as Person[]),
-  ]);
+  const sales = await api.salesEmployees().catch(() => [] as Person[]);
   const byId = new Map<number, Person>();
-  for (const p of [...sales, ...team]) {
+  for (const p of sales) {
     const id = Number(p.id);
     if (id !== myId && !byId.has(id)) byId.set(id, { id, name: p.name, role: p.role });
   }
@@ -230,7 +225,7 @@ export function TeamScreen() {
                   <Text style={styles.personName} numberOfLines={1}>
                     {item.name}
                   </Text>
-                  {!!item.role && <Text style={styles.personRole}>{item.role.replace(/_/g, ' ')}</Text>}
+                  {!!item.role && <Text style={styles.personRole}>{api.roleName(item.role)}</Text>}
                   {item.target?.target ? (
                     <>
                       <Text style={styles.targetLine}>

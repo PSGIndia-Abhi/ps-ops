@@ -35,6 +35,8 @@ export type LeadStackParamList = {
   LeadConvert: { leadId: string; name: string };
   /** `amount` pre-fills the total with the lead's approximate quote. */
   LeadQuote: { leadId: string; name: string; amount: number };
+  /** Build a quotation from the quotation master (services, plans, prices, terms) - the PDF is made by the server. */
+  LeadQuoteBuild: { leadId: string; name: string };
   LeadFeedback: { leadId: string; name: string };
   LeadMeetings: undefined;
   LeadMeeting: { meetingId: string };
@@ -74,4 +76,6 @@ export type LeadRootStackParamList = {
   /** The residential lead's details and its edit form - the CRM's own screens. */
   CrmLeadDetail: { leadId: string };
   CrmNewLead: { editLeadId?: string } | undefined;
+  /** Edit a commercial lead's details (allowed until it is converted to a customer). */
+  CrmNewCommercialLead: { editLeadId?: string } | undefined;
 } & LeadStackParamList;

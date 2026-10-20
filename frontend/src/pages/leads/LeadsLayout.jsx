@@ -30,7 +30,7 @@ import {
 } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import { roleBasePath } from "../../auth/roleBasePath";
-import { LEAD_ROLES, TASKPRO_HOME } from "../taskpro/access";
+import { LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "../taskpro/access";
 import { LEADS_HOME, PERSONAS, resolvePersona, roleIsPersona } from "./access";
 import { getNotifications, loadWorkspace, markNotificationRead, markNotificationsRead, resetWorkspace, useLeadData } from "./leadsApi";
 import { isPast, isToday } from "./format";
@@ -122,6 +122,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar /> },
         { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
+        { to: `${LEADS_HOME}/quote-master`, label: "Quotation Master", icon: <FiFileText /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
   }
@@ -296,7 +297,7 @@ export default function LeadsLayout() {
   const nav = [
     ...(residential ? residentialNav() : navFor(persona, counts)),
     ...(persona !== "lead_provider" ? [{ to: `${LEADS_HOME}/reminders`, label: "Reminders", icon: <FiBell /> }] : []),
-    ...(LEAD_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : []),
+    ...(LEAD_ROLES.includes(role) || LEAD_MANAGER_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : []),
   ];
 
   return (

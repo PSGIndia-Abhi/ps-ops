@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -67,7 +67,7 @@ import {
   type CommercialLeadFormValues,
 } from '../validation';
 import { ContactPickerSheet } from '../ui/ContactPickerSheet';
-import { CheckIcon, RupeeIcon } from '../ui/crmIcons';
+import { CheckIcon, ChevronDownIcon, RupeeIcon } from '../ui/crmIcons';
 import { CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
 import { CrmTextField } from '../ui/CrmTextField';
 import { SectionHeader } from '../ui/LeadFormParts';
@@ -145,7 +145,13 @@ const factory = (t: CrmTheme) => ({
     marginTop: spacing.sm,
   },
   addressWrap: { marginTop: spacing.md },
-  competitorHint: { ...typography.caption, color: t.textMuted, marginBottom: spacing.sm },
+  competitorHint: { ...typography.caption, color: t.textMuted, marginTop: spacing.md, marginBottom: spacing.sm },
+  collapseHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  collapseIcon: { width: 36, height: 36, borderRadius: radii.md, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  collapseText: { flex: 1, minWidth: 0 },
+  collapseTitle: { ...typography.subtitle, color: t.textPrimary },
+  collapseSub: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  chevronOpen: { transform: [{ rotate: '180deg' }] },
   dateField: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -175,25 +181,31 @@ const factory = (t: CrmTheme) => ({
   addressButtonPressed: { opacity: 0.8 },
   addressButtonText: { ...typography.captionMedium, color: t.primary },
 
+  // A two-column grid of equal tiles with a tick circle - the same as the quotation form.
   chips: {
     flexDirection: 'row' as const,
     flexWrap: 'wrap' as const,
-    gap: spacing.xs,
+    justifyContent: 'space-between' as const,
+    rowGap: spacing.sm,
   },
   chip: {
+    width: '48.5%' as const,
+    height: 56, // every tile the same size, whether the name takes one line or two
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 6,
-    minHeight: 40,
+    gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1.5,
+    borderRadius: radii.lg,
+    borderWidth: 1,
     borderColor: t.border,
     backgroundColor: t.surface,
   },
-  chipOn: { borderColor: t.primary, backgroundColor: t.primary },
-  chipText: { ...typography.captionMedium, color: t.textSecondary },
-  chipTextOn: { color: t.textOnPrimary },
+  chipOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  chipPressed: { opacity: 0.7 },
+  tick: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
+  tickOn: { backgroundColor: t.primary, borderColor: t.primary },
+  chipText: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
+  chipTextOn: { color: t.primary },
   chipsWrap: { marginBottom: spacing.md },
 
   reviewIntro: {
@@ -247,6 +259,18 @@ const INITIAL_VALUES: CommercialLeadFormValues = {
 
 type Step = 'details' | 'review';
 
+/**
+ * A stored source as this form's choice: the web saves the name ("Google", "Social Media"), the
+ * app the code ("google"). A source the form has no button for (e.g. "Lead Provider") is kept as is.
+ */
+function sourceChoice(stored: string | null | undefined): string | null {
+  const raw = (stored ?? '').trim();
+  if (!raw) return null;
+  const key = raw.toLowerCase();
+  const hit = COMMERCIAL_LEAD_SOURCES.find(o => o.value === key || o.label.toLowerCase() === key || o.value === key.replace(/\s+/g, '_'));
+  return hit ? hit.value : raw;
+}
+
 /** The form's values for a lead that is being edited. */
 function valuesOf(lead: Lead): CommercialLeadFormValues {
   return {
@@ -258,10 +282,10 @@ function valuesOf(lead: Lead): CommercialLeadFormValues {
     phone: lead.phone,
     alternatePhone: lead.alternatePhone ?? '',
     email: lead.email ?? '',
-    source: lead.source,
+    source: sourceChoice(lead.source) as LeadSource | null,
     referenceBy: lead.referenceBy ?? '',
     services: lead.servicesRequested ?? [],
-    amount: lead.amount > 0 ? String(Math.round(lead.amount)) : '',
+    amount: Number.isFinite(lead.amount) && lead.amount >= 0 ? String(Math.round(lead.amount)) : '',
     notes: lead.notes ?? '',
   };
 }
@@ -375,6 +399,14 @@ export function CrmNewCommercialLeadScreen({
   const [step, setStep] = useState<Step>('details');
   const [values, setValues] = useState<CommercialLeadFormValues>(initialValues);
   const latest = useRef<CommercialLeadFormValues>(initialValues);
+  // The app's sources, plus the lead's own when it came from elsewhere (e.g. "Lead Provider").
+  const sourceOptions = useMemo(
+    () =>
+      values.source && !COMMERCIAL_LEAD_SOURCES.some(o => o.value === values.source)
+        ? [...COMMERCIAL_LEAD_SOURCES, { value: values.source as LeadSource, label: String(values.source) }]
+        : COMMERCIAL_LEAD_SOURCES,
+    [values.source],
+  );
   latest.current = values;
   const [errors, setErrors] = useState<CommercialLeadFormErrors>({});
   const [leadStatus, setLeadStatus] = useState<LeadStatus>(editLead?.leadStatus ?? 'new');
@@ -411,6 +443,9 @@ export function CrmNewCommercialLeadScreen({
   const setCompetitorField = (key: 'name' | 'amount' | 'notes', value: string) =>
     setCompetitor(prev => ({ ...prev, [key]: key === 'amount' ? value.replace(/\D/g, '').slice(0, 9) : value }));
   const hasCompetitor = !!(competitor.name.trim() || competitor.amount || competitor.contractEnd || competitor.notes.trim());
+  // The Competitor block folds away: closed on a new lead, open when editing one that already has details.
+  const [competitorOpen, setCompetitorOpen] = useState(hasCompetitor);
+  const competitorSummary = [competitor.name.trim(), competitor.amount ? formatINR(Number(competitor.amount)) : ''].filter(Boolean).join('  ·  ');
 
   // Sales manager: who the new lead goes to - themselves unless they pick someone.
   const [people, setPeople] = useState<Person[]>([]);
@@ -784,7 +819,7 @@ export function CrmNewCommercialLeadScreen({
               <ReviewRow
                 first
                 label="Source of Lead"
-                value={optionLabel(COMMERCIAL_LEAD_SOURCES, values.source as LeadSource)}
+                value={optionLabel(sourceOptions, values.source as LeadSource)}
               />
               <ReviewRow label="Referred By" value={values.referenceBy.trim()} />
               <ReviewRow
@@ -1040,7 +1075,7 @@ export function CrmNewCommercialLeadScreen({
                 sheetTitle="Source of Lead"
                 icon={<ExternalLinkIcon size={18} color={theme.textMuted} />}
                 placeholder="Select source of lead"
-                options={COMMERCIAL_LEAD_SOURCES}
+                options={sourceOptions}
                 value={values.source as LeadSource | null}
                 onChange={value => setField('source', value)}
                 error={errors.source}
@@ -1081,10 +1116,12 @@ export function CrmNewCommercialLeadScreen({
                         accessibilityState={{ checked: on }}
                         accessibilityLabel={service.label}
                         testID={`commercial-service-${service.value}`}
-                        style={[styles.chip, on && styles.chipOn]}
+                        style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.chipPressed]}
                       >
-                        {on && <CheckIcon size={14} color={theme.textOnPrimary} />}
-                        <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                        <View style={[styles.tick, on && styles.tickOn]}>
+                          {on && <CheckIcon size={12} color={theme.textOnPrimary} />}
+                        </View>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={2}>
                           {service.label}
                         </Text>
                       </Pressable>
@@ -1123,10 +1160,30 @@ export function CrmNewCommercialLeadScreen({
             </View>
 
             <View style={styles.section}>
-              <SectionHeader
-                icon={<UsersIcon size={20} color={theme.primary} />}
-                title="Competitor (optional)"
-              />
+              <Pressable
+                onPress={() => setCompetitorOpen(o => !o)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: competitorOpen }}
+                style={({ pressed }) => [styles.collapseHead, pressed && styles.dateFieldPressed]}
+                testID="commercial-competitor-toggle"
+              >
+                <View style={styles.collapseIcon}>
+                  <UsersIcon size={18} color={theme.primary} />
+                </View>
+                <View style={styles.collapseText}>
+                  <Text style={styles.collapseTitle}>Competitor (optional)</Text>
+                  {!competitorOpen && (
+                    <Text style={styles.collapseSub} numberOfLines={1}>
+                      {competitorSummary || 'Tap to add the current service provider'}
+                    </Text>
+                  )}
+                </View>
+                <View style={competitorOpen ? styles.chevronOpen : undefined}>
+                  <ChevronDownIcon size={20} color={theme.textMuted} />
+                </View>
+              </Pressable>
+              {competitorOpen && (
+              <>
               <Text style={styles.competitorHint}>Who looks after the customer today? It helps price and time the offer.</Text>
               <CrmTextField
                 label="Current Service Provider"
@@ -1174,6 +1231,8 @@ export function CrmNewCommercialLeadScreen({
                 maxLength={500}
                 testID="commercial-competitor-notes"
               />
+              </>
+              )}
               <DateSheet
                 visible={contractSheet}
                 onClose={() => setContractSheet(false)}

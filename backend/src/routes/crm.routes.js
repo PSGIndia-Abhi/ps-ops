@@ -283,7 +283,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   const houseType = typeof body.house_type === "string" ? body.house_type.trim() : "";
   const serviceName = typeof body.service_name === "string" ? body.service_name.trim() : "";
   const planType = typeof body.plan_type === "string" ? body.plan_type.trim() : "";
-  const amount = Number(body.amount);
+  // An empty amount is missing (not 0); 0 itself is allowed.
+  const amount = body.amount === "" || body.amount === null || body.amount === undefined ? NaN : Number(body.amount);
   const couponCode = typeof body.coupon_code === "string" ? body.coupon_code.trim() : "";
   const location = typeof body.location === "string" ? body.location.trim() : "";
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
@@ -319,7 +320,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   if (!houseType) return res.status(400).json({ error: "House type is required" });
   if (!serviceName) return res.status(400).json({ error: "Service is required" });
   if (!planType) return res.status(400).json({ error: "Plan is required" });
-  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "A valid amount is required" });
+  // 0 is allowed (nothing to collect); negative or missing is not.
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: "A valid amount is required" });
   let coupon = null;
   if (couponCode) {
     coupon = findCoupon(couponCode);
@@ -454,7 +456,8 @@ async function readCommercialFields(body, lead) {
     }
     if (!master) return { error: "Source of lead is required" };
   }
-  if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
+  // 0 is allowed for an approximate quote; negative or missing is not.
+  if (!Number.isFinite(lead.amount) || lead.amount < 0 || lead.amount > 99999999) {
     return { error: "A valid approximate quote is required" };
   }
   if (!LEAD_STATUSES.includes(lead.leadStatus)) return { error: "Invalid lead status" };
@@ -627,7 +630,8 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
   const location = typeof body.location === "string" ? body.location.trim() : "";
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
   const referenceBy = typeof body.reference_by === "string" ? body.reference_by.trim() : "";
-  const amount = Number(body.amount);
+  // An empty amount is missing (not 0); 0 itself is allowed.
+  const amount = body.amount === "" || body.amount === null || body.amount === undefined ? NaN : Number(body.amount);
   const leadStatus = body.lead_status || "new";
 
   if (customerName.length < 2) return res.status(400).json({ error: "Customer name is required" });
@@ -643,6 +647,10 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
     if (!existing) return res.status(404).json({ error: "Lead not found" });
 
     if (existing.lead_type === "commercial") {
+      // A commercial lead can be edited (e.g. another number added) until it becomes a customer.
+      if (existing.lead_status === "converted" || ["WON", "CONVERTED"].includes(existing.pipeline_stage)) {
+        return res.status(400).json({ error: "A converted lead cannot be edited" });
+      }
       const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus });
       if (read.error) return res.status(400).json({ error: read.error });
       const v = read.values;
@@ -707,7 +715,7 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
         if (!houseType) return res.status(400).json({ error: "House type is required" });
         if (!serviceName) return res.status(400).json({ error: "Service is required" });
         if (!planType) return res.status(400).json({ error: "Plan is required" });
-        if (!Number.isFinite(newAmount) || newAmount <= 0) return res.status(400).json({ error: "A valid amount is required" });
+        if (!Number.isFinite(newAmount) || newAmount < 0) return res.status(400).json({ error: "A valid amount is required" });
         if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: "Invalid payment method" });
         if (!PAYMENT_STATUSES.includes(paymentStatus)) return res.status(400).json({ error: "Invalid payment status" });
         // Online payments are only "paid" once Razorpay confirms them.
@@ -991,6 +999,7 @@ router.post("/leads/:id/payment-order", auth, requirePermission("CRM_COLLECT_PAY
     if (lead.payment_status === "paid") return res.status(409).json({ error: "This lead is already paid" });
 
     const amountPaise = Math.round(Number(lead.amount) * 100);
+    if (amountPaise <= 0) return res.status(400).json({ error: "The amount is 0 - there is nothing to collect" });
     if (!Number.isFinite(amountPaise) || amountPaise < 100) {
       return res.status(400).json({ error: "The lead amount is too small for an online payment" });
     }

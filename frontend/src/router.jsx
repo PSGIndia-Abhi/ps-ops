@@ -73,6 +73,7 @@ import { ResidentialDashboard, ResidentialLeadPage, ResidentialNewLead } from ".
 import { FollowUps, LeadFollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
 import LeadsPerformance from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
+import QuoteMaster from "./pages/leads/QuoteMaster";
 import TeamVisits from "./pages/leads/TeamVisits";
 import LeadReminders from "./pages/leads/Reminders";
 import { LEADS_HOME, LEADS_ROLES } from "./pages/leads/access";
@@ -284,6 +285,7 @@ const router = createBrowserRouter([
       { path: "providers", element: <Providers /> },
       { path: "performance", element: <LeadsPerformance /> },
       { path: "sources", element: <LeadSources /> },
+      { path: "quote-master", element: <QuoteMaster /> },
       // Residential (home-service) leads: the sales executive's and sales manager's second area.
       {
         path: "residential",

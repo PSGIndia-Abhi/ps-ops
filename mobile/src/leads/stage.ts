@@ -121,6 +121,8 @@ export function leadPersonaForRole(role: string | null | undefined): LeadPersona
   if (r === 'telecaller') return 'telecaller';
   if (r === 'sales executive') return 'sales';
   if (r === 'sales_manager') return 'sales_manager';
+  // Managing Director / Personal Assistant work the Commercial and Residential apps as a sales manager.
+  if (r === 'managing director' || r === 'personal assistant') return 'sales_manager';
   return null;
 }
 

@@ -170,8 +170,8 @@ router.post("/provider/leads", auth, requireProvider, async (req, res) => {
     // crm_leads.amount is NOT NULL, and the internal create-lead path already
     // treats the quote amount as required -- matching that here, not silently
     // defaulting to 0.
-    const approxQuoteAmount = Number(body.approxQuoteAmount);
-    if (!Number.isFinite(approxQuoteAmount) || approxQuoteAmount <= 0 || approxQuoteAmount > 99999999) {
+    const approxQuoteAmount = body.approxQuoteAmount === "" || body.approxQuoteAmount === null || body.approxQuoteAmount === undefined ? NaN : Number(body.approxQuoteAmount);
+    if (!Number.isFinite(approxQuoteAmount) || approxQuoteAmount < 0 || approxQuoteAmount > 99999999) {
       throw new HttpError(400, "approxQuoteAmount is required and must be a valid positive number");
     }
 

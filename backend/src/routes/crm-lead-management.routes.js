@@ -6,6 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
+  INDUSTRY_TYPES, COMMERCIAL_SERVICES,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -203,14 +204,28 @@ router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
     }
     if (body.requirement !== undefined) next.notes = optionalText(body.requirement);
     if (body.approx_quote_amount !== undefined) {
-      const v = Number(body.approx_quote_amount);
-      if (!Number.isFinite(v) || v <= 0 || v > 99999999) throw new HttpError(400, "A valid approximate quote is required");
+      // 0 is allowed; an empty value is missing.
+      const v = body.approx_quote_amount === "" || body.approx_quote_amount === null ? NaN : Number(body.approx_quote_amount);
+      if (!Number.isFinite(v) || v < 0 || v > 99999999) throw new HttpError(400, "A valid approximate quote is required");
       next.amount = v;
     }
     if (body.lead_source_id !== undefined) {
       const [[source]] = await pool.query("SELECT id, name FROM crm_lead_sources WHERE id = ? AND is_active = 1", [body.lead_source_id]);
       if (!source) throw new HttpError(400, "Invalid lead_source_id");
       next.lead_source = source.name;
+    }
+
+    // Industry and services (optional): the same codes as the app's form.
+    let industryType = lead.industry_type ?? null;
+    if (body.industry_type !== undefined) {
+      industryType = body.industry_type || null;
+      if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) throw new HttpError(400, "Invalid industry type");
+    }
+    let services = lead.services_requested ?? null;
+    if (body.services_requested !== undefined) {
+      const list = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
+      if (list.some((s) => !COMMERCIAL_SERVICES.includes(s))) throw new HttpError(400, "Invalid service requested");
+      services = list.length ? list.join(",") : null;
     }
 
     const competitor = readCompetitor(body);
@@ -222,10 +237,10 @@ router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
       }
       const [upd] = await conn.query(
         `UPDATE crm_leads SET company_name=?, customer_name=?, phone=?, alternate_phone=?, customer_email=?,
-                location=?, notes=?, amount=?, lead_source=?, row_version = row_version + 1
+                location=?, notes=?, amount=?, lead_source=?, industry_type=?, services_requested=?, row_version = row_version + 1
          WHERE id = ? AND row_version = ?`,
         [next.company_name, next.customer_name, next.phone, next.alternate_phone, next.customer_email,
-         next.location, next.notes, next.amount, next.lead_source, lead.id, body.row_version]
+         next.location, next.notes, next.amount, next.lead_source, industryType, services, lead.id, body.row_version]
       );
       if (!upd.affectedRows) throw new HttpError(409, "This lead was changed by someone else. Reload and try again.");
       await logLeadHistory(conn, lead.id, "UPDATE", { changedBy: req.user.id });

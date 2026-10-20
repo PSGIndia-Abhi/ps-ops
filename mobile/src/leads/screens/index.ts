@@ -14,6 +14,7 @@ import {
   LeadResidentialConvertScreen,
 } from './LeadActionScreens';
 import { LeadListScreen } from './LeadBrowseScreens';
+import { LeadQuoteBuilderScreen } from './LeadQuoteBuilderScreen';
 import { LeadFollowUpHistoryScreen } from './LeadFollowUpHistoryScreen';
 import { LeadFollowUpsScreen } from './LeadFollowUpsScreen';
 import { LeadTasksScreen } from './LeadTodayScreen';
@@ -55,6 +56,7 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadClose', component: LeadCloseScreen, modal: true },
   { name: 'LeadConvert', component: LeadConvertScreen, modal: true },
   { name: 'LeadQuote', component: LeadQuoteScreen, modal: true },
+  { name: 'LeadQuoteBuild', component: LeadQuoteBuilderScreen, modal: true },
   { name: 'LeadFeedback', component: LeadFeedbackScreen, modal: true },
   { name: 'LeadMeetings', component: MeetingsScreen },
   { name: 'LeadMeeting', component: MeetingScreen },

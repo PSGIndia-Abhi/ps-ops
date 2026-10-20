@@ -14,6 +14,7 @@ import { LeadsProvider } from '../crm/LeadsContext';
 import { CrmLeadDetailScreen } from '../crm/screens/CrmLeadDetailScreen';
 import { CrmMoreScreen } from '../crm/screens/CrmMoreScreen';
 import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
+import { CrmNewCommercialLeadScreen } from '../crm/screens/CrmNewCommercialLeadScreen';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import type { LeadRootStackParamList, LeadTabParamList } from '../leads/navigation';
@@ -140,6 +141,7 @@ export function LeadsNavigator() {
         {/* Residential leads (sales executive / manager): the CRM's own details and edit screens. */}
         <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />
         <Stack.Screen name="CrmNewLead" component={CrmNewLeadScreen as React.ComponentType} options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="CrmNewCommercialLead" component={CrmNewCommercialLeadScreen as React.ComponentType} options={{ animation: 'slide_from_bottom' }} />
       </Stack.Navigator>
     </LeadsProvider>
   );

@@ -28,6 +28,7 @@ import { fmtDateShort, fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
+import { openPdf, savedQuotationPdf, saveToDownloads } from '../quotation';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
 import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
@@ -193,7 +194,7 @@ const ACTION_META: Record<LeadAction, { title: string; hint: string; tone: Tone;
   needInfo: { title: 'Need more info', hint: 'Keep it open and call again later', tone: 'warning', icon: (c) => <AlertCircleIcon size={20} color={c} /> },
   meeting: { title: 'Schedule meeting', hint: 'Pick the sales person and the time', tone: 'accent', icon: (c) => <CalendarIcon size={20} color={c} /> },
   followUp: { title: 'Follow-up', hint: 'Set a reminder to get back to them', tone: 'warning', icon: (c) => <ClockIcon size={20} color={c} /> },
-  quote: { title: 'Upload quotation', hint: 'Attach the quotation PDF and amount', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
+  quote: { title: 'Create quotation', hint: 'Pick services, plan and price - the PDF is made for you', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
   convert: { title: 'Convert to customer', hint: 'Creates the customer record', tone: 'success', icon: (c) => <UsersIcon size={20} color={c} /> },
   lost: { title: 'Mark as lost', hint: 'Close with a reason', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
   reject: { title: 'Reject lead', hint: 'Not genuine - a reason is required', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
@@ -325,7 +326,7 @@ export function LeadWorkScreen() {
       case 'followUp':
         return navigation.navigate('LeadFollowUp', { leadId: lead.id, name });
       case 'quote':
-        return navigation.navigate('LeadQuote', { leadId: lead.id, name, amount: lead.amount });
+        return navigation.navigate('LeadQuoteBuild', { leadId: lead.id, name });
       case 'convert':
         return navigation.navigate('LeadConvert', { leadId: lead.id, name });
       case 'lost':
@@ -338,6 +339,27 @@ export function LeadWorkScreen() {
   };
 
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
+
+  // A saved quotation's PDF: open it in the phone's PDF viewer, or save a copy to Downloads.
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const quotationPdf = (quotationId: string, number: string) => {
+    const run = async (work: (file: string) => Promise<void>) => {
+      setPdfBusy(quotationId);
+      setActionError(null);
+      try {
+        await work(await savedQuotationPdf(leadId, quotationId, number));
+      } catch (err) {
+        setActionError(errorMessage(err, 'Could not open the quotation PDF.'));
+      } finally {
+        setPdfBusy(null);
+      }
+    };
+    Alert.alert(number, 'What would you like to do with this quotation?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save to Downloads', onPress: () => run(async (f) => { await saveToDownloads(f); setNotice(`${number}.pdf saved in Downloads/BestServe.`); }) },
+      { text: 'Open PDF', onPress: () => run(openPdf) },
+    ]);
+  };
 
   const lead = data?.lead;
   const openMeeting = data?.openMeeting ?? null;
@@ -542,7 +564,14 @@ export function LeadWorkScreen() {
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>QUOTATIONS</Text>
                 {data.quotations.map((q, i) => (
-                  <View key={q.id} style={[styles.quoteItem, i > 0 && styles.quoteDivider]}>
+                  // A tap opens the PDF (with an option to save it to Downloads for WhatsApp / email).
+                  <Pressable
+                    key={q.id}
+                    disabled={!q.hasPdf || pdfBusy === q.id}
+                    onPress={() => quotationPdf(q.id, q.number)}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.quoteItem, i > 0 && styles.quoteDivider, pressed && { opacity: 0.7 }]}
+                  >
                     <View style={styles.quoteIcon}>
                       <DocumentIcon size={18} color={theme.accent} />
                     </View>
@@ -551,11 +580,11 @@ export function LeadWorkScreen() {
                       <Text style={styles.quoteMeta}>
                         {formatINR(q.total)}
                         {q.sentAt ? ` · ${formatLeadWhen(q.sentAt)}` : ''}
-                        {q.hasPdf ? ' · PDF' : ''}
+                        {q.hasPdf ? (pdfBusy === q.id ? ' · Opening...' : ' · Tap to open PDF') : ''}
                       </Text>
                     </View>
                     <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
-                  </View>
+                  </Pressable>
                 ))}
               </View>
             )}

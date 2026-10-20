@@ -194,7 +194,12 @@ const PIPELINE_STAGES = [
   "QUOTATION_SENT", "WON", "CONVERTED", "NEED_MORE_INFO", "NOT_GENUINE", "LOST", "CANCELLED",
 ];
 
+// A commercial lead's industry and services - the same codes as crm.routes.js (the app's form).
+const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
+const COMMERCIAL_SERVICES = ["gpc", "rodent_control", "cockroach_control", "ant_treatment", "honeybee_control", "snake_control", "fly_control"];
+
 module.exports = {
+  INDUSTRY_TYPES, COMMERCIAL_SERVICES,
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,

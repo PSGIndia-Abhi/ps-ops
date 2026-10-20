@@ -370,7 +370,7 @@ export function MeetingScreen() {
   const goNext = (next: VisitNext, lead: PipelineLead | null) => {
     if (!next || !lead) return;
     const base = { leadId: lead.id, name: lead.companyName };
-    if (next === 'quote') navigation.navigate('LeadQuote', { ...base, amount: lead.amount });
+    if (next === 'quote') navigation.navigate('LeadQuoteBuild', base);
     if (next === 'followUp') navigation.navigate('LeadFollowUp', base);
     if (next === 'convert') navigation.navigate('LeadConvert', base);
     if (next === 'lost') navigation.navigate('LeadClose', { ...base, mode: 'lost' });

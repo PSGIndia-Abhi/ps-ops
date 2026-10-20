@@ -10,6 +10,10 @@
 // are tasks), and get a link back to Lead Management in this sidebar.
 export const LEAD_ROLES = ["telecaller", "sales", "Sales Executive", "sales_manager"];
 
+// Task Management roles that also work in Lead Management (Commercial and Residential) as a sales
+// manager - they land in Task Management and open Lead Management from its sidebar.
+export const LEAD_MANAGER_ROLES = ["Managing Director", "Personal Assistant"];
+
 export const TASKPRO_ROLES = [
   ...LEAD_ROLES,
   // Deliberately NOT "admin" — admin manages the whole app from /admin and

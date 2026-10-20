@@ -131,6 +131,7 @@ const factory = (t: CrmTheme) => ({
   infoText: { flex: 1 },
   infoLabel: { ...typography.caption, color: t.textMuted },
   infoValue: { ...typography.bodyMedium, color: t.textPrimary, marginTop: 1 },
+  infoEmpty: { ...typography.body, color: t.textMuted, fontStyle: 'italic' as const },
   infoLink: { color: t.primary },
   notes: { ...typography.body, color: t.textSecondary, lineHeight: 22, paddingBottom: spacing.sm },
 });
@@ -141,6 +142,7 @@ function InfoRow({
   value,
   first,
   onPress,
+  empty,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -148,6 +150,8 @@ function InfoRow({
   first?: boolean;
   /** Makes the row tappable (e.g. to call the number it shows). */
   onPress?: () => void;
+  /** Nothing saved yet: the value reads "Not added", greyed. */
+  empty?: boolean;
 }) {
   const { styles } = useCrmStyles(factory);
   return (
@@ -160,7 +164,7 @@ function InfoRow({
       <View style={styles.infoIcon}>{icon}</View>
       <View style={styles.infoText}>
         <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={[styles.infoValue, !!onPress && styles.infoLink]}>{value}</Text>
+        <Text style={[styles.infoValue, !!onPress && styles.infoLink, empty && styles.infoEmpty]}>{empty ? 'Not added' : value}</Text>
       </View>
     </Pressable>
   );
@@ -250,7 +254,7 @@ export function CommercialLeadDetail({
       : open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.location)}`, 'No maps app found on this device.');
 
   // Only the fields this lead has, in the order a sales person needs them.
-  const rows: { key: string; icon: React.ReactNode; label: string; value: string; onPress?: () => void }[] = [
+  const rows: { key: string; icon: React.ReactNode; label: string; value: string; onPress?: () => void; empty?: boolean }[] = [
     { key: 'phone', icon: <PhoneIcon size={17} color={iconColor} />, label: 'Phone', value: lead.phone, onPress: () => call(lead.phone) },
     ...(lead.alternatePhone
       ? [{ key: 'alt', icon: <PhoneIcon size={17} color={iconColor} />, label: 'Alternate phone', value: lead.alternatePhone, onPress: () => call(lead.alternatePhone as string) }]
@@ -260,9 +264,10 @@ export function CommercialLeadDetail({
       ? [{ key: 'addr', icon: <PinIcon size={17} color={iconColor} />, label: 'Address', value: lead.location || 'Open in Maps', onPress: openMaps }]
       : []),
     ...(lead.designation ? [{ key: 'desig', icon: <PersonIcon size={17} color={iconColor} />, label: 'Designation', value: lead.designation }] : []),
-    ...(industry ? [{ key: 'industry', icon: <BriefcaseIcon size={17} color={iconColor} />, label: 'Industry', value: industry }] : []),
-    ...(services ? [{ key: 'services', icon: <BriefcaseIcon size={17} color={iconColor} />, label: 'Services', value: services }] : []),
-    ...(source ? [{ key: 'source', icon: <TagIcon size={17} color={iconColor} />, label: 'Source', value: source }] : []),
+    // Always shown - "Not added" when empty (e.g. a lead added on the web), so Edit can fill them in.
+    { key: 'industry', icon: <BriefcaseIcon size={17} color={iconColor} />, label: 'Industry', value: industry, empty: !industry },
+    { key: 'services', icon: <BriefcaseIcon size={17} color={iconColor} />, label: 'Services', value: services, empty: !services },
+    { key: 'source', icon: <TagIcon size={17} color={iconColor} />, label: 'Source', value: source, empty: !source },
     ...(lead.referenceBy ? [{ key: 'ref', icon: <UsersIcon size={17} color={iconColor} />, label: 'Referred by', value: lead.referenceBy }] : []),
     ...(lead.createdByName ? [{ key: 'by', icon: <PersonIcon size={17} color={iconColor} />, label: 'Added by', value: lead.createdByName }] : []),
     { key: 'when', icon: <ClockIcon size={17} color={iconColor} />, label: 'Added on', value: formatLeadWhen(lead.createdAt) },
@@ -386,7 +391,7 @@ export function CommercialLeadDetail({
           {detailsOpen && (
             <>
               {rows.map((r, i) => (
-                <InfoRow key={r.key} first={i === 0} icon={r.icon} label={r.label} value={r.value} onPress={r.onPress} />
+                <InfoRow key={r.key} first={i === 0} icon={r.icon} label={r.label} value={r.value} onPress={r.onPress} empty={r.empty} />
               ))}
               {!!lead.notes && (
                 <View style={styles.subBlock}>

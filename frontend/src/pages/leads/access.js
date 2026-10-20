@@ -42,7 +42,12 @@ export const PERSONA_KEYS = Object.keys(PERSONAS);
  * executive - the server's SALES_EXECUTIVE_ROLES; the Android app maps it the same
  * way. "sales" stays the sales persona as before.
  */
-export const ROLE_ALIASES = { "Sales Executive": "sales" };
+export const ROLE_ALIASES = {
+  "Sales Executive": "sales",
+  // Managing Director / Personal Assistant work Lead Management as a sales manager.
+  "Managing Director": "sales_manager",
+  "Personal Assistant": "sales_manager",
+};
 
 /** Every login role that is a lead persona, by its own name or an alias. */
 const LEAD_ROLE_NAMES = [...PERSONA_KEYS, ...Object.keys(ROLE_ALIASES)];

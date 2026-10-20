@@ -366,8 +366,10 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     [updateOutbox],
   );
 
+  // Puts the server's copy of a lead in the list - added when it is not there yet (e.g. a lead
+  // opened from the Lead Management app, so its edit form finds it).
   const replaceLead = useCallback((lead: Lead) => {
-    setServerLeads(prev => prev.map(l => (l.id === lead.id ? lead : l)));
+    setServerLeads(prev => (prev.some(l => l.id === lead.id) ? prev.map(l => (l.id === lead.id ? lead : l)) : [lead, ...prev]));
   }, []);
 
   const updateLead = useCallback(

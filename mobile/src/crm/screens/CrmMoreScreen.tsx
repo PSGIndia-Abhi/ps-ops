@@ -3,8 +3,9 @@ import { Pressable, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
 import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
-import { BellIcon, ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
+import { ChartIcon, ChevronRightIcon, ClockIcon, LogoutIcon, PersonIcon, SettingsIcon } from '../../components/icons';
 import type { LeadStackParamList } from '../../leads/navigation';
+import { leadPersonaForRole } from '../../leads/stage';
 import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
@@ -167,22 +168,8 @@ export function CrmMoreScreen() {
             label="Follow-ups"
             onPress={() => leadNavigation.navigate('LeadFollowUpsList', { leadType: 'consumer' })}
           />
-        ) : (
-          <>
-            <MenuRow
-              icon={<BellIcon size={18} color={theme.primary} />}
-              label="Reminders"
-              onPress={() => leadNavigation.navigate('LeadReminders')}
-            />
-            <MenuRow
-              icon={<ClockIcon size={18} color={theme.primary} />}
-              label="Today's follow-ups"
-              divider
-              onPress={() => leadNavigation.navigate('LeadTasks')}
-            />
-          </>
-        )}
-        {(rawRole ?? '').toLowerCase().trim() === 'sales_manager' && !residentialApp && (
+        ) : null /* Commercial: follow-ups and reminders are in the Follow-ups tab. */}
+        {leadPersonaForRole(rawRole) === 'sales_manager' && !residentialApp && (
           <MenuRow
             icon={<ChartIcon size={18} color={theme.primary} />}
             label="Team report & targets"

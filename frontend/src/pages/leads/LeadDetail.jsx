@@ -1,3 +1,4 @@
+import { industryLabel, servicesLabel } from "./constants";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -43,6 +44,7 @@ import {
   VisitModal,
 } from "./dialogs";
 import { getConversion, listQuotations, openQuotationPdf, providerName, useLeadData, userName } from "./leadsApi";
+import QuotationBuilder from "./QuotationBuilder";
 import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
@@ -145,7 +147,7 @@ function Journey({ lead, timeline, showWho }) {
 }
 
 /** A lead's quotations: what has been sent, each one's PDF, and the button to upload another. */
-function QuotationsTab({ lead, canAdd, onAdd, canCancel, onCancel, refreshKey }) {
+function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refreshKey }) {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
@@ -173,16 +175,22 @@ function QuotationsTab({ lead, canAdd, onAdd, canCancel, onCancel, refreshKey })
     }
   }
 
+  // Build one from the quotation master, or upload a PDF prepared elsewhere.
   const add = canAdd && (
-    <Button icon={<FiUploadCloud />} onClick={onAdd}>
-      Create Quotation
-    </Button>
+    <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+      <Button icon={<FiFileText />} onClick={onBuild}>
+        Create Quotation
+      </Button>
+      <Button variant="ghost" icon={<FiUploadCloud />} onClick={onAdd}>
+        Upload PDF
+      </Button>
+    </span>
   );
 
   if (error) return <Empty title="Could not load quotations" text={error} icon={<FiFileText />} />;
   if (!rows) return <Empty title="Loading quotations..." icon={<FiFileText />} />;
   if (rows.length === 0) {
-    return <Empty title="No quotations yet" text={canAdd ? "Upload the quotation PDF once it has been prepared for the customer." : "A quotation appears here once the sales team uploads one."} icon={<FiFileText />} action={add} />;
+    return <Empty title="No quotations yet" text={canAdd ? "Create the quotation from the services the customer wants, or upload a PDF prepared elsewhere." : "A quotation appears here once the sales team sends one."} icon={<FiFileText />} action={add} />;
   }
 
   return (
@@ -377,7 +385,9 @@ function DetailsPanel({ lead, provider, onCall }) {
       </InfoSection>
 
       <InfoSection icon={<FiBriefcase />} title="Requirement">
-        <Info label="Source of lead">{lead.source}</Info>
+        <Info label="Source of lead">{lead.source || "Not added"}</Info>
+        <Info label="Industry type">{industryLabel(lead.industry) || "Not added"}</Info>
+        <Info label="Services">{servicesLabel(lead.services) || "Not added"}</Info>
         <Info label="Approximate quote">{money(lead.quote)}</Info>
         <Info label="Address">{lead.address}</Info>
         <Info label="Requirement">
@@ -613,7 +623,8 @@ export default function LeadDetail() {
               Update Provider
             </Button>
           )}
-          {canManage && (
+          {/* Details can be changed (another number, address...) until the lead becomes a customer. */}
+          {canManage && !["WON", "CONVERTED"].includes(lead.stage) && (
             <Button variant="ghost" icon={<FiEdit2 />} onClick={() => setDialog("edit")}>
               Edit Details
             </Button>
@@ -675,6 +686,7 @@ export default function LeadDetail() {
               lead={lead}
               canAdd={canSell && !closed}
               onAdd={() => setDialog("quotation")}
+              onBuild={() => setDialog("buildQuote")}
               // The server's rule: whoever sent it, a lead manager or admin, while the lead is open.
               canCancel={(q) => !closed && (q.createdBy === myId || viewer.canPick || !!me?.canManage)}
               onCancel={(q) => setDialog({ cancelQuote: q })}
@@ -687,6 +699,7 @@ export default function LeadDetail() {
       {dialog === "call" && <CallVerifyModal lead={lead} onClose={() => setDialog(null)} onScheduleMeeting={() => setDialog("meeting")} />}
       {dialog === "meeting" && <ScheduleMeetingModal lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "quotation" && <QuotationModal lead={lead} onClose={() => setDialog(null)} />}
+      {dialog === "buildQuote" && <QuotationBuilder lead={lead} onClose={() => setDialog(null)} />}
       {dialog === "won" && <CloseLeadModal lead={lead} won onClose={() => setDialog(null)} />}
       {dialog === "lost" && <CloseLeadModal lead={lead} won={false} onClose={() => setDialog(null)} />}
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}

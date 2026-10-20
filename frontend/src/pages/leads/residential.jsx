@@ -249,7 +249,8 @@ export function ResidentialNewLead() {
     if (!values.houseType) found.houseType = "Choose the house type.";
     if (!values.service) found.service = "Choose the service.";
     if (!values.plan) found.plan = "Choose the plan.";
-    if (!(Number(values.amount) > 0)) found.amount = "Enter the amount.";
+    // The amount must be more than 0.
+    if (!(Number(values.amount) > 0)) found.amount = "Enter the amount (more than 0).";
     setErrors(found);
     return Object.keys(found).length === 0;
   }

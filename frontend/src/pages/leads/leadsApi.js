@@ -108,6 +108,8 @@ function toLead(row, closingNote) {
     competitorAmount: row.competitor_amount === null || row.competitor_amount === undefined ? "" : String(Math.round(Number(row.competitor_amount))),
     competitorEnd: row.competitor_contract_end ? String(row.competitor_contract_end).slice(0, 10) : "",
     competitorNotes: row.competitor_notes || "",
+    industry: row.industry_type || "",
+    services: Array.isArray(row.services_requested) ? row.services_requested : [],
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,
@@ -425,6 +427,31 @@ export async function updateSource(id, { name, active }) {
   await loadWorkspace();
 }
 
+// ---- quotation master (sales manager / admin) --------------------------------
+
+/** GET /quote-master?all=1 - services (with treatment rows and prices), plans and clauses, switched-off ones too. */
+export const getQuoteMaster = () => request("/api/crm/quote-master?all=1");
+
+/** POST /quote-services - `{ name, description }`; returns the new service. */
+export const addQuoteService = (body) => request("/api/crm/quote-services", { method: "POST", body });
+/** PATCH /quote-services/{id} - any of name, description, sort_order, is_active. */
+export const updateQuoteService = (id, body) => request(`/api/crm/quote-services/${id}`, { method: "PATCH", body });
+/** PUT /quote-services/{id}/treatments - replaces the service's treatment rows, in this order. */
+export const saveQuoteTreatments = (id, treatments) => request(`/api/crm/quote-services/${id}/treatments`, { method: "PUT", body: { treatments } });
+
+/** PUT /quote-prices - `[{ service_id, plan_id, price }]`; a null price takes the plan off that service. */
+export const saveQuotePrices = (prices) => request("/api/crm/quote-prices", { method: "PUT", body: { prices } });
+
+/** POST /quote-plans - `{ name, billing: ONE_TIME|MONTHLY, visits_per_month }`. */
+export const addQuotePlan = (body) => request("/api/crm/quote-plans", { method: "POST", body });
+/** PATCH /quote-plans/{id} - any of name, billing, visits_per_month, sort_order, is_active. */
+export const updateQuotePlan = (id, body) => request(`/api/crm/quote-plans/${id}`, { method: "PATCH", body });
+
+/** POST /quote-clauses - `{ kind: VALUE_ADDED|TERMS, text, is_default }`. */
+export const addQuoteClause = (body) => request("/api/crm/quote-clauses", { method: "POST", body });
+/** PATCH /quote-clauses/{id} - any of text, is_default, sort_order, is_active. */
+export const updateQuoteClause = (id, body) => request(`/api/crm/quote-clauses/${id}`, { method: "PATCH", body });
+
 /** The server's list of reasons a lead is closed (not genuine or lost); empty if it could not be read. */
 export const lossReasons = () => state.lossReasons.map((r) => r.name);
 /** The id of a reason from that list, so the server records it against the lead (and its reports count it). */
@@ -497,6 +524,8 @@ export async function submitLead(input, actor) {
         lead_source: input.source,
         amount: Number(input.quote),
         notes: input.requirement?.trim() || "",
+        industry_type: input.industry || null,
+        services_requested: input.services || [],
         // Sales manager: who the lead goes to (a sales executive, or themselves).
         assign_to: input.assignTo || undefined,
         ...competitorBody(input),
@@ -699,6 +728,8 @@ export async function updateLead(leadId, input) {
         address: input.address.trim(),
         requirement: input.requirement.trim(),
         approx_quote_amount: Number(input.quote),
+        industry_type: input.industry || null,
+        services_requested: input.services || [],
         ...competitorBody(input),
       },
     });
@@ -830,6 +861,26 @@ export async function uploadQuotation(leadId, { file, totalAmount, notes }) {
   form.append("totalAmount", String(totalAmount));
   if (notes?.trim()) form.append("notes", notes.trim().slice(0, 300));
   const row = await request(`/api/crm/leads/${leadId}/quotations`, { method: "POST", form });
+  await loadWorkspace();
+  return toQuotation(row);
+}
+
+// ---- quotation builder (quotations made from the quotation master) -----------
+
+/** GET /quote-master - the active services (with treatment rows and prices), plans and clauses. */
+export const getActiveQuoteMaster = () => request("/api/crm/quote-master");
+
+/** POST /leads/{id}/quotations/preview - the quotation as a DRAFT PDF; returns a blob URL (revoke it when done). */
+export async function previewQuotation(leadId, content) {
+  const res = await apiFetch(`/api/crm/leads/${leadId}/quotations/preview`, { method: "POST", body: JSON.stringify(content) });
+  if (!res) throw new Error("Your session has ended. Please sign in again.");
+  if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not make the preview.");
+  return URL.createObjectURL(await res.blob());
+}
+
+/** POST /leads/{id}/quotations/generate - numbers and saves the quotation and its PDF; the lead moves to Quotation Sent. */
+export async function generateQuotation(leadId, content) {
+  const row = await request(`/api/crm/leads/${leadId}/quotations/generate`, { method: "POST", body: content });
   await loadWorkspace();
   return toQuotation(row);
 }

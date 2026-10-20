@@ -4,6 +4,7 @@ import {
   FiArrowLeft,
   FiArrowRight,
   FiBarChart2,
+  FiBriefcase,
   FiBell,
   FiCalendar,
   FiCheckCircle,
@@ -21,7 +22,7 @@ import {
   FiUser,
   FiRefreshCw,
 } from "react-icons/fi";
-import { ACCOUNTANT_PANEL_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
+import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -210,6 +211,13 @@ function TaskProShell() {
           </nav>
 
           {/* Lead staff come here from Lead Management, so they get a way back without logging in again. */}
+          {/* Managing Director / Personal Assistant also work Lead Management, as a sales manager. */}
+          {LEAD_MANAGER_ROLES.includes(localStorage.getItem("role")) && (
+            <button type="button" className="tp-nav-item" onClick={() => navigate("/leads")} title={collapsed ? "Lead Management" : undefined}>
+              <FiBriefcase className="tp-nav-icon" />
+              <span className="tp-nav-label">Lead Management</span>
+            </button>
+          )}
           {LEAD_ROLES.includes(localStorage.getItem("role")) && (
             <button type="button" className="tp-nav-item" onClick={() => navigate("/leads")} title={collapsed ? "Lead Management" : undefined}>
               <FiArrowLeft className="tp-nav-icon" />

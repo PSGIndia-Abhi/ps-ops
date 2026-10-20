@@ -66,8 +66,9 @@ export function validateLead(values: LeadFormValues): LeadFormErrors {
   if (!values.service) errors.service = 'Select a service.';
   if (!values.plan) errors.plan = 'Select a plan.';
 
+  // The amount must be more than 0.
   if (parseAmount(values.amount) <= 0) {
-    errors.amount = 'Enter a valid amount.';
+    errors.amount = 'Enter an amount more than 0.';
   }
 
   return errors;
@@ -132,7 +133,8 @@ export function validateCommercialLead(
 
   if (!values.source) errors.source = 'Select where this lead came from.';
   if (values.services.length === 0) errors.services = 'Select at least one service.';
-  if (parseAmount(values.amount) <= 0) errors.amount = 'Enter the approximate quote.';
+  // The quote must be more than 0.
+  if (parseAmount(values.amount) <= 0) errors.amount = 'Enter the approximate quote (more than 0).';
 
   return errors;
 }

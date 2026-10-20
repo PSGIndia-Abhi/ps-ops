@@ -779,6 +779,14 @@
   .lm-radio-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #cbd5e1; transition: border-color .2s; &::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); transform: scale(0); transition: transform .25s var(--lm-spring); } }
   .lm-radio.on .lm-radio-mark { border-color: var(--tone); &::after { transform: scale(1); } }
   .lm-radio-text { display: grid; line-height: 1.3; strong { font-size: 14px; } small { color: var(--lm-muted); font-size: 12.5px; } }
+  /* Services requested: tick boxes in a wrapping grid. */
+  .lm-svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .lm-svc {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--lm-line); border-radius: 10px;
+    background: #fff; cursor: pointer; font-size: 13.5px; font-weight: 500;
+    input { width: 16px; height: 16px; accent-color: var(--lm-primary); }
+    &.on { border-color: var(--lm-primary); background: var(--lm-primary-soft); color: var(--lm-primary); }
+  }
   .lm-check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 500; input { width: 18px; height: 18px; accent-color: var(--lm-primary); } }
 
   /* ================= full-page form ================= */
@@ -1055,6 +1063,17 @@
 /* A titled break inside a lead form (the Competitor block in dialogs.jsx). */
 .lm-root, body {
   .lm-form-split { grid-column: 1 / -1; display: grid; gap: 2px; margin-top: 6px; padding-top: 14px; border-top: 1px dashed var(--lm-border, #e5e9f2); strong { font-size: 14px; color: var(--lm-text, #0f172a); } span { font-size: 12.5px; color: var(--lm-muted, #64748b); } }
+  /* A form section that opens and closes (e.g. Competitor): the whole bar is the toggle. */
+  .lm-collapse {
+    grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 6px;
+    padding: 12px 14px; border-radius: 12px; border: 1px solid var(--lm-border, #e5e9f2); background: #f8fafc; text-align: left; cursor: pointer;
+    transition: border-color .2s, background .2s;
+    &:hover { border-color: #c7d2e5; background: #f3f6fb; }
+    &.open { background: #fff; border-color: var(--lm-primary, #2563eb); }
+  }
+  .lm-collapse-text { display: grid; gap: 2px; min-width: 0; strong { font-size: 14px; color: var(--lm-text, #0f172a); } span { font-size: 12.5px; color: var(--lm-muted, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+  .lm-collapse-icon { flex: none; font-size: 18px; color: var(--lm-muted, #64748b); transition: transform .25s; }
+  .lm-collapse.open .lm-collapse-icon { transform: rotate(180deg); color: var(--lm-primary, #2563eb); }
 }
 
 /* Monthly targets (Performance.jsx) */

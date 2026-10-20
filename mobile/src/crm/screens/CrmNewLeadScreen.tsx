@@ -290,7 +290,7 @@ function valuesOf(lead: Lead): LeadFormValues {
     houseType: lead.houseType || null,
     service: lead.service || null,
     plan: lead.plan || null,
-    amount: lead.amount > 0 ? String(Math.round(lead.amount)) : '',
+    amount: Number.isFinite(lead.amount) && lead.amount >= 0 ? String(Math.round(lead.amount)) : '',
     location: lead.location ?? '',
     referenceBy: lead.referenceBy ?? '',
     notes: lead.notes ?? '',
@@ -1158,8 +1158,9 @@ export function CrmNewLeadScreen({
                 )}
               </Pressable>
               <Text style={styles.onlineNote}>
-                The lead is saved first, then Razorpay opens. It shows Paid
-                once Razorpay confirms the payment.
+                {amountNumber === 0
+                  ? 'The amount is 0, so there is nothing to collect - just save the lead.'
+                  : 'The lead is saved first, then Razorpay opens. It shows Paid once Razorpay confirms the payment.'}
               </Text>
             </View>
           ) : (

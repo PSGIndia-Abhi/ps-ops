@@ -33,6 +33,31 @@ export const FORM_SOURCES = [
 /** A lead a provider submits always carries this source (a row of the server's lead-source list). */
 export const PROVIDER_SOURCE = "Lead Provider";
 
+/** A commercial lead's industry and the services asked for - the same codes as the Android form. */
+export const INDUSTRY_TYPES = [
+  { value: "restaurant", label: "Restaurant" },
+  { value: "apartment", label: "Apartment" },
+  { value: "hospital", label: "Hospital" },
+  { value: "it", label: "IT" },
+  { value: "qsr", label: "QSR" },
+  { value: "builder", label: "Builder" },
+  { value: "other", label: "Other" },
+];
+export const COMMERCIAL_SERVICES = [
+  { value: "gpc", label: "GPC" },
+  { value: "rodent_control", label: "Rodent Control" },
+  { value: "cockroach_control", label: "Cockroach Control" },
+  { value: "ant_treatment", label: "Ant Treatment" },
+  { value: "honeybee_control", label: "Honeybee Control" },
+  { value: "snake_control", label: "Snake Control" },
+  { value: "fly_control", label: "Fly Control" },
+];
+export const industryLabel = (v) => INDUSTRY_TYPES.find((o) => o.value === v)?.label || "";
+export const servicesLabel = (list) =>
+  COMMERCIAL_SERVICES.filter((o) => (list || []).includes(o.value))
+    .map((o) => o.label)
+    .join(", ");
+
 /** The stored source as it reads on screen ("social_media" -> "Social Media"). */
 export function sourceLabel(raw) {
   if (!raw) return "Other";

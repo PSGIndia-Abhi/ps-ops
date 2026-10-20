@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { crmApi } from '../../api';
+import { useLeads } from '../../crm/LeadsContext';
 import { CommercialLeadDetail } from '../../crm/screens/CrmCommercialLeadDetail';
 import { BellIcon, CalendarIcon, ChevronRightIcon, PersonIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -59,6 +60,7 @@ export function LeadDetailScreen() {
   const { leadId } = useRoute<RouteProp<LeadStackParamList, 'LeadDetail'>>().params;
   const { myId, persona } = useMe();
   const { styles, theme } = useCrmStyles(factory);
+  const { replaceLead } = useLeads();
 
   // Both read GET /api/crm/leads/:id: the CRM shape has every field of the form, the pipeline
   // shape has the stage and who may act on it. Reloaded on every focus, so it is current after Manage lead.
@@ -115,6 +117,16 @@ export function LeadDetailScreen() {
     ? `${holder.name} · ${api.roleName(holder.role)}`
     : 'Someone else';
   const canFollowUp = leadActions(pipeline, persona, myId).includes('followUp');
+  // Details can be changed (another number, address...) until the lead becomes a customer - by the
+  // sales manager or whoever added it or holds it. The server checks the same.
+  const converted = lead.leadStatus === 'converted' || ['WON', 'CONVERTED'].includes(pipeline.stage);
+  const canEdit =
+    !converted && (manager || [pipeline.createdById, pipeline.salesEmployeeId, pipeline.telecallerId].some((id) => !!id && String(id) === myId));
+  const edit = () => {
+    // The edit form reads the lead from the CRM list: put this copy there first.
+    replaceLead(lead);
+    (navigation as unknown as NativeStackNavigationProp<LeadRootStackParamList>).navigate('CrmNewCommercialLead', { editLeadId: lead.id });
+  };
 
   return (
     <CommercialLeadDetail
@@ -122,7 +134,7 @@ export function LeadDetailScreen() {
       stage={<StageBadge stage={pipeline.stage} />}
       onManage={() => navigation.navigate('LeadWork', { leadId })}
       onFollowUp={canFollowUp ? () => navigation.navigate('LeadFollowUp', { leadId, name }) : undefined}
-      onEdit={null}
+      onEdit={canEdit ? edit : null}
       afterActions={
         openMeeting ? (
           <Pressable

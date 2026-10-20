@@ -10,6 +10,7 @@ const { nextCompanyId } = require("../utils/crmCustomerCompany");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
+const { normalizeQuotationContent, renderQuotationPdf, QuotationInputError } = require("../utils/crmQuotationDocument");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -204,6 +205,111 @@ router.post("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), p
     notifyLead(lead.id, "QUOTATION_SENT", { actorId: req.user.id, extra: { reason: quotation.quotation_number } });
     res.status(201).json({ ...quotation, total_amount: Number(quotation.total_amount), items: lineItems.map((i) => ({ ...i, unit_price: Number(i.unit_price) })) });
   } catch (err) {
+    sendError(res, err, "Failed to create quotation");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Quotations built from the quotation master (the web / app quotation builder).
+// The body is the quotation's content -- customer block, subject, services with
+// their treatment rows and prices, pricing mode, clauses; see
+// utils/crmQuotationDocument.js for the exact shape and limits.
+//
+// POST /api/crm/leads/:id/quotations/preview  -> the PDF (marked DRAFT), nothing saved
+// POST /api/crm/leads/:id/quotations/generate -> numbers it, stores the PDF in MinIO
+//   and the content in crm_lead_quotation_documents, and moves the lead to
+//   QUOTATION_SENT -- the same outcome as uploading a PDF.
+// Same rights as uploading one (precheckQuotationWrite).
+// ---------------------------------------------------------------------------
+// The checked content, with the master's locked clauses (is_default = "always included")
+// put first in their list if the request left any out -- they go on every quotation.
+async function readContent(req) {
+  let content;
+  try {
+    content = normalizeQuotationContent(req.body);
+  } catch (err) {
+    if (err instanceof QuotationInputError) throw new HttpError(400, err.message);
+    throw err;
+  }
+  const [locked] = await pool.query(
+    "SELECT kind, text FROM crm_quote_clauses WHERE is_active = 1 AND is_default = 1 ORDER BY sort_order, created_at"
+  );
+  for (const [kind, key] of [["VALUE_ADDED", "valueAdded"], ["TERMS", "terms"]]) {
+    const missing = locked.filter((c) => c.kind === kind && !content[key].includes(c.text)).map((c) => c.text);
+    content[key] = [...missing, ...content[key]];
+  }
+  return content;
+}
+
+// Who is making the quotation -- they sign it: name, designation (their org designation, else
+// their role, e.g. "Sales Executive") and phone.
+async function preparedBy(userId) {
+  const [[u]] = await pool.query(
+    `SELECT u.name, u.phone, r.name AS role,
+            (SELECT d.name FROM user_org_units uo JOIN designations d ON d.id = uo.designation_id
+              WHERE uo.user_id = u.id AND (uo.effective_to IS NULL OR uo.effective_to >= CURDATE())
+              ORDER BY uo.is_primary DESC, uo.effective_from DESC LIMIT 1) AS designation
+       FROM users u LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.id = ?`,
+    [userId]
+  );
+  if (!u) return null;
+  const roleLabel = (u.role || "").replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return { name: u.name || "", designation: u.designation || roleLabel, phone: u.phone || "" };
+}
+
+router.post("/leads/:id/quotations/preview", auth, requirePermission("CRM_VIEW_LEAD"), precheckQuotationWrite, async (req, res) => {
+  try {
+    const content = await readContent(req);
+    const by = await preparedBy(req.user.id);
+    const pdf = await renderQuotationPdf(content, { number: "", date: new Date(), leadNumber: req.lead.lead_number, draft: true, preparedBy: by });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline; filename=\"quotation-preview.pdf\"");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(pdf);
+  } catch (err) {
+    sendError(res, err, "Failed to preview the quotation");
+  }
+});
+
+router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_LEAD"), precheckQuotationWrite, async (req, res) => {
+  const lead = req.lead;
+  let objectKey = null;
+  try {
+    const content = await readContent(req);
+    content.preparedBy = await preparedBy(req.user.id); // saved with the quotation's content
+    const quotationId = uuid();
+    objectKey = `crm-quotations/${lead.id}/${quotationId}.pdf`;
+    if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
+      await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+    }
+
+    const total = content.totals.final; // after any special discount
+    const quotationNumber = await inTransaction(async (conn) => {
+      const number = await nextQuotationNumber(conn);
+      const pdf = await renderQuotationPdf(content, { number, date: new Date(), leadNumber: lead.lead_number, draft: false, preparedBy: content.preparedBy });
+      await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, pdf, pdf.length, { "Content-Type": "application/pdf" });
+      await conn.query(
+        `INSERT INTO crm_lead_quotations (id, lead_id, quotation_number, total_amount, status, pdf_object_key, sent_at, created_by)
+         VALUES (?, ?, ?, ?, 'SENT', ?, NOW(), ?)`,
+        [quotationId, lead.id, number, total, objectKey, req.user.id]
+      );
+      await conn.query("INSERT INTO crm_lead_quotation_documents (quotation_id, content) VALUES (?, ?)", [quotationId, JSON.stringify(content)]);
+      await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
+      const per = { MONTHLY: " per month", YEARLY: " per year", ONE_TIME: "" }[content.totals.primaryBilling];
+      await logLeadHistory(conn, lead.id, "QUOTATION_SENT", {
+        note: `${number} for Rs. ${total}${per}${content.totals.discount ? ` (after Rs. ${content.totals.discount} discount)` : ""}: ${content.services.map((s) => s.name).join(", ")}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
+      return number;
+    });
+
+    const [[quotation]] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE id = ?`, [quotationId]);
+    notifyLead(lead.id, "QUOTATION_SENT", { actorId: req.user.id, extra: { reason: quotationNumber } });
+    res.status(201).json({ ...quotation, total_amount: Number(quotation.total_amount), items: [] });
+  } catch (err) {
+    // Anything failed after the file was stored: don't leave an orphan file behind.
+    if (objectKey) minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
     sendError(res, err, "Failed to create quotation");
   }
 });

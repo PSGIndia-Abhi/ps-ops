@@ -2,7 +2,7 @@
 // a meeting, record a visit, upload a quotation, edit the lead and close it.
 
 import { useEffect, useMemo, useState } from "react";
-import { FiBriefcase, FiCalendar, FiCheck, FiSave, FiSend, FiThumbsDown, FiThumbsUp, FiUploadCloud, FiXCircle } from "react-icons/fi";
+import { FiBriefcase, FiCalendar, FiCheck, FiChevronDown, FiSave, FiSend, FiThumbsDown, FiThumbsUp, FiUploadCloud, FiXCircle } from "react-icons/fi";
 import {
   addFollowUp,
   cancelMeeting,
@@ -26,7 +26,7 @@ import {
   uploadQuotation,
 } from "./leadsApi";
 import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
-import { FORM_SOURCES, REASONS, VISIT_OUTCOMES } from "./constants";
+import { COMMERCIAL_SERVICES, FORM_SOURCES, INDUSTRY_TYPES, REASONS, VISIT_OUTCOMES } from "./constants";
 import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
@@ -82,6 +82,7 @@ function Choice({ name, value, onChange, options }) {
 
 const BLANK_LEAD = {
   company: "", contact: "", phone: "", altPhone: "", email: "", address: "", area: "", source: "", quote: "", requirement: "",
+  industry: "", services: [],
   competitorName: "", competitorAmount: "", competitorEnd: "", competitorNotes: "",
 };
 
@@ -89,13 +90,55 @@ const BLANK_LEAD = {
  * The optional Competitor block of the lead forms (add and edit): who serves the customer now,
  * their price, when the contract ends, and notes. `set(key)` is the form's own change handler.
  */
-function CompetitorFields({ values, set }) {
+/**
+ * Industry type and the services asked for (both optional) - the same choices as the Android
+ * form, so a lead added or edited on either shows them on both.
+ */
+function IndustryServiceFields({ values, setValues }) {
+  const toggle = (code) =>
+    setValues((v) => ({ ...v, services: v.services.includes(code) ? v.services.filter((s) => s !== code) : [...v.services, code] }));
   return (
     <>
-      <div className="lm-form-split wide">
-        <strong>Competitor</strong>
-        <span>Optional - who looks after the customer today. It helps price and time the offer.</span>
-      </div>
+      <Field label="Industry Type">
+        <select className="lm-select" value={values.industry} onChange={(e) => setValues((v) => ({ ...v, industry: e.target.value }))}>
+          <option value="">Select industry</option>
+          {INDUSTRY_TYPES.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Services Requested" wide>
+        <div className="lm-svc-grid">
+          {COMMERCIAL_SERVICES.map((o) => (
+            <label key={o.value} className={`lm-svc${values.services.includes(o.value) ? " on" : ""}`}>
+              <input type="checkbox" checked={values.services.includes(o.value)} onChange={() => toggle(o.value)} />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </Field>
+    </>
+  );
+}
+
+// Folds away: closed on a new lead, open when editing one that already has competitor details.
+function CompetitorFields({ values, set }) {
+  const filled = !!(values.competitorName || values.competitorAmount || values.competitorEnd || values.competitorNotes);
+  const [open, setOpen] = useState(filled);
+  const summary = [values.competitorName, values.competitorAmount && `₹${Number(values.competitorAmount).toLocaleString("en-IN")}`].filter(Boolean).join("  ·  ");
+  return (
+    <>
+      <button type="button" className={`lm-collapse wide${open ? " open" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="lm-collapse-text">
+          <strong>Competitor</strong>
+          <span>{open ? "Optional - who looks after the customer today. It helps price and time the offer." : summary || "Optional - click to add the current service provider"}</span>
+        </span>
+        <FiChevronDown className="lm-collapse-icon" />
+      </button>
+      {open && (
+        <>
       <Field label="Current Service Provider">
         <input className="lm-input" value={values.competitorName} onChange={set("competitorName")} placeholder="e.g. ABC Pest Control" maxLength={150} />
       </Field>
@@ -108,6 +151,8 @@ function CompetitorFields({ values, set }) {
       <Field label="Notes on the Competitor" wide>
         <textarea className="lm-textarea" value={values.competitorNotes} onChange={set("competitorNotes")} placeholder="What the customer likes or dislikes about them" maxLength={500} />
       </Field>
+        </>
+      )}
     </>
   );
 }
@@ -156,7 +201,8 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     if (values.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) found.email = "That email looks incomplete.";
     if (!values.address.trim()) found.address = "Enter the address.";
     if (!values.source) found.source = "Choose the source of this lead.";
-    if (!(Number(values.quote) > 0)) found.quote = "Enter the approximate quote.";
+    // The quote must be more than 0.
+    if (!(Number(values.quote) > 0)) found.quote = "Enter the approximate quote (more than 0).";
     if (values.requirement.trim().length < 5) found.requirement = "Describe what the customer needs.";
     setErrors(found);
     return Object.keys(found).length === 0;
@@ -232,6 +278,7 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
             ))}
           </select>
         </Field>
+        {viewer.persona !== "lead_provider" && <IndustryServiceFields values={values} setValues={setValues} />}
         {canAssign && (
           <Field label="Assign To" required hint="Only this person (and the managers) will see the lead.">
             <select className="lm-select" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
@@ -717,12 +764,14 @@ export function EditLeadModal({ lead, onClose }) {
     altPhone: lead.altPhone,
     email: lead.email,
     address: lead.address,
-    quote: lead.quote ? String(Math.round(lead.quote)) : "",
+    quote: lead.quote !== null && lead.quote !== undefined && Number.isFinite(Number(lead.quote)) ? String(Math.round(lead.quote)) : "",
     requirement: lead.requirement,
     competitorName: lead.competitorName || "",
     competitorAmount: lead.competitorAmount || "",
     competitorEnd: lead.competitorEnd || "",
     competitorNotes: lead.competitorNotes || "",
+    industry: lead.industry || "",
+    services: lead.services || [],
   });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -740,7 +789,8 @@ export function EditLeadModal({ lead, onClose }) {
     if (values.altPhone && phoneProblem(values.altPhone)) found.altPhone = phoneProblem(values.altPhone);
     if (values.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) found.email = "That email looks incomplete.";
     if (!values.address.trim()) found.address = "Enter the address.";
-    if (!(Number(values.quote) > 0)) found.quote = "Enter the approximate quote.";
+    // The quote must be more than 0.
+    if (!(Number(values.quote) > 0)) found.quote = "Enter the approximate quote (more than 0).";
     if (values.requirement.trim().length < 5) found.requirement = "Describe what the customer needs.";
     setErrors(found);
     return Object.keys(found).length === 0;
@@ -800,6 +850,7 @@ export function EditLeadModal({ lead, onClose }) {
         <Field label="Address" required error={errors.address} wide>
           <input className={cls("address")} value={values.address} onChange={set("address")} maxLength={255} />
         </Field>
+        <IndustryServiceFields values={values} setValues={setValues} />
         <Field label="Requirement / Description" required error={errors.requirement} wide>
           <textarea className={`lm-textarea${errors.requirement ? " bad" : ""}`} value={values.requirement} onChange={set("requirement")} />
         </Field>
