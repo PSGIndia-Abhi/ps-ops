@@ -230,7 +230,7 @@ export default function AccountantLayout() {
               </button>
               {menuOpen && <div className="acc-mobile-panel">{nav}</div>}
             </>
-          )}
+          )} 
           <Outlet />
           {/* pop-ups for payment reminders that have just come due */}
           <ReminderAlerts />
