@@ -11,6 +11,7 @@ import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navig
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useAuth } from '../../auth/AuthContext';
 import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { useResidentialOnly } from '../../navigation/AppSwitchContext';
 import { GradientCard } from '../../components/GradientCard';
 import {
   BriefcaseIcon,
@@ -25,13 +26,14 @@ import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { colors, radii, spacing, typography } from '../../theme';
 import { formatINR, formatLeadWhen } from '../format';
 import { useLeads } from '../LeadsContext';
-import { computeCommercialAchievements, computeLeadStats } from '../stats';
+import { computeCommercialAchievements, computeLeadStats, computeMonthlyAchievements } from '../stats';
 import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import type { CrmTabScreenNav } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
+import { LeadTodayCard } from '../../leads/LeadTodayCard';
 import { isCommercial, type Lead } from '../types';
 import { ClipboardListIcon, RupeeIcon, TrendUpIcon, WalletIcon } from '../ui/crmIcons';
-import { AchievementCard } from '../ui/AchievementCard';
+import { AchievementCard, ResidentialAchievementCard } from '../ui/AchievementCard';
 import { CrmBackgroundWash } from '../ui/CrmBackgroundWash';
 import { CrmHeader } from '../ui/CrmHeader';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner } from '../ui/CrmScreen';
@@ -465,9 +467,11 @@ export function CrmHomeScreen() {
   const { user } = useAuth();
   const role = useUserRole();
   const rawRole = useRawRole();
-  const { leads, commercialLeads, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } =
+  const { leads, commercialLeads, stats, loading, refreshing, refresh, error, notice, noticeTone, dismissNotice } =
     useLeads();
   const { styles, theme } = useCrmStyles(factory);
+  // sales / marketing: the residential Home as it was before commercial leads.
+  const residential = useResidentialOnly(rawRole);
 
   // The slider width is measured (not assumed) so each card is exactly one page wide.
   const [sliderWidth, setSliderWidth] = useState(0);
@@ -486,14 +490,16 @@ export function CrmHomeScreen() {
   }, [refreshing]);
   const [sliderIndex, setSliderIndex] = useState(0);
 
-  // The newest leads of both kinds together (ISO timestamps sort correctly as text).
+  // The newest leads of both kinds together (ISO timestamps sort correctly as text);
+  // residential roles only ever see residential leads.
   const recent = useMemo(
     () =>
-      [...leads, ...commercialLeads]
+      (residential ? [...leads] : [...leads, ...commercialLeads])
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, RECENT_LIMIT),
-    [leads, commercialLeads],
+    [leads, commercialLeads, residential],
   );
+  const residentialAchievements = useMemo(() => computeMonthlyAchievements(leads), [leads]);
   // Home's card and the three tiles under it are about commercial leads (quotes and conversions).
   // Residential money - collected and still to collect - lives on the Leads and Payments tabs.
   const achievements = useMemo(() => computeCommercialAchievements(commercialLeads), [commercialLeads]);
@@ -532,10 +538,16 @@ export function CrmHomeScreen() {
       />
       <CrmScreen transparent edges={[]} refreshing={refreshing} onRefresh={refresh}>
         <View style={styles.homePad}>
-          <AchievementCard achievements={achievements} monthLabel={monthLabel} replayKey={replay} />
+          {residential ? (
+            <ResidentialAchievementCard achievements={residentialAchievements} monthLabel={monthLabel} replayKey={replay} />
+          ) : (
+            <AchievementCard achievements={achievements} monthLabel={monthLabel} replayKey={replay} />
+          )}
 
           <NoticeBanner message={notice} tone={noticeTone} onDismiss={dismissNotice} />
           <CrmErrorBanner message={error} onRetry={refresh} />
+
+          {!residential && <LeadTodayCard />}
 
           <View style={styles.dashStatRow}>
             {loading ? (
@@ -543,6 +555,30 @@ export function CrmHomeScreen() {
                 <CrmSkeleton height={112} radius={radii.lg} style={styles.flex1} />
                 <CrmSkeleton height={112} radius={radii.lg} style={styles.flex1} />
                 <CrmSkeleton height={112} radius={radii.lg} style={styles.flex1} />
+              </>
+            ) : residential ? (
+              <>
+                <DashStat
+                  icon={<ClipboardListIcon size={17} color={theme.textOnPrimary} />}
+                  value={String(stats.todaysLeads)}
+                  label="Today's Leads"
+                  accentColor={theme.primary}
+                  onPress={() => navigation.navigate('Leads', { filter: 'all', at: Date.now() })}
+                />
+                <DashStat
+                  icon={<TrendUpIcon size={17} color={theme.textOnPrimary} />}
+                  value={formatINR(stats.paidTotal)}
+                  label="Paid"
+                  accentColor={theme.success}
+                  onPress={() => navigation.navigate('Payments')}
+                />
+                <DashStat
+                  icon={<ClockIcon size={17} color={theme.textOnPrimary} />}
+                  value={formatINR(stats.pendingTotal)}
+                  label="Payment Pending"
+                  accentColor={theme.warning}
+                  onPress={() => navigation.navigate('Payments')}
+                />
               </>
             ) : (
               <>

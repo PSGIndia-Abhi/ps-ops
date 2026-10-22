@@ -102,7 +102,17 @@ export const isActive = (t: WorkTask) => t.status === 'OPEN' || t.status === 'IN
 export const isFinished = (s: TaskStatus) => s === 'COMPLETED' || s === 'CANCELLED';
 
 /** Day-granularity, the same rule the server uses for `is_overdue`. */
-export const isOverdue = (t: WorkTask) => isActive(t) && !!t.due_date && t.due_date < todayStr();
+// Past its date - or a repeating task with a missed day that is still on today's date (the server's
+// is_overdue rule: once today's is done it moves on, and only the Missed flag stays).
+export const isOverdue = (t: WorkTask) =>
+  isActive(t) && !!t.due_date && (t.due_date < todayStr() || (!!t.missed_dates?.length && t.due_date <= todayStr()));
+
+/** "Missed 15 Oct" / "Missed 2 days" for a repeating task's missed dates, or ''. */
+export const missedText = (t: Pick<WorkTask, 'missed_dates'>) => {
+  const m = t.missed_dates ?? [];
+  if (!m.length) return '';
+  return m.length === 1 ? `Missed ${fmtDateShort(m[0])}` : `Missed ${m.length} days`;
+};
 
 export type DueTone = 'late' | 'soon' | 'ok' | 'muted';
 

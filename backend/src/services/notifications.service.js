@@ -546,6 +546,13 @@ async function notifyInvoiceImport({ userId, importId, fileName, total, imported
   });
 }
 
+// A notification for a set of users, without the person whose action caused it.
+async function notifyUsers(userIds, payload, { exceptUserId = null } = {}) {
+  const except = exceptUserId === null || exceptUserId === undefined ? null : String(exceptUserId);
+  const recipients = normalizeUserIds(userIds).filter((id) => id !== except);
+  return insertNotifications(pool, recipients, payload);
+}
+
 // A payment reminder has reached its date and time: tells the accountant it is assigned to.
 // entity_id is the reminder (work_tasks.id), so the bell can open it.
 async function notifyPaymentReminderDue({ userId, taskId, title, message }) {
@@ -559,6 +566,7 @@ async function notifyPaymentReminderDue({ userId, taskId, title, message }) {
 }
 
 module.exports = {
+  notifyUsers,
   notifyPaymentReminderDue,
   listNotificationsForUser,
   getUnreadNotificationCount,

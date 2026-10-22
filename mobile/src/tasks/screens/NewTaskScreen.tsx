@@ -54,6 +54,7 @@ import {
   ScreenHeader,
 } from '../ui/parts';
 import { DateSheet, PeopleSheet, TimeSheet } from '../ui/sheets';
+import { BellIcon } from '../../components/icons';
 import { ChevronDownIcon, RepeatIcon } from '../ui/taskIcons';
 
 const FREQUENCIES: RecurrenceFrequency[] = [
@@ -89,7 +90,9 @@ type Picker =
   | 'person'
   | 'recStart'
   | 'recTime'
-  | 'recEnd';
+  | 'recEnd'
+  | 'remDate'
+  | 'remTime';
 
 const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },
@@ -251,6 +254,18 @@ export function NewTaskScreen() {
   const [typeFocused, setTypeFocused] = useState(false);
 
   const [repeat, setRepeat] = useState(false);
+  // Off unless asked for: only a task with a reminder rings - once, at the date and time chosen here,
+  // for its assignee. Turning it on starts it at the task's own date and time.
+  const [remind, setRemind] = useState(false);
+  const [remDate, setRemDate] = useState(todayStr());
+  const [remTime, setRemTime] = useState('09:00');
+  const toggleRemind = (on: boolean) => {
+    if (on) {
+      setRemDate(repeat ? recStart : dueDate);
+      setRemTime(repeat ? recTime : dueTime || '09:00');
+    }
+    setRemind(on);
+  };
   const [freq, setFreq] = useState<RecurrenceFrequency>('WEEKLY');
   const [interval, setIntervalValue] = useState('1');
   const [weekdays, setWeekdays] = useState<number[]>([new Date().getDay()]);
@@ -406,10 +421,23 @@ export function NewTaskScreen() {
       payload.due_date = dueDate;
       if (dueTime) payload.due_time = `${dueTime}:00`;
     }
+    if (remind && new Date(`${remDate}T${remTime}:00`).getTime() <= Date.now())
+      return setError(
+        `Reminder time ${remDate === todayStr() ? 'today' : fmtDateShort(remDate)}, ${fmtTime(remTime)} has already passed. Pick a later reminder time.`,
+      );
 
     setSaving(true);
     try {
       const created = await api.createTask(payload);
+      // The reminder goes on the task once it exists (a schedule's one task, or the task itself).
+      const made = repeat ? (created as CreateSeriesResponse).tasks?.[0] : (created as WorkTask);
+      if (remind && made) {
+        try {
+          await api.setTaskReminder(made.id, remDate, remTime);
+        } catch (err) {
+          showToast(`Task created, but the reminder was not set: ${errorMessage(err)}`);
+        }
+      }
       if (repeat) {
         const series = created as CreateSeriesResponse;
         const first = series.tasks?.[0];
@@ -849,6 +877,47 @@ export function NewTaskScreen() {
                       )}
                     </View>
                   )}
+
+                  <View style={styles.optRow}>
+                    <View style={[styles.optIcon, { backgroundColor: theme.warningBg }]}>
+                      <BellIcon size={18} color={theme.warningText} />
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={styles.optTitle}>Reminder</Text>
+                      <Text style={styles.optSub}>
+                        {remind
+                          ? 'Rings once at the date and time below'
+                          : 'Off - this task will not ring'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={remind}
+                      onValueChange={toggleRemind}
+                      trackColor={{
+                        true: theme.primarySoft,
+                        false: theme.border,
+                      }}
+                      thumbColor={remind ? theme.primary : theme.surface}
+                    />
+                  </View>
+                  {remind && (
+                    <View style={[styles.duo, styles.field]}>
+                      <View style={styles.flex}>
+                        <FieldLabel required>Reminder Date</FieldLabel>
+                        <Pressable style={styles.picker} onPress={() => setPicker('remDate')} accessibilityRole="button">
+                          <CalendarIcon size={18} color={theme.textSecondary} />
+                          <Text style={styles.pickerText}>{fmtDateShort(remDate)}</Text>
+                        </Pressable>
+                      </View>
+                      <View style={styles.flex}>
+                        <FieldLabel required>Reminder Time</FieldLabel>
+                        <Pressable style={styles.picker} onPress={() => setPicker('remTime')} accessibilityRole="button">
+                          <ClockIcon size={18} color={theme.textSecondary} />
+                          <Text style={styles.pickerText}>{fmtTime(remTime)}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
                 </>
               )}
             </View>
@@ -910,6 +979,21 @@ export function NewTaskScreen() {
         onPick={setEndDate}
         minDate={recStart}
         title="Schedule ends"
+      />
+      <DateSheet
+        visible={picker === 'remDate'}
+        onClose={() => setPicker(null)}
+        value={remDate}
+        onPick={setRemDate}
+        minDate={todayStr()}
+        title="Reminder date"
+      />
+      <TimeSheet
+        visible={picker === 'remTime'}
+        onClose={() => setPicker(null)}
+        value={remTime}
+        onPick={v => setRemTime(v || '09:00')}
+        allowNone={false}
       />
       <PeopleSheet
         visible={picker === 'person'}

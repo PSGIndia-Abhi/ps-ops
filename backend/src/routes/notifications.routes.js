@@ -4,9 +4,12 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 // Notifications always belong to the logged-in user. Besides the job permissions, a user who works with
-// invoices (the accountant) may use them too.
+// invoices (the accountant) may use them too, and so may everyone in the lead flow (anyone who works
+// leads, and the external lead providers).
 const allowNotifications = (jobPermission) => (req, res, next) =>
-  req.user?.permissions?.includes(PERMISSIONS.VIEW_INVOICE)
+  req.user?.permissions?.includes(PERMISSIONS.VIEW_INVOICE) ||
+  req.user?.permissions?.includes("CRM_VIEW_LEAD") ||
+  req.user?.role === "lead_provider"
     ? next()
     : requirePermission(jobPermission)(req, res, next);
 

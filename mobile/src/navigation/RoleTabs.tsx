@@ -1,18 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useAuth } from '../auth/AuthContext';
 import { canSwitchToSales, isAccountantRole, isTaskRole, useRawRole, useUserRole } from '../auth/role';
+import { loadDefaultApp, saveDefaultApp } from './defaultApp';
+import { leadPersonaForRole } from '../leads/stage';
 import { AppSwitchProvider, type AppKind } from './AppSwitchContext';
 import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
+import { LeadsNavigator } from './LeadsNavigator';
 import { RemindersNavigator } from './RemindersNavigator';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
 import { colors } from '../theme';
-
-/** How long the screen stays blank between unmounting one app and mounting the other. */
-const SWAP_MS = 80;
 
 /**
  * Picks the one bottom-tab navigator that matches the signed-in user's
@@ -31,22 +32,72 @@ const SWAP_MS = 80;
  * temporary_worker, or nothing decoded yet) gets the same safe fallback -
  * never a crash, never the wrong role's dashboard.
  */
+/** How long the screen stays blank between unmounting one app and mounting the other. */
+const SWAP_MS = 80;
+
 export function RoleTabs() {
   const role = useUserRole();
   const rawRole = useRawRole();
 
-  // Managing Director / Personal Assistant open in Task Management like every org-hierarchy role,
-  // and can move to the Sales app and back without signing out. The accountant opens in Payment
-  // Reminders instead, and can move to Task Management and back the same way.
+  // Which apps this person has, and the one they open in:
+  //  - Managing Director / Personal Assistant: Task Management, can switch to Commercial and
+  //    Residential Leads, where they work as a sales manager (the old Sales app is no longer used);
+  //  - lead roles (telecaller, commercial sales, sales manager): Lead Management, can switch to
+  //    Task Management - same as the web, where their follow-ups and visits are tasks too;
+  //  - accountant: Payment Reminders (the web's Accountant Panel), can switch to Task Management;
+  //  - other org-hierarchy roles: Task Management only.
+  const leadPersona = leadPersonaForRole(rawRole);
+  const salesSwitch = canSwitchToSales(rawRole);
+  const leadRole = !!leadPersona && !salesSwitch;
+  // A Sales Executive / Sales Manager also works residential leads, in their own app.
+  const residentialToo = leadPersona === 'sales' || leadPersona === 'sales_manager';
   const accountant = isAccountantRole(rawRole);
-  const other: AppKind | null = accountant ? 'reminders' : canSwitchToSales(rawRole) ? 'sales' : null;
-  const canSwitch = other !== null;
-  const [inOther, setInOther] = useState(accountant);
+  const taskRole = isTaskRole(rawRole);
+  const apps = useMemo<AppKind[]>(
+    () =>
+      salesSwitch
+        ? ['tasks', 'leads', 'residential']
+        : leadRole
+        ? residentialToo
+          ? ['leads', 'residential', 'tasks']
+          : ['leads', 'tasks']
+        : accountant
+        ? ['reminders', 'tasks']
+        : taskRole
+        ? ['tasks']
+        : [],
+    [salesSwitch, leadRole, residentialToo, accountant, taskRole],
+  );
+  const canSwitch = apps.length > 1;
+  const [picked, setPicked] = useState<AppKind | null>(null);
+  // The app this person chose to open in (Switch app -> Set as default). Read once before the first
+  // app is shown, so it opens straight in the right one; undefined while reading.
+  const { user, session } = useAuth();
+  const userId = String(user?.id ?? session?.userId ?? '');
+  const [defaultApp, setDefaultApp] = useState<AppKind | null | undefined>(canSwitch ? undefined : null);
+  useEffect(() => {
+    if (!canSwitch || !userId) {
+      setDefaultApp(null);
+      return;
+    }
+    let alive = true;
+    loadDefaultApp(userId).then(app => {
+      if (!alive) return;
+      setDefaultApp(app);
+      if (app) setPicked(prev => prev ?? app);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canSwitch, userId]);
+  const chooseDefault = (app: AppKind) => {
+    setDefaultApp(app);
+    if (userId) saveDefaultApp(userId, app);
+  };
+  const current: AppKind = picked && apps.includes(picked) ? picked : apps[0] ?? 'tasks';
   // The app being left is unmounted first and the other one mounted a moment later: replacing one
   // navigator with the other in a single step leaves the native screen stack unable to open screens.
   const [swapping, setSwapping] = useState(false);
-  const current: AppKind = other && inOther ? other : 'tasks';
-  const apps = useMemo<AppKind[]>(() => (other ? ['tasks', other] : ['tasks']), [other]);
   const [sheet, setSheet] = useState<{ onProfile?: () => void } | null>(null);
   const appSwitch = useMemo(
     () => ({
@@ -57,13 +108,14 @@ export function RoleTabs() {
     [canSwitch, current],
   );
 
-  // Org-hierarchy designations get Task Management - same login split as the web app.
-  if (isTaskRole(rawRole) || accountant) {
+  if (apps.length > 0) {
     return (
       <AppSwitchProvider value={appSwitch}>
-        {swapping ? (
+        {swapping || defaultApp === undefined ? (
           <View style={styles.blank} />
-        ) : current === 'sales' ? (
+        ) : current === 'leads' ? (
+          <LeadsNavigator />
+        ) : current === 'sales' || current === 'residential' ? (
           <CrmNavigator />
         ) : current === 'reminders' ? (
           <RemindersNavigator />
@@ -75,11 +127,13 @@ export function RoleTabs() {
             visible={sheet !== null}
             current={current}
             apps={apps}
+            defaultApp={defaultApp ?? null}
+            onSetDefault={chooseDefault}
             onPick={app => {
               setSheet(null);
               setSwapping(true);
               setTimeout(() => {
-                setInOther(app !== 'tasks');
+                setPicked(app);
                 setSwapping(false);
               }, SWAP_MS);
             }}

@@ -11,6 +11,8 @@ import { AppState } from 'react-native';
 import { ApiError, crmApi } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { newClientRef } from './leadHelpers';
+import { loadLeadSources } from './leadSources';
+import { loadQuoteServices } from './quoteServices';
 import {
   LOCAL_ID_PREFIX,
   loadOutbox,
@@ -84,6 +86,14 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const outboxRef = useRef<OutboxItem[]>([]);
   const outboxLoaded = useRef(false);
+
+  // The New Lead form's services (the Quotation Master) and sources (the lead source master):
+  // loaded now, so the form has them even if the connection drops later.
+  useEffect(() => {
+    if (!session) return;
+    loadQuoteServices().catch(() => undefined);
+    loadLeadSources().catch(() => undefined);
+  }, [session]);
   const syncing = useRef(false);
   const [serviceMaster, setServiceMaster] = useState<ServiceMasterRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -262,7 +272,9 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
   const waiting = outbox.some(i => !i.error);
   useEffect(() => {
     if (!waiting) return;
+    // Retried only while the app is open; reopening the app or the network coming back sends it at once.
     const timer = setInterval(() => {
+      if (AppState.currentState !== 'active') return;
       syncOutbox().then(sent => {
         if (sent) load();
       });
@@ -364,8 +376,10 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     [updateOutbox],
   );
 
+  // Puts the server's copy of a lead in the list - added when it is not there yet (e.g. a lead
+  // opened from the Lead Management app, so its edit form finds it).
   const replaceLead = useCallback((lead: Lead) => {
-    setServerLeads(prev => prev.map(l => (l.id === lead.id ? lead : l)));
+    setServerLeads(prev => (prev.some(l => l.id === lead.id) ? prev.map(l => (l.id === lead.id ? lead : l)) : [lead, ...prev]));
   }, []);
 
   const updateLead = useCallback(

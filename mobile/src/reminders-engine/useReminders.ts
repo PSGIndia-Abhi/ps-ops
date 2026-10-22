@@ -4,10 +4,12 @@ import { kvGet, kvSet } from '../crm/secureKv';
 import { syncReminders, type ReminderRoute } from './engine';
 import { canScheduleExactAlarms, consumeOpenedRoute, onReminderOpened, openExactAlarmSettings, remindersAvailable } from './native';
 import { listenForPush, registerForPush } from './push';
-import { myUpcomingTasks, taskToReminder } from './sources';
+import { myUpcomingTasks, tasksToReminders } from './sources';
 
 /** While an app is open its reminders are refreshed this often (plus on open and on return). */
-const SYNC_EVERY_MS = 5 * 60_000;
+// A safety net only: a push re-arms the alarms the moment something changes, and opening the app
+// re-syncs too. So this reads the list just every 15 minutes, and only while the app is open.
+const SYNC_EVERY_MS = 15 * 60_000;
 
 let currentSync: (() => Promise<void>) | null = null;
 /**
@@ -28,7 +30,7 @@ async function askExactOnce() {
   await kvSet('reminders', 'exactAsked', true);
   Alert.alert(
     'Ring reminders on time',
-    'Allow "Alarms & reminders" for BestServe so meeting and task alarms ring exactly 30 minutes before.',
+    'Allow "Alarms & reminders" for BestServe so meeting and task alarms ring at exactly the right time.',
     [
       { text: 'Not now', style: 'cancel' },
       { text: 'Allow', onPress: openExactAlarmSettings },
@@ -45,16 +47,28 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
   const openRef = useRef(open);
   openRef.current = open;
   const busy = useRef(false);
+  // Asked for while a sync was running (a push for a just-saved follow-up, say): one more after it,
+  // so the newest item is never lost to a sync that had already read the list.
+  const again = useRef(false);
 
   const sync = useCallback(async () => {
-    if (!remindersAvailable || !myId || busy.current) return;
+    if (!remindersAvailable || !myId) return;
+    if (busy.current) {
+      again.current = true;
+      return;
+    }
     busy.current = true;
     try {
-      const tasks = await myUpcomingTasks(myId);
-      await syncReminders(myId, tasks.map((t) => taskToReminder(t, myId)));
-      askExactOnce();
-    } catch {
-      // Offline or the server is down: the alarms already armed stay armed; try again later.
+      do {
+        again.current = false;
+        try {
+          const tasks = await myUpcomingTasks(myId, { withTaskReminders: true });
+          await syncReminders(myId, tasksToReminders(tasks, myId));
+          askExactOnce();
+        } catch {
+          // Offline or the server is down: the alarms already armed stay armed; try again later.
+        }
+      } while (again.current);
     } finally {
       busy.current = false;
     }
@@ -94,7 +108,9 @@ export function useReminders(myId: string, app: ReminderRoute['app'], open: (rou
   useEffect(() => {
     currentSync = sync;
     sync();
-    const timer = setInterval(sync, SYNC_EVERY_MS);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') sync();
+    }, SYNC_EVERY_MS);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') sync();
     });

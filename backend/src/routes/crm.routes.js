@@ -10,6 +10,25 @@ const requirePermission = require("../middleware/permission.middleware");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
 const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
+const {
+  nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
+  SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
+  readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices,
+} = require("../utils/crmLeadManagement");
+const { notifyLead } = require("../utils/crmLeadNotifications");
+const { notifyUsers } = require("../services/notifications.service");
+
+// Lead responses name the services a lead asks for (toLead -> services_requested_names): keep the
+// Quotation Master service names cached. One small query a minute at most; a failure only means
+// the names are left out.
+router.use(async (req, res, next) => {
+  try {
+    await loadQuoteServices(pool);
+  } catch (err) {
+    console.error("CRM quote service names error:", err.message);
+  }
+  next();
+});
 
 // Never let the company-hand-off break the lead flow it rides along with - log and move on.
 async function handleNewCustomer(customerName) {
@@ -36,15 +55,7 @@ const LIST_LIMIT = 500;
 // with no house type / service / plan and no payment. Everything else is a consumer lead.
 const COMMERCIAL_LEAD_SOURCES = ["google", "website", "referral", "social_media", "other"];
 const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
-const COMMERCIAL_SERVICES = [
-  "gpc",
-  "rodent_control",
-  "cockroach_control",
-  "ant_treatment",
-  "honeybee_control",
-  "snake_control",
-  "fly_control",
-];
+// Services requested: Quotation Master service ids (crm_quote_services) - see resolveLeadServices.
 const MAX_LEAD_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const PHOTO_TYPES = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -65,6 +76,13 @@ function findCoupon(rawCode) {
   return { code, percentage: coupon.percentage };
 }
 
+// A DATE column as 'YYYY-MM-DD' (mysql2 hands it back as a Date at local midnight).
+function toDateOnly(value) {
+  if (!(value instanceof Date)) return String(value).slice(0, 10);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
 function toLead(row) {
   return {
     id: row.id,
@@ -73,7 +91,9 @@ function toLead(row) {
     company_name: row.company_name || "",
     industry_type: row.industry_type || null,
     contact_designation: row.contact_designation || "",
-    services_requested: row.services_requested ? String(row.services_requested).split(",") : [],
+    services_requested: row.services_requested ? String(row.services_requested).split(",").filter(Boolean) : [],
+    // Their names from the Quotation Master (cache warmed for every request - see router.use below).
+    services_requested_names: row.services_requested ? quoteServiceNames(String(row.services_requested).split(",")) : [],
     latitude: row.latitude === null || row.latitude === undefined ? null : Number(row.latitude),
     longitude: row.longitude === null || row.longitude === undefined ? null : Number(row.longitude),
     phone: row.phone,
@@ -96,6 +116,19 @@ function toLead(row) {
     created_by_name: row.created_by_name || "",
     created_at: row.created_at,
     paid_at: row.paid_at || null,
+    // Competitor details (commercial leads only, all optional).
+    competitor_name: row.competitor_name || "",
+    competitor_amount: row.competitor_amount === null || row.competitor_amount === undefined ? null : Number(row.competitor_amount),
+    competitor_contract_end: row.competitor_contract_end ? toDateOnly(row.competitor_contract_end) : null,
+    competitor_notes: row.competitor_notes || "",
+    // Lead Management fields -- always present, but only ever set for lead_type='commercial'.
+    lead_number: row.lead_number || null,
+    provider_id: row.provider_id === null || row.provider_id === undefined ? null : String(row.provider_id),
+    pipeline_stage: row.pipeline_stage || null,
+    assigned_telecaller_id: row.assigned_telecaller_id === null || row.assigned_telecaller_id === undefined ? null : String(row.assigned_telecaller_id),
+    assigned_sales_employee_id: row.assigned_sales_employee_id === null || row.assigned_sales_employee_id === undefined ? null : String(row.assigned_sales_employee_id),
+    loss_reason_id: row.loss_reason_id || null,
+    row_version: row.row_version === undefined ? null : Number(row.row_version),
   };
 }
 
@@ -165,6 +198,37 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
   try {
     const wanted = req.query.lead_type;
     const leadType = wanted === "commercial" || wanted === "all" ? wanted : "consumer";
+    // Commercial leads get Lead Management's visibility scoping + filters.
+    // Consumer leads (and lead_type=all, which includes consumer rows) keep
+    // their original behaviour, for backward compatibility with the existing mobile app.
+    if (leadType === "commercial") {
+      const where = ["l.lead_type = 'commercial'"];
+      const params = [];
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null) {
+        where.push("(l.created_by_user_id IN (?) OR l.assigned_telecaller_id IN (?) OR l.assigned_sales_employee_id IN (?))");
+        params.push(visibleIds, visibleIds, visibleIds);
+      }
+      // Other people's sales-own leads stay with them and lead managers.
+      const salesOwn = salesOwnLeadFilter(req, "l");
+      if (salesOwn) {
+        where.push(salesOwn.sql);
+        params.push(...salesOwn.params);
+      }
+      if (req.query.pipeline_stage) { where.push("l.pipeline_stage = ?"); params.push(String(req.query.pipeline_stage)); }
+      if (req.query.assigned_telecaller_id) { where.push("l.assigned_telecaller_id = ?"); params.push(Number(req.query.assigned_telecaller_id)); }
+      if (req.query.assigned_sales_employee_id) { where.push("l.assigned_sales_employee_id = ?"); params.push(Number(req.query.assigned_sales_employee_id)); }
+      if (req.query.lead_source) { where.push("l.lead_source = ?"); params.push(String(req.query.lead_source)); }
+      if (req.query.from_date) { where.push("DATE(l.created_at) >= ?"); params.push(String(req.query.from_date)); }
+      if (req.query.to_date) { where.push("DATE(l.created_at) <= ?"); params.push(String(req.query.to_date)); }
+
+      const [rows] = await pool.query(
+        `${LEAD_WITH_CREATOR_SQL} WHERE ${where.join(" AND ")} ORDER BY l.created_at DESC LIMIT ${LIST_LIMIT}`,
+        params
+      );
+      return res.json(rows.map(toLead));
+    }
+
     const where = [];
     const params = [];
     if (leadType !== "all") {
@@ -190,8 +254,18 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
 // GET /api/crm/leads/:id
 router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
-    const row = await loadVisibleLead(req, req.params.id);
+    const [[row]] = await pool.query(`${LEAD_WITH_CREATOR_SQL} WHERE l.id = ? LIMIT 1`, [req.params.id]);
     if (!row) return res.status(404).json({ error: "Lead not found" });
+    if (row.lead_type === "commercial") {
+      // Commercial: Lead Management's visibility (own, assigned, or a visible team member's).
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      if (visibleIds !== null && !isOwnLead(row, req.user.id) && !visibleIds.some((id) => isOwnLead(row, id))) {
+        return res.status(404).json({ error: "Lead not found" });
+      }
+      if (await isHiddenSalesOwnLead(pool, req, row)) return res.status(404).json({ error: "Lead not found" });
+    } else if (!canViewAllLeads(req) && Number(row.created_by_user_id) !== Number(req.user.id)) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
     res.json(toLead(row));
   } catch (err) {
     console.error("CRM lead fetch error:", err);
@@ -215,7 +289,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   const houseType = typeof body.house_type === "string" ? body.house_type.trim() : "";
   const serviceName = typeof body.service_name === "string" ? body.service_name.trim() : "";
   const planType = typeof body.plan_type === "string" ? body.plan_type.trim() : "";
-  const amount = Number(body.amount);
+  // An empty amount is missing (not 0); 0 itself is allowed.
+  const amount = body.amount === "" || body.amount === null || body.amount === undefined ? NaN : Number(body.amount);
   const couponCode = typeof body.coupon_code === "string" ? body.coupon_code.trim() : "";
   const location = typeof body.location === "string" ? body.location.trim() : "";
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
@@ -251,7 +326,8 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
   if (!houseType) return res.status(400).json({ error: "House type is required" });
   if (!serviceName) return res.status(400).json({ error: "Service is required" });
   if (!planType) return res.status(400).json({ error: "Plan is required" });
-  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "A valid amount is required" });
+  // 0 is allowed (nothing to collect); negative or missing is not.
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: "A valid amount is required" });
   let coupon = null;
   if (couponCode) {
     coupon = findCoupon(couponCode);
@@ -351,14 +427,13 @@ router.post("/leads", auth, requirePermission("CRM_CREATE_LEAD"), async (req, re
 // app version from before they existed can still save.
 // Reads and checks the commercial-only fields of a lead - shared by create and edit.
 // `lead` carries what the caller already read (location, referenceBy, amount, leadStatus).
-// -> { error } when something is wrong, otherwise { values }.
-function readCommercialFields(body, lead) {
+// -> { error } when something is wrong, otherwise { values }. Async: the source may come from the master.
+async function readCommercialFields(body, lead) {
   const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
   const alternatePhone = typeof body.alternate_phone === "string" ? body.alternate_phone.replace(/\D/g, "") : "";
   const leadSource = body.lead_source || null;
   const industryType = body.industry_type || null;
   const designation = typeof body.contact_designation === "string" ? body.contact_designation.trim() : "";
-  const services = Array.isArray(body.services_requested) ? [...new Set(body.services_requested)] : [];
   const hasPoint = body.latitude !== null && body.latitude !== undefined && body.latitude !== "" &&
     body.longitude !== null && body.longitude !== undefined && body.longitude !== "";
   const latitude = hasPoint ? Number(body.latitude) : null;
@@ -368,7 +443,8 @@ function readCommercialFields(body, lead) {
   if (companyName.length > 150) return { error: "Company / business name is too long (max 150)" };
   if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) return { error: "Invalid industry type" };
   if (designation.length > 100) return { error: "Designation is too long (max 100)" };
-  if (services.some((service) => !COMMERCIAL_SERVICES.includes(service))) return { error: "Invalid service requested" };
+  const picked = await resolveLeadServices(pool, body.services_requested);
+  if (picked.error) return { error: picked.error };
   if (lead.referenceBy.length > 100) return { error: "Reference name is too long (max 100)" };
   if (hasPoint && (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180)) {
     return { error: "Invalid location" };
@@ -378,22 +454,54 @@ function readCommercialFields(body, lead) {
   if (alternatePhone && alternatePhone.length !== 10) {
     return { error: "Alternate number must be a valid 10-digit phone number" };
   }
-  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) return { error: "Source of lead is required" };
-  if (!Number.isFinite(lead.amount) || lead.amount <= 0 || lead.amount > 99999999) {
+  // The fixed codes the mobile app sends, or any active source from the lead source master.
+  if (!COMMERCIAL_LEAD_SOURCES.includes(leadSource)) {
+    let master = null;
+    if (typeof leadSource === "string") {
+      [[master]] = await pool.query("SELECT id FROM crm_lead_sources WHERE name = ? AND is_active = 1", [leadSource]);
+    }
+    if (!master) return { error: "Source of lead is required" };
+  }
+  // 0 is allowed for an approximate quote; negative or missing is not.
+  if (!Number.isFinite(lead.amount) || lead.amount < 0 || lead.amount > 99999999) {
     return { error: "A valid approximate quote is required" };
   }
   if (!LEAD_STATUSES.includes(lead.leadStatus)) return { error: "Invalid lead status" };
 
   return {
-    values: { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude },
+    values: { companyName, alternatePhone, leadSource, industryType, designation, services: picked.ids, latitude, longitude },
   };
 }
 
 async function createCommercialLead(req, res, lead) {
-  const read = readCommercialFields(req.body || {}, lead);
+  let read;
+  try {
+    read = await readCommercialFields(req.body || {}, lead);
+  } catch (err) {
+    console.error("CRM lead source lookup error:", err);
+    return res.status(500).json({ error: "Failed to save lead" });
+  }
   if (read.error) return res.status(400).json({ error: read.error });
   const { companyName, alternatePhone, leadSource, industryType, designation, services, latitude, longitude } =
     read.values;
+  const competitor = readCompetitor(req.body || {});
+  if (competitor.error) return res.status(400).json({ error: competitor.error });
+
+  // The sales manager (MANAGE_LEADS) / admin may give the new lead to someone straight away:
+  // `assign_to` = a sales executive, a telecaller, or themselves (see assignmentFor).
+  let assignee = null;
+  if (req.body?.assign_to !== undefined && req.body?.assign_to !== null && req.body?.assign_to !== "") {
+    if (req.user.role !== "admin" && !req.user.permissions?.includes("MANAGE_LEADS")) {
+      return res.status(403).json({ error: "You cannot assign leads" });
+    }
+    try {
+      assignee = await findLeadAssignee(pool, req.body.assign_to, req.user.id);
+    } catch (err) {
+      console.error("CRM lead assignee lookup error:", err);
+      return res.status(500).json({ error: "Failed to save lead" });
+    }
+    if (!assignee) return res.status(400).json({ error: "Choose who to assign this lead to" });
+  }
 
   const findByRef = async () => {
     const [[row]] = await pool.query(
@@ -410,38 +518,88 @@ async function createCommercialLead(req, res, lead) {
     }
 
     const id = uuid();
-    await pool.query(
-      `INSERT INTO crm_leads
-        (id, lead_type, customer_name, company_name, industry_type, contact_designation,
-         phone, alternate_phone, customer_email,
-         house_type, service_name, plan_type, standard_amount, amount, services_requested,
-         location, latitude, longitude, lead_source, reference_by, notes,
-         payment_method, payment_status, lead_status, created_by_user_id, external_ref)
-       VALUES (?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?)`,
-      [
-        id,
-        lead.customerName,
-        companyName,
-        industryType,
-        designation || null,
-        lead.phone,
-        alternatePhone || null,
-        lead.email || null,
-        lead.amount,
-        services.length ? services.join(",") : null,
-        lead.location || null,
-        latitude,
-        longitude,
-        leadSource,
-        lead.referenceBy || null,
-        lead.notes || null,
-        lead.leadStatus,
-        req.user.id,
-        lead.clientRef,
-      ]
-    );
+    // A sales executive's own lead skips the telecaller: they met or know the customer, so it starts
+    // verified (QUALIFIED) and assigned to them. Every other lead joins the telecaller queue as NEW.
+    // One transaction: the lead number, the commercial fields, the pipeline start and the history rows.
+    const salesOwn = SALES_EXECUTIVE_ROLES.includes(req.user.role);
+    // Assigned on the form: where it goes instead of the telecaller queue.
+    const plan = assignee ? assignmentFor({ pipeline_stage: "NEW", assigned_telecaller_id: null }, assignee) : null;
+    const startStage = plan ? plan.stage : salesOwn ? "QUALIFIED" : "NEW";
+    const startSales = plan ? plan.salesId : salesOwn ? req.user.id : null;
+    const startTelecaller = plan ? plan.telecallerId : null;
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const leadNumber = await nextLeadNumber(conn);
+      await conn.query(
+        `INSERT INTO crm_leads
+          (id, lead_number, lead_type, customer_name, company_name, industry_type, contact_designation,
+           phone, alternate_phone, customer_email,
+           house_type, service_name, plan_type, standard_amount, amount, services_requested,
+           location, latitude, longitude, lead_source, reference_by, notes,
+           payment_method, payment_status, lead_status, pipeline_stage, assigned_sales_employee_id,
+           assigned_telecaller_id, created_by_user_id, external_ref)
+         VALUES (?, ?, 'commercial', ?, ?, ?, ?, ?, ?, ?, '', '', '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'none', 'na', ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          leadNumber,
+          lead.customerName,
+          companyName,
+          industryType,
+          designation || null,
+          lead.phone,
+          alternatePhone || null,
+          lead.email || null,
+          lead.amount,
+          services.length ? services.join(",") : null,
+          lead.location || null,
+          latitude,
+          longitude,
+          leadSource,
+          lead.referenceBy || null,
+          lead.notes || null,
+          lead.leadStatus,
+          startStage,
+          startSales,
+          startTelecaller,
+          req.user.id,
+          lead.clientRef,
+        ]
+      );
+      if (competitor.present) {
+        await conn.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, id]);
+      }
+      await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      if (assignee) {
+        const who = assignee.id === Number(req.user.id) ? "themselves" : `${assignee.name}${startTelecaller ? " (telecaller)" : ""}`;
+        await logLeadHistory(conn, id, "ASSIGNED", { note: `Assigned to ${who}`.slice(0, 500), changedBy: req.user.id });
+      } else if (salesOwn) {
+        await logLeadHistory(conn, id, "QUALIFY", { note: "Marked GENUINE - the sales executive's own lead, no telecaller call needed", changedBy: req.user.id });
+      }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
 
     const [[created]] = await pool.query(`SELECT * FROM crm_leads WHERE id = ?`, [id]);
+    // Best effort, after the change is saved: never holds up or fails the request. An assigned lead
+    // is told only to the person it went to (not the whole telecaller queue).
+    if (assignee) {
+      if (assignee.id !== Number(req.user.id)) {
+        notifyUsers([assignee.id], {
+          type: "LEAD_ASSIGNED",
+          title: startTelecaller ? `Lead to verify: ${companyName}` : `New lead for you: ${companyName}`,
+          message: `${created.lead_number || "A lead"} was assigned to you${startTelecaller ? " for a verification call" : ""}.`,
+          entityType: "lead",
+          entityId: id,
+        }).catch(() => {});
+      }
+    } else {
+      notifyLead(id, salesOwn ? "VERIFIED" : "SUBMITTED", { actorId: req.user.id });
+    }
     res.status(201).json(toLead(created));
   } catch (err) {
     if (err && err.code === "ER_DUP_ENTRY" && lead.clientRef) {
@@ -478,7 +636,8 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
   const location = typeof body.location === "string" ? body.location.trim() : "";
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
   const referenceBy = typeof body.reference_by === "string" ? body.reference_by.trim() : "";
-  const amount = Number(body.amount);
+  // An empty amount is missing (not 0); 0 itself is allowed.
+  const amount = body.amount === "" || body.amount === null || body.amount === undefined ? NaN : Number(body.amount);
   const leadStatus = body.lead_status || "new";
 
   if (customerName.length < 2) return res.status(400).json({ error: "Customer name is required" });
@@ -494,7 +653,11 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
     if (!existing) return res.status(404).json({ error: "Lead not found" });
 
     if (existing.lead_type === "commercial") {
-      const read = readCommercialFields(body, { location, referenceBy, amount, leadStatus });
+      // A commercial lead can be edited (e.g. another number added) until it becomes a customer.
+      if (existing.lead_status === "converted" || ["WON", "CONVERTED"].includes(existing.pipeline_stage)) {
+        return res.status(400).json({ error: "A converted lead cannot be edited" });
+      }
+      const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus });
       if (read.error) return res.status(400).json({ error: read.error });
       const v = read.values;
 
@@ -525,6 +688,11 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
           existing.id,
         ]
       );
+      const competitor = readCompetitor(body);
+      if (competitor.error) return res.status(400).json({ error: competitor.error });
+      if (competitor.present) {
+        await pool.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, existing.id]);
+      }
     } else {
       const leadSource = body.lead_source || null;
       if (leadSource !== null && !LEAD_SOURCES.includes(leadSource)) {
@@ -553,7 +721,7 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
         if (!houseType) return res.status(400).json({ error: "House type is required" });
         if (!serviceName) return res.status(400).json({ error: "Service is required" });
         if (!planType) return res.status(400).json({ error: "Plan is required" });
-        if (!Number.isFinite(newAmount) || newAmount <= 0) return res.status(400).json({ error: "A valid amount is required" });
+        if (!Number.isFinite(newAmount) || newAmount < 0) return res.status(400).json({ error: "A valid amount is required" });
         if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: "Invalid payment method" });
         if (!PAYMENT_STATUSES.includes(paymentStatus)) return res.status(400).json({ error: "Invalid payment status" });
         // Online payments are only "paid" once Razorpay confirms them.
@@ -837,6 +1005,7 @@ router.post("/leads/:id/payment-order", auth, requirePermission("CRM_COLLECT_PAY
     if (lead.payment_status === "paid") return res.status(409).json({ error: "This lead is already paid" });
 
     const amountPaise = Math.round(Number(lead.amount) * 100);
+    if (amountPaise <= 0) return res.status(400).json({ error: "The amount is 0 - there is nothing to collect" });
     if (!Number.isFinite(amountPaise) || amountPaise < 100) {
       return res.status(400).json({ error: "The lead amount is too small for an online payment" });
     }

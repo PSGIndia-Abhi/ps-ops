@@ -22,7 +22,8 @@ import type { TeamMember, WorkTask } from './types';
 import { NotificationToast } from './ui/NotificationToast';
 
 /** How often the task list is quietly re-fetched to pick up other people's changes. */
-const POLL_MS = 60000;
+// While the app is open; returning to it, pulling down and every action refresh at once anyway.
+const POLL_MS = 120000;
 
 /**
  * The signed-in person plus one shared, cached task list - the mobile twin
@@ -150,8 +151,16 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     async (silent = false) => {
       if (!silent) setRefreshing(true);
       try {
-        const all = await api.listTasks();
-        const list = hideReminders ? all.filter((x) => !isPaymentReminder(x)) : all;
+        // Personal reminders are tasks underneath, but they live on the Reminders screen, not here.
+        // The accountant's payment reminders are tasks too, but they belong to the Payment Reminders app.
+        // Lead follow-ups and meetings are tasks underneath as well; they are worked in the Lead app.
+        const list = (await api.listTasks()).filter(
+          (t) =>
+            t.task_type !== 'PERSONAL_REMINDER' &&
+            t.task_type !== 'LEAD_FOLLOW_UP' &&
+            t.task_type !== 'LEAD_MEETING' &&
+            !(hideReminders && isPaymentReminder(t)),
+        );
         setTasks((prev) => mergeTasks(prev, list));
         setError(null);
         await stateLoaded;

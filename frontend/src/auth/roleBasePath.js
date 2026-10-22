@@ -12,10 +12,21 @@ export const ROLE_HOME = {
   branch_admin: "/admin",
   supervisor: "/supervisor",
   technician: "/technician",
-  accountant: "/accountant",
+  // The Accountant Panel belongs to "Collection Executive" (below); the old "accountant" role has no
+  // panel of its own any more and falls through to /staff.
   client: "/client",
   temporary_worker: "/temp",
   staff: "/staff",
+
+  // Lead Management (pages/leads). Each lands on /leads, which shows the
+  // dashboard for that role: provider portal, telecaller or sales manager.
+  lead_provider: "/leads",
+  telecaller: "/leads",
+  sales_manager: "/leads",
+  // The sales executive works their leads, meetings and quotations there too.
+  sales: "/leads",
+  // The commercial sales executive ("Sales Executive", listed with the hierarchy roles
+  // below) lands in Lead Management too, and opens Task Management from its sidebar.
 
   // The real org-hierarchy designations (see user_hierarchy / Roles &
   // Permissions) land in Task Management. Deliberately NOT "supervisor" —
@@ -29,14 +40,15 @@ export const ROLE_HOME = {
   "Marketing Head": "/taskpro",
   "Marketing Executive": "/taskpro",
   "Sales Head": "/taskpro",
-  "Sales Executive": "/taskpro",
+  "Sales Executive": "/leads",
   "Operations Head": "/taskpro",
   "Operations Manager": "/taskpro",
   "Service Coordinator": "/taskpro",
   "Quality Head": "/taskpro",
   "Accounts Head": "/taskpro",
   "Accounts Executive": "/taskpro",
-  "Collection Executive": "/taskpro",
+  // Works in the Accountant Panel (payments); Task Management is a link from its sidebar.
+  "Collection Executive": "/accountant",
   "Admin Executive": "/taskpro",
 };
 

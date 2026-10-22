@@ -93,7 +93,8 @@ export async function loadTasks(forId, { force = false } = {}) {
   if (loadingPromise) return loadingPromise;
   loadingPromise = (async () => {
     try {
-      const tasks = await call("GET", "/api/work-tasks");
+      // Lead follow-ups and meetings are work tasks underneath, but they are worked in Lead Management.
+      const tasks = (await call("GET", "/api/work-tasks")).filter((t) => t.task_type !== "LEAD_FOLLOW_UP" && t.task_type !== "LEAD_MEETING");
       if (state.forId === forId) set({ tasks, ready: true, error: null });
     } catch (err) {
       if (state.forId === forId) set({ ready: true, error: err.message });
@@ -223,6 +224,30 @@ export async function skipTask(id, reason) {
 
 export async function reopenTask(id, reason) {
   const data = await call("POST", `/api/work-tasks/${id}/reopen`, reason ? { reason } : {});
+  patchList(data);
+  return data;
+}
+
+/**
+ * A reminder on the task: it rings once, at the date ('YYYY-MM-DD') and time ('HH:MM') chosen, for
+ * the task's assignee, on the web and the phone. `task.reminder_id` / `task.reminder_at` say whether
+ * one is set and when. Setting it again moves it.
+ */
+export async function setTaskReminder(id, { date, time }) {
+  const data = await call("POST", `/api/work-tasks/${id}/reminder`, { date, time });
+  patchList(data);
+  return data;
+}
+
+/** A repeating task's missed date, marked done afterwards (clears its Missed flag). */
+export async function markDoneLate(id, date, note) {
+  const data = await call("POST", `/api/work-tasks/${id}/done-late`, { date, note: note || undefined });
+  patchList(data);
+  return data;
+}
+
+export async function removeTaskReminder(id) {
+  const data = await call("DELETE", `/api/work-tasks/${id}/reminder`);
   patchList(data);
   return data;
 }

@@ -60,6 +60,38 @@ function stringData(obj = {}) {
  * right screen (entityType / entityId). Never throws.
  */
 async function sendPush(userIds, { title, body, data = {} }) {
+  return deliver(userIds, {
+    notification: { title: title || "BestServe", body: body || "" },
+    data: stringData(data),
+    android: {
+      priority: "high",
+      notification: {
+        // The app's own "New meetings & tasks" channel (heads-up, sound) - created on first launch.
+        channelId: "bestserve_reminder_popup",
+        // The app's white bell (res/drawable/ic_stat_reminder) - otherwise Android shows a blank square.
+        icon: "ic_stat_reminder",
+        color: "#2563EB",
+        defaultSound: true,
+      },
+    },
+  });
+}
+
+/**
+ * Tells these people's phones to fetch their reminders again: something with a due time (a task,
+ * a lead follow-up or meeting, a personal reminder) was added, moved, reassigned or closed for
+ * them - often from the web, while the app is closed. A silent, data-only push: nothing shows;
+ * the app re-arms its alarms in the background. Deferred and best effort, so it never delays or
+ * fails the save that caused it.
+ */
+function syncReminders(userIds) {
+  setImmediate(() => {
+    deliver(userIds, { data: { type: "REMINDERS_SYNC" }, android: { priority: "high" } });
+  });
+}
+
+/** Sends `message` to every phone of these users. Never throws; returns how many phones got it. */
+async function deliver(userIds, message) {
   try {
     const fcm = getMessaging();
     const ids = [...new Set((userIds || []).filter((id) => id !== null && id !== undefined && id !== "").map(String))];
@@ -69,29 +101,14 @@ async function sendPush(userIds, { title, body, data = {} }) {
     const tokens = rows.map((r) => r.token);
     if (tokens.length === 0) return 0;
 
-    const message = {
-      tokens,
-      notification: { title: title || "BestServe", body: body || "" },
-      data: stringData(data),
-      android: {
-        priority: "high",
-        notification: {
-          // The app's own "New meetings & tasks" channel (heads-up, sound) - created on first launch.
-          channelId: "bestserve_reminder_popup",
-          // The app's white bell (res/drawable/ic_stat_reminder) - otherwise Android shows a blank square.
-          icon: "ic_stat_reminder",
-          color: "#2563EB",
-          defaultSound: true,
-        },
-      },
-    };
+    const multicast = { ...message, tokens };
     let res;
     try {
-      res = await fcm.sendEachForMulticast(message);
+      res = await fcm.sendEachForMulticast(multicast);
     } catch (err) {
       // A dropped connection to Google (seen after the backend has been idle): try once more.
       console.warn("[push] send failed, retrying once:", err.message);
-      res = await fcm.sendEachForMulticast(message);
+      res = await fcm.sendEachForMulticast(multicast);
     }
 
     // Drop tokens Firebase says are gone (app uninstalled, data cleared).
@@ -108,4 +125,4 @@ async function sendPush(userIds, { title, body, data = {} }) {
   }
 }
 
-module.exports = { getMessaging, registerToken, unregisterToken, sendPush };
+module.exports = { getMessaging, registerToken, unregisterToken, sendPush, syncReminders };

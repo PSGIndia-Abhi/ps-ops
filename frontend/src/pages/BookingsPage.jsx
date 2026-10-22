@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import "./BookingsPage.css";
 import { roleBasePath } from "../auth/roleBasePath";
+import DeleteBookingDialog from "../components/DeleteBookingDialog";
+import "../components/DeleteBookingDialog.css";
 
 function formatDate(value) {
   if (!value) return "-";
@@ -26,6 +28,10 @@ export default function BookingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [archivingJobId, setArchivingJobId] = useState("");
+  // The job being deleted (admin / branch admin), and a counter that reloads the list after it.
+  const [deleting, setDeleting] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const canDelete = ["admin", "branch_admin"].includes(role);
 
   useEffect(() => {
     let isMounted = true;
@@ -55,7 +61,7 @@ export default function BookingsPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   async function handleToggleArchive(jobId, archived) {
     try {
@@ -395,7 +401,8 @@ export default function BookingsPage() {
                 <div className="booking-section-title">Tasks</div>
                 <div className="booking-job-list">
                   {[...(booking.jobs || [])]
-                    .sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
+                    // In date order, earliest first - the order the work happens.
+                    .sort((a, b) => new Date(a.start_date) - new Date(b.start_date))
                     .map(job => (
                       <div
                         key={job.id}
@@ -421,6 +428,18 @@ export default function BookingsPage() {
                               ? "Unarchive"
                               : "Archive"}
                         </button>
+                        {canDelete && !job.is_archived && (
+                          <button
+                            type="button"
+                            className="booking-delete-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleting({ ...job, booking_id: booking.id && !String(booking.id).startsWith("unbooked") ? booking.id : job.booking_id });
+                            }}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     ))}
                   {(booking.jobs || []).length === 0 && (
@@ -432,6 +451,16 @@ export default function BookingsPage() {
           </div>
         ))}
       </div>
+      {deleting && (
+        <DeleteBookingDialog
+          job={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

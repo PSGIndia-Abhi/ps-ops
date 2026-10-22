@@ -212,6 +212,29 @@ const ensureJobAccess = async (req, res, executor, jobId) => {
   return true;
 };
 
+// A job's visits that have not started yet follow the job's team: when the job is (re)assigned,
+// its SCHEDULED visits are given to the new technicians - so the technician app (shift, visits)
+// shows them to the new people and no longer to the old ones. Visits already started, finished,
+// missed or cancelled keep whoever was on them. `jobFilter` is SQL on `j` (the jobs to sync).
+const syncScheduledVisitTeam = async (executor, jobFilter, params, teamJson) => {
+  await executor.query(
+    `DELETE vt FROM visit_technicians vt
+       JOIN job_visits v ON v.id = vt.visit_id
+       JOIN jobs j ON j.id = v.job_id
+      WHERE v.status = 'SCHEDULED' AND ${jobFilter}`,
+    params
+  );
+  await executor.query(
+    `INSERT INTO visit_technicians (id, visit_id, technician_id)
+     SELECT UUID(), v.id, t.technician_id
+       FROM job_visits v
+       JOIN jobs j ON j.id = v.job_id
+       JOIN JSON_TABLE(?, '$[*]' COLUMNS (technician_id BIGINT PATH '$')) t
+      WHERE v.status = 'SCHEDULED' AND t.technician_id IS NOT NULL AND ${jobFilter}`,
+    [teamJson || "[]", ...params]
+  );
+};
+
 const updateFutureRecurringJobs = async (
   executor,
   bookingId,
@@ -232,6 +255,12 @@ const updateFutureRecurringJobs = async (
       AND DATE(start_date) >= DATE(?)
     `,
     [supervisorId, teamJson, branchId, bookingId, startDate]
+  );
+  await syncScheduledVisitTeam(
+    executor,
+    "j.booking_id = ? AND j.start_date IS NOT NULL AND DATE(j.start_date) >= DATE(?)",
+    [bookingId, startDate],
+    teamJson
   );
 
   return result?.affectedRows || 0;
@@ -258,6 +287,12 @@ const updateRangeRecurringJobs = async (
       AND DATE(start_date) BETWEEN DATE(?) AND DATE(?)
     `,
     [supervisorId, teamJson, branchId, bookingId, rangeStart, rangeEnd]
+  );
+  await syncScheduledVisitTeam(
+    executor,
+    "j.booking_id = ? AND j.start_date IS NOT NULL AND DATE(j.start_date) BETWEEN DATE(?) AND DATE(?)",
+    [bookingId, rangeStart, rangeEnd],
+    teamJson
   );
 
   return result?.affectedRows || 0;
@@ -717,6 +752,89 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
   } catch (err) {
     console.error("Failed to fetch job:", err);
     res.status(500).json({ error: "Failed to fetch job" });
+  }
+});
+
+// POST /api/jobs/:jobId/delete { whole_booking? } -- admin / branch admin take back a booking made
+// by mistake. Only work that has not started is removed: the job(s) become CANCELED and archived
+// (gone from every list and from the technician / supervisor apps) and their scheduled visits are
+// cancelled. Nothing is erased, so history, comments and invoices stay intact. `whole_booking`
+// removes every not-started job of the booking and stops it making new repeat jobs; jobs where work
+// has started or finished are kept (and counted in the answer).
+const STARTED_JOB_STATUSES = ["IN_PROGRESS", "AWAITING_APPROVAL", "COMPLETED", "PAUSED"];
+const STARTED_VISIT_STATUSES = ["IN_PROGRESS", "AWAITING_APPROVAL", "COMPLETED"];
+
+router.post("/:jobId/delete", auth, requirePermission(PERMISSIONS.UPDATE_JOB), async (req, res) => {
+  const { jobId } = req.params;
+  if (!["admin", "branch_admin"].includes(req.user?.role)) {
+    return res.status(403).json({ error: "Only an admin can delete a booking" });
+  }
+  const wholeBooking = req.body?.whole_booking === true;
+
+  const connection = await pool.getConnection();
+  try {
+    if (!(await ensureJobAccess(req, res, connection, jobId))) return;
+    await connection.beginTransaction();
+
+    const [[job]] = await connection.query("SELECT id, booking_id, status FROM jobs WHERE id = ? FOR UPDATE", [jobId]);
+    if (!job) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    const [candidates] = wholeBooking && job.booking_id
+      ? await connection.query("SELECT id, status FROM jobs WHERE booking_id = ? AND COALESCE(is_archived, 0) = 0 FOR UPDATE", [job.booking_id])
+      : [[job]];
+    const ids = candidates.map((j) => j.id);
+    const [startedVisits] = ids.length
+      ? await connection.query(
+          "SELECT DISTINCT job_id FROM job_visits WHERE job_id IN (?) AND status IN (?)",
+          [ids, STARTED_VISIT_STATUSES]
+        )
+      : [[]];
+    const started = new Set(startedVisits.map((v) => v.job_id));
+    candidates.forEach((j) => STARTED_JOB_STATUSES.includes(j.status) && started.add(j.id));
+    const toDelete = candidates.filter((j) => !started.has(j.id) && j.status !== "CANCELED").map((j) => j.id);
+    const alreadyCancelled = candidates.filter((j) => !started.has(j.id) && j.status === "CANCELED").map((j) => j.id);
+
+    if (!wholeBooking && started.has(job.id)) {
+      await connection.rollback();
+      return res.status(400).json({ error: "Work has started on this job, so it can't be deleted. You can archive it instead." });
+    }
+
+    const removing = [...toDelete, ...alreadyCancelled];
+    const [[actor]] = await connection.query("SELECT name FROM users WHERE id = ?", [req.user?.id || null]);
+    if (removing.length) {
+      await connection.query(
+        "UPDATE jobs SET status = IF(status = 'COMPLETED', status, 'CANCELED'), is_archived = 1, updated_at = NOW() WHERE id IN (?)",
+        [removing]
+      );
+      await connection.query(
+        "UPDATE job_visits SET status = 'CANCELED', updated_at = NOW() WHERE job_id IN (?) AND status IN ('SCHEDULED', 'MISSED')",
+        [removing]
+      );
+      for (const id of removing) {
+        await connection.query(
+          `INSERT INTO job_history
+           (id, job_id, action, message, metadata, created_by_user_id, visible_to_client, created_at)
+           VALUES (?, ?, 'DELETED', ?, ?, ?, 0, NOW())`,
+          [uuid(), id, `Booking deleted by ${actor?.name || "an admin"}`, JSON.stringify({ whole_booking: wholeBooking }), req.user?.id || null]
+        );
+      }
+    }
+    // The whole booking: no new repeat jobs from it (the generator only reads ACTIVE bookings).
+    if (wholeBooking && job.booking_id) {
+      await connection.query("UPDATE bookings SET status = 'CANCELED', updated_at = NOW() WHERE id = ?", [job.booking_id]);
+    }
+
+    await connection.commit();
+    res.json({ success: true, deleted: removing.length, kept: started.size });
+  } catch (err) {
+    await connection.rollback().catch(() => {});
+    console.error("Failed to delete booking:", err);
+    res.status(500).json({ error: "Failed to delete the booking" });
+  } finally {
+    connection.release();
   }
 });
 
@@ -1256,6 +1374,7 @@ router.post(
           [supervisorId, teamJson, branchId, jobId]
         );
       }
+      await syncScheduledVisitTeam(connection, "j.id = ?", [jobId], teamJson);
 
       // Update recurring rule defaults for future occurrences
       if (job.booking_id) {
@@ -1415,6 +1534,7 @@ router.post(
            WHERE id = ?`,
           [supervisorId, teamJson, branchId, jobId]
         );
+        await syncScheduledVisitTeam(connection, "j.id = ?", [jobId], teamJson);
         updatedCount = 1;
       } else if (selectedScope === "range") {
         const effectiveStart = new Date(rangeStart) < new Date(job.start_date)
@@ -1602,6 +1722,7 @@ router.post("/assign", auth, requirePermission(PERMISSIONS.REASSIGN_JOB), async 
            WHERE id = ?`,
           [supervisorId, teamJson, branchId, job.id]
         );
+        await syncScheduledVisitTeam(connection, "j.id = ?", [job.id], teamJson);
         updatedCount = 1;
       } else if (selectedScope === "range") {
         const effectiveStart = new Date(rangeStart) < new Date(job.start_date)
@@ -1786,6 +1907,7 @@ router.post("/assign", auth, requirePermission(PERMISSIONS.REASSIGN_JOB), async 
           [supervisorId, JSON.stringify(normalizedTechIds), supervisorBranchId, jobId]
         );
       }
+      await syncScheduledVisitTeam(connection, "j.id = ?", [jobId], JSON.stringify(normalizedTechIds));
 
       if (job.booking_id) {
         await connection.query(

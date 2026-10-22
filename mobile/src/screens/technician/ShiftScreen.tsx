@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useRefreshOnForeground } from '../../hooks/useRefreshOnForeground';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -110,6 +111,8 @@ export function ShiftScreen() {
       load();
     }, [load]),
   );
+  // ...and when the app comes back to the foreground (visits reassigned on the web meanwhile).
+  useRefreshOnForeground(load);
 
   const active = !!current?.active && !!current.shift;
   // Gated on focus too, not just `active`: this is a bottom-tab screen, so React Navigation

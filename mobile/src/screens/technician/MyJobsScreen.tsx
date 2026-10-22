@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRefreshOnForeground } from '../../hooks/useRefreshOnForeground';
 import { Animated, Easing, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -208,6 +209,8 @@ export function MyJobsScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [route.params?.filter]),
   );
+  // ...and when the app comes back to the foreground (a job reassigned on the web meanwhile).
+  useRefreshOnForeground(load);
 
   const completedJobs = useMemo(() => {
     if (!jobs || !user) return null;

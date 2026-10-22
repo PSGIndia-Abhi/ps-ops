@@ -21,8 +21,10 @@ export function outcome(t, today) {
 
 /** Counts and rates for a list of tasks. Cancelled tasks don't count towards rates. */
 export function statsFor(list, today) {
-  const s = { total: list.length, completed: 0, onTime: 0, late: 0, inProgress: 0, paused: 0, open: 0, overdue: 0, cancelled: 0 };
+  const s = { total: list.length, completed: 0, onTime: 0, late: 0, inProgress: 0, paused: 0, open: 0, overdue: 0, cancelled: 0, missed: 0 };
   for (const t of list) {
+    // Repeating tasks: days of the last week that passed without being done (not marked done late).
+    s.missed += (t.missed_dates || []).length;
     if (t.status === "COMPLETED") {
       s.completed += 1;
       if (outcome(t, today) === "Late") s.late += 1;

@@ -5,7 +5,7 @@ import { ChevronLeftIcon, ClockIcon, CloseIcon, PauseIcon, PlayIcon } from '../.
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
-import { dueInfo, initials } from '../format';
+import { dueInfo, initials, missedText, todayStr } from '../format';
 import { dueLabel } from '../notifications';
 import { avatarColor, PRIORITY_META, STATE_META, taskState, TONE_GRADIENT, toneSolid } from '../theme';
 import type { TaskPriority, WorkTask } from '../types';
@@ -193,9 +193,14 @@ function TaskRowView({ task, onPress, showAssignee, index = 0 }: TaskRowProps) {
           <View style={styles.dueLine}>
             <ClockIcon size={12} color={dueColor} />
             <Text style={[styles.rowDue, { color: dueColor }]} numberOfLines={1}>
-              {state === 'overdue' ? dueInfo(task).text : dueLabel(task.due_date, task.due_time)}
+              {state === 'overdue' && task.due_date && task.due_date < todayStr() ? dueInfo(task).text : dueLabel(task.due_date, task.due_time)}
             </Text>
           </View>
+          {!!missedText(task) && (
+            <Text style={[styles.rowDue, { color: theme.dangerText }]} numberOfLines={1}>
+              ⚠ {missedText(task)}
+            </Text>
+          )}
         </View>
         <View style={styles.rowRight}>
           <TaskStatePill task={task} />

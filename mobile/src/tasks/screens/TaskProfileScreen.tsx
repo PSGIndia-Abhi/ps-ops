@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { useNavigation, type NavigationProp } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
-import { ChevronRightIcon, LockIcon, LogoutIcon, UsersIcon } from '../../components/icons';
+import { BellIcon, ChevronRightIcon, LockIcon, LogoutIcon, UsersIcon } from '../../components/icons';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
+import type { TaskStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmScreen } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
@@ -65,6 +66,8 @@ const factory = (t: CrmTheme) => ({
   rowIcon: { width: 36, height: 36, borderRadius: radii.md, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   rowIconDanger: { backgroundColor: t.dangerBg },
   rowLabel: { flex: 1, ...typography.bodyMedium, color: t.textPrimary },
+  rowIconWarn: { backgroundColor: t.warningBg },
+  rowHint: { ...typography.caption, color: t.textMuted },
   rowLabelDanger: { color: t.dangerText },
   memberPad: { paddingBottom: spacing.sm },
   sheetText: { ...typography.body, color: t.textSecondary, marginBottom: spacing.md },
@@ -74,9 +77,16 @@ const factory = (t: CrmTheme) => ({
 /** Profile (opened from the avatar on Home) - the viewer's own numbers, their team, password and sign out. */
 export function TaskProfileScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  const taskNavigation = useNavigation<NavigationProp<TaskStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
   const { user, logout } = useAuth();
-  const { viewer, tasks } = useTasks();
+  const { viewer, tasks, refresh } = useTasks();
+  // Read the tasks again each time Profile opens, so "My reminders" counts a reminder just set.
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
   const [confirmOut, setConfirmOut] = useState(false);
 
   const stats = useMemo(() => {
@@ -87,6 +97,14 @@ export function TaskProfileScreen() {
       overdue: mine.filter(isOverdue).length,
     };
   }, [tasks, viewer.id]);
+  // Task reminders still to ring for me (Profile -> My reminders).
+  const upcomingReminders = useMemo(
+    () =>
+      tasks.filter(
+        (x) => x.assigned_to === viewer.id && isActive(x) && !!x.reminder_id && !!x.reminder_at && new Date(x.reminder_at.replace(' ', 'T')).getTime() > Date.now(),
+      ).length,
+    [tasks, viewer.id],
+  );
 
   return (
     <View style={styles.screen}>
@@ -145,7 +163,15 @@ export function TaskProfileScreen() {
       )}
 
       <View style={styles.group}>
-        <Pressable onPress={() => navigation.navigate('ChangePassword')} style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+        <Pressable onPress={() => taskNavigation.navigate('TaskReminders')} style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+          <View style={[styles.rowIcon, styles.rowIconWarn]}>
+            <BellIcon size={18} color={theme.warningText} />
+          </View>
+          <Text style={styles.rowLabel}>My reminders</Text>
+          <Text style={styles.rowHint}>{upcomingReminders > 0 ? `${upcomingReminders} upcoming` : 'None'}</Text>
+          <ChevronRightIcon size={16} color={theme.textMuted} />
+        </Pressable>
+        <Pressable onPress={() => navigation.navigate('ChangePassword')} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && { opacity: 0.7 }]} accessibilityRole="button">
           <View style={styles.rowIcon}>
             <LockIcon size={18} color={theme.primary} />
           </View>

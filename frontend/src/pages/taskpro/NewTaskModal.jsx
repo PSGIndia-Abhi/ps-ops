@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiAlignLeft, FiCalendar, FiCheck, FiChevronDown, FiClock, FiFlag, FiPlus, FiRepeat, FiSearch, FiTag, FiUser, FiZap } from "react-icons/fi";
+import { FiAlignLeft, FiBell, FiCalendar, FiCheck, FiChevronDown, FiClock, FiFlag, FiPlus, FiRepeat, FiSearch, FiTag, FiUser, FiZap } from "react-icons/fi";
 import { PRIORITY, WEEKDAY_LABELS } from "./data";
 import { assignableUsers, personOf } from "./hierarchy";
 import { daysFromToday, fmtDate, fmtTime, todayStr } from "./format";
-import { createTask, fetchAllUsers, fetchTaskTypes } from "./tasksApi";
+import { createTask, fetchAllUsers, fetchTaskTypes, setTaskReminder } from "./tasksApi";
 import { useToast } from "./toastContext";
 import { Avatar, Drawer } from "./ui";
 import { useViewer } from "./viewerContext";
@@ -269,7 +269,15 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
   const [rec, setRec] = useState(blankRec);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Off unless asked for: only a task with a reminder rings - once, at the date and time chosen here,
+  // for its assignee. Turning it on starts it at the task's own date and time.
+  const [remind, setRemind] = useState(false);
+  const [remAt, setRemAt] = useState({ date: "", time: "09:00" });
   const isRepeat = repeat !== "ONCE";
+  const toggleRemind = (on) => {
+    if (on) setRemAt({ date: isRepeat ? rec.start_date : form.due_date, time: (isRepeat ? rec.time_of_day : form.due_time) || "09:00" });
+    setRemind(on);
+  };
 
   useEffect(() => {
     // people[0] may not be loaded yet on first render; keep the selection valid.
@@ -375,13 +383,29 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
       payload.due_time = form.due_time ? `${form.due_time}:00` : undefined;
     }
 
+    if (remind && (!remAt.date || !remAt.time || new Date(`${remAt.date}T${remAt.time}`) <= new Date())) {
+      setError(
+        !remAt.date || !remAt.time
+          ? "Pick a reminder date and time."
+          : `Reminder time ${remAt.date === todayStr() ? "today" : fmtDate(remAt.date)}, ${fmtTime(remAt.time)} has already passed. Pick a later reminder time.`
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       const created = await createTask(payload);
       // A schedule whose first date is still ahead (a future start, or a
       // weekly rule that doesn't include today) creates no task yet — there
       // is nothing to open, so just say when the first one will appear.
-      const opened = isRepeat ? created.tasks?.[0] : created;
+      let opened = isRepeat ? created.tasks?.[0] : created;
+      if (remind && opened) {
+        try {
+          opened = await setTaskReminder(opened.id, remAt);
+        } catch (err) {
+          toast.push({ type: "error", title: "Task created, but the reminder was not set", text: err.message });
+        }
+      }
       toast.push({
         type: "success",
         title: isRepeat ? "Schedule created" : "Task created",
@@ -645,6 +669,29 @@ export default function NewTaskModal({ onClose, onCreated, copyFrom = null }) {
                 </div>
               </div>
             )}
+
+            <Prop icon={FiBell} label="Reminder">
+              <div className="tp-nt-pills">
+                <button type="button" className={!remind ? "on" : ""} onClick={() => toggleRemind(false)} aria-pressed={!remind}>
+                  Off
+                </button>
+                <button type="button" className={remind ? "on" : ""} onClick={() => toggleRemind(true)} aria-pressed={remind}>
+                  <FiBell /> Remind on a date &amp; time
+                </button>
+              </div>
+              {remind && (
+                <>
+                  <div className="tp-nt-inline">
+                    <input className="tp-input" type="date" value={remAt.date} min={todayStr()} onChange={(e) => setRemAt((r) => ({ ...r, date: e.target.value }))} aria-label="Reminder date" />
+                    <span className="tp-nt-time">
+                      <FiClock />
+                      <input className="tp-input" type="time" value={remAt.time} onChange={(e) => setRemAt((r) => ({ ...r, time: e.target.value }))} aria-label="Reminder time" />
+                    </span>
+                  </div>
+                  <small className="tp-nt-hint">Rings once at this time, for the assignee only - on the web and their phone.</small>
+                </>
+              )}
+            </Prop>
           </div>
 
           <div className="tp-nt-summary" aria-live="polite">

@@ -256,6 +256,13 @@ export default function AdminLayout() {
                 Tasks
               </button>
 
+              {/* Lead Management is its own area (pages/leads); admin can look at every dashboard there. */}
+              {role === "admin" && (
+                <button className="nav-btn" onClick={() => navigate("/leads")}>
+                  Lead Management
+                </button>
+              )}
+
             </nav>
           </aside>
         )}

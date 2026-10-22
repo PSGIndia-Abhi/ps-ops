@@ -176,6 +176,14 @@ object ReminderScheduler {
     return PendingIntent.getActivity(ctx, ("open:" + r.id).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
   }
 
+  /** The alarm's own screen (AlarmActivity) - shown over the lock screen instead of launching the app. */
+  private fun alarmScreenIntent(ctx: Context, r: Reminder): PendingIntent {
+    val intent = Intent(ctx, AlarmActivity::class.java)
+      .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+      .putExtra(EXTRA_ID, r.id)
+    return PendingIntent.getActivity(ctx, ("alarm:" + r.id).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+  }
+
   private fun actionIntent(ctx: Context, action: String, r: Reminder): PendingIntent {
     val intent = Intent(ctx, ReminderReceiver::class.java).setAction(action).putExtra(EXTRA_ID, r.id)
     return PendingIntent.getBroadcast(ctx, (action + r.id).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -199,7 +207,8 @@ object ReminderScheduler {
       .setAutoCancel(true)
       .setColor(0xFF2563EB.toInt())
     if (alarm) {
-      b.setFullScreenIntent(open, true)
+      // Locked phone: Android opens this full-screen intent by itself - the alarm screen, never the app.
+      b.setFullScreenIntent(alarmScreenIntent(ctx, r), true)
         .setTimeoutAfter(30 * 60 * 1000L)
         .addAction(0, "Snooze 10 min", actionIntent(ctx, ReminderReceiver.ACTION_SNOOZE, r))
         .addAction(0, "Dismiss", actionIntent(ctx, ReminderReceiver.ACTION_DISMISS, r))

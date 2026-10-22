@@ -1,0 +1,412 @@
+// The performance report (GET /api/crm/reports/sales-performance). Telecallers and sales
+// executives see their own numbers (and the executive their monthly target); the sales manager
+// picks anyone on the team, sets each person's monthly target and gets the whole team side by side.
+
+import { useEffect, useMemo, useState } from "react";
+import { Navigate } from "react-router-dom";
+import { FiAward, FiCalendar, FiCheckCircle, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
+import { LEADS_HOME } from "./access";
+import { getPerformance, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
+import { money } from "./format";
+import { useToast } from "./hooks";
+import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, Who } from "./ui";
+import { useViewer } from "./viewer";
+
+/** A YYYY-MM-DD in the user's own time zone (the server reads the dates as wall-clock days). */
+function ymd(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+const RANGES = [
+  { key: "today", label: "Today", from: () => ymd(new Date()) },
+  {
+    key: "week",
+    label: "This week",
+    // Weeks start on Monday.
+    from: () => {
+      const d = new Date();
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      return ymd(d);
+    },
+  },
+  { key: "month", label: "This month", from: () => ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1)) },
+  // Everything so far: from before the first lead was ever added.
+  { key: "lifetime", label: "Lifetime", from: () => "2020-01-01" },
+  { key: "custom", label: "Custom" },
+];
+
+/** The report's numbers, in the order they are shown. */
+const METRICS = [
+  { key: "leadsGenerated", label: "Leads Added", icon: <FiInbox />, tone: "info", foot: "Created by them" },
+  { key: "genuineLeads", label: "Marked Genuine", icon: <FiUserCheck />, tone: "success", foot: "Verified on a call" },
+  { key: "followUpsDue", label: "Follow-ups Due", icon: <FiPhoneCall />, tone: "warn", foot: "Calls planned in the period" },
+  { key: "meetingsScheduled", label: "Meetings Assigned", icon: <FiCalendar />, tone: "info", foot: "Visits given to them" },
+  { key: "visitsCompleted", label: "Visits Completed", icon: <FiMapPin />, tone: "teal", foot: "Outcome recorded" },
+  { key: "quotationsSent", label: "Quotations Sent", icon: <FiFileText />, tone: "violet", foot: "Uploaded by them" },
+  { key: "leadsConverted", label: "Converted", icon: <FiAward />, tone: "success", foot: "Became customers" },
+  { key: "leadsLost", label: "Lost", icon: <FiThumbsDown />, tone: "danger", foot: "Closed without a deal" },
+];
+
+const ROLE_LABEL = { telecaller: "Telecaller", sales: "Sales Executive", sales_manager: "Sales Manager", marketing: "Marketing", admin: "Admin" };
+
+export default function Performance() {
+  const viewer = useViewer();
+  const { me, ready } = useLeadData();
+  const manager = viewer.persona === "sales_manager";
+  const team = useMemo(() => (ready && manager ? leadTeam() : []), [ready, manager]);
+
+  const [range, setRange] = useState("month");
+  const [custom, setCustom] = useState(() => ({ from: RANGES[2].from(), to: ymd(new Date()) }));
+  const [personId, setPersonId] = useState(""); // "" = the signed-in person
+  // Each answer is kept with the question it answers, so an old one is never shown for a new period.
+  const [result, setResult] = useState({ key: null, data: null, error: "" });
+  const [teamResult, setTeamResult] = useState({ key: null, rows: null });
+
+  const today = ymd(new Date());
+  const from = range === "custom" ? custom.from : RANGES.find((r) => r.key === range).from();
+  const to = range === "custom" ? custom.to : today;
+  const badCustom = range === "custom" && (!from || !to || to < from);
+  const key = `${from}|${to}|${personId}`;
+  const teamKey = `${from}|${to}|${team.length}`;
+
+  // One person's numbers.
+  useEffect(() => {
+    if (!ready || badCustom) return undefined;
+    let alive = true;
+    getPerformance({ from, to, employeeId: personId || undefined })
+      .then((data) => alive && setResult({ key, data, error: "" }))
+      .catch((err) => alive && setResult({ key, data: null, error: err.message || "Could not load the report." }));
+    return () => {
+      alive = false;
+    };
+  }, [ready, badCustom, from, to, personId, key]);
+
+  // The manager's side-by-side view: one report per person, read together.
+  useEffect(() => {
+    if (!manager || team.length === 0 || badCustom) return undefined;
+    let alive = true;
+    Promise.allSettled(team.map((u) => getPerformance({ from, to, employeeId: u.id }))).then((results) => {
+      if (alive) setTeamResult({ key: teamKey, rows: team.map((u, i) => ({ user: u, data: results[i].status === "fulfilled" ? results[i].value : null })) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [manager, team, badCustom, from, to, teamKey]);
+
+  // Not for a lead provider.
+  if (viewer.persona === "lead_provider") return <Navigate to={LEADS_HOME} replace />;
+
+  const current = result.key === key ? result : null;
+  const report = current?.data;
+  const error = current?.error;
+  const teamRows = teamResult.key === teamKey ? teamResult.rows : null;
+  const period = { from, to };
+  const whose = personId ? team.find((u) => u.id === personId)?.name || "Team member" : me?.name || "You";
+
+  return (
+    <>
+      <div className="lm-head">
+        <div>
+          <h1>{manager ? "Team Report" : "My Performance"}</h1>
+          <p>{manager ? "What each person on the lead team did in the period." : "What you did in the period - calls, visits, quotations and conversions."}</p>
+        </div>
+        <div className="lm-head-actions">
+          <div className="lm-seg">
+            {RANGES.map((r) => (
+              <button key={r.key} type="button" className={r.key === range ? "on" : ""} onClick={() => setRange(r.key)}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {manager && (
+            <select className="lm-select" value={personId} onChange={(e) => setPersonId(e.target.value)} aria-label="Whose numbers">
+              <option value="">Me</option>
+              {team
+                .filter((u) => u.id !== String(me?.id))
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {range === "custom" && (
+        <div className="lm-head-actions" style={{ marginBottom: 16 }}>
+          <label className="lm-check">
+            From
+            <input className="lm-input" type="date" value={custom.from} max={today} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
+          </label>
+          <label className="lm-check">
+            To
+            <input className="lm-input" type="date" value={custom.to} max={today} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
+          </label>
+          {badCustom && <span className="muted">Choose a start date on or before the end date.</span>}
+        </div>
+      )}
+
+      {(manager || viewer.persona === "sales") && <Targets manager={manager} myId={String(me?.id || "")} />}
+
+      <Card title={whose} sub={range === "lifetime" ? "All time" : period.from === period.to ? period.from : `${period.from} to ${period.to}`} index={0}>
+        {error ? (
+          <Empty title="Could not load the report" text={error} icon={<FiCheckCircle />} />
+        ) : !report || badCustom ? (
+          <SkeletonRows rows={2} />
+        ) : (
+          // `key` replays the numbers when the period or person changes.
+          <div className="lm-grid kpi" key={`${period.from}:${period.to}:${personId}`} style={{ marginBottom: 0 }}>
+            {METRICS.map((m, i) => (
+              <Kpi key={m.key} index={i} label={m.label} value={report[m.key] || 0} icon={m.icon} tone={m.tone} foot={m.foot} />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {manager && (
+        <Card title="Whole Team" sub="Click a person to see their numbers above" index={1} flush className="lm-detail">
+          <div style={{ height: 14 }} />
+          {!teamRows ? (
+            <SkeletonRows rows={4} />
+          ) : teamRows.length === 0 ? (
+            <Empty title="No one on the lead team yet" />
+          ) : (
+            <div className="lm-table-wrap">
+              <table className="lm-table">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Added</th>
+                    <th>Genuine</th>
+                    <th>Meetings</th>
+                    <th>Visits</th>
+                    <th>Quotes</th>
+                    <th>Converted</th>
+                    <th>Lost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamRows.map(({ user, data }, i) => (
+                    <tr key={user.id} style={{ "--i": i }} onClick={() => setPersonId(user.id === String(me?.id) ? "" : user.id)}>
+                      <td>
+                        <Who name={user.name} sub={ROLE_LABEL[user.role] || user.role || ""} size={34} />
+                      </td>
+                      {data ? (
+                        ["leadsGenerated", "genuineLeads", "meetingsScheduled", "visitsCompleted", "quotationsSent", "leadsConverted", "leadsLost"].map((k) => (
+                          <td key={k} className="num">
+                            {data[k]}
+                          </td>
+                        ))
+                      ) : (
+                        <td colSpan={7} className="muted">
+                          Could not load
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+    </>
+  );
+}
+
+const thisMonth = () => ymd(new Date()).slice(0, 7);
+const monthLabel = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+const pctOf = (t) => (t.target ? Math.round((Number(t.achieved) / Number(t.target)) * 100) : null);
+
+/** Achieved against target: a bar that turns green at 100%. */
+function TargetBar({ t }) {
+  const pct = pctOf(t);
+  if (pct === null) return <span className="muted">No target</span>;
+  return (
+    <span className="lm-target">
+      <span className="lm-target-track">
+        <span className={`lm-target-fill${pct >= 100 ? " done" : pct < 50 ? " low" : ""}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </span>
+      <b>{pct}%</b>
+    </span>
+  );
+}
+
+/**
+ * Monthly sales targets. The sales manager sees every sales executive's target against what they
+ * converted this month (the amounts of their converted leads) and sets or changes each one; a sales
+ * executive sees their own.
+ */
+function Targets({ manager, myId }) {
+  const [month, setMonth] = useState(thisMonth);
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null);
+  const load = () =>
+    getTargets(month)
+      .then((list) => {
+        setRows(list);
+        setError("");
+      })
+      .catch((err) => {
+        setRows([]);
+        setError(err.message || "Could not load the targets.");
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => void load(), [month]);
+
+  const mine = rows?.find((t) => String(t.user_id) === myId);
+  const list = manager ? rows || [] : mine ? [mine] : [];
+  const totals = list.reduce((s, t) => ({ target: s.target + (Number(t.target) || 0), achieved: s.achieved + Number(t.achieved || 0) }), { target: 0, achieved: 0 });
+
+  return (
+    <Card
+      title={manager ? "Monthly Targets" : "My Target"}
+      sub={`${monthLabel(month)} - achieved = the amounts of the leads converted in the month`}
+      index={0}
+      action={<input className="lm-input" type="month" value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" style={{ width: 170 }} />}
+      flush={manager}
+    >
+      {error && <Note tone="warn">{error}</Note>}
+      {rows === null ? (
+        <SkeletonRows rows={manager ? 3 : 1} />
+      ) : manager ? (
+        list.length === 0 ? (
+          <Empty title="No sales executives yet" />
+        ) : (
+          <div className="lm-table-wrap">
+            <table className="lm-table">
+              <thead>
+                <tr>
+                  <th>Sales person</th>
+                  <th className="num">Target</th>
+                  <th className="num">Achieved</th>
+                  <th>Progress</th>
+                  <th className="num">Converted</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((t, i) => (
+                  <tr key={t.user_id} style={{ "--i": i }}>
+                    <td>
+                      <Who name={t.name} sub={ROLE_LABEL[t.role] || t.role} size={34} />
+                    </td>
+                    <td className="num">{t.target ? money(t.target) : "-"}</td>
+                    <td className="num">{money(t.achieved)}</td>
+                    <td style={{ minWidth: 180 }}>
+                      <TargetBar t={t} />
+                    </td>
+                    <td className="num">{t.converted}</td>
+                    <td className="num">
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                        {t.target ? "Change" : "Set target"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="lm-total-row">
+                  <td>
+                    <strong>Team total</strong>
+                  </td>
+                  <td className="num">
+                    <strong>{money(totals.target)}</strong>
+                  </td>
+                  <td className="num">
+                    <strong>{money(totals.achieved)}</strong>
+                  </td>
+                  <td>
+                    <TargetBar t={totals} />
+                  </td>
+                  <td />
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : !mine || !mine.target ? (
+        <Empty title="No target set for this month" text={mine && Number(mine.achieved) > 0 ? `Converted so far: ${money(mine.achieved)}.` : "Your sales manager sets your monthly target."} />
+      ) : (
+        <div className="lm-target-me">
+          <div>
+            <small>Target</small>
+            <strong>{money(mine.target)}</strong>
+          </div>
+          <div>
+            <small>Achieved</small>
+            <strong>{money(mine.achieved)}</strong>
+          </div>
+          <div>
+            <small>{Number(mine.achieved) >= Number(mine.target) ? "Target reached" : "To go"}</small>
+            <strong>{money(Math.max(0, Number(mine.target) - Number(mine.achieved)))}</strong>
+          </div>
+          <div className="wide">
+            <TargetBar t={mine} />
+            <small>
+              {mine.converted} lead{Number(mine.converted) === 1 ? "" : "s"} converted this month
+            </small>
+          </div>
+        </div>
+      )}
+      {editing && (
+        <SetTargetModal
+          target={editing}
+          month={month}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+function SetTargetModal({ target, month, onClose, onSaved }) {
+  const toast = useToast();
+  const [amount, setAmount] = useState(target.target ? String(Math.round(target.target)) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await setTarget(target.user_id, month, amount);
+      toast(amount ? `Target saved for ${target.name}` : `Target removed for ${target.name}`);
+      onSaved();
+    } catch (err) {
+      setError(err.message || "Could not save the target.");
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      title={`Target for ${target.name}`}
+      sub={`${monthLabel(month)} - the amount of leads to convert`}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} onClick={save}>
+            Save target
+          </Button>
+        </>
+      )}
+    >
+      <div style={{ display: "grid", gap: 10 }}>
+        {error && <Note tone="warn">{error}</Note>}
+        <label className="lm-field">
+          <span className="lm-label">Target amount (₹)</span>
+          <input className="lm-input" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="e.g. 500000" autoFocus />
+          <span className="lm-hint">Leave empty to remove the target for this month.</span>
+        </label>
+      </div>
+    </Modal>
+  );
+}

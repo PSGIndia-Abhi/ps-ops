@@ -27,4 +27,8 @@ export type TaskStackParamList = {
   Profile: undefined;
   /** Opened from the bell on Home. */
   Notifications: undefined;
+  /** Profile -> My reminders: the task reminders that will ring for me. */
+  TaskReminders: undefined;
+  /** Change one task's reminder (date and time) - the Leads app's reminder screen. */
+  TaskReminderTime: { parentTaskId: string; title: string; date: string; time: string | null };
 };

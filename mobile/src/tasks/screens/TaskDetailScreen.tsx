@@ -31,6 +31,7 @@ import {
 } from '@react-native-documents/picker';
 import {
   AlertCircleIcon,
+  BellIcon,
   CalendarIcon,
   CameraIcon,
   CheckCircleIcon,
@@ -53,6 +54,7 @@ import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import {
+  addDays,
   fmtDateShort,
   fmtDateTime,
   fmtTime,
@@ -81,7 +83,7 @@ import {
   TaskStatePill,
   TaskSummaryCard,
 } from '../ui/parts';
-import { ActionSheet, Sheet, type SheetAction } from '../ui/sheets';
+import { ActionSheet, DateSheet, Sheet, TimeSheet, type SheetAction } from '../ui/sheets';
 import { SeriesSheet } from '../ui/SeriesSheet';
 import {
   DotsIcon,
@@ -103,7 +105,9 @@ type Dialog =
   | 'skip'
   | 'pause'
   | 'series'
-  | 'upload';
+  | 'upload'
+  | 'remDate'
+  | 'remTime';
 
 const HISTORY_LABEL: Record<string, string> = {
   CREATE: 'Created',
@@ -151,6 +155,23 @@ const factory = (t: CrmTheme) => ({
   // Shrinks and wraps next to the avatar instead of running past the card edge.
   personName: { ...typography.bodyMedium, color: t.textPrimary, flexShrink: 1 },
   link: { ...typography.bodyMedium, color: t.primary },
+  // Reminder: the time on one line, its buttons under it - fits any phone width
+  remBox: { gap: 6, flex: 1 },
+  remWhen: { ...typography.bodyMedium, color: t.textPrimary },
+  remOff: { ...typography.bodyMedium, color: t.textMuted },
+  remActions: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6 },
+  remPill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 3, minHeight: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: t.primarySoftBg },
+  remPillDanger: { backgroundColor: t.dangerBg },
+  remPillText: { ...typography.captionMedium, color: t.primary },
+  remPillTextDanger: { color: t.dangerText },
+  // A repeating task's dates (Occurrences card): Done / Missed / Skipped, newest first.
+  occHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
+  occTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  occSum: { ...typography.caption, color: t.textMuted },
+  occLine: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.xs },
+  occIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center' as const, justifyContent: 'center' as const },
+  occDate: { ...typography.bodyMedium, color: t.textPrimary },
+  occSub: { ...typography.caption, color: t.textMuted },
   person: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -309,6 +330,16 @@ const factory = (t: CrmTheme) => ({
   },
 });
 
+// A repeating task's history notes: "Done for 2026-10-15 - next due …", "Missed 2026-10-15 - …",
+// "Skipped …", and "Done late for 2026-10-15" (a missed day marked done afterwards).
+const OCCURRENCE = /^(Done late for|Done for|Missed|Skipped) (\d{4}-\d{2}-\d{2})(?: - next due \d{4}-\d{2}-\d{2})?(?::\s*([\s\S]*))?/;
+const OCCURRENCE_KIND = {
+  'Done for': { label: 'Done', color: (t: CrmTheme) => t.successText, bg: (t: CrmTheme) => t.successBg },
+  'Done late for': { label: 'Done late', color: (t: CrmTheme) => t.warningText, bg: (t: CrmTheme) => t.warningBg },
+  Missed: { label: 'Missed', color: (t: CrmTheme) => t.dangerText, bg: (t: CrmTheme) => t.dangerBg },
+  Skipped: { label: 'Skipped', color: (t: CrmTheme) => t.textMuted, bg: (t: CrmTheme) => t.surfaceAlt },
+} as const;
+
 export function TaskDetailScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
@@ -331,6 +362,9 @@ export function TaskDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
+  // The reminder's date and time while it is being picked (date sheet, then time sheet).
+  const [remDate, setRemDate] = useState(todayStr());
+  const [remTime, setRemTime] = useState('09:00');
   const [tab, setTab] = useState<Tab>('details');
   const [comments, setComments] = useState<TaskComment[] | null>(null);
   const [files, setFiles] = useState<TaskAttachment[] | null>(null);
@@ -494,6 +528,47 @@ export function TaskDetailScreen() {
     viewer.isAdmin ||
     viewer.team.some(m => m.id === task.assigned_to);
   const canDecideRequest = !!pendingReq && !isRequester && managesTask;
+  // The reminder rings once, at the date and time chosen, for the assignee only (phone and web).
+  const canSetReminder = !finished && (task.assigned_to === viewer.id || managesTask);
+  const reminderDate = task.reminder_at ? task.reminder_at.slice(0, 10) : null;
+  const reminderTime = task.reminder_at ? task.reminder_at.slice(11, 16) : null;
+  const reminderOn = !!task.reminder_id && !finished && !!reminderDate;
+  // Short, so it stays on one line: "Today, 4:25 PM" / "Tomorrow, 9:00 AM" / "Oct 18, 4:25 PM".
+  const reminderDay = !reminderDate
+    ? ''
+    : reminderDate === todayStr()
+      ? 'Today'
+      : reminderDate === addDays(todayStr(), 1)
+        ? 'Tomorrow'
+        : reminderDate.slice(0, 4) === todayStr().slice(0, 4)
+          ? fmtDateShort(reminderDate).replace(/, \d{4}$/, '')
+          : fmtDateShort(reminderDate);
+  const pickReminder = () => {
+    setRemDate(reminderDate || (task.due_date && task.due_date >= todayStr() ? task.due_date : todayStr()));
+    setRemTime(reminderTime || (task.due_time ? task.due_time.slice(0, 5) : '09:00'));
+    setDialog('remDate');
+  };
+  const saveReminder = (time: string) => {
+    if (new Date(`${remDate}T${time}:00`).getTime() <= Date.now()) {
+      showToast('Pick a reminder time in the future.', 'validation');
+      return;
+    }
+    run(() => api.setTaskReminder(task.id, remDate, time), `Reminder set for ${fmtDateShort(remDate)}, ${fmtTime(time)}`);
+  };
+  const missed = task.missed_dates ?? [];
+  const canMarkLate = task.assigned_to === viewer.id && !finished;
+  // A repeating task is ONE task that moves to its next date; each date's outcome is in its history.
+  const occurrences = (history ?? [])
+    .map(h => ({ h, m: OCCURRENCE.exec(h.note || '') }))
+    .filter((x): x is { h: TaskHistoryEntry; m: RegExpExecArray } => !!x.m)
+    .map(({ h, m }) => ({
+      id: h.id,
+      kind: m[1] as keyof typeof OCCURRENCE_KIND,
+      date: m[2],
+      note: m[3] || '',
+      by: m[1] === 'Missed' ? '' : h.changed_by_name || '',
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const state = taskState(task);
   const explainFinished = (what: string) =>
     showToast(
@@ -810,6 +885,36 @@ export function TaskDetailScreen() {
               {fmtDateTime(task.due_date, task.due_time)}
             </InfoRow>
             <InfoRow
+              icon={<BellIcon size={18} color={theme.textMuted} />}
+              label="Reminder"
+            >
+              <View style={styles.remBox}>
+                <Text style={reminderOn ? styles.remWhen : styles.remOff} numberOfLines={1}>
+                  {reminderOn ? `${reminderDay}, ${fmtTime(reminderTime || '')}` : 'Off'}
+                </Text>
+                {canSetReminder && (
+                  <View style={styles.remActions}>
+                    <Pressable onPress={pickReminder} disabled={busy} accessibilityRole="button" hitSlop={4} style={styles.remPill}>
+                      {reminderOn ? <EditIcon size={12} color={theme.primary} /> : <BellIcon size={12} color={theme.primary} />}
+                      <Text style={styles.remPillText}>{reminderOn ? 'Change' : 'Set reminder'}</Text>
+                    </Pressable>
+                    {!!task.reminder_id && (
+                      <Pressable
+                        onPress={() => run(() => api.removeTaskReminder(task.id), 'Reminder removed')}
+                        disabled={busy}
+                        accessibilityRole="button"
+                        hitSlop={4}
+                        style={[styles.remPill, styles.remPillDanger]}
+                      >
+                        <TrashIcon size={12} color={theme.dangerText} />
+                        <Text style={[styles.remPillText, styles.remPillTextDanger]}>Remove</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+              </View>
+            </InfoRow>
+            <InfoRow
               icon={<PersonIcon size={18} color={theme.textMuted} />}
               label="Created By"
             >
@@ -874,6 +979,62 @@ export function TaskDetailScreen() {
                 )}
               </View>
             )}
+          </Card>
+        )}
+
+        {tab === 'details' && !!task.series_id && (
+          <Card>
+            <View style={styles.occHead}>
+              <Text style={styles.occTitle}>Occurrences</Text>
+              <Text style={styles.occSum}>
+                {occurrences.filter(o => o.kind === 'Done for').length} done ·{' '}
+                {occurrences.filter(o => o.kind === 'Missed').length} missed
+              </Text>
+            </View>
+            {!finished && (
+              <View style={styles.occLine}>
+                <View style={[styles.occIcon, { backgroundColor: theme.primarySoftBg }]}>
+                  <ClockIcon size={16} color={theme.primary} />
+                </View>
+                <View style={styles.flex}>
+                  <Text style={styles.occDate}>{fmtDateShort(String(task.due_date).slice(0, 10))}</Text>
+                  <Text style={styles.occSub}>Current - {STATE_META[state].label}</Text>
+                </View>
+              </View>
+            )}
+            {occurrences.map(o => {
+              const k = OCCURRENCE_KIND[o.kind];
+              const lateable = o.kind === 'Missed' && missed.includes(o.date) && canMarkLate;
+              return (
+                <View key={o.id} style={styles.occLine}>
+                  <View style={[styles.occIcon, { backgroundColor: k.bg(theme) }]}>
+                    {o.kind === 'Done for' || o.kind === 'Done late for' ? (
+                      <CheckCircleIcon size={16} color={k.color(theme)} />
+                    ) : (
+                      <CloseIcon size={16} color={k.color(theme)} />
+                    )}
+                  </View>
+                  <View style={styles.flex}>
+                    <Text style={styles.occDate}>{fmtDateShort(o.date)}</Text>
+                    <Text style={styles.occSub}>
+                      <Text style={{ color: k.color(theme) }}>{k.label}</Text>
+                      {o.by ? ` by ${o.by}` : ''}
+                      {o.note ? ` - ${o.note}` : ''}
+                    </Text>
+                  </View>
+                  {lateable && (
+                    <Pressable
+                      onPress={() => run(() => api.markDoneLate(task.id, o.date), `${fmtDateShort(o.date)} marked done`)}
+                      disabled={busy}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.link}>Mark done late</Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            })}
+            {history === null && <ActivityIndicator color={theme.primary} />}
           </Card>
         )}
 
@@ -1082,7 +1243,7 @@ export function TaskDetailScreen() {
                   const done = await api.completeTask(task.id);
                   notifyLocal(done, 'completed');
                   return done;
-                }, null)
+                }, task.series_id ? 'Done for this date - moved to its next date' : null)
               }
             />
           </View>
@@ -1253,8 +1414,8 @@ export function TaskDetailScreen() {
         title="Skip this occurrence?"
       >
         <Text style={styles.sheetText}>
-          Only this one is cancelled — the schedule and its other occurrences
-          stay as they are.
+          {fmtDateShort(String(task.due_date).slice(0, 10))} is skipped and the
+          task moves to its next date. The schedule stays as it is.
         </Text>
         <TextInput
           value={reason}
@@ -1302,6 +1463,24 @@ export function TaskDetailScreen() {
         ]}
       />
 
+      <DateSheet
+        visible={dialog === 'remDate'}
+        onClose={() => setDialog(null)}
+        value={remDate}
+        onPick={(d) => {
+          setRemDate(d);
+          setTimeout(() => setDialog('remTime'), 250);
+        }}
+        minDate={todayStr()}
+        title="Reminder date"
+      />
+      <TimeSheet
+        visible={dialog === 'remTime'}
+        onClose={() => setDialog(null)}
+        value={remTime}
+        onPick={(t) => saveReminder(t || '09:00')}
+        allowNone={false}
+      />
       {!!task.series_id && (
         <SeriesSheet
           visible={dialog === 'series'}

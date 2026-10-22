@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useRefreshOnForeground } from '../../hooks/useRefreshOnForeground';
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -132,6 +133,8 @@ export function TechnicianDashboardScreen() {
       load();
     }, [load]),
   );
+  // ...and when the app comes back to the foreground (a job reassigned on the web meanwhile).
+  useRefreshOnForeground(load);
 
   const todaysVisits = visits
     ? [...visits.filter((v) => isToday(v.scheduled_date))].sort(

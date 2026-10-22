@@ -6,7 +6,8 @@ import { replaceAllReminders, showReminderNow, type NativeReminder } from './nat
 /**
  * The shared reminders engine. Any module (lead meetings and follow-ups, Task Management, payment
  * follow-ups) describes what is coming up as ReminderItems; the engine turns them into:
- *  - an ALARM `leadMinutes` before each one (09:00 on the day for items with no time), and
+ *  - an ALARM exactly at each one's date and time - once, no early warning (09:00 on the day for
+ *    an item with no time), and
  *  - a POPUP the first time an item set for you by someone else is seen.
  * Each sync hands the phone the complete list, so rescheduled items move and finished or cancelled
  * ones simply drop out.
@@ -34,6 +35,10 @@ export interface ReminderItem {
   time: string | null;
   /** True when someone else set it for you - only those announce themselves with a popup. */
   fromSomeoneElse: boolean;
+  /** False for an item that must not ring (a Task Management task with no reminder set). */
+  ring?: boolean;
+  /** A reminder set ON a task / meeting / follow-up: that task's id (to change or remove it). */
+  parentTaskId?: string;
   route: ReminderRoute | null;
 }
 
@@ -84,24 +89,16 @@ function bodyOf(item: ReminderItem): string {
   return [item.detail, item.title].filter(Boolean).join(' · ');
 }
 
-/** The alarm for one item, or null when its moment has passed. */
+/**
+ * The day alarm for an item with no time of its own (09:00 on its day), or null. A timed item rings
+ * once, exactly at its time - dueAlarmFor - with no early warning.
+ */
 export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = Date.now()): NativeReminder | null {
+  if (item.ring === false || item.time) return null;
   const due = dueAt(item).getTime();
-  // A personal reminder rings at the very time the person chose; everything else rings early.
-  const personal = item.kind === 'personal';
-  const fireAt = item.time && !personal ? due - settings.leadMinutes * 60_000 : due;
+  const fireAt = due;
   if (fireAt <= now) return null;
   const text = KIND_TEXT[item.kind];
-  if (personal) {
-    return {
-      id: `alarm:${item.key}:${item.date}T${item.time ?? ''}`,
-      kind: 'alarm',
-      title: `⏰ ${item.title}`,
-      body: item.detail ? item.detail : `Reminder · ${item.time ? fmtTime(item.time) : 'today'}`,
-      fireAt,
-      route: item.route ? JSON.stringify(item.route) : '',
-    };
-  }
   return {
     id: `alarm:${item.key}:${item.date}T${item.time ?? ''}`,
     kind: 'alarm',
@@ -112,21 +109,33 @@ export function alarmFor(item: ReminderItem, settings: ReminderSettings, now = D
   };
 }
 
+/** The alarm's title, by kind. */
+const DUE_TITLE: Partial<Record<ReminderKind, string>> = {
+  payment: 'Payment reminder',
+  // A meeting / follow-up rings only through a reminder set on it - at the reminder's time.
+  meeting: '⏰ Meeting reminder',
+  followup: '⏰ Follow-up reminder',
+  personal: '⏰',
+  task: '⏰ Task reminder',
+};
+
 /**
- * A payment reminder rings a second time, at its own time: that is when the accountant calls the
- * customer, so the early alarm alone is not enough (and one set a few minutes ahead has no early
- * alarm at all). Null for other kinds, for a reminder with no time (its one alarm is already on
- * the day) and when the time has passed.
+ * The alarm for a timed item, exactly at its date and time - once: payment reminders, lead
+ * meetings, lead follow-ups, personal reminders and Task Management reminders (each at the date and
+ * time it was set for). Null for an item that must not ring, for one with no time (alarmFor rings
+ * it on the day) and when the time has passed.
  */
 export function dueAlarmFor(item: ReminderItem, now = Date.now()): NativeReminder | null {
-  if (item.kind !== 'payment' || !item.time) return null;
+  const title = DUE_TITLE[item.kind];
+  if (!title || !item.time || item.ring === false) return null;
   const fireAt = dueAt(item).getTime();
   if (fireAt <= now) return null;
   return {
     id: `due:${item.key}:${item.date}T${item.time}`,
     kind: 'alarm',
-    title: 'Payment reminder due',
-    body: `${bodyOf(item)} · ${fmtTime(item.time)}`,
+    // A personal reminder is announced by its own words: "⏰ Call Ravi about the quotation".
+    title: item.kind === 'personal' ? `${title} ${item.title}` : title,
+    body: item.kind === 'personal' ? item.detail || `Reminder · ${fmtTime(item.time)}` : `${bodyOf(item)} · ${fmtTime(item.time)}`,
     fireAt,
     route: item.route ? JSON.stringify(item.route) : '',
   };

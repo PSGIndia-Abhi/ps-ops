@@ -1,4 +1,4 @@
--- Reschedule requests for the generic Task Management module.
+                                                            -- Reschedule requests for the generic Task Management module.
 --
 -- An assignee who didn't create a task can't move its due date themselves;
 -- they ask instead. The task's creator, or a manager of the assignee (anyone
@@ -30,3 +30,4 @@ CREATE TABLE IF NOT EXISTS `work_task_reschedule_requests` (
   CONSTRAINT `fk_wtrr_requested_by` FOREIGN KEY (`requested_by`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_wtrr_decided_by` FOREIGN KEY (`decided_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+

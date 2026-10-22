@@ -36,6 +36,14 @@ export interface WorkTask {
   completed_at: string | null;
   completed_by: number | null;
   completion_note: string | null;
+  /**
+   * The task's live reminder (a PERSONAL_REMINDER work task linked to it), or null, and when it
+   * rings ('YYYY-MM-DD HH:MM:SS'). It rings once, at that date and time, for the assignee only.
+   */
+  reminder_id?: string | null;
+  reminder_at?: string | null;
+  /** A repeating task's dates of the last 7 days that were missed and not yet marked done late. */
+  missed_dates?: string[];
   created_at: string;
   updated_at: string;
   is_overdue?: boolean;

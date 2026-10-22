@@ -38,3 +38,23 @@ export const loadLastSource = (scope: string) =>
   kvGet<string>(scope, SOURCE_KEY);
 export const saveLastSource = (scope: string, source: string) =>
   kvSet(scope, SOURCE_KEY, source);
+
+/**
+ * The last value picked in each dropdown of the lead forms, so the next new lead opens with it
+ * already chosen (it can still be changed). Residential: house type, service, plan (the lead source
+ * keeps its own key above). Commercial: industry type and lead source.
+ */
+export type LastChoices = Partial<
+  Record<'houseType' | 'service' | 'plan' | 'industryType' | 'commercialSource', string>
+>;
+const CHOICES_KEY = 'lastLeadChoices';
+export const loadLastChoices = async (scope: string): Promise<LastChoices> =>
+  (await kvGet<LastChoices>(scope, CHOICES_KEY)) ?? {};
+export async function saveLastChoices(scope: string, patch: LastChoices): Promise<void> {
+  const current = await loadLastChoices(scope);
+  const next: LastChoices = { ...current };
+  for (const [key, value] of Object.entries(patch) as [keyof LastChoices, string | undefined][]) {
+    if (value) next[key] = value;
+  }
+  await kvSet(scope, CHOICES_KEY, next);
+}

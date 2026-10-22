@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   FiAlignLeft,
+  FiAlertTriangle,
   FiArrowRight,
+  FiBell,
+  FiBellOff,
   FiCalendar,
   FiCheck,
   FiCheckCircle,
@@ -53,15 +56,18 @@ import {
   listAttachments,
   listComments,
   listHistory,
+  markDoneLate,
   openAttachment,
   pauseTask,
   reassignTask,
   rejectRequest,
+  removeTaskReminder,
   reopenTask,
   requestReschedule,
   rescheduleTask,
   resumeTask,
   scheduleDelete,
+  setTaskReminder,
   skipTask,
   startTask,
   undoDelete,
@@ -215,7 +221,139 @@ function Timeline({ history, ready }) {
   );
 }
 
+// A repeating task is ONE task that moves to its next date; the server writes each date's outcome
+// into its history as "Done for 2026-10-15 - next due …", "Missed 2026-10-15 - …" or "Skipped …".
+// "Done late for 2026-10-15" is a missed day marked done afterwards.
+const OCCURRENCE = /^(Done late for|Done for|Missed|Skipped) (\d{4}-\d{2}-\d{2})(?: - next due \d{4}-\d{2}-\d{2})?(?::\s*([\s\S]*))?/;
+const OCCURRENCE_KIND = {
+  "Done for": { label: "Done", color: "#16a34a", soft: "#e7f7ee", icon: FiCheckCircle },
+  "Done late for": { label: "Done late", color: "#b45309", soft: "#fff4e5", icon: FiCheckCircle },
+  Missed: { label: "Missed", color: "#dc2626", soft: "#fdecec", icon: FiX },
+  Skipped: { label: "Skipped", color: "#64748b", soft: "#eef2f7", icon: FiSkipForward },
+};
+
+function Occurrences({ task, history, ready, canMarkLate, onMarkLate }) {
+  const items = useMemo(
+    () =>
+      history
+        .map((h) => ({ h, m: OCCURRENCE.exec(h.note || "") }))
+        .filter((x) => x.m)
+        .map(({ h, m }) => ({ id: h.id, key: m[1], kind: OCCURRENCE_KIND[m[1]], date: m[2], note: m[3] || "", by: m[1] === "Missed" ? "" : h.changed_by_name, at: h.changed_at }))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    [history],
+  );
+  const done = items.filter((i) => i.kind.label === "Done").length;
+  const missed = items.filter((i) => i.kind.label === "Missed").length;
+  const finished = task.status === "COMPLETED" || task.status === "CANCELLED";
+  return (
+    <section className="tp-card">
+      <div className="tp-card-head">
+        <h3>
+          <FiRepeat style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          Occurrences
+        </h3>
+        <small className="tp-occ-sum">
+          {done} done · {missed} missed
+        </small>
+      </div>
+      {!ready && [0, 1].map((i) => <Skeleton key={i} height={36} style={{ marginBottom: 8 }} />)}
+      {ready && (
+        <ol className="tp-occ">
+          {!finished && (
+            <li className="tp-occ-row now">
+              <span className="tp-occ-icon" style={{ background: "#eef2fb", color: "#2563eb" }}>
+                <FiClock />
+              </span>
+              <div>
+                <strong>{fmtDate(task.due_date)}</strong>
+                <small>Current - {STATUS[task.status]?.label || task.status}</small>
+              </div>
+            </li>
+          )}
+          {items.map((o) => (
+            <li key={o.id} className="tp-occ-row">
+              <span className="tp-occ-icon" style={{ background: o.kind.soft, color: o.kind.color }}>
+                <o.kind.icon />
+              </span>
+              <div>
+                <strong>{fmtDate(o.date)}</strong>
+                <small>
+                  <span style={{ color: o.kind.color, fontWeight: 600 }}>{o.kind.label}</span>
+                  {o.by ? ` by ${o.by}` : ""}
+                  {o.note ? ` - ${o.note}` : ""}
+                </small>
+              </div>
+              {o.key === "Missed" && canMarkLate && (task.missed_dates || []).includes(o.date) && (
+                <button type="button" className="tp-btn outline tp-occ-late" onClick={() => onMarkLate(o.date)}>
+                  Mark done late
+                </button>
+              )}
+            </li>
+          ))}
+          {items.length === 0 && finished && <li className="tp-timeline-empty">No dates recorded.</li>}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 /* ---------- dialogs ---------- */
+
+/** Set or move the task's reminder: one date and time, rings once for the assignee. */
+function ReminderDialog({ task, onClose, onSave, onRemove }) {
+  const today = todayStr();
+  const at = task.reminder_at || "";
+  const [date, setDate] = useState(at.slice(0, 10) || (task.due_date && task.due_date >= today ? task.due_date : today));
+  const [time, setTime] = useState(at.slice(11, 16) || toTimeInput(task.due_time) || "09:00");
+  const future = !!date && !!time && new Date(`${date}T${time}`) > new Date();
+  return (
+    <Modal title={task.reminder_id ? "Change reminder" : "Set reminder"} onClose={onClose} size="sm">
+      {(close) => (
+        <div className="tp-form">
+          <p className="tp-desc muted">
+            Rings once at this date and time for {task.assigned_to_name || "the assignee"} - a pop-up here and an alarm on their phone.
+          </p>
+          <label className="tp-field">
+            <span>Reminder date &amp; time</span>
+            <div className="tp-duo">
+              <input className="tp-input" type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} autoFocus />
+              <input className="tp-input" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            {!!date && !!time && !future && <em className="tp-error">Pick a time in the future.</em>}
+          </label>
+          <div className="tp-modal-actions">
+            {task.reminder_id && (
+              <button
+                type="button"
+                className="tp-btn ghost danger-text"
+                onClick={() => {
+                  onRemove();
+                  close();
+                }}
+              >
+                <FiBellOff /> Remove
+              </button>
+            )}
+            <button type="button" className="tp-btn ghost" onClick={close}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="tp-btn primary"
+              disabled={!future}
+              onClick={() => {
+                onSave({ date, time });
+                close();
+              }}
+            >
+              <FiBell /> {task.reminder_id ? "Save" : "Set reminder"}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 function StartDialog({ onClose, onConfirm }) {
   return (
@@ -1054,12 +1192,28 @@ export default function TaskDetail() {
     reloadComments();
   }
 
+  // The reminder rings once, at the date and time chosen, for the assignee only (web and phone).
+  const reminderAt = task.reminder_at ? fmtDateTime(task.reminder_at.slice(0, 10), task.reminder_at.slice(11, 19)) : "";
+  async function saveReminder(at) {
+    await run(() => setTaskReminder(task.id, at), {
+      title: task.reminder_id ? "Reminder moved" : "Reminder set",
+      text: `${isAssignee ? "You'll" : `${task.assigned_to_name || "The assignee"} will`} be reminded on ${fmtDateTime(at.date, `${at.time}:00`)}.`,
+    });
+  }
+  async function markLate(date) {
+    await run(() => markDoneLate(task.id, date), { title: `${fmtDate(date)} marked done` });
+  }
+
   async function doComplete() {
     const ok = await run(() => completeTask(task.id));
     if (ok) {
       setBurst(true);
       setTimeout(() => setBurst(false), 1700);
-      toast.push({ type: "success", title: "Task completed", text: task.title });
+      toast.push(
+        task.series_id
+          ? { type: "success", title: "Done for this date", text: "The task moved to its next date." }
+          : { type: "success", title: "Task completed", text: task.title },
+      );
     }
   }
 
@@ -1151,6 +1305,18 @@ export default function TaskDetail() {
                   Recurring
                 </span>
               )}
+              {task.reminder_id && !finished && (
+                <span className="tp-tag tp-tag-reminder">
+                  <FiBell style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  Reminder: {reminderAt}
+                </span>
+              )}
+              {!!task.missed_dates?.length && !finished && (
+                <span className="tp-tag tp-tag-missed">
+                  <FiAlertTriangle style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  {task.missed_dates.length === 1 ? `Missed ${fmtDate(task.missed_dates[0])}` : `Missed ${task.missed_dates.length} days`}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1199,6 +1365,17 @@ export default function TaskDetail() {
                 title={pendingReq ? "Waiting for a decision on your request" : "Ask for a new due date"}
               >
                 <FiCalendar /> {pendingReq ? "Reschedule requested" : "Request reschedule"}
+              </button>
+            )}
+            {!finished && (isAssignee || managesTask) && (
+              <button
+                type="button"
+                className={`tp-btn outline${task.reminder_id ? " tp-btn-reminder-on" : ""}`}
+                onClick={() => setDialog("reminder")}
+                disabled={busy}
+                title={task.reminder_id ? `Rings on ${reminderAt} - click to change or remove` : "Remind the assignee on a date and time"}
+              >
+                <FiBell /> {task.reminder_id ? "Change reminder" : "Set reminder"}
               </button>
             )}
             {task.status === "IN_PROGRESS" && panelHidden && canWork && (
@@ -1576,6 +1753,7 @@ export default function TaskDetail() {
           {showPanel && (
             <StartedPanel key={task.started_at} task={task} busy={busy} onClose={() => setPanelHidden(true)} onSaveProgress={doSaveProgress} onComplete={() => setDialog("complete")} />
           )}
+          {task.series_id && <Occurrences task={task} history={history} ready={historyReady} canMarkLate={canWork} onMarkLate={markLate} />}
           <Timeline history={history} ready={historyReady} />
 
           <section className="tp-card">
@@ -1640,11 +1818,23 @@ export default function TaskDetail() {
         <ConfirmDialog
           tone="success"
           icon={FiCheckCircle}
-          title="Complete this task?"
-          text="The task moves to Completed. You can't add progress updates after this."
-          confirmLabel="Complete Task"
+          title={task.series_id ? "Done for this date?" : "Complete this task?"}
+          text={
+            task.series_id
+              ? `It is marked done for ${fmtDate(task.due_date)} and moves to its next date, as the same task. Every date stays under Occurrences.`
+              : "The task moves to Completed. You can't add progress updates after this."
+          }
+          confirmLabel={task.series_id ? "Mark Done" : "Complete Task"}
           onClose={() => setDialog(null)}
           onConfirm={doComplete}
+        />
+      )}
+      {dialog === "reminder" && (
+        <ReminderDialog
+          task={task}
+          onClose={() => setDialog(null)}
+          onSave={saveReminder}
+          onRemove={() => run(() => removeTaskReminder(task.id), { title: "Reminder removed" })}
         />
       )}
       {dialog === "skip" && (
@@ -1652,7 +1842,7 @@ export default function TaskDetail() {
           tone="danger"
           icon={FiSkipForward}
           title="Skip this occurrence?"
-          text="This one occurrence is cancelled. The schedule and every other occurrence are untouched."
+          text={`${fmtDate(task.due_date)} is skipped and the task moves to its next date. The schedule is untouched.`}
           confirmLabel="Skip Occurrence"
           onClose={() => setDialog(null)}
           onConfirm={() => run(() => skipTask(task.id), { title: "Occurrence skipped" })}
