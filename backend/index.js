@@ -65,7 +65,7 @@ app.use(cors());
 // checked file's rows back in one request (nothing is persisted until that point), which
 // can be a few hundred KB for a large file. Every other route just gets a higher ceiling,
 // nothing about how it parses JSON changes.
-app.use(express.json({ limit: "3mb" }));
+app.use(express.json({ limit: "15mb" }));
 
 // Health check
 app.get('/health', (req, res) => {

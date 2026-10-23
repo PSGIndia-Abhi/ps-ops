@@ -6,7 +6,7 @@ const { notifyInvoiceImport } = require("./notifications.service");
 const { insertInvoiceTds } = require("./Tds.service");
 const { syncInvoiceStatusesSafely } = require("./InvoiceStatus.service");
 
-const MAX_ROWS = 5000;
+const MAX_ROWS = 10000;
 const MAX_AMOUNT = 9999999999999.99;
 
 function withStatus(message, status = 400) {
@@ -220,11 +220,12 @@ async function validateRows(rows, user) {
 
     if (!row.customer) errors.push("Customer is required");
 
-    if (!row.amount) errors.push("Invoice amount is required");
+    // A blank or 0 amount is accepted and saved as a ₹0 invoice (nothing pending).
+    if (!row.amount) result.parsed_amount = 0;
     else {
       const amount = parseAmount(row.amount);
       if (Number.isNaN(amount)) errors.push("Invoice amount is not a valid number");
-      else if (amount <= 0) errors.push("Invoice amount must be greater than 0");
+      else if (amount < 0) errors.push("Invoice amount cannot be negative");
       else if (amount > MAX_AMOUNT) errors.push("Invoice amount is too large");
       else result.parsed_amount = amount;
     }
@@ -428,10 +429,11 @@ async function confirmImport(fileName, submittedRows, user) {
           await connection.query(
             `INSERT INTO invoices
              (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, pending_amount, status, remarks, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               invoiceId, r.invoice_number, r.matched_customer_id, r.matched_site_id, r.parsed_invoice_date, r.parsed_due_date,
-              r.parsed_amount, r.parsed_amount, r.remarks || null, user.id,
+              // A blank or 0 amount in the file is saved as a cancelled invoice.
+              r.parsed_amount, r.parsed_amount, r.parsed_amount > 0 ? "PENDING" : "CANCELLED", r.remarks || null, user.id,
             ]
           );
           await insertInvoiceTds(connection, invoiceId, companyById.get(r.matched_customer_id), r.parsed_amount);

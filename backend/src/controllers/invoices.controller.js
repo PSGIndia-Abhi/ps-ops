@@ -41,6 +41,7 @@ function computeInvoiceView(row) {
   const isOverdue =
     row.status !== "PAID" &&
     row.status !== "CANCELLED" &&
+    Number(row.pending_amount) > 0 && // a ₹0 invoice has nothing to be late with
     row.due_date &&
     new Date(row.due_date) < new Date(new Date().toDateString());
   return { ...row, display_status: isOverdue ? "OVERDUE" : row.status };

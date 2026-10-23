@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiUpload } from "react-icons/fi";
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiUpload, FiXCircle } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { showDate, useAccountantData, usePaged } from "./data";
@@ -13,6 +13,7 @@ const TABS = [
   { key: "OVERDUE", label: "Overdue", icon: <FiAlertTriangle /> },
   { key: "PARTIAL", label: "Partially Paid", icon: <FiPieChart /> },
   { key: "PAID", label: "Paid", icon: <FiCheckCircle /> },
+  { key: "CANCELLED", label: "Cancelled", icon: <FiXCircle /> },
 ];
 
 export default function InvoiceList() {
@@ -86,6 +87,7 @@ export default function InvoiceList() {
             <option value="PARTIAL">Partially Paid</option>
             <option value="PAID">Paid</option>
             <option value="OVERDUE">Overdue</option>
+            <option value="CANCELLED">Cancelled</option>
           </select>
         </div>
 

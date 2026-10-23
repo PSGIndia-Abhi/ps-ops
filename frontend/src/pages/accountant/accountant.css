@@ -74,6 +74,7 @@
 .ac-badge.partial { background: #dbeafe; color: #1d4ed8; }
 .ac-badge.paid, .ac-badge.completed, .ac-badge.low { background: #dcfce7; color: #15803d; }
 .ac-badge.overdue, .ac-badge.high, .ac-badge.cancelled { background: #fee2e2; color: #b91c1c; }
+.ac-badge.void { background: #e5e7eb; color: #4b5563; }
 .ac-badge.upcoming, .ac-badge.normal { background: #ede9fe; color: #6d28d9; }
 .ac-badge.today { background: #ffedd5; color: #c2410c; }
 
@@ -398,6 +399,10 @@
 .rv-body { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px 20px 20px; }
 
 .rv-tabs { display: inline-flex; gap: 2px; background: #f1f5f9; padding: 4px; border-radius: 10px; margin-bottom: 16px; max-width: 100%; overflow-x: auto; }
+/* review page: the tabs and the search box share one row (the search drops below on narrow screens) */
+.rv-toolbar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.rv-search { flex: 0 1 340px; min-width: 220px; margin-bottom: 16px; }
+.rv-search-count { margin: -8px 0 10px; font-size: 13px; color: #64748b; }
 .rv-tab { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; white-space: nowrap; transition: background 0.15s ease, color 0.15s ease; }
 .rv-tab:hover { color: #334155; background: rgba(15, 23, 42, 0.05); }
 .rv-tab.active { background: #fff; color: #0f172a; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1); }

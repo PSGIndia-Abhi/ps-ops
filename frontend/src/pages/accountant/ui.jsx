@@ -8,7 +8,7 @@ const STATUS_CLASS = {
   PARTIAL: "partial",
   PAID: "paid",
   OVERDUE: "overdue",
-  CANCELLED: "cancelled",
+  CANCELLED: "void", // grey, so it doesn't look like Overdue
   POSTED: "paid",
   OPEN: "upcoming",
   COMPLETED: "completed",

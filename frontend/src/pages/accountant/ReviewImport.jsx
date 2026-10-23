@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FiAlertCircle, FiArrowLeft, FiCheckCircle, FiChevronLeft, FiChevronRight, FiClipboard,
-  FiDownload, FiFileText, FiList, FiRefreshCw, FiSend, FiUploadCloud, FiX,
+  FiDownload, FiFileText, FiList, FiRefreshCw, FiSearch, FiSend, FiUploadCloud, FiX,
 } from "react-icons/fi";
 import { apiFetch, safeJson } from "../../api";
 import { money } from "./format";
@@ -79,6 +79,7 @@ export default function ReviewImport() {
   ); // { type: "error" | "ok", text }
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("all");
+  const [search, setSearch] = useState(""); // matches row no, invoice no, customer or error reason
   const [page, setPage] = useState(0);
 
   const loadReview = useCallback(async (id) => {
@@ -229,7 +230,10 @@ export default function ReviewImport() {
     );
   }
 
-  const rows = review.rows.filter((r) => tab === "all" || r.status === tab);
+  const q = search.trim().toLowerCase();
+  const rows = review.rows.filter((r) =>
+    (tab === "all" || r.status === tab) &&
+    (!q || `${r.rowNumber} ${r.invoiceNo} ${r.customer} ${r.errors.join(" ")}`.toLowerCase().includes(q)));
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const current = Math.min(page, pages - 1);
   const visible = rows.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
@@ -321,14 +325,22 @@ export default function ReviewImport() {
       </div>
 
       <div className="rv-body">
-        <div className="rv-tabs">
-          {tabs.map(([key, label, icon]) => (
-            <button key={key} type="button" className={`rv-tab ${tab === key ? "active" : ""}`}
-              onClick={() => { setTab(key); setPage(0); }}>
-              {icon} {label}
-            </button>
-          ))}
+        <div className="rv-toolbar">
+          <div className="rv-tabs">
+            {tabs.map(([key, label, icon]) => (
+              <button key={key} type="button" className={`rv-tab ${tab === key ? "active" : ""}`}
+                onClick={() => { setTab(key); setPage(0); }}>
+                {icon} {label}
+              </button>
+            ))}
+          </div>
+          <div className="ac-search rv-search">
+            <FiSearch />
+            <input className="ac-input" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              placeholder="Search customer, invoice no or error" aria-label="Search rows" />
+          </div>
         </div>
+        {q && <p className="rv-search-count">{rows.length} matching row{rows.length === 1 ? "" : "s"}</p>}
 
         <div className="rv-table-wrap">
           <table className="rv-table">
@@ -355,7 +367,7 @@ export default function ReviewImport() {
                 </tr>
               )) : (
                 <tr><td className="rv-empty" colSpan={hasSite ? 7 : 6}>
-                  {tab === "error" ? "No errors found" : tab === "valid" ? "No valid records" : "No records"}
+                  {q ? "No rows match your search" : tab === "error" ? "No errors found" : tab === "valid" ? "No valid records" : "No records"}
                 </td></tr>
               )}
             </tbody>
