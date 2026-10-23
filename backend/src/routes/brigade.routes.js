@@ -39,6 +39,13 @@ router.get("/quote", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigad
 router.post("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.createBrigadeBooking);
 router.get("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listBrigadeBookings);
 
+// Flat history (booking form), flats board + job flats (dashboard), flat card (job page)
+router.get("/flat-history", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getFlatHistory);
+router.get("/flats-status", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getFlatsStatus);
+router.get("/flats-report", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getFlatsReport);
+router.get("/job-flats", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getJobFlats);
+router.get("/jobs/:jobId/flat", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getJobFlatCard);
+
 // Billing: client PO -> services + billed amounts (admin + Brigade Executive)
 router.get("/billing/pos", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listBillingPos);
 router.get("/billing/po", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getBillingPo);

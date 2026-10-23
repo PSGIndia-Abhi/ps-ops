@@ -848,3 +848,10 @@
   background: #e0f2fe;
   color: #075985;
 }
+
+/* Brigade Executive dashboard: the flat of a Brigade job */
+.job-tag.job-tag-flat {
+  background: #e0f2fe;
+  color: #075985;
+  font-variant-numeric: tabular-nums;
+}

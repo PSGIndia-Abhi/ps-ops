@@ -11,6 +11,7 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { createBooking } = require("./bookings.controller");
+const { buildFlatsReport } = require("../services/brigadeFlatsReport.service");
 const {
   BRIGADE_GROUP_NAME,
   BRIGADE_SUB_SERVICES,
@@ -541,18 +542,75 @@ async function deletePrice(req, res) {
 /* Price quote (booking form)                                          */
 /* ------------------------------------------------------------------ */
 
-async function findFlatByNumber(db, companyId, flatNumber) {
+function readFlatNumber(value) {
+  const flatNumber = trimString(value).toUpperCase();
   if (!isValidFlatNumber(flatNumber)) throw withStatus(FLAT_FORMAT_MESSAGE, 400);
-  const [[flat]] = await db.query(
-    `SELECT id, company_id, flat_number, bhk
-     FROM brigade_flats
-     WHERE company_id = ? AND flat_number = ? AND is_active = 1`,
+  return flatNumber;
+}
+
+// The flat number is typed in the booking form and the BHK is picked from the
+// BHK types master. A matching row of the old flat master, if any, is only
+// linked for reference; prices come from Property + BHK + service.
+async function readFlatAndBhk(db, companyId, flatNumberValue, bhkValue) {
+  const flatNumber = readFlatNumber(flatNumberValue);
+  const bhk = normalizeBhk(bhkValue);
+  if (!bhk) throw withStatus("Please choose the BHK", 400);
+  await assertBhkType(db, bhk);
+  const [[master]] = await db.query(
+    "SELECT id FROM brigade_flats WHERE company_id = ? AND flat_number = ? AND is_active = 1",
     [companyId, flatNumber]
   );
-  if (!flat) {
-    throw withStatus(`Flat ${flatNumber} is not in the master for this property`, 404);
+  return { id: master?.id || null, company_id: companyId, flat_number: flatNumber, bhk };
+}
+
+// Services of a Brigade job that are still open (not completed / canceled).
+const OPEN_JOB_STATUSES = ["CREATED", "NOT_STARTED", "IN_PROGRESS", "PAUSED"];
+
+function serviceDate(job) {
+  return job.status === "COMPLETED" ? job.completed_at || job.start_date : job.start_date;
+}
+
+// Every service ever booked for one flat (canceled jobs left out), summarised
+// per sub-service: an open job wins ("booked"), else the latest completed one.
+function summariseFlatJobs(jobs) {
+  const bySub = new Map();
+  for (const job of jobs) {
+    if (!bySub.has(job.sub_service)) {
+      bySub.set(job.sub_service, { sub_service: job.sub_service, state: "none", job: null, last_completed: null, times_booked: 0 });
+    }
+    const entry = bySub.get(job.sub_service);
+    entry.times_booked += 1;
+    const brief = { id: job.id, code: job.code, status: job.status, date: serviceDate(job) };
+    if (OPEN_JOB_STATUSES.includes(job.status) && entry.state !== "booked") {
+      entry.state = "booked";
+      entry.job = brief;
+    }
+    if (job.status === "COMPLETED" && !entry.last_completed) {
+      entry.last_completed = brief;
+      if (entry.state === "none") {
+        entry.state = "completed";
+        entry.job = brief;
+      }
+    }
   }
-  return flat;
+  return [...bySub.values()];
+}
+
+const FLAT_JOBS_SELECT = `
+  SELECT j.id, j.code, j.sub_service, j.status, j.start_date, j.completed_at, j.created_at,
+         bd.company_id, co.name AS property, bd.flat_number, bd.bhk
+  FROM jobs j
+  JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+  LEFT JOIN companies co ON co.id = bd.company_id
+  WHERE j.status <> 'CANCELED'
+`;
+
+async function loadFlatJobs(db, companyId, flatNumber) {
+  const [rows] = await db.query(
+    `${FLAT_JOBS_SELECT} AND bd.company_id = ? AND bd.flat_number = ? ORDER BY j.created_at DESC`,
+    [companyId, flatNumber]
+  );
+  return rows;
 }
 
 async function quoteServices(db, flat, subServices) {
@@ -587,13 +645,13 @@ function readSubServices(value) {
   return unique;
 }
 
-// GET /api/brigade/quote?company_id=&flat_number=&sub_services=a,b
-// Returns the flat (with BHK) and, when services are given, their prices.
+// GET /api/brigade/quote?company_id=&flat_number=&bhk=&sub_services=a,b
+// Returns the flat (number + BHK) and, when services are given, their prices.
 async function getQuote(req, res) {
   try {
     const companyId = trimString(req.query.company_id);
     await assertBrigadeCompany(pool, companyId);
-    const flat = await findFlatByNumber(pool, companyId, trimString(req.query.flat_number));
+    const flat = await readFlatAndBhk(pool, companyId, req.query.flat_number, req.query.bhk);
     const subServices = readSubServices(req.query.sub_services);
     const quote = await quoteServices(pool, flat, subServices);
     res.json({ flat, ...quote });
@@ -661,10 +719,21 @@ async function createBrigadeBooking(req, res) {
     );
     if (!site) throw withStatus("Please choose the property site", 400);
 
-    const flat = await findFlatByNumber(pool, companyId, trimString(body.flat_number));
+    const flat = await readFlatAndBhk(pool, companyId, body.flat_number, body.bhk);
 
     const subServices = readSubServices(body.subServices);
     if (!subServices.length) throw withStatus("Please select at least one service", 400);
+
+    // A service that is already booked (not yet completed) for this flat
+    // cannot be booked again. Completed ones can be booked for a repeat clean.
+    const openForFlat = summariseFlatJobs(await loadFlatJobs(pool, companyId, flat.flat_number))
+      .filter((s) => s.state === "booked" && subServices.includes(s.sub_service));
+    if (openForFlat.length) {
+      throw withStatus(
+        `Already booked for ${flat.flat_number}: ${openForFlat.map((s) => `${s.sub_service} (${s.job.code})`).join(", ")}`,
+        409
+      );
+    }
 
     const quote = await quoteServices(pool, flat, subServices);
     if (quote.missing.length) {
@@ -1297,6 +1366,319 @@ async function saveBillingPo(req, res) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Flat history + flats board + job flats (Brigade Executive panel)    */
+/* ------------------------------------------------------------------ */
+
+// GET /api/brigade/flat-history?company_id=&flat_number=
+// The flat's last BHK and every service's state (booked / completed / none).
+async function getFlatHistory(req, res) {
+  try {
+    const companyId = trimString(req.query.company_id);
+    await assertBrigadeCompany(pool, companyId);
+    const flatNumber = readFlatNumber(req.query.flat_number);
+    const jobs = await loadFlatJobs(pool, companyId, flatNumber);
+    const summary = summariseFlatJobs(jobs);
+    const bySub = new Map(summary.map((s) => [s.sub_service, s]));
+    res.json({
+      company_id: companyId,
+      flat_number: flatNumber,
+      last_bhk: jobs[0]?.bhk || null,
+      services: BRIGADE_SUB_SERVICES.map(
+        (name) => bySub.get(name) || { sub_service: name, state: "none", job: null, last_completed: null, times_booked: 0 }
+      ),
+      jobs: jobs.map((j) => ({
+        id: j.id,
+        code: j.code,
+        sub_service: j.sub_service,
+        status: j.status,
+        bhk: j.bhk,
+        date: serviceDate(j),
+      })),
+    });
+  } catch (err) {
+    sendError(res, err, "Failed to load flat history");
+  }
+}
+
+// GET /api/brigade/flats-status?company_id=
+// Every booked flat with each service's state, for the dashboard Flats view.
+async function getFlatsStatus(req, res) {
+  try {
+    const companyId = trimString(req.query.company_id);
+    const params = [];
+    let filter = "";
+    if (companyId) {
+      await assertBrigadeCompany(pool, companyId);
+      filter = " AND bd.company_id = ?";
+      params.push(companyId);
+    }
+    const [rows] = await pool.query(
+      `${FLAT_JOBS_SELECT}${filter} ORDER BY co.name ASC, bd.flat_number ASC, j.created_at DESC`,
+      params
+    );
+
+    const flats = new Map();
+    for (const row of rows) {
+      const key = `${row.company_id}|${row.flat_number}`;
+      if (!flats.has(key)) {
+        flats.set(key, {
+          company_id: row.company_id,
+          property: row.property,
+          flat_number: row.flat_number,
+          bhk: row.bhk, // latest booking first
+          last_activity: row.created_at,
+          jobs: [],
+        });
+      }
+      flats.get(key).jobs.push(row);
+    }
+
+    const list = [...flats.values()].map((flat) => {
+      const services = summariseFlatJobs(flat.jobs);
+      return {
+        company_id: flat.company_id,
+        property: flat.property,
+        flat_number: flat.flat_number,
+        bhk: flat.bhk,
+        last_activity: flat.last_activity,
+        services,
+        completed: services.filter((s) => s.state === "completed").length,
+        booked: services.filter((s) => s.state === "booked").length,
+      };
+    });
+    res.json({ sub_services: BRIGADE_SUB_SERVICES, flats: list });
+  } catch (err) {
+    sendError(res, err, "Failed to load flats");
+  }
+}
+
+// GET /api/brigade/job-flats — { [jobId]: { property, flat_number, bhk } } for
+// Brigade booking jobs, so the dashboard rows can show the flat.
+async function getJobFlats(req, res) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT j.id, co.name AS property, bd.flat_number, bd.bhk
+       FROM jobs j
+       JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+       LEFT JOIN companies co ON co.id = bd.company_id`
+    );
+    res.json(Object.fromEntries(rows.map((r) => [r.id, { property: r.property, flat_number: r.flat_number, bhk: r.bhk }])));
+  } catch (err) {
+    sendError(res, err, "Failed to load flats");
+  }
+}
+
+// GET /api/brigade/jobs/:jobId/flat — the job's flat card: flat history plus
+// the job's PO and billing figures.
+async function getJobFlatCard(req, res) {
+  try {
+    const { jobId } = req.params;
+    if (!(await canSeeJob(req.user, jobId))) throw withStatus("Job not found", 404);
+    const [[row]] = await pool.query(
+      `SELECT bd.company_id, co.name AS property, s.name AS site_name, bd.flat_number, bd.bhk
+       FROM jobs j
+       JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+       LEFT JOIN companies co ON co.id = bd.company_id
+       LEFT JOIN sites s ON s.id = bd.site_id
+       WHERE j.id = ?`,
+      [jobId]
+    );
+    if (!row) return res.json({ is_brigade: false });
+
+    const jobs = await loadFlatJobs(pool, row.company_id, row.flat_number);
+
+    // PO + billing: the PO this service is billed under (Billing page link
+    // first, else the PO typed at booking) and that PO's totals.
+    let billing = null;
+    try {
+      const [[svc]] = await pool.query(
+        `${BILLING_SERVICE_SELECT} AND j.id = ?`,
+        [jobId]
+      );
+      if (svc?.po_number) {
+        const po = await loadBillingPo(pool, svc.po_number);
+        const line = po.services.find((x) => x.job_id === jobId);
+        billing = {
+          po_number: po.po_number,
+          po_amount: po.po_amount,
+          amount: line ? line.amount : null,
+          po_billed: po.totals.billed,
+          po_balance: po.totals.balance,
+        };
+      }
+    } catch (err) {
+      if (err?.code !== "ER_NO_SUCH_TABLE") throw err; // billing tables not created yet
+    }
+
+    res.json({
+      is_brigade: true,
+      company_id: row.company_id,
+      property: row.property,
+      site_name: row.site_name,
+      flat_number: row.flat_number,
+      bhk: row.bhk,
+      services: summariseFlatJobs(jobs),
+      jobs: jobs.map((j) => ({ id: j.id, code: j.code, sub_service: j.sub_service, status: j.status, date: serviceDate(j) })),
+      billing,
+    });
+  } catch (err) {
+    sendError(res, err, "Failed to load flat");
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Flats report (.xlsx) — Brigade Executive Flats board                */
+/* ------------------------------------------------------------------ */
+
+const FLAT_REPORT_STATES = { all: "All flats", open: "Open work", done: "Nothing pending" };
+
+function parseIdList(value) {
+  if (!value) return [];
+  try {
+    const list = Array.isArray(value) ? value : JSON.parse(value);
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+// GET /api/brigade/flats-report?company_id=&state=all|open|done
+async function getFlatsReport(req, res) {
+  try {
+    const companyId = trimString(req.query.company_id);
+    const state = FLAT_REPORT_STATES[req.query.state] ? req.query.state : "all";
+    const params = [];
+    let filter = "";
+    let propertyName = "All properties";
+    if (companyId) {
+      await assertBrigadeCompany(pool, companyId);
+      filter = " AND bd.company_id = ?";
+      params.push(companyId);
+      const [[co]] = await pool.query("SELECT name FROM companies WHERE id = ?", [companyId]);
+      propertyName = co?.name || propertyName;
+    }
+
+    const [rows] = await pool.query(
+      `SELECT j.id, j.code, j.sub_service, j.status, j.start_date, j.completed_at, j.created_at,
+              j.supervisor_id, j.team, b.created_at AS booked_at,
+              bd.company_id, co.name AS property, bd.flat_number, bd.bhk, bd.prices,
+              NULLIF(TRIM(bd.client_po_number), '') AS booking_po
+       FROM jobs j
+       JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+       JOIN bookings b ON b.id = j.booking_id
+       LEFT JOIN companies co ON co.id = bd.company_id
+       WHERE j.status <> 'CANCELED'${filter}
+       ORDER BY co.name ASC, bd.flat_number ASC, j.created_at DESC`,
+      params
+    );
+
+    // Flats (jobs newest first, as summariseFlatJobs expects)
+    const flatMap = new Map();
+    for (const row of rows) {
+      const key = `${row.company_id}|${row.flat_number}`;
+      if (!flatMap.has(key)) {
+        flatMap.set(key, { property: row.property, flat_number: row.flat_number, bhk: row.bhk, last_activity: row.created_at, jobs: [] });
+      }
+      flatMap.get(key).jobs.push(row);
+    }
+    let flats = [...flatMap.values()].map((f) => {
+      const services = summariseFlatJobs(f.jobs);
+      return {
+        property: f.property,
+        flat_number: f.flat_number,
+        bhk: f.bhk,
+        last_activity: f.last_activity,
+        services,
+        completed: services.filter((s) => s.state === "completed").length,
+        booked: services.filter((s) => s.state === "booked").length,
+      };
+    });
+    if (state === "open") flats = flats.filter((f) => f.booked > 0);
+    if (state === "done") flats = flats.filter((f) => f.booked === 0);
+    const keep = new Set(flats.map((f) => `${f.property}|${f.flat_number}`));
+
+    // PO + billed per job (billing tables may not exist yet)
+    const billing = new Map();
+    try {
+      const [lines] = await pool.query(
+        `SELECT l.job_id, l.amount, p.po_number
+         FROM brigade_po_lines l JOIN brigade_pos p ON p.id = l.po_id`
+      );
+      for (const l of lines) billing.set(String(l.job_id), { po: l.po_number, amount: Number(l.amount) });
+    } catch (err) {
+      if (err?.code !== "ER_NO_SUCH_TABLE") throw err;
+    }
+
+    // Names for supervisors and technicians
+    const userIds = new Set();
+    for (const row of rows) {
+      if (row.supervisor_id) userIds.add(String(row.supervisor_id));
+      for (const id of parseIdList(row.team)) userIds.add(id);
+    }
+    const names = new Map();
+    if (userIds.size) {
+      const [users] = await pool.query("SELECT id, name FROM users WHERE id IN (?)", [[...userIds]]);
+      for (const u of users) names.set(String(u.id), u.name);
+    }
+
+    const jobs = rows
+      .filter((r) => keep.has(`${r.property}|${r.flat_number}`))
+      .sort((a, b) =>
+        String(a.property || "").localeCompare(String(b.property || "")) ||
+        a.flat_number.localeCompare(b.flat_number) ||
+        new Date(a.created_at) - new Date(b.created_at)
+      )
+      .map((r) => {
+        let prices = r.prices;
+        if (typeof prices === "string") {
+          try { prices = JSON.parse(prices); } catch { prices = {}; }
+        }
+        const price = prices?.[r.sub_service] ?? null;
+        const line = billing.get(String(r.id));
+        const po = line?.po || r.booking_po || null;
+        return {
+          property: r.property,
+          flat_number: r.flat_number,
+          bhk: r.bhk,
+          sub_service: r.sub_service,
+          code: r.code,
+          status: r.status,
+          booked_at: r.booked_at,
+          start_date: r.start_date,
+          completed_at: r.completed_at,
+          price: price === null ? null : Number(price),
+          po_number: po,
+          // Billed: the amount saved on the Billing page, else the booked price while on a PO.
+          billed: line ? line.amount : po && price !== null ? Number(price) : null,
+          supervisor: r.supervisor_id ? names.get(String(r.supervisor_id)) || `#${r.supervisor_id}` : "",
+          technicians: parseIdList(r.team).map((id) => names.get(id) || `#${id}`).join(", "),
+        };
+      });
+
+    const generatedAt = new Date();
+    const wb = await buildFlatsReport({
+      generatedAt,
+      filters: { property: propertyName, state: FLAT_REPORT_STATES[state] },
+      subServices: BRIGADE_SUB_SERVICES,
+      flats,
+      jobs,
+    });
+
+    const fileName = `Brigade-Flats-Report-${generatedAt.toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    if (res.headersSent) {
+      console.error("Flats report failed", err);
+      return res.end();
+    }
+    sendError(res, err, "Failed to build the flats report");
+  }
+}
+
 module.exports = {
   getMeta,
   listBhkTypes,
@@ -1322,4 +1704,9 @@ module.exports = {
   getBillingPo,
   listUnassignedServices,
   saveBillingPo,
+  getFlatHistory,
+  getFlatsStatus,
+  getJobFlats,
+  getJobFlatCard,
+  getFlatsReport,
 };

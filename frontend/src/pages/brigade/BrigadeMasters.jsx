@@ -1,28 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import StatusAlertModal from "../../components/StatusAlertModal";
-import {
-  FLAT_NUMBER_HINT,
-  brigadeRequest,
-  flatNumberError,
-  formatInr,
-} from "./brigadeShared";
+import { brigadeRequest, formatInr } from "./brigadeShared";
 import "./brigade.css";
 
-// Brigade masters: flats (flat number + BHK) and prices per property.
-// Used by admin (/admin/brigade-masters) and the Brigade Executive (/brigade/masters).
+// Brigade masters: price list per property (Property + BHK + service) and the
+// BHK types master. Flat numbers are typed in the booking form, so there is no
+// flat master here. Brigade Executive panel only (/brigade/masters).
 export default function BrigadeMasters() {
   const [properties, setProperties] = useState([]);
   const [subServices, setSubServices] = useState([]);
   const [bhkTypes, setBhkTypes] = useState([]); // names from the BHK types master
   const [companyId, setCompanyId] = useState("");
-  const [tab, setTab] = useState("flats");
+  const [tab, setTab] = useState("prices");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState(null);
 
-  // Shared by both tabs so counts and the price grid's BHK columns stay in sync.
-  const [flats, setFlats] = useState([]);
+  // Property + BHK prices (old flat-specific prices are no longer used).
   const [prices, setPrices] = useState([]);
   const [loadingData, setLoadingData] = useState(false);
 
@@ -44,13 +39,8 @@ export default function BrigadeMasters() {
     setLoadingData(true);
     try {
       const q = `company_id=${encodeURIComponent(companyId)}`;
-      const [f, p] = await Promise.all([
-        brigadeRequest(`/api/brigade/flats?${q}`),
-        brigadeRequest(`/api/brigade/prices?${q}`),
-      ]);
-      setFlats(f || []);
-      setPrices(p || []);
-      setProperties((prev) => prev.map((x) => (x.id === companyId ? { ...x, flat_count: (f || []).length } : x)));
+      const p = await brigadeRequest(`/api/brigade/prices?${q}`);
+      setPrices((p || []).filter((row) => !row.flat_id));
     } catch (err) {
       setStatus({ type: "error", message: err.message });
     } finally {
@@ -59,20 +49,18 @@ export default function BrigadeMasters() {
   }, [companyId]);
 
   useEffect(() => {
-    setFlats([]);
     setPrices([]);
     reload();
   }, [reload]);
 
   const property = properties.find((p) => p.id === companyId) || null;
-  const overrideCount = prices.filter((p) => p.flat_id).length;
 
   return (
     <div className="bg-page">
       <div className="bg-page-header">
         <div>
-          <h2>Flats &amp; Prices</h2>
-          <p>Flat master and price list for each Brigade property. Prices are excluding GST.</p>
+          <h2>Prices &amp; BHK</h2>
+          <p>Price list for each Brigade property by BHK and service, and the BHK types used in the booking form. Prices exclude GST.</p>
         </div>
       </div>
 
@@ -116,15 +104,6 @@ export default function BrigadeMasters() {
             <button
               type="button"
               role="tab"
-              aria-selected={tab === "flats"}
-              className={`bg-tab ${tab === "flats" ? "active" : ""}`}
-              onClick={() => setTab("flats")}
-            >
-              Flats <span className="bg-tab-count">{flats.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
               aria-selected={tab === "prices"}
               className={`bg-tab ${tab === "prices" ? "active" : ""}`}
               onClick={() => setTab("prices")}
@@ -150,21 +129,11 @@ export default function BrigadeMasters() {
               }}
               onStatus={setStatus}
             />
-          ) : tab === "flats" ? (
-            <FlatsMaster
-              property={property}
-              bhkTypes={bhkTypes}
-              flats={flats}
-              loading={loadingData}
-              overrideCount={overrideCount}
-              onChanged={reload}
-              onStatus={setStatus}
-            />
           ) : (
             <PricesMaster
               property={property}
               bhkTypes={bhkTypes}
-              flats={flats}
+              flats={[]}
               prices={prices}
               subServices={subServices}
               loading={loadingData}
@@ -241,7 +210,7 @@ function BhkTypesMaster({ onChanged, onStatus }) {
       await brigadeRequest(`/api/brigade/bhk-types/${editing.id}`, { method: "PUT", body: JSON.stringify({ name: trimmed }) });
       setEditing(null);
       await refresh();
-      onStatus({ type: "success", message: "BHK type renamed — flats and prices updated" });
+      onStatus({ type: "success", message: "BHK type renamed — prices updated" });
     } catch (err) {
       onStatus({ type: "error", message: err.message });
     }
@@ -282,7 +251,7 @@ function BhkTypesMaster({ onChanged, onStatus }) {
         <div>
           <h3>BHK types</h3>
           <p className="bg-card-sub">
-            Shared by every Brigade property. These are the choices in the BHK dropdowns. Renaming one also renames it on existing flats and prices.
+            Shared by every Brigade property. These are the choices in the BHK dropdowns. Renaming one also renames it on existing prices.
           </p>
         </div>
       </div>
@@ -370,8 +339,8 @@ function BhkTypesMaster({ onChanged, onStatus }) {
                     )}
                   </td>
                   <td className="bg-field-hint" style={{ fontSize: 13 }}>
-                    {t.flat_count || t.price_count
-                      ? `${t.flat_count} flat${t.flat_count === 1 ? "" : "s"} · ${t.price_count} price${t.price_count === 1 ? "" : "s"}`
+                    {t.price_count
+                      ? `${t.price_count} price${t.price_count === 1 ? "" : "s"}`
                       : "Not used yet"}
                   </td>
                   <td>
@@ -389,7 +358,7 @@ function BhkTypesMaster({ onChanged, onStatus }) {
                             className="bg-link-btn danger"
                             onClick={() => setConfirmDelete(t)}
                             disabled={Boolean(t.flat_count || t.price_count)}
-                            title={t.flat_count || t.price_count ? "In use — change those flats/prices first" : undefined}
+                            title={t.flat_count || t.price_count ? "In use — change those prices first" : undefined}
                           >
                             Remove
                           </button>
@@ -417,241 +386,13 @@ function BhkTypesMaster({ onChanged, onStatus }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Flats                                                               */
-/* ------------------------------------------------------------------ */
-
-function FlatsMaster({ property, bhkTypes, flats, loading, onChanged, onStatus }) {
-  const [search, setSearch] = useState("");
-  const [bhkFilter, setBhkFilter] = useState("");
-  const [form, setForm] = useState({ flat_number: "", bhk: "" });
-  const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(null); // { id, flat_number, bhk }
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const flatInputRef = useRef(null);
-
-  const formError = flatNumberError(form.flat_number);
-  const editError = editing ? flatNumberError(editing.flat_number) : "";
-
-  const bhkCounts = useMemo(() => {
-    const counts = new Map();
-    for (const f of flats) counts.set(f.bhk, (counts.get(f.bhk) || 0) + 1);
-    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
-  }, [flats]);
-
-  const visible = useMemo(() => {
-    const q = search.trim().toUpperCase();
-    return flats.filter((f) => (!bhkFilter || f.bhk === bhkFilter) && (!q || f.flat_number.includes(q)));
-  }, [flats, search, bhkFilter]);
-
-  async function addFlat(e) {
-    e.preventDefault();
-    if (!form.flat_number || formError) {
-      onStatus({ type: "error", message: formError || "Please enter the flat number" });
-      return;
-    }
-    if (!form.bhk) {
-      onStatus({ type: "error", message: "Please choose the BHK" });
-      return;
-    }
-    setSaving(true);
-    try {
-      await brigadeRequest("/api/brigade/flats", {
-        method: "POST",
-        body: JSON.stringify({ company_id: property.id, ...form }),
-      });
-      setForm((f) => ({ ...f, flat_number: "" })); // keep BHK for quick entry of the next flat
-      await onChanged();
-      onStatus({ type: "success", message: `Flat ${form.flat_number} added` });
-      flatInputRef.current?.focus();
-    } catch (err) {
-      onStatus({ type: "error", message: err.message });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveEdit() {
-    if (editError) {
-      onStatus({ type: "error", message: editError });
-      return;
-    }
-    try {
-      await brigadeRequest(`/api/brigade/flats/${editing.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ flat_number: editing.flat_number, bhk: editing.bhk }),
-      });
-      setEditing(null);
-      await onChanged();
-      onStatus({ type: "success", message: "Flat updated" });
-    } catch (err) {
-      onStatus({ type: "error", message: err.message });
-    }
-  }
-
-  async function doDelete() {
-    const flat = confirmDelete;
-    setConfirmDelete(null);
-    try {
-      await brigadeRequest(`/api/brigade/flats/${flat.id}`, { method: "DELETE" });
-      await onChanged();
-      onStatus({ type: "success", message: `Flat ${flat.flat_number} deleted` });
-    } catch (err) {
-      onStatus({ type: "error", message: err.message });
-    }
-  }
-
-  return (
-    <div className="bg-card">
-      <div className="bg-card-head">
-        <div>
-          <h3>Flats — {property.name}</h3>
-          <p className="bg-card-sub">{flats.length} flat{flats.length === 1 ? "" : "s"} · {FLAT_NUMBER_HINT}</p>
-        </div>
-      </div>
-
-      <form className="bg-quickadd" onSubmit={addFlat} aria-label="Add flat">
-        <div className="bg-field">
-          <label htmlFor="bg-new-flat">Flat number</label>
-          <input
-            id="bg-new-flat"
-            ref={flatInputRef}
-            value={form.flat_number}
-            maxLength={7}
-            placeholder="L-0123"
-            className={formError ? "invalid" : ""}
-            onChange={(e) => setForm((f) => ({ ...f, flat_number: e.target.value.toUpperCase() }))}
-            autoComplete="off"
-          />
-          {formError && <span className="bg-field-error">{formError}</span>}
-        </div>
-        <div className="bg-field">
-          <label htmlFor="bg-new-bhk">BHK</label>
-          <select id="bg-new-bhk" value={form.bhk} onChange={(e) => setForm((f) => ({ ...f, bhk: e.target.value }))}>
-            <option value="">Select BHK</option>
-            {bhkTypes.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-        </div>
-        <div className="bg-field">
-          <span className="bg-label" aria-hidden="true">&nbsp;</span>
-          <button type="submit" className="primary" disabled={saving}>
-            {saving ? "Adding…" : "+ Add flat"}
-          </button>
-        </div>
-      </form>
-
-      <div className="bg-toolbar" style={{ justifyContent: "space-between", margin: "16px 0 6px" }}>
-        <div className="bg-filter-chips" role="group" aria-label="Filter by BHK">
-          <button type="button" className={`bg-filter-chip ${!bhkFilter ? "active" : ""}`} onClick={() => setBhkFilter("")}>
-            All <span>{flats.length}</span>
-          </button>
-          {bhkCounts.map(([bhk, n]) => (
-            <button
-              key={bhk}
-              type="button"
-              className={`bg-filter-chip ${bhkFilter === bhk ? "active" : ""}`}
-              onClick={() => setBhkFilter(bhkFilter === bhk ? "" : bhk)}
-            >
-              {bhk} <span>{n}</span>
-            </button>
-          ))}
-        </div>
-        <div className="bg-field" style={{ minWidth: 200 }}>
-          <input placeholder="Search flat number" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search flats" />
-        </div>
-      </div>
-
-      {loading && !flats.length ? (
-        <div className="bg-loading">Loading flats…</div>
-      ) : flats.length === 0 ? (
-        <div className="bg-empty-state">
-          <strong>No flats yet</strong>
-          Add the first flat above — e.g. L-0123 as 3 BHK.
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="bg-empty">No flats match these filters.</div>
-      ) : (
-        <div className="bg-table-wrap">
-          <table className="bg-table">
-            <thead>
-              <tr>
-                <th style={{ width: "36%" }}>Flat number</th>
-                <th>BHK</th>
-                <th className="num" style={{ width: 140 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((f) =>
-                editing?.id === f.id ? (
-                  <tr key={f.id}>
-                    <td>
-                      <div className="bg-field">
-                        <input
-                          value={editing.flat_number}
-                          maxLength={7}
-                          className={editError ? "invalid" : ""}
-                          onChange={(e) => setEditing((x) => ({ ...x, flat_number: e.target.value.toUpperCase() }))}
-                          aria-label="Flat number"
-                          autoFocus
-                        />
-                        {editError && <span className="bg-field-error">{editError}</span>}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="bg-field">
-                        <select value={editing.bhk} onChange={(e) => setEditing((x) => ({ ...x, bhk: e.target.value }))} aria-label="BHK">
-                          {[...new Set([...bhkTypes, editing.bhk])].map((b) => (
-                            <option key={b} value={b}>{b}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="bg-actions">
-                        <button type="button" className="bg-link-btn" onClick={saveEdit}>Save</button>
-                        <button type="button" className="bg-link-btn" onClick={() => setEditing(null)}>Cancel</button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={f.id}>
-                    <td><strong>{f.flat_number}</strong></td>
-                    <td><span className="bg-chip accent">{f.bhk}</span></td>
-                    <td>
-                      <div className="bg-actions">
-                        <button type="button" className="bg-link-btn" onClick={() => setEditing({ id: f.id, flat_number: f.flat_number, bhk: f.bhk })}>Edit</button>
-                        <button type="button" className="bg-link-btn danger" onClick={() => setConfirmDelete(f)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={Boolean(confirmDelete)}
-        title="Delete flat?"
-        message={confirmDelete ? `Flat ${confirmDelete.flat_number} and any flat-specific prices for it will be removed. Existing bookings keep their details.` : ""}
-        onConfirm={doDelete}
-        onCancel={() => setConfirmDelete(null)}
-      />
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Prices                                                              */
 /* ------------------------------------------------------------------ */
 
 const sortBhk = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
-// Price list: same layout as the Flats tab — quick-add bar, filter chips,
-// one table. A BHK price covers every flat of that BHK; a flat price
-// overrides it for that one flat.
+// Price list: quick-add bar, filter chips, one table. A BHK price covers
+// every flat of that BHK in the property.
 function PricesMaster({ property, bhkTypes, flats, prices, subServices, loading, onChanged, onStatus }) {
   const [form, setForm] = useState({ target: "", sub_service: "", price: "" }); // target: "bhk:<bhk>" | "flat:<id>"
   const [saving, setSaving] = useState(false);
@@ -777,7 +518,7 @@ function PricesMaster({ property, bhkTypes, flats, prices, subServices, loading,
         <div>
           <h3>Price list — {property.name}</h3>
           <p className="bg-card-sub">
-            {prices.length} price{prices.length === 1 ? "" : "s"} · A BHK price covers every flat of that BHK; a flat price overrides it.
+            {prices.length} price{prices.length === 1 ? "" : "s"} · Each price applies to every flat of that BHK in this property.
           </p>
         </div>
       </div>

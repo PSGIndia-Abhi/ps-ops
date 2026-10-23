@@ -9,6 +9,7 @@ import {
   formatInr,
   statusLabel,
 } from "./brigadeShared";
+import KpiTile from "./KpiTile";
 import "./brigade.css";
 
 // Brigade billing: client PO -> the services billed under it, with an amount
@@ -174,29 +175,37 @@ function PoList({ onOpen }) {
 
       {error && <div className="bg-error">{error}</div>}
 
-      <section className="bgb-kpis" aria-label="Billing summary">
-        <div className="bgb-kpi">
-          <span>Purchase orders</span>
-          <strong>{pos.length}</strong>
-          <small>{counts.open || 0} open · {counts.full || 0} fully billed</small>
-        </div>
-        <div className="bgb-kpi">
-          <span>Total PO value</span>
-          <strong>{formatInr(summary.value)}</strong>
-          <small>{counts.none ? `${counts.none} without an amount` : "All POs have an amount"}</small>
-        </div>
-        <div className="bgb-kpi">
-          <span>Billed</span>
-          <strong>{formatInr(summary.billed)}</strong>
-          <small>{overallPct === null ? "—" : `${overallPct}% of PO value`}</small>
-        </div>
-        <div className="bgb-kpi">
-          <span>Balance</span>
-          <strong><Money value={summary.balance} signed /></strong>
-          <small className={summary.over ? "bgb-neg" : undefined}>
-            {summary.over ? `${summary.over} PO${summary.over === 1 ? "" : "s"} over-billed` : "No PO over-billed"}
-          </small>
-        </div>
+      <section className="bgk-grid" aria-label="Billing summary">
+        <KpiTile
+          icon="file"
+          tone="blue"
+          label="Purchase orders"
+          value={pos.length}
+          note={`${counts.open || 0} open · ${counts.full || 0} fully billed`}
+        />
+        <KpiTile
+          icon="rupee"
+          tone="violet"
+          label="Total PO value"
+          value={formatInr(summary.value)}
+          note={counts.none ? `${counts.none} PO${counts.none === 1 ? "" : "s"} without an amount` : "All POs have an amount"}
+        />
+        <KpiTile
+          icon="receipt"
+          tone="green"
+          label="Billed"
+          value={formatInr(summary.billed)}
+          progress={overallPct}
+          note={overallPct === null ? "No PO amounts yet" : `${overallPct}% of PO value`}
+        />
+        <KpiTile
+          icon="wallet"
+          tone={summary.balance < 0 || summary.over ? "red" : "amber"}
+          label="Balance"
+          value={<Money value={summary.balance} signed />}
+          note={summary.over ? `${summary.over} PO${summary.over === 1 ? "" : "s"} over-billed` : "No PO over-billed"}
+          noteTone={summary.over ? "bad" : undefined}
+        />
       </section>
 
       <section className="bgb-sheet">

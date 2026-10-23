@@ -83,6 +83,7 @@ import PaymentsPage from "./pages/PaymentsPage";
 import TasksPage from "./pages/TasksPage";
 // Brigade Executive module — see pages/brigade/
 import BrigadeLayout from "./pages/brigade/BrigadeLayout";
+import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 
@@ -144,8 +145,6 @@ const router = createBrowserRouter([
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "tracking/history/:technicianId", element: <TrackingHistory /> },
-      { path: "brigade-masters", element: <BrigadeMasters /> },
-      { path: "brigade-billing", element: <BrigadeBilling /> },
     ],
   },
 
@@ -160,8 +159,8 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      // Same dashboard as admin; the backend limits jobs to Brigade Group.
-      { index: true, element: <AdminDashboard /> },
+      // Jobs (same dashboard as admin, limited to Brigade Group by the backend) + Flats view.
+      { index: true, element: <BrigadeDashboard /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "group-management", element: <AdminGroupManagement /> },
       { path: "contacts", element: <ContactsPage /> },

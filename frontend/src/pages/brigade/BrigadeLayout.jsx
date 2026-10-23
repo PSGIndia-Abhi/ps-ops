@@ -14,7 +14,7 @@ const NAV = [
   { path: "/brigade/companies", label: "Companies" },
   { path: "/brigade/contacts", label: "Contacts" },
   { path: "/brigade/group-management", label: "Group Management" },
-  { path: "/brigade/masters", label: "Flats & Prices" },
+  { path: "/brigade/masters", label: "Prices & BHK" },
   { path: "/brigade/billing", label: "Billing" },
 ];
 
@@ -112,7 +112,7 @@ export default function BrigadeLayout() {
             onClick={() => go("/brigade/masters")}
             className={location.pathname.startsWith("/brigade/masters") && !menuOpen ? "active" : ""}
           >
-            Flats &amp; Prices
+            Prices &amp; BHK
           </button>
           <button onClick={() => setMenuOpen((open) => !open)} className={menuOpen ? "active" : ""}>
             Menu

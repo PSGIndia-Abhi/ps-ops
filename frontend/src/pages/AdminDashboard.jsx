@@ -30,9 +30,23 @@ function matchesSearch(job, query) {
     job.supervisor?.name,
     job.requestedBy?.name,
     job.requestedBy?.phone,
+    job.brigade_flat?.flat_number,
+    job.brigade_flat?.bhk,
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(query));
+}
+
+// Brigade Executive only: put each Brigade job's flat (number + BHK) on the
+// job so the row can show it and search can find it.
+async function withBrigadeFlats(jobs) {
+  try {
+    const res = await apiFetch("/api/brigade/job-flats");
+    const flats = res.ok ? await res.json() : {};
+    return jobs.map((job) => (flats[job.id] ? { ...job, brigade_flat: flats[job.id] } : job));
+  } catch {
+    return jobs;
+  }
 }
 
 const statusLabel = (value) => STATUS_OPTIONS.find((o) => o.value === value)?.label || value.replace(/_/g, " ");
@@ -102,7 +116,7 @@ export default function AdminDashboard() {
       const res = await apiFetch(`/api/jobs`);
       if (!res.ok) throw new Error("Failed to fetch jobs");
       const data = await res.json();
-      setJobs(data);
+      setJobs(localStorage.getItem("role") === "brigade_executive" ? await withBrigadeFlats(data) : data);
     } catch (err) {
       console.error(err);
       setError(err.message);

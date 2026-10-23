@@ -2,24 +2,36 @@ import { useEffect, useMemo, useState } from "react";
 import CreateContactModal from "../../components/CreateContactModal";
 import AssignWorkOrderModal from "../../components/AssignWorkOrderModal";
 import StatusAlertModal from "../../components/StatusAlertModal";
-import { brigadeRequest, formatDate, formatInr } from "./brigadeShared";
+import {
+  brigadeRequest,
+  flatNumberError,
+  formatDate,
+  formatInr,
+  isValidFlatNumber,
+  statusLabel,
+} from "./brigadeShared";
 import "./brigade.css";
 
-// Brigade booking form. Left: Property & flat → Deep Cleaning services (with
-// their master price) → Requested by → Schedule → Team → Client PO → Notes.
+// Brigade booking form. Left: Property, flat number (typed) + BHK (master) →
+// Deep Cleaning services (price + what was already done for that flat) →
+// Requested by → Schedule → Team → Client PO → Notes.
 // Right: live summary with the total and what is still missing.
-// Saved through POST /api/brigade/bookings, which re-checks the flat and prices.
+// Saved through POST /api/brigade/bookings, which re-checks the flat, BHK,
+// prices and refuses a service that is already booked for the flat.
 export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
   const [properties, setProperties] = useState([]);
   const [subServicesAll, setSubServicesAll] = useState([]);
+  const [bhkTypes, setBhkTypes] = useState([]); // names from the BHK types master
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [setupError, setSetupError] = useState("");
 
   const [propertyKey, setPropertyKey] = useState(""); // `${companyId}|${siteId}`
-  const [flats, setFlats] = useState([]); // flat master of the chosen property
-  const [loadingFlats, setLoadingFlats] = useState(false);
-  const [flatId, setFlatId] = useState("");
-  const [flat, setFlat] = useState(null); // { id, flat_number, bhk } once priced
+  const [flatInput, setFlatInput] = useState(""); // typed flat number
+  const [bhk, setBhk] = useState("");
+  const [bhkFromHistory, setBhkFromHistory] = useState(false);
+  const [history, setHistory] = useState(null); // GET /api/brigade/flat-history
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [flat, setFlat] = useState(null); // { flat_number, bhk } once priced
   const [flatLookupError, setFlatLookupError] = useState("");
   const [lookingUpFlat, setLookingUpFlat] = useState(false);
   const [prices, setPrices] = useState({}); // sub_service -> price | null
@@ -60,6 +72,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
         ]);
         if (cancelled) return;
         setSubServicesAll(meta?.sub_services || []);
+        setBhkTypes(meta?.bhk_types || []);
         setProperties(Array.isArray(props) ? props : []);
       } catch (err) {
         if (!cancelled) setSetupError(err.message || "Failed to load Brigade properties");
@@ -111,10 +124,12 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
   const companyId = selectedOption?.property?.id || "";
   const site = selectedOption?.site || null;
 
-  /* ---------- property change: reset flat, load flats + contacts, address ---------- */
+  /* ---------- property change: reset flat, load contacts, address ---------- */
   useEffect(() => {
-    setFlats([]);
-    setFlatId("");
+    setFlatInput("");
+    setBhk("");
+    setBhkFromHistory(false);
+    setHistory(null);
     setFlat(null);
     setFlatLookupError("");
     setPrices({});
@@ -129,18 +144,6 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
     setAddress([site.address, site.city, site.state].filter(Boolean).join(", "));
 
     let cancelled = false;
-    setLoadingFlats(true);
-    brigadeRequest(`/api/brigade/flats?company_id=${encodeURIComponent(selectedOption.property.id)}`)
-      .then((rows) => {
-        if (!cancelled) setFlats(Array.isArray(rows) ? rows : []);
-      })
-      .catch(() => {
-        if (!cancelled) setFlats([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingFlats(false);
-      });
-
     setLoadingContacts(true);
     brigadeRequest(`/api/contacts?site_id=${encodeURIComponent(site.id)}`)
       .then((rows) => {
@@ -158,20 +161,74 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyKey]);
 
-  /* ---------- flat chosen: BHK + every service's price ---------- */
-  const chosenFlat = flats.find((f) => f.id === flatId) || null;
+  /* ---------- flat typed: its history (last BHK + what was done) ---------- */
+  const flatNumber = flatInput.trim().toUpperCase();
+  const flatValid = isValidFlatNumber(flatNumber);
+  const flatError = flatInput ? flatNumberError(flatNumber) : "";
 
+  useEffect(() => {
+    setHistory(null);
+    if (!companyId || !flatValid) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLoadingHistory(true);
+      const params = new URLSearchParams({ company_id: companyId, flat_number: flatNumber });
+      brigadeRequest(`/api/brigade/flat-history?${params}`)
+        .then((data) => {
+          if (cancelled) return;
+          setHistory(data);
+          // Same flat booked before: start from its last BHK (she can change it).
+          if (data.last_bhk) {
+            setBhk((current) => {
+              if (current) return current;
+              setBhkFromHistory(true);
+              return data.last_bhk;
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setHistory(null);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingHistory(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [companyId, flatNumber, flatValid]);
+
+  // service -> { state: "none" | "completed" | "booked", job, last_completed }
+  const serviceHistory = useMemo(
+    () => Object.fromEntries((history?.services || []).map((s) => [s.sub_service, s])),
+    [history]
+  );
+  const isBlocked = (s) => serviceHistory[s]?.state === "booked";
+
+  // Already-booked services can never stay picked; completed ones start unticked.
+  useEffect(() => {
+    if (!history) return;
+    const done = new Set(
+      history.services.filter((s) => s.state !== "none").map((s) => s.sub_service)
+    );
+    setSelectedServices((prev) => prev.filter((s) => !done.has(s)));
+    setSchedules((prev) => Object.fromEntries(Object.entries(prev).filter(([s]) => !done.has(s))));
+  }, [history]);
+
+  /* ---------- flat + BHK: every service's price ---------- */
   useEffect(() => {
     setFlat(null);
     setFlatLookupError("");
     setPrices({});
-    if (!companyId || !chosenFlat || !subServicesAll.length) return;
+    if (!companyId || !flatValid || !bhk || !subServicesAll.length) return;
 
     let cancelled = false;
     setLookingUpFlat(true);
     const params = new URLSearchParams({
       company_id: companyId,
-      flat_number: chosenFlat.flat_number,
+      flat_number: flatNumber,
+      bhk,
       sub_services: subServicesAll.join(","),
     });
     brigadeRequest(`/api/brigade/quote?${params}`)
@@ -191,7 +248,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
     return () => {
       cancelled = true;
     };
-  }, [companyId, chosenFlat, subServicesAll]);
+  }, [companyId, flatNumber, flatValid, bhk, subServicesAll]);
 
   const hasPrice = (s) => prices[s] !== null && prices[s] !== undefined;
   const pricedServices = subServicesAll.filter(hasPrice);
@@ -199,7 +256,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
   const total = selectedServices.reduce((sum, s) => sum + (prices[s] || 0), 0);
 
   function toggleService(service) {
-    if (!hasPrice(service)) return;
+    if (!hasPrice(service) || isBlocked(service)) return;
     setSelectedServices((prev) =>
       prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service]
     );
@@ -237,8 +294,9 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
   /* ---------- what is still missing (drives the summary + submit) ---------- */
   const missing = [];
   if (!site) missing.push("Choose the property");
-  else if (!chosenFlat) missing.push("Choose the flat");
-  if (chosenFlat && !selectedServices.length) missing.push("Pick at least one service");
+  else if (!flatValid) missing.push("Enter the flat number");
+  else if (!bhk) missing.push("Choose the BHK");
+  if (flat && !selectedServices.length) missing.push("Pick at least one service");
   if (!contactId) missing.push("Choose who is requesting");
   const undated = selectedServices.filter((s) => !schedules[s]?.start_date);
   if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
@@ -281,6 +339,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
           company_id: companyId,
           site_id: site.id,
           flat_number: flat.flat_number,
+          bhk: flat.bhk,
           subServices: selectedServices,
           contact_id: contactId,
           address: address.trim(),
@@ -308,13 +367,12 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
 
   if (!isOpen) return null;
 
-  const flatPlaceholder = !site
-    ? "Choose the property first"
-    : loadingFlats
-      ? "Loading flats…"
-      : flats.length
-        ? "Select flat"
-        : "No flats in the master";
+  const historyCounts = history
+    ? {
+        completed: history.services.filter((s) => s.state === "completed").length,
+        booked: history.services.filter((s) => s.state === "booked").length,
+      }
+    : null;
 
   /* ---------- render ---------- */
   return (
@@ -337,7 +395,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
             {/* 1. PROPERTY & FLAT */}
             <section className="bgm-section">
               <SectionHead step={1} title="Property & flat" done={stepDone.property} />
-              <div className="bg-grid-2">
+              <div>
                 <div className="bg-field">
                   <label htmlFor="bg-property">Property</label>
                   <select
@@ -357,34 +415,70 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                     <span className="bg-field-hint">No properties yet. Add a company under Brigade Group first.</span>
                   )}
                 </div>
+              </div>
+              <div className="bg-grid-2" style={{ marginTop: 12 }}>
                 <div className="bg-field">
-                  <label htmlFor="bg-flat-number">Flat</label>
-                  <select
+                  <label htmlFor="bg-flat-number">Flat number</label>
+                  <input
                     id="bg-flat-number"
-                    value={flatId}
-                    disabled={!site || loadingFlats || !flats.length}
-                    onChange={(e) => setFlatId(e.target.value)}
+                    value={flatInput}
+                    maxLength={6}
+                    placeholder={site ? "e.g. L-0123" : "Choose the property first"}
+                    disabled={!site}
+                    autoComplete="off"
+                    className={flatError ? "invalid" : undefined}
+                    onChange={(e) => {
+                      setFlatInput(e.target.value.toUpperCase());
+                      if (bhkFromHistory) {
+                        setBhk("");
+                        setBhkFromHistory(false);
+                      }
+                    }}
+                  />
+                  {flatError ? (
+                    <span className="bg-field-error">{flatError}</span>
+                  ) : (
+                    <span className="bg-field-hint">One capital letter, hyphen, 4 digits</span>
+                  )}
+                </div>
+                <div className="bg-field">
+                  <label htmlFor="bg-bhk">BHK</label>
+                  <select
+                    id="bg-bhk"
+                    value={bhk}
+                    disabled={!site}
+                    onChange={(e) => {
+                      setBhk(e.target.value);
+                      setBhkFromHistory(false);
+                    }}
                   >
-                    <option value="">{flatPlaceholder}</option>
-                    {flats.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.flat_number} · {f.bhk}
-                      </option>
+                    <option value="">{bhkTypes.length ? "Select BHK" : "No BHK types — add them in the master"}</option>
+                    {bhkTypes.map((name) => (
+                      <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
                   {flatLookupError ? (
                     <span className="bg-field-error">{flatLookupError}</span>
-                  ) : site && !loadingFlats && !flats.length ? (
-                    <span className="bg-field-hint">Add this property&apos;s flats in Flats &amp; Prices first.</span>
+                  ) : bhkFromHistory ? (
+                    <span className="bg-field-hint">From this flat&apos;s last booking — change if needed</span>
                   ) : null}
                 </div>
               </div>
 
-              {chosenFlat && (
+              {flatValid && site && (
                 <div className="bgm-flat-strip">
-                  <strong>{chosenFlat.flat_number}</strong>
-                  <span className="bg-chip accent">{chosenFlat.bhk}</span>
+                  <strong>{flatNumber}</strong>
+                  {bhk && <span className="bg-chip accent">{bhk}</span>}
                   <span>{selectedOption.label}</span>
+                  {loadingHistory ? (
+                    <span className="bg-field-hint">· checking this flat…</span>
+                  ) : historyCounts ? (
+                    <span className="bgm-flat-history">
+                      {historyCounts.completed || historyCounts.booked
+                        ? `· ${historyCounts.completed} service${historyCounts.completed === 1 ? "" : "s"} completed, ${historyCounts.booked} booked`
+                        : "· First booking for this flat"}
+                    </span>
+                  ) : null}
                   {lookingUpFlat && <span className="bg-field-hint">· loading prices…</span>}
                 </div>
               )}
@@ -399,27 +493,40 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 hint={flat ? `${pricedServices.length} of ${subServicesAll.length} priced for ${flat.bhk}` : null}
               />
               {!flat ? (
-                <div className="bg-field-hint">Choose the flat to see its services and prices.</div>
+                <div className="bg-field-hint">Enter the flat number and BHK to see the services, prices and what was already done.</div>
               ) : (
                 <>
                   {pricedServices.length === 0 ? (
                     <div className="bg-empty-state">
-                      <strong>No prices set for this flat</strong>
-                      Add {flat.bhk} prices for this property in Flats &amp; Prices.
+                      <strong>No prices set for {flat.bhk}</strong>
+                      Add {flat.bhk} prices for this property in Prices &amp; BHK.
                     </div>
                   ) : (
                     <div className="bgm-svc-list">
-                      {pricedServices.map((s) => (
-                        <label key={s} className={`bgm-svc ${selectedServices.includes(s) ? "active" : ""}`}>
-                          <input
-                            type="checkbox"
-                            checked={selectedServices.includes(s)}
-                            onChange={() => toggleService(s)}
-                          />
-                          <span className="bgm-svc-name">{s}</span>
-                          <span className="bgm-svc-price">{formatInr(prices[s])}</span>
-                        </label>
-                      ))}
+                      {pricedServices.map((s) => {
+                        const h = serviceHistory[s];
+                        const blocked = isBlocked(s);
+                        const picked = selectedServices.includes(s);
+                        return (
+                          <label
+                            key={s}
+                            className={`bgm-svc ${picked ? "active" : ""} ${blocked ? "blocked" : ""}`}
+                            title={blocked ? "Already booked for this flat" : undefined}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={picked}
+                              disabled={blocked}
+                              onChange={() => toggleService(s)}
+                            />
+                            <span className="bgm-svc-name">
+                              {s}
+                              <ServiceHistoryNote history={h} picked={picked} />
+                            </span>
+                            <span className="bgm-svc-price">{formatInr(prices[s])}</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -628,7 +735,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
 
               <div className="bgm-sum-rows">
                 <div className="bgm-sum-row"><span>Property</span><span>{selectedOption?.label || "—"}</span></div>
-                <div className="bgm-sum-row"><span>Flat</span><span>{chosenFlat ? `${chosenFlat.flat_number} · ${chosenFlat.bhk}` : "—"}</span></div>
+                <div className="bgm-sum-row"><span>Flat</span><span>{flat ? `${flat.flat_number} · ${flat.bhk}` : flatValid ? flatNumber : "—"}</span></div>
                 <div className="bgm-sum-row"><span>Requested by</span><span>{contact?.name || "—"}</span></div>
                 {po.number && <div className="bgm-sum-row"><span>Client PO</span><span>{po.number}</span></div>}
               </div>
@@ -732,5 +839,26 @@ function SectionHead({ step, title, done, hint }) {
       <h4>{title}</h4>
       {hint && <span className="bg-field-hint">{hint}</span>}
     </div>
+  );
+}
+
+// What already happened to this service for the flat.
+function ServiceHistoryNote({ history, picked }) {
+  if (!history || history.state === "none") {
+    return <span className="bgm-svc-note">Not done yet for this flat</span>;
+  }
+  if (history.state === "booked") {
+    return (
+      <span className="bgm-svc-note booked">
+        Already booked · {statusLabel(history.job.status)} · {history.job.code}
+        {history.job.date ? ` · ${formatDate(history.job.date)}` : ""}
+      </span>
+    );
+  }
+  return (
+    <span className="bgm-svc-note done">
+      ✓ Completed {history.job.date ? formatDate(history.job.date) : ""} · {history.job.code}
+      {picked ? " — booking a repeat clean" : ""}
+    </span>
   );
 }

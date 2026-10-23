@@ -1300,6 +1300,424 @@
   text-decoration: none;
 }
 
+/* ---------- Booking form: what was already done for the flat ---------- */
+.bgm-svc .bgm-svc-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bgm-svc-note {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.bgm-svc-note.done {
+  color: #15803d;
+}
+
+.bgm-svc-note.booked {
+  color: #b45309;
+}
+
+.bgm-svc.blocked {
+  cursor: not-allowed;
+  background: #fffbeb;
+}
+
+.bgm-svc.blocked:hover {
+  background: #fffbeb;
+}
+
+.bgm-svc.blocked .bgm-svc-price {
+  color: #94a3b8;
+}
+
+.bgm-flat-history {
+  color: #475569;
+}
+
+/* ---------- Brigade dashboard: Jobs / Flats switch + Flats board ---------- */
+.bgf-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bgf-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #eef2f6;
+}
+
+.bgf-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bgf-switch button:hover:not(.active) {
+  color: #0f172a;
+}
+
+.bgf-switch button.active {
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 1px 6px rgba(15, 23, 42, 0.06);
+}
+
+.bgf-switch button.active svg {
+  color: var(--primary, #0284c7);
+}
+
+.bgf-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.bgf-download:hover:not(:disabled) {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.bgf-download:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bgf-filters {
+  display: flex;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.bgf-filters select,
+.bgf-filters input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.bgf-filters input {
+  width: 200px;
+}
+
+.bgf-table > tbody > tr:first-child {
+  cursor: pointer;
+}
+
+.bgf-table > tbody > tr:first-child:hover > td,
+.bgf-table > tbody.open > tr:first-child > td {
+  background: #f8fafc;
+}
+
+.bgf-caret {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.bgf-bhk {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  background: #fff;
+}
+
+.bgf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bgf-chip {
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bgf-chip.completed { background: #f0fdf4; color: #15803d; }
+.bgf-chip.booked { background: #fffbeb; color: #b45309; }
+
+.bgf-detail > td {
+  background: #fbfcfe;
+  border-bottom: 1px solid #e2e8f0;
+  padding-top: 4px !important;
+  padding-bottom: 16px !important;
+}
+
+.bgf-state {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bgf-state.completed { background: #f0fdf4; color: #15803d; }
+.bgf-state.booked { background: #fffbeb; color: #b45309; }
+.bgf-state.none { background: #f1f5f9; color: #64748b; }
+
+/* opened flat on the Flats board */
+.bgf-detail-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bgf-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bgf-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: currentColor;
+}
+
+.bgf-legend .booked { color: #b45309; }
+.bgf-legend .completed { color: #15803d; }
+.bgf-legend .none { color: #94a3b8; }
+
+.bgf-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.bgf-scard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 92px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: inset 0 3px 0 transparent;
+}
+
+.bgf-scard.booked { box-shadow: inset 0 3px 0 #f59e0b; }
+.bgf-scard.completed { box-shadow: inset 0 3px 0 #16a34a; }
+
+.bgf-scard.none {
+  align-self: start;
+  min-height: 0;
+  border-style: dashed;
+  background: #f8fafc;
+}
+
+.bgf-scard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bgf-scard-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.bgf-scard.none .bgf-scard-name {
+  font-weight: 500;
+  color: #64748b;
+}
+
+.bgf-scard-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.bgf-scard.none .bgf-scard-meta {
+  color: #94a3b8;
+}
+
+.bgf-scard-date {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.bgf-scard-extra {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* ---------- Job page: flat card (Brigade Executive) ---------- */
+.bgf-card {
+  /* same tokens as the billing pages (.bgb), the card sits on the job page */
+  --bgb-ink: #0f172a;
+  --bgb-text: #334155;
+  --bgb-soft: #64748b;
+  --bgb-faint: #94a3b8;
+  --bgb-line: #e2e8f0;
+  --bgb-hair: #eef2f6;
+  --bgb-head: #f8fafc;
+  --bgb-blue: var(--primary, #0284c7);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.bgf-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bgf-card-title {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.bgf-card-title strong {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.bgf-card-facts {
+  display: flex;
+  gap: 24px;
+  margin: 0;
+}
+
+.bgf-card-facts dt {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.bgf-card-facts dd {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bgf-card-body {
+  overflow-x: auto;
+}
+
+.bgf-card .bgb-ledger td,
+.bgf-card .bgb-ledger th {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.bgf-current td {
+  background: #f0f9ff;
+}
+
+.bgf-this {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bgf-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.bgf-card-foot strong {
+  color: #0f172a;
+}
+
+.bgf-photo-rule {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .bgf-filters {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .bgf-filters input {
+    width: auto;
+  }
+
+  .bgf-card-facts {
+    gap: 16px;
+  }
+
+  .bgf-photo-rule {
+    margin-left: 0;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Billing (BrigadeBilling.jsx)                                        */
 /* ------------------------------------------------------------------ */
@@ -1468,47 +1886,123 @@
   background: repeating-linear-gradient(90deg, #edf1f6 0 5px, transparent 5px 9px);
 }
 
-/* ---------- KPI strip ---------- */
-.bgb-kpis {
+/* ---------- summary tiles (KpiTile.jsx) ---------- */
+.bgk-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  background: #fff;
-  border: 1px solid var(--bgb-line);
-  border-radius: 10px;
-  box-shadow: var(--bgb-shadow);
+  gap: 14px;
 }
 
-.bgb-kpi {
+.bgk-tile {
+  --bgk-ink: #0284c7;
+  --bgk-soft: #e0f2fe;
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 18px 22px;
+  gap: 8px;
   min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 14px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.bgb-kpi + .bgb-kpi {
-  border-left: 1px solid var(--bgb-line);
+.bgk-tile::after {
+  content: "";
+  position: absolute;
+  right: -28px;
+  bottom: -28px;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--bgk-soft);
+  opacity: 0.55;
+  pointer-events: none;
 }
 
-.bgb-kpi > span {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--bgb-soft);
+.bgk-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
-.bgb-kpi strong {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--bgb-ink);
-  letter-spacing: -0.01em;
+.bgk-tile.blue { --bgk-ink: #0284c7; --bgk-soft: #e0f2fe; }
+.bgk-tile.green { --bgk-ink: #16a34a; --bgk-soft: #dcfce7; }
+.bgk-tile.amber { --bgk-ink: #d97706; --bgk-soft: #fef3c7; }
+.bgk-tile.violet { --bgk-ink: #7c3aed; --bgk-soft: #ede9fe; }
+.bgk-tile.red { --bgk-ink: #dc2626; --bgk-soft: #fee2e2; }
+
+.bgk-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.bgk-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.bgk-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--bgk-soft);
+  color: var(--bgk-ink);
+}
+
+.bgk-value {
+  position: relative;
+  z-index: 1;
+  font-size: 28px;
+  font-weight: 750;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: #0f172a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
-.bgb-kpi small {
+.bgk-bar {
+  position: relative;
+  z-index: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: #eef2f6;
+  overflow: hidden;
+}
+
+.bgk-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bgk-ink);
+}
+
+.bgk-bar.over > span {
+  background: #dc2626;
+}
+
+.bgk-note {
+  position: relative;
+  z-index: 1;
   font-size: 12px;
-  color: var(--bgb-faint);
+  color: #94a3b8;
+}
+
+.bgk-note.bad {
+  color: #b91c1c;
+  font-weight: 600;
 }
 
 /* ---------- sheet (white card holding a table / document) ---------- */
@@ -2201,16 +2695,8 @@
 
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
-  .bgb-kpis {
+  .bgk-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .bgb-kpi:nth-child(3) {
-    border-left: none;
-  }
-
-  .bgb-kpi:nth-child(n + 3) {
-    border-top: 1px solid var(--bgb-line);
   }
 
   .bgb-doc-head,
@@ -2228,12 +2714,21 @@
 }
 
 @media (max-width: 768px) {
-  .bgb-kpi {
-    padding: 14px 16px;
+  .bgk-grid {
+    gap: 10px;
   }
 
-  .bgb-kpi strong {
-    font-size: 18px;
+  .bgk-tile {
+    padding: 14px;
+  }
+
+  .bgk-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .bgk-value {
+    font-size: 20px;
   }
 
   .bgb-sheet-toolbar {
