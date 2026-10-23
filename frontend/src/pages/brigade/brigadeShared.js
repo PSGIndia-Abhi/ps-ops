@@ -9,7 +9,7 @@ export const BRIGADE_ROLE = "brigade_executive";
 export const FLAT_NUMBER_PATTERN = /^[A-Z]-\d{4}$/;
 export const FLAT_NUMBER_HINT = "Format: one capital letter, hyphen, 4 digits (e.g. L-0123)";
 
-export const MIN_VISIT_PHOTOS = 3;
+export const MIN_VISIT_PHOTOS = 1;
 
 export function isValidFlatNumber(value) {
   return FLAT_NUMBER_PATTERN.test(value || "");

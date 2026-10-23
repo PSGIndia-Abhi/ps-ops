@@ -8,7 +8,7 @@ const brigade = require("../controllers/brigade.controller");
 
 /*
 Brigade Executive module (admin passes every permission check by role).
-  BRIGADE_ACCESS          → booking form, bookings list
+  BRIGADE_ACCESS          → booking form, bookings list, billing
   BRIGADE_MANAGE_MASTERS  → flats + prices masters
   VIEW_VISIT / SUBMIT_VISIT → technician before/after photo steps
 */
@@ -38,6 +38,12 @@ router.delete("/prices/:id", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_
 router.get("/quote", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getQuote);
 router.post("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.createBrigadeBooking);
 router.get("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listBrigadeBookings);
+
+// Billing: client PO -> services + billed amounts (admin + Brigade Executive)
+router.get("/billing/pos", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listBillingPos);
+router.get("/billing/po", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getBillingPo);
+router.put("/billing/po", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.saveBillingPo);
+router.get("/billing/unassigned-services", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listUnassignedServices);
 
 // Job details + technician before/after photos (Android app)
 router.get("/jobs/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), brigade.getJobDetails);

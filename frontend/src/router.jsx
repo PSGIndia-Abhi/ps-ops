@@ -84,6 +84,7 @@ import TasksPage from "./pages/TasksPage";
 // Brigade Executive module — see pages/brigade/
 import BrigadeLayout from "./pages/brigade/BrigadeLayout";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
+import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -144,6 +145,7 @@ const router = createBrowserRouter([
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "tracking/history/:technicianId", element: <TrackingHistory /> },
       { path: "brigade-masters", element: <BrigadeMasters /> },
+      { path: "brigade-billing", element: <BrigadeBilling /> },
     ],
   },
 
@@ -165,6 +167,7 @@ const router = createBrowserRouter([
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "masters", element: <BrigadeMasters /> },
+      { path: "billing", element: <BrigadeBilling /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "profile", element: <ProfilePage /> },
     ],

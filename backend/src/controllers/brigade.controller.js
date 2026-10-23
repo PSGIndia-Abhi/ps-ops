@@ -1,6 +1,7 @@
 // Brigade Executive module: masters (flats, prices), price quote, Brigade
-// booking creation, Brigade bookings list, and the before/after
-// visit photo steps used by the Android technician app.
+// booking creation, Brigade bookings list, the before/after
+// visit photo steps used by the Android technician app, and billing (client PO
+// -> services + billed amounts).
 //
 // Bookings are still created by the existing createBooking controller (same
 // jobs, visits, recurrence and notifications as every other booking); this
@@ -935,7 +936,10 @@ async function startPhotoUpload(req, res) {
     if (phase === "after") {
       const counts = await getVisitPhotoCounts(pool, visit.id);
       if (counts.before < MIN_VISIT_PHOTOS) {
-        throw withStatus(`Upload at least ${MIN_VISIT_PHOTOS} before-work photos first`, 400);
+        throw withStatus(
+          `Upload at least ${MIN_VISIT_PHOTOS} before-work photo${MIN_VISIT_PHOTOS === 1 ? "" : "s"} first`,
+          400
+        );
       }
     }
 
@@ -952,6 +956,344 @@ async function startPhotoUpload(req, res) {
     res.json({ history_id: historyId, job_id: visit.job_id, action });
   } catch (err) {
     sendError(res, err, "Failed to start photo upload");
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Billing: client PO -> services + billed amounts                     */
+/* ------------------------------------------------------------------ */
+
+// A service is one job of a Brigade booking. Its PO is the one it was linked
+// to on the Billing page (brigade_po_lines), else the PO typed during booking
+// (brigade_booking_details, read only). Canceled jobs are left out.
+const BILLING_PO_OF_JOB = "COALESCE(p.po_number, NULLIF(TRIM(bd.client_po_number), ''))";
+const BILLING_SERVICE_SELECT = `
+  SELECT j.id AS job_id, j.code, j.sub_service, j.status, j.start_date, j.booking_id,
+         bd.company_id, co.name AS property, bd.flat_number, bd.bhk, bd.prices,
+         NULLIF(TRIM(bd.client_po_number), '') AS booking_po,
+         l.id AS line_id, l.amount AS line_amount,
+         ${BILLING_PO_OF_JOB} AS po_number
+  FROM jobs j
+  JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+  LEFT JOIN companies co ON co.id = bd.company_id
+  LEFT JOIN brigade_po_lines l ON l.job_id = j.id
+  LEFT JOIN brigade_pos p ON p.id = l.po_id
+  WHERE j.status <> 'CANCELED'
+`;
+const BILLING_SERVICE_ORDER = "ORDER BY co.name ASC, bd.flat_number ASC, j.created_at ASC";
+
+function readPoNumber(value) {
+  const number = trimString(value);
+  if (!number) throw withStatus("Enter a PO number", 400);
+  if (number.length > 100) throw withStatus("PO number is too long", 400);
+  return number;
+}
+
+// PO numbers match like the database does (case-insensitive).
+function samePo(a, b) {
+  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
+}
+
+function toAmount(value) {
+  return value === null || value === undefined ? null : Number(value);
+}
+
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function toBillingService(row) {
+  let prices = row.prices;
+  if (typeof prices === "string") {
+    try { prices = JSON.parse(prices); } catch { prices = {}; }
+  }
+  const bookedPrice = toAmount(prices?.[row.sub_service]);
+  const saved = Boolean(row.line_id);
+  return {
+    job_id: row.job_id,
+    code: row.code,
+    sub_service: row.sub_service,
+    status: row.status,
+    start_date: row.start_date,
+    booking_id: row.booking_id,
+    company_id: row.company_id,
+    property: row.property,
+    flat_number: row.flat_number,
+    bhk: row.bhk,
+    po_number: row.po_number,
+    booked_price: bookedPrice,
+    // Until an amount is saved it starts at the price booked for the service.
+    amount: saved ? Number(row.line_amount) : bookedPrice,
+    amount_saved: saved,
+    // Came with the PO typed during booking (cannot be moved off this PO).
+    from_booking: Boolean(row.booking_po) && samePo(row.booking_po, row.po_number),
+  };
+}
+
+function billingTotals(poAmount, services) {
+  const billed = round2(services.reduce((sum, s) => sum + (s.amount || 0), 0));
+  const booked = round2(services.reduce((sum, s) => sum + (s.booked_price || 0), 0));
+  return {
+    po_amount: poAmount,
+    booked,
+    billed,
+    balance: poAmount === null ? null : round2(poAmount - billed),
+    services: services.length,
+  };
+}
+
+const PO_HEADER_COLUMNS = "po_source, DATE_FORMAT(po_date, '%Y-%m-%d') AS po_date, po_amount";
+
+// PO details: saved on the Billing page, else from the latest booking with that PO.
+async function loadPoHeader(db, number) {
+  const [[saved]] = await db.query(
+    `SELECT id, po_number, ${PO_HEADER_COLUMNS} FROM brigade_pos WHERE po_number = ?`,
+    [number]
+  );
+  if (saved) return { ...saved, header_from: "billing" };
+  const [[booked]] = await db.query(
+    `SELECT TRIM(client_po_number) AS po_number, ${PO_HEADER_COLUMNS}
+     FROM brigade_booking_details
+     WHERE TRIM(client_po_number) = ?
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [number]
+  );
+  return booked ? { ...booked, id: null, header_from: "booking" } : null;
+}
+
+async function loadBillingPo(db, number) {
+  const header = await loadPoHeader(db, number);
+  const [rows] = await db.query(
+    `${BILLING_SERVICE_SELECT} AND ${BILLING_PO_OF_JOB} = ? ${BILLING_SERVICE_ORDER}`,
+    [number]
+  );
+  const services = rows.map(toBillingService);
+  const poAmount = toAmount(header?.po_amount);
+  return {
+    po_number: header?.po_number || rows[0]?.po_number || number,
+    is_new: !header && !services.length,
+    header_from: header?.header_from || null, // "billing" | "booking" | null
+    po_source: header?.po_source ?? null,
+    po_date: header?.po_date ?? null,
+    po_amount: poAmount,
+    services,
+    totals: billingTotals(poAmount, services),
+  };
+}
+
+function sendBillingError(res, err, fallback) {
+  if (err?.code === "ER_NO_SUCH_TABLE") {
+    return res.status(500).json({ error: "Billing is not set up yet. Run brigade_billing.sql on the database." });
+  }
+  return sendError(res, err, fallback);
+}
+
+// GET /api/brigade/billing/pos — every PO with its totals.
+async function listBillingPos(req, res) {
+  try {
+    const [saved] = await pool.query(
+      `SELECT po_number, ${PO_HEADER_COLUMNS}, updated_at FROM brigade_pos`
+    );
+    const [booked] = await pool.query(
+      `SELECT TRIM(client_po_number) AS po_number, ${PO_HEADER_COLUMNS}, created_at AS updated_at
+       FROM brigade_booking_details
+       WHERE NULLIF(TRIM(client_po_number), '') IS NOT NULL
+       ORDER BY created_at DESC`
+    );
+    const [rows] = await pool.query(
+      `${BILLING_SERVICE_SELECT} AND ${BILLING_PO_OF_JOB} IS NOT NULL ${BILLING_SERVICE_ORDER}`
+    );
+
+    const byPo = new Map();
+    const entry = (number) => {
+      const key = String(number).toLowerCase();
+      if (!byPo.has(key)) byPo.set(key, { header: null, services: [] });
+      return byPo.get(key);
+    };
+    for (const po of saved) entry(po.po_number).header = { ...po, header_from: "billing" };
+    for (const po of booked) {
+      const e = entry(po.po_number);
+      if (!e.header) e.header = { ...po, header_from: "booking" }; // latest booking first
+    }
+    for (const row of rows) entry(row.po_number).services.push(toBillingService(row));
+
+    const list = [...byPo.values()].map(({ header, services }) => {
+      const poAmount = toAmount(header?.po_amount);
+      return {
+        po_number: header?.po_number || services[0]?.po_number,
+        header_from: header?.header_from || null,
+        po_source: header?.po_source ?? null,
+        po_date: header?.po_date ?? null,
+        properties: [...new Set(services.map((s) => s.property).filter(Boolean))],
+        flats: [...new Set(services.map((s) => s.flat_number).filter(Boolean))],
+        updated_at: header?.updated_at ?? null,
+        totals: billingTotals(poAmount, services),
+      };
+    });
+    list.sort((a, b) =>
+      String(b.po_date || "").localeCompare(String(a.po_date || "")) ||
+      String(a.po_number).localeCompare(String(b.po_number))
+    );
+    res.json(list);
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load POs");
+  }
+}
+
+// GET /api/brigade/billing/po?number= — one PO: details, services, amounts.
+async function getBillingPo(req, res) {
+  try {
+    const number = readPoNumber(req.query.number);
+    res.json(await loadBillingPo(pool, number));
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load PO");
+  }
+}
+
+// GET /api/brigade/billing/unassigned-services?company_id=&flat_number=
+// Brigade services that are not under any PO yet.
+async function listUnassignedServices(req, res) {
+  try {
+    const params = [];
+    let filter = ` AND l.id IS NULL AND NULLIF(TRIM(bd.client_po_number), '') IS NULL`;
+    const companyId = trimString(req.query.company_id);
+    const flatNumber = trimString(req.query.flat_number);
+    if (companyId) {
+      filter += " AND bd.company_id = ?";
+      params.push(companyId);
+    }
+    if (flatNumber) {
+      filter += " AND bd.flat_number LIKE ?";
+      params.push(`%${flatNumber}%`);
+    }
+    const [rows] = await pool.query(
+      `${BILLING_SERVICE_SELECT} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
+      params
+    );
+    res.json(rows.map(toBillingService));
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load services");
+  }
+}
+
+function readBillingLines(body) {
+  const lines = (Array.isArray(body?.lines) ? body.lines : []).map((line) => {
+    const jobId = trimString(String(line?.job_id ?? ""));
+    if (!jobId) throw withStatus("Each service needs a job id", 400);
+    const amount = parsePrice(line?.amount);
+    if (amount === null) throw withStatus("Enter an amount of 0 or more for every service", 400);
+    return { jobId, amount };
+  });
+  const ids = lines.map((l) => l.jobId);
+  if (new Set(ids).size !== ids.length) throw withStatus("A service is listed twice", 400);
+
+  const removeIds = [...new Set(
+    (Array.isArray(body?.remove_job_ids) ? body.remove_job_ids : [])
+      .map((id) => trimString(String(id ?? "")))
+      .filter(Boolean)
+  )];
+  if (removeIds.some((id) => ids.includes(id))) {
+    throw withStatus("A service cannot be both saved and removed", 400);
+  }
+  return { lines, removeIds };
+}
+
+// PUT /api/brigade/billing/po
+// { po_number, po_source, po_date, po_amount, lines: [{ job_id, amount }], remove_job_ids: [] }
+async function saveBillingPo(req, res) {
+  let conn;
+  try {
+    const body = req.body || {};
+    const number = readPoNumber(body.po_number);
+    const header = readPo({
+      client_po: { number, source: body.po_source, date: body.po_date, amount: body.po_amount },
+    });
+    const { lines, removeIds } = readBillingLines(body);
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    // Upsert the PO. A new one keeps the spelling typed during booking, if any.
+    const [[existing]] = await conn.query(
+      "SELECT id, po_number FROM brigade_pos WHERE po_number = ? FOR UPDATE",
+      [number]
+    );
+    let poId = existing?.id;
+    let poNumber = existing?.po_number || number;
+    if (poId) {
+      await conn.query(
+        `UPDATE brigade_pos SET po_source = ?, po_date = ?, po_amount = ?, updated_by_user_id = ?
+         WHERE id = ?`,
+        [header.source, header.date, header.amount, req.user.id, poId]
+      );
+    } else {
+      const [[booked]] = await conn.query(
+        `SELECT TRIM(client_po_number) AS po_number FROM brigade_booking_details
+         WHERE TRIM(client_po_number) = ? LIMIT 1`,
+        [number]
+      );
+      poNumber = booked?.po_number || number;
+      poId = uuid();
+      await conn.query(
+        `INSERT INTO brigade_pos
+         (id, po_number, po_source, po_date, po_amount, created_by_user_id, updated_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [poId, poNumber, header.source, header.date, header.amount, req.user.id, req.user.id]
+      );
+    }
+
+    if (lines.length) {
+      const [jobs] = await conn.query(
+        `SELECT j.id, j.code, j.status, bd.booking_id AS brigade_booking,
+                NULLIF(TRIM(bd.client_po_number), '') AS booking_po,
+                l.id AS line_id, p.po_number AS line_po
+         FROM jobs j
+         LEFT JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+         LEFT JOIN brigade_po_lines l ON l.job_id = j.id
+         LEFT JOIN brigade_pos p ON p.id = l.po_id
+         WHERE j.id IN (?)`,
+        [lines.map((l) => l.jobId)]
+      );
+      const jobsById = new Map(jobs.map((j) => [String(j.id), j]));
+
+      for (const line of lines) {
+        const job = jobsById.get(line.jobId);
+        if (!job || !job.brigade_booking) throw withStatus("Only Brigade booking services can be billed", 400);
+        if (job.status === "CANCELED") throw withStatus(`${job.code} is canceled`, 400);
+        const currentPo = job.line_po || job.booking_po;
+        if (currentPo && !samePo(currentPo, poNumber)) {
+          throw withStatus(`${job.code} is already under PO ${currentPo}`, 409);
+        }
+        if (job.line_id) {
+          await conn.query(
+            "UPDATE brigade_po_lines SET amount = ?, updated_by_user_id = ? WHERE id = ?",
+            [line.amount, req.user.id, job.line_id]
+          );
+        } else {
+          await conn.query(
+            `INSERT INTO brigade_po_lines (id, po_id, job_id, amount, updated_by_user_id)
+             VALUES (?, ?, ?, ?, ?)`,
+            [uuid(), poId, line.jobId, line.amount, req.user.id]
+          );
+        }
+      }
+    }
+
+    if (removeIds.length) {
+      await conn.query("DELETE FROM brigade_po_lines WHERE po_id = ? AND job_id IN (?)", [poId, removeIds]);
+    }
+
+    await conn.commit();
+    res.json(await loadBillingPo(pool, poNumber));
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "This PO or service was just changed by someone else. Please reload." });
+    }
+    sendBillingError(res, err, "Failed to save PO");
+  } finally {
+    if (conn) conn.release();
   }
 }
 
@@ -976,4 +1318,8 @@ module.exports = {
   getJobDetails,
   getVisitPhotos,
   startPhotoUpload,
+  listBillingPos,
+  getBillingPo,
+  listUnassignedServices,
+  saveBillingPo,
 };

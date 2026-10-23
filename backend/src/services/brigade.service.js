@@ -31,7 +31,7 @@ const BRIGADE_SUB_SERVICES = [
 const BRIGADE_SERVICE_TYPE = "DEEP";
 
 // Before/after photo rule for Brigade visits (Android app).
-const MIN_VISIT_PHOTOS = 3;
+const MIN_VISIT_PHOTOS = 1;
 const PHOTO_PHASES = { BEFORE: "BEFORE_PHOTOS", AFTER: "AFTER_PHOTOS" };
 
 function isBrigadeExecutive(user) {

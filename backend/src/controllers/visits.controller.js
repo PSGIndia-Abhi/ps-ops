@@ -831,7 +831,7 @@ async function submitVisit(req, res) {
       const counts = await getVisitPhotoCounts(pool, visitId);
       if (counts.before < MIN_VISIT_PHOTOS || counts.after < MIN_VISIT_PHOTOS) {
         return res.status(400).json({
-          error: `Please upload at least ${MIN_VISIT_PHOTOS} before and ${MIN_VISIT_PHOTOS} after work photos before ending the visit`,
+          error: `Please upload at least ${MIN_VISIT_PHOTOS} before and ${MIN_VISIT_PHOTOS} after work photo${MIN_VISIT_PHOTOS === 1 ? "" : "s"} before ending the visit`,
           code: "PHOTOS_REQUIRED",
           required: MIN_VISIT_PHOTOS,
           before: counts.before,

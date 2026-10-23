@@ -30,7 +30,8 @@ export default function BrigadeJobInfo({ jobId }) {
     <section className="bg-card" aria-label="Brigade details">
       <h3>Brigade booking</h3>
       <p className="bg-card-sub">
-        Technician must upload {info.min_visit_photos} before and {info.min_visit_photos} after photos in the app.
+        Technician must upload at least {info.min_visit_photos} before and {info.min_visit_photos} after
+        {info.min_visit_photos === 1 ? " photo" : " photos"} in the app.
       </p>
       <div className="bg-form-row" style={{ alignItems: "start" }}>
         <Detail label="Property" value={info.site_name && info.site_name !== info.property ? `${info.property} – ${info.site_name}` : info.property} />

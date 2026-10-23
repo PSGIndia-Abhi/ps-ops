@@ -611,6 +611,17 @@
   cursor:pointer;
 }
 
+.attachment-photo{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  min-width:72px;
+}
+
+.attachment-photo .attachment-download-btn{
+  width:100%;
+}
+
 .attachment-file{
   font-size:13px;
   color:#2563eb;

@@ -15,6 +15,7 @@ const NAV = [
   { path: "/brigade/contacts", label: "Contacts" },
   { path: "/brigade/group-management", label: "Group Management" },
   { path: "/brigade/masters", label: "Flats & Prices" },
+  { path: "/brigade/billing", label: "Billing" },
 ];
 
 export default function BrigadeLayout() {
