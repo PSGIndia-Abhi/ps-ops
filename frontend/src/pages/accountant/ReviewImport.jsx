@@ -357,7 +357,12 @@ export default function ReviewImport() {
                   <td>{r.invoiceNo || "—"}</td>
                   <td>{r.customer || "—"}</td>
                   {hasSite && <td>{r.site || "—"}</td>}
-                  <td className="ac-num">{typeof r.amount === "number" ? money(r.amount) : r.amount || "—"}</td>
+                  <td className="ac-num">
+                    {typeof r.amount === "number" ? money(r.amount)
+                      : r.amount ? r.amount
+                      : r.status === "valid" ? <span className="ac-badge void">Cancelled</span> /* blank amount: saved as Cancelled */
+                      : "—"}
+                  </td>
                   <td>
                     {r.status === "valid"
                       ? <span className="rv-pill valid"><FiCheckCircle /> Valid</span>

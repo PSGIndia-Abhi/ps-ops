@@ -220,12 +220,14 @@ async function validateRows(rows, user) {
 
     if (!row.customer) errors.push("Customer is required");
 
-    // A blank or 0 amount is accepted and saved as a ₹0 invoice (nothing pending).
+    // A blank amount is accepted and saved as a cancelled ₹0 invoice. An amount of 0 is
+    // not uploaded (the row is shown as an error).
     if (!row.amount) result.parsed_amount = 0;
     else {
       const amount = parseAmount(row.amount);
       if (Number.isNaN(amount)) errors.push("Invoice amount is not a valid number");
       else if (amount < 0) errors.push("Invoice amount cannot be negative");
+      else if (amount === 0) errors.push("Amount is 0, not uploaded");
       else if (amount > MAX_AMOUNT) errors.push("Invoice amount is too large");
       else result.parsed_amount = amount;
     }
@@ -305,7 +307,7 @@ async function createPreview(file, user) {
       site: r.site_display || "",
       invoiceDate: r.invoice_date || "",
       dueDate: r.due_date || "",
-      amount: r.parsed_amount ?? r.amount ?? "",
+      amount: r.amount ? r.parsed_amount ?? r.amount : "", // blank stays blank (it is saved as Cancelled), not ₹0
       remarks: r.remarks || "",
       status: r.errors.length === 0 ? "valid" : "error",
       imported: false,
@@ -346,7 +348,7 @@ async function getImport(importId, user) {
       site: raw.site || "",
       invoiceDate: raw.invoice_date || "",
       dueDate: raw.due_date || "",
-      amount: r.invoice_amount == null ? raw.amount || "" : Number(r.invoice_amount),
+      amount: r.invoice_amount == null || !raw.amount ? raw.amount || "" : Number(r.invoice_amount),
       remarks: raw.remarks || "",
       status: r.is_valid ? "valid" : "error",
       imported: Boolean(r.created_invoice_id),
@@ -432,7 +434,7 @@ async function confirmImport(fileName, submittedRows, user) {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               invoiceId, r.invoice_number, r.matched_customer_id, r.matched_site_id, r.parsed_invoice_date, r.parsed_due_date,
-              // A blank or 0 amount in the file is saved as a cancelled invoice.
+              // A blank amount in the file is saved as a cancelled invoice (0 never gets here).
               r.parsed_amount, r.parsed_amount, r.parsed_amount > 0 ? "PENDING" : "CANCELLED", r.remarks || null, user.id,
             ]
           );
