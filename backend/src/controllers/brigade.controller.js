@@ -700,6 +700,13 @@ function readPo(body) {
     if (amount === null) throw withStatus("PO amount must be a number of 0 or more", 400);
   }
 
+  // The PO is optional, but once a PO number is given its details are required.
+  if (number) {
+    if (!source) throw withStatus("Enter where the PO comes from", 400);
+    if (!date) throw withStatus("Enter the PO date", 400);
+    if (amount === null) throw withStatus("Enter the PO amount", 400);
+  }
+
   return { number: number || null, source: source || null, date: date || null, amount };
 }
 
@@ -744,6 +751,16 @@ async function createBrigadeBooking(req, res) {
         400
       );
     }
+    // The booking form starts each service at its price-master price and may change it for this
+    // booking ({ service_prices: { [sub_service]: price } }); the master itself is not touched.
+    const edited = body.service_prices && typeof body.service_prices === "object" ? body.service_prices : {};
+    for (const line of quote.lines) {
+      if (edited[line.sub_service] === undefined || edited[line.sub_service] === null || edited[line.sub_service] === "") continue;
+      const price = parsePrice(edited[line.sub_service]);
+      if (price === null) throw withStatus(`Enter a valid price for ${line.sub_service}`, 400);
+      line.price = price;
+    }
+    quote.total = Math.round(quote.lines.reduce((sum, l) => sum + (l.price || 0), 0) * 100) / 100;
 
     // The job's site (and so the technician's location check) comes from the
     // requested-by contact, so it must belong to the chosen property site.
@@ -1200,7 +1217,7 @@ async function startPhotoUpload(req, res) {
 // (brigade_booking_details, read only). Canceled jobs are left out.
 const BILLING_PO_OF_JOB = "COALESCE(p.po_number, NULLIF(TRIM(bd.client_po_number), ''))";
 const BILLING_SERVICE_SELECT = `
-  SELECT j.id AS job_id, j.code, j.sub_service, j.status, j.start_date, j.booking_id,
+  SELECT j.id AS job_id, j.code, j.sub_service, j.status, j.start_date, j.booking_id, j.address AS service_address,
          bd.company_id, co.name AS property, bd.flat_number, bd.bhk, bd.prices,
          NULLIF(TRIM(bd.client_po_number), '') AS booking_po,
          l.id AS line_id, l.amount AS line_amount,
@@ -1213,6 +1230,9 @@ const BILLING_SERVICE_SELECT = `
   WHERE j.status <> 'CANCELED'
 `;
 const BILLING_SERVICE_ORDER = "ORDER BY co.name ASC, bd.flat_number ASC, j.created_at ASC";
+// Billing (PO pages, the PO list, Add services, invoices) shows a service only once it is
+// completed; one not started or in progress appears there when it is done.
+const BILLING_COMPLETED_ONLY = "AND j.status = 'COMPLETED'";
 
 function readPoNumber(value) {
   const number = trimString(value);
@@ -1252,6 +1272,8 @@ function toBillingService(row) {
     property: row.property,
     flat_number: row.flat_number,
     bhk: row.bhk,
+    // The service address typed in the booking form (Ship To on the invoice).
+    service_address: row.service_address || "",
     po_number: row.po_number,
     booked_price: bookedPrice,
     // Until an amount is saved it starts at the price booked for the service.
@@ -1294,10 +1316,12 @@ async function loadPoHeader(db, number) {
   return booked ? { ...booked, id: null, header_from: "booking" } : null;
 }
 
-async function loadBillingPo(db, number) {
+// One PO: its details, services and totals. Billing sees completed services only; the PO tab
+// passes { allStatuses: true } to see every service assigned to the PO (not canceled).
+async function loadBillingPo(db, number, { allStatuses = false } = {}) {
   const header = await loadPoHeader(db, number);
   const [rows] = await db.query(
-    `${BILLING_SERVICE_SELECT} AND ${BILLING_PO_OF_JOB} = ? ${BILLING_SERVICE_ORDER}`,
+    `${BILLING_SERVICE_SELECT} ${allStatuses ? "" : BILLING_COMPLETED_ONLY} AND ${BILLING_PO_OF_JOB} = ? ${BILLING_SERVICE_ORDER}`,
     [number]
   );
   const services = rows.map(toBillingService);
@@ -1321,55 +1345,84 @@ function sendBillingError(res, err, fallback) {
   return sendError(res, err, fallback);
 }
 
-// GET /api/brigade/billing/pos — every PO with its totals.
+// Every PO with its totals: from Billing (brigade_pos) and from bookings that typed a PO.
+// Billing counts completed services only; the PO tab counts every assigned service.
+async function listPos({ allStatuses = false } = {}) {
+  const [saved] = await pool.query(
+    `SELECT po_number, ${PO_HEADER_COLUMNS}, updated_at FROM brigade_pos`
+  );
+  const [booked] = await pool.query(
+    `SELECT TRIM(client_po_number) AS po_number, ${PO_HEADER_COLUMNS}, created_at AS updated_at
+     FROM brigade_booking_details
+     WHERE NULLIF(TRIM(client_po_number), '') IS NOT NULL
+     ORDER BY created_at DESC`
+  );
+  const [rows] = await pool.query(
+    `${BILLING_SERVICE_SELECT} ${allStatuses ? "" : BILLING_COMPLETED_ONLY} AND ${BILLING_PO_OF_JOB} IS NOT NULL ${BILLING_SERVICE_ORDER}`
+  );
+
+  const byPo = new Map();
+  const entry = (number) => {
+    const key = String(number).toLowerCase();
+    if (!byPo.has(key)) byPo.set(key, { header: null, services: [] });
+    return byPo.get(key);
+  };
+  for (const po of saved) entry(po.po_number).header = { ...po, header_from: "billing" };
+  for (const po of booked) {
+    const e = entry(po.po_number);
+    if (!e.header) e.header = { ...po, header_from: "booking" }; // latest booking first
+  }
+  for (const row of rows) entry(row.po_number).services.push(toBillingService(row));
+
+  const list = [...byPo.values()].map(({ header, services }) => {
+    const poAmount = toAmount(header?.po_amount);
+    return {
+      po_number: header?.po_number || services[0]?.po_number,
+      header_from: header?.header_from || null,
+      po_source: header?.po_source ?? null,
+      po_date: header?.po_date ?? null,
+      properties: [...new Set(services.map((s) => s.property).filter(Boolean))],
+      flats: [...new Set(services.map((s) => s.flat_number).filter(Boolean))],
+      updated_at: header?.updated_at ?? null,
+      totals: billingTotals(poAmount, services),
+      // How far the work has got: services done vs assigned (PO tab).
+      completed: services.filter((s) => s.status === "COMPLETED").length,
+    };
+  });
+  list.sort((a, b) =>
+    String(b.po_date || "").localeCompare(String(a.po_date || "")) ||
+    String(a.po_number).localeCompare(String(b.po_number))
+  );
+  return list;
+}
+
+// GET /api/brigade/billing/pos — every PO with its totals (completed services).
 async function listBillingPos(req, res) {
   try {
-    const [saved] = await pool.query(
-      `SELECT po_number, ${PO_HEADER_COLUMNS}, updated_at FROM brigade_pos`
-    );
-    const [booked] = await pool.query(
-      `SELECT TRIM(client_po_number) AS po_number, ${PO_HEADER_COLUMNS}, created_at AS updated_at
-       FROM brigade_booking_details
-       WHERE NULLIF(TRIM(client_po_number), '') IS NOT NULL
-       ORDER BY created_at DESC`
-    );
-    const [rows] = await pool.query(
-      `${BILLING_SERVICE_SELECT} AND ${BILLING_PO_OF_JOB} IS NOT NULL ${BILLING_SERVICE_ORDER}`
-    );
-
-    const byPo = new Map();
-    const entry = (number) => {
-      const key = String(number).toLowerCase();
-      if (!byPo.has(key)) byPo.set(key, { header: null, services: [] });
-      return byPo.get(key);
-    };
-    for (const po of saved) entry(po.po_number).header = { ...po, header_from: "billing" };
-    for (const po of booked) {
-      const e = entry(po.po_number);
-      if (!e.header) e.header = { ...po, header_from: "booking" }; // latest booking first
-    }
-    for (const row of rows) entry(row.po_number).services.push(toBillingService(row));
-
-    const list = [...byPo.values()].map(({ header, services }) => {
-      const poAmount = toAmount(header?.po_amount);
-      return {
-        po_number: header?.po_number || services[0]?.po_number,
-        header_from: header?.header_from || null,
-        po_source: header?.po_source ?? null,
-        po_date: header?.po_date ?? null,
-        properties: [...new Set(services.map((s) => s.property).filter(Boolean))],
-        flats: [...new Set(services.map((s) => s.flat_number).filter(Boolean))],
-        updated_at: header?.updated_at ?? null,
-        totals: billingTotals(poAmount, services),
-      };
-    });
-    list.sort((a, b) =>
-      String(b.po_date || "").localeCompare(String(a.po_date || "")) ||
-      String(a.po_number).localeCompare(String(b.po_number))
-    );
-    res.json(list);
+    res.json(await listPos());
   } catch (err) {
     sendBillingError(res, err, "Failed to load POs");
+  }
+}
+
+// GET /api/brigade/pos — the PO tab: every PO with every service assigned to it, any status.
+async function listAllPos(req, res) {
+  try {
+    res.json(await listPos({ allStatuses: true }));
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load POs");
+  }
+}
+
+// GET /api/brigade/pos/detail?number= — one PO with all its services (any status) and amounts.
+async function getPoDetail(req, res) {
+  try {
+    const number = readPoNumber(req.query.number);
+    const po = await loadBillingPo(pool, number, { allStatuses: true });
+    if (po.is_new) throw withStatus(`PO ${number} not found`, 404);
+    res.json(po);
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load PO");
   }
 }
 
@@ -1400,7 +1453,7 @@ async function listUnassignedServices(req, res) {
       params.push(`%${flatNumber}%`);
     }
     const [rows] = await pool.query(
-      `${BILLING_SERVICE_SELECT} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
+      `${BILLING_SERVICE_SELECT} ${BILLING_COMPLETED_ONLY} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
       params
     );
     res.json(rows.map(toBillingService));
@@ -1879,4 +1932,8 @@ module.exports = {
   createFlatRequest,
   listFlatRequests,
   cancelFlatRequest,
+  listAllPos,
+  getPoDetail,
+  // Shared with brigadeInvoices.controller: a PO's details and services.
+  loadBillingPo,
 };

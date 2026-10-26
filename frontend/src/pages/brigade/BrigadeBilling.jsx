@@ -10,6 +10,8 @@ import {
   statusLabel,
 } from "./brigadeShared";
 import KpiTile from "./KpiTile";
+import PoFiles from "./PoFiles";
+import PoInvoices from "./PoInvoices";
 import "./brigade.css";
 
 // Brigade billing: client PO -> the services billed under it, with an amount
@@ -425,12 +427,15 @@ function PoEditor({ number, onBack, onOpen }) {
   const [status, setStatus] = useState(null);
   const [picking, setPicking] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // Services ticked for the next invoice (job ids). Only completed services are listed here.
+  const [invoicePick, setInvoicePick] = useState(() => new Set());
 
   const apply = useCallback((data) => {
     setPo(data);
     setForm(formFrom(data));
     setRows(rowsFrom(data));
     setRemoved([]);
+    setInvoicePick(new Set());
   }, []);
 
   useEffect(() => {
@@ -473,10 +478,6 @@ function PoEditor({ number, onBack, onOpen }) {
     return [...map.values()];
   }, [rows]);
 
-  function setAmount(jobId, value) {
-    setRows((prev) => prev.map((r) => (r.job_id === jobId ? { ...r, amountText: value } : r)));
-  }
-
   function removeRow(row) {
     setRows((prev) => prev.filter((r) => r.job_id !== row.job_id));
     if (row.amount_saved) setRemoved((prev) => [...prev, row.job_id]);
@@ -493,13 +494,30 @@ function PoEditor({ number, onBack, onOpen }) {
     setPicking(false);
   }
 
+  function togglePick(jobId) {
+    setInvoicePick((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  // Only lines with an amount can be invoiced.
+  const pickable = rows.filter((r) => !invalidIds.has(r.job_id));
+  const pickedRows = pickable.filter((r) => invoicePick.has(r.job_id));
+  const allPicked = pickable.length > 0 && pickedRows.length === pickable.length;
+  const pickedAmount = round2(pickedRows.reduce((s, r) => s + (toNumber(r.amountText) || 0), 0));
+
   function discard() {
     apply(po);
   }
 
   async function save() {
     if (invalidIds.size) {
-      return setStatus({ type: "error", message: "Enter an amount of 0 or more for every line." });
+      // Amounts are not edited here; a line without one was booked without a price.
+      const names = rows.filter((r) => invalidIds.has(r.job_id)).map((r) => `${r.sub_service} (${r.flat_number})`);
+      return setStatus({ type: "error", message: `No price was booked for ${names.join(", ")}, so it cannot be billed on this PO.` });
     }
     if (poAmountInvalid) return setStatus({ type: "error", message: "PO amount must be a number of 0 or more." });
     setSaving(true);
@@ -623,6 +641,11 @@ function PoEditor({ number, onBack, onOpen }) {
                 onChange={(e) => setForm((f) => ({ ...f, po_source: e.target.value }))}
               />
             </div>
+            {/* Files are saved as soon as they are picked (not with "Save changes"), and shared with the booking form. */}
+            <div className="bgb-meta-field full">
+              <label>Upload files</label>
+              <PoFiles poNumber={po.po_number} />
+            </div>
           </section>
 
           {/* Line items */}
@@ -634,9 +657,10 @@ function PoEditor({ number, onBack, onOpen }) {
 
             {!rows.length ? (
               <div className="bg-empty-state bgb-lines-empty">
-                <strong>No line items yet</strong>
+                <strong>No completed services yet</strong>
+                Services show here once they are completed.
                 <button type="button" className="bg-link-btn" onClick={() => setPicking(true)}>
-                  Add the Brigade services this PO pays for
+                  Add completed Brigade services this PO pays for
                 </button>
               </div>
             ) : (
@@ -644,7 +668,18 @@ function PoEditor({ number, onBack, onOpen }) {
                 <table className="bgb-ledger bgb-items">
                   <thead>
                     <tr>
-                      <th style={{ width: 44 }}>#</th>
+                      <th style={{ width: 64 }}>
+                        <label className="bgb-pick" title="Select all for the invoice">
+                          <input
+                            type="checkbox"
+                            checked={allPicked}
+                            disabled={!pickable.length}
+                            onChange={() => setInvoicePick(allPicked ? new Set() : new Set(pickable.map((r) => r.job_id)))}
+                            aria-label="Select all services for the invoice"
+                          />
+                          #
+                        </label>
+                      </th>
                       <th>Description</th>
                       <th>Status</th>
                       <th className="num">Booked rate</th>
@@ -671,7 +706,18 @@ function PoEditor({ number, onBack, onOpen }) {
                           const diff = amt !== null && r.booked_price !== null ? round2(amt - r.booked_price) : 0;
                           return (
                             <tr key={r.job_id} className={r.added ? "bgb-added" : undefined}>
-                              <td className="bgb-line-no">{r.line}</td>
+                              <td className="bgb-line-no">
+                                <label className="bgb-pick">
+                                  <input
+                                    type="checkbox"
+                                    checked={invoicePick.has(r.job_id)}
+                                    disabled={invalidIds.has(r.job_id)}
+                                    onChange={() => togglePick(r.job_id)}
+                                    aria-label={`Put ${r.code} ${r.sub_service} on the invoice`}
+                                  />
+                                  {r.line}
+                                </label>
+                              </td>
                               <td>
                                 <div className="bgb-strong">{r.sub_service}</div>
                                 <div className="bgb-sub">
@@ -689,19 +735,13 @@ function PoEditor({ number, onBack, onOpen }) {
                               </td>
                               <td><span className={`bg-status ${r.status}`}>{statusLabel(r.status)}</span></td>
                               <td className="num bgb-muted">{formatInr(r.booked_price)}</td>
+                              {/* Read only: the billed amount comes from the booking's price and cannot be changed here. */}
                               <td className="num">
-                                <div className={`bgb-money compact ${invalidIds.has(r.job_id) ? "invalid" : ""}`}>
-                                  <span aria-hidden="true">₹</span>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    inputMode="decimal"
-                                    value={r.amountText}
-                                    aria-label={`Amount for ${r.code} ${r.sub_service}`}
-                                    onChange={(e) => setAmount(r.job_id, e.target.value)}
-                                  />
-                                </div>
+                                {invalidIds.has(r.job_id) ? (
+                                  <span className="bgb-no-price">No price</span>
+                                ) : (
+                                  <strong>{formatInr(amt)}</strong>
+                                )}
                                 {diff !== 0 && (
                                   <div className={`bgb-diff ${diff > 0 ? "up" : "down"}`}>
                                     {diff > 0 ? "+" : "−"}{formatInr(Math.abs(diff))} vs booked
@@ -735,11 +775,12 @@ function PoEditor({ number, onBack, onOpen }) {
           {/* Totals */}
           <footer className="bgb-doc-foot">
             <p className="bgb-doc-note">
-              All amounts are in INR and exclude GST. Lines marked “Booked on this PO” came with the booking and stay on it.
+              Only completed services are shown; others appear once they are done. All amounts are in INR and exclude GST. Lines marked “Booked on this PO” came with the booking and stay on it. Tick the services to put on the invoice.
             </p>
             <dl className="bgb-totals">
               <div><dt>Booked value</dt><dd>{formatInr(booked)}</dd></div>
               <div><dt>Billed ({rows.length} line{rows.length === 1 ? "" : "s"})</dt><dd>{formatInr(billed)}</dd></div>
+              <div className="bgb-picked-total"><dt>Selected for invoice ({pickedRows.length})</dt><dd>{formatInr(pickedAmount)}</dd></div>
               <div><dt>PO amount</dt><dd><Money value={poAmount} /></dd></div>
               <div className="grand">
                 <dt>Balance</dt>
@@ -747,6 +788,23 @@ function PoEditor({ number, onBack, onOpen }) {
               </div>
             </dl>
           </footer>
+
+          {/* Tax invoices: built from the PO as saved, so unsaved edits must be saved first. */}
+          <PoInvoices
+            poNumber={po.po_number}
+            selected={{ ids: pickedRows.map((r) => r.job_id), count: pickedRows.length, amount: pickedAmount }}
+            blockedReason={
+              po.is_new
+                ? "Save the PO before generating an invoice."
+                : dirty
+                  ? "Save your changes before generating an invoice."
+                  : !rows.length
+                    ? "No completed services on this PO yet."
+                    : !pickedRows.length
+                      ? "Tick the completed services above to put them on the invoice."
+                      : ""
+            }
+          />
         </article>
       )}
 

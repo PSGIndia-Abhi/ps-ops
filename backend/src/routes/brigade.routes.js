@@ -5,6 +5,8 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const brigade = require("../controllers/brigade.controller");
+const poFiles = require("../controllers/brigadePoFiles.controller");
+const invoices = require("../controllers/brigadeInvoices.controller");
 
 /*
 Brigade Executive module (admin passes every permission check by role).
@@ -55,6 +57,22 @@ router.get("/billing/pos", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), 
 router.get("/billing/po", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getBillingPo);
 router.put("/billing/po", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.saveBillingPo);
 router.get("/billing/unassigned-services", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listUnassignedServices);
+
+// PO tab: every PO and, inside one, every service assigned to it (any status). Read only.
+router.get("/pos", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listAllPos);
+router.get("/pos/detail", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getPoDetail);
+
+// Tax invoices from a PO: preview (PDF, not saved), save with the next BSPMPL number, list, download
+router.post("/billing/invoices/preview", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.previewInvoice);
+router.post("/billing/invoices", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.createInvoice);
+router.get("/billing/invoices", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.listInvoices);
+router.get("/billing/invoices/:id/pdf", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.invoicePdf);
+
+// PO files: documents attached to a client PO, shared by the booking form and Billing (max 3 MB each)
+router.get("/po-files", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), poFiles.listPoFiles);
+router.post("/po-files", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), poFiles.acceptFile, poFiles.uploadPoFile);
+router.get("/po-files/:id/view", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), poFiles.viewPoFile);
+router.delete("/po-files/:id", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), poFiles.deletePoFile);
 
 // Job details + technician before/after photos (Android app)
 router.get("/jobs/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), brigade.getJobDetails);

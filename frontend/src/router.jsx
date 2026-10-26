@@ -86,6 +86,7 @@ import BrigadeLayout from "./pages/brigade/BrigadeLayout";
 import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
+import BrigadePos from "./pages/brigade/BrigadePos";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -166,6 +167,7 @@ const router = createBrowserRouter([
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "masters", element: <BrigadeMasters /> },
+      { path: "pos", element: <BrigadePos /> },
       { path: "billing", element: <BrigadeBilling /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "profile", element: <ProfilePage /> },

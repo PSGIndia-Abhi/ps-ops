@@ -15,6 +15,7 @@ const NAV = [
   { path: "/brigade/contacts", label: "Contacts" },
   { path: "/brigade/group-management", label: "Group Management" },
   { path: "/brigade/masters", label: "Prices & BHK" },
+  { path: "/brigade/pos", label: "PO" },
   { path: "/brigade/billing", label: "Billing" },
 ];
 

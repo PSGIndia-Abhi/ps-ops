@@ -49,6 +49,93 @@ export function brigadeBasePath() {
   return localStorage.getItem("role") === BRIGADE_ROLE ? "/brigade" : "/admin";
 }
 
+/* ---- PO files: documents attached to a client PO (kept per PO number) ---- */
+
+export const MAX_PO_FILE_BYTES = 3 * 1024 * 1024;
+
+/** 2048 -> "2 KB", 1572864 -> "1.5 MB". */
+export function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
+/** The reason a picked file cannot be uploaded, or "" when it can. Any format is allowed. */
+export function poFileProblem(file) {
+  return file.size > MAX_PO_FILE_BYTES ? `${file.name} is larger than 3 MB` : "";
+}
+
+export function listPoFiles(poNumber) {
+  return brigadeRequest(`/api/brigade/po-files?po_number=${encodeURIComponent(poNumber)}`);
+}
+
+/** POST /api/brigade/po-files - one file for a PO number; resolves to the saved row. */
+export function uploadPoFile(poNumber, file) {
+  const form = new FormData();
+  form.append("po_number", poNumber);
+  form.append("file", file);
+  return brigadeRequest("/api/brigade/po-files", { method: "POST", body: form });
+}
+
+export function deletePoFile(id) {
+  return brigadeRequest(`/api/brigade/po-files/${id}`, { method: "DELETE" });
+}
+
+/** Opens (PDF, images) or downloads (anything else) a PO file - fetched with the login token, which a plain link can't carry. */
+export async function openPoFile(file) {
+  const res = await apiFetch(`/api/brigade/po-files/${file.id}/view`);
+  if (!res?.ok) throw new Error((await safeJson(res))?.error || "Could not open the file");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.download = file.file_name || "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+/* ---- Tax invoices from a PO ---- */
+
+/** Fetches a PDF (with the login token) and returns a blob URL for it; a refusal becomes an Error with the server's message. */
+async function fetchPdfUrl(endpoint, options) {
+  const res = await apiFetch(endpoint, options);
+  if (!res?.ok) {
+    const err = new Error((await safeJson(res))?.error || "Request failed");
+    err.status = res?.status;
+    throw err;
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
+/** POST /api/brigade/billing/invoices/preview - the invoice for the ticked services, stamped PREVIEW. */
+export function previewInvoiceUrl(poNumber, jobIds) {
+  return fetchPdfUrl("/api/brigade/billing/invoices/preview", { method: "POST", body: JSON.stringify({ po_number: poNumber, job_ids: jobIds }) });
+}
+
+export function createInvoice(poNumber, jobIds) {
+  return brigadeRequest("/api/brigade/billing/invoices", { method: "POST", body: JSON.stringify({ po_number: poNumber, job_ids: jobIds }) });
+}
+
+export function listInvoices(poNumber) {
+  return brigadeRequest(`/api/brigade/billing/invoices?po_number=${encodeURIComponent(poNumber)}`);
+}
+
+/** Downloads an issued invoice as "Tax Invoice BSPMPL26-27-5000.pdf". */
+export async function downloadInvoice(invoice) {
+  const url = await fetchPdfUrl(`/api/brigade/billing/invoices/${invoice.id}/pdf`);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Tax Invoice ${invoice.invoice_number.replace(/\//g, "-")}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 // fetch + JSON + error message in one place.
 export async function brigadeRequest(endpoint, options) {
   const res = await apiFetch(endpoint, options);

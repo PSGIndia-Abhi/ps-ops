@@ -2975,3 +2975,331 @@
     max-width: none;
   }
 }
+
+/* ---- PO files: "Upload files" in the booking form's Client PO section and on a Billing PO ---- */
+.bgb-meta-field.full {
+  grid-column: 1 / -1;
+}
+
+.bg-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bg-files-drop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.bg-files-drop:hover:not(:disabled) {
+  border-color: var(--bg-accent, #0284c7);
+  background: #f0f9ff;
+}
+
+.bg-files-drop:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.bg-files-drop strong {
+  display: block;
+  font-size: 14px;
+}
+
+.bg-files-drop small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.bg-files-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--bg-accent-soft, #e0f2fe);
+  color: var(--bg-accent, #0284c7);
+  font-size: 18px;
+}
+
+.bg-files-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.bg-files-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.bg-files-list li + li {
+  border-top: 1px solid #e2e8f0;
+}
+
+.bg-files-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.bg-files-size {
+  flex: none;
+  color: #64748b;
+}
+
+.bg-files-empty {
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* Client PO: choose an existing PO or create a new one */
+.bg-po-mode {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: #f1f5f9;
+}
+
+.bg-po-mode button {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.bg-po-mode button.on {
+  background: #fff;
+  color: var(--bg-accent-ink, #075985);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.bg-field input[readonly] {
+  background: #f8fafc;
+  color: #475569;
+}
+
+/* ---- Tax invoices on a Billing PO: the list, and the preview popup ---- */
+.bgb-invoices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 28px 24px;
+  border-top: 1px solid var(--bgb-line, #e2e8f0);
+}
+
+.bgb-invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bgb-invoice-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--bgb-line, #e2e8f0);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--bgb-faint, #94a3b8);
+}
+
+.bgb-invoice-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--bgb-line, #e2e8f0);
+}
+
+.bgb-invoice-table .num {
+  text-align: right;
+}
+
+.bgi-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.bgi-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(900px, 100%);
+  height: min(92vh, 1000px);
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+
+.bgi-head,
+.bgi-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.bgi-head {
+  justify-content: space-between;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bgi-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.bgi-head p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.bgi-body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  background: #f1f5f9;
+}
+
+.bgi-body iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bgi-foot {
+  justify-content: flex-end;
+  border-top: 1px solid #e2e8f0;
+}
+
+.bgi-foot .bg-field-error {
+  margin-right: auto;
+}
+
+/* A PO line whose service has no price in the price master (amounts are read only on the PO). */
+.bgb-no-price {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+/* Booking form: a picked service's price, editable for this booking (starts at the master price) */
+.bgm-svc-edit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.bgm-svc-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 600;
+}
+
+.bgm-svc-input:focus-within {
+  border-color: var(--bg-accent, #0284c7);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+}
+
+.bgm-svc-input.invalid {
+  border-color: #dc2626;
+}
+
+.bgm-svc-input input {
+  width: 92px;
+  border: 0;
+  outline: 0;
+  background: none;
+  font: inherit;
+  text-align: right;
+}
+
+.bgm-svc-reset {
+  padding: 0;
+  font-size: 11.5px;
+}
+
+.bgb-invoice-done {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Billing PO: tick boxes that pick services for the invoice */
+.bgb-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.bgb-pick input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--bg-accent, #0284c7);
+  cursor: pointer;
+}
+
+.bgb-picked-total dt,
+.bgb-picked-total dd {
+  color: var(--bg-accent-ink, #075985);
+  font-weight: 600;
+}
+
+/* PO tab: read-only PO details */
+.bgb-meta-value {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--bgb-ink, #0f172a);
+}
