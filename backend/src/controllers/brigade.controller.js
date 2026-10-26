@@ -150,7 +150,7 @@ async function listActiveBhkTypes(db) {
     );
     return rows;
   } catch (err) {
-    // brigade_masters.sql not run yet: the rest of the module keeps working.
+    // database/brigade/01_brigade_masters.sql not run yet: the rest of the module keeps working.
     if (err?.code === "ER_NO_SUCH_TABLE") return [];
     throw err;
   }
@@ -852,7 +852,7 @@ async function createBrigadeBooking(req, res) {
 
 function sendRequestError(res, err, fallback) {
   if (err?.code === "ER_NO_SUCH_TABLE") {
-    return res.status(500).json({ error: "Flat requests are not set up yet. Run brigade_flat_requests.sql on the database." });
+    return res.status(500).json({ error: "Flat requests are not set up yet. Run database/brigade/03_brigade_flat_requests.sql on the database." });
   }
   return sendError(res, err, fallback);
 }
@@ -1316,7 +1316,7 @@ async function loadBillingPo(db, number) {
 
 function sendBillingError(res, err, fallback) {
   if (err?.code === "ER_NO_SUCH_TABLE") {
-    return res.status(500).json({ error: "Billing is not set up yet. Run brigade_billing.sql on the database." });
+    return res.status(500).json({ error: "Billing is not set up yet. Run database/brigade/02_brigade_billing.sql on the database." });
   }
   return sendError(res, err, fallback);
 }

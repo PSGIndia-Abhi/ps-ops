@@ -1,7 +1,7 @@
 // Brigade Executive module — shared rules.
 //
 // A Brigade Executive only ever works inside one company group, "Brigade
-// Group" (created by brigade_masters.sql). Every property is a company in that
+// Group" (created by database/brigade/01_brigade_masters.sql). Every property is a company in that
 // group, its address is the company's site, and a booking is a "Brigade
 // booking" when brigade_booking_details has a row for it.
 //
