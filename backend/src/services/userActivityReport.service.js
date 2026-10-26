@@ -15,7 +15,11 @@ function readFilters(query) {
   const platform = query.platform || "";
   if (platform && !PLATFORMS.includes(platform)) throw new ReportInputError("Unknown app filter");
   const role = typeof query.role === "string" ? query.role.trim() : "";
-  return { date: localDate(), platform, role };
+  // Today (default) or yesterday - the report for a day that has just ended.
+  const yesterday = query.day === "yesterday";
+  const d = new Date();
+  if (yesterday) d.setDate(d.getDate() - 1);
+  return { day: yesterday ? "yesterday" : "today", date: localDate(d), platform, role };
 }
 
 // ---- formatting (server local time, i.e. IST) ------------------------------
@@ -114,7 +118,7 @@ function todayTable(data) {
   const f = data.filters;
   const t = data.totals;
   return {
-    title: "User Activity - Today",
+    title: `User Activity - ${f.day === "yesterday" ? "Yesterday" : "Today"}`,
     lines: [
       `Date: ${fmtDay(f.date)}   |   App: ${f.platform ? PLATFORM_LABELS[f.platform] : "All"}   |   Role: ${f.role || "All"}`,
       `Total users: ${t.users}   |   Active: ${t.active}   |   Not active: ${t.inactive}   |   ` +
@@ -136,7 +140,7 @@ function todayTable(data) {
 async function renderXlsx(table) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "BestServe";
-  const ws = wb.addWorksheet("Today");
+  const ws = wb.addWorksheet(table.title.replace("User Activity - ", ""));
   ws.columns = table.columns.map((c) => ({ width: c.width }));
 
   ws.addRow([table.title]).font = { bold: true, size: 14 };

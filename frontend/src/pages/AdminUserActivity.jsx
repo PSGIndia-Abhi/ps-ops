@@ -4,7 +4,7 @@ import { apiFetch, safeJson } from "../api";
 import { downloadFile } from "./accountant/download";
 import "./AdminUserActivity.css";
 
-// Admin-only list of who used the website / apps today.
+// Admin-only list of who used the website / apps today (or yesterday).
 // Data: /api/user-activity (backend/src/routes/user-activity.routes.js).
 
 const PLATFORMS = [
@@ -20,6 +20,7 @@ function fmtTime(value) {
 }
 
 export default function AdminUserActivity() {
+  const [day, setDay] = useState("today"); // today | yesterday
   const [platform, setPlatform] = useState("");
   const [role, setRole] = useState("");
   const [showOnly, setShowOnly] = useState("all"); // all | active | inactive
@@ -40,10 +41,11 @@ export default function AdminUserActivity() {
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
+    if (day === "yesterday") params.set("day", "yesterday");
     if (platform) params.set("platform", platform);
     if (role) params.set("role", role);
     return params.toString();
-  }, [platform, role]);
+  }, [day, platform, role]);
 
   async function load() {
     try {
@@ -84,14 +86,16 @@ export default function AdminUserActivity() {
     );
   }, [data, showOnly, search]);
 
-  const todayLabel = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const shownDate = new Date();
+  if (day === "yesterday") shownDate.setDate(shownDate.getDate() - 1);
+  const dateLabel = shownDate.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
   return (
     <div className="ua-page">
       <div className="ua-header">
         <div>
           <h2>User Activity</h2>
-          <p>Who used the website or the Android apps today — {todayLabel}</p>
+          <p>Who used the website or the Android apps {day === "yesterday" ? "yesterday" : "today"} — {dateLabel}</p>
         </div>
         <div className="ua-actions">
           <button className="ua-secondary" onClick={load} disabled={loading}>
@@ -107,6 +111,16 @@ export default function AdminUserActivity() {
       </div>
 
       <div className="ua-filters">
+        <div className="ua-day" role="tablist" aria-label="Day">
+          {[
+            ["today", "Today"],
+            ["yesterday", "Yesterday"],
+          ].map(([key, label]) => (
+            <button key={key} type="button" role="tab" aria-selected={day === key} className={day === key ? "active" : ""} onClick={() => setDay(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
         <label>
           App
           <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
@@ -149,7 +163,7 @@ export default function AdminUserActivity() {
               <strong>{data.totals.users}</strong>
             </button>
             <button className={`ua-card ua-card-good ${showOnly === "active" ? "selected" : ""}`} onClick={() => setShowOnly("active")}>
-              <span>Active today</span>
+              <span>{day === "yesterday" ? "Active yesterday" : "Active today"}</span>
               <strong>{data.totals.active}</strong>
             </button>
             <button className={`ua-card ua-card-muted ${showOnly === "inactive" ? "selected" : ""}`} onClick={() => setShowOnly("inactive")}>

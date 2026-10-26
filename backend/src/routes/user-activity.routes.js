@@ -5,10 +5,10 @@ const { allowRoles } = require("../middleware/roleMiddleware");
 const { ReportInputError, loadRoles, buildToday, exportToday } = require("../services/userActivityReport.service");
 
 // ---------------------------------------------------------------------------
-// Admin User Activity report - admin only. Always today's data.
+// Admin User Activity report - admin only. Today's data, or yesterday's (?day=yesterday).
 //
-// GET /api/user-activity/today?platform=&role=
-// GET /api/user-activity/export?format=pdf|xlsx&platform=&role=
+// GET /api/user-activity/today?day=today|yesterday&platform=&role=
+// GET /api/user-activity/export?format=pdf|xlsx&day=&platform=&role=
 // GET /api/user-activity/roles
 //
 // platform: web | android_app | old_android_app (empty = all apps).
