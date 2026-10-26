@@ -54,6 +54,7 @@ const crmQuoteMasterRoutes = require("./src/routes/crm-quote-master.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
+const userActivityRoutes = require("./src/routes/user-activity.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -127,6 +128,8 @@ app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
+// Admin User Activity report (logins + daily app usage, PDF/Excel export).
+app.use("/api/user-activity", userActivityRoutes);
 
 
 

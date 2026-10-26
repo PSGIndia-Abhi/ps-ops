@@ -227,6 +227,16 @@ export default function AdminLayout() {
                 </div>
               )}
 
+              {/* Logins and daily app usage of every user - admin only (the API refuses other roles). */}
+              {isAdmin && (
+                <button
+                  className={`nav-btn ${isActive("/admin/user-activity") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/user-activity")}
+                >
+                  User Activity
+                </button>
+              )}
+
               <button
                 className={`nav-btn ${isActive("/admin/group-management") ? "active" : ""}`}
                 onClick={() => navigate("/admin/group-management")}
@@ -352,6 +362,14 @@ export default function AdminLayout() {
                 }}
               >
                 Departments
+              </button>
+              <button
+                onClick={() => {
+                  setMobilePanel(null);
+                  navigate("/admin/user-activity");
+                }}
+              >
+                User Activity
               </button>
             </>
           )}

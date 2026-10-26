@@ -53,6 +53,7 @@ import AdminUserManagement from "./pages/AdminUserManagement";
 import AdminGroupManagement from "./pages/AdminGroupManagement";
 import AdminUserHierarchy from "./pages/AdminUserHierarchy";
 import AdminDepartments from "./pages/AdminDepartments";
+import AdminUserActivity from "./pages/AdminUserActivity";
 import StaffLayout from "./layouts/StaffLayout";
 // TaskPro (task management) — self-contained module, see pages/taskpro/
 import TaskProLayout from "./pages/taskpro/TaskProLayout";
@@ -125,6 +126,7 @@ const router = createBrowserRouter([
       { path: "user-management", element: <AdminUserManagement /> },
       { path: "user-hierarchy", element: <AdminUserHierarchy /> },
       { path: "departments", element: <AdminDepartments /> },
+      { path: "user-activity", element: <AdminUserActivity /> },
       { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },

@@ -7,6 +7,7 @@ const bcrypt = require("bcrypt");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { v4: uuid } = require("uuid");
+const { recordLoginEvent } = require("../utils/userActivity");
 
 async function ensureTemporaryAccessIssuerCanManageJob(req, job) {
   if (!job) return false;
@@ -62,6 +63,7 @@ LIMIT 1
     );
 
     if (!rows.length) {
+      recordLoginEvent(req, { client, email, success: false, reason: "unknown_email" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -69,6 +71,7 @@ LIMIT 1
 
     // 🔴 block if invite not accepted
     if (user.invite_status === "INVITED") {
+      recordLoginEvent(req, { client, userId: user.id, email, success: false, reason: "not_activated" });
       return res.status(403).json({
         error: "Please activate your account using invite link"
       });
@@ -76,6 +79,7 @@ LIMIT 1
 
     // 🔴 block if inactive
     if (user.is_active === 0) {
+      recordLoginEvent(req, { client, userId: user.id, email, success: false, reason: "inactive" });
       return res.status(403).json({
         error: "Account is inactive"
       });
@@ -84,6 +88,7 @@ LIMIT 1
     const match = await bcrypt.compare(password, user.password_hash);
 
     if (!match) {
+      recordLoginEvent(req, { client, userId: user.id, email, success: false, reason: "wrong_password" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -96,6 +101,8 @@ LIMIT 1
       process.env.JWT_SECRET,
       { expiresIn: client === "mobile" ? MOBILE_TOKEN_TTL : WEB_TOKEN_TTL }
     );
+
+    recordLoginEvent(req, { client, userId: user.id, email, success: true });
 
     res.json({
       token,
