@@ -1,21 +1,21 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
+import { FlatList, RefreshControl, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ChevronRightIcon, PinIcon, UsersIcon } from '../../components/icons';
+import { UsersIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
-import { toneColors, type Tone } from '../../crm/ui/StatusBadge';
-import { addDays, fmtDateShort, initials, todayStr } from '../../tasks/format';
+import type { Tone } from '../../crm/ui/StatusBadge';
+import { addDays, fmtDateShort, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { Performance, Person } from '../types';
-import { Card, StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen, personTone } from '../ui';
-import { formatINR } from '../../crm/format';
+import { StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 import { TargetCard, targetPercent } from '../TargetCard';
+import { TeamMemberRow, TeamSummary } from '../TeamReportParts';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -23,24 +23,8 @@ const factory = (t: CrmTheme) => ({
   title: { ...typography.display, color: t.textPrimary, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   range: { ...typography.caption, color: t.textMuted, marginTop: spacing.xs, marginBottom: spacing.md },
   tileRow: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.sm },
-  person: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.pill,
-    backgroundColor: t.primarySoftBg,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  avatarText: { ...typography.bodyMedium, color: t.primary },
-  personBody: { flex: 1 },
-  visitsIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center' as const, justifyContent: 'center' as const },
-  personName: { ...typography.bodyMedium, color: t.textPrimary },
-  personRole: { ...typography.caption, color: t.textMuted, marginTop: 2 },
-  targetLine: { ...typography.captionMedium, color: t.textSecondary, marginTop: 4 },
-  targetTrack: { height: 6, borderRadius: 3, backgroundColor: t.surfaceAlt, overflow: 'hidden' as const, marginTop: 4 },
-  targetFill: { height: 6, borderRadius: 3 },
-  targetNone: { ...typography.caption, color: t.primary, marginTop: 4 },
+  summarySkeleton: { marginBottom: spacing.lg },
+  teamHeading: { ...typography.overline, color: t.textMuted, marginBottom: spacing.sm },
 });
 
 type Range = 'today' | 'week' | 'month' | 'lifetime';
@@ -148,26 +132,37 @@ async function loadTeam(myId: number): Promise<Person[]> {
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Initials on a tint that is stable per person, so the list is easy to scan. */
-function PersonAvatar({ name }: { name: string }) {
-  const { styles, theme } = useCrmStyles(factory);
-  const { bg, fg } = toneColors(theme, personTone(name));
-  return (
-    <View style={[styles.avatar, { backgroundColor: bg }]}>
-      <Text style={[styles.avatarText, { color: fg }]}>{initials(name)}</Text>
-    </View>
-  );
-}
-
 export function TeamScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
   const { myIdNum } = useMe();
 
   const loader = useCallback(async () => {
-    const [team, targets] = await Promise.all([loadTeam(myIdNum), api.listTargets().catch(() => [] as api.SalesTarget[])]);
+    const [team, targets, visits] = await Promise.all([
+      loadTeam(myIdNum),
+      api.listTargets().catch(() => [] as api.SalesTarget[]),
+      api.teamVisits(todayStr()).catch(() => [] as api.TeamVisit[]),
+    ]);
     const byId = new Map(targets.map((t) => [t.userId, t]));
-    return team.map((p) => ({ ...p, target: byId.get(Number(p.id)) ?? null }));
+    const todays = visits.filter((v) => v.status !== 'CANCELLED');
+    const people = team.map((p) => ({
+      ...p,
+      target: byId.get(Number(p.id)) ?? null,
+      visitsToday: todays.filter((v) => String(v.salesEmployeeId) === String(p.id)).length,
+    }));
+    // Ranked by how much of their target they have reached; people without a target after, by amount.
+    const pct = (t: api.SalesTarget | null) => (t?.target ? targetPercent(t) ?? 0 : -1);
+    people.sort((a, b) => pct(b.target) - pct(a.target) || (b.target?.achieved ?? 0) - (a.target?.achieved ?? 0) || a.name.localeCompare(b.name));
+    const summary = {
+      month: targets[0]?.month,
+      target: people.reduce((s, p) => s + (p.target?.target ?? 0), 0),
+      achieved: people.reduce((s, p) => s + (p.target?.achieved ?? 0), 0),
+      // Only the people who have a target count towards the team's target %.
+      targetAchieved: people.reduce((s, p) => s + (p.target?.target ? p.target.achieved : 0), 0),
+      converted: people.reduce((s, p) => s + (p.target?.converted ?? 0), 0),
+      visitsToday: todays.length,
+    };
+    return { people, summary };
   }, [myIdNum]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the team.');
   useFocusEffect(
@@ -177,72 +172,46 @@ export function TeamScreen() {
     }, []),
   );
 
+  const openVisits = () => navigation.navigate('LeadTeamVisits');
+  let place = 0;
+  const ranked = (data?.people ?? []).map((p) => ({ ...p, rank: p.target?.target ? (place += 1) : null }));
+
   return (
     <LeadScreen edges={['top']}>
       {/* Opened from Home / More (the manager's tab is Follow-ups now). */}
       <TopBar title="Team report" onBack={() => navigation.goBack()} />
       <FlatList
-        data={data ?? []}
+        data={ranked}
         keyExtractor={(p) => String(p.id)}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
         ListHeaderComponent={
           <>
             <CrmErrorBanner message={error} onRetry={reload} />
-            <Pressable accessibilityRole="button" onPress={() => navigation.navigate('LeadTeamVisits')} style={({ pressed }) => pressed && { opacity: 0.75 }}>
-              <Card>
-                <View style={styles.person}>
-                  <View style={[styles.visitsIcon, { backgroundColor: theme.accentBg }]}>
-                    <PinIcon size={20} color={theme.accent} />
-                  </View>
-                  <View style={styles.personBody}>
-                    <Text style={styles.personName}>Team visits</Text>
-                    <Text style={styles.personRole}>Who visited where today - start, end and GPS</Text>
-                  </View>
-                  <ChevronRightIcon size={16} color={theme.textMuted} />
-                </View>
-              </Card>
-            </Pressable>
+            {data ? (
+              <TeamSummary {...data.summary} onVisits={openVisits} />
+            ) : loading ? (
+              <CrmSkeleton height={200} radius={radii.xl} style={styles.summarySkeleton} />
+            ) : null}
+            {ranked.length > 0 && <Text style={styles.teamHeading}>LEADERBOARD · THIS MONTH</Text>}
           </>
         }
         ListEmptyComponent={
           loading ? (
-            <CrmSkeleton height={76} radius={radii.lg} />
+            <CrmSkeleton height={96} radius={radii.xl} />
           ) : error ? undefined : (
             <CrmEmptyState title="No team members" subtitle="People who work leads will be listed here." icon={<UsersIcon size={30} color={theme.textMuted} />} />
           )
         }
         renderItem={({ item }) => (
-          <Pressable
-            accessibilityRole="button"
+          <TeamMemberRow
+            rank={item.rank}
+            name={item.name}
+            role={item.role ? api.roleName(item.role) : ''}
+            target={item.target}
+            visitsToday={item.visitsToday}
             onPress={() => navigation.navigate('LeadPerformance', { employeeId: item.id, name: item.name })}
-            style={({ pressed }) => pressed && { opacity: 0.75 }}
-          >
-            <Card>
-              <View style={styles.person}>
-                <PersonAvatar name={item.name} />
-                <View style={styles.personBody}>
-                  <Text style={styles.personName} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  {!!item.role && <Text style={styles.personRole}>{api.roleName(item.role)}</Text>}
-                  {item.target?.target ? (
-                    <>
-                      <Text style={styles.targetLine}>
-                        {formatINR(item.target.achieved)} of {formatINR(item.target.target)} · {targetPercent(item.target)}%
-                      </Text>
-                      <View style={styles.targetTrack}>
-                        <View style={[styles.targetFill, { width: `${Math.min(100, targetPercent(item.target) ?? 0)}%`, backgroundColor: (targetPercent(item.target) ?? 0) >= 100 ? theme.success : theme.primary }]} />
-                      </View>
-                    </>
-                  ) : item.target ? (
-                    <Text style={styles.targetNone}>No target this month - tap to set</Text>
-                  ) : null}
-                </View>
-                <ChevronRightIcon size={16} color={theme.textMuted} />
-              </View>
-            </Card>
-          </Pressable>
+          />
         )}
       />
     </LeadScreen>

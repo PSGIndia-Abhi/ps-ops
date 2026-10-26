@@ -241,7 +241,7 @@ export function StageBadge({ stage }: { stage: PipelineStage }) {
 type IconType = React.ComponentType<{ size?: number; color?: string }>;
 
 /** A two-colour diagonal fill for whatever it is placed in (the parent clips it to its own rounded shape). */
-function GradientFill({ from, to }: { from: string; to: string }) {
+export function GradientFill({ from, to }: { from: string; to: string }) {
   const id = useRef(`lead${Math.round(Math.random() * 1e9)}`).current;
   return (
     <Svg style={StyleSheet.absoluteFill} pointerEvents="none">

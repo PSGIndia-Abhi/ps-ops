@@ -140,7 +140,8 @@ export default function LeadsList() {
   // The sales manager's extra filters: who created the lead, its telecaller, its sales executive, when it was created.
   const [creator, setCreator] = useState("");
   const [telecaller, setTelecaller] = useState("");
-  const [salesPerson, setSalesPerson] = useState("");
+  // Pre-set when opened from a card on the sales manager's dashboard with a person picked (?sales=<id>).
+  const [salesPerson, setSalesPerson] = useState(params.get("sales") || "");
   const [created, setCreated] = useState("");
   const [adding, setAdding] = useState(false);
   const [calling, setCalling] = useState(null);

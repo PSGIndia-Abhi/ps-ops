@@ -16,6 +16,7 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import * as quote from '../quotation';
+import { QuotationPdfDialog, SendQuotationDialog } from '../QuotationDialogs';
 import type { Billing, MasterPlan, MasterService, QuoteMaster, TreatmentRow } from '../quotation';
 import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, useLoad } from '../ui';
 
@@ -139,6 +140,8 @@ function Builder({
   const [busy, setBusy] = useState<'' | 'preview' | 'send'>('');
   const [problem, setProblem] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [askSend, setAskSend] = useState<quote.QuotationContent | null>(null); // "Save and send?" open
+  const [sent, setSent] = useState<{ id: string; number: string; name: string } | null>(null); // just saved
 
   const serviceById = useMemo(() => new Map(master.services.map((s) => [s.id, s])), [master]);
   const planById = useMemo(() => new Map(master.plans.map((p) => [p.id, p])), [master]);
@@ -284,14 +287,7 @@ function Builder({
     const { content, problem: p } = build();
     if (!content) return setProblem(p || null);
     setProblem(null);
-    Alert.alert(
-      'Save and send?',
-      'The quotation gets its number, the PDF is saved on the lead and the lead moves to "Quotation sent".',
-      [
-        { text: 'Back', style: 'cancel' },
-        { text: 'Save & send', onPress: () => send(content) },
-      ],
-    );
+    setAskSend(content);
   }
 
   async function send(content: quote.QuotationContent) {
@@ -299,32 +295,8 @@ function Builder({
     try {
       const q = await quote.generateQuotation(leadId, content);
       setBusy('');
-      const afterOpen = () => navigation.goBack();
-      Alert.alert(`${q.number} saved`, 'Open the PDF to check it and share it with the customer.', [
-        { text: 'Done', style: 'cancel', onPress: afterOpen },
-        {
-          text: 'Save to Downloads',
-          onPress: async () => {
-            try {
-              await quote.saveToDownloads(await quote.savedQuotationPdf(leadId, q.id, q.number));
-              Alert.alert('Saved', `${q.number}.pdf is in Downloads/BestServe.`, [{ text: 'OK', onPress: afterOpen }]);
-            } catch (err) {
-              Alert.alert('Could not save', errorMessage(err, 'Please try again from the lead.'), [{ text: 'OK', onPress: afterOpen }]);
-            }
-          },
-        },
-        {
-          text: 'Open PDF',
-          onPress: async () => {
-            try {
-              await quote.openPdf(await quote.savedQuotationPdf(leadId, q.id, q.number));
-            } catch (err) {
-              Alert.alert('Could not open the PDF', errorMessage(err, 'Open it later from the lead.'));
-            }
-            afterOpen();
-          },
-        },
-      ]);
+      // Done / Open PDF on this card go back to the lead.
+      setSent({ id: q.id, number: q.number, name: content.customer.name });
     } catch (err) {
       setBusy('');
       setProblem(errorMessage(err, 'Could not save the quotation. Check your connection and try again.'));
@@ -653,6 +625,28 @@ function Builder({
             confirm.onConfirm?.();
             setConfirm(null);
           }}
+        />
+      )}
+
+      {askSend && (
+        <SendQuotationDialog
+          name={askSend.customer.name}
+          onCancel={() => setAskSend(null)}
+          onSend={() => {
+            const content = askSend;
+            setAskSend(null);
+            send(content);
+          }}
+        />
+      )}
+
+      {sent && (
+        <QuotationPdfDialog
+          saved
+          name={sent.name}
+          getFile={() => quote.savedQuotationPdf(leadId, sent.id, sent.number)}
+          onOpened={() => navigation.goBack()}
+          onClose={() => navigation.goBack()}
         />
       )}
 

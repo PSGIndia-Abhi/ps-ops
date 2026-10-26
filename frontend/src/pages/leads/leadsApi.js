@@ -832,13 +832,27 @@ export const leadTeam = () => state.people.filter((u) => u.role !== "lead_provid
 
 // ---- quotations ---------------------------------------------------------------
 
+/**
+ * The file a quotation PDF downloads as: CLIENTNAME_PROPOSAL_YEAR.pdf, e.g. ABC_Foods_Pvt_Ltd_PROPOSAL_2026.pdf
+ * (the same rule as the server's proposalFileName).
+ */
+export function proposalFileName(clientName, year = new Date().getFullYear()) {
+  const name = String(clientName || "Customer").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "Customer";
+  return `${name}_PROPOSAL_${year}.pdf`;
+}
+
 const toQuotation = (row) => ({
   id: row.id,
+  // Kept for the records (PDF, lead history); the screens show the client name instead.
   number: row.quotation_number,
+  clientName: row.client_name || "",
+  fileName: row.file_name || proposalFileName(row.client_name),
   total: Number(row.total_amount) || 0,
   status: row.status,
   sentAt: wall(row.sent_at),
   hasPdf: !!row.pdf_object_key,
+  // Built with Create Quotation (its details are saved), so it can be edited or duplicated.
+  hasContent: !!row.has_content,
   createdBy: row.created_by === null || row.created_by === undefined ? "" : String(row.created_by),
 });
 
@@ -855,16 +869,8 @@ export async function listQuotations(leadId) {
   return rows.map(toQuotation);
 }
 
-/** POST /leads/{id}/quotations with the quotation as a PDF. The lead moves to Quotation Sent. */
-export async function uploadQuotation(leadId, { file, totalAmount, notes }) {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("totalAmount", String(totalAmount));
-  if (notes?.trim()) form.append("notes", notes.trim().slice(0, 300));
-  const row = await request(`/api/crm/leads/${leadId}/quotations`, { method: "POST", form });
-  await loadWorkspace();
-  return toQuotation(row);
-}
+/** GET /leads/{id}/quotations/{qid}/content - what a quotation built here was made from, to edit or duplicate it. */
+export const getQuotationContent = (leadId, quotationId) => request(`/api/crm/leads/${leadId}/quotations/${quotationId}/content`);
 
 // ---- quotation builder (quotations made from the quotation master) -----------
 
@@ -879,21 +885,26 @@ export async function previewQuotation(leadId, content) {
   return URL.createObjectURL(await res.blob());
 }
 
-/** POST /leads/{id}/quotations/generate - numbers and saves the quotation and its PDF; the lead moves to Quotation Sent. */
-export async function generateQuotation(leadId, content) {
-  const row = await request(`/api/crm/leads/${leadId}/quotations/generate`, { method: "POST", body: content });
+/**
+ * POST /leads/{id}/quotations/generate - numbers and saves the quotation and its PDF; the lead moves to
+ * Quotation Sent. replacesQuotationId (an edit): that quotation is marked Cancelled, replaced by this one.
+ */
+export async function generateQuotation(leadId, content, { replacesQuotationId } = {}) {
+  const body = replacesQuotationId ? { ...content, replacesQuotationId } : content;
+  const row = await request(`/api/crm/leads/${leadId}/quotations/generate`, { method: "POST", body });
   await loadWorkspace();
   return toQuotation(row);
 }
 
-/** Opens a quotation's PDF in a new tab. Fetched with the session token, since a plain link would not carry it. */
-export async function openQuotationPdf(leadId, quotationId) {
+/**
+ * A quotation's PDF as a blob URL (revoke it when done), shown in the page's own viewer so its
+ * Download button can save it under the proposal's name. Fetched with the session token, since a
+ * plain link would not carry it.
+ */
+export async function fetchQuotationPdf(leadId, quotationId) {
   const res = await fetch(`${API_BASE}/api/crm/leads/${leadId}/quotations/${quotationId}/pdf`, {
     headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
   });
   if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not open the quotation.");
-  const url = URL.createObjectURL(await res.blob());
-  window.open(url, "_blank", "noopener");
-  // Long enough for the new tab to load it; then the copy held in memory is released.
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return URL.createObjectURL(await res.blob());
 }

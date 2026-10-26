@@ -23,7 +23,6 @@ import {
   FiSend,
   FiSmartphone,
   FiThumbsDown,
-  FiUploadCloud,
   FiUser,
   FiUserCheck,
   FiUsers,
@@ -39,12 +38,11 @@ import {
   FollowUpModal,
   MeetingChangeModal,
   ProviderUpdateModal,
-  QuotationModal,
   ScheduleMeetingModal,
   VisitModal,
 } from "./dialogs";
-import { getConversion, listQuotations, openQuotationPdf, providerName, useLeadData, userName } from "./leadsApi";
-import QuotationBuilder from "./QuotationBuilder";
+import { fetchQuotationPdf, getConversion, listQuotations, providerName, useLeadData, userName } from "./leadsApi";
+import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
 import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
@@ -146,12 +144,17 @@ function Journey({ lead, timeline, showWho }) {
   );
 }
 
-/** A lead's quotations: what has been sent, each one's PDF, and the button to upload another. */
-function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refreshKey }) {
+/**
+ * A lead's quotations: what has been sent, each one's PDF, and the button to create another.
+ * A standing quotation made with Create Quotation can be duplicated (a new one from its details)
+ * or edited (a new one that replaces it - the old one stays, marked Cancelled).
+ */
+function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, refreshKey }) {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [opening, setOpening] = useState(null);
+  const [viewing, setViewing] = useState(null); // { url, fileName } of the PDF on screen
 
   // The lead's history grows with every upload or cancellation, which is what brings the change in.
   useEffect(() => {
@@ -167,7 +170,8 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
   async function open(q) {
     setOpening(q.id);
     try {
-      await openQuotationPdf(lead.id, q.id);
+      const url = await fetchQuotationPdf(lead.id, q.id);
+      setViewing({ url, fileName: q.fileName });
     } catch (err) {
       toast(err.message || "Could not open the quotation.", true);
     } finally {
@@ -175,22 +179,17 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
     }
   }
 
-  // Build one from the quotation master, or upload a PDF prepared elsewhere.
+  // Built from the quotation master.
   const add = canAdd && (
-    <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-      <Button icon={<FiFileText />} onClick={onBuild}>
-        Create Quotation
-      </Button>
-      <Button variant="ghost" icon={<FiUploadCloud />} onClick={onAdd}>
-        Upload PDF
-      </Button>
-    </span>
+    <Button icon={<FiFileText />} onClick={onBuild}>
+      Create Quotation
+    </Button>
   );
 
   if (error) return <Empty title="Could not load quotations" text={error} icon={<FiFileText />} />;
   if (!rows) return <Empty title="Loading quotations..." icon={<FiFileText />} />;
   if (rows.length === 0) {
-    return <Empty title="No quotations yet" text={canAdd ? "Create the quotation from the services the customer wants, or upload a PDF prepared elsewhere." : "A quotation appears here once the sales team sends one."} icon={<FiFileText />} action={add} />;
+    return <Empty title="No quotations yet" text={canAdd ? "Create the quotation from the services the customer wants." : "A quotation appears here once the sales team sends one."} icon={<FiFileText />} action={add} />;
   }
 
   return (
@@ -200,7 +199,7 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
         <table className="lm-table">
           <thead>
             <tr>
-              <th>Quotation No</th>
+              <th>Client</th>
               <th>Amount</th>
               <th>Sent</th>
               <th>Status</th>
@@ -211,7 +210,7 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
             {rows.map((q, i) => (
               <tr key={q.id} style={{ "--i": i, cursor: "default", opacity: q.status === "CANCELLED" ? 0.6 : 1 }}>
                 <td>
-                  <strong style={q.status === "CANCELLED" ? { textDecoration: "line-through" } : undefined}>{q.number}</strong>
+                  <strong style={q.status === "CANCELLED" ? { textDecoration: "line-through" } : undefined}>{q.clientName || lead.company || lead.contact}</strong>
                 </td>
                 <td className="num">{money(q.total)}</td>
                 <td className="muted">{dateTime(q.sentAt)}</td>
@@ -227,6 +226,16 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
                     ) : (
                       <span className="muted">No PDF</span>
                     )}
+                    {q.status !== "CANCELLED" && q.hasContent && canAdd && canCancel?.(q) && (
+                      <Button size="sm" variant="ghost" icon={<FiEdit2 />} onClick={() => onReopen(q, "edit")}>
+                        Edit
+                      </Button>
+                    )}
+                    {q.status !== "CANCELLED" && q.hasContent && canAdd && (
+                      <Button size="sm" variant="ghost" icon={<FiCopy />} onClick={() => onReopen(q, "duplicate")}>
+                        Duplicate
+                      </Button>
+                    )}
                     {q.status !== "CANCELLED" && canCancel?.(q) && (
                       <Button size="sm" variant="danger" icon={<FiXCircle />} onClick={() => onCancel(q)}>
                         Cancel
@@ -239,6 +248,17 @@ function QuotationsTab({ lead, canAdd, onAdd, onBuild, canCancel, onCancel, refr
           </tbody>
         </table>
       </div>
+      {viewing && (
+        <PreviewOverlay
+          url={viewing.url}
+          fileName={viewing.fileName}
+          title={viewing.fileName}
+          onClose={() => {
+            URL.revokeObjectURL(viewing.url);
+            setViewing(null);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -685,8 +705,8 @@ export default function LeadDetail() {
             <QuotationsTab
               lead={lead}
               canAdd={canSell && !closed}
-              onAdd={() => setDialog("quotation")}
-              onBuild={() => setDialog("buildQuote")}
+              onBuild={() => setDialog({ buildQuote: {} })}
+              onReopen={(q, mode) => setDialog({ buildQuote: { from: q, mode } })}
               // The server's rule: whoever sent it, a lead manager or admin, while the lead is open.
               canCancel={(q) => !closed && (q.createdBy === myId || viewer.canPick || !!me?.canManage)}
               onCancel={(q) => setDialog({ cancelQuote: q })}
@@ -698,8 +718,7 @@ export default function LeadDetail() {
 
       {dialog === "call" && <CallVerifyModal lead={lead} onClose={() => setDialog(null)} onScheduleMeeting={() => setDialog("meeting")} />}
       {dialog === "meeting" && <ScheduleMeetingModal lead={lead} onClose={() => setDialog(null)} />}
-      {dialog === "quotation" && <QuotationModal lead={lead} onClose={() => setDialog(null)} />}
-      {dialog === "buildQuote" && <QuotationBuilder lead={lead} onClose={() => setDialog(null)} />}
+      {dialog?.buildQuote && <QuotationBuilder lead={lead} from={dialog.buildQuote.from} mode={dialog.buildQuote.mode} onClose={() => setDialog(null)} />}
       {dialog === "won" && <CloseLeadModal lead={lead} won onClose={() => setDialog(null)} />}
       {dialog === "lost" && <CloseLeadModal lead={lead} won={false} onClose={() => setDialog(null)} />}
       {dialog?.visit && <VisitModal meeting={dialog.visit} lead={lead} onClose={() => setDialog(null)} />}
