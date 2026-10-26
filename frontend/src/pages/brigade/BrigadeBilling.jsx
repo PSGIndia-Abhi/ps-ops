@@ -113,6 +113,7 @@ function PoList({ onOpen }) {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [newPo, setNewPo] = useState(null); // null | prefilled PO number
 
   useEffect(() => {
     brigadeRequest("/api/brigade/billing/pos")
@@ -157,9 +158,10 @@ function PoList({ onOpen }) {
   const typed = query.trim();
   const exact = typed && pos.find((p) => p.po_number.toLowerCase() === typed.toLowerCase());
 
+  // Enter in the search box opens a PO only when the number matches exactly.
   function submit(e) {
     e.preventDefault();
-    if (typed) onOpen(exact ? exact.po_number : typed);
+    if (exact) onOpen(exact.po_number);
   }
 
   const overallPct = usedPct(summary.billedAgainst, summary.value);
@@ -171,6 +173,12 @@ function PoList({ onOpen }) {
           <h2 className="bgb-h1">Billing</h2>
           <p className="bgb-lede">Client purchase orders and the services billed against them. Amounts exclude GST.</p>
         </div>
+        <button type="button" className="primary bgb-new-po" onClick={() => setNewPo("")}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New PO
+        </button>
       </div>
 
       {error && <div className="bg-error">{error}</div>}
@@ -231,13 +239,10 @@ function PoList({ onOpen }) {
               value={query}
               maxLength={100}
               placeholder="Search PO, property or flat"
-              aria-label="Search or open a PO"
+              aria-label="Search POs"
               onChange={(e) => setQuery(e.target.value)}
               autoComplete="off"
             />
-            <button type="submit" className="primary" disabled={!typed}>
-              {typed && !exact ? "+ New PO" : "Open"}
-            </button>
           </form>
         </div>
 
@@ -246,14 +251,14 @@ function PoList({ onOpen }) {
         ) : !pos.length ? (
           <div className="bg-empty-state">
             <strong>No purchase orders yet</strong>
-            POs typed during booking appear here. To start one, type its number in the search box and press New PO.
+            POs typed during booking appear here. Use “New PO” to start one.
           </div>
         ) : !shown.length ? (
           <div className="bg-empty-state">
             <strong>No matching POs</strong>
             {typed && !exact ? (
-              <button type="button" className="bg-link-btn" onClick={() => onOpen(typed)}>
-                Start a new PO “{typed}”
+              <button type="button" className="bg-link-btn" onClick={() => setNewPo(typed)}>
+                Create a new PO “{typed}”
               </button>
             ) : (
               "Try another search or filter."
@@ -313,6 +318,81 @@ function PoList({ onOpen }) {
           </div>
         )}
       </section>
+
+      {newPo !== null && (
+        <NewPoDialog
+          initial={newPo}
+          existing={pos}
+          onClose={() => setNewPo(null)}
+          onCreate={(number) => {
+            setNewPo(null);
+            onOpen(number);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// "New PO": enter the number, then the PO opens to add its details and services.
+function NewPoDialog({ initial, existing, onClose, onCreate }) {
+  const [number, setNumber] = useState(initial || "");
+  const value = number.trim();
+  const match = value && existing.find((p) => p.po_number.toLowerCase() === value.toLowerCase());
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function submit(e) {
+    e.preventDefault();
+    if (!value) return;
+    onCreate(match ? match.po_number : value);
+  }
+
+  return (
+    <div className="bgm-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="bgb-newpo" role="dialog" aria-modal="true" aria-labelledby="bgb-newpo-title" onSubmit={submit}>
+        <div className="bgb-newpo-head">
+          <span className="bgb-newpo-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
+              <path d="M14 3v5h5M12 11v6M9 14h6" />
+            </svg>
+          </span>
+          <div>
+            <h3 id="bgb-newpo-title">New purchase order</h3>
+            <p>Enter the client PO number. Next you add the PO details and the services it covers.</p>
+          </div>
+        </div>
+
+        <div className="bgb-meta-field">
+          <label htmlFor="bgb-newpo-number">PO number</label>
+          <input
+            id="bgb-newpo-number"
+            value={number}
+            maxLength={100}
+            placeholder="e.g. 4500012345"
+            autoFocus
+            autoComplete="off"
+            onChange={(e) => setNumber(e.target.value)}
+          />
+          {match ? (
+            <span className="bgb-newpo-note warn">PO {match.po_number} already exists — it will open as it is.</span>
+          ) : (
+            <span className="bgb-newpo-note">Use the number exactly as it is on the client&apos;s PO.</span>
+          )}
+        </div>
+
+        <div className="bgb-newpo-foot">
+          <button type="button" className="bgb-btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="primary" disabled={!value}>
+            {match ? "Open PO" : "Create PO"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

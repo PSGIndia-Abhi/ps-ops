@@ -598,9 +598,10 @@ function summariseFlatJobs(jobs) {
 
 const FLAT_JOBS_SELECT = `
   SELECT j.id, j.code, j.sub_service, j.status, j.start_date, j.completed_at, j.created_at,
-         bd.company_id, co.name AS property, bd.flat_number, bd.bhk
+         bd.company_id, co.name AS property, bd.flat_number, bd.bhk, bd.site_id, b.contact_id
   FROM jobs j
   JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
+  JOIN bookings b ON b.id = j.booking_id
   LEFT JOIN companies co ON co.id = bd.company_id
   WHERE j.status <> 'CANCELED'
 `;
@@ -705,7 +706,8 @@ function readPo(body) {
 // POST /api/brigade/bookings
 async function createBrigadeBooking(req, res) {
   try {
-    const body = req.body || {};
+    const requestId = trimString(req.body?.request_id);
+    const body = requestId ? await bookingBodyFromRequest(requestId, req.body || {}) : req.body || {};
     const companyId = trimString(body.company_id);
     const siteId = trimString(body.site_id);
     const contactId = trimString(body.contact_id);
@@ -807,9 +809,31 @@ async function createBrigadeBooking(req, res) {
       ]
     );
 
+    if (requestId) {
+      await pool.query(
+        `UPDATE brigade_flat_requests
+         SET status = 'BOOKED', booking_id = ?, booked_at = NOW(), booked_by_user_id = ?
+         WHERE id = ? AND status = 'PENDING'`,
+        [bookingId, req.user.id, requestId]
+      );
+    } else {
+      // Booked straight from the form: the same flat waiting in Pending is done too.
+      await pool
+        .query(
+          `UPDATE brigade_flat_requests
+           SET status = 'BOOKED', booking_id = ?, booked_at = NOW(), booked_by_user_id = ?
+           WHERE company_id = ? AND flat_number = ? AND status = 'PENDING'`,
+          [bookingId, req.user.id, companyId, flat.flat_number]
+        )
+        .catch((err) => {
+          if (err?.code !== "ER_NO_SUCH_TABLE") throw err;
+        });
+    }
+
     res.json({
       ...payload,
       booking_id: bookingId,
+      request_id: requestId || null,
       brigade: {
         flat_number: flat.flat_number,
         bhk: flat.bhk,
@@ -818,8 +842,147 @@ async function createBrigadeBooking(req, res) {
       },
     });
   } catch (err) {
-    sendError(res, err, "Failed to create Brigade booking");
+    sendRequestError(res, err, "Failed to create Brigade booking");
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Flat requests: step 1 of a Brigade booking (flat only, no job yet)  */
+/* ------------------------------------------------------------------ */
+
+function sendRequestError(res, err, fallback) {
+  if (err?.code === "ER_NO_SUCH_TABLE") {
+    return res.status(500).json({ error: "Flat requests are not set up yet. Run brigade_flat_requests.sql on the database." });
+  }
+  return sendError(res, err, fallback);
+}
+
+const FLAT_REQUEST_SELECT = `
+  SELECT r.id, r.company_id, co.name AS property, r.site_id, s.name AS site_name,
+         r.flat_number, r.bhk, r.contact_id, c.name AS contact_name, c.phone AS contact_phone,
+         r.address, r.client_po_number, r.po_source, DATE_FORMAT(r.po_date, '%Y-%m-%d') AS po_date,
+         r.po_amount, r.notes, r.status, r.booking_id, r.created_at, r.booked_at,
+         u.name AS created_by
+  FROM brigade_flat_requests r
+  LEFT JOIN companies co ON co.id = r.company_id
+  LEFT JOIN sites s ON s.id = r.site_id
+  LEFT JOIN contacts c ON c.id = r.contact_id
+  LEFT JOIN users u ON u.id = r.created_by_user_id
+`;
+
+function toFlatRequest(row) {
+  return { ...row, po_amount: row.po_amount === null ? null : Number(row.po_amount) };
+}
+
+// Property site + requested-by contact checks shared by requests and bookings.
+async function readBrigadeSiteAndContact(db, companyId, siteId, contactId) {
+  await assertBrigadeCompany(db, companyId);
+  const [[site]] = await db.query(
+    `SELECT id, name, address, city, state
+     FROM sites WHERE id = ? AND company_id = ? AND is_active = 1`,
+    [siteId, companyId]
+  );
+  if (!site) throw withStatus("Please choose the property site", 400);
+  if (!contactId || !(await isBrigadeContact(db, contactId))) {
+    throw withStatus("Please select who is requesting this booking", 400);
+  }
+  const [[contact]] = await db.query("SELECT company_id FROM contacts WHERE id = ?", [contactId]);
+  if (String(contact?.company_id) !== String(site.id)) {
+    throw withStatus("The requested-by contact must belong to the selected property site", 400);
+  }
+  return site;
+}
+
+// POST /api/brigade/flat-requests
+// { company_id, site_id, flat_number, bhk, contact_id, address?, client_po?, notes? }
+async function createFlatRequest(req, res) {
+  try {
+    const body = req.body || {};
+    const companyId = trimString(body.company_id);
+    const site = await readBrigadeSiteAndContact(pool, companyId, trimString(body.site_id), trimString(body.contact_id));
+    const flat = await readFlatAndBhk(pool, companyId, body.flat_number, body.bhk);
+    const po = readPo(body);
+    const notes = trimString(body.notes) || null;
+    const siteAddress = [site.address, site.city, site.state].map(trimString).filter(Boolean).join(", ");
+    const address = trimString(body.address) || siteAddress || null;
+
+    const [[pending]] = await pool.query(
+      "SELECT id FROM brigade_flat_requests WHERE company_id = ? AND flat_number = ? AND status = 'PENDING'",
+      [companyId, flat.flat_number]
+    );
+    if (pending) throw withStatus(`${flat.flat_number} is already waiting for services in Pending`, 409);
+
+    const id = uuid();
+    await pool.query(
+      `INSERT INTO brigade_flat_requests
+       (id, company_id, site_id, flat_number, bhk, contact_id, address,
+        client_po_number, po_source, po_date, po_amount, notes, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, companyId, site.id, flat.flat_number, flat.bhk, trimString(body.contact_id), address,
+        po.number, po.source, po.date, po.amount, notes, req.user.id]
+    );
+    const [[row]] = await pool.query(`${FLAT_REQUEST_SELECT} WHERE r.id = ?`, [id]);
+    res.status(201).json(toFlatRequest(row));
+  } catch (err) {
+    sendRequestError(res, err, "Failed to save the flat");
+  }
+}
+
+// GET /api/brigade/flat-requests?status=PENDING|BOOKED|CANCELED
+async function listFlatRequests(req, res) {
+  try {
+    const status = ["PENDING", "BOOKED", "CANCELED"].includes(req.query.status) ? req.query.status : "PENDING";
+    const [rows] = await pool.query(
+      `${FLAT_REQUEST_SELECT} WHERE r.status = ? ORDER BY r.created_at DESC`,
+      [status]
+    );
+    res.json(rows.map(toFlatRequest));
+  } catch (err) {
+    sendRequestError(res, err, "Failed to load pending flats");
+  }
+}
+
+// POST /api/brigade/flat-requests/:id/cancel
+async function cancelFlatRequest(req, res) {
+  try {
+    const [result] = await pool.query(
+      "UPDATE brigade_flat_requests SET status = 'CANCELED', canceled_at = NOW() WHERE id = ? AND status = 'PENDING'",
+      [req.params.id]
+    );
+    if (!result.affectedRows) throw withStatus("This flat is not pending any more", 409);
+    res.json({ success: true });
+  } catch (err) {
+    sendRequestError(res, err, "Failed to cancel");
+  }
+}
+
+// Step 2: the booking body for a pending request — property, flat, BHK,
+// requested by, address and PO always come from the request.
+async function bookingBodyFromRequest(requestId, body) {
+  const [[request]] = await pool.query(
+    `SELECT id, company_id, site_id, flat_number, bhk, contact_id, address, notes,
+            client_po_number, po_source, DATE_FORMAT(po_date, '%Y-%m-%d') AS po_date, po_amount, status
+     FROM brigade_flat_requests WHERE id = ?`,
+    [requestId]
+  );
+  if (!request) throw withStatus("Pending flat not found", 404);
+  if (request.status !== "PENDING") throw withStatus("This flat is not pending any more", 409);
+  return {
+    ...body,
+    company_id: request.company_id,
+    site_id: request.site_id,
+    contact_id: request.contact_id,
+    flat_number: request.flat_number,
+    bhk: request.bhk,
+    address: request.address || body.address,
+    notes: trimString(body.notes) || request.notes || null,
+    client_po: {
+      number: request.client_po_number || "",
+      source: request.po_source || "",
+      date: request.po_date || "",
+      amount: request.po_amount,
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1427,6 +1590,8 @@ async function getFlatsStatus(req, res) {
           property: row.property,
           flat_number: row.flat_number,
           bhk: row.bhk, // latest booking first
+          site_id: row.site_id,
+          contact_id: row.contact_id,
           last_activity: row.created_at,
           jobs: [],
         });
@@ -1441,6 +1606,8 @@ async function getFlatsStatus(req, res) {
         property: flat.property,
         flat_number: flat.flat_number,
         bhk: flat.bhk,
+        site_id: flat.site_id,
+        contact_id: flat.contact_id,
         last_activity: flat.last_activity,
         services,
         completed: services.filter((s) => s.state === "completed").length,
@@ -1709,4 +1876,7 @@ module.exports = {
   getJobFlats,
   getJobFlatCard,
   getFlatsReport,
+  createFlatRequest,
+  listFlatRequests,
+  cancelFlatRequest,
 };

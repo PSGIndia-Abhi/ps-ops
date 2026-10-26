@@ -37,6 +37,10 @@ router.delete("/prices/:id", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_
 // Booking form
 router.get("/quote", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getQuote);
 router.post("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.createBrigadeBooking);
+// Step 1: flat only (Pending); step 2 books services with { request_id } on POST /bookings
+router.post("/flat-requests", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.createFlatRequest);
+router.get("/flat-requests", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listFlatRequests);
+router.post("/flat-requests/:id/cancel", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.cancelFlatRequest);
 router.get("/bookings", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.listBrigadeBookings);
 
 // Flat history (booking form), flats board + job flats (dashboard), flat card (job page)

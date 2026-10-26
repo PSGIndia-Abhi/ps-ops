@@ -12,13 +12,16 @@ import {
 } from "./brigadeShared";
 import "./brigade.css";
 
-// Brigade booking form. Left: Property, flat number (typed) + BHK (master) →
-// Deep Cleaning services (price + what was already done for that flat) →
-// Requested by → Schedule → Team → Client PO → Notes.
-// Right: live summary with the total and what is still missing.
-// Saved through POST /api/brigade/bookings, which re-checks the flat, BHK,
-// prices and refuses a service that is already booked for the flat.
-export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
+// Brigade booking.
+//  New booking (no forFlat): Property, flat number + BHK, Services (optional),
+//    Requested by, Client PO, Notes. With services picked, Schedule + Team show
+//    and "Create jobs" books them (POST /api/brigade/bookings). Without
+//    services, "Save flat" keeps the flat in Pending (POST /api/brigade/flat-requests).
+//  Add services (forFlat = a pending request or a booked flat): the flat is
+//    fixed at the top; Services → Schedule → Team (→ PO) → Notes → jobs.
+// Right: live summary and what is still missing.
+export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFlat = null }) {
+  const isServicesStep = Boolean(forFlat);
   const [properties, setProperties] = useState([]);
   const [subServicesAll, setSubServicesAll] = useState([]);
   const [bhkTypes, setBhkTypes] = useState([]); // names from the BHK types master
@@ -74,6 +77,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
         setSubServicesAll(meta?.sub_services || []);
         setBhkTypes(meta?.bhk_types || []);
         setProperties(Array.isArray(props) ? props : []);
+        if (forFlat) setPropertyKey(`${forFlat.company_id}|${forFlat.site_id}`);
       } catch (err) {
         if (!cancelled) setSetupError(err.message || "Failed to load Brigade properties");
       } finally {
@@ -99,6 +103,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const propertyOptions = useMemo(() => {
@@ -126,8 +131,10 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
 
   /* ---------- property change: reset flat, load contacts, address ---------- */
   useEffect(() => {
-    setFlatInput("");
-    setBhk("");
+    // Step 2 keeps the flat it was opened for.
+    const keep = forFlat && propertyKey === `${forFlat.company_id}|${forFlat.site_id}` ? forFlat : null;
+    setFlatInput(keep ? keep.flat_number : "");
+    setBhk(keep ? keep.bhk : "");
     setBhkFromHistory(false);
     setHistory(null);
     setFlat(null);
@@ -135,13 +142,13 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
     setPrices({});
     setSelectedServices([]);
     setSchedules({});
-    setContactId("");
+    setContactId(keep ? keep.contact_id || "" : "");
     setContacts([]);
     if (!site) {
       setAddress("");
       return;
     }
-    setAddress([site.address, site.city, site.state].filter(Boolean).join(", "));
+    setAddress(keep?.address || [site.address, site.city, site.state].filter(Boolean).join(", "));
 
     let cancelled = false;
     setLoadingContacts(true);
@@ -296,26 +303,71 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
   if (!site) missing.push("Choose the property");
   else if (!flatValid) missing.push("Enter the flat number");
   else if (!bhk) missing.push("Choose the BHK");
-  if (flat && !selectedServices.length) missing.push("Pick at least one service");
   if (!contactId) missing.push("Choose who is requesting");
   const undated = selectedServices.filter((s) => !schedules[s]?.start_date);
-  if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
-  if (!team.supervisorId) missing.push("Assign a supervisor");
-  if (!team.technicianIds.length) missing.push("Assign at least one technician");
+  // Jobs are made when services are picked (always on "Add services").
+  const makesJobs = isServicesStep || selectedServices.length > 0;
+  if (isServicesStep && flat && !selectedServices.length) missing.push("Pick at least one service");
+  if (makesJobs) {
+    if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
+    if (!team.supervisorId) missing.push("Assign a supervisor");
+    if (!team.technicianIds.length) missing.push("Assign at least one technician");
+  }
+  const showPo = !forFlat?.request_id; // a pending flat already carries its PO
   const poAmountInvalid = po.amount !== "" && (!Number.isFinite(Number(po.amount)) || Number(po.amount) < 0);
   if (poAmountInvalid) missing.push("Fix the PO amount");
 
   const stepDone = {
-    property: Boolean(flat),
+    property: isServicesStep ? Boolean(flat) : Boolean(flatValid && bhk),
     services: selectedServices.length > 0,
     contact: Boolean(contactId),
     schedule: selectedServices.length > 0 && undated.length === 0,
     team: Boolean(team.supervisorId && team.technicianIds.length),
   };
 
+  const clientPo = () => ({
+    number: po.number.trim(),
+    source: po.source.trim(),
+    date: po.date,
+    amount: po.amount === "" ? null : Number(po.amount),
+  });
+
+  // Step 1: save the flat only (Pending) — no services, dates or team.
+  async function saveFlatRequest() {
+    setSaving(true);
+    try {
+      const data = await brigadeRequest("/api/brigade/flat-requests", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyId,
+          site_id: site.id,
+          flat_number: flatNumber,
+          bhk,
+          contact_id: contactId,
+          address: address.trim(),
+          client_po: clientPo(),
+          notes: notes.trim(),
+        }),
+      });
+      onCreated?.(data);
+      setStatus({
+        type: "success",
+        message: `Flat ${data.flat_number} saved to Pending. Add services and team when ready.`,
+      });
+    } catch (err) {
+      setStatus({ type: "error", message: err.message || "Failed to save the flat" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSubmit() {
     if (missing.length) {
       setStatus({ type: "error", message: `${missing[0]}.` });
+      return;
+    }
+    if (!makesJobs) {
+      saveFlatRequest();
       return;
     }
     if (!flat) {
@@ -336,6 +388,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
       const data = await brigadeRequest("/api/brigade/bookings", {
         method: "POST",
         body: JSON.stringify({
+          request_id: forFlat?.request_id || undefined,
           company_id: companyId,
           site_id: site.id,
           flat_number: flat.flat_number,
@@ -347,17 +400,15 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
           serviceSchedules,
           supervisor_id: team.supervisorId,
           technician_ids: team.technicianIds,
-          client_po: {
-            number: po.number.trim(),
-            source: po.source.trim(),
-            date: po.date,
-            amount: po.amount === "" ? null : Number(po.amount),
-          },
+          client_po: showPo ? clientPo() : undefined,
           notes: notes.trim(),
         }),
       });
       onCreated?.(data);
-      setStatus({ type: "success", message: "Booking created successfully" });
+      setStatus({
+        type: "success",
+        message: `${data.jobs?.length || selectedServices.length} job${(data.jobs?.length || selectedServices.length) === 1 ? "" : "s"} created for flat ${flat.flat_number}`,
+      });
     } catch (err) {
       setStatus({ type: "error", message: err.message || "Failed to create booking" });
     } finally {
@@ -374,14 +425,26 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
       }
     : null;
 
+  // Section numbers for the step being shown.
+  const order = isServicesStep
+    ? ["services", "schedule", "team", ...(showPo ? ["po"] : []), "notes"]
+    : ["property", "services", "contact", ...(makesJobs ? ["schedule", "team"] : []), "po", "notes"];
+  const num = (key) => order.indexOf(key) + 1;
+
   /* ---------- render ---------- */
   return (
     <div className="bgm-overlay">
       <div className="bgm-modal" role="dialog" aria-modal="true" aria-labelledby="bgm-title">
         <div className="bgm-header">
           <div>
-            <h3 id="bgm-title">New Brigade Booking</h3>
-            <p>Deep Cleaning · prices from the Brigade price master, excluding GST</p>
+            <h3 id="bgm-title">
+              {isServicesStep ? `Add services · Flat ${forFlat.flat_number}` : "New Brigade booking"}
+            </h3>
+            <p>
+              {isServicesStep
+                ? "Step 2 of 2 · Pick services, visit dates and team — prices from the Brigade price master, excluding GST"
+                : "Pick services now to create the jobs, or leave them empty to save the flat to Pending"}
+            </p>
           </div>
           <button type="button" className="bgm-close" onClick={onClose} aria-label="Close" disabled={saving}>
             ×
@@ -392,9 +455,36 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
           <div className="bgm-main">
             {setupError && <div className="bg-error">{setupError}</div>}
 
-            {/* 1. PROPERTY & FLAT */}
+            {isServicesStep && (
+              <section className="bgm-section bgm-fixed-flat" aria-label="Flat">
+                <div className="bgm-fixed-main">
+                  <span className="bgm-fixed-label">Flat</span>
+                  <strong>{forFlat.flat_number}</strong>
+                  <span className="bg-chip accent">{forFlat.bhk}</span>
+                  <span className="bgm-fixed-prop">{selectedOption?.label || forFlat.property || "—"}</span>
+                </div>
+                <div className="bgm-fixed-meta">
+                  <span>Requested by <strong>{contact?.name || forFlat.contact_name || "—"}</strong></span>
+                  {forFlat.po_number && <span>PO <strong>{forFlat.po_number}</strong></span>}
+                  {loadingHistory ? (
+                    <span>Checking this flat…</span>
+                  ) : historyCounts ? (
+                    <span>
+                      {historyCounts.completed || historyCounts.booked
+                        ? `${historyCounts.completed} completed · ${historyCounts.booked} booked`
+                        : "No services yet"}
+                    </span>
+                  ) : null}
+                  {lookingUpFlat && <span>Loading prices…</span>}
+                </div>
+                {flatLookupError && <span className="bg-field-error">{flatLookupError}</span>}
+              </section>
+            )}
+
+            {/* PROPERTY & FLAT (step 1) */}
+            {!isServicesStep && (
             <section className="bgm-section">
-              <SectionHead step={1} title="Property & flat" done={stepDone.property} />
+              <SectionHead step={num("property")} title="Property & flat" done={stepDone.property} />
               <div>
                 <div className="bg-field">
                   <label htmlFor="bg-property">Property</label>
@@ -479,21 +569,25 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                         : "· First booking for this flat"}
                     </span>
                   ) : null}
-                  {lookingUpFlat && <span className="bg-field-hint">· loading prices…</span>}
                 </div>
               )}
             </section>
+            )}
 
-            {/* 2. SERVICES */}
+            {/* SERVICES (optional on a new booking) */}
             <section className="bgm-section">
               <SectionHead
-                step={2}
-                title="Services — Deep Cleaning"
+                step={num("services")}
+                title={isServicesStep ? "Services — Deep Cleaning" : "Services — optional"}
                 done={stepDone.services}
                 hint={flat ? `${pricedServices.length} of ${subServicesAll.length} priced for ${flat.bhk}` : null}
               />
               {!flat ? (
-                <div className="bg-field-hint">Enter the flat number and BHK to see the services, prices and what was already done.</div>
+                <div className="bg-field-hint">
+                  {isServicesStep
+                    ? "Loading the services for this flat…"
+                    : "Enter the flat number and BHK to see the services. Leave them empty to save the flat to Pending."}
+                </div>
               ) : (
                 <>
                   {pricedServices.length === 0 ? (
@@ -552,9 +646,10 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
               )}
             </section>
 
-            {/* 3. REQUESTED BY + ADDRESS */}
+            {/* REQUESTED BY + ADDRESS (new booking) */}
+            {!isServicesStep && (
             <section className="bgm-section">
-              <SectionHead step={3} title="Requested by" done={stepDone.contact} />
+              <SectionHead step={num("contact")} title="Requested by" done={stepDone.contact} />
               {!site ? (
                 <div className="bg-field-hint">Choose the property first.</div>
               ) : loadingContacts ? (
@@ -597,11 +692,13 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 <span className="bg-field-hint">The technician&apos;s location check uses the property site on the map.</span>
               </div>
             </section>
+            )}
 
-            {/* 4. SCHEDULE */}
+            {/* SCHEDULE (when services are picked) */}
+            {makesJobs && (
             <section className="bgm-section">
               <SectionHead
-                step={4}
+                step={num("schedule")}
                 title="Schedule"
                 done={stepDone.schedule}
                 hint={
@@ -641,10 +738,12 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 </div>
               )}
             </section>
+            )}
 
-            {/* 5. TEAM */}
+            {/* TEAM (when services are picked) */}
+            {makesJobs && (
             <section className="bgm-section">
-              <SectionHead step={5} title="Team" done={stepDone.team} />
+              <SectionHead step={num("team")} title="Team" done={stepDone.team} />
               <div className="bgm-team">
                 <button type="button" className="secondary" onClick={() => setShowAssignModal(true)}>
                   {team.supervisorId ? "Change team" : "Assign team"}
@@ -661,10 +760,12 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 )}
               </div>
             </section>
+            )}
 
-            {/* 6. CLIENT PO */}
+            {/* CLIENT PO */}
+            {showPo && (
             <section className="bgm-section">
-              <SectionHead step={6} title="Client PO" hint="Optional" />
+              <SectionHead step={num("po")} title="Client PO" hint="Optional" />
               <div className="bg-grid-2">
                 <div className="bg-field">
                   <label htmlFor="bg-po-number">Client PO number</label>
@@ -710,10 +811,11 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 </div>
               </div>
             </section>
+            )}
 
-            {/* 7. NOTES */}
+            {/* NOTES */}
             <section className="bgm-section">
-              <SectionHead step={7} title="Notes" hint="Optional" />
+              <SectionHead step={num("notes")} title="Notes" hint="Optional" />
               <div className="bg-field">
                 <textarea
                   rows={3}
@@ -730,16 +832,20 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
           <aside className="bgm-summary" aria-label="Booking summary">
             <div className="bgm-summary-body">
               <div>
-                <h4>Booking summary</h4>
+                <h4>{makesJobs ? "Booking summary" : "Flat summary"}</h4>
               </div>
 
               <div className="bgm-sum-rows">
                 <div className="bgm-sum-row"><span>Property</span><span>{selectedOption?.label || "—"}</span></div>
-                <div className="bgm-sum-row"><span>Flat</span><span>{flat ? `${flat.flat_number} · ${flat.bhk}` : flatValid ? flatNumber : "—"}</span></div>
+                <div className="bgm-sum-row"><span>Flat</span><span>{flat ? `${flat.flat_number} · ${flat.bhk}` : flatValid ? (bhk ? `${flatNumber} · ${bhk}` : flatNumber) : "—"}</span></div>
                 <div className="bgm-sum-row"><span>Requested by</span><span>{contact?.name || "—"}</span></div>
-                {po.number && <div className="bgm-sum-row"><span>Client PO</span><span>{po.number}</span></div>}
+                {(showPo ? po.number : forFlat?.po_number) && (
+                  <div className="bgm-sum-row"><span>Client PO</span><span>{showPo ? po.number : forFlat.po_number}</span></div>
+                )}
               </div>
 
+              {makesJobs && (
+              <>
               <div>
                 <h4 style={{ marginBottom: 10 }}>Services</h4>
                 {selectedServices.length === 0 ? (
@@ -770,6 +876,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                 </span>
                 <span className="bgm-total-value">{formatInr(total)}</span>
               </div>
+              </>
+              )}
 
               {missing.length ? (
                 <div>
@@ -781,13 +889,17 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated }) {
                   </ul>
                 </div>
               ) : (
-                <div className="bgm-ready">Everything is filled in — ready to create.</div>
+                <div className="bgm-ready">
+                  {makesJobs
+                    ? "Everything is filled in — ready to create the jobs."
+                    : "Ready to save to Pending. Pick services above to create the jobs now instead."}
+                </div>
               )}
             </div>
 
             <div className="bgm-summary-foot">
               <button type="button" className="primary" onClick={handleSubmit} disabled={saving}>
-                {saving ? "Creating…" : "Create booking"}
+                {saving ? "Saving…" : makesJobs ? "Create jobs" : "Save flat"}
               </button>
               <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
             </div>
