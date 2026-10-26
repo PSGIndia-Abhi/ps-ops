@@ -1,7 +1,7 @@
 const { pool } = require("../../db");
 
 // ---------------------------------------------------------------------------
-// Recording for the admin User Activity report (tables in
+// Recording for the admin User Activity report (table in
 // data/migrations/20261026_create_user_activity_tables.sql).
 //
 // Nothing here may break a login or a request: every write is fire-and-forget
@@ -29,89 +29,58 @@ function detectPlatform(req, client) {
   return "web";
 }
 
-function clientIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return (forwarded || req.socket?.remoteAddress || "").slice(0, 64) || null;
-}
-
 // The server's own date (the container runs in IST), not toISOString()'s UTC date.
 function localDate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// One message per kind of failure, so a missing table doesn't flood the log on every request.
-const warned = new Set();
-function warnOnce(kind, err) {
-  if (warned.has(kind)) return;
-  warned.add(kind);
-  console.error(`User activity: could not record ${kind} (further errors not logged):`, err.message);
+// One message, so a missing table doesn't flood the log on every request.
+let warned = false;
+function warnOnce(err) {
+  if (warned) return;
+  warned = true;
+  console.error("User activity: could not record (further errors not logged):", err.message);
 }
 
-function upsertDailyActivity(userId, platform, now) {
-  return pool.query(
-    `INSERT INTO user_daily_activity (user_id, activity_date, platform, first_seen_at, last_seen_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE last_seen_at = GREATEST(last_seen_at, VALUES(last_seen_at))`,
-    [userId, localDate(now), platform, now, now]
-  );
-}
-
-// Called from the auth middleware on every signed-in request. Writes at most once per
-// THROTTLE_MS per user and app (and always on the first request of a new day), so
-// "last used" can lag by up to that much.
+// Writes at most once per THROTTLE_MS per user and app, and always on the first request of a
+// new day, so the first time of the day is exact.
 const THROTTLE_MS = 5 * 60 * 1000;
 const lastWrite = new Map(); // `${userId}|${platform}` -> { date, at }
 
-function touchDailyActivity(req, userId) {
-  if (!userId) return;
+function markActive(userId, platform, { force = false } = {}) {
   const now = new Date();
-  const platform = detectPlatform(req);
   const key = `${userId}|${platform}`;
   const date = localDate(now);
   const prev = lastWrite.get(key);
-  if (prev && prev.date === date && now - prev.at < THROTTLE_MS) return;
+  if (!force && prev && prev.date === date && now - prev.at < THROTTLE_MS) return;
   lastWrite.set(key, { date, at: now.getTime() });
-  upsertDailyActivity(userId, platform, now).catch((err) => {
-    lastWrite.delete(key); // try again on the next request
-    warnOnce("daily activity", err);
-  });
-}
-
-// Called from POST /api/auth/login for every attempt. reason is null on success, else one of
-// unknown_email | not_activated | inactive | wrong_password | error.
-function recordLoginEvent(req, { client, userId = null, email, success, reason = null }) {
-  const now = new Date();
-  const platform = detectPlatform(req, client);
   pool
     .query(
-      `INSERT INTO user_login_events
-         (user_id, email, platform, success, failure_reason, ip_address, user_agent, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        userId,
-        String(email || "").slice(0, 150),
-        platform,
-        success ? 1 : 0,
-        reason,
-        clientIp(req),
-        String(req.headers["user-agent"] || "").slice(0, 255) || null,
-        now,
-      ]
+      `INSERT INTO user_daily_activity (user_id, activity_date, platform, first_seen_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE last_seen_at = GREATEST(last_seen_at, VALUES(last_seen_at))`,
+      [userId, date, platform, now, now]
     )
-    .catch((err) => warnOnce("login event", err));
+    .catch((err) => {
+      lastWrite.delete(key); // try again on the next request
+      warnOnce(err);
+    });
+}
 
-  // A successful login is also use of the app that day.
-  if (success && userId) {
-    lastWrite.set(`${userId}|${platform}`, { date: localDate(now), at: now.getTime() });
-    upsertDailyActivity(userId, platform, now).catch((err) => warnOnce("daily activity", err));
-  }
+// Auth middleware: every signed-in request.
+function touchDailyActivity(req, userId) {
+  if (userId) markActive(userId, detectPlatform(req));
+}
+
+// POST /api/auth/login: a successful login.
+function recordLogin(req, client, userId) {
+  if (userId) markActive(userId, detectPlatform(req, client), { force: true });
 }
 
 module.exports = {
   PLATFORMS,
   PLATFORM_LABELS,
-  detectPlatform,
   localDate,
   touchDailyActivity,
-  recordLoginEvent,
+  recordLogin,
 };
