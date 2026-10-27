@@ -5,6 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  findLeadAssignee,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
 const { notifyLead } = require("../utils/crmLeadNotifications");
@@ -524,6 +525,10 @@ router.post("/leads/:id/mark-lost", auth, requirePermission("CRM_VIEW_LEAD"), as
 // lead_id enforces one conversion per lead), and moves the lead to CONVERTED.
 // Gated by CONVERT_LEAD specifically -- a step up from ordinary lead
 // management, since it creates a real customer record.
+//
+// credit_to (optional): who the conversion counts for - the sales manager converting a sales
+// executive's lead picks them or themselves. The lead's sales person becomes that person, so their
+// target, Converted count and achievement show it (see CONVERTED_LEADS_SQL in the reports).
 // ---------------------------------------------------------------------------
 router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -544,6 +549,17 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       amount = Number(req.body.amount);
       if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) throw new HttpError(400, "Enter a valid amount");
       amount = Math.round(amount * 100) / 100;
+    }
+
+    // Who it counts for. Only someone who manages leads may credit another person.
+    let creditTo = null;
+    if (req.body?.credit_to !== undefined && req.body?.credit_to !== null && req.body?.credit_to !== "") {
+      const wanted = Number(req.body.credit_to);
+      if (wanted !== Number(req.user.id) && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) {
+        throw new HttpError(403, "You cannot count this conversion for someone else");
+      }
+      creditTo = await findLeadAssignee(pool, wanted, req.user.id);
+      if (!creditTo) throw new HttpError(400, "Choose who this conversion counts for");
     }
 
     const conversionId = uuid();
@@ -569,8 +585,15 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       if (amount !== null && amount !== Number(lead.amount)) {
         await conn.query("UPDATE crm_leads SET amount = ? WHERE id = ?", [amount, lead.id]);
       }
+      if (creditTo && Number(lead.assigned_sales_employee_id) !== creditTo.id) {
+        await conn.query("UPDATE crm_leads SET assigned_sales_employee_id = ? WHERE id = ?", [creditTo.id, lead.id]);
+      }
       const amountNote = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
-      await logLeadHistory(conn, lead.id, "CONVERTED", { note: `Converted to company "${companyName}"${amountNote}${notes ? `: ${notes}` : ""}`.slice(0, 500), changedBy: req.user.id });
+      const creditNote = creditTo && creditTo.id !== Number(req.user.id) ? ` - counted for ${creditTo.name}` : "";
+      await logLeadHistory(conn, lead.id, "CONVERTED", {
+        note: `Converted to company "${companyName}"${amountNote}${creditNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
       return newCompanyId;
     });
 

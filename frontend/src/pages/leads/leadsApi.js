@@ -695,11 +695,32 @@ export async function completeVisit(meetingId, { outcome, notes }) {
   await loadWorkspace();
 }
 
-/** POST /leads/{id}/convert-to-customer (won) or /leads/{id}/mark-lost (lost). */
-export async function closeLead(leadId, { won, reason, notes }) {
+/**
+ * The sales person a lead belongs to: its assigned sales person, else the sales executive / manager
+ * who added it. Null when neither is a sales person (e.g. a provider's lead nobody holds yet).
+ */
+export function leadSalesOwner(lead) {
+  const isSales = (u) => u && ["sales", "sales_manager"].includes(ROLE_ALIASES[u.role] || u.role);
+  const byId = (id) => (id ? state.people.find((u) => String(u.id) === String(id)) : null);
+  const assigned = byId(lead.salesId);
+  if (isSales(assigned)) return assigned;
+  const creator = byId(lead.createdBy);
+  return isSales(creator) ? creator : null;
+}
+
+/**
+ * POST /leads/{id}/convert-to-customer (won) or /leads/{id}/mark-lost (lost).
+ * `creditTo`: who a conversion counts for (the sales manager converting a sales executive's lead).
+ */
+export async function closeLead(leadId, { won, reason, notes, creditTo }) {
   if (!won && !reason) throw new Error("Choose why this lead was lost.");
   const extra = notes?.trim();
-  if (won) await request(`/api/crm/leads/${leadId}/convert-to-customer`, { method: "POST", body: { notes: extra || "" } });
+  if (won) {
+    await request(`/api/crm/leads/${leadId}/convert-to-customer`, {
+      method: "POST",
+      body: { notes: extra || "", ...(creditTo ? { credit_to: Number(creditTo) } : {}) },
+    });
+  }
   else {
     await request(`/api/crm/leads/${leadId}/mark-lost`, {
       method: "POST",
@@ -793,6 +814,18 @@ export async function getPerformance({ from, to, employeeId }) {
   if (employeeId) query.set("employeeId", String(employeeId));
   return request(`/api/crm/reports/sales-performance?${query}`);
 }
+
+/** GET /reports/sales-performance/items - the records behind one number of the report, by the same rules. */
+export async function getPerformanceItems({ metric, from, to, employeeId }) {
+  const query = new URLSearchParams({ metric, from, to });
+  if (employeeId) query.set("employeeId", String(employeeId));
+  const data = await request(`/api/crm/reports/sales-performance/items?${query}`);
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
+/** GET /targets/history - one sales person's last months against their targets, and their lifetime total. */
+export const getTargetHistory = (userId, months = 6) =>
+  request(`/api/crm/targets/history?months=${months}${userId ? `&userId=${userId}` : ""}`);
 
 /** GET /leads/{id}/conversion - the customer a converted lead became; null when it has not been converted. */
 export async function getConversion(leadId) {

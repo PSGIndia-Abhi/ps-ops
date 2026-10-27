@@ -12,8 +12,9 @@ import { addDays, fmtDateShort, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import type { Performance, Person } from '../types';
+import type { Person } from '../types';
 import { StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { AchievementCard } from '../AchievementCard';
 import { TargetCard, targetPercent } from '../TargetCard';
 import { TeamMemberRow, TeamSummary } from '../TeamReportParts';
 
@@ -45,7 +46,7 @@ export function rangeDates(range: Range, today = todayStr()): { from: string; to
   return { from: `${today.slice(0, 8)}01`, to: today };
 }
 
-const METRICS: { key: keyof Performance; label: string; tone: Tone }[][] = [
+const METRICS: { key: api.PerformanceMetric; label: string; tone: Tone }[][] = [
   [
     { key: 'leadsGenerated', label: 'Leads generated', tone: 'info' },
     { key: 'genuineLeads', label: 'Genuine leads', tone: 'success' },
@@ -83,20 +84,36 @@ export function PerformanceScreen() {
     return list.find((t) => t.userId === (employeeId ?? myIdNum)) ?? null;
   }, [employeeId, myIdNum]);
   const { data: target, refresh: refreshTarget, reload: reloadTarget } = useLoad(targetLoader, '');
+  // Last month and lifetime, for the people who have targets (sales executives and managers).
+  const historyLoader = useCallback(() => api.targetHistory(employeeId).catch(() => null), [employeeId]);
+  const { data: history, refresh: refreshHistory, reload: reloadHistory } = useLoad(historyLoader, '');
   const refresh = () => {
     refreshReport();
     refreshTarget();
+    refreshHistory();
   };
+  const periodLabel = range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`;
+  // A tile opens the records behind its number, for the same person and period.
+  const openTile = (metric: api.PerformanceMetric, label: string) =>
+    navigation.navigate('LeadPerformanceItems', { metric, label, from, to, employeeId, name: params?.name ?? 'My performance', periodLabel });
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={params?.name ?? 'My performance'} subtitle="Sales performance" onBack={() => navigation.goBack()} />
       <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
-        {!!target && <TargetCard target={target} canSet={manager && !!employeeId} onChanged={reloadTarget} />}
+        {!!target && (
+          <TargetCard
+            target={target}
+            canSet={manager && !!employeeId}
+            onChanged={() => {
+              reloadTarget();
+              reloadHistory();
+            }}
+          />
+        )}
+        {!!target && !!history && <AchievementCard history={history} />}
         <SegmentedControl options={RANGES} value={range} onChange={setRange} />
-        <Text style={styles.range}>
-          {range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`}
-        </Text>
+        <Text style={styles.range}>{periodLabel}</Text>
         <CrmErrorBanner message={error} onRetry={reload} />
         {loading && !data ? (
           <CrmSkeleton height={360} radius={radii.lg} />
@@ -105,7 +122,7 @@ export function PerformanceScreen() {
           METRICS.map((row, i) => (
             <View key={i} style={styles.tileRow}>
               {row.map((m) => (
-                <StatTile key={m.key} label={m.label} value={data[m.key]} tone={m.tone} />
+                <StatTile key={m.key} label={m.label} value={data[m.key]} tone={m.tone} onPress={() => openTile(m.key, m.label)} />
               ))}
             </View>
           ))

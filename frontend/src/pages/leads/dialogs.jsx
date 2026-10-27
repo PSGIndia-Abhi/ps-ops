@@ -30,7 +30,7 @@ import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
-import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster } from "./leadsApi";
+import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -644,12 +644,18 @@ export function CloseLeadModal({ lead, won, onClose }) {
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // The sales manager converting someone else's lead chooses who it counts for - that sales person
+  // (picked to start with) or themselves.
+  const myId = String(viewer.me?.id || "");
+  const owner = won && viewer.persona === "sales_manager" ? leadSalesOwner(lead) : null;
+  const askCredit = !!owner && String(owner.id) !== myId;
+  const [creditTo, setCreditTo] = useState(() => (askCredit ? String(owner.id) : ""));
 
   async function save(close) {
     if (busy) return;
     setBusy(true);
     try {
-      await closeLead(lead.id, { won, reason, notes }, viewer.me);
+      await closeLead(lead.id, { won, reason, notes, creditTo: askCredit ? creditTo : undefined }, viewer.me);
       toast(won ? `${lead.company} converted to a customer` : "Lead marked as lost");
       close();
     } catch (err) {
@@ -675,9 +681,28 @@ export function CloseLeadModal({ lead, won, onClose }) {
       )}
     >
       <LeadBar lead={lead} />
+      {won && askCredit && (
+        <Field label="Count this conversion for" required>
+          <Choice
+            name="credit"
+            value={creditTo}
+            onChange={setCreditTo}
+            options={[
+              {
+                value: String(owner.id),
+                label: owner.name,
+                sub: `${assigneeRole(owner.role) || "Sales Executive"} - ${String(lead.salesId) === String(owner.id) ? "this lead is assigned to them" : "added this lead"}`,
+                tone: "success",
+              },
+              { value: myId, label: `Me (${viewer.me?.name || "Sales Manager"})`, sub: "Count it towards my own target" },
+            ]}
+          />
+        </Field>
+      )}
       {won ? (
         <Note tone="success">
           A customer record is created for <b>{lead.company}</b> and the lead's full history is kept. A lead can be converted only once.
+          {askCredit && <> It counts towards the target of the person chosen above.</>}
         </Note>
       ) : (
         <Field label="Reason" required>
