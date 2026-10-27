@@ -67,6 +67,31 @@
   align-items: flex-end;
 }
 
+/* Today | Yesterday switch, first in the filter row */
+.ua-day {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.ua-day button {
+  height: 30px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ua-day button.active {
+  background: #2563eb;
+  color: #fff;
+}
+
 .ua-filters label {
   display: flex;
   flex-direction: column;

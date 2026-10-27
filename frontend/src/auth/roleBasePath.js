@@ -50,6 +50,9 @@ export const ROLE_HOME = {
   // Works in the Accountant Panel (payments); Task Management is a link from its sidebar.
   "Collection Executive": "/accountant",
   "Admin Executive": "/taskpro",
+
+  // Brigade Group bookings, masters and analysis (pages/brigade).
+  brigade_executive: "/brigade",
 };
 
 export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";

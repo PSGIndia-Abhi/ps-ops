@@ -11,7 +11,6 @@ import {
   CalendarIcon,
   ChartIcon,
   CheckCircleIcon,
-  ChevronRightIcon,
   ClockIcon,
   DocumentIcon,
   ExternalLinkIcon,
@@ -29,6 +28,7 @@ import { HomeBand, HomeTile, QuickAction, SectionTitle, TILE_OVERLAP } from '../
 import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
 import { countByGroup, type StageGroup } from '../stage';
 import type { LeadTask, Meeting } from '../types';
+import { TeamVisitsTimeline } from '../TeamVisitsTimeline';
 import { LeadRow, LeadWash, meetingWhen, useLoad, useMe } from '../ui';
 
 const RECENT_LIMIT = 3;
@@ -81,23 +81,6 @@ const factory = (t: CrmTheme) => ({
     padding: spacing.lg,
   },
   calmText: { ...typography.bodyMedium, color: t.successText, flex: 1 },
-
-  // Manager: today's team visits strip
-  strip: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    backgroundColor: t.surface,
-    borderRadius: radii.xl,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: spacing.md,
-    gap: spacing.sm,
-    ...t.cardShadow,
-  },
-  stripCell: { flex: 1, alignItems: 'center' as const },
-  stripValue: { ...typography.title },
-  stripLabel: { ...typography.caption, color: t.textMuted, marginTop: 1, textAlign: 'center' as const },
-  stripGo: { width: 32, alignItems: 'center' as const },
 });
 
 type HomeNav = CompositeNavigationProp<BottomTabNavigationProp<LeadTabParamList, 'Home'>, NativeStackNavigationProp<LeadRootStackParamList>>;
@@ -288,23 +271,6 @@ export function SalesManagerHome() {
 
   const leads = useMemo(() => data?.leads ?? [], [data]);
   const counts = useMemo(() => countByGroup(leads), [leads]);
-  const visitStats = useMemo(() => {
-    const v = (data?.visits ?? []).filter((x) => x.status !== 'CANCELLED');
-    const now = new Date();
-    let done = 0;
-    let live = 0;
-    let missed = 0;
-    for (const x of v) {
-      if (x.status === 'COMPLETED' || x.checkOutAt) done += 1;
-      else if (x.checkInAt) live += 1;
-      else {
-        const [y, m, d] = x.date.split('-').map(Number);
-        const [hh, mm] = x.time.split(':').map(Number);
-        if (new Date(y, m - 1, d, hh, mm || 0) < now) missed += 1;
-      }
-    }
-    return { total: v.length, done, live, missed };
-  }, [data]);
   const openGroup = (group: StageGroup) => navigation.navigate('Leads', { group, at: Date.now() });
 
   return (
@@ -335,27 +301,7 @@ export function SalesManagerHome() {
           {/* Today's team visits at a glance */}
           <View style={styles.section}>
             <SectionTitle title="Team visits today" />
-            <Pressable onPress={() => navigation.navigate('LeadTeamVisits')} accessibilityRole="button" style={({ pressed }) => [styles.strip, pressed && styles.pressed]}>
-              <View style={styles.stripCell}>
-                <Text style={[styles.stripValue, { color: theme.textPrimary }]}>{data ? visitStats.total : '-'}</Text>
-                <Text style={styles.stripLabel}>Visits</Text>
-              </View>
-              <View style={styles.stripCell}>
-                <Text style={[styles.stripValue, { color: theme.success }]}>{data ? visitStats.done : '-'}</Text>
-                <Text style={styles.stripLabel}>Done</Text>
-              </View>
-              <View style={styles.stripCell}>
-                <Text style={[styles.stripValue, { color: theme.warning }]}>{data ? visitStats.live : '-'}</Text>
-                <Text style={styles.stripLabel}>Ongoing</Text>
-              </View>
-              <View style={styles.stripCell}>
-                <Text style={[styles.stripValue, { color: theme.danger }]}>{data ? visitStats.missed : '-'}</Text>
-                <Text style={styles.stripLabel}>Not started</Text>
-              </View>
-              <View style={styles.stripGo}>
-                <ChevronRightIcon size={18} color={theme.textMuted} />
-              </View>
-            </Pressable>
+            <TeamVisitsTimeline visits={data ? data.visits : null} onPress={() => navigation.navigate('LeadTeamVisits')} />
           </View>
 
 

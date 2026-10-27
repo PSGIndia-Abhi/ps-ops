@@ -1,15 +1,18 @@
 // The quotation builder: makes a customer quotation for a lead from the quotation master
 // (services with their treatment rows, the price chart and the standard clauses), shows it
 // as a draft PDF, and saves it. Saving numbers it (QT-...), stores the PDF on the lead and
-// moves the lead to Quotation Sent - the same outcome as uploading a PDF.
+// moves the lead to Quotation Sent.
+//
+// It can also open an existing quotation's details (`from`): "duplicate" saves a new quotation
+// from them; "edit" saves a new one that replaces it (the old one is kept, marked Cancelled).
 //
 // The server draws the PDF and checks everything again (utils/crmQuotationDocument.js).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FiCheck, FiChevronDown, FiChevronUp, FiDownload, FiEye, FiFileText, FiPlus, FiSend, FiTrash2, FiX } from "react-icons/fi";
+import { FiCheck, FiChevronDown, FiChevronUp, FiDownload, FiEye, FiFileText, FiPlus, FiPrinter, FiSend, FiTrash2, FiX } from "react-icons/fi";
 import { money } from "./format";
-import { generateQuotation, getActiveQuoteMaster, previewQuotation } from "./leadsApi";
+import { generateQuotation, getActiveQuoteMaster, getQuotationContent, previewQuotation, proposalFileName } from "./leadsApi";
 import { useToast } from "./hooks";
 import { frequencyNames, frequencyOptions, sortPlans } from "./quoteOptions";
 import { Alert, Button, Empty, Field, Modal, Note, SkeletonRows } from "./ui";
@@ -45,29 +48,46 @@ function Step({ no, title, sub, children, action }) {
 }
 
 /**
- * The draft PDF over the whole screen, inside the page (no pop-up to block). Rendered inside
- * .lm-root, where the Lead Management button styles live.
+ * A quotation PDF over the whole screen, inside the page (no pop-up to block), with a Download
+ * button that saves it as `fileName`. Used for the draft preview here and for saved quotations on
+ * the lead's Quotations tab. Rendered inside .lm-root, where the Lead Management button styles live.
  */
-function PreviewOverlay({ url, fileName, onClose }) {
+export function PreviewOverlay({ url, fileName, onClose, title = "Preview - draft, not saved" }) {
+  const frame = useRef(null);
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // The browser's own PDF toolbar is hidden (#toolbar=0): its download icon saves a blob under a
+  // random name. Download and Print here replace it.
+  function print() {
+    try {
+      frame.current.contentWindow.focus();
+      frame.current.contentWindow.print();
+    } catch {
+      window.open(url, "_blank", "noopener");
+    }
+  }
+
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(15,23,42,.72)", display: "flex", flexDirection: "column" }} role="dialog" aria-modal="true" aria-label="Quotation preview">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", background: "#fff" }}>
-        <strong>Preview - draft, not saved</strong>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", background: "#fff", flexWrap: "wrap" }}>
+        <strong style={{ overflowWrap: "anywhere" }}>{title}</strong>
         <span style={{ display: "flex", gap: 8 }}>
-          <a className="lm-btn ghost sm" href={url} download={fileName} style={{ textDecoration: "none" }}>
+          <a className="lm-btn primary sm" href={url} download={fileName} style={{ textDecoration: "none" }}>
             <FiDownload /> Download
           </a>
-          <Button size="sm" icon={<FiX />} onClick={onClose}>
-            Close Preview
+          <Button size="sm" variant="ghost" icon={<FiPrinter />} onClick={print}>
+            Print
+          </Button>
+          <Button size="sm" variant="ghost" icon={<FiX />} onClick={onClose}>
+            Close
           </Button>
         </span>
       </div>
-      <iframe title="Quotation preview" src={url} style={{ flex: 1, border: 0, width: "100%", background: "#525659" }} />
+      <iframe ref={frame} title="Quotation preview" src={`${url}#toolbar=0&navpanes=0`} style={{ flex: 1, border: 0, width: "100%", background: "#525659" }} />
     </div>,
     document.querySelector(".lm-root") || document.body,
   );
@@ -242,7 +262,72 @@ function startPick(service, plans, perService) {
   };
 }
 
-export default function QuotationBuilder({ lead, onClose }) {
+const sameText = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+// The form's starting state from a saved quotation's content. Services and plans are matched to
+// the master by name; a service no longer in the master can't be put back and is listed in `missing`.
+function stateFromContent(content, master) {
+  const picks = {};
+  const order = [];
+  const missing = [];
+  for (const s of content.services || []) {
+    const service = master.services.find((x) => sameText(x.name, s.name));
+    if (!service || picks[service.id]) {
+      if (!service) missing.push(s.name);
+      continue;
+    }
+    const plan =
+      master.plans.find((p) => sameText(p.name, s.plan) && p.billing === s.billing) || master.plans.find((p) => sameText(p.name, s.plan));
+    picks[service.id] = {
+      planId: plan?.id || "",
+      price: s.price === null || s.price === undefined ? "" : String(s.price),
+      rows: (s.rows || []).map((r) => Object.fromEntries(ROW_KEYS.map((k) => [k, r[k] || ""]))),
+      open: false,
+    };
+    order.push(service.id);
+  }
+
+  // Ticked optional clauses come back ticked; lines typed for that customer come back as extra lines.
+  // The always-included ones are added by the server anyway.
+  const checked = new Set();
+  const extra = { VALUE_ADDED: [], TERMS: [] };
+  for (const [kind, lines] of [["VALUE_ADDED", content.valueAdded], ["TERMS", content.terms]]) {
+    for (const text of lines || []) {
+      const clause = master.clauses.find((c) => c.kind === kind && sameText(c.text, text));
+      if (!clause) extra[kind].push(text);
+      else if (!clause.is_default) checked.add(clause.id);
+    }
+  }
+
+  const p = content.pricing || {};
+  const c = content.customer || {};
+  return {
+    customer: { name: c.name || "", address: c.address || "", attention: c.attention || "", phone: c.phone || "" },
+    picks,
+    order,
+    missing,
+    subject: content.subject || "",
+    revised: !!content.revised,
+    validDays: String(content.validDays || 30),
+    contractMonths: String(content.contractMonths || 12),
+    discount: content.totals?.discount ? String(content.totals.discount) : "",
+    mode: p.mode === "PACKAGE" ? "PACKAGE" : "PER_SERVICE",
+    pkg: {
+      amount: p.amount ? String(p.amount) : "",
+      billing: p.billing || "MONTHLY",
+      planLabel: p.planLabel || "",
+      // The server's default wording ("services 1 to N") is left out so it follows the services picked now.
+      description: /^Pest management services .* as per scope above$/.test(p.description || "") ? "" : p.description || "",
+    },
+    checked,
+    extraValue: extra.VALUE_ADDED,
+    extraTerms: extra.TERMS,
+  };
+}
+
+export default function QuotationBuilder({ lead, from = null, mode: openMode = "", onClose }) {
+  const editing = !!from && openMode === "edit";
+  const fromName = from?.clientName || lead.company || lead.contact || "";
   // The services the customer asked for on the lead (Quotation Master ids) - ticked to start with.
   const [leadServices] = useState(() => lead.services || []);
   const toast = useToast();
@@ -266,24 +351,45 @@ export default function QuotationBuilder({ lead, onClose }) {
   const [busy, setBusy] = useState(""); // "preview" | "send"
   const [previewUrl, setPreviewUrl] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [missing, setMissing] = useState([]); // services on the old quotation no longer in the master
 
   useEffect(() => {
     let alive = true;
-    getActiveQuoteMaster()
-      .then((m) => {
+    Promise.all([getActiveQuoteMaster(), from ? getQuotationContent(lead.id, from.id) : null])
+      .then(([m, content]) => {
         if (!alive) return;
-        setMaster(m);
-        const asked = leadServices.map((id) => m.services.find((s) => s.id === id)).filter(Boolean);
-        if (asked.length) {
-          setPicks(Object.fromEntries(asked.map((s) => [s.id, startPick(s, m.plans, true)])));
-          setOrder(asked.map((s) => s.id));
+        if (content) {
+          const st = stateFromContent(content, m);
+          setCustomer(st.customer);
+          setPicks(st.picks);
+          setOrder(st.order);
+          setMissing(st.missing);
+          setSubject(st.subject);
+          setSubjectEdited(true);
+          // An edit goes to the customer as a revised proposal; it can be unticked.
+          setRevised(editing || st.revised);
+          setValidDays(st.validDays);
+          setContractMonths(st.contractMonths);
+          setDiscount(st.discount);
+          setMode(st.mode);
+          setPkg(st.pkg);
+          setChecked(st.checked);
+          setExtraValue(st.extraValue);
+          setExtraTerms(st.extraTerms);
+        } else {
+          const asked = leadServices.map((id) => m.services.find((s) => s.id === id)).filter(Boolean);
+          if (asked.length) {
+            setPicks(Object.fromEntries(asked.map((s) => [s.id, startPick(s, m.plans, true)])));
+            setOrder(asked.map((s) => s.id));
+          }
         }
+        setMaster(m);
       })
-      .catch((err) => alive && setLoadError(err.message || "Could not load the quotation master."));
+      .catch((err) => alive && setLoadError(err.message || "Could not load the quotation."));
     return () => {
       alive = false;
     };
-  }, [leadServices]);
+  }, [leadServices, from, lead.id, editing]);
   useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl]);
 
   const serviceById = useMemo(() => new Map((master?.services || []).map((s) => [s.id, s])), [master]);
@@ -415,8 +521,12 @@ export default function QuotationBuilder({ lead, onClose }) {
     const { content } = build();
     setBusy("send");
     try {
-      const q = await generateQuotation(lead.id, content);
-      toast(`${q.number} created. Open it from the Quotations tab.`);
+      await generateQuotation(lead.id, content, editing ? { replacesQuotationId: from.id } : {});
+      toast(
+        editing
+          ? `New quotation for ${content.customer.name} saved. The previous one is marked Cancelled.`
+          : `Quotation for ${content.customer.name} saved. Open it from the Quotations tab.`,
+      );
       closeConfirm();
       onClose();
     } catch (err) {
@@ -456,13 +566,35 @@ export default function QuotationBuilder({ lead, onClose }) {
   );
 
   return (
-    <Modal wide title="Create Quotation" sub={`${lead.company || lead.contact}${lead.number && lead.number !== "-" ? ` - ${lead.number}` : ""}`} onClose={onClose} footer={footer}>
+    <Modal wide title={editing ? `Edit Quotation - ${fromName}` : from ? `Duplicate Quotation - ${fromName}` : "Create Quotation"} sub={`${lead.company || lead.contact}${lead.number && lead.number !== "-" ? ` - ${lead.number}` : ""}`} onClose={onClose} footer={footer}>
       {loadError ? (
         <Empty title="Could not load the quotation master" text={loadError} icon={<FiFileText />} />
       ) : !master ? (
         <SkeletonRows rows={6} />
       ) : (
         <>
+          {from && (
+            <div style={{ marginBottom: 18 }}>
+              <Note tone="info">
+                {editing ? (
+                  <>
+                    Saving makes a <b>new quotation</b>. The current one is kept and marked <b>Cancelled - replaced</b> by it.
+                  </>
+                ) : (
+                  <>
+                    Saving makes a <b>new quotation</b>. The one you copied stays as it is.
+                  </>
+                )}
+              </Note>
+            </div>
+          )}
+          {missing.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <Note tone="warn">
+                Not in the Quotation Master any more, so not filled in: <b>{missing.join(", ")}</b>. Pick a replacement service below if needed.
+              </Note>
+            </div>
+          )}
           <Step no="1" title="Customer" sub="Filled in from the lead. Change it if the quotation should go to a different name or address.">
             <div className="lm-form">
               <Field label="Customer / company name" required>
@@ -639,7 +771,7 @@ export default function QuotationBuilder({ lead, onClose }) {
       {previewUrl && (
         <PreviewOverlay
           url={previewUrl}
-          fileName={`Quotation-${(customer.name.trim() || "Customer").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")}.pdf`}
+          fileName={proposalFileName(customer.name.trim())}
           onClose={() => {
             URL.revokeObjectURL(previewUrl);
             setPreviewUrl("");
@@ -649,7 +781,7 @@ export default function QuotationBuilder({ lead, onClose }) {
       {confirming && (
         <Alert
           icon={<FiSend />}
-          title="Save and send this quotation?"
+          title={editing ? "Save the new quotation and cancel the current one?" : "Save and send this quotation?"}
           onClose={() => setConfirming(false)}
           actions={(close) => (
             <>
@@ -658,7 +790,14 @@ export default function QuotationBuilder({ lead, onClose }) {
             </>
           )}
         >
-          It gets a quotation number, the PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>. You can then open the PDF from the Quotations tab and share it with the customer.
+          The PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>.
+          {editing && (
+            <>
+              {" "}
+              The current one stays in the list, marked <b>Cancelled - replaced</b> by the new one.
+            </>
+          )}{" "}
+          You can then open the PDF from the Quotations tab and share it with the customer.
         </Alert>
       )}
     </Modal>

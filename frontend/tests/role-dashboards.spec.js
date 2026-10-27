@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-
 import { mockApi, seedAuth } from './helpers/mockApi.js';
 
 const roles = [
@@ -39,9 +38,7 @@ for (const { role, path, shell, content } of roles) {
   test(`${role} dashboard renders with mocked API data`, async ({ page }) => {
     await mockApi(page);
     await seedAuth(page, role);
-
     await page.goto(path);
-
     await expect(page.getByText(shell)).toBeVisible();
     await expect(page.getByText(content).first()).toBeVisible();
   });

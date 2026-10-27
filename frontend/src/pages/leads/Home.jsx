@@ -518,6 +518,8 @@ function ManagerHome() {
   const [date, setDate] = useState(""); // a picked day replaces the period
   const [member, setMember] = useState("");
   const team = salesTeam();
+  // The sales person picked here goes along to the page a card opens (?sales=<id>).
+  const withMember = (path) => (member ? `${path}${path.includes("?") ? "&" : "?"}sales=${encodeURIComponent(member)}` : path);
 
   const scoped = useMemo(() => {
     const inPeriod = date ? (iso) => onDay(iso, date) : PERIODS.find((p) => p.key === period).match;
@@ -604,10 +606,10 @@ function ManagerHome() {
       {/* `key` replays the numbers and charts when the filter changes. */}
       <div key={`${period}:${date}:${member}`}>
         <div className="lm-grid kpi">
-          <Kpi index={0} label="Verified Leads" value={total} icon={<FiInbox />} tone="info" foot={`${awaitingMeeting} awaiting a meeting`} onClick={() => navigate(`${LEADS_HOME}/all`)} />
-          <Kpi index={1} label="Meetings" value={met} icon={<FiCalendar />} tone="warn" foot={`${pct(met, total)}% of leads`} onClick={() => navigate(`${LEADS_HOME}/meetings`)} />
-          <Kpi index={2} label="Quotations" value={quoted} icon={<FiFileText />} tone="violet" foot={`${pct(quoted, total)}% of leads`} onClick={() => navigate(`${LEADS_HOME}/all?tab=progress`)} />
-          <Kpi index={3} label="Converted" value={won} icon={<FiAward />} tone="success" foot={`${pct(won, total)}% · ${compactMoney(wonValue)} won`} onClick={() => navigate(`${LEADS_HOME}/all?tab=closed`)} />
+          <Kpi index={0} label="Verified Leads" value={total} icon={<FiInbox />} tone="info" foot={`${awaitingMeeting} awaiting a meeting`} onClick={() => navigate(withMember(`${LEADS_HOME}/all`))} />
+          <Kpi index={1} label="Meetings" value={met} icon={<FiCalendar />} tone="warn" foot={`${pct(met, total)}% of leads`} onClick={() => navigate(withMember(`${LEADS_HOME}/meetings`))} />
+          <Kpi index={2} label="Quotations" value={quoted} icon={<FiFileText />} tone="violet" foot={`${pct(quoted, total)}% of leads`} onClick={() => navigate(withMember(`${LEADS_HOME}/all?tab=progress`))} />
+          <Kpi index={3} label="Converted" value={won} icon={<FiAward />} tone="success" foot={`${pct(won, total)}% · ${compactMoney(wonValue)} won`} onClick={() => navigate(withMember(`${LEADS_HOME}/all?tab=closed`))} />
         </div>
 
         <div className="lm-grid two wide fill lm-row">

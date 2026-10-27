@@ -1,0 +1,126 @@
+/* Job page header (components/JobHeader). */
+
+.job-header.jh {
+  display: block;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+}
+
+.jh-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.jh-code {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.jh-title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.jh-sub {
+  margin-top: 4px;
+  font-size: 15px;
+  color: #64748b;
+}
+
+.jh-people {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eef2f7;
+}
+
+.jh-person {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.jh-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.jh-value {
+  font-size: 15px;
+  font-weight: 500;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.jh-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0369a1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.jh-link:hover {
+  text-decoration: underline;
+}
+
+.jh-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  color: #0369a1;
+}
+
+.jh-address svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.jh-address > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.jh-address-text {
+  font-size: 14px;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .job-header.jh {
+    padding: 16px;
+  }
+  .jh-title {
+    font-size: 22px;
+  }
+}

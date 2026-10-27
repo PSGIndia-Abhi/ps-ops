@@ -1087,6 +1087,47 @@
   .lm-target-me { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .lm-target-me > div { display: grid; gap: 2px; small { color: var(--lm-muted); font-size: 12px; } strong { font-size: 22px; } }
   .lm-target-me > .wide { grid-column: 1 / -1; }
+
+  /* Achievement: last month, lifetime and six months of bars (Performance.jsx Achievement) */
+  /* Opens and closes; closed it is one tidy row with the headline numbers. */
+  .lm-achieve-toggle { display: flex; align-items: center; gap: 14px; width: 100%; padding: 0; text-align: left; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .lm-achieve-toggle-icon { display: grid; place-items: center; flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; font-size: 19px; color: var(--lm-primary); background: rgba(37, 99, 235, .1); }
+  .lm-achieve-toggle-text { display: grid; gap: 2px; flex: 1; min-width: 0; strong { font-size: 16px; } small { color: var(--lm-muted); font-size: 13px; } b { color: var(--lm-text); } }
+  .lm-achieve-toggle-chevron { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; background: var(--lm-line); color: var(--lm-muted); transition: transform .25s var(--lm-ease); }
+  .lm-achieve-toggle.open .lm-achieve-toggle-chevron { transform: rotate(180deg); }
+  .lm-achieve-toggle:hover .lm-achieve-toggle-chevron { color: var(--lm-primary); }
+  .lm-achieve-card .lm-achieve { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--lm-line); }
+  .lm-achieve { display: grid; gap: 14px; }
+  .lm-achieve-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .lm-achieve-stats > div { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--lm-line, #e2e8f0); border-radius: 12px; }
+  .lm-achieve-stats small { color: var(--lm-muted); font-size: 12px; }
+  .lm-achieve-stats strong { font-size: 22px; }
+  .lm-achieve-stats span { color: var(--lm-muted); font-size: 13px; }
+  .lm-achieve-head { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid var(--lm-line); font-size: 13px; }
+  .lm-achieve-key { display: inline-flex; align-items: center; gap: 6px; color: var(--lm-muted); font-size: 12px; }
+  .lm-achieve-key i { display: inline-block; }
+  .lm-achieve-key i.bar { width: 10px; height: 10px; border-radius: 3px; background: var(--lm-primary); }
+  .lm-achieve-key i.dash { width: 14px; border-top: 2px dashed var(--lm-muted); margin-left: 8px; }
+  .lm-achieve-chart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+  .lm-achieve-col { display: grid; justify-items: center; gap: 6px; small { color: var(--lm-muted); font-size: 12px; } }
+  .lm-achieve-col.now small { color: inherit; font-weight: 700; }
+  .lm-achieve-area { position: relative; width: 100%; height: 120px; margin-top: 22px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--lm-line); }
+  .lm-achieve-bar { position: relative; width: 56%; max-width: 54px; min-height: 4px; border-radius: 7px 7px 2px 2px; background: var(--lm-primary); opacity: .45; transition: height .5s var(--lm-ease); }
+  .lm-achieve-col.now .lm-achieve-bar { opacity: 1; }
+  .lm-achieve-col.hit .lm-achieve-bar { background: var(--lm-success); opacity: 1; }
+  .lm-achieve-bar em { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); font-style: normal; font-size: 12px; font-weight: 700; white-space: nowrap; color: var(--lm-muted); }
+  .lm-achieve-col.now .lm-achieve-bar em { color: inherit; }
+  .lm-achieve-none { color: var(--lm-muted); opacity: .5; margin-bottom: 2px; }
+  .lm-achieve-target { position: absolute; left: 50%; width: min(80%, 84px); transform: translateX(-50%); border-top: 2px dashed var(--lm-muted); }
+  .lm-achieve-target em { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 11px; color: var(--lm-muted); white-space: nowrap; }
+
+  /* The records behind a performance number (Performance.jsx ReportItems) */
+  .lm-report-items { display: grid; gap: 8px; }
+  .lm-report-item { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 12px 14px; text-align: left; font: inherit; color: inherit; background: none; border: 1px solid var(--lm-line, #e2e8f0); border-radius: 12px; cursor: pointer; transition: border-color .2s, background .2s; }
+  .lm-report-item:hover { border-color: var(--lm-primary, #2563eb); background: rgba(37, 99, 235, .04); }
+  .lm-report-item-main { display: grid; gap: 2px; min-width: 0; strong { font-size: 15px; } small { color: var(--lm-muted); font-size: 13px; } }
+  .lm-report-item-side { display: grid; justify-items: end; gap: 4px; flex-shrink: 0; }
+  .lm-report-item-meta { display: flex; align-items: center; gap: 8px; small { color: var(--lm-muted); font-size: 12px; } }
 }
 
 /* "Set a reminder" in the lead dialogs (dialogs.jsx ReminderInput) */

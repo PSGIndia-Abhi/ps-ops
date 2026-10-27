@@ -8,6 +8,15 @@ const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveHeadOfficeBranchId } = require("../utils/branch");
 const { resolveGroupTable } = require("../utils/groupTable");
+const { isBrigadeExecutive, getBrigadeGroupId, isBrigadeSite, isBrigadeContact } = require("../services/brigade.service");
+
+// Brigade Executive may only act on contacts of Brigade Group sites.
+async function denyNonBrigadeContact(req, res) {
+  if (!isBrigadeExecutive(req.user)) return false;
+  if (await isBrigadeContact(pool, req.params.id)) return false;
+  res.status(404).json({ error: "Contact not found" });
+  return true;
+}
 
 
 
@@ -47,7 +56,13 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
 
     const params = [];
 
-    if (["branch_admin", "supervisor"].includes(req.user.role)) {
+    if (isBrigadeExecutive(req.user)) {
+      // Brigade Executive: every Brigade Group contact, regardless of branch.
+      const brigadeGroupId = await getBrigadeGroupId(pool);
+      if (!brigadeGroupId) return res.json([]);
+      sql += ` AND co.group_id = ? `;
+      params.push(brigadeGroupId);
+    } else if (["branch_admin", "supervisor"].includes(req.user.role)) {
       const [[me]] = await pool.query(
         "SELECT branch_id FROM users WHERE id = ?",
         [req.user.id]
@@ -79,6 +94,7 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
 // GET single contact by ID
 router.get("/:id", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req,res)=>{
   try {
+    if (await denyNonBrigadeContact(req, res)) return;
     const [rows] = await pool.query(
       `SELECT * FROM contacts WHERE id = ? AND is_active = 1`,
       [req.params.id]
@@ -115,6 +131,10 @@ router.post(
     }
 
     try {
+      if (isBrigadeExecutive(req.user) && !(await isBrigadeSite(pool, company_id))) {
+        return res.status(400).json({ error: "Please choose a Brigade Group company/site" });
+      }
+
       const id = uuid();
 
       // ✅ Resolve branch_id
@@ -234,6 +254,8 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
   const { name, phone, email, role, is_primary } = req.body;
 
   try {
+    if (await denyNonBrigadeContact(req, res)) return;
+
     let sql = `
       UPDATE contacts
       SET name = ?, phone = ?, email = ?, role = ?, is_primary = ?
@@ -273,6 +295,7 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
 //delete contact
 router.delete("/:id", auth, requirePermission(PERMISSIONS.DELETE_CONTACT), async (req,res)=>{
   try {
+    if (await denyNonBrigadeContact(req, res)) return;
 
     let sql = `UPDATE contacts SET is_active = 0 WHERE id = ?`;
     const params = [req.params.id];

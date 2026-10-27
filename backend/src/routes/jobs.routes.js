@@ -15,6 +15,7 @@ const PERMISSIONS = require("../access/permissions");
 const { createBooking } = require("../controllers/bookings.controller");
 const { notifyJobAssignmentChange } = require("../services/notifications.service");
 const buildScopeFilter = require("../utils/buildScopeFilter");
+const { isBrigadeExecutive, getBrigadeGroupId, BRIGADE_GROUP_NAME, brigadeJobOnly } = require("../services/brigade.service");
 
 
 const isValidJobId = (jobId) => {
@@ -112,6 +113,21 @@ const resolveJobBranchForAccess = async (executor, job) => {
 const canAccessJob = async (executor, user, jobId) => {
   if (user.is_temporary_worker) {
     return String(user.temp_access_job_id) === String(jobId);
+  }
+
+  // Brigade Executive: any job whose company is in Brigade Group, any branch.
+  if (isBrigadeExecutive(user)) {
+    const [[job]] = await executor.query(
+      `SELECT j.id
+       FROM jobs j
+       JOIN sites s ON s.id = j.company_id
+       JOIN companies co ON co.id = s.company_id
+       JOIN group_name g ON g.id = co.group_id
+       WHERE j.id = ? AND g.name = ?
+       LIMIT 1`,
+      [jobId, BRIGADE_GROUP_NAME]
+    );
+    return !!job;
   }
 
   const branchId = user.role === "admin"
@@ -309,19 +325,29 @@ router.get(
       const conditions = [];
       const params = [];
       //
-      const scope = buildScopeFilter(req.user, {
-        branch: "j.branch_id",
-        company: "s.company_id",
-        site: "j.company_id"
-      });
+      if (isBrigadeExecutive(req.user)) {
+        // Brigade Executive: every Brigade Group job, regardless of branch.
+        const brigadeGroupId = await getBrigadeGroupId(pool);
+        if (!brigadeGroupId) {
+          return res.json([]);
+        }
+        conditions.push("co.group_id = ?");
+        params.push(brigadeGroupId);
+      } else {
+        const scope = buildScopeFilter(req.user, {
+          branch: "j.branch_id",
+          company: "s.company_id",
+          site: "j.company_id"
+        });
 
-      if (scope.forbidden) {
-        return res.status(403).json({ error: "No scope assigned" });
-      }
+        if (scope.forbidden) {
+          return res.status(403).json({ error: "No scope assigned" });
+        }
 
-      if (scope.condition) {
-        conditions.push(scope.condition);
-        params.push(...scope.params);
+        if (scope.condition) {
+          conditions.push(scope.condition);
+          params.push(...scope.params);
+        }
       }
       conditions.push("COALESCE(j.is_archived, 0) = 0");
 
@@ -700,6 +726,7 @@ router.get("/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), async (req,
       approval_status: job.approval_status,
       approved_at: job.approved_at,
       notes: job.notes,
+      address: job.address,
       start_date: job.start_date,
       dueDate: job.due_date,
 
@@ -1080,7 +1107,7 @@ router.patch(
 
 
 // JOB STATUS UPDATE (single source of truth)
-router.patch("/:id/status", auth, requirePermission(PERMISSIONS.UPDATE_JOB_STATUS), async (req, res) => {
+router.patch("/:id/status", auth, requirePermission(PERMISSIONS.UPDATE_JOB_STATUS), brigadeJobOnly((req) => req.params.id), async (req, res) => {
   const jobId = req.params.id;
   const newStatus = req.body?.status;
   const userId = req.user.id;
@@ -1291,6 +1318,7 @@ router.post(
   "/:jobId/assign-recurring",
   auth,
   requirePermission(PERMISSIONS.ASSIGN_RECURRING_JOB),
+  brigadeJobOnly((req) => req.params.jobId),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds } = req.body;
@@ -1435,6 +1463,7 @@ router.post(
   "/:jobId/reassign",
   auth,
   requirePermission(PERMISSIONS.REASSIGN_JOB),
+  brigadeJobOnly((req) => req.params.jobId),
   async (req, res) => {
     const { jobId } = req.params;
     const { supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
@@ -1614,7 +1643,7 @@ router.post(
 );
 
 // POST /api/jobs/assign
-router.post("/assign", auth, requirePermission(PERMISSIONS.REASSIGN_JOB), async (req, res) => {
+router.post("/assign", auth, requirePermission(PERMISSIONS.REASSIGN_JOB), brigadeJobOnly((req) => req.body?.jobIds), async (req, res) => {
   const { jobIds, supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
   const created_by_user_id = req.user?.id;
 

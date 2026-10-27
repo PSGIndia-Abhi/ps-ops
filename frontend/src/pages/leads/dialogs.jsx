@@ -2,7 +2,7 @@
 // a meeting, record a visit, upload a quotation, edit the lead and close it.
 
 import { useEffect, useMemo, useState } from "react";
-import { FiBriefcase, FiCalendar, FiCheck, FiChevronDown, FiSave, FiSend, FiThumbsDown, FiThumbsUp, FiUploadCloud, FiXCircle } from "react-icons/fi";
+import { FiBriefcase, FiCalendar, FiCheck, FiChevronDown, FiSave, FiSend, FiThumbsDown, FiThumbsUp, FiXCircle } from "react-icons/fi";
 import {
   addFollowUp,
   cancelMeeting,
@@ -23,7 +23,6 @@ import {
   scheduleMeeting,
   submitLead,
   updateLead,
-  uploadQuotation,
 } from "./leadsApi";
 import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
 import { FORM_SOURCES, INDUSTRY_TYPES, REASONS, VISIT_OUTCOMES } from "./constants";
@@ -31,7 +30,7 @@ import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
-import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster } from "./leadsApi";
+import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -645,12 +644,18 @@ export function CloseLeadModal({ lead, won, onClose }) {
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // The sales manager converting someone else's lead chooses who it counts for - that sales person
+  // (picked to start with) or themselves.
+  const myId = String(viewer.me?.id || "");
+  const owner = won && viewer.persona === "sales_manager" ? leadSalesOwner(lead) : null;
+  const askCredit = !!owner && String(owner.id) !== myId;
+  const [creditTo, setCreditTo] = useState(() => (askCredit ? String(owner.id) : ""));
 
   async function save(close) {
     if (busy) return;
     setBusy(true);
     try {
-      await closeLead(lead.id, { won, reason, notes }, viewer.me);
+      await closeLead(lead.id, { won, reason, notes, creditTo: askCredit ? creditTo : undefined }, viewer.me);
       toast(won ? `${lead.company} converted to a customer` : "Lead marked as lost");
       close();
     } catch (err) {
@@ -676,9 +681,28 @@ export function CloseLeadModal({ lead, won, onClose }) {
       )}
     >
       <LeadBar lead={lead} />
+      {won && askCredit && (
+        <Field label="Count this conversion for" required>
+          <Choice
+            name="credit"
+            value={creditTo}
+            onChange={setCreditTo}
+            options={[
+              {
+                value: String(owner.id),
+                label: owner.name,
+                sub: `${assigneeRole(owner.role) || "Sales Executive"} - ${String(lead.salesId) === String(owner.id) ? "this lead is assigned to them" : "added this lead"}`,
+                tone: "success",
+              },
+              { value: myId, label: `Me (${viewer.me?.name || "Sales Manager"})`, sub: "Count it towards my own target" },
+            ]}
+          />
+        </Field>
+      )}
       {won ? (
         <Note tone="success">
           A customer record is created for <b>{lead.company}</b> and the lead's full history is kept. A lead can be converted only once.
+          {askCredit && <> It counts towards the target of the person chosen above.</>}
         </Note>
       ) : (
         <Field label="Reason" required>
@@ -693,79 +717,6 @@ export function CloseLeadModal({ lead, won, onClose }) {
       <Field label="Notes">
         <textarea className="lm-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={won ? "e.g. Annual contract signed, service to start next month." : "Anything worth remembering about this lead."} />
       </Field>
-    </Modal>
-  );
-}
-
-/* ------------------------------------------------------------ quotation */
-
-const MAX_PDF_BYTES = 10 * 1024 * 1024;
-
-/** Upload a quotation as a PDF with its total. The lead moves to Quotation Sent. */
-export function QuotationModal({ lead, onClose }) {
-  const toast = useToast();
-  const [amount, setAmount] = useState(lead.quote ? String(Math.round(lead.quote)) : "");
-  const [file, setFile] = useState(null);
-  const [notes, setNotes] = useState("");
-  const [errors, setErrors] = useState({});
-  const [busy, setBusy] = useState(false);
-
-  function pick(e) {
-    const picked = e.target.files?.[0] || null;
-    setFile(picked);
-    setErrors((er) => ({ ...er, file: "" }));
-  }
-
-  async function save(close) {
-    const found = {};
-    if (!(Number(amount) > 0)) found.amount = "Enter the quotation amount.";
-    if (!file) found.file = "Attach the quotation PDF.";
-    else if (file.type !== "application/pdf") found.file = "The quotation must be a PDF file.";
-    else if (file.size > MAX_PDF_BYTES) found.file = "That file is too large. The limit is 10 MB.";
-    setErrors(found);
-    if (busy || Object.keys(found).length > 0) return;
-    setBusy(true);
-    try {
-      const quotation = await uploadQuotation(lead.id, { file, totalAmount: Number(amount), notes });
-      toast(`Quotation ${quotation.number} uploaded`);
-      close();
-    } catch (err) {
-      toast(err.message || "Could not upload the quotation.", true);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      title="Create Quotation"
-      sub="Upload the quotation PDF - it is saved as sent to the customer"
-      onClose={onClose}
-      footer={(close) => (
-        <>
-          <Button variant="ghost" onClick={close}>
-            Cancel
-          </Button>
-          <Button busy={busy} icon={<FiUploadCloud />} onClick={() => save(close)}>
-            Upload Quotation
-          </Button>
-        </>
-      )}
-    >
-      <LeadBar lead={lead} />
-      <div className="lm-form">
-        <Field label="Quotation No" hint="Assigned automatically when uploaded">
-          <input className="lm-input" value="Auto" disabled />
-        </Field>
-        <Field label="Total Amount (₹)" required error={errors.amount}>
-          <input className={`lm-input${errors.amount ? " bad" : ""}`} value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" placeholder="0" />
-        </Field>
-        <Field label="Upload Quotation (PDF)" required error={errors.file} hint={file ? `${file.name} - choose again to replace` : "PDF only, up to 10 MB"} wide>
-          <input className={`lm-input${errors.file ? " bad" : ""}`} type="file" accept="application/pdf" onChange={pick} />
-        </Field>
-        <Field label="Notes" wide>
-          <textarea className="lm-textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={300} placeholder="e.g. Sent quotation by email. Follow up after 1 week." />
-        </Field>
-      </div>
     </Modal>
   );
 }
@@ -950,7 +901,7 @@ export function CancelQuotationModal({ lead, quotation, onClose }) {
     setBusy(true);
     try {
       await cancelQuotation(lead.id, quotation.id, reason);
-      toast(`Quotation ${quotation.number} cancelled`);
+      toast(`Quotation for ${quotation.clientName || lead.company || lead.contact} cancelled`);
       close();
     } catch (err) {
       toast(err.message || "Could not cancel the quotation.", true);
@@ -961,7 +912,7 @@ export function CancelQuotationModal({ lead, quotation, onClose }) {
   return (
     <Modal
       title="Cancel Quotation"
-      sub={`${quotation.number} - it stays on the lead, marked Cancelled`}
+      sub={`${quotation.clientName || lead.company || lead.contact} - it stays on the lead, marked Cancelled`}
       onClose={onClose}
       footer={(close) => (
         <>
