@@ -6,14 +6,50 @@ import DeleteBookingDialog from "../components/DeleteBookingDialog";
 import "../components/DeleteBookingDialog.css";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import CreateBookingModal from "../components/CreateBookingModal";
+import BrigadeBookingModal from "./brigade/BrigadeBookingModal";
 import { apiFetch } from "../api";
 import JobFilters from "../components/JobFilters";
-import { filterJobs, getSupervisorOptions, getTechnicianOptions, getCompanyOptions } from "../utils/jobFilters";
+import { filterJobs, getSupervisorOptions, getTechnicianOptions, getCompanyOptions, STATUS_OPTIONS } from "../utils/jobFilters";
 import Pagination from "../components/Pagination";
 import { getTotalPages, paginate } from "../utils/pagination";
+import "./AdminDashboard.css";
 
 // Jobs shown per page on the dashboard list.
 const JOBS_PER_PAGE = 30;
+
+// Free-text search over the fields shown on a job card.
+function matchesSearch(job, query) {
+  if (!query) return true;
+  return [
+    job.code,
+    job.companyname,
+    job.site,
+    job.title,
+    job.service_type,
+    job.address,
+    job.supervisor?.name,
+    job.requestedBy?.name,
+    job.requestedBy?.phone,
+    job.brigade_flat?.flat_number,
+    job.brigade_flat?.bhk,
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+}
+
+// Brigade Executive only: put each Brigade job's flat (number + BHK) on the
+// job so the row can show it and search can find it.
+async function withBrigadeFlats(jobs) {
+  try {
+    const res = await apiFetch("/api/brigade/job-flats");
+    const flats = res.ok ? await res.json() : {};
+    return jobs.map((job) => (flats[job.id] ? { ...job, brigade_flat: flats[job.id] } : job));
+  } catch {
+    return jobs;
+  }
+}
+
+const statusLabel = (value) => STATUS_OPTIONS.find((o) => o.value === value)?.label || value.replace(/_/g, " ");
 
 
 
@@ -39,6 +75,9 @@ export default function AdminDashboard() {
   // The job being deleted (admin / branch admin take back a booking made by mistake).
   const [deleting, setDeleting] = useState(null);
   const canDelete = ["admin", "branch_admin"].includes(localStorage.getItem("role"));
+  // The Brigade Executive sees this same dashboard (backend limits it to Brigade jobs)
+  // and books through the Brigade form.
+  const isBrigadeExecutive = localStorage.getItem("role") === "brigade_executive";
 
   //job usestates
   const [jobs, setJobs] = useState([]);
@@ -54,12 +93,18 @@ export default function AdminDashboard() {
     companyId: "",
   };
   const [filters, setFiltersState] = useState(defaultFilters);
+  const [search, setSearchState] = useState("");
   const [page, setPage] = useState(1);
   // Any filter change starts again from page 1.
   const setFilters = (next) => {
     setFiltersState(next);
     setPage(1);
   };
+  const setSearch = (value) => {
+    setSearchState(value);
+    setPage(1);
+  };
+  const searchQuery = search.trim().toLowerCase();
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
@@ -71,7 +116,7 @@ export default function AdminDashboard() {
       const res = await apiFetch(`/api/jobs`);
       if (!res.ok) throw new Error("Failed to fetch jobs");
       const data = await res.json();
-      setJobs(data);
+      setJobs(localStorage.getItem("role") === "brigade_executive" ? await withBrigadeFlats(data) : data);
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -160,7 +205,7 @@ export default function AdminDashboard() {
   const byDate = !!(filters.startDate || filters.endDate);
   const filteredJobs = useMemo(
     () =>
-      filterJobs(jobs, filters).sort((a, b) => {
+      filterJobs(jobs, filters).filter((job) => matchesSearch(job, searchQuery)).sort((a, b) => {
         if (byDate) {
           const at = new Date(a.start_date || a.startDate || a.created_at).getTime() || 0;
           const bt = new Date(b.start_date || b.startDate || b.created_at).getTime() || 0;
@@ -172,7 +217,24 @@ export default function AdminDashboard() {
           String(b.code || "").localeCompare(String(a.code || ""), undefined, { numeric: true })
         );
       }),
-    [jobs, filters, byDate]
+    [jobs, filters, byDate, searchQuery]
+  );
+
+  // Status tabs: counts under every other filter + search, so each tab shows
+  // how many jobs it would list.
+  const statusCounts = useMemo(() => {
+    const counts = new Map();
+    for (const job of filterJobs(jobs, { ...filters, status: "" })) {
+      if (!matchesSearch(job, searchQuery)) continue;
+      const status = job.display_status || job.status || "";
+      counts.set(status, (counts.get(status) || 0) + 1);
+    }
+    return counts;
+  }, [jobs, filters, searchQuery]);
+  const statusTabs = STATUS_OPTIONS.filter((o) => o.value && (statusCounts.get(o.value) || filters.status === o.value));
+  const allCount = [...statusCounts.values()].reduce((sum, n) => sum + n, 0);
+  const filtersActive = Boolean(
+    filters.startDate || filters.endDate || filters.supervisorId || filters.technicianId || filters.companyId
   );
   // Never past the last page (e.g. after a refresh returns fewer jobs).
   const currentPage = Math.min(page, getTotalPages(filteredJobs.length, JOBS_PER_PAGE));
@@ -326,19 +388,80 @@ export default function AdminDashboard() {
 
 
 
+  const firstShown = filteredJobs.length ? (currentPage - 1) * JOBS_PER_PAGE + 1 : 0;
+  const lastShown = Math.min(currentPage * JOBS_PER_PAGE, filteredJobs.length);
+
   return (
     <>
-      <div className="dashboard-layout mobile-stack">
+      <div className="dash">
+        {/* HEADER: title, search, actions */}
+        <div className="dash-head">
+          <div>
+            <h2>{isBrigadeExecutive ? "Brigade jobs" : "Jobs"}</h2>
+            <p>
+              {loading
+                ? "Loading jobs…"
+                : `${jobs.length} job${jobs.length === 1 ? "" : "s"}${
+                    filteredJobs.length !== jobs.length ? ` · ${filteredJobs.length} match` : ""
+                  }`}
+            </p>
+          </div>
+          <div className="dash-head-actions">
+            <input
+              type="search"
+              className="dash-search"
+              placeholder="Search job, company, service, person…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search jobs"
+            />
+            <button
+              type="button"
+              disabled={selectedJobIds.length === 0}
+              onClick={() => setIsAssignOpen(true)}
+            >
+              Assign Work Order{selectedJobIds.length ? ` (${selectedJobIds.length})` : ""}
+            </button>
+            <button type="button" className="primary" onClick={() => setIsCreateOpen(true)}>
+              + New Booking
+            </button>
+          </div>
+        </div>
 
+        {/* STATUS TABS */}
+        <div className="dash-tabs" role="tablist" aria-label="Job status">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!filters.status}
+            className={`dash-tab ${!filters.status ? "active" : ""}`}
+            onClick={() => setFilters({ ...filters, status: "" })}
+          >
+            All <span>{allCount}</span>
+          </button>
+          {statusTabs.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="tab"
+              aria-selected={filters.status === o.value}
+              className={`dash-tab ${filters.status === o.value ? "active" : ""} s-${o.value}`}
+              onClick={() => setFilters({ ...filters, status: filters.status === o.value ? "" : o.value })}
+            >
+              {statusLabel(o.value)} <span>{statusCounts.get(o.value) || 0}</span>
+            </button>
+          ))}
+        </div>
 
-        {/* job list  */}
-        <div>
-
-
+        {/* FILTERS */}
+        <div className="dash-filters">
           <JobFilters
             filters={filters}
             setFilters={setFilters}
-            onReset={() => setFilters(defaultFilters)}
+            onReset={() => {
+              setFilters(defaultFilters);
+              setSearch("");
+            }}
             supervisorOptions={supervisorOptions}
             technicianOptions={technicianOptions}
             companyOptions={companyOptions}
@@ -346,81 +469,97 @@ export default function AdminDashboard() {
             showTechnician
             showCompany
           />
-
-          {filteredJobs.length > 0 && (
-            <div className="jobs-count" style={{ margin: "4px 2px 10px", fontSize: 14, color: "#6b7280" }}>
-              Showing {(currentPage - 1) * JOBS_PER_PAGE + 1}–{Math.min(currentPage * JOBS_PER_PAGE, filteredJobs.length)} of{" "}
-              {filteredJobs.length} jobs
-            </div>
-          )}
-
-          {pagedJobs.map((job) => (
-            <div key={job.id} style={{ marginBottom: "8px" }}>
-              <JobRow
-                job={job}
-                isSelected={selectedJobIds.includes(job.id)}
-                isExpanded={expandedJobId === job.id}
-                onToggleSelect={() => toggleJobSelection(job.id)}
-                onToggleExpand={() => toggleJobExpansion(job.id)}
-              />
-
-              {expandedJobId === job.id && <JobDetails job={job} onDelete={canDelete ? setDeleting : undefined} />}
-            </div>
-          ))}
-
-          {deleting && (
-            <DeleteBookingDialog
-              job={deleting}
-              onClose={() => setDeleting(null)}
-              onDeleted={() => {
-                setDeleting(null);
-                setExpandedJobId(null);
-                fetchJobs();
-              }}
-            />
-          )}
-
-          <Pagination
-            page={currentPage}
-            totalItems={filteredJobs.length}
-            pageSize={JOBS_PER_PAGE}
-            onChange={goToPage}
-          />
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="dashboard-actions">
-          <input
-            className="sheet-search"
-            placeholder="Global Search"
+        {selectedJobIds.length > 0 && (
+          <div className="dash-selbar" role="status">
+            <strong>{selectedJobIds.length} selected</strong>
+            <button type="button" className="primary" onClick={() => setIsAssignOpen(true)}>
+              Assign Work Order
+            </button>
+            <button type="button" onClick={() => setSelectedJobIds([])}>
+              Clear
+            </button>
+          </div>
+        )}
+
+        {/* LIST */}
+        {loading && !jobs.length ? (
+          <div className="dash-state">Loading jobs…</div>
+        ) : error ? (
+          <div className="dash-state dash-state-error">
+            Could not load jobs. <button type="button" onClick={fetchJobs}>Try again</button>
+          </div>
+        ) : filteredJobs.length === 0 ? (
+          <div className="dash-state">
+            <strong>{jobs.length ? "No jobs match" : "No jobs yet"}</strong>
+            {jobs.length ? (
+              <span>
+                Try another status{filtersActive || searchQuery ? ", clear the search or reset the filters" : ""}.
+              </span>
+            ) : (
+              <span>Create the first booking with “+ New Booking”.</span>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="dash-count">
+              Showing {firstShown}–{lastShown} of {filteredJobs.length}
+            </div>
+            <div className="dash-list">
+              {pagedJobs.map((job) => (
+                <div key={job.id}>
+                  <JobRow
+                    job={job}
+                    isSelected={selectedJobIds.includes(job.id)}
+                    isExpanded={expandedJobId === job.id}
+                    onToggleSelect={() => toggleJobSelection(job.id)}
+                    onToggleExpand={() => toggleJobExpansion(job.id)}
+                  />
+
+                  {expandedJobId === job.id && <JobDetails job={job} onDelete={canDelete ? setDeleting : undefined} />}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {deleting && (
+          <DeleteBookingDialog
+            job={deleting}
+            onClose={() => setDeleting(null)}
+            onDeleted={() => {
+              setDeleting(null);
+              setExpandedJobId(null);
+              fetchJobs();
+            }}
           />
+        )}
 
-          <button
-            className="primary"
-            onClick={() => setIsCreateOpen(true)}
-          >
-            New Booking
-          </button>
-
-          <button
-            disabled={selectedJobIds.length === 0}
-            onClick={() => setIsAssignOpen(true)}
-          >
-            Assign Work Order
-          </button>
-        </div>
-
-
+        <Pagination
+          page={currentPage}
+          totalItems={filteredJobs.length}
+          pageSize={JOBS_PER_PAGE}
+          onChange={goToPage}
+        />
       </div>
 
       {/* MODAL booking form */}
-      <CreateBookingModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onCreate={handleCreateBooking}
-        supervisors={supervisors}
-        technicians={technicians}
-      />
+      {isBrigadeExecutive ? (
+        <BrigadeBookingModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          onCreated={fetchJobs}
+        />
+      ) : (
+        <CreateBookingModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          onCreate={handleCreateBooking}
+          supervisors={supervisors}
+          technicians={technicians}
+        />
+      )}
 
 
       {/* MODAL (outside layout, global) */}

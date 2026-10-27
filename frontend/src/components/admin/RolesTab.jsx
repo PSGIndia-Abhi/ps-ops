@@ -31,6 +31,8 @@ const PERMISSION_CATEGORIES = {
       { name: "START_VISIT", desc: "Start/begin visits" },
       { name: "SUBMIT_VISIT", desc: "Submit visit reports" },
       { name: "APPROVE_VISIT", desc: "Approve submitted visits" },
+      { name: "START_VISIT_ANYWHERE", desc: "Start visits from anywhere (no location check)" },
+      { name: "END_VISIT_WITHOUT_PHOTOS", desc: "End Brigade visits without before/after photos" },
     ],
   },
   contacts: {

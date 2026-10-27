@@ -8,6 +8,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveGroupTable } = require("../utils/groupTable");
+const { isBrigadeExecutive, getBrigadeGroupId, isBrigadeCompany } = require("../services/brigade.service");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -17,9 +18,15 @@ const buildLogoUrl = (companyId) => `/api/companies/${companyId}/logo`;
 
 // GET /api/companies (legal entities)
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, res) => {
-  const { group_id } = req.query;
+  let { group_id } = req.query;
 
   try {
+    // Brigade Executive only sees Brigade Group companies (properties).
+    if (isBrigadeExecutive(req.user)) {
+      group_id = await getBrigadeGroupId(pool);
+      if (!group_id) return res.json([]);
+    }
+
     const groupTable = await resolveGroupTable(pool);
      const groupRef = "`group_name`";
     let sql = `
@@ -118,6 +125,13 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
     const groupTable = await resolveGroupTable(pool);
      const groupRef = "`group_name`";
     let resolvedGroupId = group_id || null;
+    // Brigade Executive can only add companies to Brigade Group.
+    if (isBrigadeExecutive(req.user)) {
+      resolvedGroupId = await getBrigadeGroupId(pool);
+      if (!resolvedGroupId) {
+        return res.status(400).json({ error: "Brigade Group is not set up" });
+      }
+    }
     if (resolvedGroupId) {
       const [[group]] = await pool.query(
       `SELECT id FROM ${groupRef} WHERE id = ?`,
@@ -246,6 +260,13 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
     }
 
     let resolvedGroupId = group_id || null;
+    // Brigade Executive can only edit Brigade companies, and they stay in Brigade Group.
+    if (isBrigadeExecutive(req.user)) {
+      if (!(await isBrigadeCompany(pool, id))) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      resolvedGroupId = await getBrigadeGroupId(pool);
+    }
     if (resolvedGroupId) {
       const [[group]] = await pool.query(`SELECT id FROM ${groupRef} WHERE id = ?`, [resolvedGroupId]);
       if (!group) {
@@ -327,6 +348,9 @@ router.delete("/:id", auth, requirePermission(PERMISSIONS.DELETE_CONTACT), async
     if (!existingCompany) {
       return res.status(404).json({ error: "Company not found" });
     }
+    if (isBrigadeExecutive(req.user) && !(await isBrigadeCompany(pool, id))) {
+      return res.status(404).json({ error: "Company not found" });
+    }
 
     const [[{ site_count }]] = await pool.query(
       "SELECT COUNT(*) AS site_count FROM sites WHERE company_id = ? AND is_active = 1",
@@ -364,6 +388,10 @@ router.post(
     }
 
     try {
+      if (isBrigadeExecutive(req.user) && !(await isBrigadeCompany(pool, id))) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+
       if (
         !process.env.MINIO_ENDPOINT ||
         !process.env.MINIO_PORT ||

@@ -1,4 +1,5 @@
 import "./JobRow.css";
+import "./JobHeader.css";
 import { useState } from "react";
 import RequesterPopover from "./RequesterPopover";
 
@@ -22,88 +23,101 @@ export default function JobHeader({ job, setIsAssignOpen }) {
   const displayStatus = job.display_status || status || "";
 
   const companyName = job.requestedBy?.company?.site ?? "-";
+  // The service address entered on the booking; the site address if none.
+  const address = job.address || job.requestedBy?.company?.address || "";
+  const companyLabel = job.requestedBy?.company?.name;
 
   return (
-    <div className="job-header">
+    <div className="job-header jh">
+      <div className="jh-top">
+        <span className="jh-code">{code}</span>
+        <span className={`job-status ${displayStatus}`}>
+          {displayStatus ? displayStatus.replace(/_/g, " ") : "-"}
+        </span>
+      </div>
 
-      {/* LEFT */}
-      <div className="job-header-left">
+      <h1 className="jh-title">{title}</h1>
+      <div className="jh-sub">
+        {companyLabel && companyLabel !== companyName ? `${companyLabel} · ${companyName}` : companyName}
+      </div>
 
-        <h1 className="job-title">{title}</h1>
-        <h3 className="job-subtitle">{companyName}</h3>
-
-        <div className="job-meta">
-          <span className="job-code">{code}</span>
-        </div>
-
-        {/* PEOPLE ROW */}
-        <div className="job-people-row">
-
-          {/* REQUESTED BY */}
-          {canViewRequester && (
-            <div className="job-person">
-            <span className="label">Requested By:</span>
-
+      {/* PEOPLE */}
+      <div className="jh-people">
+        {/* REQUESTED BY */}
+        {canViewRequester && (
+          <div className="jh-person">
+            <span className="jh-label">Requested by</span>
             {requestedBy ? (
               <button
-                className="link-button"
+                type="button"
+                className="jh-link"
                 onClick={() => setShowRequester(prev => !prev)}
+                aria-expanded={showRequester}
               >
                 {requestedBy.name}
               </button>
             ) : (
-              <span>-</span>
+              <span className="jh-value">-</span>
             )}
-          </div>)}
-
-          {/* SUPERVISOR */}
-          {role !== "technician" && (
-            <div className="job-person">
-              <span className="label">Supervisor:</span>
-
-              {canAssign && setIsAssignOpen ? (
-                <button
-                  className="link-button"
-                  onClick={() => setIsAssignOpen(true)}
-                >
-                  {supervisor?.name ?? "Unassigned"}
-                </button>
-              ) : (
-                <span>{supervisor?.name ?? "Unassigned"}</span>
-              )}
-            </div>
-          )}
-
-        </div>
-
-        {/* POPOVER (always below row) */}
-        {showRequester && requestedBy && (
-          <div className="requester-popover">
-            <RequesterPopover
-              contact={requestedBy}
-              onClose={() => setShowRequester(false)}
-            />
           </div>
         )}
 
-      </div>
-
-      {/* RIGHT */}
-      <div className="job-header-right">
+        {/* SUPERVISOR */}
+        {role !== "technician" && (
+          <div className="jh-person">
+            <span className="jh-label">Supervisor</span>
+            {canAssign && setIsAssignOpen ? (
+              <button
+                type="button"
+                className="jh-link"
+                onClick={() => setIsAssignOpen(true)}
+                title="Change team"
+              >
+                {supervisor?.name ?? "Unassigned"}
+              </button>
+            ) : (
+              <span className="jh-value">{supervisor?.name ?? "Unassigned"}</span>
+            )}
+          </div>
+        )}
 
         {/* TEAM */}
         {role !== "technician" && team.length > 0 && (
-          <div className="team-line">
-            <span className="label">Team:</span>{" "}
-            {team.map(m => m.name).join(", ")}
+          <div className="jh-person">
+            <span className="jh-label">Technician</span>
+            <span className="jh-value">{team.map(m => m.name).join(", ")}</span>
           </div>
         )}
-
-        <button className={`job-status ${displayStatus.toLowerCase()}`}>
-          {displayStatus}
-        </button>
-
       </div>
+
+      {address && (
+        <div className="jh-address">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21Z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            <circle cx="12" cy="9.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+          <span>
+            <span className="jh-label">Address</span>
+            <span className="jh-address-text">{address}</span>
+          </span>
+        </div>
+      )}
+
+      {/* POPOVER (always below the people row) */}
+      {showRequester && requestedBy && (
+        <div className="requester-popover">
+          <RequesterPopover
+            contact={requestedBy}
+            onClose={() => setShowRequester(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

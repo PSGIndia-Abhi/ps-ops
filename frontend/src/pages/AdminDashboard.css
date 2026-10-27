@@ -1,0 +1,264 @@
+/* Admin / branch admin / Brigade Executive dashboard (pages/AdminDashboard).
+   Job card overrides are scoped to .dash so the supervisor dashboard, which
+   shares JobRow, keeps its own look. */
+
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dash-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.dash-head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.dash-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dash-head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dash-head-actions button {
+  white-space: nowrap;
+  padding: 10px 16px;
+}
+
+.dash-search {
+  width: 300px;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.dash-search:focus {
+  outline: 2px solid #e0f2fe;
+  border-color: var(--primary);
+}
+
+/* status tabs */
+
+.dash-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dash-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+}
+
+.dash-tab span {
+  background: #f3f4f6;
+  color: #4b5563;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-tab:hover {
+  border-color: #bae6fd;
+}
+
+.dash-tab.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+
+.dash-tab.active span {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+/* filters: lighter bar */
+
+.dash-filters .job-filters {
+  margin-bottom: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: end;
+}
+
+.dash-filters .job-filter-reset {
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+/* selection bar */
+
+.dash-selbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #1e3a8a;
+}
+
+.dash-selbar strong {
+  margin-right: auto;
+}
+
+/* states + count */
+
+.dash-count {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 2px -4px;
+}
+
+.dash-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 40px 16px;
+  background: #fff;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.dash-state strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.dash-state-error {
+  flex-direction: row;
+  justify-content: center;
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+  border-style: solid;
+}
+
+/* compact job cards */
+
+.dash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dash .job-row {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border-color: var(--border);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.dash .job-row:hover {
+  border-color: #93c5fd;
+}
+
+.dash .job-row.expanded {
+  border-color: #2563eb;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.1);
+}
+
+.dash .job-checkbox {
+  margin-top: 2px;
+}
+
+.dash .job-row-content {
+  gap: 8px;
+}
+
+.dash .job-row-header {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dash .job-companyname {
+  font-size: 15px;
+}
+
+.dash .job-service {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0369a1;
+}
+
+.dash .job-row-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  padding-top: 8px;
+}
+
+.dash .job-info-block {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dash .job-info-block-right {
+  margin-left: auto;
+}
+
+.dash .job-supervisor-label {
+  margin: 0;
+  font-size: 11px;
+}
+
+.dash .job-supervisor-name,
+.dash .job-date {
+  font-size: 14px;
+}
+
+@media (max-width: 768px) {
+  .dash-head-actions,
+  .dash-search {
+    width: 100%;
+  }
+  .dash-head-actions button {
+    flex: 1;
+  }
+  .dash .job-row-header {
+    flex-direction: column;
+  }
+  .dash .job-info-block-right {
+    margin-left: 0;
+  }
+}

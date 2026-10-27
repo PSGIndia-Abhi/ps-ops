@@ -56,6 +56,7 @@ const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
+const brigadeRoutes = require("./src/routes/brigade.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -98,6 +99,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use(express.json());
 app.use("/api/bookings", bookingsRoutes);
 app.use("/api/visits", visitRoutes);
+app.use("/api/brigade", brigadeRoutes);
 app.use("/api/tickets", ticketsRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/push", pushRoutes);
