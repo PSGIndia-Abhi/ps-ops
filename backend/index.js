@@ -55,6 +55,8 @@ const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
+const salesFieldTrackingRoutes = require("./src/routes/sales-field-tracking.routes");
+const { startSalesShiftAutoEndCron } = require("./src/jobs/salesShiftAutoEnd.cron");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -130,6 +132,8 @@ app.use("/api/work-tasks", workTasksRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
 // Admin User Activity report (logins + daily app usage, PDF/Excel export).
 app.use("/api/user-activity", userActivityRoutes);
+// Sales Executive Field Tracking (shift, background GPS, manager's day review).
+app.use("/api/field-tracking", salesFieldTrackingRoutes);
 
 
 
@@ -148,6 +152,7 @@ const PORT = process.env.PORT || 3000;
     startPaymentReminderCron();
     startLeadReminderCron();
     startTaskReminderCron();
+    startSalesShiftAutoEndCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

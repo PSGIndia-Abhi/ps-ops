@@ -402,6 +402,84 @@ router.post("/meetings/:id/check-in", auth, requirePermission("CRM_VIEW_LEAD"), 
   }
 });
 
+// POST /api/crm/leads/:id/unplanned-visit -- the sales executive is at a client with no meeting
+// booked: create the meeting and check in, in one step. Body: { lat?, lng?, notes? }.
+// The visit is then closed with the normal POST /meetings/:id/complete (check-out).
+// If the requester already has an open meeting on this lead, that one is checked in instead.
+// scheduled_at and check_in_at get the same value - that is how an unplanned visit is told apart
+// from a planned one (Field Tracking reads it that way).
+router.post("/leads/:id/unplanned-visit", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot record a visit for this lead");
+    if (!ACTIVE_MEETING_STAGES.includes(lead.pipeline_stage)) {
+      throw new HttpError(400, `Cannot record a visit for a lead that is ${lead.pipeline_stage}`);
+    }
+
+    const lat = req.body?.lat !== undefined && req.body?.lat !== null ? Number(req.body.lat) : null;
+    const lng = req.body?.lng !== undefined && req.body?.lng !== null ? Number(req.body.lng) : null;
+    if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) || (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180))) {
+      throw new HttpError(400, "lat/lng must be valid coordinates");
+    }
+    const notes = optionalText(req.body?.notes, 2000);
+    if (notes === false) throw new HttpError(400, "notes is too long (max 2000 characters)");
+
+    const open = await findOpenMeeting(lead.id);
+    if (open) {
+      if (Number(open.sales_employee_id) !== Number(req.user.id)) {
+        return res.status(409).json({
+          error: `A meeting is already scheduled for this lead${open.sales_employee_name ? ` with ${open.sales_employee_name}` : ""}.`,
+          meeting: open,
+        });
+      }
+      if (open.check_in_at) {
+        return res.status(409).json({ error: "You are already checked in to this lead. Check out first.", meeting: await loadMeeting(open.id) });
+      }
+      // Their own booked meeting - check in to it rather than creating a duplicate.
+      await inTransaction(async (conn) => {
+        await conn.query("UPDATE crm_lead_meetings SET check_in_at = NOW(), check_in_lat = ?, check_in_lng = ? WHERE id = ?", [lat, lng, open.id]);
+        await logLeadHistory(conn, lead.id, "VISIT_CHECK_IN", { note: lat !== null ? `at ${lat},${lng}` : null, changedBy: req.user.id });
+      });
+      return res.json(await loadMeeting(open.id));
+    }
+
+    const meetingId = uuid();
+    const taskId = uuid();
+    const taskTitle = `Site visit - ${lead.company_name || lead.customer_name}`.slice(0, 200);
+
+    await inTransaction(async (conn) => {
+      const [[{ now }]] = await conn.query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS now");
+      const [dueDate, dueTime] = now.split(" ");
+      await conn.query(
+        `INSERT INTO work_tasks (id, title, description, task_type, priority, source_module, source_id, assigned_to, created_by, due_date, due_time)
+         VALUES (?, ?, ?, 'LEAD_MEETING', 'NORMAL', 'LEAD', ?, ?, ?, ?, ?)`,
+        [taskId, taskTitle, notes, lead.id, req.user.id, req.user.id, dueDate, dueTime]
+      );
+      await logTaskHistory(conn, taskId, "CREATE", { toStatus: "OPEN", changedBy: req.user.id, note: "Created from an unplanned lead visit" });
+
+      await conn.query(
+        `INSERT INTO crm_lead_meetings
+           (id, lead_id, sales_employee_id, scheduled_at, meeting_type, meeting_address, notes, task_id, check_in_at, check_in_lat, check_in_lng)
+         VALUES (?, ?, ?, ?, 'SITE_VISIT', ?, ?, ?, ?, ?, ?)`,
+        [meetingId, lead.id, req.user.id, now, lead.location, notes, taskId, now, lat, lng]
+      );
+      // Same stage move as scheduling a meeting; an existing sales rep on the lead is kept.
+      await conn.query(
+        `UPDATE crm_leads SET pipeline_stage = 'MEETING_SCHEDULED',
+                assigned_sales_employee_id = COALESCE(assigned_sales_employee_id, ?), row_version = row_version + 1
+          WHERE id = ?`,
+        [req.user.id, lead.id]
+      );
+      await logLeadHistory(conn, lead.id, "MEETING_SCHEDULED", { note: "Unplanned visit", changedBy: req.user.id });
+      await logLeadHistory(conn, lead.id, "VISIT_CHECK_IN", { note: lat !== null ? `at ${lat},${lng}` : null, changedBy: req.user.id });
+    });
+
+    res.status(201).json(await loadMeeting(meetingId));
+  } catch (err) {
+    sendError(res, err, "Failed to record unplanned visit");
+  }
+});
+
 // POST /api/crm/meetings/:id/complete -- save the visit outcome. Moves the
 // lead's pipeline_stage to VISIT_COMPLETED.
 router.post("/meetings/:id/complete", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
