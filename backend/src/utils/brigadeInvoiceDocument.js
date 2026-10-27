@@ -37,11 +37,12 @@ const BILL_TO = {
 const PLACE_OF_SUPPLY = "29-Karnataka";
 const TAX_RATE = 9; // SGST and CGST each (intra-state)
 
+// Bank details: label | value, drawn as two aligned columns.
 const BANK = [
-  ["Name", "ICICI BANK LIMITED, BANNERGHATTA"],
+  ["Bank", "ICICI Bank Limited, Bannerghatta"],
   ["Account No.", "100705001440"],
-  ["IFSC code", "ICIC0001007"],
-  ["Account holder's name", "Bestserve Pest Management Pvt Ltd"],
+  ["IFSC Code", "ICIC0001007"],
+  ["Account Name", "Bestserve Pest Management Pvt Ltd"],
 ];
 
 const TERMS = [
@@ -50,9 +51,8 @@ const TERMS = [
 ];
 
 const LOGO = path.join(__dirname, "../../assets/quotation-logo.png");
-// The company's stamp with signature (transparent PNG) and its UPI "Scan to pay" QR code.
+// The company's stamp with signature (transparent PNG).
 const STAMP = path.join(__dirname, "../../assets/invoice-stamp.png");
-const UPI_QR = path.join(__dirname, "../../assets/invoice-upi-qr.png");
 const FONT_DIR = path.join(__dirname, "../../assets/fonts");
 // Liberation Serif (SIL Open Font License): the same shapes and widths as Times New Roman,
 // which itself cannot be bundled. Like Times New Roman it has no rupee sign, so only the "₹"
@@ -366,18 +366,17 @@ function renderInvoicePdf(content, stream, { preview = false } = {}) {
   font("B", 8.4).text("Terms and Conditions", b1 + PAD, y + 6, { lineBreak: false });
   font("R", 8).text(`For : ${SELLER.name}`, b2 + PAD, y + 12, { width: R - b2 - PAD * 2, align: "center" });
 
-  // The UPI QR code with its "Scan to pay" band (portrait image, 356 x 465).
-  const qrX = L + PAD + 2;
-  const qrY = y + 24;
-  const QR = 58;
-  doc.image(UPI_QR, qrX, qrY, { fit: [QR, Math.round(QR * (465 / 356))], align: "center", valign: "top" });
-  const bankX = qrX + QR + 8;
-  const bankW = b1 - bankX - 4;
+  const bankX = L + PAD + 4;
+  const bankW = b1 - bankX - PAD;
+  // Labels in a fixed column, values in the next one, so a wrapped value stays under its value.
+  const labelW = 62;
+  const valueX = bankX + labelW;
+  const valueW = bankW - labelW;
   let ky = y + 24;
   for (const [k, v] of BANK) {
-    const t = `${k} : ${v}`;
-    font("R", 7.6).text(t, bankX, ky, { width: bankW });
-    ky += textH(t, bankW, 7.6) + 6;
+    font("B", 7.8).text(k, bankX, ky, { width: labelW - 6, lineBreak: false });
+    font("R", 7.8).text(v, valueX, ky, { width: valueW });
+    ky += Math.max(textH(k, labelW - 6, 7.8, "B"), textH(v, valueW, 7.8)) + 6;
   }
 
   let ry = y + 24;
@@ -387,7 +386,7 @@ function renderInvoicePdf(content, stream, { preview = false } = {}) {
   }
 
   // The company stamp with signature, between "For: ..." and "Authorized Signatory".
-  const bankEnd = Math.max(ky, ry, y + 112) + 4;
+  const bankEnd = Math.max(ky, ry, y + 104) + 4;
   const stampTop = y + 34;
   const stampH = bankEnd - 24 - stampTop;
   doc.image(STAMP, b2 + PAD, stampTop, { fit: [R - b2 - PAD * 2, stampH], align: "center", valign: "center" });

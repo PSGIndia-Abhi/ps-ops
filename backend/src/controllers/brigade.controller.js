@@ -28,7 +28,9 @@ const {
   isBrigadeJob,
   resolvePrice,
   getVisitPhotoCounts,
+  canOverrideVisit,
 } = require("../services/brigade.service");
+const PERMISSIONS = require("../access/permissions");
 
 const FLAT_FORMAT_MESSAGE =
   "Flat number must be one capital letter, a hyphen and 4 digits (e.g. L-0123)";
@@ -683,7 +685,9 @@ function runCreateBooking(req, body) {
   });
 }
 
-function readPo(body) {
+// strict: a PO number needs its source, date and amount (new bookings). Scheduling a pending
+// flat passes strict: false, so a flat saved before that rule can still be scheduled.
+function readPo(body, { strict = true } = {}) {
   const po = body?.client_po || {};
   const number = trimString(po.number);
   const source = trimString(po.source);
@@ -701,7 +705,7 @@ function readPo(body) {
   }
 
   // The PO is optional, but once a PO number is given its details are required.
-  if (number) {
+  if (number && strict) {
     if (!source) throw withStatus("Enter where the PO comes from", 400);
     if (!date) throw withStatus("Enter the PO date", 400);
     if (amount === null) throw withStatus("Enter the PO amount", 400);
@@ -751,16 +755,15 @@ async function createBrigadeBooking(req, res) {
         400
       );
     }
-    // The booking form starts each service at its price-master price and may change it for this
-    // booking ({ service_prices: { [sub_service]: price } }); the master itself is not touched.
-    const edited = body.service_prices && typeof body.service_prices === "object" ? body.service_prices : {};
+    // Prices always come from the price master. Scheduling a pending flat keeps the
+    // prices saved when it was booked (Brigade's order), even if the master changed since.
+    const requestPrices = body._request_prices || {};
     for (const line of quote.lines) {
-      if (edited[line.sub_service] === undefined || edited[line.sub_service] === null || edited[line.sub_service] === "") continue;
-      const price = parsePrice(edited[line.sub_service]);
-      if (price === null) throw withStatus(`Enter a valid price for ${line.sub_service}`, 400);
-      line.price = price;
+      if (requestPrices[line.sub_service] !== undefined && requestPrices[line.sub_service] !== null) {
+        line.price = Number(requestPrices[line.sub_service]);
+      }
     }
-    quote.total = Math.round(quote.lines.reduce((sum, l) => sum + (l.price || 0), 0) * 100) / 100;
+    quote.total = round2(quote.lines.reduce((sum, l) => sum + (l.price || 0), 0));
 
     // The job's site (and so the technician's location check) comes from the
     // requested-by contact, so it must belong to the chosen property site.
@@ -772,7 +775,7 @@ async function createBrigadeBooking(req, res) {
       throw withStatus("The requested-by contact must belong to the selected property site", 400);
     }
 
-    const po = readPo(body);
+    const po = readPo(body, { strict: !requestId });
 
     const siteAddress = [site.address, site.city, site.state]
       .map(trimString)
@@ -910,14 +913,55 @@ async function readBrigadeSiteAndContact(db, companyId, siteId, contactId) {
   return site;
 }
 
+// The services saved with pending flats: { [request_id]: [{ sub_service, price }] }.
+async function loadRequestServices(db, requestIds) {
+  if (!requestIds.length) return {};
+  try {
+    const [rows] = await db.query(
+      `SELECT request_id, sub_service, price FROM brigade_flat_request_services
+       WHERE request_id IN (?) ORDER BY sort_order ASC, sub_service ASC`,
+      [requestIds]
+    );
+    const map = {};
+    for (const r of rows) {
+      (map[r.request_id] ||= []).push({ sub_service: r.sub_service, price: r.price === null ? null : Number(r.price) });
+    }
+    return map;
+  } catch (err) {
+    if (err?.code === "ER_NO_SUCH_TABLE") return {}; // 06_brigade_flat_request_services.sql not run yet
+    throw err;
+  }
+}
+
 // POST /api/brigade/flat-requests
-// { company_id, site_id, flat_number, bhk, contact_id, address?, client_po?, notes? }
+// { company_id, site_id, flat_number, bhk, contact_id, subServices?, address?, client_po?, notes? }
+// A Brigade booking: the flat and the services Brigade asked for, saved to Pending at the
+// price-master prices. Visit dates and team are set later ("Schedule & assign").
 async function createFlatRequest(req, res) {
+  let conn;
   try {
     const body = req.body || {};
     const companyId = trimString(body.company_id);
     const site = await readBrigadeSiteAndContact(pool, companyId, trimString(body.site_id), trimString(body.contact_id));
     const flat = await readFlatAndBhk(pool, companyId, body.flat_number, body.bhk);
+    const subServices = readSubServices(body.subServices);
+    let lines = [];
+    if (subServices.length) {
+      // Same rules as a booking: not already booked for the flat, and priced for its BHK.
+      const open = summariseFlatJobs(await loadFlatJobs(pool, companyId, flat.flat_number))
+        .filter((x) => x.state === "booked" && subServices.includes(x.sub_service));
+      if (open.length) {
+        throw withStatus(
+          `Already booked for ${flat.flat_number}: ${open.map((x) => `${x.sub_service} (${x.job.code})`).join(", ")}`,
+          409
+        );
+      }
+      const quote = await quoteServices(pool, flat, subServices);
+      if (quote.missing.length) {
+        throw withStatus(`No price set for ${flat.flat_number} (${flat.bhk}): ${quote.missing.join(", ")}`, 400);
+      }
+      lines = quote.lines;
+    }
     const po = readPo(body);
     const notes = trimString(body.notes) || null;
     const siteAddress = [site.address, site.city, site.state].map(trimString).filter(Boolean).join(", ");
@@ -930,7 +974,9 @@ async function createFlatRequest(req, res) {
     if (pending) throw withStatus(`${flat.flat_number} is already waiting for services in Pending`, 409);
 
     const id = uuid();
-    await pool.query(
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    await conn.query(
       `INSERT INTO brigade_flat_requests
        (id, company_id, site_id, flat_number, bhk, contact_id, address,
         client_po_number, po_source, po_date, po_amount, notes, created_by_user_id)
@@ -938,10 +984,25 @@ async function createFlatRequest(req, res) {
       [id, companyId, site.id, flat.flat_number, flat.bhk, trimString(body.contact_id), address,
         po.number, po.source, po.date, po.amount, notes, req.user.id]
     );
+    for (const [i, line] of lines.entries()) {
+      await conn.query(
+        `INSERT INTO brigade_flat_request_services (id, request_id, sub_service, price, sort_order)
+         VALUES (?, ?, ?, ?, ?)`,
+        [uuid(), id, line.sub_service, line.price, i]
+      );
+    }
+    await conn.commit();
     const [[row]] = await pool.query(`${FLAT_REQUEST_SELECT} WHERE r.id = ?`, [id]);
-    res.status(201).json(toFlatRequest(row));
+    const services = (await loadRequestServices(pool, [id]))[id] || [];
+    res.status(201).json({ ...toFlatRequest(row), services, services_total: round2(services.reduce((t, x) => t + (x.price || 0), 0)) });
   } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err?.code === "ER_NO_SUCH_TABLE") {
+      return res.status(500).json({ error: "Pending services are not set up yet. Run database/brigade/06_brigade_flat_request_services.sql on the database." });
+    }
     sendRequestError(res, err, "Failed to save the flat");
+  } finally {
+    if (conn) conn.release();
   }
 }
 
@@ -953,7 +1014,13 @@ async function listFlatRequests(req, res) {
       `${FLAT_REQUEST_SELECT} WHERE r.status = ? ORDER BY r.created_at DESC`,
       [status]
     );
-    res.json(rows.map(toFlatRequest));
+    const servicesBy = await loadRequestServices(pool, rows.map((r) => r.id));
+    res.json(
+      rows.map((r) => {
+        const services = servicesBy[r.id] || [];
+        return { ...toFlatRequest(r), services, services_total: round2(services.reduce((t, x) => t + (x.price || 0), 0)) };
+      })
+    );
   } catch (err) {
     sendRequestError(res, err, "Failed to load pending flats");
   }
@@ -984,8 +1051,13 @@ async function bookingBodyFromRequest(requestId, body) {
   );
   if (!request) throw withStatus("Pending flat not found", 404);
   if (request.status !== "PENDING") throw withStatus("This flat is not pending any more", 409);
+  const saved = (await loadRequestServices(pool, [requestId]))[requestId] || [];
+  const picked = Array.isArray(body.subServices) && body.subServices.length ? body.subServices : saved.map((x) => x.sub_service);
   return {
     ...body,
+    subServices: picked,
+    // The prices saved when the flat was booked (Brigade's order).
+    _request_prices: Object.fromEntries(saved.filter((x) => x.price !== null).map((x) => [x.sub_service, x.price])),
     company_id: request.company_id,
     site_id: request.site_id,
     contact_id: request.contact_id,
@@ -1141,17 +1213,21 @@ async function loadVisitForPhotos(user, visitId) {
   return visit;
 }
 
-function photoStatus(visit, isBrigade, counts) {
+// optional: this user may end the visit without photos (END_VISIT_WITHOUT_PHOTOS / admin), so
+// the app doesn't hold End Visit back for them; they can still upload photos.
+function photoStatus(visit, isBrigade, counts, optional = false) {
+  const needed = isBrigade && !optional;
   return {
     visit_id: visit.id,
     job_id: visit.job_id,
     visit_status: visit.status,
     is_brigade: isBrigade,
-    required: isBrigade ? MIN_VISIT_PHOTOS : 0,
+    photos_optional: isBrigade && optional,
+    required: needed ? MIN_VISIT_PHOTOS : 0,
     before: counts.before,
     after: counts.after,
-    before_done: !isBrigade || counts.before >= MIN_VISIT_PHOTOS,
-    after_done: !isBrigade || counts.after >= MIN_VISIT_PHOTOS,
+    before_done: !needed || counts.before >= MIN_VISIT_PHOTOS,
+    after_done: !needed || counts.after >= MIN_VISIT_PHOTOS,
   };
 }
 
@@ -1161,7 +1237,7 @@ async function getVisitPhotos(req, res) {
     const visit = await loadVisitForPhotos(req.user, req.params.visitId);
     const isBrigade = await isBrigadeJob(pool, visit.job_id);
     const counts = isBrigade ? await getVisitPhotoCounts(pool, visit.id) : { before: 0, after: 0 };
-    res.json(photoStatus(visit, isBrigade, counts));
+    res.json(photoStatus(visit, isBrigade, counts, canOverrideVisit(req.user, PERMISSIONS.END_VISIT_WITHOUT_PHOTOS)));
   } catch (err) {
     sendError(res, err, "Failed to load visit photos");
   }
@@ -1284,16 +1360,87 @@ function toBillingService(row) {
   };
 }
 
-function billingTotals(poAmount, services) {
+// GST is fixed at 18%: CGST 9% + SGST 9% on the service value (prices exclude GST).
+// The client PO amount INCLUDES GST, so it is compared with service value + GST.
+const GST_HALF_RATE = 0.09;
+function gstOn(value) {
+  const base = round2(value);
+  const half = round2(base * GST_HALF_RATE);
+  return { base, cgst: half, sgst: half, gst: round2(half * 2), total: round2(base + half * 2) };
+}
+
+function billingTotals(poAmount, services, pendingValue = 0) {
   const billed = round2(services.reduce((sum, s) => sum + (s.amount || 0), 0));
   const booked = round2(services.reduce((sum, s) => sum + (s.booked_price || 0), 0));
+  const tax = gstOn(billed);
+  const pending = gstOn(pendingValue);
   return {
-    po_amount: poAmount,
+    po_amount: poAmount, // incl. GST
     booked,
-    billed,
-    balance: poAmount === null ? null : round2(poAmount - billed),
+    billed, // service value, excl. GST
+    cgst: tax.cgst,
+    sgst: tax.sgst,
+    gst: tax.gst,
+    billed_incl: tax.total,
+    // Pending flats on this PO, not scheduled yet (PO tab / booking form check).
+    pending_value: pending.base,
+    pending_incl: pending.total,
+    balance: poAmount === null ? null : round2(poAmount - tax.total),
     services: services.length,
   };
+}
+
+// Pending flats that carry a PO number: { [po lower-case]: { header, value, flats: [...] } }.
+async function loadPendingByPo(db, number = null) {
+  try {
+    const [rows] = await db.query(
+      `SELECT r.id, TRIM(r.client_po_number) AS po_number, r.po_source,
+              DATE_FORMAT(r.po_date, '%Y-%m-%d') AS po_date, r.po_amount, r.created_at,
+              r.flat_number, r.bhk, co.name AS property,
+              (SELECT COALESCE(SUM(rs.price), 0) FROM brigade_flat_request_services rs WHERE rs.request_id = r.id) AS value
+       FROM brigade_flat_requests r
+       LEFT JOIN companies co ON co.id = r.company_id
+       WHERE r.status = 'PENDING' AND NULLIF(TRIM(r.client_po_number), '') IS NOT NULL
+         ${number ? "AND TRIM(r.client_po_number) = ?" : ""}
+       ORDER BY r.created_at DESC`,
+      number ? [number] : []
+    );
+    const services = await loadRequestServices(db, rows.map((r) => r.id));
+    const map = {};
+    for (const r of rows) {
+      const key = r.po_number.toLowerCase();
+      const e = (map[key] ||= {
+        header: { po_number: r.po_number, po_source: r.po_source, po_date: r.po_date, po_amount: r.po_amount, updated_at: r.created_at },
+        value: 0,
+        flats: [],
+      });
+      e.value = round2(e.value + Number(r.value || 0));
+      e.flats.push({ request_id: r.id, property: r.property, flat_number: r.flat_number, bhk: r.bhk, value: Number(r.value || 0), services: services[r.id] || [] });
+    }
+    return map;
+  } catch (err) {
+    if (err?.code === "ER_NO_SUCH_TABLE") return {};
+    throw err;
+  }
+}
+
+// Invoices each service of a PO is already on: { [job_id]: ["BSPMPL26-27/5000", ...] }.
+async function loadInvoicedJobs(db, number) {
+  try {
+    const [rows] = await db.query(
+      `SELECT l.job_id, i.invoice_number
+       FROM brigade_invoice_lines l JOIN brigade_invoices i ON i.id = l.invoice_id
+       WHERE i.po_number = ?
+       ORDER BY i.created_at ASC`,
+      [number]
+    );
+    const map = {};
+    for (const r of rows) (map[r.job_id] ||= []).push(r.invoice_number);
+    return map;
+  } catch (err) {
+    if (err?.code === "ER_NO_SUCH_TABLE") return {};
+    throw err;
+  }
 }
 
 const PO_HEADER_COLUMNS = "po_source, DATE_FORMAT(po_date, '%Y-%m-%d') AS po_date, po_amount";
@@ -1324,17 +1471,21 @@ async function loadBillingPo(db, number, { allStatuses = false } = {}) {
     `${BILLING_SERVICE_SELECT} ${allStatuses ? "" : BILLING_COMPLETED_ONLY} AND ${BILLING_PO_OF_JOB} = ? ${BILLING_SERVICE_ORDER}`,
     [number]
   );
-  const services = rows.map(toBillingService);
-  const poAmount = toAmount(header?.po_amount);
+  const invoiced = await loadInvoicedJobs(db, header?.po_number || rows[0]?.po_number || number);
+  const services = rows.map((row) => ({ ...toBillingService(row), invoiced_in: invoiced[row.job_id] || [] }));
+  const pending = (await loadPendingByPo(db, number))[String(number).toLowerCase()] || null;
+  const head = header || (pending ? { ...pending.header, header_from: "pending" } : null);
+  const poAmount = toAmount(head?.po_amount);
   return {
-    po_number: header?.po_number || rows[0]?.po_number || number,
-    is_new: !header && !services.length,
-    header_from: header?.header_from || null, // "billing" | "booking" | null
-    po_source: header?.po_source ?? null,
-    po_date: header?.po_date ?? null,
+    po_number: head?.po_number || rows[0]?.po_number || number,
+    is_new: !head && !services.length,
+    header_from: head?.header_from || null, // "billing" | "booking" | "pending" | null
+    po_source: head?.po_source ?? null,
+    po_date: head?.po_date ?? null,
     po_amount: poAmount,
     services,
-    totals: billingTotals(poAmount, services),
+    pending_flats: pending?.flats || [],
+    totals: billingTotals(poAmount, services, pending?.value || 0),
   };
 }
 
@@ -1373,18 +1524,26 @@ async function listPos({ allStatuses = false } = {}) {
     if (!e.header) e.header = { ...po, header_from: "booking" }; // latest booking first
   }
   for (const row of rows) entry(row.po_number).services.push(toBillingService(row));
+  // POs typed on pending flats (booked, not scheduled yet) are POs too.
+  const pendingBy = await loadPendingByPo(pool);
+  for (const [key, p] of Object.entries(pendingBy)) {
+    const e = entry(key);
+    if (!e.header) e.header = { ...p.header, header_from: "pending" };
+    e.pending = p;
+  }
 
-  const list = [...byPo.values()].map(({ header, services }) => {
+  const list = [...byPo.values()].map(({ header, services, pending }) => {
     const poAmount = toAmount(header?.po_amount);
     return {
       po_number: header?.po_number || services[0]?.po_number,
       header_from: header?.header_from || null,
       po_source: header?.po_source ?? null,
       po_date: header?.po_date ?? null,
-      properties: [...new Set(services.map((s) => s.property).filter(Boolean))],
-      flats: [...new Set(services.map((s) => s.flat_number).filter(Boolean))],
+      properties: [...new Set([...services, ...(pending?.flats || [])].map((s) => s.property).filter(Boolean))],
+      flats: [...new Set([...services, ...(pending?.flats || [])].map((s) => s.flat_number).filter(Boolean))],
       updated_at: header?.updated_at ?? null,
-      totals: billingTotals(poAmount, services),
+      totals: billingTotals(poAmount, services, pending?.value || 0),
+      pending_flats: pending?.flats.length || 0,
       // How far the work has got: services done vs assigned (PO tab).
       completed: services.filter((s) => s.status === "COMPLETED").length,
     };
@@ -1418,9 +1577,8 @@ async function listAllPos(req, res) {
 async function getPoDetail(req, res) {
   try {
     const number = readPoNumber(req.query.number);
-    const po = await loadBillingPo(pool, number, { allStatuses: true });
-    if (po.is_new) throw withStatus(`PO ${number} not found`, 404);
-    res.json(po);
+    // A number that is not a PO yet opens as a new PO (created when it is first saved).
+    res.json(await loadBillingPo(pool, number, { allStatuses: true }));
   } catch (err) {
     sendBillingError(res, err, "Failed to load PO");
   }
@@ -1453,7 +1611,7 @@ async function listUnassignedServices(req, res) {
       params.push(`%${flatNumber}%`);
     }
     const [rows] = await pool.query(
-      `${BILLING_SERVICE_SELECT} ${BILLING_COMPLETED_ONLY} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
+      `${BILLING_SERVICE_SELECT} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
       params
     );
     res.json(rows.map(toBillingService));
@@ -1936,4 +2094,6 @@ module.exports = {
   getPoDetail,
   // Shared with brigadeInvoices.controller: a PO's details and services.
   loadBillingPo,
+  loadInvoicedJobs,
+  gstOn,
 };

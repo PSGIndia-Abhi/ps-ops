@@ -316,9 +316,13 @@ export default function JobPage() {
     });
   }
 
+  // Admin may start a visit from anywhere (the backend skips the location check for them), so the
+  // browser isn't asked for a position. Everyone else must share it, as before.
+  const locationForStart = () => (role === "admin" ? Promise.resolve({}) : getCurrentLocation());
+
   async function startVisit(visitId) {
     try {
-      const location = await getCurrentLocation();
+      const location = await locationForStart();
       const res = await apiFetch(`/api/visits/${visitId}/start`, {
         method: "PATCH",
         body: JSON.stringify(location),
@@ -357,7 +361,7 @@ export default function JobPage() {
 
   async function startVisitAnyway(visitId) {
     try {
-      const location = await getCurrentLocation();
+      const location = await locationForStart();
       const res = await apiFetch(
         `/api/visits/${visitId}/start-anyway`,
         {

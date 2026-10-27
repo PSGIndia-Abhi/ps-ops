@@ -4,7 +4,7 @@ import AdminDashboard from "../AdminDashboard";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import BrigadeBookingModal from "./BrigadeBookingModal";
 import { apiFetch } from "../../api";
-import { brigadeRequest, formatDate, statusLabel } from "./brigadeShared";
+import { brigadeRequest, formatDate, formatInr, gstOn, statusLabel } from "./brigadeShared";
 import KpiTile from "./KpiTile";
 import "./brigade.css";
 
@@ -361,7 +361,7 @@ function FlatDetail({ flat, allServices, onOpenJob, onAddServices }) {
         <span className="booked">{flat.booked} booked</span>
         <span className="completed">{flat.completed} done</span>
         <span className="none">{notBooked} not booked</span>
-        <button type="button" className="bgf-add-btn" onClick={onAddServices}>+ Add services</button>
+        <button type="button" className="bgf-add-btn" onClick={onAddServices} title="New booking for this flat - it goes to Pending">+ Book services</button>
       </div>
       <div className="bgf-cards">
         {cards.map((c) => (
@@ -393,8 +393,9 @@ function FlatDetail({ flat, allServices, onOpenJob, onAddServices }) {
   );
 }
 
-// Flats saved in step 1 (no services yet). "Add services" opens step 2 for
-// that flat; Cancel takes it off the list.
+// Booked flats waiting to be scheduled: the services Brigade asked for, their value with
+// GST and the PO. "Schedule & assign" sets visit dates + team and creates the jobs;
+// Cancel takes the flat off the list.
 function PendingFlats({ onChanged }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -443,11 +444,11 @@ function PendingFlats({ onChanged }) {
     <div className="bg-page bgb">
       <div className="bgb-topbar">
         <div>
-          <h2 className="bgb-h1">Pending flats</h2>
-          <p className="bgb-lede">Flats saved without services. Add services, visit dates and team to create the jobs.</p>
+          <h2 className="bgb-h1">Pending</h2>
+          <p className="bgb-lede">Brigade bookings waiting to be scheduled. Set the visit date and team to create the jobs.</p>
         </div>
         <button type="button" className="primary bgf-new-flat" onClick={() => setCreating(true)}>
-          + New flat
+          + New booking
         </button>
       </div>
 
@@ -456,7 +457,7 @@ function PendingFlats({ onChanged }) {
       <section className="bgb-sheet">
         <div className="bgb-sheet-toolbar">
           <div className="bgf-pending-count">
-            <strong>{rows.length}</strong> flat{rows.length === 1 ? "" : "s"} waiting for services
+            <strong>{rows.length}</strong> flat{rows.length === 1 ? "" : "s"} waiting to be scheduled
             {oldest && <span className="bgb-muted"> · oldest saved {formatDate(oldest)}</span>}
           </div>
           <div className="bgf-filters">
@@ -474,8 +475,8 @@ function PendingFlats({ onChanged }) {
           <div className="bg-loading bgb-pad">Loading pending flats…</div>
         ) : !rows.length ? (
           <div className="bg-empty-state">
-            <strong>No flats waiting for services</strong>
-            Use “+ New flat” to save a flat now and add its services later.
+            <strong>Nothing waiting to be scheduled</strong>
+            New Brigade bookings land here. Use “+ New booking” to add one.
           </div>
         ) : !shown.length ? (
           <div className="bg-empty-state">
@@ -488,30 +489,63 @@ function PendingFlats({ onChanged }) {
               <thead>
                 <tr>
                   <th>Flat</th>
-                  <th>Property</th>
-                  <th>Requested by</th>
+                  <th>Services Brigade asked for</th>
+                  <th className="num">Value incl. GST</th>
                   <th>Client PO</th>
-                  <th>Saved</th>
-                  <th className="num" style={{ width: 220 }} aria-label="Actions" />
+                  <th>Requested by</th>
+                  <th>Booked</th>
+                  <th className="num" style={{ width: 250 }} aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r) => (
+                {shown.map((r) => {
+                  const services = r.services || [];
+                  const money = gstOn(r.services_total || 0);
+                  return (
                   <tr key={r.id}>
                     <td>
                       <span className="bgb-po-no">{r.flat_number}</span>
                       <span className="bgf-bhk">{r.bhk}</span>
+                      <div className="bgb-sub">{r.property}{r.site_name && r.site_name !== r.property ? ` · ${r.site_name}` : ""}</div>
                       {r.notes && <div className="bgb-sub" title={r.notes}>{r.notes.length > 60 ? `${r.notes.slice(0, 60)}…` : r.notes}</div>}
                     </td>
                     <td>
-                      <div>{r.property}</div>
-                      {r.site_name && r.site_name !== r.property && <div className="bgb-sub">{r.site_name}</div>}
+                      {services.length ? (
+                        <div className="bgf-chips">
+                          {services.map((x) => (
+                            <span key={x.sub_service} className="bgf-chip asked" title={x.price === null ? "No price" : formatInr(x.price)}>
+                              {x.sub_service}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="bgf-no-services">No services yet — pick them when scheduling</span>
+                      )}
+                    </td>
+                    <td className="num">
+                      {services.length ? (
+                        <>
+                          <div className="bgb-strong">{formatInr(money.total)}</div>
+                          <div className="bgb-sub">{formatInr(money.base)} + GST {formatInr(money.gst)}</div>
+                        </>
+                      ) : (
+                        <span className="bgb-muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {r.client_po_number ? (
+                        <>
+                          <div>{r.client_po_number}</div>
+                          {r.po_amount !== null && <div className="bgb-sub">PO {formatInr(r.po_amount)} incl. GST</div>}
+                        </>
+                      ) : (
+                        <span className="bgb-muted">—</span>
+                      )}
                     </td>
                     <td>
                       <div>{r.contact_name || "—"}</div>
                       {r.contact_phone && <div className="bgb-sub">{r.contact_phone}</div>}
                     </td>
-                    <td>{r.client_po_number || <span className="bgb-muted">—</span>}</td>
                     <td className="bgb-nowrap">
                       <div>{formatDate(r.created_at)}</div>
                       {r.created_by && <div className="bgb-sub">by {r.created_by}</div>}
@@ -536,15 +570,17 @@ function PendingFlats({ onChanged }) {
                               property: r.property,
                               address: r.address,
                               po_number: r.client_po_number,
+                              services,
                             })
                           }
                         >
-                          Add services
+                          Schedule &amp; assign
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -561,7 +597,7 @@ function PendingFlats({ onChanged }) {
       <ConfirmDialog
         open={Boolean(cancelling)}
         title="Cancel this flat?"
-        message={cancelling ? `Flat ${cancelling.flat_number} will be removed from Pending. No jobs were created for it.` : ""}
+        message={cancelling ? `The booking for flat ${cancelling.flat_number} will be removed from Pending. No jobs were created for it.` : ""}
         confirmLabel="Cancel flat"
         onConfirm={doCancel}
         onCancel={() => setCancelling(null)}

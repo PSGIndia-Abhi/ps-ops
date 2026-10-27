@@ -8,7 +8,8 @@ import { deletePoFile, formatBytes, listPoFiles, openPoFile, poFileProblem, uplo
 //  New booking - pass `pending` + `onPendingChange`: picked files are only held
 //    here and uploaded by the form once the booking is saved (they need the PO
 //    number it is saved with). `disabledHint` explains why picking is off.
-export default function PoFiles({ poNumber, pending, onPendingChange, disabledHint }) {
+//  readOnly (Billing) - the PO's files can only be opened: no upload, no remove.
+export default function PoFiles({ poNumber, pending, onPendingChange, disabledHint, readOnly = false }) {
   const saved = Boolean(poNumber) && !onPendingChange;
   const inputRef = useRef(null);
   const [files, setFiles] = useState([]);
@@ -83,19 +84,25 @@ export default function PoFiles({ poNumber, pending, onPendingChange, disabledHi
 
   return (
     <div className="bg-files">
-      <input ref={inputRef} type="file" multiple hidden onChange={pick} />
-      <button type="button" className="bg-files-drop" onClick={() => inputRef.current?.click()} disabled={disabled}>
-        <span className="bg-files-icon" aria-hidden="true">⇪</span>
-        <span>
-          <strong>{busy ? "Uploading…" : "Upload files"}</strong>
-          <small>{disabledHint || "PO copy, email or any document · any format · up to 3 MB each"}</small>
-        </span>
-      </button>
+      {!readOnly && (
+        <>
+          <input ref={inputRef} type="file" multiple hidden onChange={pick} />
+          <button type="button" className="bg-files-drop" onClick={() => inputRef.current?.click()} disabled={disabled}>
+            <span className="bg-files-icon" aria-hidden="true">⇪</span>
+            <span>
+              <strong>{busy ? "Uploading…" : "Upload files"}</strong>
+              <small>{disabledHint || "PO copy, email or any document · any format · up to 3 MB each"}</small>
+            </span>
+          </button>
+        </>
+      )}
 
       {error && <div className="bg-field-error">{error}</div>}
 
       {loading ? (
         <div className="bg-files-empty">Loading files…</div>
+      ) : readOnly && !list.length ? (
+        <div className="bg-files-empty">No files on this PO</div>
       ) : (
         list.length > 0 && (
           <ul className="bg-files-list">
@@ -106,7 +113,9 @@ export default function PoFiles({ poNumber, pending, onPendingChange, disabledHi
                 {saved ? (
                   <>
                     <button type="button" className="bg-link-btn" onClick={() => open(item.file)}>Open</button>
-                    <button type="button" className="bg-link-btn danger" onClick={() => remove(item.file)}>Remove</button>
+                    {!readOnly && (
+                      <button type="button" className="bg-link-btn danger" onClick={() => remove(item.file)}>Remove</button>
+                    )}
                   </>
                 ) : (
                   <button

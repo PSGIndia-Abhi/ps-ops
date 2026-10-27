@@ -182,6 +182,15 @@ async function resolvePrice(db, { companyId, flatId, bhk, subService }) {
 // Before/after photo counts for a visit's job. Photos are job_attachments
 // hung off a job_history row whose action is BEFORE_PHOTOS / AFTER_PHOTOS and
 // whose metadata carries the visit id.
+// Whether this user may skip a visit rule (location check / Brigade photos): admin always,
+// anyone else only when their role holds the permission. Technicians and temporary workers
+// don't, so for them nothing changes.
+function canOverrideVisit(user, permission) {
+  if (!user || user.is_temporary_worker) return false;
+  if (user.role === "admin") return true;
+  return Array.isArray(user.permissions) && user.permissions.includes(permission);
+}
+
 async function getVisitPhotoCounts(db, visitId) {
   const [rows] = await db.query(
     `SELECT h.action, COUNT(a.id) AS photos
@@ -203,6 +212,7 @@ async function getVisitPhotoCounts(db, visitId) {
 }
 
 module.exports = {
+  canOverrideVisit,
   BRIGADE_ROLE,
   BRIGADE_GROUP_NAME,
   BRIGADE_SUB_SERVICES,

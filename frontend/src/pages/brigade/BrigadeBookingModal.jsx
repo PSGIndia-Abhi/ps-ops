@@ -14,16 +14,24 @@ import {
 import PoFiles from "./PoFiles";
 import "./brigade.css";
 
-// Brigade booking.
-//  New booking (no forFlat): Property, flat number + BHK, Services (optional),
-//    Requested by, Client PO, Notes. With services picked, Schedule + Team show
-//    and "Create jobs" books them (POST /api/brigade/bookings). Without
-//    services, "Save flat" keeps the flat in Pending (POST /api/brigade/flat-requests).
-//  Add services (forFlat = a pending request or a booked flat): the flat is
-//    fixed at the top; Services → Schedule → Team (→ PO) → Notes → jobs.
+// Brigade booking, in two steps.
+//  Booking (no forFlat, or a booked flat to prefill): Property, flat number + BHK, the
+//    services Brigade asked for, Requested by, Client PO (+ files), Notes. Prices come
+//    from the price master (GST, PO amounts and balances are handled in the PO section).
+//    "Save to Pending" (POST /api/brigade/flat-requests) - no visit date or team.
+//  Schedule & assign (forFlat = a pending flat, with request_id): the flat and its
+//    services are fixed at the top; visit dates + team -> "Create jobs"
+//    (POST /api/brigade/bookings), at the prices saved when it was booked.
 // Right: live summary and what is still missing.
-export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFlat = null }) {
-  const isServicesStep = Boolean(forFlat);
+// presetPo: a PO number - the form was opened from that PO ("+ Book flat" in the PO section);
+// the Client PO is fixed to it.
+export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFlat = null, presetPo = null }) {
+  const isServicesStep = Boolean(forFlat?.request_id); // scheduling a pending flat
+  // The prices saved with the pending flat (Brigade's order), used instead of today's master.
+  const requestPrices = useMemo(
+    () => Object.fromEntries((forFlat?.services || []).filter((x) => x.price !== null && x.price !== undefined).map((x) => [x.sub_service, Number(x.price)])),
+    [forFlat]
+  );
   const [properties, setProperties] = useState([]);
   const [subServicesAll, setSubServicesAll] = useState([]);
   const [bhkTypes, setBhkTypes] = useState([]); // names from the BHK types master
@@ -40,7 +48,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   const [flatLookupError, setFlatLookupError] = useState("");
   const [lookingUpFlat, setLookingUpFlat] = useState(false);
   const [prices, setPrices] = useState({}); // sub_service -> price master price | null
-  const [priceEdits, setPriceEdits] = useState({}); // sub_service -> typed price for this booking
+  const [servicesReady, setServicesReady] = useState(false); // scheduling: requested services ticked
   const [showUnpriced, setShowUnpriced] = useState(false);
 
   const [selectedServices, setSelectedServices] = useState([]);
@@ -59,7 +67,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   const [po, setPo] = useState({ number: "", source: "", date: "", amount: "" });
   // Client PO: "new" = type a new PO number, "existing" = pick one already in Billing.
   const [poMode, setPoMode] = useState("new");
-  const [existingPos, setExistingPos] = useState([]); // GET /api/brigade/billing/pos
+  const [existingPos, setExistingPos] = useState([]); // GET /api/brigade/pos (every service, any status)
   const [lockedPo, setLockedPo] = useState({}); // details that came from the chosen existing PO
   const [poFiles, setPoFiles] = useState([]); // picked files, uploaded once the booking is saved
   const [notes, setNotes] = useState("");
@@ -91,8 +99,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
       } finally {
         if (!cancelled) setLoadingSetup(false);
       }
-      // Existing POs for the Client PO dropdown (empty when billing is not set up yet).
-      brigadeRequest("/api/brigade/billing/pos")
+      // Existing POs for the Client PO dropdown, with what is already on each (all services + pending flats).
+      brigadeRequest("/api/brigade/pos")
         .then((rows) => !cancelled && setExistingPos(Array.isArray(rows) ? rows.filter((p) => p.po_number) : []))
         .catch(() => !cancelled && setExistingPos([]));
       // Names for the summary; the team picker loads its own lists.
@@ -180,6 +188,17 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyKey]);
 
+  // Opened from a PO: choose that PO as soon as the PO list is in.
+  useEffect(() => {
+    if (!presetPo || po.number) return;
+    const found = existingPos.find((p) => p.po_number.toLowerCase() === presetPo.toLowerCase());
+    if (found) {
+      setPoMode("existing");
+      pickExistingPo(found.po_number);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetPo, existingPos]);
+
   /* ---------- flat typed: its history (last BHK + what was done) ---------- */
   const flatNumber = flatInput.trim().toUpperCase();
   const flatValid = isValidFlatNumber(flatNumber);
@@ -240,7 +259,6 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
     setFlat(null);
     setFlatLookupError("");
     setPrices({});
-    setPriceEdits({});
     if (!companyId || !flatValid || !bhk || !subServicesAll.length) return;
 
     let cancelled = false;
@@ -270,26 +288,27 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
     };
   }, [companyId, flatNumber, flatValid, bhk, subServicesAll]);
 
-  const hasPrice = (s) => prices[s] !== null && prices[s] !== undefined;
+  // Prices come from the price master; a pending flat keeps the prices saved when it was booked.
+  const priceOf = (s) => (requestPrices[s] !== undefined ? requestPrices[s] : prices[s]);
+  const hasPrice = (s) => priceOf(s) !== null && priceOf(s) !== undefined;
   const pricedServices = subServicesAll.filter(hasPrice);
   const unpricedServices = subServicesAll.filter((s) => !hasPrice(s));
-  // A picked service starts at its price-master price; the price can be changed for this booking.
-  const isEdited = (s) => priceEdits[s] !== undefined && priceEdits[s] !== String(prices[s]);
-  const priceOf = (s) => (priceEdits[s] !== undefined ? Number(priceEdits[s]) : prices[s]);
-  const badPrice = (s) => priceEdits[s] !== undefined && (priceEdits[s] === "" || !Number.isFinite(Number(priceEdits[s])) || Number(priceEdits[s]) < 0);
-  const total = selectedServices.reduce((sum, s) => sum + (badPrice(s) ? 0 : priceOf(s) || 0), 0);
+  const total = selectedServices.reduce((sum, s) => sum + (priceOf(s) || 0), 0);
+
+  // Scheduling a pending flat: tick the services Brigade asked for once the prices are in.
+  useEffect(() => {
+    if (!isServicesStep || servicesReady || !flat) return;
+    const asked = (forFlat.services || []).map((x) => x.sub_service).filter((x) => subServicesAll.includes(x));
+    setSelectedServices(asked);
+    setSchedules(Object.fromEntries(asked.map((x) => [x, { start_date: "", time: "" }])));
+    setServicesReady(true);
+  }, [isServicesStep, servicesReady, flat, forFlat, subServicesAll]);
 
   function toggleService(service) {
     if (!hasPrice(service) || isBlocked(service)) return;
     setSelectedServices((prev) =>
       prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service]
     );
-    // Unticking forgets a changed price; ticking again starts from the master price.
-    setPriceEdits((prev) => {
-      const next = { ...prev };
-      delete next[service];
-      return next;
-    });
     setSchedules((prev) => {
       const next = { ...prev };
       if (next[service]) delete next[service];
@@ -328,11 +347,9 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   else if (!bhk) missing.push("Choose the BHK");
   if (!contactId) missing.push("Choose who is requesting");
   const undated = selectedServices.filter((s) => !schedules[s]?.start_date);
-  // Jobs are made when services are picked (always on "Add services").
-  const makesJobs = isServicesStep || selectedServices.length > 0;
+  // Jobs are made only when a pending flat is scheduled; a booking always goes to Pending.
+  const makesJobs = isServicesStep;
   if (isServicesStep && flat && !selectedServices.length) missing.push("Pick at least one service");
-  const badPrices = selectedServices.filter(badPrice);
-  if (badPrices.length) missing.push(`Enter a valid price for ${badPrices.join(", ")}`);
   if (makesJobs) {
     if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
     if (!team.supervisorId) missing.push("Assign a supervisor");
@@ -416,7 +433,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
     return `. ${done ? `${done} file${done === 1 ? "" : "s"} attached, but ` : ""}${failed.length} could not be uploaded: ${failed.join(", ")}. Add ${failed.length === 1 ? "it" : "them"} from Billing → PO ${number}.`;
   }
 
-  // Step 1: save the flat only (Pending) — no services, dates or team.
+  // Booking: the flat + the services Brigade asked for go to Pending - no dates or team yet.
   async function saveFlatRequest() {
     setSaving(true);
     try {
@@ -427,6 +444,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
           site_id: site.id,
           flat_number: flatNumber,
           bhk,
+          subServices: selectedServices,
           contact_id: contactId,
           address: address.trim(),
           client_po: clientPo(),
@@ -435,9 +453,10 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
       });
       onCreated?.(data);
       const filesNote = await uploadPickedFiles();
+      const n = data.services?.length || 0;
       setStatus({
         type: "success",
-        message: `Flat ${data.flat_number} saved to Pending. Add services and team when ready${filesNote}`,
+        message: `Flat ${data.flat_number} saved to Pending${n ? ` with ${n} service${n === 1 ? "" : "s"}` : ""}. Schedule the visit and assign the team from Pending${filesNote}`,
       });
     } catch (err) {
       setStatus({ type: "error", message: err.message || "Failed to save the flat" });
@@ -485,8 +504,6 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
           serviceSchedules,
           supervisor_id: team.supervisorId,
           technician_ids: team.technicianIds,
-          // Only the prices changed on this form; the rest come from the price master.
-          service_prices: Object.fromEntries(selectedServices.filter(isEdited).map((s) => [s, Number(priceEdits[s])])),
           client_po: showPo ? clientPo() : undefined,
           notes: notes.trim(),
         }),
@@ -515,8 +532,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
 
   // Section numbers for the step being shown.
   const order = isServicesStep
-    ? ["services", "schedule", "team", ...(showPo ? ["po", "files"] : []), "notes"]
-    : ["property", "services", "contact", ...(makesJobs ? ["schedule", "team"] : []), "po", "files", "notes"];
+    ? ["services", "schedule", "team", "notes"]
+    : ["property", "services", "contact", "po", "files", "notes"];
   const num = (key) => order.indexOf(key) + 1;
 
   /* ---------- render ---------- */
@@ -526,12 +543,12 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
         <div className="bgm-header">
           <div>
             <h3 id="bgm-title">
-              {isServicesStep ? `Add services · Flat ${forFlat.flat_number}` : "New Brigade booking"}
+              {isServicesStep ? `Schedule & assign · Flat ${forFlat.flat_number}` : presetPo ? `Book a flat on PO ${presetPo}` : "New Brigade booking"}
             </h3>
             <p>
               {isServicesStep
-                ? "Step 2 of 2 · Pick services, visit dates and team — prices from the Brigade price master, excluding GST"
-                : "Pick services now to create the jobs, or leave them empty to save the flat to Pending"}
+                ? "Set the visit date and team for the services Brigade asked for — this creates the jobs"
+                : "Flat, the services Brigade asked for and the PO. It goes to Pending; the visit date and team are set later."}
             </p>
           </div>
           <button type="button" className="bgm-close" onClick={onClose} aria-label="Close" disabled={saving}>
@@ -559,8 +576,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                   ) : historyCounts ? (
                     <span>
                       {historyCounts.completed || historyCounts.booked
-                        ? `${historyCounts.completed} completed · ${historyCounts.booked} booked`
-                        : "No services yet"}
+                        ? `${historyCounts.completed} completed · ${historyCounts.booked} booked before`
+                        : "No jobs yet for this flat"}
                     </span>
                   ) : null}
                   {lookingUpFlat && <span>Loading prices…</span>}
@@ -666,15 +683,15 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
             <section className="bgm-section">
               <SectionHead
                 step={num("services")}
-                title={isServicesStep ? "Services — Deep Cleaning" : "Services — optional"}
+                title={isServicesStep ? "Services" : "Services Brigade asked for"}
                 done={stepDone.services}
-                hint={flat ? `${pricedServices.length} of ${subServicesAll.length} priced for ${flat.bhk}` : null}
+                hint={flat ? `Price master · ${flat.bhk} · excl. GST` : null}
               />
               {!flat ? (
                 <div className="bg-field-hint">
                   {isServicesStep
                     ? "Loading the services for this flat…"
-                    : "Enter the flat number and BHK to see the services. Leave them empty to save the flat to Pending."}
+                    : "Enter the flat number and BHK to see the services and their prices."}
                 </div>
               ) : (
                 <>
@@ -705,41 +722,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                               {s}
                               <ServiceHistoryNote history={h} picked={picked} />
                             </span>
-                            {picked ? (
-                              // Clicks around the price box must not untick the service (the row is a label).
-                              <span className="bgm-svc-edit" onClick={(e) => e.target.tagName !== "INPUT" && e.preventDefault()}>
-                                <span className={`bgm-svc-input ${badPrice(s) ? "invalid" : ""}`}>
-                                  <span aria-hidden="true">₹</span>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    inputMode="decimal"
-                                    value={priceEdits[s] ?? String(prices[s])}
-                                    onChange={(e) => setPriceEdits((p) => ({ ...p, [s]: e.target.value }))}
-                                    aria-label={`Price for ${s}`}
-                                  />
-                                </span>
-                                {isEdited(s) && (
-                                  <button
-                                    type="button"
-                                    className="bg-link-btn bgm-svc-reset"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      setPriceEdits((p) => {
-                                        const next = { ...p };
-                                        delete next[s];
-                                        return next;
-                                      });
-                                    }}
-                                  >
-                                    Master price {formatInr(prices[s])}
-                                  </button>
-                                )}
-                              </span>
-                            ) : (
-                              <span className="bgm-svc-price">{formatInr(prices[s])}</span>
-                            )}
+                            <span className="bgm-svc-price">{formatInr(priceOf(s))}</span>
                           </label>
                         );
                       })}
@@ -885,7 +868,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
             {/* CLIENT PO */}
             {showPo && (
             <section className="bgm-section">
-              <SectionHead step={num("po")} title="Client PO" hint={hasPoNumber ? "All fields required" : "Optional"} />
+              <SectionHead step={num("po")} title="Client PO" hint={presetPo ? "From the PO" : hasPoNumber ? "All fields required" : "Optional"} />
+              {!presetPo && (
               <div className="bg-po-mode" role="radiogroup" aria-label="Client PO">
                 <button type="button" role="radio" aria-checked={poMode === "existing"} className={poMode === "existing" ? "on" : ""} onClick={() => choosePoMode("existing")}>
                   Choose existing PO
@@ -894,15 +878,16 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                   Create new PO
                 </button>
               </div>
+              )}
               <div className="bg-grid-2">
                 <div className="bg-field">
                   <label htmlFor="bg-po-number">Client PO number</label>
                   {poMode === "existing" ? (
-                    <select id="bg-po-number" value={po.number} onChange={(e) => pickExistingPo(e.target.value)}>
+                    <select id="bg-po-number" value={po.number} disabled={Boolean(presetPo)} onChange={(e) => pickExistingPo(e.target.value)}>
                       <option value="">{existingPos.length ? "Select a PO" : "No POs yet - create a new one"}</option>
                       {existingPos.map((p) => (
                         <option key={p.po_number} value={p.po_number}>
-                          {[p.po_number, p.totals?.po_amount != null && formatInr(p.totals.po_amount), p.totals?.balance != null && `balance ${formatInr(p.totals.balance)}`]
+                          {[p.po_number, p.po_date && formatDate(p.po_date)]
                             .filter(Boolean)
                             .join(" · ")}
                         </option>
@@ -950,7 +935,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                   />
                 </div>
                 <div className="bg-field">
-                  <label htmlFor="bg-po-amount">PO amount (₹){hasPoNumber && " *"}</label>
+                  <label htmlFor="bg-po-amount">PO amount (₹, incl. GST){hasPoNumber && " *"}</label>
                   <input
                     id="bg-po-amount"
                     type="number"
@@ -968,7 +953,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
               {poMode === "existing" && hasPoNumber && (
                 <span className="bg-field-hint">
                   {Object.values(lockedPo).every(Boolean)
-                    ? "Details come from the existing PO. Change them in Billing."
+                    ? "Details come from the existing PO. Change them in the PO section."
                     : "Details saved on this PO are filled in; fill in the ones it is missing."}
                 </span>
               )}
@@ -1005,7 +990,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
           <aside className="bgm-summary" aria-label="Booking summary">
             <div className="bgm-summary-body">
               <div>
-                <h4>{makesJobs ? "Booking summary" : "Flat summary"}</h4>
+                <h4>{makesJobs ? "Schedule summary" : "Booking summary"}</h4>
               </div>
 
               <div className="bgm-sum-rows">
@@ -1017,7 +1002,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                 )}
               </div>
 
-              {makesJobs && (
+              {(makesJobs || selectedServices.length > 0) && (
               <>
               <div>
                 <h4 style={{ marginBottom: 10 }}>Services</h4>
@@ -1045,7 +1030,7 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
               <div className="bgm-total">
                 <span>
                   <strong>Total</strong>
-                  <div className="bg-field-hint">excl. GST</div>
+                  <div className="bg-field-hint">price master · excl. GST</div>
                 </span>
                 <span className="bgm-total-value">{formatInr(total)}</span>
               </div>
@@ -1065,14 +1050,14 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                 <div className="bgm-ready">
                   {makesJobs
                     ? "Everything is filled in — ready to create the jobs."
-                    : "Ready to save to Pending. Pick services above to create the jobs now instead."}
+                    : "Ready to save to Pending. The visit date and team are set later from Pending."}
                 </div>
               )}
             </div>
 
             <div className="bgm-summary-foot">
               <button type="button" className="primary" onClick={handleSubmit} disabled={saving}>
-                {saving ? "Saving…" : makesJobs ? "Create jobs" : "Save flat"}
+                {saving ? "Saving…" : makesJobs ? "Create jobs" : "Save to Pending"}
               </button>
               <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
             </div>

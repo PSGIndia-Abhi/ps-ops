@@ -2,7 +2,8 @@ const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { redis } = require("../utils/redis");
 const { createVisit } = require("../services/Visit.service");
-const { isBrigadeJob, getVisitPhotoCounts, MIN_VISIT_PHOTOS } = require("../services/brigade.service");
+const { isBrigadeJob, getVisitPhotoCounts, MIN_VISIT_PHOTOS, canOverrideVisit } = require("../services/brigade.service");
+const PERMISSIONS = require("../access/permissions");
 const {
   notifyVisitCreated,
   notifyVisitTechniciansUpdated,
@@ -77,7 +78,9 @@ async function checkVisitGeofence(
   visitId,
   technicianId,
   currentLocation = null,
-  conn = pool
+  conn = pool,
+  // START_VISIT_ANYWHERE (admin): only check the visit exists - no job location or position needed.
+  skipLocation = false
 ) {
   // Get visit + job site location
 const [[visit]] = await conn.query(
@@ -114,6 +117,10 @@ const [[visit]] = await conn.query(
       status: 404,
       error: "Visit not found",
     };
+  }
+
+  if (skipLocation) {
+    return { allowed: true, skipped: true, distanceMeters: null };
   }
 
   // Visit exists but location isn't configured
@@ -533,7 +540,9 @@ async function startVisit(req, res) {
     const geofence = await checkVisitGeofence(
       visitId,
       technicianId,
-      currentLocation
+      currentLocation,
+      pool,
+      canOverrideVisit(req.user, PERMISSIONS.START_VISIT_ANYWHERE)
     );
 
     if (geofence.error) {
@@ -657,7 +666,8 @@ async function startVisitAnyway(req, res) {
       visitId,
       userId,
       currentLocation,
-      conn
+      conn,
+      canOverrideVisit(req.user, PERMISSIONS.START_VISIT_ANYWHERE)
     );
 
     if (geofence.error) {
@@ -822,12 +832,13 @@ async function submitVisit(req, res) {
 
   try {
 
-    // Brigade jobs only: End Visit needs the before and after work photos.
+    // Brigade jobs only: End Visit needs the before and after work photos
+    // (not for admin, or a role granted END_VISIT_WITHOUT_PHOTOS).
     const [[visitRow]] = await pool.query(
       `SELECT job_id FROM job_visits WHERE id = ?`,
       [visitId]
     );
-    if (visitRow && (await isBrigadeJob(pool, visitRow.job_id))) {
+    if (visitRow && !canOverrideVisit(req.user, PERMISSIONS.END_VISIT_WITHOUT_PHOTOS) && (await isBrigadeJob(pool, visitRow.job_id))) {
       const counts = await getVisitPhotoCounts(pool, visitId);
       if (counts.before < MIN_VISIT_PHOTOS || counts.after < MIN_VISIT_PHOTOS) {
         return res.status(400).json({

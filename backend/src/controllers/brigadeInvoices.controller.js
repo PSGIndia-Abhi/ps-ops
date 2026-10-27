@@ -8,7 +8,7 @@
 
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../db");
-const { loadBillingPo } = require("./brigade.controller");
+const { loadBillingPo, loadInvoicedJobs } = require("./brigade.controller");
 const { renderInvoicePdf, taxFor, round2 } = require("../utils/brigadeInvoiceDocument");
 
 const PREFIX = "BSPMPL";
@@ -139,6 +139,61 @@ function sendPdf(res, content, fileName, preview) {
 
 const pdfName = (number) => `Tax Invoice ${number.replace(/\//g, "-")}.pdf`;
 
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+const money = (n) => inr.format(Number(n) || 0);
+
+// POST /api/brigade/billing/invoices/check { po_number, job_ids }
+// What the invoice would come to, and anything about the PO that doesn't match - shown before
+// generating. Nothing is blocked: the PO amount includes GST, so it is compared with the
+// invoices' totals including GST.
+async function checkInvoice(req, res) {
+  try {
+    const number = readPoNumber(req.body?.po_number);
+    const jobIds = readJobIds(req.body?.job_ids);
+    const content = await buildContent(pool, number, jobIds);
+    const po = await loadBillingPo(pool, number);
+    const invoiced = await loadInvoicedJobs(pool, po.po_number);
+    const [[{ invoiced_total: invoicedTotal }]] = await pool.query(
+      "SELECT COALESCE(SUM(total), 0) AS invoiced_total FROM brigade_invoices WHERE po_number = ?",
+      [po.po_number]
+    );
+    const invoicedBefore = round2(invoicedTotal);
+    const after = round2(invoicedBefore + content.total);
+    const poAmount = po.po_amount;
+
+    const warnings = [];
+    const again = po.services
+      .filter((s) => jobIds.includes(String(s.job_id)) && (invoiced[s.job_id] || []).length)
+      .map((s) => ({ job_id: s.job_id, code: s.code, sub_service: s.sub_service, flat_number: s.flat_number, invoices: invoiced[s.job_id] }));
+    for (const a of again) {
+      warnings.push(`${a.sub_service} (Flat ${a.flat_number}, ${a.code}) is already on invoice ${a.invoices.join(", ")} - invoicing it again bills it twice.`);
+    }
+    if (poAmount === null) {
+      warnings.push("This PO has no amount, so the invoice cannot be checked against it. Add the PO amount in Billing.");
+    } else if (after > poAmount + 0.5) {
+      warnings.push(
+        `Invoices on this PO would come to ${money(after)} incl. GST - ${money(after - poAmount)} more than the PO amount ${money(poAmount)}.`
+      );
+    }
+
+    res.json({
+      po_number: po.po_number,
+      po_amount: poAmount,
+      subtotal: content.subtotal,
+      cgst: content.cgst,
+      sgst: content.sgst,
+      total: content.total,
+      invoiced_before: invoicedBefore,
+      invoiced_after: after,
+      remaining_after: poAmount === null ? null : round2(poAmount - after),
+      already_invoiced: again,
+      warnings,
+    });
+  } catch (err) {
+    sendError(res, err, "Failed to check the invoice");
+  }
+}
+
 // POST /api/brigade/billing/invoices/preview { po_number, job_ids } -> the PDF, stamped PREVIEW, nothing saved
 async function previewInvoice(req, res) {
   try {
@@ -213,4 +268,4 @@ async function invoicePdf(req, res) {
   }
 }
 
-module.exports = { previewInvoice, createInvoice, listInvoices, invoicePdf, financialYear, invoiceNumber };
+module.exports = { checkInvoice, previewInvoice, createInvoice, listInvoices, invoicePdf, financialYear, invoiceNumber };

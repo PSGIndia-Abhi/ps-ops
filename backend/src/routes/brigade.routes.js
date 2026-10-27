@@ -63,6 +63,7 @@ router.get("/pos", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.
 router.get("/pos/detail", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), brigade.getPoDetail);
 
 // Tax invoices from a PO: preview (PDF, not saved), save with the next BSPMPL number, list, download
+router.post("/billing/invoices/check", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.checkInvoice);
 router.post("/billing/invoices/preview", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.previewInvoice);
 router.post("/billing/invoices", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.createInvoice);
 router.get("/billing/invoices", auth, requirePermission(PERMISSIONS.BRIGADE_ACCESS), invoices.listInvoices);

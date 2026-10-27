@@ -12,6 +12,7 @@ matching backend.
 | 3 | `03_brigade_flat_requests.sql` | Two-step booking: `brigade_flat_requests` (flat saved to Pending before services, dates and team are added) |
 | 4 | `04_brigade_po_files.sql` | Files attached to a client PO: `brigade_po_files` (one row per file, kept by PO number; the file itself is in MinIO). Shared by the booking form and Billing |
 | 5 | `05_brigade_invoices.sql` | Tax invoices from a PO (Billing → PO → Generate invoice): `brigade_invoice_sequences` (BSPMPL26-27/5000 numbering per financial year), `brigade_invoices` (one per invoice, with what was printed) and `brigade_invoice_lines` (a service is invoiced once) |
+| 6 | `06_brigade_flat_request_services.sql` | Booking → Pending with services: `brigade_flat_request_services` (the services Brigade asked for on a pending flat, with the price-master price at booking). "Schedule & assign" creates the jobs from them |
 
 ## Notes
 

@@ -148,3 +148,87 @@ export async function brigadeRequest(endpoint, options) {
   }
   return data;
 }
+
+/* ---- GST (fixed 18%: CGST 9% + SGST 9%) and PO checks ---- */
+// Service prices exclude GST. A client PO amount INCLUDES GST (₹10,000 PO = ₹8,474.58
+// service value + ₹762.71 CGST + ₹762.71 SGST), so it is compared with value + GST.
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+/** GST on a service value: { base, cgst, sgst, gst, total } (total incl. GST). */
+export function gstOn(value) {
+  const base = r2(value);
+  const half = r2(base * 0.09);
+  return { base, cgst: half, sgst: half, gst: r2(half * 2), total: r2(base + half * 2) };
+}
+
+/** Splits an amount that includes GST: ₹10,000 -> { base 8474.58, cgst 762.71, sgst 762.71, gst, total }. */
+export function gstInside(total) {
+  const t = r2(total);
+  const base = r2(t / 1.18);
+  const gst = r2(t - base);
+  const cgst = r2(gst / 2);
+  return { base, cgst, sgst: r2(gst - cgst), gst, total: t };
+}
+
+/**
+ * How services (value excl. GST) compare with what is left on a PO (incl. GST).
+ * Returns { tone: "ok" | "info" | "warn", title, text } for <PoCheck/>; never blocks anything.
+ *   poAmount  - PO amount incl. GST (null when not entered)
+ *   used      - already on the PO, incl. GST (other flats / services)
+ *   value     - the services being checked, excl. GST
+ */
+export function poMatch({ poAmount, used = 0, value }) {
+  const mine = gstOn(value).total;
+  if (poAmount === null || poAmount === undefined || poAmount === "") {
+    return { tone: "info", title: "No PO amount", text: "Add the PO amount to check the services against it." };
+  }
+  const po = Number(poAmount);
+  const left = r2(po - used);
+  const diff = r2(left - mine);
+  const usedNote = used ? ` (${formatInr(used)} of the PO is already used)` : "";
+  if (Math.abs(diff) < 1) {
+    return { tone: "ok", title: "Matches the PO", text: `Services ${formatInr(mine)} incl. GST = PO amount left ${formatInr(left)}${usedNote}.` };
+  }
+  if (diff < 0) {
+    return {
+      tone: "warn",
+      title: `Over the PO by ${formatInr(-diff)}`,
+      text: `Services come to ${formatInr(mine)} incl. GST but only ${formatInr(left)} of the PO is left${usedNote}. Check the PO amount or the services.`,
+    };
+  }
+  return {
+    tone: "info",
+    title: `${formatInr(diff)} of the PO left`,
+    text: `Services ${formatInr(mine)} incl. GST; the PO has ${formatInr(left)} left${usedNote}, so ${formatInr(diff)} stays unused.`,
+  };
+}
+
+/** POST /api/brigade/billing/invoices/check - totals + any PO mismatch for the ticked services. */
+export function checkInvoice(poNumber, jobIds) {
+  return brigadeRequest("/api/brigade/billing/invoices/check", { method: "POST", body: JSON.stringify({ po_number: poNumber, job_ids: jobIds }) });
+}
+
+/* ---- PO screens (PO section + Billing) ---- */
+
+export function toNumber(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+export function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// Where a PO stands: drives the status badge, bar colour and list filters.
+export function poState(poAmount, balance) {
+  if (poAmount === null) return { key: "none", tone: "muted", label: "No PO amount" };
+  if (balance < 0) return { key: "over", tone: "danger", label: "Over the PO" };
+  if (Math.abs(balance) < 1) return { key: "full", tone: "ok", label: "Fully used" };
+  return { key: "open", tone: "info", label: "Open" };
+}
+
+export function usedPct(used, poAmount) {
+  return poAmount ? Math.round((used / poAmount) * 100) : null;
+}
