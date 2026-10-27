@@ -33,6 +33,13 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Sales field tracking: records the sales executive's location between Start Shift and End
+         Shift with a foreground service (permanent "Shift in progress" notification). Started only
+         from the open app, so the normal while-in-use location permission is enough - no
+         ACCESS_BACKGROUND_LOCATION ("Allow all the time"). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <!-- Declaring CAMERA/ACCESS_FINE_LOCATION above makes Android's manifest
          merger auto-add these as required="true" hardware features unless
          overridden here - which would make Play Store reject the app as
@@ -90,5 +97,11 @@
           <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
         </intent-filter>
       </receiver>
+
+      <!-- Sales field tracking: GPS during a shift (fieldtracking/FieldTrackingService.kt). -->
+      <service
+        android:name=".fieldtracking.FieldTrackingService"
+        android:exported="false"
+        android:foregroundServiceType="location" />
     </application>
 </manifest>

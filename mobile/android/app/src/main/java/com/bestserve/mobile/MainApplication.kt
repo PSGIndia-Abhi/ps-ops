@@ -9,6 +9,7 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.bestserve.mobile.locationenabler.LocationEnablerPackage
 import com.bestserve.mobile.reversegeocoder.ReverseGeocoderPackage
 import com.bestserve.mobile.reminders.RemindersPackage
+import com.bestserve.mobile.fieldtracking.FieldTrackingPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -22,6 +23,7 @@ class MainApplication : Application(), ReactApplication {
           add(LocationEnablerPackage())
           add(ReverseGeocoderPackage())
           add(RemindersPackage())
+          add(FieldTrackingPackage())
         },
     )
   }

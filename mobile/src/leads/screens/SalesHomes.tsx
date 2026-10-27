@@ -29,6 +29,7 @@ import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
 import { countByGroup, type StageGroup } from '../stage';
 import type { LeadTask, Meeting } from '../types';
 import { TeamVisitsTimeline } from '../TeamVisitsTimeline';
+import { ShiftCard } from './FieldDayScreens';
 import { LeadRow, LeadWash, meetingWhen, useLoad, useMe } from '../ui';
 
 const RECENT_LIMIT = 3;
@@ -40,6 +41,7 @@ const factory = (t: CrmTheme) => ({
   tiles: { flexDirection: 'row' as const, gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: -TILE_OVERLAP },
   body: { paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xxl },
   section: { marginTop: spacing.lg },
+  shift: { marginBottom: spacing.lg },
   quickRow: { flexDirection: 'row' as const, gap: spacing.sm },
   skeleton: { marginBottom: spacing.sm },
 
@@ -168,6 +170,11 @@ export function SalesExecHome() {
         <View style={styles.body}>
           <CrmErrorBanner message={error} onRetry={reload} />
           <CrmErrorBanner message={actionError} />
+
+          {/* Field day: Start / End Shift, and the way into My Day (visits, unplanned visit). */}
+          <View style={styles.shift}>
+            <ShiftCard showMyDayLink />
+          </View>
 
           {loading && !data ? (
             <CrmSkeleton height={190} radius={radii.xl} />

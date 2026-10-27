@@ -51,6 +51,10 @@ export type LeadStackParamList = {
   LeadTeam: undefined;
   /** Sales manager: one day's visits by the team, with start / end times and GPS. */
   LeadTeamVisits: undefined;
+  /** Sales executive: today's field day - shift, visits, km tracked, unplanned visit. */
+  LeadMyDay: undefined;
+  /** Sales executive: pick the client they are at (no meeting booked) and punch in. */
+  LeadUnplannedVisit: undefined;
   /** Sales manager: residential (home-service) leads, read-only. */
   LeadResidential: undefined;
   /** More -> Profile in the sales apps (CRM and Lead Management). */

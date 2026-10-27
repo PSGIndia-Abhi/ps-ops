@@ -29,6 +29,7 @@ import { PerformanceItemsScreen } from './PerformanceItemsScreen';
 import { PerformanceScreen, TeamScreen } from './ReportScreens';
 import { ResidentialLeadsScreen } from './ResidentialLeadsScreen';
 import { TeamVisitsScreen } from './TeamVisitsScreen';
+import { MyDayScreen, UnplannedVisitScreen } from './FieldDayScreens';
 
 /**
  * Every pushed lead screen, in one list, so the two navigators that host them
@@ -67,6 +68,8 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadNotifications', component: LeadNotificationsScreen },
   { name: 'LeadProfile', component: LeadProfileScreen },
   { name: 'LeadTeamVisits', component: TeamVisitsScreen },
+  { name: 'LeadMyDay', component: MyDayScreen },
+  { name: 'LeadUnplannedVisit', component: UnplannedVisitScreen, modal: true },
   { name: 'LeadTeam', component: TeamScreen },
   { name: 'LeadResidential', component: ResidentialLeadsScreen },
   { name: 'LeadReminders', component: RemindersScreen },

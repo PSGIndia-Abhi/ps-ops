@@ -1,0 +1,41 @@
+/* Field Tracking (FieldTracking.jsx). Uses the Lead Management colour variables from leads.css. */
+
+.ft-who { display: inline-flex; align-items: center; gap: 10px; }
+
+.ft-back { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.ft-back strong { font-size: 18px; color: var(--lm-text); }
+
+.ft-map { padding: 0 16px 16px; }
+.ft-map > div { border-radius: 12px; overflow: hidden; }
+
+.ft-checks td:last-child { text-align: right; white-space: nowrap; }
+.ft-checks tbody tr { cursor: default; }
+.ft-checks tbody tr:hover { background: none; box-shadow: none; }
+
+.ft-home { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 13px; color: var(--lm-muted); }
+.ft-home a, .ft-home-text a, .ft-tl-text a { color: var(--lm-primary); font-weight: 600; }
+
+.ft-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ft-timeline li { display: grid; grid-template-columns: 72px 30px minmax(0, 1fr); align-items: start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--lm-line); }
+.ft-timeline li:last-child { border-bottom: 0; }
+.ft-tl-time { font-size: 12.5px; font-weight: 700; color: var(--lm-muted); padding-top: 5px; white-space: nowrap; }
+.ft-tl-icon { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--lm-primary-soft); color: var(--lm-primary); }
+.ft-timeline .tone-success .ft-tl-icon { background: var(--lm-success-soft); color: var(--lm-success); }
+.ft-timeline .tone-violet .ft-tl-icon { background: var(--lm-violet-soft); color: var(--lm-violet); }
+.ft-timeline .tone-danger .ft-tl-icon { background: var(--lm-danger-soft); color: var(--lm-danger); }
+.ft-timeline .tone-neutral .ft-tl-icon { background: var(--lm-bg); color: var(--lm-muted); }
+.ft-tl-text { display: grid; gap: 2px; min-width: 0; }
+.ft-tl-text strong { font-size: 13.5px; color: var(--lm-text); }
+.ft-tl-text small { font-size: 12px; color: var(--lm-muted); overflow-wrap: anywhere; }
+
+.ft-homes tbody tr { cursor: default; }
+.ft-home-edit { display: grid; gap: 4px; min-width: 260px; max-width: 520px; position: relative; }
+.ft-home-text { font-size: 13.5px; }
+.ft-actions { white-space: nowrap; text-align: right; }
+.ft-actions .lm-btn + .lm-btn { margin-left: 6px; }
+
+@media (max-width: 720px) {
+  .ft-map { padding: 0 8px 8px; }
+  .ft-timeline li { grid-template-columns: 60px 26px minmax(0, 1fr); gap: 8px; }
+  .ft-actions { white-space: normal; }
+}
