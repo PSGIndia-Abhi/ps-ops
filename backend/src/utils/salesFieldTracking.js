@@ -6,8 +6,11 @@
 //  - a point that would need more than MAX_SPEED_KMPH from the last good point is ignored (GPS jump);
 //  - hops shorter than MIN_HOP_M are not counted (GPS jitter while standing still) - the anchor
 //    stays put until the executive has really moved.
-// Petrol km (home -> each client -> home, by road) is calculated by the web page with the
-// Google Directions service; this file only returns the ordered waypoints for it.
+// Petrol km (home -> each client -> home, by road) and the road route line are worked out by the
+// web page with Google's Routes API from the waypoints returned here, once per closed day, and
+// saved in sales_field_day_routes (see the route-save endpoint in sales-field-tracking.routes.js).
+
+const crypto = require("crypto");
 
 const MAX_ACCURACY_M = 100;
 const MAX_SPEED_KMPH = 150;
@@ -245,6 +248,29 @@ async function computeDay(executor, user, date) {
     ? [{ latitude: home.latitude, longitude: home.longitude }, ...stopsForPetrol, { latitude: home.latitude, longitude: home.longitude }]
     : null;
 
+  // What the road route and petrol km are worked out from: the valid GPS track, the client stops,
+  // and whether a home was set. A saved route (sales_field_day_routes) is used only while this
+  // still matches - late points from an offline phone, or a home set afterwards, make it
+  // be worked out again. Moving an existing home later does not change a saved day.
+  const fingerprint = crypto
+    .createHash("sha1")
+    .update(JSON.stringify([
+      points.filter((p) => p.valid).map((p) => [p.latitude, p.longitude, p.ts]),
+      stopsForPetrol.map((p) => [p.latitude, p.longitude]),
+      Boolean(home),
+    ]))
+    .digest("hex");
+  // Closed = the executive started a shift that day and every shift of it has ended.
+  const closed = shifts.length > 0 && shifts.every((s) => s.status !== "ACTIVE");
+  const [[savedRow]] = await executor.query(
+    `SELECT fingerprint, petrol_km, road_path, DATE_FORMAT(computed_at, '%Y-%m-%d %H:%i:%s') AS computed_at
+       FROM sales_field_day_routes WHERE user_id = ? AND work_date = ?`,
+    [user.id, date]
+  );
+  const savedRoute = savedRow && savedRow.fingerprint === fingerprint
+    ? { petrolKm: num(savedRow.petrol_km), roadPath: savedRow.road_path, computedAt: savedRow.computed_at }
+    : null;
+
   const firstStart = shifts.length ? shifts[0].startedAt : null;
   const lastShift = shifts[shifts.length - 1];
   const durationMin = shifts.reduce(
@@ -262,7 +288,12 @@ async function computeDay(executor, user, date) {
     stops: stopsOut,
     gaps: gapsOut,
     petrolRoute,
+    closed,
+    fingerprint,
+    // The road route / petrol km saved for this day, or null (not worked out yet, or out of date).
+    savedRoute,
     summary: {
+      petrolKm: savedRoute ? savedRoute.petrolKm : null,
       firstStart,
       lastEnd: lastShift ? lastShift.endedAt : null,
       durationMin: Math.round(durationMin),

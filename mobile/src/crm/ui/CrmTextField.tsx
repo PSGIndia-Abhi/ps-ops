@@ -3,6 +3,7 @@ import { Text, TextInput, View, type TextInputProps } from 'react-native';
 import { radii, spacing, touchTarget, typography } from '../../theme';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { CheckIcon } from './crmIcons';
+import { IconTile } from './IconTile';
 
 const factory = (t: CrmTheme) => ({
   container: { marginBottom: spacing.md },
@@ -30,6 +31,9 @@ const factory = (t: CrmTheme) => ({
   },
   rowError: { borderColor: t.danger },
   icon: { marginRight: spacing.sm },
+  // Multi-line: the field grows downward, so the icon lines up with the first line of text
+  // (the input's own top padding) instead of sitting against the top edge.
+  iconMultiline: { marginTop: spacing.xs },
   accessory: { marginLeft: spacing.sm },
   prefix: {
     ...typography.bodyMedium,
@@ -104,7 +108,11 @@ export const CrmTextField = forwardRef<
           !!error && styles.rowError,
         ]}
       >
-        {!!icon && <View style={styles.icon}>{icon}</View>}
+        {!!icon && (
+          <View style={[styles.icon, multiline && styles.iconMultiline]}>
+            <IconTile icon={icon} />
+          </View>
+        )}
         {!!prefix && <Text style={styles.prefix}>{prefix}</Text>}
         <TextInput
           ref={ref}

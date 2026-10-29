@@ -392,6 +392,15 @@ const leadRowFactory = (t: CrmTheme) => ({
   byRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginTop: 3 },
   by: { ...typography.caption, color: t.textMuted, flex: 1 },
   chevron: { justifyContent: 'center' as const, paddingRight: spacing.sm },
+  // The open arrow: a soft round button rather than a bare grey chevron.
+  chevronDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: t.primarySoftBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
 });
 
 /**
@@ -437,7 +446,9 @@ export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => 
         </View>
       </View>
       <View style={styles.chevron}>
-        <ChevronRightIcon size={16} color={theme.textMuted} />
+        <View style={styles.chevronDot}>
+          <ChevronRightIcon size={15} color={theme.primary} />
+        </View>
       </View>
     </Pressable>
   );

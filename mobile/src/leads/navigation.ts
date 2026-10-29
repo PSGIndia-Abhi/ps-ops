@@ -64,6 +64,8 @@ export type LeadStackParamList = {
   /** No employeeId = the signed-in user's own numbers. */
   LeadPerformance: { employeeId?: number; name?: string } | undefined;
   /** The records behind one number of a performance report (a tapped tile). */
+  /** One person's achievement over time: lifetime, last month, month by month (no employeeId = mine). */
+  LeadAchievementHistory: { employeeId?: number; name?: string } | undefined;
   LeadPerformanceItems: {
     metric: import('./api').PerformanceMetric;
     label: string;

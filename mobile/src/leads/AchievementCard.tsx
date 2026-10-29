@@ -179,12 +179,15 @@ export function compactINR(n: number): string {
  */
 export function AchievementCard({
   history,
+  initiallyOpen = false,
 }: {
   history: api.AchievementHistory;
+  /** Open from the start (its own Achievement history screen). */
+  initiallyOpen?: boolean;
 }) {
   const { styles, theme } = useCrmStyles(factory);
   // Closed to start with: the header already gives the two headline numbers.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const toggle = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setOpen(o => !o);

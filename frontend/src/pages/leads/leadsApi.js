@@ -658,6 +658,17 @@ export async function fieldTeam(date) {
   return (data.team || []).map((t) => ({ ...t, firstStart: wall(t.firstStart), lastEnd: wall(t.lastEnd) }));
 }
 
+/**
+ * Save a closed day's road route (encoded polyline) and petrol km, worked out once with Google, so
+ * no later view asks Google again. `fingerprint` is the one fieldDay() returned for that day.
+ */
+export function saveFieldRoute(userId, date, { fingerprint, petrolKm, roadPath }) {
+  return request(`/api/field-tracking/day/${userId}/route?date=${encodeURIComponent(date)}`, {
+    method: "PUT",
+    body: { fingerprint, petrolKm, roadPath },
+  });
+}
+
 /** One executive's full day: home, shifts, GPS points, visits, stops, gaps and the petrol route. */
 export async function fieldDay(userId, date) {
   const d = await request(`/api/field-tracking/day/${userId}?date=${encodeURIComponent(date)}`);

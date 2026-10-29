@@ -12,7 +12,8 @@ const { computeDay } = require("../utils/salesFieldTracking");
 //
 // Access: the executive works on their own data with CRM_VIEW_LEAD (every lead-working role has
 // it). Reading someone else's day needs MANAGE_LEADS and is limited to the people the manager may
-// see (resolveVisibleUserIds - the same rule as Team Visits). Home locations are set by admin only.
+// see (resolveVisibleUserIds - the same rule as Team Visits). Home locations are set by the
+// executive's sales manager or admin, never by the executive.
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -62,6 +63,19 @@ async function assertCanSeeUser(req, userId) {
   if (!isManager(req)) throw new HttpError(403, "You can only see your own field tracking");
   const visibleIds = await resolveVisibleUserIds(pool, req);
   if (visibleIds !== null && !visibleIds.includes(Number(userId))) throw new HttpError(404, "User not found");
+}
+
+// Home locations are set by admin (anyone) or a sales manager (their own team only) - never by the
+// executive themselves, since petrol km is counted from it.
+async function assertCanManageHome(req, userId) {
+  if (!isManager(req)) throw new HttpError(403, "Only a sales manager or admin can set a home location");
+  const id = parseId(userId);
+  if (!id) throw new HttpError(400, "Invalid user id");
+  if (id === Number(req.user.id) && req.user.role !== "admin") {
+    throw new HttpError(403, "You cannot set your own home location");
+  }
+  const visibleIds = await resolveVisibleUserIds(pool, req);
+  if (visibleIds !== null && !visibleIds.includes(id)) throw new HttpError(404, "User not found");
 }
 
 // mysql2 returns DATETIME as JS Dates that shift with the server timezone - read them as strings.
@@ -129,12 +143,12 @@ router.get("/executives", auth, requirePermission("CRM_VIEW_LEAD"), async (req, 
 });
 
 // ---------------------------------------------------------------------------
-// PUT /api/field-tracking/home/:userId -- admin sets an executive's home location.
+// PUT /api/field-tracking/home/:userId -- admin, or the executive's sales manager, sets their home location.
 // Body: { latitude, longitude, address? }
 // ---------------------------------------------------------------------------
 router.put("/home/:userId", auth, async (req, res) => {
   try {
-    if (req.user.role !== "admin") throw new HttpError(403, "Only admin can set a home location");
+    await assertCanManageHome(req, req.params.userId);
     const userId = parseId(req.params.userId);
     if (!userId) throw new HttpError(400, "Invalid user id");
     const [[user]] = await pool.query("SELECT id FROM users WHERE id = ?", [userId]);
@@ -157,10 +171,10 @@ router.put("/home/:userId", auth, async (req, res) => {
   }
 });
 
-// DELETE /api/field-tracking/home/:userId -- admin clears a home location.
+// DELETE /api/field-tracking/home/:userId -- admin, or the executive's sales manager, clears it.
 router.delete("/home/:userId", auth, async (req, res) => {
   try {
-    if (req.user.role !== "admin") throw new HttpError(403, "Only admin can remove a home location");
+    await assertCanManageHome(req, req.params.userId);
     const userId = parseId(req.params.userId);
     if (!userId) throw new HttpError(400, "Invalid user id");
     await pool.query("DELETE FROM sales_home_locations WHERE user_id = ?", [userId]);
@@ -315,6 +329,64 @@ router.get("/day/:userId", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
     res.json(await computeDay(pool, { id: Number(user.id), name: user.name, phone: user.phone }, date));
   } catch (err) {
     sendError(res, err, "Failed to load field day");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/field-tracking/day/:userId/route?date=YYYY-MM-DD -- save the road route and petrol km
+// of a CLOSED day, worked out by the manager's browser with Google's Routes API, so no later view
+// (any manager, any computer) asks Google again, and the day keeps one fixed petrol km.
+// Body: { fingerprint, petrolKm (number | null), roadPath (Google encoded polyline | null) }
+// The fingerprint must be the one GET /day returned: if points or punches arrived since, 409.
+// A day already saved with the same fingerprint is not overwritten (the first result stays).
+// ---------------------------------------------------------------------------
+const MAX_ROAD_PATH_CHARS = 400000;
+
+router.put("/day/:userId/route", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    if (!isManager(req)) throw new HttpError(403, "Only a sales manager or admin can save a day's route");
+    const userId = parseId(req.params.userId);
+    if (!userId) throw new HttpError(400, "Invalid user id");
+    const date = readDate(req.query.date);
+    if (!date) throw new HttpError(400, "date is required (YYYY-MM-DD)");
+    await assertCanSeeUser(req, userId);
+
+    const body = req.body || {};
+    const fingerprint = typeof body.fingerprint === "string" ? body.fingerprint : "";
+    if (!/^[0-9a-f]{40}$/.test(fingerprint)) throw new HttpError(400, "fingerprint is required");
+    let petrolKm = null;
+    if (body.petrolKm !== null && body.petrolKm !== undefined) {
+      petrolKm = Number(body.petrolKm);
+      if (!Number.isFinite(petrolKm) || petrolKm < 0 || petrolKm > 5000) throw new HttpError(400, "petrolKm must be between 0 and 5000");
+      petrolKm = Math.round(petrolKm * 100) / 100;
+    }
+    let roadPath = null;
+    if (body.roadPath !== null && body.roadPath !== undefined) {
+      if (typeof body.roadPath !== "string" || !body.roadPath || body.roadPath.length > MAX_ROAD_PATH_CHARS) {
+        throw new HttpError(400, "roadPath must be an encoded polyline");
+      }
+      roadPath = body.roadPath;
+    }
+
+    const [[user]] = await pool.query("SELECT id, name FROM users WHERE id = ?", [userId]);
+    if (!user) throw new HttpError(404, "User not found");
+    const day = await computeDay(pool, { id: Number(user.id), name: user.name }, date);
+    if (!day.shifts.length) throw new HttpError(409, "No field day on this date");
+    if (!day.closed) throw new HttpError(409, "The day is still running - its route is saved once every shift has ended");
+    if (day.fingerprint !== fingerprint) throw new HttpError(409, "The day has changed since it was opened - reload the page");
+    if (day.savedRoute) return res.json({ saved: false, route: day.savedRoute });
+
+    await pool.query(
+      `INSERT INTO sales_field_day_routes (user_id, work_date, fingerprint, petrol_km, road_path, computed_by)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE fingerprint = VALUES(fingerprint), petrol_km = VALUES(petrol_km),
+                               road_path = VALUES(road_path), computed_by = VALUES(computed_by),
+                               computed_at = CURRENT_TIMESTAMP`,
+      [userId, date, fingerprint, petrolKm, roadPath, req.user.id]
+    );
+    res.status(201).json({ saved: true, route: { petrolKm, roadPath } });
+  } catch (err) {
+    sendError(res, err, "Failed to save the day's route");
   }
 });
 

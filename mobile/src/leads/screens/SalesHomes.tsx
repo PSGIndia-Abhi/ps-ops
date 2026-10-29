@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, View } from 'react-native';
 import { useNavigation, type CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,7 +13,6 @@ import {
   CheckCircleIcon,
   ClockIcon,
   DocumentIcon,
-  ExternalLinkIcon,
   PinIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -22,15 +21,15 @@ import { ClipboardListIcon } from '../../crm/ui/crmIcons';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import { todayStr } from '../../tasks/format';
-import { radii, spacing, typography } from '../../theme';
+import { radii, spacing } from '../../theme';
 import * as api from '../api';
 import { HomeBand, HomeTile, QuickAction, SectionTitle, TILE_OVERLAP } from '../homeParts';
 import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
 import { countByGroup, type StageGroup } from '../stage';
-import type { LeadTask, Meeting } from '../types';
+import type { LeadTask } from '../types';
 import { TeamVisitsTimeline } from '../TeamVisitsTimeline';
 import { ShiftCard } from './FieldDayScreens';
-import { LeadRow, LeadWash, meetingWhen, useLoad, useMe } from '../ui';
+import { LeadRow, LeadWash, useLoad } from '../ui';
 
 const RECENT_LIMIT = 3;
 const WHITE = '#FFFFFF';
@@ -41,48 +40,9 @@ const factory = (t: CrmTheme) => ({
   tiles: { flexDirection: 'row' as const, gap: spacing.sm, paddingHorizontal: spacing.md, marginTop: -TILE_OVERLAP },
   body: { paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xxl },
   section: { marginTop: spacing.lg },
-  shift: { marginBottom: spacing.lg },
+  shift: { marginBottom: spacing.xs },
   quickRow: { flexDirection: 'row' as const, gap: spacing.sm },
   skeleton: { marginBottom: spacing.sm },
-
-  // The focus card at the top (next visit / waiting for a meeting)
-  focus: {
-    backgroundColor: t.surface,
-    borderRadius: radii.xl,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderLeftWidth: 5,
-    padding: spacing.lg,
-    ...t.raisedShadow,
-  },
-  kicker: { ...typography.overline },
-  focusTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.xs },
-  focusTitle: { ...typography.title, color: t.textPrimary, flex: 1 },
-  meta: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 4 },
-  metaText: { ...typography.body, color: t.textSecondary, flex: 1 },
-  btns: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.md },
-  btn: {
-    flex: 1,
-    minHeight: 50,
-    borderRadius: radii.lg,
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: spacing.xs,
-  },
-  btnSoft: { backgroundColor: t.primarySoftBg },
-  btnTextOn: { ...typography.bodyMedium, color: WHITE },
-  btnTextSoft: { ...typography.bodyMedium, color: t.primary },
-  pressed: { opacity: 0.85 },
-  calm: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: spacing.sm,
-    backgroundColor: t.successBg,
-    borderRadius: radii.xl,
-    padding: spacing.lg,
-  },
-  calmText: { ...typography.bodyMedium, color: t.successText, flex: 1 },
 });
 
 type HomeNav = CompositeNavigationProp<BottomTabNavigationProp<LeadTabParamList, 'Home'>, NativeStackNavigationProp<LeadRootStackParamList>>;
@@ -109,42 +69,27 @@ const followUpsOf = (tasks: LeadTask[]) =>
   tasks.filter((t) => t.taskType !== 'LEAD_MEETING').sort((a, b) => (a.dueTime ?? '99').localeCompare(b.dueTime ?? '99'));
 
 // ---------------------------------------------------------------------------
-// Sales executive: the next visit first
+// Sales executive: the field day (shift) first; visits are on My day
 // ---------------------------------------------------------------------------
 
-/** The next visit of mine that is still open: one in progress, else the soonest scheduled. */
-function nextVisit(meetings: Meeting[], myId: string): Meeting | null {
-  const mine = meetings.filter((m) => m.salesEmployeeId === myId && m.status === 'SCHEDULED');
-  const live = mine.find((m) => !!m.checkInAt);
-  if (live) return live;
-  return [...mine].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0] ?? null;
-}
-
 export function SalesExecHome() {
-  const { navigation, band, actionError, setActionError } = useHomeBasics();
-  const { myId } = useMe();
+  const { navigation, band, actionError } = useHomeBasics();
   const { styles, theme } = useCrmStyles(factory);
 
   const loader = useCallback(async () => {
-    const [leads, tasks, today, upcoming, unread] = await Promise.all([
+    const [leads, tasks, unread] = await Promise.all([
       api.listLeads(),
       api.myTasksToday().catch(() => [] as LeadTask[]),
-      api.meetingsToday().catch(() => [] as Meeting[]),
-      api.meetingsUpcoming().catch(() => [] as Meeting[]),
       getUnreadNotificationCount().catch(() => 0),
     ]);
-    const meetings = [...today, ...upcoming.filter((u) => !today.some((t) => t.id === u.id))];
-    return { leads, tasks, meetings, unread };
+    return { leads, tasks, unread };
   }, []);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load your leads.');
 
   const leads = useMemo(() => data?.leads ?? [], [data]);
   const counts = useMemo(() => countByGroup(leads), [leads]);
-  const next = useMemo(() => nextVisit(data?.meetings ?? [], myId), [data, myId]);
-  const nextLead = next ? leads.find((l) => l.id === next.leadId) : undefined;
   const followUps = useMemo(() => followUpsOf(data?.tasks ?? []), [data]);
   const openGroup = (group: StageGroup) => navigation.navigate('Leads', { group, at: Date.now() });
-  const address = next?.address || nextLead?.address || '';
 
   return (
     <View style={styles.screen}>
@@ -175,63 +120,6 @@ export function SalesExecHome() {
           <View style={styles.shift}>
             <ShiftCard showMyDayLink />
           </View>
-
-          {loading && !data ? (
-            <CrmSkeleton height={190} radius={radii.xl} />
-          ) : next ? (
-            <View style={[styles.focus, { borderLeftColor: next.checkInAt ? theme.warning : theme.accent }]}>
-              <Text style={[styles.kicker, { color: next.checkInAt ? theme.warning : theme.accent }]}>
-                {next.checkInAt ? 'VISIT IN PROGRESS' : next.date === todayStr() ? 'NEXT VISIT · TODAY' : 'NEXT VISIT'}
-              </Text>
-              <View style={styles.focusTop}>
-                <Text style={styles.focusTitle} numberOfLines={1}>
-                  {nextLead?.companyName || 'Meeting'}
-                </Text>
-              </View>
-              <View style={styles.meta}>
-                <ClockIcon size={15} color={theme.textMuted} />
-                <Text style={styles.metaText}>{meetingWhen(next)}</Text>
-              </View>
-              {!!address && (
-                <View style={styles.meta}>
-                  <PinIcon size={15} color={theme.textMuted} />
-                  <Text style={styles.metaText} numberOfLines={1}>
-                    {address}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.btns}>
-                <Pressable
-                  onPress={() =>
-                    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`).catch(() =>
-                      setActionError('No maps app on this phone.'),
-                    )
-                  }
-                  disabled={!address}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.btn, { backgroundColor: theme.primary }, !address && { opacity: 0.4 }, pressed && styles.pressed]}
-                >
-                  <ExternalLinkIcon size={17} color={WHITE} />
-                  <Text style={styles.btnTextOn}>Directions</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => navigation.navigate('LeadMeeting', { meetingId: next.id })}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.btn, styles.btnSoft, pressed && styles.pressed]}
-                >
-                  <Text style={styles.btnTextSoft}>{next.checkInAt ? 'Continue visit' : 'Open visit'}</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            !!data && (
-              <View style={styles.calm}>
-                <CalendarIcon size={24} color={theme.success} />
-                <Text style={styles.calmText}>No visits scheduled. Open a verified lead to book one.</Text>
-              </View>
-            )
-          )}
-
 
           <View style={styles.section}>
             <SectionTitle title="Recent Leads" onViewAll={leads.length > 0 ? () => openGroup('all') : undefined} />

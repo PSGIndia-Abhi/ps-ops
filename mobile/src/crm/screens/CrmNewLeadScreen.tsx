@@ -927,7 +927,7 @@ export function CrmNewLeadScreen({
           }}
         >
           <SectionHeader
-            icon={<HomeIcon size={20} color={theme.primary} />}
+            icon={<HomeIcon size={20} color={theme.success} />}
             title="Property & Service"
           />
           <SelectField
@@ -1015,7 +1015,7 @@ export function CrmNewLeadScreen({
 
         <View style={styles.section}>
           <SectionHeader
-            icon={<TagIcon size={20} color={theme.primary} />}
+            icon={<TagIcon size={20} color={theme.accent} />}
             title="Lead Details"
           />
           <CrmTextField
@@ -1084,7 +1084,7 @@ export function CrmNewLeadScreen({
 
         <View style={styles.section}>
           <SectionHeader
-            icon={<WalletIcon size={20} color={theme.primary} />}
+            icon={<WalletIcon size={20} color={theme.warning} />}
             title="Payment"
           />
           {paidLocked ? (

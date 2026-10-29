@@ -1,18 +1,22 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, Text, View } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, FlatList, Pressable, Text, View } from 'react-native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { BriefcaseIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlusIcon } from '../../components/icons';
+import { GlossyBadge } from '../../components/GlossyBadge';
+import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlusIcon } from '../../components/icons';
+import Svg, { Circle, Line } from 'react-native-svg';
+import { formatShiftClock } from '../../screens/technician/shiftTime';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
-import { SearchIcon } from '../../crm/ui/crmIcons';
+import { SearchIcon, TrendUpIcon } from '../../crm/ui/crmIcons';
 import { fmtTimestamp, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import { getCurrentLocation } from '../../utils/location';
 import { refreshReminders } from '../../reminders-engine/useReminders';
 import * as api from '../api';
 import * as field from '../fieldApi';
+import { FieldDialog } from '../FieldDialog';
 import * as tracking from '../fieldTracking';
 import type { FieldShift } from '../fieldApi';
 import type { LeadStackParamList } from '../navigation';
@@ -29,34 +33,115 @@ type Nav = NativeStackNavigationProp<LeadStackParamList>;
 
 const WHITE = '#FFFFFF';
 
+/** The small stopwatch dial on the Field Day card. */
+const DIAL = 112;
+const DIAL_CENTER = DIAL / 2;
+const TICKS = 60;
+
+/**
+ * 60 ticks like a stopwatch: while on duty they light up second by second with a dot on the
+ * leading edge, starting over every minute; off duty the dial rests, dim. Same idea as the
+ * technician's My Shift clock, drawn at card size.
+ */
+function ShiftDial({ litSeconds, running, color, rest }: { litSeconds: number; running: boolean; color: string; rest: string }) {
+  const tipAngle = ((-90 + (litSeconds * 360) / TICKS) * Math.PI) / 180;
+  const tipRadius = DIAL_CENTER - 17;
+  return (
+    <Svg width={DIAL} height={DIAL}>
+      {Array.from({ length: TICKS }, (_, i) => {
+        const angle = ((-90 + (i * 360) / TICKS) * Math.PI) / 180;
+        const major = i % 5 === 0;
+        const outer = DIAL_CENTER - 2;
+        const inner = outer - (major ? 8 : 4);
+        const lit = running && i <= litSeconds;
+        return (
+          <Line
+            key={i}
+            x1={DIAL_CENTER + Math.cos(angle) * outer}
+            y1={DIAL_CENTER + Math.sin(angle) * outer}
+            x2={DIAL_CENTER + Math.cos(angle) * inner}
+            y2={DIAL_CENTER + Math.sin(angle) * inner}
+            stroke={lit ? color : rest}
+            strokeOpacity={lit || major ? 1 : 0.6}
+            strokeWidth={major ? 2.2 : 1.3}
+            strokeLinecap="round"
+          />
+        );
+      })}
+      {running && (
+        <Circle cx={DIAL_CENTER + Math.cos(tipAngle) * tipRadius} cy={DIAL_CENTER + Math.sin(tipAngle) * tipRadius} r={3} fill={color} />
+      )}
+    </Svg>
+  );
+}
+
 /** Stages a visit can be recorded for - the server's ACTIVE_MEETING_STAGES (crm-lead-meetings.routes.js). */
 const VISITABLE_STAGES: PipelineStage[] = [
   'NEW', 'TO_CALL', 'QUALIFIED', 'NEED_MORE_INFO', 'MEETING_SCHEDULED', 'VISIT_COMPLETED', 'QUOTATION_SENT',
 ];
 
 const factory = (t: CrmTheme) => ({
-  card: {
+  // Shift card: the app's white home card (as the visit card below it) with the technician's
+  // stopwatch idea as a small dial - on the left, status / time / button on the right.
+  hero: {
     backgroundColor: t.surface,
     borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: t.border,
-    borderLeftWidth: 5,
-    padding: spacing.lg,
+    padding: spacing.md,
     ...t.raisedShadow,
   },
-  kicker: { ...typography.overline },
-  title: { ...typography.title, color: t.textPrimary, marginTop: spacing.xxs },
-  meta: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 4 },
-  metaText: { ...typography.body, color: t.textSecondary, flex: 1 },
-  btns: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.md },
-  flex1: { flex: 1 },
+  row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  faceWrap: { width: DIAL, height: DIAL, alignItems: 'center' as const, justifyContent: 'center' as const },
+  glow: {
+    position: 'absolute' as const,
+    width: DIAL - 10,
+    height: DIAL - 10,
+    borderRadius: (DIAL - 10) / 2,
+    borderWidth: 4,
+  },
+  faceCenter: {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  clockText: { ...typography.bodyMedium, fontSize: 17, lineHeight: 21, fontWeight: '700' as const, color: t.textPrimary },
+  faceSub: { ...typography.caption, fontSize: 10, lineHeight: 13, color: t.textMuted },
+  side: { flex: 1, gap: 6 },
+  statusPill: {
+    alignSelf: 'flex-start' as const,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    borderRadius: radii.pill,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.xs,
+  },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { ...typography.overline },
+  sideTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  sideSub: { ...typography.caption, color: t.textMuted, marginTop: -4 },
+  heroButton: {
+    minHeight: 42,
+    borderRadius: radii.md,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginTop: 2,
+  },
+  heroButtonText: { ...typography.button },
   link: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 4,
+    justifyContent: 'space-between' as const,
     marginTop: spacing.sm,
-    minHeight: 44,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+    minHeight: 40,
   },
   linkText: { ...typography.bodyMedium, color: t.primary },
   pressed: { opacity: 0.85 },
@@ -72,7 +157,7 @@ const factory = (t: CrmTheme) => ({
     paddingVertical: spacing.md,
     alignItems: 'center' as const,
   },
-  statValue: { ...typography.title, color: t.textPrimary },
+  statValue: { ...typography.title, color: t.textPrimary, marginTop: spacing.xs },
   statLabel: { ...typography.caption, color: t.textMuted, marginTop: 2 },
   sectionRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.sm },
   sectionTitle: { ...typography.subtitle, color: t.textPrimary },
@@ -190,43 +275,93 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
       setBusy(null);
     }
   };
-  const onEnd = () =>
-    Alert.alert('End your shift?', 'Your field day will be closed and sent to your manager.', [
-      { text: 'Not yet', style: 'cancel' },
-      { text: 'End shift', style: 'destructive', onPress: doEnd },
-    ]);
-
-  if (!loaded) return <CrmSkeleton height={150} radius={radii.xl} />;
-
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const active = !!shift;
+
+  // The running clock: ticks every second only while on duty and this screen is in view
+  // (Home stays mounted under other tabs), like the technician's My Shift screen.
+  const isFocused = useIsFocused();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active || !isFocused) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active, isFocused]);
+
+  // A soft glow that breathes around the face while the shift runs.
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active || !isFocused) {
+      pulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 1400, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, isFocused, pulse]);
+
+  if (!loaded) return <CrmSkeleton height={showMyDayLink ? 196 : 146} radius={radii.xl} />;
+
+  // started_at is the server's wall-clock time, read as local time on the phone.
+  const elapsed = shift ? Math.max(0, now - new Date(shift.startedAt.replace(' ', 'T')).getTime()) : 0;
+  const litSeconds = Math.floor(elapsed / 1000) % 60;
+  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.06] });
+  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.3] });
   const tone = active ? theme.success : theme.primary;
+  const soft = active ? theme.successBg : theme.primarySoftBg;
+
   return (
     <View>
       <CrmErrorBanner message={error} onRetry={reload} />
       <CrmErrorBanner message={actionError} />
-      <View style={[styles.card, { borderLeftColor: tone }]}>
-        <Text style={[styles.kicker, { color: tone }]}>{active ? 'SHIFT IN PROGRESS' : 'FIELD DAY'}</Text>
-        <Text style={styles.title}>{shift ? `Started at ${clock(shift.startedAt)}` : 'Shift not started'}</Text>
-        <View style={styles.meta}>
-          <ClockIcon size={15} color={theme.textMuted} />
-          <Text style={styles.metaText}>
-            {active ? 'Punch in at each client. End the shift when your day is done.' : 'Start your shift when you leave for the field.'}
-          </Text>
-        </View>
-        <View style={styles.btns}>
-          {active ? (
-            <PrimaryButton label="End shift" variant="brand" onPress={onEnd} loading={busy === 'end'} disabled={busy !== null} style={styles.flex1} />
-          ) : (
-            <PrimaryButton
-              label="Start shift"
-              icon={<BriefcaseIcon size={18} color={WHITE} />}
-              onPress={onStart}
-              loading={busy === 'start'}
+      <View style={styles.hero}>
+        <View style={styles.row}>
+          <View style={styles.faceWrap}>
+            {active && <Animated.View style={[styles.glow, { borderColor: tone, opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />}
+            <ShiftDial litSeconds={litSeconds} running={active} color={tone} rest={theme.border} />
+            <View style={styles.faceCenter} pointerEvents="none">
+              <Text style={styles.clockText} accessibilityLabel={shift ? `Time on duty ${formatShiftClock(elapsed)}` : 'Not on duty'}>
+                {shift ? formatShiftClock(elapsed) : '--:--'}
+              </Text>
+              <Text style={styles.faceSub}>{shift ? 'on duty' : 'off duty'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.side}>
+            <View style={[styles.statusPill, { backgroundColor: soft }]}>
+              <View style={[styles.dot, { backgroundColor: tone }]} />
+              <Text style={[styles.statusText, { color: tone }]}>{active ? 'ON DUTY' : 'OFF DUTY'}</Text>
+            </View>
+            <Text style={styles.sideTitle} numberOfLines={1}>
+              {shift ? `Since ${clock(shift.startedAt)}` : 'Shift not started'}
+            </Text>
+            {/* <Text style={styles.sideSub} numberOfLines={1}>
+              {active ? 'Your location is being recorded' : 'Start when you leave for the field'}
+            </Text> */}
+            <Pressable
+              onPress={active ? () => setConfirmEnd(true) : onStart}
               disabled={busy !== null}
-              style={styles.flex1}
-            />
-          )}
+              accessibilityRole="button"
+              accessibilityLabel={active ? 'End shift' : 'Start shift'}
+              style={({ pressed }) => [
+                styles.heroButton,
+                { backgroundColor: active ? theme.dangerBg : theme.primary },
+                (pressed || busy !== null) && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.heroButtonText, { color: active ? theme.danger : theme.textOnPrimary }]}>
+                {busy === 'start' ? 'Starting...' : busy === 'end' ? 'Ending...' : active ? 'End shift' : 'Start shift'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
+
         {showMyDayLink && (
           <Pressable
             onPress={() => navigation.navigate('LeadMyDay')}
@@ -238,6 +373,27 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
           </Pressable>
         )}
       </View>
+
+      <FieldDialog
+        visible={confirmEnd}
+        tone="danger"
+        icon={ClockIcon}
+        title="End your shift?"
+        message="Your location will be recorded and your field day will be closed and sent to your manager."
+        onClose={() => setConfirmEnd(false)}
+        actions={[
+          {
+            label: 'End shift',
+            variant: 'danger',
+            loading: busy === 'end',
+            onPress: async () => {
+              await doEnd();
+              setConfirmEnd(false);
+            },
+          },
+          { label: 'Not yet', variant: 'secondary', onPress: () => setConfirmEnd(false) },
+        ]}
+      />
     </View>
   );
 }
@@ -266,10 +422,11 @@ export function MyDayScreen() {
     return { day, meetings: mine, names, shiftActive: !!shift };
   }, [myIdNum]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load your day.');
+  const [needShift, setNeedShift] = useState(false);
 
   const onUnplanned = () => {
     if (data && !data.shiftActive) {
-      Alert.alert('Start your shift first', 'Start your shift so this visit is part of your field day.');
+      setNeedShift(true);
       return;
     }
     navigation.navigate('LeadUnplannedVisit');
@@ -283,19 +440,22 @@ export function MyDayScreen() {
         <CrmErrorBanner message={error} onRetry={reload} />
 
         {loading && !data ? (
-          <CrmSkeleton height={84} radius={radii.lg} />
+          <CrmSkeleton height={118} radius={radii.lg} />
         ) : (
           data && (
             <View style={styles.stats}>
               <View style={styles.stat}>
+                <GlossyBadge color={theme.primary} size={36} icon={<PinIcon size={18} color={WHITE} />} />
                 <Text style={styles.statValue}>{data.day.visitCount}</Text>
                 <Text style={styles.statLabel}>Visits today</Text>
               </View>
               <View style={styles.stat}>
+                <GlossyBadge color={theme.accent} size={36} icon={<PlusIcon size={18} color={WHITE} />} />
                 <Text style={styles.statValue}>{data.day.unplannedVisitCount}</Text>
                 <Text style={styles.statLabel}>Unplanned</Text>
               </View>
               <View style={styles.stat}>
+                <GlossyBadge color={theme.success} size={36} icon={<TrendUpIcon size={18} color={WHITE} />} />
                 <Text style={styles.statValue}>{data.day.gpsKm.toFixed(1)}</Text>
                 <Text style={styles.statLabel}>km tracked</Text>
               </View>
@@ -303,7 +463,12 @@ export function MyDayScreen() {
           )
         )}
 
-        <PrimaryButton label="Unplanned visit" variant="secondary" icon={<PlusIcon size={18} color={theme.primary} />} onPress={onUnplanned} />
+        <PrimaryButton
+          label="Unplanned visit"
+          variant="secondary"
+          icon={<GlossyBadge color={theme.accent} size={26} icon={<PlusIcon size={15} color={WHITE} />} />}
+          onPress={onUnplanned}
+        />
 
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Today's visits</Text>
@@ -315,7 +480,7 @@ export function MyDayScreen() {
           <CrmEmptyState
             title="No visits today"
             subtitle="Meetings booked for today and unplanned visits show here."
-            icon={<CalendarIcon size={30} color={theme.textMuted} />}
+            icon={<GlossyBadge color={theme.primary} size={56} icon={<CalendarIcon size={26} color={WHITE} />} />}
           />
         )}
         {data?.meetings.map((m) => (
@@ -333,6 +498,16 @@ export function MyDayScreen() {
           </View>
         ))}
       </CrmScreen>
+
+      <FieldDialog
+        visible={needShift}
+        tone="warning"
+        icon={ClockIcon}
+        title="Start your shift first"
+        message="An unplanned visit is part of your field day. Start your shift, then record the visit."
+        onClose={() => setNeedShift(false)}
+        actions={[{ label: 'Got it', onPress: () => setNeedShift(false) }]}
+      />
     </LeadScreen>
   );
 }
@@ -380,23 +555,21 @@ export function UnplannedVisitScreen() {
     }
   };
 
-  const onPick = (lead: PipelineLead) =>
-    Alert.alert('Punch in here?', `Start an unplanned visit at ${lead.companyName}. Your location will be recorded.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Punch in',
-        onPress: async () => {
-          setBusyLead(lead.id);
-          const coords = await readCoords();
-          setBusyLead(null);
-          if (coords) return punchIn(lead, coords);
-          Alert.alert('Location not available', 'Your location could not be read. Turn location on and try again, or punch in without it.', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Punch in without location', onPress: () => punchIn(lead, null) },
-          ]);
-        },
-      },
-    ]);
+  // The two dialogs: confirm the punch-in, and (if GPS could not be read) what to do next.
+  const [confirmLead, setConfirmLead] = useState<PipelineLead | null>(null);
+  const [noGpsLead, setNoGpsLead] = useState<PipelineLead | null>(null);
+  const [reading, setReading] = useState(false);
+
+  const onPick = (lead: PipelineLead) => setConfirmLead(lead);
+
+  const confirmPunchIn = async (lead: PipelineLead) => {
+    setReading(true);
+    const coords = await readCoords();
+    setReading(false);
+    setConfirmLead(null);
+    if (coords) return punchIn(lead, coords);
+    setNoGpsLead(lead);
+  };
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
@@ -425,7 +598,7 @@ export function UnplannedVisitScreen() {
             <CrmEmptyState
               title={query ? 'No matching client' : 'No leads to visit'}
               subtitle="A new client? Add them as a lead first, then punch in."
-              icon={<PinIcon size={30} color={theme.textMuted} />}
+              icon={<GlossyBadge color={theme.accent} size={56} icon={<PinIcon size={26} color={WHITE} />} />}
             />
           )
         }
@@ -439,11 +612,53 @@ export function UnplannedVisitScreen() {
         <PrimaryButton
           label="New client - add lead"
           variant="secondary"
-          icon={<PlusIcon size={18} color={theme.primary} />}
+          icon={<GlossyBadge color={theme.primary} size={26} icon={<PlusIcon size={15} color={WHITE} />} />}
           onPress={() => navigation.navigate('LeadNew')}
           disabled={busyLead !== null}
         />
       </View>
+
+      <FieldDialog
+        visible={!!confirmLead}
+        tone="accent"
+        icon={PinIcon}
+        title="Punch in here?"
+        message={`Start an unplanned visit at ${confirmLead?.companyName ?? 'this client'}. Your location will be recorded.`}
+        onClose={() => setConfirmLead(null)}
+        actions={[
+          { label: reading ? 'Reading location...' : 'Punch in', loading: reading, onPress: () => confirmLead && confirmPunchIn(confirmLead) },
+          { label: 'Cancel', variant: 'secondary', onPress: () => setConfirmLead(null) },
+        ]}
+      />
+
+      <FieldDialog
+        visible={!!noGpsLead}
+        tone="warning"
+        icon={AlertTriangleIcon}
+        title="Location not available"
+        message="Your location could not be read. Turn on location and try again, or punch in without it."
+        onClose={() => setNoGpsLead(null)}
+        actions={[
+          {
+            label: 'Try again',
+            onPress: () => {
+              const lead = noGpsLead;
+              setNoGpsLead(null);
+              if (lead) setConfirmLead(lead);
+            },
+          },
+          {
+            label: 'Punch in without location',
+            variant: 'secondary',
+            onPress: () => {
+              const lead = noGpsLead;
+              setNoGpsLead(null);
+              if (lead) punchIn(lead, null);
+            },
+          },
+          { label: 'Cancel', variant: 'secondary', onPress: () => setNoGpsLead(null) },
+        ]}
+      />
     </LeadScreen>
   );
 }
