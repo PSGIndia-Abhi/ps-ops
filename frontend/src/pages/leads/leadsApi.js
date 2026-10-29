@@ -111,6 +111,7 @@ function toLead(row, closingNote) {
     industry: row.industry_type || "",
     services: Array.isArray(row.services_requested) ? row.services_requested : [], // Quotation Master service ids
     serviceNames: Array.isArray(row.services_requested_names) ? row.services_requested_names : [],
+    contractType: row.contract_type || null, // "ONE_TIME" | "AMC" from the latest quotation
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,
@@ -886,6 +887,7 @@ const toQuotation = (row) => ({
   hasPdf: !!row.pdf_object_key,
   // Built with Create Quotation (its details are saved), so it can be edited or duplicated.
   hasContent: !!row.has_content,
+  contractType: row.contract_type || null, // "ONE_TIME" | "AMC", chosen when saved
   createdBy: row.created_by === null || row.created_by === undefined ? "" : String(row.created_by),
 });
 

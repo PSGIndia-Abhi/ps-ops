@@ -61,7 +61,13 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
               l.provider_id, l.created_by_user_id, l.assigned_telecaller_id, l.assigned_sales_employee_id,
               l.created_at, l.updated_at, lr.name AS loss_reason,
               l.competitor_name, l.competitor_amount, DATE_FORMAT(l.competitor_contract_end, '%Y-%m-%d') AS competitor_contract_end,
-              l.competitor_notes, l.industry_type, l.services_requested
+              l.competitor_notes, l.industry_type, l.services_requested,
+              -- One-time or AMC, from the latest quotation that still stands (chosen when it was saved)
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType'))
+                 FROM crm_lead_quotations q JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
+                WHERE q.lead_id = l.id AND q.status <> 'CANCELLED'
+                  AND JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) IN ('ONE_TIME', 'AMC')
+                ORDER BY q.created_at DESC LIMIT 1) AS contract_type
          FROM crm_leads l
          LEFT JOIN crm_lead_loss_reasons lr ON lr.id = l.loss_reason_id
         WHERE ${where.join(" AND ")}
@@ -137,6 +143,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       industry_type: l.industry_type || null,
       services_requested: l.services_requested ? String(l.services_requested).split(",").filter(Boolean) : [],
       services_requested_names: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")) : [],
+      contract_type: l.contract_type || null,
       created_at: l.created_at,
       updated_at: l.updated_at,
     }));

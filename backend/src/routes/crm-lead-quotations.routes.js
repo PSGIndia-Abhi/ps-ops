@@ -361,13 +361,17 @@ router.get("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), as
     const [rows] = await pool.query(
       `SELECT ${QUOTATION_COLUMNS},
               (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.customer.name')) FROM crm_lead_quotation_documents d
-                WHERE d.quotation_id = crm_lead_quotations.id) AS client_name
+                WHERE d.quotation_id = crm_lead_quotations.id) AS client_name,
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) FROM crm_lead_quotation_documents d
+                WHERE d.quotation_id = crm_lead_quotations.id) AS contract_type
        FROM crm_lead_quotations WHERE lead_id = ? ORDER BY created_at DESC`,
       [lead.id]
     );
     res.json(
-      rows.map(({ client_name: name, ...r }) => ({
+      rows.map(({ client_name: name, contract_type: kind, ...r }) => ({
         ...r,
+        // One-time or AMC, chosen when it was saved (null for older and uploaded quotations).
+        contract_type: kind === "ONE_TIME" || kind === "AMC" ? kind : null,
         total_amount: Number(r.total_amount),
         has_content: name !== null,
         client_name: name || leadClientName(lead),

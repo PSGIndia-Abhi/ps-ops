@@ -21,6 +21,7 @@ import {
   FiPhoneCall,
   FiPlus,
   FiSend,
+  FiShare2,
   FiSmartphone,
   FiThumbsDown,
   FiUser,
@@ -43,6 +44,8 @@ import {
 } from "./dialogs";
 import { fetchQuotationPdf, getConversion, listQuotations, providerName, useLeadData, userName } from "./leadsApi";
 import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
+import { ShareFallback } from "./ShareQuotation";
+import { shareFile } from "./shareFile";
 import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
@@ -155,6 +158,8 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
   const [error, setError] = useState("");
   const [opening, setOpening] = useState(null);
   const [viewing, setViewing] = useState(null); // { url, fileName } of the PDF on screen
+  const [sharing, setSharing] = useState(null); // quotation id being fetched to share
+  const [fallback, setFallback] = useState(null); // { file, text } when the browser cannot share files
 
   // The lead's history grows with every upload or cancellation, which is what brings the change in.
   useEffect(() => {
@@ -166,6 +171,24 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
       alive = false;
     };
   }, [lead.id, lead.updatedAt, refreshKey]);
+
+  // The system share sheet with the PDF attached (WhatsApp, Mail...), else WhatsApp / Email / Download.
+  async function share(q) {
+    setSharing(q.id);
+    try {
+      const url = await fetchQuotationPdf(lead.id, q.id);
+      const blob = await (await fetch(url)).blob();
+      URL.revokeObjectURL(url);
+      const file = new File([blob], q.fileName, { type: "application/pdf" });
+      const text = `Quotation for ${q.clientName || lead.company} - Bestserve Pest Management Pvt. Ltd.`;
+      const shared = await shareFile(file, { title: q.fileName, text });
+      if (!shared) setFallback({ file, text });
+    } catch (err) {
+      toast(err.message || "Could not share the quotation.", true);
+    } finally {
+      setSharing(null);
+    }
+  }
 
   async function open(q) {
     setOpening(q.id);
@@ -200,6 +223,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
           <thead>
             <tr>
               <th>Client</th>
+              <th>Type</th>
               <th>Amount</th>
               <th>Sent</th>
               <th>Status</th>
@@ -212,6 +236,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                 <td>
                   <strong style={q.status === "CANCELLED" ? { textDecoration: "line-through" } : undefined}>{q.clientName || lead.company || lead.contact}</strong>
                 </td>
+                <td>{q.contractType === "AMC" ? <Badge tone="info">AMC</Badge> : q.contractType === "ONE_TIME" ? <Badge tone="teal">One-time</Badge> : <span className="muted">-</span>}</td>
                 <td className="num">{money(q.total)}</td>
                 <td className="muted">{dateTime(q.sentAt)}</td>
                 <td>
@@ -220,9 +245,16 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                 <td style={{ textAlign: "right" }}>
                   <span style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
                     {q.hasPdf ? (
-                      <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
-                        View PDF
-                      </Button>
+                      <>
+                        <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
+                          View PDF
+                        </Button>
+                        {q.status !== "CANCELLED" && (
+                          <Button size="sm" icon={<FiShare2 />} busy={sharing === q.id} onClick={() => share(q)}>
+                            Share
+                          </Button>
+                        )}
+                      </>
                     ) : (
                       <span className="muted">No PDF</span>
                     )}
@@ -248,6 +280,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
           </tbody>
         </table>
       </div>
+      {fallback && <ShareFallback file={fallback.file} text={fallback.text} phone={lead.phone} email={lead.email} onClose={() => setFallback(null)} />}
       {viewing && (
         <PreviewOverlay
           url={viewing.url}
@@ -532,7 +565,14 @@ export default function LeadDetail() {
         <FiArrowLeft /> Back
       </button>
 
-      <section className="lm-hero">
+      <section className={`lm-hero${!provider && lead.contractType ? " tagged" : ""}`}>
+        {/* One-time or AMC, from the latest quotation */}
+        {!provider && lead.contractType && (
+          <span className={`lm-contract-tag ${lead.contractType === "AMC" ? "amc" : "once"}`} title={lead.contractType === "AMC" ? "AMC contract (latest quotation)" : "One-time service (latest quotation)"}>
+            <i />
+            {lead.contractType === "AMC" ? "AMC" : "One-time"}
+          </span>
+        )}
         <div className="lm-hero-top">
           <div>
             {!provider && <StageBadge stage={lead.stage} />}

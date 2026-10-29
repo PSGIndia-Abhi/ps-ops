@@ -16,8 +16,9 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import * as quote from '../quotation';
+import { PriceTableEditor, priceTableForSave, priceTableFromContent, priceTableTotal, type PriceTable } from '../PriceTableEditor';
 import { QuotationPdfDialog, SendQuotationDialog } from '../QuotationDialogs';
-import type { Billing, MasterPlan, MasterService, QuoteMaster, TreatmentRow } from '../quotation';
+import type { Billing, ContractType, MasterPlan, MasterService, QuoteMaster, SavedQuotationContent, TreatmentRow } from '../quotation';
 import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, useLoad } from '../ui';
 
 /**
@@ -34,6 +35,7 @@ const BLANK_ROW: TreatmentRow = { defense_area: '', material_used: '', treatment
 const ROW_KEYS: (keyof TreatmentRow)[] = ['defense_area', 'material_used', 'treatment_area', 'frequency'];
 const PER: Record<Billing, string> = { MONTHLY: '/ month', YEARLY: '/ year', ONE_TIME: 'one-time' };
 const MAIN_WORD: Record<Billing, string> = { MONTHLY: 'monthly', YEARLY: 'yearly (AMC)', ONE_TIME: 'one-time' };
+const PER_UNIT: Record<Billing, string> = { MONTHLY: 'month', YEARLY: 'year', ONE_TIME: '' };
 
 const joinNames = (names: string[]) => (names.length <= 1 ? names[0] || '' : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 const defaultSubject = (names: string[], customer: string) =>
@@ -42,19 +44,26 @@ const digits = (v: string) => v.replace(/[^\d.]/g, '');
 
 export function LeadQuoteBuilderScreen() {
   const navigation = useNavigation<Nav>();
-  const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadQuoteBuild'>>().params;
+  const { leadId, name, fromId, mode } = useRoute<RouteProp<LeadStackParamList, 'LeadQuoteBuild'>>().params;
   const { styles, theme } = useCrmStyles(factory);
+  // Edit: saves a new quotation that replaces this one. Duplicate: a new one from its details.
+  const editing = !!fromId && mode === 'edit';
+  const title = editing ? 'Edit quotation' : fromId ? 'Duplicate quotation' : 'New quotation';
 
   const loader = useCallback(async () => {
-    const [master, lead] = await Promise.all([quote.getQuoteMaster(), api.getLead(leadId)]);
-    return { master, lead };
-  }, [leadId]);
-  const { data, loading, error, reload } = useLoad(loader, 'Could not load the quotation master.');
+    const [master, lead, saved] = await Promise.all([
+      quote.getQuoteMaster(),
+      api.getLead(leadId),
+      fromId ? quote.getQuotationContent(leadId, fromId) : Promise.resolve(null),
+    ]);
+    return { master, lead, saved };
+  }, [leadId, fromId]);
+  const { data, loading, error, reload } = useLoad(loader, fromId ? 'Could not load the quotation.' : 'Could not load the quotation master.');
 
   if (loading && !data) {
     return (
       <LeadScreen edges={['top', 'bottom']}>
-        <LeadTopBar title="New quotation" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <LeadTopBar title={title} subtitle={name} onBack={() => navigation.goBack()} icon="close" />
         <View style={styles.body}>
           <CrmSkeleton height={120} radius={radii.xl} style={{ marginBottom: spacing.md }} />
           <CrmSkeleton height={220} radius={radii.xl} style={{ marginBottom: spacing.md }} />
@@ -66,19 +75,25 @@ export function LeadQuoteBuilderScreen() {
   if (!data) {
     return (
       <LeadScreen edges={['top', 'bottom']}>
-        <LeadTopBar title="New quotation" subtitle={name} onBack={() => navigation.goBack()} icon="close" />
+        <LeadTopBar title={title} subtitle={name} onBack={() => navigation.goBack()} icon="close" />
         <View style={styles.body}>
           <CrmErrorBanner message={error} onRetry={reload} />
         </View>
       </LeadScreen>
     );
   }
+  const leadName = data.lead.companyName || name;
+  const start = data.saved
+    ? startFromSaved(data.saved, data.master)
+    : blankStart(data.master, { name: leadName, address: data.lead.address || '', phone: data.lead.phone || '' }, data.lead.services);
   return (
     <Builder
       leadId={leadId}
       master={data.master}
-      initial={{ name: data.lead.companyName || name, address: data.lead.address || '', phone: data.lead.phone || '' }}
-      asked={data.lead.services}
+      leadName={leadName}
+      title={title}
+      start={start}
+      from={fromId ? { id: fromId, editing } : null}
       theme={theme}
     />
   );
@@ -101,47 +116,162 @@ function startPick(service: MasterService, plans: QuoteMaster['plans'], perServi
   };
 }
 
+/** What the form starts with - a blank quotation (the lead's services ticked) or a saved one's details. */
+type Start = {
+  customer: { name: string; address: string; phone: string };
+  order: string[];
+  picks: Record<string, Pick>;
+  mode: 'PER_SERVICE' | 'PACKAGE';
+  pkg: { amount: string; billing: Billing; planLabel: string; description: string };
+  table: PriceTable | null;
+  perOutlet: boolean;
+  subject: string;
+  validDays: string;
+  contractMonths: string;
+  revised: boolean;
+  discount: string;
+  checked: Set<string>;
+  extra: { VALUE_ADDED: string[]; TERMS: string[] };
+  contractType: ContractType | null;
+  /** Services on the saved quotation that are no longer in the master. */
+  missing: string[];
+};
+
+function blankStart(master: QuoteMaster, customer: Start['customer'], asked: string[]): Start {
+  const services = master.services.filter((s) => asked.includes(s.id));
+  return {
+    customer,
+    order: asked.filter((id) => master.services.some((s) => s.id === id)),
+    picks: Object.fromEntries(services.map((s) => [s.id, startPick(s, master.plans, true)])),
+    mode: 'PER_SERVICE',
+    pkg: { amount: '', billing: 'MONTHLY', planLabel: '', description: '' },
+    table: null,
+    perOutlet: false,
+    subject: '',
+    validDays: '30',
+    contractMonths: '12',
+    revised: false,
+    discount: '',
+    checked: new Set(),
+    extra: { VALUE_ADDED: [], TERMS: [] },
+    contractType: null,
+    missing: [],
+  };
+}
+
+const sameText = (a?: string, b?: string) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+/**
+ * A saved quotation's details as the form's start (the same as the web builder): services and plans
+ * are matched to the master by name; one no longer in the master goes to `missing`. Ticked optional
+ * clauses come back ticked, lines typed for that customer come back as extra lines.
+ */
+function startFromSaved(content: SavedQuotationContent, master: QuoteMaster): Start {
+  const picks: Record<string, Pick> = {};
+  const order: string[] = [];
+  const missing: string[] = [];
+  for (const s of content.services || []) {
+    const service = master.services.find((x) => sameText(x.name, s.name));
+    if (!service || picks[service.id]) {
+      if (!service) missing.push(s.name);
+      continue;
+    }
+    const plan = master.plans.find((p) => sameText(p.name, s.plan) && p.billing === s.billing) || master.plans.find((p) => sameText(p.name, s.plan));
+    picks[service.id] = {
+      planId: plan?.id || '',
+      price: s.price === null || s.price === undefined ? '' : String(s.price),
+      rows: (s.rows || []).map((r) => ({ defense_area: r.defense_area || '', material_used: r.material_used || '', treatment_area: r.treatment_area || '', frequency: r.frequency || '' })),
+      open: false,
+    };
+    order.push(service.id);
+  }
+  const checked = new Set<string>();
+  const extra: Start['extra'] = { VALUE_ADDED: [], TERMS: [] };
+  for (const [kind, lines] of [
+    ['VALUE_ADDED', content.valueAdded],
+    ['TERMS', content.terms],
+  ] as const) {
+    for (const text of lines || []) {
+      const clause = master.clauses.find((c) => c.kind === kind && sameText(c.text, text));
+      if (!clause) extra[kind].push(text);
+      else if (!clause.is_default) checked.add(clause.id);
+    }
+  }
+  const p = (content.pricing || { mode: 'PER_SERVICE' }) as Partial<{ mode: string; amount: number; billing: Billing; planLabel: string; description: string }>;
+  const c = content.customer || { name: '', address: '', phone: '', attention: '' };
+  return {
+    customer: { name: c.name || '', address: c.address || '', phone: c.phone || '' },
+    order,
+    picks,
+    mode: p.mode === 'PACKAGE' ? 'PACKAGE' : 'PER_SERVICE',
+    pkg: {
+      amount: p.amount ? String(p.amount) : '',
+      billing: p.billing || 'MONTHLY',
+      planLabel: p.planLabel || '',
+      // The server's default wording ("services 1 to N") is left out so it follows the services picked now.
+      description: /^Pest management services .* as per scope above$/.test(p.description || '') ? '' : p.description || '',
+    },
+    table: priceTableFromContent(content.priceTable),
+    perOutlet: !!content.perOutlet,
+    subject: content.subject || '',
+    validDays: String(content.validDays || 30),
+    contractMonths: String(content.contractMonths || 12),
+    revised: !!content.revised,
+    discount: content.totals?.discount ? String(content.totals.discount) : '',
+    checked,
+    extra,
+    contractType: content.contractType || null,
+    missing,
+  };
+}
+
 function Builder({
   leadId,
   master,
-  initial,
-  asked,
+  leadName,
+  title,
+  start,
+  from,
   theme,
 }: {
   leadId: string;
   master: QuoteMaster;
-  initial: { name: string; address: string; phone: string };
-  /** The services the customer asked for on the lead (master ids) - ticked to start with. */
-  asked: string[];
+  leadName: string;
+  title: string;
+  /** Blank, or a saved quotation's details (Edit / Duplicate). */
+  start: Start;
+  /** The saved quotation it was opened from; `editing` saves a replacement for it. */
+  from: { id: string; editing: boolean } | null;
   theme: CrmTheme;
 }) {
   const navigation = useNavigation<Nav>();
   const { styles } = useCrmStyles(factory);
 
-  const [customer, setCustomer] = useState(initial);
+  const [customer, setCustomer] = useState(start.customer);
   const [editCustomer, setEditCustomer] = useState(false);
-  const [order, setOrder] = useState<string[]>(() => asked.filter((id) => master.services.some((s) => s.id === id)));
-  const [picks, setPicks] = useState<Record<string, Pick>>(() =>
-    Object.fromEntries(
-      master.services.filter((s) => asked.includes(s.id)).map((s) => [s.id, startPick(s, master.plans, true)]),
-    ),
-  );
-  const [mode, setMode] = useState<'PER_SERVICE' | 'PACKAGE'>('PER_SERVICE');
-  const [pkg, setPkg] = useState({ amount: '', billing: 'MONTHLY' as Billing, planLabel: '', description: '' });
-  const [subject, setSubject] = useState('');
-  const [subjectEdited, setSubjectEdited] = useState(false);
-  const [validDays, setValidDays] = useState('30');
-  const [contractMonths, setContractMonths] = useState('12');
-  const [revised, setRevised] = useState(false);
-  const [discount, setDiscount] = useState('');
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [extra, setExtra] = useState<{ VALUE_ADDED: string[]; TERMS: string[] }>({ VALUE_ADDED: [], TERMS: [] });
+  const [order, setOrder] = useState<string[]>(start.order);
+  const [picks, setPicks] = useState<Record<string, Pick>>(start.picks);
+  const [mode, setMode] = useState<'PER_SERVICE' | 'PACKAGE'>(start.mode);
+  const [pkg, setPkg] = useState(start.pkg);
+  // Optional price table in the client's format; its total row's amount is the package price.
+  const [table, setTable] = useState<PriceTable | null>(start.table);
+  const [perOutlet, setPerOutlet] = useState(start.perOutlet); // the price is for one outlet
+  const [subject, setSubject] = useState(start.subject);
+  // A saved quotation keeps its own subject; a new one is written from the services picked.
+  const [subjectEdited, setSubjectEdited] = useState(!!start.subject);
+  const [validDays, setValidDays] = useState(start.validDays);
+  const [contractMonths, setContractMonths] = useState(start.contractMonths);
+  // An edit goes to the customer as a revised proposal (it can be switched off).
+  const [revised, setRevised] = useState(start.revised || !!from?.editing);
+  const [discount, setDiscount] = useState(start.discount);
+  const [checked, setChecked] = useState<Set<string>>(start.checked);
+  const [extra, setExtra] = useState<{ VALUE_ADDED: string[]; TERMS: string[] }>(start.extra);
   const [rowEdit, setRowEdit] = useState<{ serviceId: string; index: number | null; row: TreatmentRow } | null>(null);
   const [busy, setBusy] = useState<'' | 'preview' | 'send'>('');
   const [problem, setProblem] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [askSend, setAskSend] = useState<quote.QuotationContent | null>(null); // "Save and send?" open
-  const [sent, setSent] = useState<{ id: string; number: string; name: string } | null>(null); // just saved
+  const [sent, setSent] = useState<{ id: string; number: string; name: string; fileName: string } | null>(null); // just saved
 
   const serviceById = useMemo(() => new Map(master.services.map((s) => [s.id, s])), [master]);
   const planById = useMemo(() => new Map(master.plans.map((p) => [p.id, p])), [master]);
@@ -149,10 +279,13 @@ function Builder({
   const pickedNames = order.map((id) => serviceById.get(id)?.name || '').filter(Boolean);
   const shownSubject = subjectEdited ? subject : defaultSubject(pickedNames, customer.name.trim());
 
-  // ---- totals (the same rules as the server)
+  // ---- totals (the same rules as the server). A price table makes it one package price: its total.
+  const tableTotal = priceTableTotal(table);
+  const priceMode = table ? 'PACKAGE' : mode;
+  const pkgAmount = table ? tableTotal : Number(pkg.amount) || 0;
   const totals = useMemo(() => {
-    if (mode === 'PACKAGE') {
-      const a = Number(pkg.amount) || 0;
+    if (priceMode === 'PACKAGE') {
+      const a = pkgAmount;
       return { MONTHLY: pkg.billing === 'MONTHLY' ? a : 0, YEARLY: pkg.billing === 'YEARLY' ? a : 0, ONE_TIME: pkg.billing === 'ONE_TIME' ? a : 0 };
     }
     const t = { MONTHLY: 0, YEARLY: 0, ONE_TIME: 0 };
@@ -162,7 +295,8 @@ function Builder({
       t[plan?.billing ?? 'MONTHLY'] += Number(p.price) || 0;
     }
     return t;
-  }, [mode, pkg, order, picks, planById]);
+  }, [priceMode, pkgAmount, pkg.billing, order, picks, planById]);
+  const perText = (b: Billing) => `${PER[b]}${perOutlet ? ' + per outlet' : ''}`;
   const mainBilling: Billing = totals.MONTHLY > 0 ? 'MONTHLY' : totals.YEARLY > 0 ? 'YEARLY' : 'ONE_TIME';
   const mainTotal = totals[mainBilling];
   const discountValue = Number(discount) || 0;
@@ -172,7 +306,7 @@ function Builder({
   // ---- services
   function toggleService(service: MasterService) {
     if (picks[service.id]) return removeService(service.id);
-    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, mode === 'PER_SERVICE') }));
+    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, priceMode === 'PER_SERVICE') }));
     setOrder((o) => [...o, service.id]);
   }
   function removeService(id: string) {
@@ -232,7 +366,7 @@ function Builder({
       if (!rows.length) return { problem: `${s.name}: add at least one treatment row.` };
       if (rows.some((r) => ROW_KEYS.some((k) => !r[k].trim()))) return { problem: `${s.name}: a treatment row is not complete. Tap it to fill every field.` };
       const plan = planById.get(p.planId);
-      if (mode === 'PER_SERVICE') {
+      if (priceMode === 'PER_SERVICE') {
         if (!plan) return { problem: `${s.name}: choose a plan.` };
         if (p.price === '' || !(Number(p.price) >= 0)) return { problem: `${s.name}: enter the price.` };
       }
@@ -240,11 +374,14 @@ function Builder({
         name: s.name,
         plan: plan?.name || '',
         billing: plan?.billing || 'MONTHLY',
-        price: mode === 'PER_SERVICE' ? Number(p.price) : null,
+        price: priceMode === 'PER_SERVICE' ? Number(p.price) : null,
         rows: rows.map((r) => ({ defense_area: r.defense_area.trim(), material_used: r.material_used.trim(), treatment_area: r.treatment_area.trim(), frequency: r.frequency.trim() })),
       });
     }
-    if (mode === 'PACKAGE' && !(Number(pkg.amount) > 0)) return { problem: 'Enter the package amount.' };
+    if (table) {
+      if (!table.rows[0].some((c) => c.trim())) return { problem: 'Price table: fill in the headings (first row).' };
+      if (!(tableTotal > 0)) return { problem: 'Price table: type the amounts in the last column.' };
+    } else if (mode === 'PACKAGE' && !(Number(pkg.amount) > 0)) return { problem: 'Enter the package amount.' };
     if (mainTotal <= 0) return { problem: 'The total must be more than zero.' };
     if (discountValue > 0 && discountValue >= mainTotal) return { problem: `The discount must be less than the total (${formatINR(mainTotal)} ${PER[mainBilling]}).` };
     if (shownSubject.trim().length < 5) return { problem: 'Enter the subject.' };
@@ -259,9 +396,11 @@ function Builder({
         discount: discountValue,
         services,
         pricing:
-          mode === 'PACKAGE'
-            ? { mode, amount: Number(pkg.amount), billing: pkg.billing, planLabel: pkg.planLabel.trim(), description: pkg.description.trim() }
-            : { mode },
+          priceMode === 'PACKAGE'
+            ? { mode: 'PACKAGE', amount: pkgAmount, billing: pkg.billing, planLabel: pkg.planLabel.trim(), description: pkg.description.trim() }
+            : { mode: 'PER_SERVICE' },
+        priceTable: table ? priceTableForSave(table) : null,
+        perOutlet,
         valueAdded: [...picked('VALUE_ADDED'), ...extra.VALUE_ADDED],
         terms: [...picked('TERMS'), ...extra.TERMS],
       },
@@ -293,10 +432,10 @@ function Builder({
   async function send(content: quote.QuotationContent) {
     setBusy('send');
     try {
-      const q = await quote.generateQuotation(leadId, content);
+      const q = await quote.generateQuotation(leadId, content, from?.editing ? from.id : undefined);
       setBusy('');
       // Done / Open PDF on this card go back to the lead.
-      setSent({ id: q.id, number: q.number, name: content.customer.name });
+      setSent({ id: q.id, number: q.number, name: content.customer.name, fileName: q.fileName });
     } catch (err) {
       setBusy('');
       setProblem(errorMessage(err, 'Could not save the quotation. Check your connection and try again.'));
@@ -307,9 +446,32 @@ function Builder({
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
-      <LeadTopBar title="New quotation" subtitle={initial.name} onBack={() => navigation.goBack()} icon="close" />
+      <LeadTopBar title={title} subtitle={leadName} onBack={() => navigation.goBack()} icon="close" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+          {/* Opened from a saved quotation: what saving does, and services it had that the master no longer has */}
+          {!!from && (
+            <View style={[styles.tableNote, styles.fromNote]}>
+              <Text style={styles.tableNoteText}>
+                {from.editing ? (
+                  <>
+                    Saving makes a <Text style={styles.tableNoteStrong}>new quotation</Text>. The current one is kept, marked Cancelled - replaced.
+                  </>
+                ) : (
+                  <>
+                    Saving makes a <Text style={styles.tableNoteStrong}>new quotation</Text>. The one you copied stays as it is.
+                  </>
+                )}
+              </Text>
+            </View>
+          )}
+          {start.missing.length > 0 && (
+            <View style={[styles.tableNote, styles.fromNote, styles.missingNote]}>
+              <Text style={styles.tableNoteText}>
+                Not in the Quotation Master any more, so not filled in: <Text style={styles.tableNoteStrong}>{start.missing.join(', ')}</Text>. Pick a replacement service below if needed.
+              </Text>
+            </View>
+          )}
           {/* 1. Customer */}
           <Section no={1} title="Customer" action={{ label: editCustomer ? 'Done' : 'Edit', onPress: () => setEditCustomer((v) => !v) }}>
             {editCustomer ? (
@@ -355,7 +517,7 @@ function Builder({
               const p = picks[id];
               const plan = planById.get(p.planId);
               const priced = new Set(s.prices.map((x) => x.plan_id));
-              const noPrice = mode === 'PER_SERVICE' && !!plan && !priced.has(plan.id);
+              const noPrice = priceMode === 'PER_SERVICE' && !!plan && !priced.has(plan.id);
               return (
                 <View key={id} style={styles.serviceCard}>
                   <View style={styles.serviceHead}>
@@ -370,7 +532,8 @@ function Builder({
                     </Pressable>
                   </View>
 
-                  {mode === 'PER_SERVICE' && (
+                  {/* One package price (or a price table): no plan / price per service, just its rows. */}
+                  {priceMode === 'PER_SERVICE' && (
                     <View style={styles.planRow}>
                       <View style={styles.planCell}>
                       <SelectField
@@ -453,19 +616,35 @@ function Builder({
             })}
           </Section>
 
-          {/* 3. Price */}
-          <Section no={3} title="Price">
-            <SegmentedControl
-              options={[
-                { value: 'PER_SERVICE', label: 'Per service' },
-                { value: 'PACKAGE', label: 'One package' },
-              ]}
-              value={mode}
-              onChange={(v) => setMode(v as 'PER_SERVICE' | 'PACKAGE')}
-            />
-            {mode === 'PACKAGE' && (
+          {/* 3. Price table (optional) */}
+          <Section no={3} title="Price table">
+            <PriceTableEditor table={table} onChange={setTable} />
+          </Section>
+
+          {/* 4. Price */}
+          <Section no={4} title="Price">
+            {table ? (
+              <View style={styles.tableNote}>
+                <Text style={styles.tableNoteText}>
+                  One package price from the price table:{' '}
+                  <Text style={styles.tableNoteStrong}>{tableTotal > 0 ? formatINR(tableTotal) : 'type the amounts in its last column'}</Text>
+                </Text>
+              </View>
+            ) : (
+              <SegmentedControl
+                options={[
+                  { value: 'PER_SERVICE', label: 'Per service' },
+                  { value: 'PACKAGE', label: 'One package' },
+                ]}
+                value={mode}
+                onChange={(v) => setMode(v as 'PER_SERVICE' | 'PACKAGE')}
+              />
+            )}
+            {priceMode === 'PACKAGE' && (
               <View style={{ marginTop: spacing.md }}>
-                <CrmTextField label="Package amount" value={pkg.amount} onChangeText={(v) => setPkg({ ...pkg, amount: digits(v) })} prefix="₹" keyboardType="decimal-pad" placeholder="e.g. 158000" />
+                {!table && (
+                  <CrmTextField label="Package amount" value={pkg.amount} onChangeText={(v) => setPkg({ ...pkg, amount: digits(v) })} prefix="₹" keyboardType="decimal-pad" placeholder="e.g. 158000" />
+                )}
                 <SegmentedControl
                   options={[
                     { value: 'MONTHLY', label: 'Per month' },
@@ -481,8 +660,8 @@ function Builder({
             )}
           </Section>
 
-          {/* 4. Details */}
-          <Section no={4} title="Proposal details">
+          {/* 5. Details */}
+          <Section no={5} title="Proposal details">
             <CrmTextField
               label="Subject"
               value={shownSubject}
@@ -503,8 +682,8 @@ function Builder({
             </View>
           </Section>
 
-          {/* 5. Discount */}
-          <Section no={5} title="Discount">
+          {/* 6. Discount */}
+          <Section no={6} title="Discount">
             <CrmTextField
               label={mainTotal > 0 ? `Special discount (off the ${MAIN_WORD[mainBilling]} total)` : 'Special discount'}
               value={discount}
@@ -518,7 +697,7 @@ function Builder({
                 <View style={styles.sumLine}>
                   <Text style={styles.muted}>Subtotal</Text>
                   <Struck on={discountValue > 0} style={styles.sumOld}>
-                    {`${formatINR(mainTotal)} ${PER[mainBilling]}`}
+                    {`${formatINR(mainTotal)} ${perText(mainBilling)}`}
                   </Struck>
                 </View>
                 {discountValue > 0 && (
@@ -530,15 +709,27 @@ function Builder({
                 <View style={[styles.sumLine, styles.sumFinal]}>
                   <Text style={styles.finalLabel}>Final amount</Text>
                   <Text style={styles.finalValue}>
-                    {formatINR(finalTotal)} <Text style={styles.finalPer}>{PER[mainBilling]}</Text>
+                    {formatINR(finalTotal)} <Text style={styles.finalPer}>{perText(mainBilling)}</Text>
                   </Text>
                 </View>
               </View>
             )}
+            <Pressable
+              onPress={() => setPerOutlet((v) => !v)}
+              style={[styles.outlet, perOutlet && styles.outletOn]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: perOutlet }}
+            >
+              <View style={[styles.box, perOutlet && styles.boxOn]}>{perOutlet && <CheckIcon size={12} color="#fff" />}</View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.outletTitle}>Price is per outlet</Text>
+                <Text style={styles.muted}>The quotation says &quot;{MAIN_WORD[mainBilling] === 'one-time' ? 'one-time' : `per ${PER_UNIT[mainBilling]}`} + per outlet&quot;</Text>
+              </View>
+            </Pressable>
           </Section>
 
-          {/* 6. Terms */}
-          <Section no={6} title="Terms">
+          {/* 7. Terms */}
+          <Section no={7} title="Terms">
             {(['VALUE_ADDED', 'TERMS'] as const).map((kind) => (
               <View key={kind} style={{ marginBottom: spacing.md }}>
                 <Text style={styles.groupLabel}>{kind === 'VALUE_ADDED' ? 'Value added services' : 'Terms & conditions'}</Text>
@@ -580,7 +771,7 @@ function Builder({
             ))}
           </Section>
 
-          <Pressable onPress={() => navigation.replace('LeadQuote', { leadId, name: initial.name, amount: 0 })} style={styles.uploadLink} accessibilityRole="link">
+          <Pressable onPress={() => navigation.replace('LeadQuote', { leadId, name: leadName, amount: 0 })} style={styles.uploadLink} accessibilityRole="link">
             <Text style={styles.muted}>Have a PDF already? </Text>
             <Text style={styles.link}>Upload it instead</Text>
           </Pressable>
@@ -598,7 +789,7 @@ function Builder({
                   </Struck>
                 )}
                 <Text style={styles.footerTotal}>
-                  {formatINR(finalTotal)} <Text style={styles.finalPer}>{PER[mainBilling]}</Text>
+                  {formatINR(finalTotal)} <Text style={styles.finalPer}>{perText(mainBilling)}</Text>
                 </Text>
                 {otherTotals.map((b) => (
                   <Text key={b} style={styles.footerOther}>
@@ -631,9 +822,11 @@ function Builder({
       {askSend && (
         <SendQuotationDialog
           name={askSend.customer.name}
+          initial={start.contractType}
+          replacing={!!from?.editing}
           onCancel={() => setAskSend(null)}
-          onSend={() => {
-            const content = askSend;
+          onSend={(contractType) => {
+            const content = { ...askSend, contractType };
             setAskSend(null);
             send(content);
           }}
@@ -644,7 +837,7 @@ function Builder({
         <QuotationPdfDialog
           saved
           name={sent.name}
-          getFile={() => quote.savedQuotationPdf(leadId, sent.id, sent.number)}
+          getFile={() => quote.savedQuotationPdf(leadId, sent.id, sent.fileName)}
           onOpened={() => navigation.goBack()}
           onClose={() => navigation.goBack()}
         />
@@ -937,6 +1130,16 @@ const factory = (t: CrmTheme) => ({
   finalPer: { ...typography.caption, color: t.textMuted },
 
   groupLabel: { ...typography.overline, color: t.textSecondary, marginBottom: spacing.xs },
+  // Price step note when a price table sets the package price
+  tableNote: { padding: spacing.md, borderRadius: radii.md, backgroundColor: t.primarySoftBg },
+  tableNoteText: { ...typography.body, color: t.textSecondary },
+  tableNoteStrong: { color: t.textPrimary, fontWeight: '700' as const },
+  fromNote: { marginBottom: spacing.md },
+  missingNote: { backgroundColor: t.warningBg },
+  // "Price is per outlet" under the discount summary
+  outlet: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.md, padding: spacing.md, borderRadius: radii.lg, borderWidth: 1, borderColor: t.border },
+  outletOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  outletTitle: { ...typography.bodyMedium, color: t.textPrimary },
   checkRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.sm, paddingVertical: spacing.xs },
   box: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const, marginTop: 1 },
   boxOn: { backgroundColor: t.primary, borderColor: t.primary },

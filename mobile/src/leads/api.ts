@@ -1,4 +1,5 @@
 import { httpClient } from '../api/httpClient';
+import { proposalFileName } from './proposalName';
 import type {
   CallOutcome,
   Conversion,
@@ -136,6 +137,11 @@ const toQuotation = (r: Row): Quotation => ({
   status: str(r.status),
   sentAt: idOrNull(r.sent_at),
   hasPdf: !!r.pdf_object_key,
+  contractType: r.contract_type === 'AMC' || r.contract_type === 'ONE_TIME' ? r.contract_type : null,
+  clientName: str(r.client_name),
+  fileName: str(r.file_name) || proposalFileName(str(r.client_name)),
+  hasContent: !!r.has_content,
+  createdBy: str(r.created_by),
 });
 
 export async function getQuotations(id: string): Promise<Quotation[]> {

@@ -14,6 +14,8 @@ import { FiCheck, FiChevronDown, FiChevronUp, FiDownload, FiEye, FiFileText, FiP
 import { money } from "./format";
 import { generateQuotation, getActiveQuoteMaster, getQuotationContent, previewQuotation, proposalFileName } from "./leadsApi";
 import { useToast } from "./hooks";
+import { PriceTableEditor } from "./PriceTable";
+import { priceTableForSave, priceTableFromContent, priceTableTotal } from "./priceTableData";
 import { frequencyNames, frequencyOptions, sortPlans } from "./quoteOptions";
 import { Alert, Button, Empty, Field, Modal, Note, SkeletonRows } from "./ui";
 
@@ -322,6 +324,9 @@ function stateFromContent(content, master) {
     checked,
     extraValue: extra.VALUE_ADDED,
     extraTerms: extra.TERMS,
+    table: priceTableFromContent(content.priceTable),
+    perOutlet: !!content.perOutlet,
+    contractType: content.contractType || "",
   };
 }
 
@@ -344,6 +349,10 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   const [discount, setDiscount] = useState(""); // special discount in rupees, off the main total
   const [mode, setMode] = useState("PER_SERVICE");
   const [pkg, setPkg] = useState({ amount: "", billing: "MONTHLY", planLabel: "", description: "" });
+  // Optional price table in the client's format; its total row's amount is the package price.
+  const [table, setTable] = useState(null);
+  const [perOutlet, setPerOutlet] = useState(false); // the price is for one outlet
+  const [contractType, setContractType] = useState(""); // "ONE_TIME" | "AMC" - asked when saving
   const [checked, setChecked] = useState(new Set());
   const [extraValue, setExtraValue] = useState([]);
   const [extraTerms, setExtraTerms] = useState([]);
@@ -373,6 +382,9 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           setDiscount(st.discount);
           setMode(st.mode);
           setPkg(st.pkg);
+          setTable(st.table);
+          setPerOutlet(st.perOutlet);
+          setContractType(st.contractType);
           setChecked(st.checked);
           setExtraValue(st.extraValue);
           setExtraTerms(st.extraTerms);
@@ -396,9 +408,14 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   const pickedNames = order.map((id) => serviceById.get(id)?.name).filter(Boolean);
   const shownSubject = subjectEdited ? subject : defaultSubject(pickedNames, customer.name.trim());
 
+  // With a price table the quotation is one package price - the table's total.
+  const tableTotal = priceTableTotal(table);
+  const priceMode = table ? "PACKAGE" : mode;
+  const pkgAmount = table ? tableTotal : Number(pkg.amount) || 0;
+
   const totals = useMemo(() => {
-    if (mode === "PACKAGE") {
-      const a = Number(pkg.amount) || 0;
+    if (priceMode === "PACKAGE") {
+      const a = pkgAmount;
       return { monthly: pkg.billing === "MONTHLY" ? a : 0, yearly: pkg.billing === "YEARLY" ? a : 0, oneTime: pkg.billing === "ONE_TIME" ? a : 0 };
     }
     let monthly = 0;
@@ -413,7 +430,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
       else monthly += v;
     }
     return { monthly, yearly, oneTime };
-  }, [mode, pkg, order, picks, master]);
+  }, [priceMode, pkgAmount, pkg.billing, order, picks, master]);
 
   // The discount comes off the main total: monthly if there is one, else the AMC, else one-time
   // (the same rule the server uses).
@@ -422,13 +439,14 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   const discountValue = Number(discount) || 0;
   const finalTotal = Math.max(0, mainTotal - discountValue);
   const PER_TEXT = { MONTHLY: "/ month", YEARLY: "/ year (AMC)", ONE_TIME: "one-time" };
+  const perText = (b) => `${PER_TEXT[b]}${perOutlet ? " + per outlet" : ""}`;
 
   function toggleService(service) {
     if (picks[service.id]) {
       removeService(service.id);
       return;
     }
-    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, mode === "PER_SERVICE") }));
+    setPicks((all) => ({ ...all, [service.id]: startPick(service, master.plans, priceMode === "PER_SERVICE") }));
     setOrder((o) => [...o, service.id]);
   }
   function removeService(id) {
@@ -460,7 +478,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
       if (!rows.length) return { problem: `${s.name}: add at least one treatment row.` };
       if (rows.some((r) => ROW_KEYS.some((k) => !r[k].trim()))) return { problem: `${s.name}: a treatment row is not complete. Open "Edit rows" and fill every column or remove the row.` };
       const plan = master.plans.find((x) => x.id === p.planId);
-      if (mode === "PER_SERVICE") {
+      if (priceMode === "PER_SERVICE") {
         if (!plan) return { problem: `${s.name}: select a plan.` };
         if (p.price === "" || !(Number(p.price) >= 0)) return { problem: `${s.name}: enter the price.` };
       }
@@ -468,11 +486,14 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
         name: s.name,
         plan: plan?.name || "",
         billing: plan?.billing || "MONTHLY",
-        price: mode === "PER_SERVICE" ? Number(p.price) : null,
+        price: priceMode === "PER_SERVICE" ? Number(p.price) : null,
         rows: rows.map((r) => Object.fromEntries(ROW_KEYS.map((k) => [k, r[k].trim()]))),
       });
     }
-    if (mode === "PACKAGE" && !(Number(pkg.amount) > 0)) return { problem: "Enter the package amount." };
+    if (table) {
+      if (!table.rows[0].some((c) => c.trim())) return { problem: "Price table: fill in the headings (first row)." };
+      if (!(tableTotal > 0)) return { problem: "Price table: type the amounts in the last column." };
+    } else if (mode === "PACKAGE" && !(Number(pkg.amount) > 0)) return { problem: "Enter the package amount." };
     if (totals.monthly + totals.yearly + totals.oneTime <= 0) return { problem: "The total must be more than zero." };
     if (discountValue > 0 && discountValue >= mainTotal) return { problem: `The discount must be less than the total (${money(mainTotal)} ${PER_TEXT[mainBilling]}).` };
     if (shownSubject.trim().length < 5) return { problem: "Enter the subject." };
@@ -486,9 +507,11 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
         contractMonths: Number(contractMonths) || 12,
         discount: discountValue,
         services,
-        pricing: mode === "PACKAGE"
-          ? { mode, amount: Number(pkg.amount), billing: pkg.billing, planLabel: pkg.planLabel.trim(), description: pkg.description.trim() }
-          : { mode },
+        pricing: priceMode === "PACKAGE"
+          ? { mode: "PACKAGE", amount: pkgAmount, billing: pkg.billing, planLabel: pkg.planLabel.trim(), description: pkg.description.trim() }
+          : { mode: "PER_SERVICE" },
+        priceTable: table ? priceTableForSave(table) : null,
+        perOutlet,
         valueAdded: [...pickedClauses("VALUE_ADDED"), ...extraValue],
         terms: [...pickedClauses("TERMS"), ...extraTerms],
       },
@@ -518,7 +541,8 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   }
 
   async function send(closeConfirm) {
-    const { content } = build();
+    const { content: built } = build();
+    const content = { ...built, contractType };
     setBusy("send");
     try {
       await generateQuotation(lead.id, content, editing ? { replacesQuotationId: from.id } : {});
@@ -545,12 +569,12 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
               <span className="muted" style={{ textDecoration: "line-through" }}>{money(mainTotal)}</span>
               <span style={{ color: "#15803d", fontWeight: 600 }}>- {money(discountValue)} discount</span>
               <strong style={{ fontSize: 16 }}>
-                {money(finalTotal)} {PER_TEXT[mainBilling]}
+                {money(finalTotal)} {perText(mainBilling)}
               </strong>
             </span>
           ) : (
             <strong style={{ fontSize: 16 }}>
-              {money(mainTotal)} {PER_TEXT[mainBilling]}
+              {money(mainTotal)} {perText(mainBilling)}
             </strong>
           ))}
         {/* the other totals (no discount on them) */}
@@ -641,7 +665,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                     pick={picks[id]}
                     plans={master.plans}
                     frequencies={frequencyNames(master)}
-                    packageMode={mode === "PACKAGE"}
+                    packageMode={priceMode === "PACKAGE"}
                     onChange={(patch) => updatePick(id, patch)}
                     onRemove={() => removeService(id)}
                   />
@@ -650,7 +674,18 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
             )}
           </Step>
 
-          <Step no="3" title="Price">
+          <Step no="3" title="Price table" sub="Optional. For clients who want the price in their own format - it is printed on the quotation as you lay it out here.">
+            <PriceTableEditor table={table} onChange={setTable} />
+          </Step>
+
+          <Step no="4" title="Price">
+            {table ? (
+              <div style={{ marginBottom: 14 }}>
+                <Note tone="info">
+                  One package price from the price table: <b>{tableTotal > 0 ? money(tableTotal) : "type the amounts in its last column"}</b>. Choose how it is billed below.
+                </Note>
+              </div>
+            ) : (
             <div className="lm-choice" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", marginBottom: 14 }}>
               {[
                 { key: "PER_SERVICE", label: "Price per service", hint: "Each service shows its own price; the total adds up." },
@@ -666,11 +701,14 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                 </label>
               ))}
             </div>
-            {mode === "PACKAGE" && (
+            )}
+            {priceMode === "PACKAGE" && (
               <div className="lm-form">
-                <Field label="Package amount (Rs.)" required>
-                  <input className="lm-input" inputMode="decimal" value={pkg.amount} onChange={(e) => setPkg({ ...pkg, amount: e.target.value.replace(/[^\d.]/g, "") })} placeholder="e.g. 158000" />
-                </Field>
+                {!table && (
+                  <Field label="Package amount (Rs.)" required>
+                    <input className="lm-input" inputMode="decimal" value={pkg.amount} onChange={(e) => setPkg({ ...pkg, amount: e.target.value.replace(/[^\d.]/g, "") })} placeholder="e.g. 158000" />
+                  </Field>
+                )}
                 <Field label="Billing">
                   <select className="lm-select" value={pkg.billing} onChange={(e) => setPkg({ ...pkg, billing: e.target.value })}>
                     <option value="MONTHLY">Per month</option>
@@ -689,7 +727,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
             <Note tone="info">GST is shown as &quot;As applicable&quot; on the quotation.</Note>
           </Step>
 
-          <Step no="4" title="Proposal details">
+          <Step no="5" title="Proposal details">
             <div className="lm-form">
               <Field label="Subject" wide hint={subjectEdited ? "" : "Written for you from the services picked. Edit it if you like."}>
                 <textarea
@@ -716,7 +754,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
             </div>
           </Step>
 
-          <Step no="5" title="Discount" sub="Optional. A special discount in rupees, taken off the total. It shows on the quotation as a special discount with the final amount.">
+          <Step no="6" title="Discount" sub="Optional. A special discount in rupees, taken off the total. It shows on the quotation as a special discount with the final amount.">
             <div className="lm-form">
               <Field label={`Special discount (Rs.)${mainTotal > 0 ? ` - off the ${{ MONTHLY: "monthly", YEARLY: "yearly (AMC)", ONE_TIME: "one-time" }[mainBilling]} total` : ""}`}>
                 <input className="lm-input" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 5000" />
@@ -727,7 +765,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                       <span className="muted">Subtotal</span>
                       <span className="muted" style={{ textDecoration: discountValue > 0 ? "line-through" : "none" }}>
-                        {money(mainTotal)} {PER_TEXT[mainBilling]}
+                        {money(mainTotal)} {perText(mainBilling)}
                       </span>
                     </div>
                     {discountValue > 0 && (
@@ -750,16 +788,23 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: "1px solid var(--lm-border)", paddingTop: 8 }}>
                       <strong>Final amount</strong>
                       <strong style={{ fontSize: 18 }}>
-                        {money(finalTotal)} <span style={{ fontSize: 13, fontWeight: 500 }}>{PER_TEXT[mainBilling]}</span>
+                        {money(finalTotal)} <span style={{ fontSize: 13, fontWeight: 500 }}>{perText(mainBilling)}</span>
                       </strong>
                     </div>
                   </div>
                 )}
+                <label className={`lm-outlet${perOutlet ? " on" : ""}`}>
+                  <input type="checkbox" checked={perOutlet} onChange={(e) => setPerOutlet(e.target.checked)} />
+                  <span>
+                    <strong>Price is per outlet</strong>
+                    <small>The quotation says &quot;{PER_TEXT[mainBilling] === "one-time" ? "one-time" : PER_TEXT[mainBilling].replace("/ ", "per ")} + per outlet&quot;</small>
+                  </span>
+                </label>
               </div>
             </div>
           </Step>
 
-          <Step no="6" title="Value added services and terms" sub="The standard terms (taxes, payment, repellent machine, prevention suggestions ...) are added to every quotation automatically. Tick any optional lines that apply, and add lines for this customer only.">
+          <Step no="7" title="Value added services and terms" sub="The standard terms (taxes, payment, repellent machine, prevention suggestions ...) are added to every quotation automatically. Tick any optional lines that apply, and add lines for this customer only.">
             <ClausePicker title="Value Added Services" clauses={master.clauses.filter((c) => c.kind === "VALUE_ADDED")} checked={checked} onToggle={toggleClause} extra={extraValue} onExtra={setExtraValue} />
             <ClausePicker title="Terms & Conditions" clauses={master.clauses.filter((c) => c.kind === "TERMS")} checked={checked} onToggle={toggleClause} extra={extraTerms} onExtra={setExtraTerms} />
           </Step>
@@ -786,10 +831,25 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           actions={(close) => (
             <>
               <Button variant="ghost" onClick={close} disabled={busy === "send"}>Back</Button>
-              <Button icon={<FiSend />} busy={busy === "send"} onClick={() => send(close)}>Save &amp; Send</Button>
+              <Button icon={<FiSend />} busy={busy === "send"} disabled={!contractType} onClick={() => send(close)}>Save &amp; Send</Button>
             </>
           )}
         >
+          <div className="lm-contract">
+            <span className="lm-contract-label">Is this quotation for a one-time service or an AMC?</span>
+            <div className="lm-contract-options" role="radiogroup">
+              {[
+                { key: "ONE_TIME", label: "One-time", sub: "A single service" },
+                { key: "AMC", label: "AMC", sub: "Annual maintenance contract" },
+              ].map((o) => (
+                <button key={o.key} type="button" role="radio" aria-checked={contractType === o.key} className={`lm-contract-option${contractType === o.key ? " on" : ""}`} onClick={() => setContractType(o.key)}>
+                  <strong>{o.label}</strong>
+                  <small>{o.sub}</small>
+                </button>
+              ))}
+            </div>
+            <small className="lm-contract-hint">Shown on the lead&apos;s Quotations - not on the PDF.</small>
+          </div>
           The PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>.
           {editing && (
             <>

@@ -52,10 +52,51 @@ function billing(value) {
   if (!BILLINGS.includes(value)) throw new QuotationInputError("Billing must be ONE_TIME, MONTHLY or YEARLY");
   return value;
 }
+// What kind of contract the quotation is for - asked when it is saved, shown on the lead (not on the PDF).
+const CONTRACT_TYPES = ["ONE_TIME", "AMC"];
+function contractType(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!CONTRACT_TYPES.includes(value)) throw new QuotationInputError("Choose One-time or AMC");
+  return value;
+}
 function clauseList(list, label) {
   if (list === undefined || list === null) return [];
   if (!Array.isArray(list) || list.length > 25) throw new QuotationInputError(`Too many ${label}`);
   return list.map((c) => text(c, `${label} line`, 500, { min: 3 })).filter(Boolean);
+}
+
+/**
+ * The salesperson's own price table (optional - some clients want the price laid out their way):
+ * rows of cells, the first row the headings, the last row the total - a label in the first cell and
+ * the amount in the last, which becomes the package price. -> { header, body, totalLabel, total } or null.
+ */
+function priceTable(t) {
+  if (t === undefined || t === null || t === false) return null;
+  const rows = Array.isArray(t?.rows) ? t.rows : null;
+  if (!rows || rows.length < 2 || rows.length > 20) throw new QuotationInputError("The price table needs 2 to 20 rows");
+  const cols = Array.isArray(rows[0]) ? rows[0].length : 0;
+  if (cols < 2 || cols > 6) throw new QuotationInputError("The price table needs 2 to 6 columns");
+  const clean = rows.map((r, i) => {
+    if (!Array.isArray(r) || r.length !== cols) throw new QuotationInputError(`Price table row ${i + 1} has the wrong number of cells`);
+    return r.map((c) => text(c, `price table cell (row ${i + 1})`, 120));
+  });
+  if (!clean[0].some(Boolean)) throw new QuotationInputError("Fill in the headings (first row) of the price table");
+  const last = clean[clean.length - 1];
+  // The total adds up the Amount column (the last one); amounts print with thousands separators.
+  const toNumber = (v) => {
+    const raw = String(v || "").replace(/[₹,\s]/g, "");
+    return raw && /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : null;
+  };
+  const body = clean.slice(1, -1).map((r) => {
+    const n = toNumber(r[cols - 1]);
+    return n === null ? r : [...r.slice(0, -1), inr0.format(n)];
+  });
+  const sum = clean.slice(1, -1).reduce((t, r) => t + (toNumber(r[cols - 1]) || 0), 0);
+  // A table saved before the total added itself up: its typed total.
+  const total = Math.round((sum > 0 ? sum : toNumber(last[cols - 1]) || 0) * 100) / 100;
+  if (total <= 0) throw new QuotationInputError("Enter the amounts in the last column of the price table");
+  if (total > 99999999) throw new QuotationInputError("The price table total is too large");
+  return { header: clean[0], body, totalLabel: last[0] || "Total", total };
 }
 
 /**
@@ -78,7 +119,9 @@ function normalizeQuotationContent(body) {
   if (!Array.isArray(b.services) || b.services.length === 0) throw new QuotationInputError("Pick at least one service");
   if (b.services.length > 20) throw new QuotationInputError("A quotation can have at most 20 services");
 
-  const mode = b.pricing?.mode === "PACKAGE" ? "PACKAGE" : "PER_SERVICE";
+  // A price table sets one package price: its total.
+  const table = priceTable(b.priceTable);
+  const mode = table || b.pricing?.mode === "PACKAGE" ? "PACKAGE" : "PER_SERVICE";
   const services = b.services.map((s, i) => {
     const where = `Service ${i + 1}: `;
     try {
@@ -112,7 +155,7 @@ function normalizeQuotationContent(body) {
   let totals;
   if (mode === "PACKAGE") {
     const p = b.pricing || {};
-    const pkgAmount = amount(p.amount, "package amount");
+    const pkgAmount = table ? table.total : amount(p.amount, "package amount");
     if (pkgAmount <= 0) throw new QuotationInputError("Enter the package amount");
     pricing = {
       mode,
@@ -155,6 +198,10 @@ function normalizeQuotationContent(body) {
     contractMonths: int(b.contractMonths, "Contract period (months)", 1, 60, 12),
     services,
     pricing,
+    priceTable: table,
+    // The price is for one outlet (a client with several branches pays it for each).
+    perOutlet: Boolean(b.perOutlet),
+    contractType: contractType(b.contractType),
     valueAdded: clauseList(b.valueAdded, "value added services"),
     terms: clauseList(b.terms, "terms and conditions"),
     totals,
@@ -501,8 +548,74 @@ function draw(doc, q, meta) {
     }
   });
 
-  // package line (one price for everything)
-  if (q.pricing.mode === "PACKAGE") {
+  // the salesperson's own price table: headings bold on a grey row, ruled lines, the total row
+  // bold at the bottom; the amount column on the right. A long table runs on with its headings.
+  if (q.priceTable) {
+    const t = q.priceTable;
+    const cols = t.header.length;
+    const weights = t.header.map((_, k) => (k === 0 && cols > 2 ? 1.6 : 1));
+    const wsum = weights.reduce((a, w) => a + w, 0);
+    const cw = weights.map((w) => (w / wsum) * W);
+    const cx = [];
+    cw.reduce((x, w) => (cx.push(x), x + w), L);
+    const rows = [
+      { kind: "head", cells: t.header },
+      ...t.body.map((cells) => ({ kind: "body", cells })),
+      { kind: "total", cells: [t.totalLabel, ...Array(cols - 2).fill(""), rupees(t.total)] },
+    ];
+    const fontOf = (kind) => (kind === "body" ? "SB" : "B");
+    const sizeOf = (kind) => (kind === "head" ? 8.6 : 9.4);
+    const heightOf = (r) => {
+      font(fontOf(r.kind), sizeOf(r.kind));
+      return Math.max(...r.cells.map((v, k) => doc.heightOfString(v || " ", { width: cw[k] - 18, lineGap: 1 }))) + 16;
+    };
+    const heights = rows.map(heightOf);
+    const whole = heights.reduce((a, h) => a + h, 0);
+    if (whole <= BOTTOM - 140 && y + whole + 8 > BOTTOM) newPage();
+    const rule = "#d5dbe5";
+    let i = 0;
+    while (i < rows.length) {
+      // the rows that fit on this page; after a page break the headings come again
+      const seg = i === 0 ? [] : [0];
+      let used = i === 0 ? 0 : heights[0];
+      let j = i;
+      while (j < rows.length && y + used + heights[j] <= BOTTOM) used += heights[j], seg.push(j++);
+      if (j === i) {
+        newPage();
+        continue;
+      }
+      const top = y;
+      doc.roundedRect(L, top, W, used, 8).fill("#ffffff");
+      doc.save();
+      doc.roundedRect(L, top, W, used, 8).clip();
+      let ry = top;
+      seg.forEach((k) => {
+        const r = rows[k];
+        if (r.kind === "head") doc.rect(L, ry, W, heights[k]).fill("#e4e9f1");
+        if (r.kind === "total") doc.rect(L, ry, W, heights[k]).fill(C.pillSoft);
+        ry += heights[k];
+      });
+      doc.restore();
+      ry = top;
+      seg.forEach((k, n) => {
+        const r = rows[k];
+        if (n > 0) hLine(ry, rule, 0.7, L, R);
+        r.cells.forEach((v, c) => {
+          const last = c === cols - 1;
+          font(fontOf(r.kind), sizeOf(r.kind), C.ink).text(v || "", cx[c] + 9, ry + 8, { width: cw[c] - 18, align: last && cols > 1 ? "right" : "left", lineGap: 1 });
+        });
+        ry += heights[k];
+      });
+      for (let c = 1; c < cols; c++) doc.moveTo(cx[c], top).lineTo(cx[c], top + used).lineWidth(0.7).strokeColor(rule).stroke();
+      doc.roundedRect(L, top, W, used, 8).lineWidth(0.8).strokeColor(rule).stroke();
+      y = top + used + 12;
+      i = j;
+      if (i < rows.length) newPage();
+    }
+  }
+
+  // package line (one price for everything) - a price table already says it
+  if (q.pricing.mode === "PACKAGE" && !q.priceTable) {
     const text = `${q.pricing.description}${q.pricing.planLabel ? `  ·  ${q.pricing.planLabel}` : ""}`;
     paragraph(text, { fontName: "SB", size: 9.4, color: C.body, after: 10 });
   }
@@ -519,7 +632,7 @@ function draw(doc, q, meta) {
   const countText = q.pricing.mode === "PACKAGE" ? "One package price for all services" : `${q.services.length} service${q.services.length > 1 ? "s" : ""}`;
   const discount = q.totals.discount || 0;
   const final = q.totals.final ?? q.totals.primary;
-  const perWord = PER_WORD[main];
+  const perWord = `${PER_WORD[main]}${q.perOutlet ? " + per outlet" : ""}`;
   if (discount > 0) {
     // With a discount the eye should land on it: subtotal small and struck through, the discount on
     // a green bar, then the final amount large.
@@ -561,7 +674,7 @@ function draw(doc, q, meta) {
     font("R", 8.6, C.onNavy).text(perWord, R - 280, y + 50, { width: 258, align: "right", lineBreak: false });
     y += cardH + 12;
   }
-  const words = `${amountInWords(final)}${main === "MONTHLY" ? " per month" : main === "YEARLY" ? " per year" : ""}.`;
+  const words = `${amountInWords(final)}${main === "MONTHLY" ? " per month" : main === "YEARLY" ? " per year" : ""}${q.perOutlet ? " + per outlet" : ""}.`;
   paragraph(`All charges are exclusive of GST.  ${words}`, { size: 8.4, color: C.muted, after: 6 });
 
   // ================= 3. closing =================

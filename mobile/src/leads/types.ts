@@ -92,6 +92,16 @@ export interface Quotation {
   sentAt: string | null;
   /** True when the quotation was uploaded as a PDF. */
   hasPdf: boolean;
+  /** One-time or AMC, chosen when it was saved (null for older / uploaded ones). */
+  contractType: 'ONE_TIME' | 'AMC' | null;
+  /** The name on the quotation (else the lead's). */
+  clientName: string;
+  /** What its PDF is shown and saved as: CLIENTNAME_PROPOSAL_YEAR.pdf. */
+  fileName: string;
+  /** Built with Create Quotation (its details are saved), so it can be edited or duplicated. */
+  hasContent: boolean;
+  /** Who made it (user id) - they, or a sales manager, may edit it. */
+  createdBy: string;
 }
 
 /** A file picked on this phone, in the shape React Native's FormData uploads from. */

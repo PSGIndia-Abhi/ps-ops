@@ -23,7 +23,7 @@ import { whatsappUrl } from '../../crm/leadHelpers';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { WhatsAppIcon } from '../../crm/ui/crmIcons';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner } from '../../crm/ui/CrmScreen';
-import { StatusBadge, toneColors, type Tone } from '../../crm/ui/StatusBadge';
+import { toneColors, type Tone } from '../../crm/ui/StatusBadge';
 import { fmtDateShort, fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
@@ -31,7 +31,7 @@ import type { LeadStackParamList } from '../navigation';
 import { savedQuotationPdf } from '../quotation';
 import { QuotationPdfDialog } from '../QuotationDialogs';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
-import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
+import type { PipelineLead, PipelineStage, Quotation, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const HISTORY_PREVIEW = 5;
@@ -53,6 +53,25 @@ const factory = (t: CrmTheme) => ({
   // Who, how much, where it stands
   hero: { borderLeftWidth: 5, borderLeftColor: t.primary, ...t.raisedShadow },
   heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  heroTopTagged: { paddingRight: 72 }, // room for the corner tag
+  // The corner tag: One-time or AMC, from the latest quotation
+  contractTag: {
+    position: 'absolute' as const,
+    top: -1,
+    right: -1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderTopRightRadius: radii.xl,
+    borderBottomLeftRadius: radii.lg,
+    zIndex: 1,
+  },
+  contractAmc: { backgroundColor: '#ea580c' },
+  contractOnce: { backgroundColor: '#0d9488' },
+  contractDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
+  contractText: { ...typography.captionMedium, fontSize: 11, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
   heroIcon: {
     width: 52,
     height: 52,
@@ -165,12 +184,50 @@ const factory = (t: CrmTheme) => ({
   infoRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, paddingVertical: 6 },
   infoLabel: { ...typography.caption, color: t.textMuted },
   infoValue: { ...typography.bodyMedium, color: t.textPrimary },
-  quoteItem: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.sm },
-  quoteDivider: { borderTopWidth: 1, borderTopColor: t.border },
-  quoteIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: t.accentBg, alignItems: 'center' as const, justifyContent: 'center' as const },
-  quoteBody: { flex: 1 },
-  quoteNumber: { ...typography.bodyMedium, color: t.textPrimary },
-  quoteMeta: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  // Quotations: one small card each - PDF tile, file name, amount, One-time/AMC and status chips
+  quotesHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginBottom: spacing.sm },
+  quotesTitle: { marginBottom: 0 },
+  quotesCount: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  quotesCountText: { ...typography.captionMedium, fontSize: 12, color: t.primary },
+  qCard: {
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+    overflow: 'hidden' as const,
+  },
+  qCardLatest: { borderColor: t.primary, borderLeftWidth: 4, backgroundColor: t.primarySoftBg },
+  qCardCancelled: { opacity: 0.6, backgroundColor: t.surfaceAlt },
+  qPressed: { opacity: 0.8 },
+  qLatest: { position: 'absolute' as const, top: 0, right: 0, paddingHorizontal: spacing.sm, paddingVertical: 3, borderBottomLeftRadius: radii.md, backgroundColor: t.primary },
+  qLatestText: { ...typography.caption, fontSize: 9, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
+  qTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  qPdf: { width: 44, height: 50, borderRadius: radii.md, backgroundColor: '#fee2e2', alignItems: 'center' as const, justifyContent: 'center' as const, gap: 1 },
+  qPdfText: { ...typography.caption, fontSize: 9, fontWeight: '800' as const, letterSpacing: 0.5, color: '#dc2626' },
+  qTitleBox: { flex: 1, paddingRight: spacing.lg },
+  qTitle: { ...typography.bodyMedium, fontWeight: '700' as const, color: t.textPrimary },
+  qSub: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  qBottom: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+  },
+  qAmount: { ...typography.title, fontSize: 20, fontWeight: '800' as const, color: t.textPrimary },
+  qAmountCancelled: { color: t.textMuted },
+  qChips: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  qChip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.pill },
+  qChipAmc: { backgroundColor: '#ffedd5' },
+  qChipOnce: { backgroundColor: '#ccfbf1' },
+  qChipSent: { backgroundColor: t.successBg },
+  qChipCancelled: { backgroundColor: t.surfaceAlt },
+  qChipText: { ...typography.captionMedium, fontSize: 12 },
+  qDot: { width: 6, height: 6, borderRadius: 3 },
 
   // Activity
   entry: { flexDirection: 'row' as const, gap: spacing.sm },
@@ -343,9 +400,11 @@ export function LeadWorkScreen() {
 
   // A saved quotation's PDF: open it in the phone's PDF viewer, or save a copy to Downloads
   // (QuotationPdfDialog does both and shows how it went).
-  const [pdfFor, setPdfFor] = useState<{ id: string; number: string } | null>(null);
+  const [pdfFor, setPdfFor] = useState<Quotation | null>(null);
 
   const lead = data?.lead;
+  // One-time or AMC from the latest quotation that still stands - the tag on the lead card.
+  const contractType = data?.quotations?.find((q) => q.status !== 'CANCELLED' && q.contractType)?.contractType ?? null;
   const openMeeting = data?.openMeeting ?? null;
   const baseActions = lead ? leadActions(lead, persona, myId) : [];
   // An open meeting is always reachable from here (as "View meeting"), whoever runs the visit.
@@ -369,6 +428,12 @@ export function LeadWorkScreen() {
 
   const journeyIndex = lead ? JOURNEY.findIndex((s) => s.stages.includes(lead.stage)) : -1;
   const closedBadly = !!lead && isTerminal(lead.stage) && journeyIndex === -1;
+  // A saved quotation can be opened again to edit or duplicate while the lead is still open.
+  const reopenable = (q: Quotation) => !!lead && !isTerminal(lead.stage) && q.status !== 'CANCELLED' && q.hasContent;
+  const reopen = (q: Quotation, mode: 'edit' | 'duplicate') => {
+    setPdfFor(null);
+    if (lead) navigation.navigate('LeadQuoteBuild', { leadId: lead.id, name: lead.companyName, fromId: q.id, mode });
+  };
 
   const history = data ? [...data.timeline].reverse() : [];
   const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
@@ -395,7 +460,13 @@ export function LeadWorkScreen() {
           <>
             {/* Who, how much, where it stands */}
             <View style={[styles.card, styles.hero]}>
-              <View style={styles.heroTop}>
+              {!!contractType && (
+                <View style={[styles.contractTag, contractType === 'AMC' ? styles.contractAmc : styles.contractOnce]} accessibilityLabel={contractType === 'AMC' ? 'AMC contract' : 'One-time service'}>
+                  <View style={styles.contractDot} />
+                  <Text style={styles.contractText}>{contractType === 'AMC' ? 'AMC' : 'ONE-TIME'}</Text>
+                </View>
+              )}
+              <View style={[styles.heroTop, !!contractType && styles.heroTopTagged]}>
                 <View style={styles.heroIcon}>
                   <BriefcaseIcon size={26} color={theme.primary} />
                 </View>
@@ -546,30 +617,66 @@ export function LeadWorkScreen() {
 
             {data && data.quotations.length > 0 && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>QUOTATIONS</Text>
-                {data.quotations.map((q, i) => (
-                  // A tap opens the PDF (with an option to save it to Downloads for WhatsApp / email).
-                  <Pressable
-                    key={q.id}
-                    disabled={!q.hasPdf}
-                    onPress={() => setPdfFor({ id: q.id, number: q.number })}
-                    accessibilityRole="button"
-                    style={({ pressed }) => [styles.quoteItem, i > 0 && styles.quoteDivider, pressed && { opacity: 0.7 }]}
-                  >
-                    <View style={styles.quoteIcon}>
-                      <DocumentIcon size={18} color={theme.accent} />
-                    </View>
-                    <View style={styles.quoteBody}>
-                      <Text style={styles.quoteNumber}>{q.number}</Text>
-                      <Text style={styles.quoteMeta}>
-                        {formatINR(q.total)}
-                        {q.sentAt ? ` · ${formatLeadWhen(q.sentAt)}` : ''}
-                        {q.hasPdf ? ' · Tap to open PDF' : ''}
-                      </Text>
-                    </View>
-                    <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
-                  </Pressable>
-                ))}
+                <View style={styles.quotesHead}>
+                  <Text style={[styles.cardTitle, styles.quotesTitle]}>QUOTATIONS</Text>
+                  <View style={styles.quotesCount}>
+                    <Text style={styles.quotesCountText}>{data.quotations.length}</Text>
+                  </View>
+                </View>
+                {data.quotations.map((q) => {
+                  const cancelled = q.status === 'CANCELLED';
+                  // The newest one that still stands is the one the customer is looking at.
+                  const latest = !cancelled && data.quotations.find((x) => x.status !== 'CANCELLED')?.id === q.id;
+                  return (
+                    // A tap opens the PDF card: Share, Open, Save to Downloads, Edit, Duplicate.
+                    <Pressable
+                      key={q.id}
+                      disabled={!q.hasPdf}
+                      onPress={() => setPdfFor(q)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${q.fileName}, ${formatINR(q.total)}${q.contractType ? `, ${q.contractType === 'AMC' ? 'AMC' : 'one-time'}` : ''}, ${cancelled ? 'cancelled' : 'sent'}`}
+                      style={({ pressed }) => [styles.qCard, latest && styles.qCardLatest, cancelled && styles.qCardCancelled, pressed && styles.qPressed]}
+                    >
+                      {latest && (
+                        <View style={styles.qLatest}>
+                          <Text style={styles.qLatestText}>LATEST</Text>
+                        </View>
+                      )}
+                      <View style={styles.qTop}>
+                        <View style={styles.qPdf}>
+                          <DocumentIcon size={20} color="#dc2626" />
+                          <Text style={styles.qPdfText}>PDF</Text>
+                        </View>
+                        <View style={styles.qTitleBox}>
+                          {/* The PDF's name (CLIENTNAME_PROPOSAL_YEAR.pdf); it wraps at its underscores. */}
+                          <Text style={styles.qTitle} numberOfLines={3}>
+                            {q.fileName.replace(/_/g, '_\u200B')}
+                          </Text>
+                          <Text style={styles.qSub} numberOfLines={2}>
+                            {[q.number, q.sentAt ? formatLeadWhen(q.sentAt) : ''].filter(Boolean).join('  ·  ')}
+                          </Text>
+                        </View>
+                        {q.hasPdf && <ChevronRightIcon size={18} color={theme.textMuted} />}
+                      </View>
+                      <View style={styles.qBottom}>
+                        <Text style={[styles.qAmount, cancelled && styles.qAmountCancelled]}>{formatINR(q.total)}</Text>
+                        <View style={styles.qChips}>
+                          {!!q.contractType && (
+                            <View style={[styles.qChip, q.contractType === 'AMC' ? styles.qChipAmc : styles.qChipOnce]}>
+                              <Text style={[styles.qChipText, { color: q.contractType === 'AMC' ? '#c2410c' : '#0f766e' }]}>
+                                {q.contractType === 'AMC' ? 'AMC' : 'One-time'}
+                              </Text>
+                            </View>
+                          )}
+                          <View style={[styles.qChip, cancelled ? styles.qChipCancelled : styles.qChipSent]}>
+                            <View style={[styles.qDot, { backgroundColor: cancelled ? theme.textMuted : theme.success }]} />
+                            <Text style={[styles.qChipText, { color: cancelled ? theme.textMuted : theme.successText }]}>{cancelled ? 'Cancelled' : actionLabel(q.status)}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                })}
               </View>
             )}
 
@@ -612,12 +719,16 @@ export function LeadWorkScreen() {
           </>
         )}
       </CrmScreen>
-      {pdfFor && (
+      {pdfFor && lead && (
         <QuotationPdfDialog
-          name={data?.lead.companyName || pdfFor.number}
-          getFile={() => savedQuotationPdf(leadId, pdfFor.id, pdfFor.number)}
+          name={pdfFor.clientName || lead.companyName || ''}
+          getFile={() => savedQuotationPdf(leadId, pdfFor.id, pdfFor.fileName)}
           onOpened={() => setPdfFor(null)}
           onClose={() => setPdfFor(null)}
+          // Built in the app or on the web (its details are saved), on a lead still open. Editing it
+          // saves a replacement - for whoever sent it or a sales manager, as on the web.
+          onEdit={reopenable(pdfFor) && (pdfFor.createdBy === myId || persona === 'sales_manager') ? () => reopen(pdfFor, 'edit') : undefined}
+          onDuplicate={reopenable(pdfFor) ? () => reopen(pdfFor, 'duplicate') : undefined}
         />
       )}
     </LeadScreen>
