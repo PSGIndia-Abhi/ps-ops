@@ -26,6 +26,7 @@ import { useCrmTheme } from '../crm/theme';
 import { LEAD_STACK_SCREENS } from '../leads/screens';
 import { ClipboardListIcon, WalletIcon } from '../crm/ui/crmIcons';
 import { radii, shadows } from '../theme';
+import { salesTabIcon } from './salesTabIcon';
 
 const Tab = createBottomTabNavigator<CrmTabParamList>();
 const Stack = createNativeStackNavigator<CrmStackParamList>();
@@ -33,11 +34,10 @@ const Stack = createNativeStackNavigator<CrmStackParamList>();
 const BASE_HEIGHT = 60;
 const BASE_PADDING_BOTTOM = 6;
 
-type TabIconProps = { color: string; size: number };
-const homeIcon = ({ color, size }: TabIconProps) => <HomeIcon size={size} color={color} />;
-const leadsIcon = ({ color, size }: TabIconProps) => <ClipboardListIcon size={size} color={color} />;
-const paymentsIcon = ({ color, size }: TabIconProps) => <WalletIcon size={size} color={color} />;
-const moreIcon = ({ color, size }: TabIconProps) => <MoreHorizontalIcon size={size} color={color} />;
+const homeIcon = salesTabIcon(HomeIcon);
+const leadsIcon = salesTabIcon(ClipboardListIcon);
+const paymentsIcon = salesTabIcon(WalletIcon);
+const moreIcon = salesTabIcon(MoreHorizontalIcon);
 
 /** The centre slot never shows a screen - tapping it opens the New Lead form instead. */
 function NewLeadPlaceholder() {

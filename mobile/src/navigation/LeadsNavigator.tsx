@@ -24,6 +24,7 @@ import { LeadHomeScreen } from '../leads/screens/LeadHomeScreen';
 import { LeadFollowUpsScreen } from '../leads/screens/LeadFollowUpsScreen';
 import { useMe } from '../leads/ui';
 import { radii, shadows } from '../theme';
+import { salesTabIcon } from './salesTabIcon';
 
 const Tab = createBottomTabNavigator<LeadTabParamList>();
 const Stack = createNativeStackNavigator<LeadRootStackParamList>();
@@ -31,11 +32,10 @@ const Stack = createNativeStackNavigator<LeadRootStackParamList>();
 const BASE_HEIGHT = 60;
 const BASE_PADDING_BOTTOM = 6;
 
-type TabIconProps = { color: string; size: number };
-const homeIcon = ({ color, size }: TabIconProps) => <HomeIcon size={size} color={color} />;
-const leadsIcon = ({ color, size }: TabIconProps) => <ClipboardListIcon size={size} color={color} />;
-const tasksIcon = ({ color, size }: TabIconProps) => <ClockIcon size={size} color={color} />;
-const moreIcon = ({ color, size }: TabIconProps) => <MoreHorizontalIcon size={size} color={color} />;
+const homeIcon = salesTabIcon(HomeIcon);
+const leadsIcon = salesTabIcon(ClipboardListIcon);
+const tasksIcon = salesTabIcon(ClockIcon);
+const moreIcon = salesTabIcon(MoreHorizontalIcon);
 
 /** The centre slot never shows a screen - tapping it opens the New Lead form instead. */
 function NewLeadPlaceholder() {

@@ -14,8 +14,9 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import type { Person } from '../types';
 import { StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { formatINR } from '../../crm/format';
 import { AchievementCard } from '../AchievementCard';
-import { TargetCard, targetPercent } from '../TargetCard';
+import { TargetCard, targetPercent, type PeriodFigures } from '../TargetCard';
 import { TeamMemberRow, TeamSummary } from '../TeamReportParts';
 
 const factory = (t: CrmTheme) => ({
@@ -44,6 +45,51 @@ export function rangeDates(range: Range, today = todayStr()): { from: string; to
   if (range === 'week') return { from: addDays(today, -6), to: today };
   if (range === 'lifetime') return { from: LIFETIME_FROM, to: today };
   return { from: `${today.slice(0, 8)}01`, to: today };
+}
+
+/** Days in the month of a 'YYYY-MM' string. */
+const daysInMonth = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+};
+
+/**
+ * What the Target card shows for the chosen filter. Targets are set per month, so:
+ *  - Month: the card's own month figures (undefined here);
+ *  - Today / 7 days: the month target's share for 1 / 7 days, against what the leads converted in
+ *    the period are worth;
+ *  - Lifetime: every monthly target set added up, against everything achieved.
+ */
+function periodFigures(
+  range: Range,
+  target: api.SalesTarget,
+  history: api.AchievementHistory | null,
+  converted: api.PerformanceItem[] | null,
+): PeriodFigures | undefined {
+  if (range === 'month') return undefined;
+  if (range === 'lifetime') {
+    const set = (history?.months ?? []).filter((m) => m.target !== null);
+    const total = set.reduce((s, m) => s + (m.target ?? 0), 0);
+    return {
+      title: 'LIFETIME',
+      target: total || null,
+      achieved: history?.lifetime.achieved ?? 0,
+      converted: history?.lifetime.converted ?? 0,
+      when: 'so far',
+      note: total ? `All monthly targets added up (${set.length} month${set.length === 1 ? '' : 's'})` : undefined,
+    };
+  }
+  const days = range === 'today' ? 1 : 7;
+  const share = target.target ? Math.round((target.target * days) / daysInMonth(target.month)) : null;
+  const items = converted ?? [];
+  return {
+    title: range === 'today' ? 'TODAY' : 'LAST 7 DAYS',
+    target: share,
+    achieved: items.reduce((s, i) => s + (i.amount ?? 0), 0),
+    converted: items.length,
+    when: range === 'today' ? 'today' : 'in the last 7 days',
+    note: target.target ? `${days === 1 ? "1 day's" : "7 days'"} share of the month's ${formatINR(target.target)}` : undefined,
+  };
 }
 
 const METRICS: { key: api.PerformanceMetric; label: string; tone: Tone }[][] = [
@@ -84,15 +130,26 @@ export function PerformanceScreen() {
     return list.find((t) => t.userId === (employeeId ?? myIdNum)) ?? null;
   }, [employeeId, myIdNum]);
   const { data: target, refresh: refreshTarget, reload: reloadTarget } = useLoad(targetLoader, '');
-  // Last month and lifetime, for the people who have targets (sales executives and managers).
-  const historyLoader = useCallback(() => api.targetHistory(employeeId).catch(() => null), [employeeId]);
+  // Lifetime achieved and every monthly target set (the server keeps up to 24 months), for the Lifetime filter.
+  const historyLoader = useCallback(() => api.targetHistory(employeeId, 24).catch(() => null), [employeeId]);
   const { data: history, refresh: refreshHistory, reload: reloadHistory } = useLoad(historyLoader, '');
+  // Today / 7 days: what the leads converted in the period are worth (the same value the target counts).
+  const convertedLoader = useCallback(
+    () =>
+      range === 'today' || range === 'week'
+        ? api.performanceItems('leadsConverted', from, to, employeeId).catch(() => null)
+        : Promise.resolve(null),
+    [range, from, to, employeeId],
+  );
+  const { data: converted, refresh: refreshConverted } = useLoad(convertedLoader, '');
   const refresh = () => {
     refreshReport();
     refreshTarget();
     refreshHistory();
+    refreshConverted();
   };
   const periodLabel = range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`;
+  const period = target ? periodFigures(range, target, history ?? null, converted ?? null) : undefined;
   // A tile opens the records behind its number, for the same person and period.
   const openTile = (metric: api.PerformanceMetric, label: string) =>
     navigation.navigate('LeadPerformanceItems', { metric, label, from, to, employeeId, name: params?.name ?? 'My performance', periodLabel });
@@ -101,19 +158,20 @@ export function PerformanceScreen() {
     <LeadScreen edges={['top', 'bottom']}>
       <TopBar title={params?.name ?? 'My performance'} subtitle="Sales performance" onBack={() => navigation.goBack()} />
       <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+        <SegmentedControl options={RANGES} value={range} onChange={setRange} />
+        <Text style={styles.range}>{periodLabel}</Text>
         {!!target && (
           <TargetCard
             target={target}
+            period={period}
             canSet={manager && !!employeeId}
             onChanged={() => {
               reloadTarget();
               reloadHistory();
             }}
+            onHistory={() => navigation.navigate('LeadAchievementHistory', { employeeId, name: params?.name ?? 'My achievement' })}
           />
         )}
-        {!!target && !!history && <AchievementCard history={history} />}
-        <SegmentedControl options={RANGES} value={range} onChange={setRange} />
-        <Text style={styles.range}>{periodLabel}</Text>
         <CrmErrorBanner message={error} onRetry={reload} />
         {loading && !data ? (
           <CrmSkeleton height={360} radius={radii.lg} />
@@ -127,6 +185,28 @@ export function PerformanceScreen() {
             </View>
           ))
         )}
+      </CrmScreen>
+    </LeadScreen>
+  );
+}
+
+/**
+ * Achievement history for one person (opened from the Target card): lifetime achieved, last month,
+ * and the month-by-month chart against each month's target.
+ */
+export function AchievementHistoryScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
+  const params = useRoute<RouteProp<LeadStackParamList, 'LeadAchievementHistory'>>().params;
+  const { styles } = useCrmStyles(factory);
+  const loader = useCallback(() => api.targetHistory(params?.employeeId), [params?.employeeId]);
+  const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the achievement history.');
+
+  return (
+    <LeadScreen edges={['top', 'bottom']}>
+      <TopBar title="Achievement history" subtitle={params?.name} onBack={() => navigation.goBack()} />
+      <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
+        <CrmErrorBanner message={error} onRetry={reload} />
+        {loading && !data ? <CrmSkeleton height={320} radius={radii.lg} /> : !!data && <AchievementCard history={data} initiallyOpen />}
       </CrmScreen>
     </LeadScreen>
   );

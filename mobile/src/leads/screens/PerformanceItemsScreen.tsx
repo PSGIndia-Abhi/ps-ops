@@ -1,17 +1,20 @@
-import React, { useCallback } from 'react';
-import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ChevronRightIcon } from '../../components/icons';
 import { formatINR } from '../../crm/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
+import { CrmTextField } from '../../crm/ui/CrmTextField';
+import { SearchIcon } from '../../crm/ui/crmIcons';
 import { toneColors, type Tone } from '../../crm/ui/StatusBadge';
 import { MONTHS_LONG } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { STAGE_META } from '../stage';
+import type { PipelineStage } from '../types';
 import { StageBadge, useLoad, LeadScreen, LeadTopBar } from '../ui';
 
 const factory = (t: CrmTheme) => ({
@@ -37,6 +40,33 @@ const factory = (t: CrmTheme) => ({
   bottom: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm },
   when: { ...typography.caption, color: t.textMuted, flex: 1 },
   chevron: { justifyContent: 'center' as const, paddingRight: spacing.sm },
+  chevronDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: t.primarySoftBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  // Search and stage chips, fixed above the list.
+  tools: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+  chips: { gap: spacing.xs, paddingBottom: spacing.sm },
+  chip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+  },
+  chipOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  chipText: { ...typography.captionMedium, color: t.textSecondary },
+  chipTextOn: { color: t.primary },
+  chipCount: { ...typography.caption, color: t.textMuted },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });
 
 /** "17 Oct, 11:00 AM" - or just "17 Oct" for a day (a follow-up's due date). */
@@ -60,12 +90,68 @@ export function PerformanceItemsScreen() {
 
   const loader = useCallback(() => api.performanceItems(metric, from, to, employeeId), [metric, from, to, employeeId]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the list.');
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState<PipelineStage | null>(null);
+
+  // The stages present in this list, most common first, for the chips.
+  const stages = useMemo(() => {
+    const counts = new Map<PipelineStage, number>();
+    (data ?? []).forEach((i) => i.stage && counts.set(i.stage, (counts.get(i.stage) ?? 0) + 1));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [data]);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (data ?? [])
+      .filter((i) => !stage || i.stage === stage)
+      .filter(
+        (i) =>
+          !q ||
+          [i.company, i.contact, i.leadNumber ?? '', i.detail].some((v) => v.toLowerCase().includes(q)),
+      );
+  }, [data, query, stage]);
+  const narrowed = !!query.trim() || !!stage;
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
       <LeadTopBar title={label} subtitle={name} onBack={() => navigation.goBack()} />
+      <View style={styles.tools}>
+        <CrmTextField
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search company, contact, lead no..."
+          icon={<SearchIcon size={18} color={theme.textMuted} />}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {stages.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
+            <Pressable onPress={() => setStage(null)} accessibilityRole="button" accessibilityState={{ selected: !stage }} style={[styles.chip, !stage && styles.chipOn]}>
+              <Text style={[styles.chipText, !stage && styles.chipTextOn]}>All</Text>
+              <Text style={styles.chipCount}>{data?.length ?? 0}</Text>
+            </Pressable>
+            {stages.map(([key, count]) => {
+              const on = stage === key;
+              const meta = STAGE_META[key];
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => setStage(on ? null : key)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.chip, on && styles.chipOn]}
+                >
+                  <View style={[styles.dot, { backgroundColor: toneColors(theme, meta?.tone ?? 'neutral').fg }]} />
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{meta?.label ?? key}</Text>
+                  <Text style={styles.chipCount}>{count}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+      </View>
       <FlatList
-        data={data ?? []}
+        data={shown}
+        keyboardShouldPersistTaps="handled"
         keyExtractor={(item, i) => `${item.leadId}-${item.at}-${i}`}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
@@ -73,7 +159,11 @@ export function PerformanceItemsScreen() {
           <>
             <Text style={styles.period}>
               {periodLabel}
-              {data ? `  ·  ${data.length} ${data.length === 1 ? 'record' : 'records'}` : ''}
+              {data
+                ? narrowed
+                  ? `  ·  ${shown.length} of ${data.length}`
+                  : `  ·  ${data.length} ${data.length === 1 ? 'record' : 'records'}`
+                : ''}
             </Text>
             <CrmErrorBanner message={error} onRetry={reload} />
           </>
@@ -82,7 +172,10 @@ export function PerformanceItemsScreen() {
           loading && !data ? (
             <CrmSkeleton height={260} radius={radii.lg} />
           ) : !error ? (
-            <CrmEmptyState title="Nothing here" subtitle="No records for this period." />
+            <CrmEmptyState
+              title={narrowed ? 'No matches' : 'Nothing here'}
+              subtitle={narrowed ? 'Try another search or stage.' : 'No records for this period.'}
+            />
           ) : undefined
         }
         renderItem={({ item }) => {
@@ -118,7 +211,9 @@ export function PerformanceItemsScreen() {
                 </View>
               </View>
               <View style={styles.chevron}>
-                <ChevronRightIcon size={16} color={theme.textMuted} />
+                <View style={styles.chevronDot}>
+                  <ChevronRightIcon size={15} color={theme.primary} />
+                </View>
               </View>
             </Pressable>
           );

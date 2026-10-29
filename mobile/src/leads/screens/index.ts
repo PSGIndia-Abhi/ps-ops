@@ -26,7 +26,7 @@ import { LeadWorkScreen } from './LeadWorkScreen';
 import { MeetingScreen, MeetingsScreen } from './MeetingScreens';
 import { ReminderEditScreen, RemindersScreen, ReminderTimeScreen } from './RemindersScreens';
 import { PerformanceItemsScreen } from './PerformanceItemsScreen';
-import { PerformanceScreen, TeamScreen } from './ReportScreens';
+import { AchievementHistoryScreen, PerformanceScreen, TeamScreen } from './ReportScreens';
 import { ResidentialLeadsScreen } from './ResidentialLeadsScreen';
 import { TeamVisitsScreen } from './TeamVisitsScreen';
 
@@ -64,6 +64,7 @@ export const LEAD_STACK_SCREENS: {
   { name: 'LeadTasks', component: LeadTasksScreen },
   { name: 'LeadPerformance', component: PerformanceScreen },
   { name: 'LeadPerformanceItems', component: PerformanceItemsScreen },
+  { name: 'LeadAchievementHistory', component: AchievementHistoryScreen },
   { name: 'LeadNotifications', component: LeadNotificationsScreen },
   { name: 'LeadProfile', component: LeadProfileScreen },
   { name: 'LeadTeamVisits', component: TeamVisitsScreen },

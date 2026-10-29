@@ -25,6 +25,20 @@ export function SearchIcon({ size = 20, color = '#6B7280' }: IconProps) {
   );
 }
 
+/** "Use my current location": a crosshair with a centre dot, as on map apps. */
+export function LocateIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={6.5} stroke={color} strokeWidth={1.8} />
+      <Circle cx={12} cy={12} r={2.2} fill={color} />
+      <Line x1={12} y1={2.5} x2={12} y2={5.5} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={12} y1={18.5} x2={12} y2={21.5} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={2.5} y1={12} x2={5.5} y2={12} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={18.5} y1={12} x2={21.5} y2={12} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function ClipboardListIcon({ size = 24, color = '#6B7280' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

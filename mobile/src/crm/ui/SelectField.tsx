@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, spacing, touchTarget, typography } from '../../theme';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { CheckIcon, ChevronDownIcon } from './crmIcons';
+import { IconTile } from './IconTile';
 import type { Option } from '../types';
 
 const factory = (t: CrmTheme) => ({
@@ -104,7 +105,11 @@ export function SelectField<T extends string>({
         accessibilityState={{ disabled }}
         style={[styles.field, !!error && styles.fieldError, disabled && styles.fieldDisabled]}
       >
-        {!!icon && <View style={styles.fieldIcon}>{icon}</View>}
+        {!!icon && (
+          <View style={styles.fieldIcon}>
+            <IconTile icon={icon} />
+          </View>
+        )}
         <Text style={[selected ? styles.value : styles.placeholder, styles.fieldText]} numberOfLines={1}>
           {selected ? selected.label : placeholder}
         </Text>

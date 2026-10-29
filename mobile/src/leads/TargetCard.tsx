@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { ChevronRightIcon } from '../components/icons';
 import { formatINR } from '../crm/format';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { MONTHS_LONG } from '../tasks/format';
@@ -21,7 +22,18 @@ const factory = (t: CrmTheme) => ({
   barFill: { height: 10, borderRadius: 5 },
   foot: { ...typography.caption, color: t.textMuted, marginTop: spacing.xs },
   none: { ...typography.body, color: t.textSecondary },
-  // Set-target dialog
+  history: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+    minHeight: 36,
+  },
+  historyText: { ...typography.bodyMedium, color: t.primary },
+  // Set-target dialog (a month's target; only shown on the Month filter)
   backdrop: { flex: 1, backgroundColor: t.overlay, justifyContent: 'center' as const, padding: spacing.lg },
   dialog: { backgroundColor: t.surface, borderRadius: radii.xl, padding: spacing.lg, gap: spacing.sm },
   dTitle: { ...typography.subtitle, color: t.textPrimary },
@@ -32,6 +44,7 @@ const factory = (t: CrmTheme) => ({
   btn: { minHeight: 44, paddingHorizontal: spacing.lg, borderRadius: radii.pill, justifyContent: 'center' as const },
   btnGhost: { borderWidth: 1, borderColor: t.border },
   btnPrimary: { backgroundColor: t.primary },
+  saving: { opacity: 0.6 },
   btnText: { ...typography.button, color: t.textPrimary },
   btnTextPrimary: { ...typography.button, color: t.textOnPrimary },
 });
@@ -45,37 +58,69 @@ export const monthName = (month: string) => {
 export const targetPercent = (t: Pick<api.SalesTarget, 'target' | 'achieved'>) =>
   t.target ? Math.round((t.achieved / t.target) * 100) : null;
 
+/** What the card shows for a chosen period (Today / 7 days / Lifetime) instead of the month. */
+export interface PeriodFigures {
+  /** e.g. "TODAY", "LAST 7 DAYS", "LIFETIME". */
+  title: string;
+  /** The month target's share for the period (or all monthly targets added up); null = none set. */
+  target: number | null;
+  achieved: number;
+  converted: number;
+  /** "this month", "today", "in the last 7 days", "so far". */
+  when: string;
+  /** Under the bar, e.g. "7 days' share of ₹1,00,000". */
+  note?: string;
+}
+
 /**
- * This month's target for one sales person: target, achieved (the amounts of the leads they
- * converted this month), and how far along they are. `canSet` (the sales manager) adds "Set target".
+ * One sales person's target: target, achieved (the amounts of the leads they converted), and how
+ * far along they are - for the month, or for `period` (the performance filter: today, 7 days,
+ * lifetime). `canSet` (the sales manager) adds "Change target" (the month's target);
+ * `onHistory` adds "View achievement history".
  */
-export function TargetCard({ target, canSet, onChanged }: { target: api.SalesTarget; canSet?: boolean; onChanged?: () => void }) {
+export function TargetCard({
+  target,
+  canSet,
+  onChanged,
+  period,
+  onHistory,
+}: {
+  target: api.SalesTarget;
+  canSet?: boolean;
+  onChanged?: () => void;
+  period?: PeriodFigures;
+  onHistory?: () => void;
+}) {
   const { styles, theme } = useCrmStyles(factory);
   const [editing, setEditing] = useState(false);
-  const pct = targetPercent(target);
+  const shown = period
+    ? { target: period.target, achieved: period.achieved, converted: period.converted }
+    : { target: target.target, achieved: target.achieved, converted: target.converted };
+  const when = period?.when ?? 'this month';
+  const pct = targetPercent(shown);
   const fill = pct === null ? 0 : Math.min(100, pct);
   const tone = pct === null ? theme.textMuted : pct >= 100 ? theme.success : pct >= 50 ? theme.primary : theme.warning;
 
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        <Text style={styles.title}>TARGET · {monthName(target.month).toUpperCase()}</Text>
-        {canSet && (
+        <Text style={styles.title}>TARGET · {period ? period.title : monthName(target.month).toUpperCase()}</Text>
+        {canSet && !period && (
           <Pressable onPress={() => setEditing(true)} accessibilityRole="button" style={({ pressed }) => [styles.set, pressed && { opacity: 0.85 }]}>
             <Text style={styles.setText}>{target.target ? 'Change target' : 'Set target'}</Text>
           </Pressable>
         )}
       </View>
-      {target.target ? (
+      {shown.target ? (
         <>
           <View style={styles.row}>
             <View style={styles.cell}>
               <Text style={styles.label}>Target</Text>
-              <Text style={styles.value}>{formatINR(target.target)}</Text>
+              <Text style={styles.value}>{formatINR(shown.target)}</Text>
             </View>
             <View style={styles.cell}>
               <Text style={styles.label}>Achieved</Text>
-              <Text style={[styles.value, { color: tone }]}>{formatINR(target.achieved)}</Text>
+              <Text style={[styles.value, { color: tone }]}>{formatINR(shown.achieved)}</Text>
             </View>
             <View style={styles.cell}>
               <Text style={styles.label}>Done</Text>
@@ -86,14 +131,22 @@ export function TargetCard({ target, canSet, onChanged }: { target: api.SalesTar
             <View style={[styles.barFill, { width: `${fill}%`, backgroundColor: tone }]} />
           </View>
           <Text style={styles.foot}>
-            {target.converted} lead{target.converted === 1 ? '' : 's'} converted this month
-            {target.achieved < target.target ? ` · ${formatINR(target.target - target.achieved)} to go` : ' · target reached'}
+            {shown.converted} lead{shown.converted === 1 ? '' : 's'} converted {when}
+            {shown.achieved < shown.target ? ` · ${formatINR(shown.target - shown.achieved)} to go` : ' · target reached'}
           </Text>
+          {!!period?.note && <Text style={styles.foot}>{period.note}</Text>}
         </>
       ) : (
         <Text style={styles.none}>
-          No target set for this month.{target.achieved > 0 ? ` Converted so far: ${formatINR(target.achieved)}.` : ''}
+          No target set{period ? '' : ' for this month'}.
+          {shown.achieved > 0 ? ` Converted ${when}: ${formatINR(shown.achieved)}.` : ''}
         </Text>
+      )}
+      {!!onHistory && (
+        <Pressable onPress={onHistory} accessibilityRole="button" style={({ pressed }) => [styles.history, pressed && { opacity: 0.7 }]}>
+          <Text style={styles.historyText}>View achievement history</Text>
+          <ChevronRightIcon size={16} color={theme.primary} />
+        </Pressable>
       )}
       {editing && <SetTargetDialog target={target} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged?.(); }} />}
     </View>
@@ -136,7 +189,7 @@ function SetTargetDialog({ target, onClose, onSaved }: { target: api.SalesTarget
             <Pressable onPress={onClose} style={[styles.btn, styles.btnGhost]} accessibilityRole="button">
               <Text style={styles.btnText}>Cancel</Text>
             </Pressable>
-            <Pressable onPress={save} disabled={saving} style={[styles.btn, styles.btnPrimary, saving && { opacity: 0.6 }]} accessibilityRole="button">
+            <Pressable onPress={save} disabled={saving} style={[styles.btn, styles.btnPrimary, saving && styles.saving]} accessibilityRole="button">
               <Text style={styles.btnTextPrimary}>{saving ? 'Saving…' : 'Save target'}</Text>
             </Pressable>
           </View>

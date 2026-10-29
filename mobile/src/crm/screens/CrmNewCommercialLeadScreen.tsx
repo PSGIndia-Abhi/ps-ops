@@ -16,6 +16,7 @@ import {
   BriefcaseIcon,
   CalendarIcon,
   CameraIcon,
+  CloseIcon,
   DocumentIcon,
   EmailIcon,
   ExternalLinkIcon,
@@ -66,7 +67,7 @@ import {
   type CommercialLeadFormValues,
 } from '../validation';
 import { ContactPickerSheet } from '../ui/ContactPickerSheet';
-import { CheckIcon, ChevronDownIcon, RupeeIcon } from '../ui/crmIcons';
+import { CheckIcon, ChevronDownIcon, LocateIcon, RupeeIcon } from '../ui/crmIcons';
 import { CrmErrorBanner, CrmScreen } from '../ui/CrmScreen';
 import { CrmTextField } from '../ui/CrmTextField';
 import { SectionHeader } from '../ui/LeadFormParts';
@@ -165,20 +166,18 @@ const factory = (t: CrmTheme) => ({
   dateFieldText: { ...typography.body, color: t.textPrimary, flex: 1 },
   dateFieldPlaceholder: { color: t.textMuted },
   dateClear: { ...typography.captionMedium, color: t.primary },
-  addressActions: { flexDirection: 'row' as const, justifyContent: 'flex-end' as const, gap: spacing.sm, marginTop: -spacing.xs },
-  addressButton: {
-    minWidth: 84,
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: t.primary,
+  // Use-my-location and clear, as two small round buttons inside the address box (top right).
+  addressIcons: { flexDirection: 'row' as const, gap: 6, marginTop: spacing.xs },
+  addressIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
-  addressButtonOff: { opacity: 0.4 },
-  addressButtonPressed: { opacity: 0.8 },
-  addressButtonText: { ...typography.captionMedium, color: t.primary },
+  addressIconLocate: { backgroundColor: t.primarySoftBg },
+  addressIconClear: { backgroundColor: t.surface, borderWidth: 1, borderColor: t.border },
+  addressIconPressed: { opacity: 0.7 },
 
   // A two-column grid of equal tiles with a tick circle - the same as the quotation form.
   chips: {
@@ -918,45 +917,44 @@ export function CrmNewCommercialLeadScreen({
                   maxLength={255}
                   multiline
                   testID="commercial-address"
+                  accessory={
+                    <View style={styles.addressIcons}>
+                      <Pressable
+                        onPress={() => readLocation(true)}
+                        disabled={location.status === 'locating' || findingAddress}
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Use my current location"
+                        style={({ pressed }) => [styles.addressIcon, styles.addressIconLocate, pressed && styles.addressIconPressed]}
+                        testID="commercial-location-retry"
+                      >
+                        {location.status === 'locating' || findingAddress ? (
+                          <ActivityIndicator size="small" color={theme.primary} />
+                        ) : (
+                          <LocateIcon size={17} color={theme.primary} />
+                        )}
+                      </Pressable>
+                      {!!values.address && (
+                        <Pressable
+                          onPress={() => setField('address', '')}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear the address"
+                          style={({ pressed }) => [styles.addressIcon, styles.addressIconClear, pressed && styles.addressIconPressed]}
+                          testID="commercial-address-clear"
+                        >
+                          <CloseIcon size={14} color={theme.textSecondary} />
+                        </Pressable>
+                      )}
+                    </View>
+                  }
                 />
-                <View style={styles.addressActions}>
-                  <Pressable
-                    onPress={() => setField('address', '')}
-                    disabled={!values.address}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear the address"
-                    style={({ pressed }) => [styles.addressButton, !values.address && styles.addressButtonOff, pressed && styles.addressButtonPressed]}
-                    testID="commercial-address-clear"
-                  >
-                    <Text style={styles.addressButtonText}>Clear</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => readLocation(true)}
-                    disabled={location.status === 'locating' || findingAddress}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel="Read the address of my current location"
-                    style={({ pressed }) => [
-                      styles.addressButton,
-                      (location.status === 'locating' || findingAddress) && styles.addressButtonOff,
-                      pressed && styles.addressButtonPressed,
-                    ]}
-                    testID="commercial-location-retry"
-                  >
-                    {location.status === 'locating' || findingAddress ? (
-                      <ActivityIndicator size="small" color={theme.primary} />
-                    ) : (
-                      <Text style={styles.addressButtonText}>Refresh</Text>
-                    )}
-                  </Pressable>
-                </View>
               </View>
             </View>
 
             <View style={styles.section}>
               <SectionHeader
-                icon={<PhoneIcon size={20} color={theme.primary} />}
+                icon={<PhoneIcon size={20} color={theme.success} />}
                 title="Contact"
               />
               <CrmTextField
@@ -1052,7 +1050,7 @@ export function CrmNewCommercialLeadScreen({
 
             <View style={styles.section}>
               <SectionHeader
-                icon={<RupeeIcon size={20} color={theme.primary} />}
+                icon={<RupeeIcon size={20} color={theme.accent} />}
                 title="Lead Details"
               />
               {!!assign && !editing && (
@@ -1252,7 +1250,7 @@ export function CrmNewCommercialLeadScreen({
 
             <View style={styles.section}>
               <SectionHeader
-                icon={<CameraIcon size={20} color={theme.primary} />}
+                icon={<CameraIcon size={20} color={theme.warning} />}
                 title="Photos"
                 hint="Site or problem-area photos help the team quote"
               />
