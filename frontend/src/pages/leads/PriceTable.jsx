@@ -5,7 +5,7 @@
 
 import { FiMinus, FiPlus, FiTrash2 } from "react-icons/fi";
 import { money } from "./format";
-import { newPriceTable, priceTableTotal, resizePriceTable, TABLE_LIMITS } from "./priceTableData";
+import { DEFAULT_TABLE_TITLE, newPriceTable, priceTableTotal, resizePriceTable, TABLE_LIMITS } from "./priceTableData";
 import { Button } from "./ui";
 
 function Stepper({ label, value, min, max, onChange }) {
@@ -39,10 +39,15 @@ export function PriceTableEditor({ table, onChange }) {
   }
   const rows = table.rows.length;
   const cols = table.rows[0].length;
-  const set = (r, c, v) => onChange({ rows: table.rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)) });
+  const set = (r, c, v) => onChange({ ...table, rows: table.rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)) });
   const total = priceTableTotal(table);
   return (
     <div className="lm-ptable">
+      {/* The heading printed above the table on the quotation. */}
+      <label className="lm-field wide">
+        <span className="lm-label">Table heading</span>
+        <input className="lm-input" value={table.title ?? ""} maxLength={80} placeholder={DEFAULT_TABLE_TITLE} onChange={(e) => onChange({ ...table, title: e.target.value })} />
+      </label>
       <div className="lm-ptable-bar">
         <Stepper label="Rows" value={rows} min={TABLE_LIMITS.minRows} max={TABLE_LIMITS.maxRows} onChange={(n) => onChange(resizePriceTable(table, n, cols))} />
         <Stepper label="Columns" value={cols} min={TABLE_LIMITS.minCols} max={TABLE_LIMITS.maxCols} onChange={(n) => onChange(resizePriceTable(table, rows, n))} />

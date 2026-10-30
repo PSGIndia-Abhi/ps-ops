@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../../auth/AuthContext';
 import { displayRole, useRawRole } from '../../auth/role';
@@ -84,10 +85,10 @@ export function LeadProfileScreen() {
   const branch = user?.branch_name || user?.branch?.name || '';
 
   const confirmSignOut = () =>
-    Alert.alert('Sign out?', 'You will need your email and password to sign in again.', [
+    appAlert('Sign out?', 'You will need your email and password to sign in again.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: logout },
-    ]);
+    ], { Icon: LogoutIcon });
 
   return (
     <LeadScreen edges={['top', 'bottom']}>

@@ -96,7 +96,9 @@ function priceTable(t) {
   const total = Math.round((sum > 0 ? sum : toNumber(last[cols - 1]) || 0) * 100) / 100;
   if (total <= 0) throw new QuotationInputError("Enter the amounts in the last column of the price table");
   if (total > 99999999) throw new QuotationInputError("The price table total is too large");
-  return { header: clean[0], body, totalLabel: last[0] || "Total", total };
+  // The heading printed above the table (older tables have none: the default).
+  const title = text(t.title, "price table heading", 80) || "Price details";
+  return { title, header: clean[0], body, totalLabel: last[0] || "Total", total };
 }
 
 /**
@@ -548,68 +550,112 @@ function draw(doc, q, meta) {
     }
   });
 
-  // the salesperson's own price table: headings bold on a grey row, ruled lines, the total row
-  // bold at the bottom; the amount column on the right. A long table runs on with its headings.
+  // the salesperson's own price table, as a card like the service cards above it: a numbered navy badge with
+  // the table's heading and its total on a pill, then the table - white box, grey heading row, ruled
+  // lines, the total row tinted at the bottom, the amount column on the right. Empty rows are left
+  // out. A long table runs on to the next page with its heading row again.
   if (q.priceTable) {
     const t = q.priceTable;
     const cols = t.header.length;
+    const HEAD_H = 60; // the card's heading band (badge, title, pill)
+    const tx1 = L + 10;
+    const tx2 = R - 10;
+    const TW = tx2 - tx1;
     const weights = t.header.map((_, k) => (k === 0 && cols > 2 ? 1.6 : 1));
     const wsum = weights.reduce((a, w) => a + w, 0);
-    const cw = weights.map((w) => (w / wsum) * W);
+    const cw = weights.map((w) => (w / wsum) * TW);
     const cx = [];
-    cw.reduce((x, w) => (cx.push(x), x + w), L);
+    cw.reduce((x, w) => (cx.push(x), x + w), tx1);
+    const body = t.body.filter((cells) => cells.some((c) => String(c || "").trim()));
     const rows = [
-      { kind: "head", cells: t.header },
-      ...t.body.map((cells) => ({ kind: "body", cells })),
+      { kind: "head", cells: t.header.map((h) => String(h || "").toUpperCase()) },
+      ...body.map((cells) => ({ kind: "body", cells })),
       { kind: "total", cells: [t.totalLabel, ...Array(cols - 2).fill(""), rupees(t.total)] },
     ];
-    const fontOf = (kind) => (kind === "body" ? "SB" : "B");
-    const sizeOf = (kind) => (kind === "head" ? 8.6 : 9.4);
+    const style = {
+      head: { name: "B", size: 7.6, spacing: 0.9 },
+      body: { name: "SB", size: 9.4, spacing: 0 },
+      total: { name: "XB", size: 10.5, spacing: 0 },
+    };
     const heightOf = (r) => {
-      font(fontOf(r.kind), sizeOf(r.kind));
-      return Math.max(...r.cells.map((v, k) => doc.heightOfString(v || " ", { width: cw[k] - 18, lineGap: 1 }))) + 16;
+      const st = style[r.kind];
+      font(st.name, st.size);
+      const h = Math.max(...r.cells.map((v, k) => doc.heightOfString(v || " ", { width: cw[k] - 18, lineGap: 1, characterSpacing: st.spacing })));
+      return h + (r.kind === "head" ? 16 : 18);
     };
     const heights = rows.map(heightOf);
     const whole = heights.reduce((a, h) => a + h, 0);
-    if (whole <= BOTTOM - 140 && y + whole + 8 > BOTTOM) newPage();
+    // Keep the heading band with at least the first rows; move the whole card on when it fits a page.
+    if (y + HEAD_H + heights[0] + (heights[1] || 0) + 20 > BOTTOM) newPage();
+    else if (HEAD_H + whole + 14 <= BOTTOM - 140 && y + HEAD_H + whole + 14 > BOTTOM) newPage();
+
     const rule = "#d5dbe5";
     let i = 0;
+    let first = true;
     while (i < rows.length) {
-      // the rows that fit on this page; after a page break the headings come again
+      const headH = first ? HEAD_H : 14;
+      // the rows that fit on this page; after a page break the heading row comes again
       const seg = i === 0 ? [] : [0];
       let used = i === 0 ? 0 : heights[0];
       let j = i;
-      while (j < rows.length && y + used + heights[j] <= BOTTOM) used += heights[j], seg.push(j++);
+      while (j < rows.length && y + headH + used + heights[j] + 14 <= BOTTOM) used += heights[j], seg.push(j++);
       if (j === i) {
         newPage();
         continue;
       }
       const top = y;
-      doc.roundedRect(L, top, W, used, 8).fill("#ffffff");
+      const segH = headH + used + 14;
+      doc.roundedRect(L, top, W, segH, 12).fillAndStroke(C.card, C.line);
+
+      if (first) {
+        // numbered on from the service cards (01, 02 ... then the table), whatever its heading says;
+        // the total on a navy pill
+        doc.roundedRect(L + 16, top + 15, 30, 30, 8).fill(C.navy);
+        font("XB", 10.5, C.sky).text(pad2(q.services.length + 1), L + 16, top + 25, { width: 30, align: "center", lineBreak: false });
+        font("XB", 14, C.ink).text(t.title || "Price details", L + 58, top + 22, { width: W - 250, lineBreak: false });
+        const pillText = `Total ${rupees(t.total)}`;
+        font("B", 9.6);
+        const pillW = doc.widthOfString(pillText) + 28;
+        doc.roundedRect(R - 16 - pillW, top + 17.5, pillW, 25, 12.5).fill(C.navy);
+        font("B", 9.6, "#ffffff").text(pillText, R - 16 - pillW, top + 25, { width: pillW, align: "center", lineBreak: false });
+      }
+
+      const tTop = top + headH;
+      const tBottom = tTop + used;
+      doc.roundedRect(tx1, tTop, TW, used, 6).fill("#ffffff");
       doc.save();
-      doc.roundedRect(L, top, W, used, 8).clip();
-      let ry = top;
+      doc.roundedRect(tx1, tTop, TW, used, 6).clip();
+      let ry = tTop;
       seg.forEach((k) => {
         const r = rows[k];
-        if (r.kind === "head") doc.rect(L, ry, W, heights[k]).fill("#e4e9f1");
-        if (r.kind === "total") doc.rect(L, ry, W, heights[k]).fill(C.pillSoft);
+        if (r.kind === "head") doc.rect(tx1, ry, TW, heights[k]).fill("#e4e9f1");
+        if (r.kind === "total") doc.rect(tx1, ry, TW, heights[k]).fill(C.pillSoft);
         ry += heights[k];
       });
       doc.restore();
-      ry = top;
+      ry = tTop;
       seg.forEach((k, n) => {
         const r = rows[k];
-        if (n > 0) hLine(ry, rule, 0.7, L, R);
+        const st = style[r.kind];
+        if (n > 0) hLine(ry, rule, 0.7, tx1, tx2);
         r.cells.forEach((v, c) => {
           const last = c === cols - 1;
-          font(fontOf(r.kind), sizeOf(r.kind), C.ink).text(v || "", cx[c] + 9, ry + 8, { width: cw[c] - 18, align: last && cols > 1 ? "right" : "left", lineGap: 1 });
+          const color = r.kind === "total" && last ? C.navy : C.ink;
+          font(st.name, st.size, color).text(v || "", cx[c] + 9, ry + (r.kind === "head" ? 8 : 9), {
+            width: cw[c] - 18,
+            align: last && cols > 1 ? "right" : "left",
+            lineGap: 1,
+            characterSpacing: st.spacing,
+          });
         });
         ry += heights[k];
       });
-      for (let c = 1; c < cols; c++) doc.moveTo(cx[c], top).lineTo(cx[c], top + used).lineWidth(0.7).strokeColor(rule).stroke();
-      doc.roundedRect(L, top, W, used, 8).lineWidth(0.8).strokeColor(rule).stroke();
-      y = top + used + 12;
+      for (let c = 1; c < cols; c++) doc.moveTo(cx[c], tTop).lineTo(cx[c], tBottom).lineWidth(0.7).strokeColor(rule).stroke();
+      doc.roundedRect(tx1, tTop, TW, used, 6).lineWidth(0.8).strokeColor(rule).stroke();
+
+      y = top + segH + 12;
       i = j;
+      first = false;
       if (i < rows.length) newPage();
     }
   }

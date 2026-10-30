@@ -13,7 +13,7 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
 import type { Person, PipelineLead } from '../types';
-import { ActiveFilterChips, ANY_TIME, FilterButton, LeadFilterSheet, whenDay, whenLabel, type WhenFilter, type WhoOption } from '../LeadFilterSheet';
+import { ActiveFilterChips, ANY_TIME, FilterButton, LeadFilterSheet, whenDay, whenLabel, whenRange, type WhenFilter, type WhoOption } from '../LeadFilterSheet';
 import { LeadRow, personTone, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
@@ -101,8 +101,8 @@ export function LeadListScreen() {
         else if (w === 'none') out = out.filter((l) => !l.salesEmployeeId);
         else out = out.filter((l) => l.salesEmployeeId === w);
       }
-      const day = whenDay(wh);
-      return day ? out.filter((l) => addedOn(l) === day) : out;
+      const range = whenRange(wh);
+      return range ? out.filter((l) => addedOn(l) >= range.from && addedOn(l) <= range.to) : out;
     },
     [manager, myId],
   );
@@ -123,7 +123,7 @@ export function LeadListScreen() {
   ];
   const activeFilters = [
     ...(manager && who !== 'all' ? [{ key: 'who', label: whoLabel, onRemove: () => setWho('all') }] : []),
-    ...(when.kind !== 'any' ? [{ key: 'when', label: `Added ${whenLabel(when) === 'Today' || whenLabel(when) === 'Yesterday' ? whenLabel(when).toLowerCase() : `on ${whenLabel(when)}`}`, onRemove: () => setWhen(ANY_TIME) }] : []),
+    ...(when.kind !== 'any' ? [{ key: 'when', label: `Added ${whenLabel(when) === 'Today' || whenLabel(when) === 'Yesterday' ? whenLabel(when).toLowerCase() : whenDay(when) ? `on ${whenLabel(when)}` : whenLabel(when)}`, onRemove: () => setWhen(ANY_TIME) }] : []),
   ];
 
   const counts = useMemo(() => countByGroup(data ?? []), [data]);
@@ -191,7 +191,7 @@ export function LeadListScreen() {
           ) : error ? undefined : (
             <CrmEmptyState
               title="No leads here"
-              subtitle={query ? 'Nothing matches your search.' : onDay ? `No leads were added on ${onDay === todayStr() ? 'today' : fmtDateShort(onDay)}.` : 'There are no leads at this stage.'}
+              subtitle={query ? 'Nothing matches your search.' : onDay ? `No leads were added on ${onDay === todayStr() ? 'today' : fmtDateShort(onDay)}.` : when.kind === 'range' ? `No leads were added ${whenLabel(when)}.` : 'There are no leads at this stage.'}
             />
           )
         }

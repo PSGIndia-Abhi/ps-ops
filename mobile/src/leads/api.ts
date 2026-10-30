@@ -676,6 +676,9 @@ export async function assignLead(id: string, userId: number): Promise<void> {
 export const roleName = (role?: string) =>
   (role || '').toLowerCase() === 'telecaller' ? 'Telecaller' : (role || '').toLowerCase() === 'sales_manager' ? 'Sales Manager' : role || '';
 
+/** Sales managers, and the Managing Director / Personal Assistant who work leads as sales managers. */
+export const isManagerRole = (role?: string) => ['sales_manager', 'Managing Director', 'Personal Assistant'].includes(role || '');
+
 /** GET /api/crm/sales-employees - who a meeting can be assigned to. */
 export async function salesEmployees(): Promise<Person[]> {
   const { data } = await httpClient.get<Row[]>('/api/crm/sales-employees');

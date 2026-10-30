@@ -5,7 +5,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { crmApi } from '../../api';
 import { useLeads } from '../../crm/LeadsContext';
 import { CommercialLeadDetail } from '../../crm/screens/CrmCommercialLeadDetail';
+import { GlossyBadge } from '../../components/GlossyBadge';
 import { BellIcon, CalendarIcon, ChevronRightIcon, PersonIcon } from '../../components/icons';
+import { toneColors } from '../../crm/ui/StatusBadge';
+import { initials } from '../../tasks/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
@@ -13,22 +16,23 @@ import * as api from '../api';
 import type { LeadRootStackParamList, LeadStackParamList } from '../navigation';
 import { SiteVisitsCard } from '../SiteVisitsCard';
 import { leadActions } from '../stage';
-import { meetingWhen, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { meetingWhen, personTone, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, gap: spacing.md },
   remind: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: spacing.sm,
     backgroundColor: t.surface,
     borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: t.border,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
     marginBottom: spacing.md,
     ...t.cardShadow,
   },
+  row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, minHeight: 68, paddingVertical: spacing.sm },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: t.border },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatarText: { ...typography.bodyMedium, fontWeight: '700' as const },
   meet: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -42,10 +46,9 @@ const factory = (t: CrmTheme) => ({
   meetKicker: { ...typography.overline, color: t.accentText },
   meetWhen: { ...typography.bodyMedium, color: t.textPrimary, marginTop: 1 },
   meetOpen: { ...typography.bodyMedium, color: t.accent },
-  remindIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   remindText: { flex: 1 },
   remindTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  assignBtn: { minHeight: 38, paddingHorizontal: spacing.md, borderRadius: radii.pill, borderWidth: 1, borderColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  assignBtn: { minHeight: 34, paddingHorizontal: spacing.md, borderRadius: radii.pill, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   assignBtnText: { ...typography.captionMedium, color: t.primary },
   remindSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
 });
@@ -109,13 +112,11 @@ export function LeadDetailScreen() {
   const closed = ['WON', 'CONVERTED', 'NOT_GENUINE', 'LOST', 'CANCELLED'].includes(pipeline.stage);
   const holderId = pipeline.salesEmployeeId || pipeline.telecallerId;
   const holder = holderId ? people.find((p) => String(p.id) === String(holderId)) : undefined;
-  const holderText = !holderId
-    ? 'Not assigned yet'
+  const holderTone = !holderId
+    ? { fg: theme.textMuted, bg: theme.surfaceAlt }
     : holderId === myId
-    ? 'You'
-    : holder
-    ? `${holder.name} · ${api.roleName(holder.role)}`
-    : 'Someone else';
+    ? { fg: theme.primary, bg: theme.primarySoftBg }
+    : toneColors(theme, personTone(holder?.name ?? ''));
   const canFollowUp = leadActions(pipeline, persona, myId).includes('followUp');
   // Details can be changed (another number, address...) until the lead becomes a customer - by the
   // sales manager or whoever added it or holds it. The server checks the same.
@@ -161,42 +162,52 @@ export function LeadDetailScreen() {
       showPhotos={pipeline.createdById === myId}
       extra={
         <>
-          {manager && (
-            <View style={styles.remind}>
-              <View style={styles.remindIcon}>
-                <PersonIcon size={19} color={theme.primary} />
+          {/* Who has it (managers) and a reminder - one card, two rows. */}
+          <View style={styles.remind}>
+            {manager && (
+              <View style={[styles.row, styles.rowDivider]}>
+                <View style={[styles.avatar, { backgroundColor: holderTone.bg }]}>
+                  {holderId ? (
+                    <Text style={[styles.avatarText, { color: holderTone.fg }]}>{holderId === myId ? 'ME' : initials(holder?.name ?? '?')}</Text>
+                  ) : (
+                    <PersonIcon size={18} color={theme.textMuted} />
+                  )}
+                </View>
+                <View style={styles.remindText}>
+                  <Text style={styles.remindTitle} numberOfLines={1}>
+                    {!holderId ? 'Not assigned yet' : holderId === myId ? 'You' : holder?.name ?? 'Someone else'}
+                  </Text>
+                  <Text style={styles.remindSub} numberOfLines={1}>
+                    {holder && holderId !== myId ? `Assigned · ${api.roleName(holder.role)}` : 'Assigned to'}
+                  </Text>
+                </View>
+                {!closed && (
+                  <Pressable
+                    onPress={() =>
+                      navigation.navigate('LeadAssign', { leadId, name, salesId: pipeline.salesEmployeeId, telecallerId: pipeline.telecallerId })
+                    }
+                    accessibilityRole="button"
+                    hitSlop={6}
+                    style={({ pressed }) => [styles.assignBtn, pressed && { opacity: 0.85 }]}
+                  >
+                    <Text style={styles.assignBtnText}>{holderId ? 'Reassign' : 'Assign'}</Text>
+                  </Pressable>
+                )}
               </View>
+            )}
+            <Pressable
+              onPress={() => navigation.navigate('LeadReminderEdit', { leadId, leadName: name })}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.row, pressed && { opacity: 0.8 }]}
+            >
+              <GlossyBadge color={theme.warning} size={40} icon={<BellIcon size={18} color="#fff" />} />
               <View style={styles.remindText}>
-                <Text style={styles.remindSub}>Assigned to</Text>
-                <Text style={styles.remindTitle} numberOfLines={1}>{holderText}</Text>
+                <Text style={styles.remindTitle}>Set a reminder</Text>
+                <Text style={styles.remindSub}>Rings at the time you choose</Text>
               </View>
-              {!closed && (
-                <Pressable
-                  onPress={() =>
-                    navigation.navigate('LeadAssign', { leadId, name, salesId: pipeline.salesEmployeeId, telecallerId: pipeline.telecallerId })
-                  }
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.assignBtn, pressed && { opacity: 0.85 }]}
-                >
-                  <Text style={styles.assignBtnText}>{holderId ? 'Reassign' : 'Assign'}</Text>
-                </Pressable>
-              )}
-            </View>
-          )}
-          <Pressable
-            onPress={() => navigation.navigate('LeadReminderEdit', { leadId, leadName: name })}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.remind, pressed && { opacity: 0.9 }]}
-          >
-            <View style={styles.remindIcon}>
-              <BellIcon size={19} color={theme.primary} />
-            </View>
-            <View style={styles.remindText}>
-              <Text style={styles.remindTitle}>Set a reminder</Text>
-              <Text style={styles.remindSub}>Your phone rings at the time you choose</Text>
-            </View>
-            <ChevronRightIcon size={16} color={theme.textMuted} />
-          </Pressable>
+              <ChevronRightIcon size={16} color={theme.textMuted} />
+            </Pressable>
+          </View>
           <SiteVisitsCard visits={visits} onOpen={(meetingId) => navigation.navigate('LeadMeeting', { meetingId })} />
         </>
       }

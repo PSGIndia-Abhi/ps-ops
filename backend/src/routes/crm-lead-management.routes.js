@@ -5,7 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
-  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
+  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
   INDUSTRY_TYPES, resolveLeadServices,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
@@ -284,8 +284,8 @@ router.post("/leads/:id/assign-telecaller", auth, requirePermission("CRM_VIEW_LE
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/crm/lead-assignees -- who the sales manager can give a lead to: active sales executives
-// and sales managers (LEAD_ASSIGNEE_ROLES), with their role.
+// GET /api/crm/lead-assignees -- who the sales manager can give a lead to: active sales executives,
+// sales managers and the MD / PA (who work as sales managers) - LEAD_OWNER_ROLES - with their role.
 // POST /api/crm/leads/:id/assign { user_id } -- give the lead to that person (sales manager / admin
 // only). A telecaller gets it to verify; a sales person to work (see assignmentFor). The person it
 // left stops seeing it unless they added it; the change is in the lead's history and they are told.
@@ -305,7 +305,7 @@ router.get("/lead-assignees", auth, requirePermission("CRM_VIEW_LEAD"), async (r
          JOIN permissions p ON p.id = rp.permission_id
         WHERE u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD' AND r.name IN (?)
         ORDER BY u.name ASC`,
-      [LEAD_ASSIGNEE_ROLES]
+      [LEAD_OWNER_ROLES]
     );
     res.json(rows);
   } catch (err) {

@@ -11,7 +11,10 @@ import { radii, spacing, typography } from '../theme';
  * first and, in the last column, the amount, which becomes the quotation's one package price.
  * The same shape as the web builder's (frontend/src/pages/leads/priceTableData.js).
  */
-export type PriceTable = { rows: string[][] };
+/** `title`: the heading printed above the table on the quotation. */
+export type PriceTable = { rows: string[][]; title?: string };
+
+export const DEFAULT_TABLE_TITLE = 'Price details';
 
 export const TABLE_LIMITS = { minRows: 3, maxRows: 20, minCols: 2, maxCols: 6 };
 
@@ -22,6 +25,7 @@ export function newPriceTable(rows = 4, cols = 3): PriceTable {
       : ['Service', 'Frequency', ...Array(cols - 3).fill(''), 'Amount'];
   const total = ['Total', ...Array(cols - 1).fill('')];
   return {
+    title: DEFAULT_TABLE_TITLE,
     rows: [
       head,
       ...Array.from({ length: rows - 2 }, () => Array(cols).fill('')),
@@ -45,10 +49,10 @@ export function priceTableTotal(table: PriceTable | null): number {
 }
 
 /** A saved quotation's table (as the server keeps it) -> the editor's rows, total row last. */
-export function priceTableFromContent(t: { header: string[]; body?: string[][]; totalLabel?: string; total?: number } | null | undefined): PriceTable | null {
+export function priceTableFromContent(t: { title?: string; header: string[]; body?: string[][]; totalLabel?: string; total?: number } | null | undefined): PriceTable | null {
   if (!t?.header?.length) return null;
   const cols = t.header.length;
-  return { rows: [t.header, ...(t.body || []), [t.totalLabel || 'Total', ...Array(Math.max(0, cols - 2)).fill(''), String(t.total ?? '')]] };
+  return { title: t.title ?? '', rows: [t.header, ...(t.body || []), [t.totalLabel || 'Total', ...Array(Math.max(0, cols - 2)).fill(''), String(t.total ?? '')]] };
 }
 
 /** The table as it is sent: trimmed, with the total row's amount filled in from the sum. */
@@ -56,7 +60,7 @@ export function priceTableForSave(table: PriceTable): PriceTable {
   const rows = table.rows.map(r => r.map(c => c.trim()));
   const last = rows[rows.length - 1];
   last[last.length - 1] = String(priceTableTotal(table) || '');
-  return { rows };
+  return { title: (table.title ?? '').trim(), rows };
 }
 
 /** The table at a new size: cells kept where they still fit; the total row keeps its label and amount. */
@@ -80,6 +84,7 @@ function resize(table: PriceTable, rows: number, cols: number): PriceTable {
           ),
         ];
   return {
+    title: table.title,
     rows: [
       fit(head),
       ...nextBody.map(fit),
@@ -158,6 +163,16 @@ const factory = (t: CrmTheme) => ({
     lineHeight: 20,
   },
   disabled: { opacity: 0.35 },
+  titleLabel: { ...typography.captionMedium, color: t.textSecondary, marginBottom: 4 },
+  titleInput: {
+    ...typography.bodyMedium,
+    color: t.textPrimary,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+    marginBottom: spacing.sm,
+  },
   // The total cell: a small AUTO tag above the amount, so the amount keeps the full width.
   autoCell: { alignItems: 'flex-end' as const, justifyContent: 'center' as const, gap: 1, paddingHorizontal: spacing.sm, paddingVertical: 4, minHeight: 44 },
   autoTag: { ...typography.caption, fontSize: 9, fontWeight: '700' as const, color: t.primary, backgroundColor: t.surface, paddingHorizontal: 5, borderRadius: 6, overflow: 'hidden' as const },
@@ -279,6 +294,7 @@ export function PriceTableEditor({
   const cols = table.rows[0].length;
   const set = (r: number, c: number, v: string) =>
     onChange({
+      ...table,
       rows: table.rows.map((row, i) =>
         i === r ? row.map((x, j) => (j === c ? v : x)) : row,
       ),
@@ -287,6 +303,16 @@ export function PriceTableEditor({
   const cellW = Math.max(MIN_CELL, width ? (width - 2) / cols : MIN_CELL);
   return (
     <View onLayout={e => setWidth(e.nativeEvent.layout.width)}>
+      {/* The heading printed above the table on the quotation. */}
+      <Text style={styles.titleLabel}>Table heading</Text>
+      <TextInput
+        value={table.title ?? ''}
+        onChangeText={v => onChange({ ...table, title: v })}
+        placeholder={DEFAULT_TABLE_TITLE}
+        placeholderTextColor={theme.textMuted}
+        maxLength={80}
+        style={styles.titleInput}
+      />
       <View style={styles.bar}>
         <Stepper
           label="Rows"

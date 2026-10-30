@@ -38,7 +38,7 @@ export type QuotationContent = {
   services: { name: string; plan: string; billing: Billing; price: number | null; rows: TreatmentRow[] }[];
   pricing: { mode: 'PER_SERVICE' } | { mode: 'PACKAGE'; amount: number; billing: Billing; planLabel: string; description: string };
   /** Optional price table in the client's format (headings first, total row last). */
-  priceTable: { rows: string[][] } | null;
+  priceTable: { rows: string[][]; title?: string } | null;
   /** The price is for one outlet. */
   perOutlet: boolean;
   /** One-time or AMC - asked when saving; shown on the lead, not on the PDF. */
@@ -78,7 +78,7 @@ export async function getQuoteMaster(): Promise<QuoteMaster> {
 
 /** What a saved quotation was made from (GET .../content) - to open it again for Edit / Duplicate. */
 export type SavedQuotationContent = Partial<Omit<QuotationContent, 'priceTable'>> & {
-  priceTable?: { header: string[]; body?: string[][]; totalLabel?: string; total?: number } | null;
+  priceTable?: { title?: string; header: string[]; body?: string[][]; totalLabel?: string; total?: number } | null;
   totals?: { discount?: number };
 };
 

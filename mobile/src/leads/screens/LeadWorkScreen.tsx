@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -181,9 +182,6 @@ const factory = (t: CrmTheme) => ({
   },
 
   // Customer + quotations
-  infoRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, paddingVertical: 6 },
-  infoLabel: { ...typography.caption, color: t.textMuted },
-  infoValue: { ...typography.bodyMedium, color: t.textPrimary },
   // Quotations: one small card each - PDF tile, file name, amount, One-time/AMC and status chips
   quotesHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginBottom: spacing.sm },
   quotesTitle: { marginBottom: 0 },
@@ -363,10 +361,10 @@ export function LeadWorkScreen() {
       case 'claim':
         return runInline(action, () => api.claimLead(lead.id, myIdNum), 'This lead is now yours to verify.');
       case 'genuine':
-        return Alert.alert('Mark as genuine?', `${name} will be qualified and can be given to the sales team.`, [
+        return appAlert('Mark as genuine?', `${name} will be qualified and can be given to the sales team.`, [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Mark genuine', onPress: () => runInline(action, () => api.qualifyLead(lead.id, 'GENUINE'), 'Lead marked as genuine.') },
-        ]);
+        ], { tone: 'success', Icon: CheckCircleIcon });
       case 'needInfo':
         return runInline(action, () => api.qualifyLead(lead.id, 'NEEDS_INFO'), 'Marked as needing more information.');
       case 'call':
@@ -595,24 +593,6 @@ export function LeadWorkScreen() {
                   </View>
                 )}
               </>
-            )}
-
-            {data?.conversion && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>CUSTOMER</Text>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Customer</Text>
-                  <Text style={styles.infoValue}>{data.conversion.companyName}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Customer ID</Text>
-                  <Text style={styles.infoValue}>{data.conversion.companyId}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Converted by</Text>
-                  <Text style={styles.infoValue}>{data.conversion.convertedBy}</Text>
-                </View>
-              </View>
             )}
 
             {data && data.quotations.length > 0 && (

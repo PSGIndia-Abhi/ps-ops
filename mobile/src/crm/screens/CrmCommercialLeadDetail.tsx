@@ -1,11 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { GlossyBadge } from '../../components/GlossyBadge';
 import {
   BriefcaseIcon,
   ChevronRightIcon,
   ClockIcon,
+  DocumentIcon,
   EmailIcon,
   PersonIcon,
   PhoneIcon,
@@ -29,7 +31,6 @@ import {
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
-import { PrimaryButton } from '../ui/PrimaryButton';
 import { LeadStatusBadge } from '../ui/StatusBadge';
 import { TopBar } from '../ui/TopBar';
 
@@ -96,6 +97,30 @@ const factory = (t: CrmTheme) => ({
   actionRow: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg, marginBottom: spacing.lg },
   actionMain: { flex: 1.4 },
   actionSide: { flex: 1 },
+  // Manage lead (filled, arrow on the right) and Follow-up (soft blue)
+  manageBtn: {
+    minHeight: 54,
+    borderRadius: radii.lg,
+    backgroundColor: t.primary,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.sm,
+    ...t.raisedShadow,
+  },
+  manageText: { ...typography.button, color: '#fff' },
+  manageArrow: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  followBtn: {
+    minHeight: 54,
+    borderRadius: radii.lg,
+    backgroundColor: t.primarySoftBg,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 6,
+  },
+  followText: { ...typography.button, color: t.primary },
+  btnPressed: { opacity: 0.85 },
   spacer: { height: spacing.lg },
 
   card: {
@@ -111,9 +136,9 @@ const factory = (t: CrmTheme) => ({
   cardTitle: { ...typography.overline, color: t.textMuted, marginTop: spacing.xs, marginBottom: spacing.xs },
   subBlock: { borderTopWidth: 1, borderTopColor: t.border, paddingTop: spacing.sm, marginTop: spacing.xs, paddingBottom: spacing.sm },
   subTitle: { ...typography.caption, color: t.textMuted, marginBottom: spacing.xs },
-  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, minHeight: 48 },
+  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, minHeight: 60 },
   foldText: { flex: 1 },
-  foldTitle: { marginBottom: 0 },
+  foldTitle: { ...typography.bodyMedium, color: t.textPrimary },
   foldHint: { ...typography.caption, color: t.textMuted, marginTop: 2 },
   foldChevron: { width: 32, height: 32, borderRadius: 16, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const, transform: [{ rotate: '90deg' }] },
   foldChevronOpen: { transform: [{ rotate: '-90deg' }] },
@@ -351,18 +376,14 @@ export function CommercialLeadDetail({
           <View style={styles.spacer} />
         ) : onFollowUp ? (
           <View style={styles.actionRow}>
-            <PrimaryButton label="Manage lead" onPress={manage} style={styles.actionMain} testID="manage-lead" />
-            <PrimaryButton
-              label="Follow-up"
-              variant="secondary"
-              icon={<ClockIcon size={17} color={theme.primary} />}
-              onPress={onFollowUp}
-              style={styles.actionSide}
-              testID="follow-up"
-            />
+            <ManageButton onPress={manage} style={styles.actionMain} />
+            <Pressable onPress={onFollowUp} accessibilityRole="button" testID="follow-up" style={({ pressed }) => [styles.followBtn, styles.actionSide, pressed && styles.btnPressed]}>
+              <ClockIcon size={18} color={theme.primary} />
+              <Text style={styles.followText}>Follow-up</Text>
+            </Pressable>
           </View>
         ) : (
-          <PrimaryButton label="Manage lead" onPress={manage} style={styles.manage} testID="manage-lead" />
+          <ManageButton onPress={manage} style={styles.manage} />
         )}
 
         {afterActions}
@@ -375,8 +396,9 @@ export function CommercialLeadDetail({
             accessibilityState={{ expanded: detailsOpen }}
             style={styles.foldHead}
           >
+            <GlossyBadge color={theme.accent} size={38} icon={<DocumentIcon size={17} color="#fff" />} />
             <View style={styles.foldText}>
-              <Text style={[styles.cardTitle, styles.foldTitle]}>DETAILS</Text>
+              <Text style={styles.foldTitle}>Details</Text>
               {!detailsOpen && (
                 <Text style={styles.foldHint} numberOfLines={1}>
                   {[...rows.map((r) => r.label), ...(lead.notes ? ['Requirement'] : []), ...(competitor ? ['Competitor'] : []), ...(showPhotos ? ['Photos'] : [])].join(' · ')}
@@ -429,5 +451,18 @@ export function CommercialLeadDetail({
 
       </ScrollView>
     </CrmScreen>
+  );
+}
+
+/** "Manage lead": filled, with an arrow on the right. */
+function ManageButton({ onPress, style }: { onPress: () => void; style?: StyleProp<ViewStyle> }) {
+  const { styles } = useCrmStyles(factory);
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" testID="manage-lead" style={({ pressed }) => [styles.manageBtn, style, pressed && styles.btnPressed]}>
+      <Text style={styles.manageText}>Manage lead</Text>
+      <View style={styles.manageArrow}>
+        <ChevronRightIcon size={15} color="#fff" />
+      </View>
+    </Pressable>
   );
 }

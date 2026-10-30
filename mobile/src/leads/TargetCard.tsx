@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, Text, TextInput, View } from 'react-native';
-import { ChevronRightIcon } from '../components/icons';
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ChartIcon, ChevronRightIcon } from '../components/icons';
 import { formatINR } from '../crm/format';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { MONTHS_LONG } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import * as api from './api';
+import { Badge, Card, NameChip } from './QuotationDialogs';
 import { errorMessage } from './ui';
 
 const factory = (t: CrmTheme) => ({
@@ -33,20 +34,29 @@ const factory = (t: CrmTheme) => ({
     minHeight: 36,
   },
   historyText: { ...typography.bodyMedium, color: t.primary },
-  // Set-target dialog (a month's target; only shown on the Month filter)
-  backdrop: { flex: 1, backgroundColor: t.overlay, justifyContent: 'center' as const, padding: spacing.lg },
-  dialog: { backgroundColor: t.surface, borderRadius: radii.xl, padding: spacing.lg, gap: spacing.sm },
-  dTitle: { ...typography.subtitle, color: t.textPrimary },
-  dSub: { ...typography.caption, color: t.textMuted },
-  input: { ...typography.title, color: t.textPrimary, borderWidth: 1, borderColor: t.border, borderRadius: radii.lg, paddingHorizontal: spacing.md, minHeight: 54 },
-  error: { ...typography.caption, color: t.danger },
-  actions: { flexDirection: 'row' as const, justifyContent: 'flex-end' as const, gap: spacing.sm, marginTop: spacing.xs },
-  btn: { minHeight: 44, paddingHorizontal: spacing.lg, borderRadius: radii.pill, justifyContent: 'center' as const },
-  btnGhost: { borderWidth: 1, borderColor: t.border },
-  btnPrimary: { backgroundColor: t.primary },
-  saving: { opacity: 0.6 },
+  // Set-target popup (a month's target; only shown on the Month filter), in the app's popup style
+  dTitle: { ...typography.title, color: t.textPrimary, textAlign: 'center' as const },
+  dSub: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.xs },
+  amountBox: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'stretch' as const,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: 58,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+  },
+  rupee: { ...typography.title, color: t.textMuted, marginRight: spacing.xs },
+  input: { ...typography.title, flex: 1, color: t.textPrimary, paddingVertical: 0 },
+  error: { ...typography.caption, color: t.danger, textAlign: 'center' as const, marginTop: spacing.xs },
+  actions: { flexDirection: 'row' as const, gap: spacing.sm, alignSelf: 'stretch' as const, marginTop: spacing.lg, marginBottom: spacing.xs },
+  btn: { flex: 1, minHeight: 50, borderRadius: radii.lg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  btnGhost: { borderWidth: 1.5, borderColor: t.border, backgroundColor: t.surface },
+  btnPrimary: { backgroundColor: t.success },
+  saving: { opacity: 0.7 },
   btnText: { ...typography.button, color: t.textPrimary },
-  btnTextPrimary: { ...typography.button, color: t.textOnPrimary },
+  btnTextPrimary: { ...typography.button, color: '#fff' },
 });
 
 export const monthName = (month: string) => {
@@ -170,31 +180,32 @@ function SetTargetDialog({ target, onClose, onSaved }: { target: api.SalesTarget
     }
   };
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.dialog} onPress={() => {}}>
-          <Text style={styles.dTitle}>Target for {target.name}</Text>
-          <Text style={styles.dSub}>{monthName(target.month)} - the amount of leads to convert. Leave empty to remove it.</Text>
-          <TextInput
-            value={amount}
-            onChangeText={(v) => setAmount(v.replace(/\D/g, '').slice(0, 10))}
-            keyboardType="number-pad"
-            placeholder="₹ 0"
-            placeholderTextColor={theme.textMuted}
-            style={styles.input}
-            autoFocus
-          />
-          {!!error && <Text style={styles.error}>{error}</Text>}
-          <View style={styles.actions}>
-            <Pressable onPress={onClose} style={[styles.btn, styles.btnGhost]} accessibilityRole="button">
-              <Text style={styles.btnText}>Cancel</Text>
-            </Pressable>
-            <Pressable onPress={save} disabled={saving} style={[styles.btn, styles.btnPrimary, saving && styles.saving]} accessibilityRole="button">
-              <Text style={styles.btnTextPrimary}>{saving ? 'Saving…' : 'Save target'}</Text>
-            </Pressable>
-          </View>
+    <Card onClose={saving ? () => undefined : onClose}>
+      <Badge color={theme.success} icon={<ChartIcon size={24} color="#fff" />} />
+      <Text style={styles.dTitle}>Set target</Text>
+      <NameChip name={`${target.name} · ${monthName(target.month)}`} />
+      <View style={styles.amountBox}>
+        <Text style={styles.rupee}>₹</Text>
+        <TextInput
+          value={amount}
+          onChangeText={(v) => setAmount(v.replace(/\D/g, '').slice(0, 10))}
+          keyboardType="number-pad"
+          placeholder="0"
+          placeholderTextColor={theme.textMuted}
+          style={styles.input}
+          autoFocus
+        />
+      </View>
+      <Text style={styles.dSub}>Leave empty to remove the target.</Text>
+      {!!error && <Text style={styles.error}>{error}</Text>}
+      <View style={styles.actions}>
+        <Pressable onPress={onClose} disabled={saving} style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && styles.saving]} accessibilityRole="button">
+          <Text style={styles.btnText}>Cancel</Text>
         </Pressable>
-      </Pressable>
-    </Modal>
+        <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.btn, styles.btnPrimary, (saving || pressed) && styles.saving]} accessibilityRole="button">
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnTextPrimary}>Save target</Text>}
+        </Pressable>
+      </View>
+    </Card>
   );
 }

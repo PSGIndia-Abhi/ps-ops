@@ -30,7 +30,7 @@ import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
-import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner } from "./leadsApi";
+import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner, MANAGER_ROLES } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -973,7 +973,7 @@ export function AssignLeadModal({ lead, onClose }) {
   const groups = people
     ? [
         { title: "Sales Executives", list: people.filter((p) => p.role === "Sales Executive") },
-        { title: "Sales Managers", list: people.filter((p) => p.role === "sales_manager" && p.id !== myId) },
+        { title: "Sales Managers", list: people.filter((p) => MANAGER_ROLES.includes(p.role) && p.id !== myId) },
       ].filter((g) => g.list.length > 0)
     : [];
 

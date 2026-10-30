@@ -403,6 +403,9 @@ export async function assignLead(leadId, userId) {
 /** "Sales Executive" / "Telecaller" / "Sales Manager" for an assignee's role. */
 export const assigneeRole = (role) => (role === "telecaller" ? "Telecaller" : role === "sales_manager" ? "Sales Manager" : role || "");
 
+/** Sales managers, and the Managing Director / Personal Assistant who work leads as sales managers. */
+export const MANAGER_ROLES = ["sales_manager", "Managing Director", "Personal Assistant"];
+
 /** The active sources from the lead source master - what the lead forms offer. */
 export const providerSources = () => state.leadSources.map((s) => s.name);
 

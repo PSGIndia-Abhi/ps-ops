@@ -35,9 +35,9 @@ const BASE_HEIGHT = 60;
 const BASE_PADDING_BOTTOM = 6;
 
 const homeIcon = salesTabIcon(HomeIcon);
-const leadsIcon = salesTabIcon(ClipboardListIcon);
-const paymentsIcon = salesTabIcon(WalletIcon);
-const moreIcon = salesTabIcon(MoreHorizontalIcon);
+const leadsIcon = salesTabIcon(ClipboardListIcon, 'accent');
+const paymentsIcon = salesTabIcon(WalletIcon, 'success');
+const moreIcon = salesTabIcon(MoreHorizontalIcon, 'info');
 
 /** The centre slot never shows a screen - tapping it opens the New Lead form instead. */
 function NewLeadPlaceholder() {

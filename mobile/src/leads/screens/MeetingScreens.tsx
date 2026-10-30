@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, Linking, Pressable, RefreshControl, Text, View } from 'react-native';
+import { FlatList, Linking, Pressable, RefreshControl, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -360,10 +361,10 @@ export function MeetingScreen() {
     setBusy(null);
     if (coords) return run('checkin', () => api.checkIn(meetingId, coords), 'Visit started - your location is recorded.');
     // Location is wanted for the visit record, but a phone with location off must not block the visit.
-    Alert.alert('Location not available', 'Your location could not be read. You can turn location on and try again, or start the visit without it.', [
+    appAlert('Location not available', 'Your location could not be read. You can turn location on and try again, or start the visit without it.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Start without location', onPress: () => run('checkin', () => api.checkIn(meetingId, null), 'Visit started without location.') },
-    ]);
+    ], { tone: 'warning', Icon: PinIcon });
   };
 
   /** Opens the form that follows from the chosen outcome, so the sales person is not left to find it. */

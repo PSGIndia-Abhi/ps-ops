@@ -28,7 +28,8 @@ import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { SelectField } from '../../crm/ui/SelectField';
-import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
+import { toneColors } from '../../crm/ui/StatusBadge';
+import { addDays, fmtDateShort, fmtTime, initials, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
 import { openFollowUpsFor } from '../../reminders-engine/personal';
@@ -41,7 +42,7 @@ import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { SOURCE_LABELS } from '../stage';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
-import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, PickField, RadioRow, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, personTone, PickField, RadioRow, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 /**
  * The small forms that act on one lead: log a call, schedule a meeting or a
@@ -55,6 +56,44 @@ const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
   section: { ...typography.overline, color: t.textMuted, marginBottom: spacing.xs },
   help: { ...typography.caption, color: t.textMuted, marginBottom: spacing.md },
+  // Assign lead: people to choose from
+  nowChip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'flex-start' as const,
+    gap: 6,
+    backgroundColor: t.primarySoftBg,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    marginBottom: spacing.md,
+  },
+  nowChipText: { ...typography.captionMedium, color: t.primary },
+  pickSection: { marginTop: spacing.md },
+  pick: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+    minHeight: 64,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radii.lg,
+    backgroundColor: t.surface,
+    borderWidth: 1.5,
+    borderColor: t.border,
+  },
+  pickOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  pickPressed: { opacity: 0.8 },
+  pickAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center' as const, justifyContent: 'center' as const },
+  pickInitials: { ...typography.bodyMedium, fontWeight: '700' as const },
+  pickBody: { flex: 1 },
+  pickName: { ...typography.bodyMedium, color: t.textPrimary },
+  pickTags: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 2 },
+  pickRole: { ...typography.caption, color: t.textMuted },
+  pickNow: { backgroundColor: t.successBg, borderRadius: radii.pill, paddingHorizontal: 6, paddingVertical: 1 },
+  pickNowText: { ...typography.overline, fontSize: 10, color: t.successText },
+  pickRing: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: t.border },
   switchRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, minHeight: 48 },
   switchLabel: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
   gap: { height: spacing.md },
@@ -658,7 +697,7 @@ export function LeadResidentialConvertScreen() {
  */
 export function LeadAssignScreen() {
   const { leadId, name, salesId, telecallerId } = useRoute<RouteProp<LeadStackParamList, 'LeadAssign'>>().params;
-  const { styles } = useCrmStyles(factory);
+  const { styles, theme } = useCrmStyles(factory);
   const { myIdNum } = useMe();
   const { saving, error, setError, submit } = useSubmit();
   const [people, setPeople] = useState<Person[] | null>(null);
@@ -684,7 +723,7 @@ export function LeadAssignScreen() {
   const groups: { title: string; list: Person[] }[] = people
     ? [
         { title: 'SALES EXECUTIVES', list: people.filter((p) => p.role === 'Sales Executive') },
-        { title: 'SALES MANAGERS', list: people.filter((p) => p.role === 'sales_manager' && p.id !== myIdNum) },
+        { title: 'SALES MANAGERS', list: people.filter((p) => api.isManagerRole(p.role) && p.id !== myIdNum) },
       ].filter((g) => g.list.length > 0)
     : [];
 
@@ -696,29 +735,62 @@ export function LeadAssignScreen() {
 
   return (
     <FormShell title="Assign lead" subtitle={name} error={error} submitLabel="Assign lead" onSubmit={onSave} saving={saving}>
-      <Text style={styles.help}>
-        {currentName ? `Now with ${currentName}. ` : 'Not assigned to anyone yet. '}Only the person you choose (and the managers) will see this lead.
-      </Text>
+      <View style={styles.nowChip}>
+        <UsersIcon size={14} color={theme.primary} />
+        <Text style={styles.nowChipText} numberOfLines={1}>
+          {currentName ? `Now with ${currentName}` : 'Not assigned yet'}
+        </Text>
+      </View>
       {!people ? (
         <CrmSkeleton height={180} radius={16} />
       ) : (
         <>
-          <Card style={styles.reviewCard}>
-            <RadioRow label={current === myIdNum ? 'Myself (now)' : 'Myself'} selected={picked === myIdNum} onPress={() => setPicked(myIdNum)} />
-          </Card>
+          <PersonPick name="Myself" me now={current === myIdNum} selected={picked === myIdNum} onPress={() => setPicked(myIdNum)} />
           {groups.map((g) => (
             <React.Fragment key={g.title}>
-              <Text style={styles.section}>{g.title}</Text>
-              <Card style={styles.reviewCard}>
-                {g.list.map((p) => (
-                  <RadioRow key={p.id} label={p.id === current ? `${p.name} (now)` : p.name} selected={picked === p.id} onPress={() => setPicked(p.id)} />
-                ))}
-              </Card>
+              <Text style={[styles.section, styles.pickSection]}>{g.title}</Text>
+              {g.list.map((p) => (
+                <PersonPick key={p.id} name={p.name} role={p.role} now={p.id === current} selected={picked === p.id} onPress={() => setPicked(p.id)} />
+              ))}
             </React.Fragment>
           ))}
         </>
       )}
     </FormShell>
+  );
+}
+
+/** One person to give the lead to: a coloured initials avatar, the name and role, a tick when chosen. */
+function PersonPick({ name, role, me, now, selected, onPress }: { name: string; role?: string; me?: boolean; now?: boolean; selected: boolean; onPress: () => void }) {
+  const { styles, theme } = useCrmStyles(factory);
+  const tone = me ? { fg: theme.primary, bg: theme.primarySoftBg } : toneColors(theme, personTone(name));
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      style={({ pressed }) => [styles.pick, selected && styles.pickOn, pressed && styles.pickPressed]}
+    >
+      <View style={[styles.pickAvatar, { backgroundColor: tone.bg }]}>
+        <Text style={[styles.pickInitials, { color: tone.fg }]}>{me ? 'ME' : initials(name)}</Text>
+      </View>
+      <View style={styles.pickBody}>
+        <Text style={styles.pickName} numberOfLines={1}>
+          {name}
+        </Text>
+        {(!!role || now) && (
+          <View style={styles.pickTags}>
+            {!!role && <Text style={styles.pickRole}>{role}</Text>}
+            {now && (
+              <View style={styles.pickNow}>
+                <Text style={styles.pickNowText}>NOW</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+      {selected ? <CheckCircleIcon size={24} color={theme.primary} /> : <View style={styles.pickRing} />}
+    </Pressable>
   );
 }
 

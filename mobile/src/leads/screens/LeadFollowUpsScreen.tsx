@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CheckCircleIcon, PhoneIcon, PlayIcon } from '../../components/icons';
@@ -162,7 +163,7 @@ export function LeadFollowUpsScreen() {
     navigation.navigate('LeadFollowUpHistory', { leadId: f.leadId, name: f.leadName, number: f.leadNumber, phone: f.phone, leadType: f.leadType });
   const call = (phone: string) => Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`).catch(() => {});
   const removeFollowUp = (f: api.FollowUpRow) =>
-    Alert.alert('Delete this follow-up?', `${f.leadName}${f.dueDate ? ` · ${fmtDateShort(f.dueDate)}${f.dueTime ? `, ${fmtTime(f.dueTime)}` : ''}` : ''}`, [
+    appAlert('Delete this follow-up?', `${f.leadName}${f.dueDate ? ` · ${fmtDateShort(f.dueDate)}${f.dueTime ? `, ${fmtTime(f.dueTime)}` : ''}` : ''}`, [
       { text: 'Keep', style: 'cancel' },
       {
         text: 'Delete',

@@ -7,6 +7,7 @@ import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/auth/AuthContext';
+import { AppAlertHost } from './src/leads/AppDialog';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { colors } from './src/theme';
 
@@ -20,6 +21,7 @@ function App() {
           <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
           <AuthProvider>
             <RootNavigator />
+            <AppAlertHost />
           </AuthProvider>
         </View>
       </SafeAreaProvider>

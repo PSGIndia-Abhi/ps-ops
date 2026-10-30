@@ -16,7 +16,6 @@ import {
   CloseIcon,
   DocumentIcon,
   PhoneIcon,
-  PersonIcon,
   PinIcon,
   SparkleIcon,
   TagIcon,
@@ -387,10 +386,12 @@ const leadRowFactory = (t: CrmTheme) => ({
   top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   company: { ...typography.bodyMedium, fontSize: 16, color: t.textPrimary, flex: 1 },
   amount: { ...typography.bodyMedium, color: t.textPrimary },
-  sub: { ...typography.body, color: t.textSecondary, flex: 1 },
   bottom: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm },
-  byRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginTop: 3 },
-  by: { ...typography.caption, color: t.textMuted, flex: 1 },
+  // Who added it: a small coloured initials avatar and their name.
+  by: { flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, minWidth: 0 },
+  byAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: 'center' as const, justifyContent: 'center' as const },
+  byInitials: { fontSize: 10.5, fontWeight: '700' as const },
+  byName: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
   chevron: { justifyContent: 'center' as const, paddingRight: spacing.sm },
   // The open arrow: a soft round button rather than a bare grey chevron.
   chevronDot: {
@@ -411,10 +412,11 @@ export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => 
   const { styles, theme } = useCrmStyles(leadRowFactory);
   const { myId } = useMe();
   const tone = (STAGE_META[lead.stage] ?? { tone: 'neutral' as Tone }).tone;
-  // Someone else's lead says who added it (a sales executive, telecaller or provider).
-  const by = lead.createdByName && lead.createdById !== myId ? lead.createdByName : '';
+  // Who added the lead - "You" for your own (in the app colour), else their name in their own colour.
+  const mineLead = !!lead.createdById && lead.createdById === myId;
+  const byName = mineLead ? 'You' : lead.createdByName || '';
+  const byTone = mineLead ? { fg: theme.primary, bg: theme.primarySoftBg } : toneColors(theme, personTone(byName));
   const company = lead.companyName || lead.contactPerson;
-  const sub = lead.contactPerson && lead.contactPerson !== company ? lead.contactPerson : '';
   return (
     <Pressable
       onPress={onPress}
@@ -430,18 +432,19 @@ export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => 
           </Text>
           <Text style={styles.amount}>{formatINR(lead.amount)}</Text>
         </View>
-        {!!by && (
-          <View style={styles.byRow}>
-            <PersonIcon size={12} color={theme.textMuted} />
-            <Text style={styles.by} numberOfLines={1}>
-              Added by {by}
-            </Text>
-          </View>
-        )}
         <View style={styles.bottom}>
-          <Text style={styles.sub} numberOfLines={1}>
-            {sub}
-          </Text>
+          {byName ? (
+            <View style={styles.by}>
+              <View style={[styles.byAvatar, { backgroundColor: byTone.bg }]}>
+                <Text style={[styles.byInitials, { color: byTone.fg }]}>{mineLead ? 'ME' : initials(byName)}</Text>
+              </View>
+              <Text style={[styles.byName, mineLead && { color: theme.primary }]} numberOfLines={1}>
+                {byName}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.by} />
+          )}
           <StageBadge stage={lead.stage} />
         </View>
       </View>

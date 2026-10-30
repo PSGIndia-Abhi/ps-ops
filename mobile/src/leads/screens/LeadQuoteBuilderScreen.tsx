@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { AppDialog, appAlert } from '../AppDialog';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -349,7 +350,7 @@ function Builder({
   function deleteRow() {
     if (!rowEdit || rowEdit.index === null) return setRowEdit(null);
     const p = picks[rowEdit.serviceId];
-    if (p.rows.length === 1) return Alert.alert('Keep one row', 'A service needs at least one treatment row. Remove the service instead.');
+    if (p.rows.length === 1) return appAlert('Keep one row', 'A service needs at least one treatment row. Remove the service instead.');
     updatePick(rowEdit.serviceId, { rows: p.rows.filter((_, i) => i !== rowEdit.index) });
     setRowEdit(null);
   }
@@ -907,49 +908,19 @@ function Struck({ on, style, children }: { on: boolean; style: object; children:
 
 type ConfirmState = { kind: 'delete' | 'info'; title: string; message: string; name?: string; onConfirm?: () => void };
 
-/**
- * The screen's own confirm dialog (instead of the plain Android alert): an icon in a soft circle,
- * a bold title, the row's name in a chip, a short message and two full-width buttons.
- */
+/** The screen's confirm popup, in the app's popup style (AppDialog). */
 function ConfirmCard({ state, onClose, onConfirm }: { state: ConfirmState; onClose: () => void; onConfirm: () => void }) {
-  const { styles, theme } = useCrmStyles(factory);
   const del = state.kind === 'delete';
   return (
-    <Modal transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.confirmShade} onPress={onClose}>
-        <Pressable style={styles.confirmCard} onPress={() => undefined}>
-          <View style={[styles.confirmIcon, { backgroundColor: del ? theme.dangerBg : theme.primarySoftBg }]}>
-            {del ? <TrashIcon size={26} color={theme.danger} /> : <DocumentIcon size={26} color={theme.primary} />}
-          </View>
-          <Text style={styles.confirmTitle}>{state.title}</Text>
-          {!!state.name && (
-            <View style={styles.confirmChip}>
-              <Text style={styles.confirmChipText} numberOfLines={2}>
-                {state.name}
-              </Text>
-            </View>
-          )}
-          <Text style={styles.confirmMessage}>{state.message}</Text>
-          <View style={styles.confirmButtons}>
-            {del ? (
-              <>
-                <Pressable onPress={onClose} style={({ pressed }) => [styles.confirmBtn, styles.confirmCancel, pressed && styles.pressed]} accessibilityRole="button">
-                  <Text style={styles.confirmCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable onPress={onConfirm} style={({ pressed }) => [styles.confirmBtn, styles.confirmDelete, pressed && styles.pressed]} accessibilityRole="button">
-                  <TrashIcon size={16} color="#fff" />
-                  <Text style={styles.confirmDeleteText}>Delete</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Pressable onPress={onClose} style={({ pressed }) => [styles.confirmBtn, styles.confirmOk, pressed && styles.pressed]} accessibilityRole="button">
-                <Text style={styles.confirmDeleteText}>Got it</Text>
-              </Pressable>
-            )}
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <AppDialog
+      title={state.title}
+      chip={state.name}
+      message={state.message}
+      tone={del ? 'danger' : 'primary'}
+      Icon={del ? TrashIcon : DocumentIcon}
+      buttons={del ? [{ text: 'Cancel', style: 'cancel', onPress: onClose }, { text: 'Delete', style: 'destructive', onPress: onConfirm }] : [{ text: 'Got it', onPress: onClose }]}
+      onClose={onClose}
+    />
   );
 }
 
@@ -1156,20 +1127,6 @@ const factory = (t: CrmTheme) => ({
   footerOther: { ...typography.captionMedium, color: t.textSecondary },
   footerButtons: { flexDirection: 'row' as const, gap: spacing.sm },
 
-  confirmShade: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', alignItems: 'center' as const, justifyContent: 'center' as const, padding: spacing.xl },
-  confirmCard: { width: '100%' as const, maxWidth: 360, backgroundColor: t.surface, borderRadius: radii.xl, padding: spacing.xl, alignItems: 'center' as const },
-  confirmIcon: { width: 60, height: 60, borderRadius: 30, alignItems: 'center' as const, justifyContent: 'center' as const, marginBottom: spacing.md },
-  confirmTitle: { ...typography.subtitle, color: t.textPrimary, textAlign: 'center' as const },
-  confirmChip: { marginTop: spacing.sm, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 6, maxWidth: '100%' as const },
-  confirmChipText: { ...typography.captionMedium, color: t.textPrimary, textAlign: 'center' as const },
-  confirmMessage: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.sm },
-  confirmButtons: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg, alignSelf: 'stretch' as const },
-  confirmBtn: { flex: 1, height: 46, borderRadius: radii.lg, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6 },
-  confirmCancel: { borderWidth: 1, borderColor: t.border, backgroundColor: t.surface },
-  confirmCancelText: { ...typography.button, color: t.textPrimary },
-  confirmDelete: { backgroundColor: t.danger },
-  confirmOk: { backgroundColor: t.primary },
-  confirmDeleteText: { ...typography.button, color: '#fff' },
 
   sheetShade: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' as const },
   sheet: { backgroundColor: t.surface, borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl, padding: spacing.lg, maxHeight: '88%' as const },
