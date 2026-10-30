@@ -1193,10 +1193,10 @@ export function LeadConvertScreen() {
           <Text style={cs.heroSub}>{lead?.leadNumber ? `${lead.leadNumber} · becomes a customer` : 'Becomes a customer'}</Text>
         </View>
       </View>
-      <View style={cs.warn}>
+      {/* <View style={cs.warn}>
         <AlertTriangleIcon size={16} color={theme.warningText} />
         <Text style={cs.warnText}>This closes the lead as converted and cannot be undone from the app.</Text>
-      </View>
+      </View> */}
 
       {!lead ? (
         <CrmSkeleton height={260} radius={16} />
