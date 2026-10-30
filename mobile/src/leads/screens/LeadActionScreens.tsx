@@ -3,7 +3,23 @@ import { Pressable, Switch, Text, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { errorCodes, isErrorWithCode, pick, types } from '@react-native-documents/picker';
-import { CalendarIcon, ClockIcon, DocumentIcon, PersonIcon } from '../../components/icons';
+import { GlossyBadge } from '../../components/GlossyBadge';
+import {
+  AlertTriangleIcon,
+  BriefcaseIcon,
+  CalendarIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  DocumentIcon,
+  EmailIcon,
+  PersonIcon,
+  PhoneIcon,
+  PinIcon,
+  TagIcon,
+  UsersIcon,
+} from '../../components/icons';
+import { IconTile } from '../../crm/ui/IconTile';
+import { RupeeIcon } from '../../crm/ui/crmIcons';
 import { formatINR } from '../../crm/format';
 import { useLeads } from '../../crm/LeadsContext';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -14,7 +30,7 @@ import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { SelectField } from '../../crm/ui/SelectField';
 import { addDays, fmtDateShort, fmtTime, todayStr } from '../../tasks/format';
 import { DateSheet, PeopleSheet, TimeSheet } from '../../tasks/ui/sheets';
-import { spacing, typography } from '../../theme';
+import { radii, spacing, typography } from '../../theme';
 import { openFollowUpsFor } from '../../reminders-engine/personal';
 import { getCurrentLocation } from '../../utils/location';
 import { reverseGeocode } from '../../utils/reverseGeocode';
@@ -1006,12 +1022,14 @@ export function LeadCloseScreen() {
 
 export function LeadConvertScreen() {
   const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadConvert'>>().params;
-  const { styles } = useCrmStyles(factory);
+  const { styles: cs, theme } = useCrmStyles(convertFactory);
   const { saving, error, setError, submit } = useSubmit();
   const [notes, setNotes] = useState('');
   const [lead, setLead] = useState<PipelineLead | null>(null);
-  // The deal amount, filled with the approximate quote and changeable before converting.
+  // The deal (closure) amount - what this conversion counts for in targets. Filled with the latest
+  // quotation (else the approximate quote) and changeable before converting.
   const [amount, setAmount] = useState('');
+  const [quoted, setQuoted] = useState<number | null>(null);
   // The sales manager converting a sales executive's lead chooses who it counts for: that sales
   // person (picked to start with) or themselves.
   const { persona, myIdNum } = useMe();
@@ -1027,7 +1045,16 @@ export function LeadConvertScreen() {
       .then(async (l) => {
         if (!alive) return;
         setLead(l);
-        setAmount((a) => a || (l.amount > 0 ? String(Math.round(l.amount)) : ''));
+        // The closure amount starts as the latest quotation sent (what was offered), else the
+        // approximate quote; the person can still change it to the final agreed amount.
+        const quotes = await api.getQuotations(leadId).catch(() => []);
+        const latest = quotes
+          .filter((q) => q.status !== 'CANCELLED' && q.total > 0)
+          .sort((a, b) => String(b.sentAt ?? '').localeCompare(String(a.sentAt ?? '')))[0];
+        if (!alive) return;
+        setQuoted(latest ? latest.total : null);
+        const start = latest ? latest.total : l.amount;
+        setAmount((a) => a || (start > 0 ? String(Math.round(start)) : ''));
         if (!manager) return;
         // Whose lead it is: its sales person, else the sales executive who added it.
         const people = await api.salesEmployees().catch(() => [] as Person[]);
@@ -1044,6 +1071,31 @@ export function LeadConvertScreen() {
     };
   }, [leadId, manager, myIdNum]);
 
+  // What the amount was filled with, to say where it came from or that it was changed.
+  const startAmount = quoted ?? lead?.amount ?? 0;
+  const startLabel = quoted !== null ? 'the latest quotation' : 'the approximate quote';
+  const changed = startAmount > 0 && amount !== '' && Number(amount) !== Math.round(startAmount);
+  const details: DetailRow[] = lead
+    ? [
+        { icon: BriefcaseIcon, label: 'Customer (company)', value: lead.companyName || name },
+        { icon: PinIcon, label: 'Address', value: lead.address },
+        { icon: TagIcon, label: 'Lead source', value: lead.source ? SOURCE_LABELS[lead.source] ?? lead.source : '' },
+        { icon: PersonIcon, label: 'Added by', value: lead.createdByName },
+      ]
+    : [];
+  const contact: DetailRow[] = lead
+    ? [
+        { icon: PersonIcon, label: 'Contact person', value: lead.contactPerson },
+        { icon: PhoneIcon, label: 'Phone', value: lead.phone ? `+91 ${lead.phone}` : '' },
+        ...(lead.alternatePhone ? [{ icon: PhoneIcon, label: 'Alternate phone', value: `+91 ${lead.alternatePhone}` }] : []),
+        { icon: EmailIcon, label: 'Email', value: lead.email },
+      ]
+    : [];
+  const sections = [
+    { title: 'Company', icon: <BriefcaseIcon />, color: theme.primary, rows: details },
+    { title: 'Contact', icon: <PhoneIcon />, color: theme.success, rows: contact },
+  ];
+
   return (
     <FormShell
       title="Convert to customer"
@@ -1059,61 +1111,187 @@ export function LeadConvertScreen() {
         });
       }}
     >
-      <Text style={styles.help}>
-        This creates a customer record for {name} and closes the lead as converted. It cannot be undone from the app.
-      </Text>
+      {/* What happens: a customer is created and the lead closes as won. */}
+      <View style={cs.hero}>
+        <GlossyBadge color={theme.success} size={52} icon={<CheckCircleIcon size={26} color={WHITE} />} />
+        <View style={cs.flex1}>
+          <Text style={cs.heroTitle} numberOfLines={2}>
+            {lead?.companyName || name}
+          </Text>
+          <Text style={cs.heroSub}>{lead?.leadNumber ? `${lead.leadNumber} · becomes a customer` : 'Becomes a customer'}</Text>
+        </View>
+      </View>
+      <View style={cs.warn}>
+        <AlertTriangleIcon size={16} color={theme.warningText} />
+        <Text style={cs.warnText}>This closes the lead as converted and cannot be undone from the app.</Text>
+      </View>
+
       {!lead ? (
-        <CrmSkeleton height={220} radius={16} />
+        <CrmSkeleton height={260} radius={16} />
       ) : (
         <>
+          {/* The closure amount - what this conversion adds to the target. */}
+          <View style={cs.card}>
+            <View style={cs.cardHead}>
+              <IconTile icon={<RupeeIcon />} color={theme.success} size={32} />
+              <View style={cs.flex1}>
+                <Text style={cs.cardTitle}>Deal amount</Text>
+                <Text style={cs.cardSub}>The final amount agreed - counts towards the target</Text>
+              </View>
+            </View>
+            <CrmTextField
+              value={amount}
+              onChangeText={(v) => setAmount(v.replace(/\D/g, ''))}
+              prefix="₹"
+              keyboardType="number-pad"
+              maxLength={9}
+              placeholder="0"
+              hint={
+                changed
+                  ? `Changed from ${startLabel} (${formatINR(startAmount)})`
+                  : startAmount > 0
+                    ? `Filled with ${startLabel} - change it if the final amount is different.`
+                    : undefined
+              }
+            />
+            {!!lead.notes && (
+              <View style={cs.req}>
+                <Text style={cs.reqLabel}>REQUIREMENT</Text>
+                <Text style={cs.reqText}>{lead.notes}</Text>
+              </View>
+            )}
+          </View>
+
           {!!owner && (
-            <>
-              <Text style={styles.section}>COUNT THIS CONVERSION FOR</Text>
-              <Card style={styles.reviewCard}>
-                <RadioRow
-                  label={`${owner.name} · ${api.roleName(owner.role)}${String(lead.salesEmployeeId) === String(owner.id) ? ' (assigned)' : ' (added this lead)'}`}
-                  selected={creditTo === owner.id}
-                  onPress={() => setCreditTo(owner.id)}
-                />
-                <RadioRow label="Me - count it towards my own target" selected={creditTo === myIdNum} onPress={() => setCreditTo(myIdNum)} />
-              </Card>
-            </>
+            <View style={cs.card}>
+              <View style={cs.cardHead}>
+                <IconTile icon={<UsersIcon />} color={theme.accent} size={32} />
+                <View style={cs.flex1}>
+                  <Text style={cs.cardTitle}>Count this conversion for</Text>
+                  <Text style={cs.cardSub}>Whose target the deal amount is added to</Text>
+                </View>
+              </View>
+              {[
+                {
+                  id: owner.id,
+                  title: owner.name,
+                  sub: `${api.roleName(owner.role)} · ${String(lead.salesEmployeeId) === String(owner.id) ? 'assigned' : 'added this lead'}`,
+                },
+                { id: myIdNum, title: 'Me', sub: 'Count it towards my own target' },
+              ].map((o) => {
+                const on = creditTo === o.id;
+                return (
+                  <Pressable
+                    key={o.id}
+                    onPress={() => setCreditTo(o.id)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    style={({ pressed }) => [cs.choice, on && cs.choiceOn, pressed && cs.pressed]}
+                  >
+                    <View style={[cs.avatar, on && cs.avatarOn]}>
+                      <Text style={[cs.avatarText, on && cs.avatarTextOn]}>{o.title.slice(0, 1).toUpperCase()}</Text>
+                    </View>
+                    <View style={cs.flex1}>
+                      <Text style={cs.choiceTitle}>{o.title}</Text>
+                      <Text style={cs.choiceSub}>{o.sub}</Text>
+                    </View>
+                    <View style={[cs.radio, on && cs.radioOn]}>{on && <View style={cs.radioDot} />}</View>
+                  </Pressable>
+                );
+              })}
+            </View>
           )}
-          <Text style={styles.section}>COMPANY</Text>
-          <Card style={styles.reviewCard}>
-            <InfoLine label="Customer (company)" value={lead.companyName || name} />
-            {!!lead.leadNumber && <InfoLine label="Lead no." value={lead.leadNumber} />}
-            <InfoLine label="Address" value={lead.address} />
-            <InfoLine label="Lead source" value={lead.source ? SOURCE_LABELS[lead.source] ?? lead.source : ''} />
-            <InfoLine label="Added by" value={lead.createdByName} />
-          </Card>
-          <Text style={styles.section}>CONTACT</Text>
-          <Card style={styles.reviewCard}>
-            <InfoLine label="Contact person" value={lead.contactPerson} />
-            <InfoLine label="Phone" value={lead.phone ? `+91 ${lead.phone}` : ''} />
-            {!!lead.alternatePhone && <InfoLine label="Alternate phone" value={`+91 ${lead.alternatePhone}`} />}
-            <InfoLine label="Email" value={lead.email} />
-          </Card>
-          <Text style={styles.section}>DEAL</Text>
-          <Card style={styles.reviewCard}>
-            <InfoLine label="Approximate quote" value={lead.amount > 0 ? formatINR(lead.amount) : ''} />
-            {!!lead.notes && <InfoLine label="Requirement" value={lead.notes} />}
-          </Card>
-          <CrmTextField
-            label="Deal amount (₹)"
-            value={amount}
-            onChangeText={(v) => setAmount(v.replace(/\D/g, ''))}
-            prefix="₹"
-            keyboardType="number-pad"
-            maxLength={9}
-            hint={lead.amount > 0 && Number(amount) !== Math.round(lead.amount) ? `Changed from ${formatINR(lead.amount)}` : 'The approximate quote - change it if the final amount is different.'}
-          />
+
+          {sections.map((sec) => (
+            <View key={sec.title} style={cs.card}>
+              <View style={cs.cardHead}>
+                <IconTile icon={sec.icon} color={sec.color} size={32} />
+                <Text style={[cs.cardTitle, cs.flex1]}>{sec.title}</Text>
+              </View>
+              {sec.rows.map((r, i) => {
+                const RowIcon = r.icon;
+                return (
+                  <View key={r.label} style={[cs.row, i > 0 && cs.rowLine]}>
+                    <RowIcon size={16} color={theme.textMuted} />
+                    <View style={cs.flex1}>
+                      <Text style={cs.rowLabel}>{r.label}</Text>
+                      <Text style={[cs.rowValue, !r.value && cs.rowEmpty]}>{r.value || 'Not added'}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
         </>
       )}
       <NotesField label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. Annual contract agreed" />
     </FormShell>
   );
 }
+
+type DetailRow = { icon: React.ComponentType<{ size?: number; color?: string }>; label: string; value: string };
+
+const WHITE = '#FFFFFF';
+
+/** The Convert to customer screen's own look: a clear header, the deal amount first, tidy detail cards. */
+const convertFactory = (t: CrmTheme) => ({
+  flex1: { flex: 1 },
+  pressed: { opacity: 0.85 },
+  hero: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, marginBottom: spacing.sm },
+  heroTitle: { ...typography.title, color: t.textPrimary },
+  heroSub: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  warn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    backgroundColor: t.warningBg,
+    borderRadius: radii.md,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  warnText: { ...typography.caption, color: t.warningText, flex: 1 },
+  card: {
+    backgroundColor: t.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    ...t.cardShadow,
+  },
+  cardHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginBottom: spacing.sm },
+  cardTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  cardSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  req: { backgroundColor: t.surfaceAlt, borderRadius: radii.md, padding: spacing.sm },
+  reqLabel: { ...typography.overline, color: t.textMuted },
+  reqText: { ...typography.body, color: t.textSecondary, marginTop: 2 },
+  choice: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    borderColor: t.border,
+    marginTop: spacing.xs,
+  },
+  choiceOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatarOn: { backgroundColor: t.primary },
+  avatarText: { ...typography.bodyMedium, color: t.textSecondary },
+  avatarTextOn: { color: WHITE },
+  choiceTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  choiceSub: { ...typography.caption, color: t.textMuted },
+  radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
+  radioOn: { borderColor: t.primary },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: t.primary },
+  row: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.sm, paddingVertical: spacing.sm },
+  rowLine: { borderTopWidth: 1, borderTopColor: t.border },
+  rowLabel: { ...typography.caption, color: t.textMuted },
+  rowValue: { ...typography.body, color: t.textPrimary, marginTop: 1 },
+  rowEmpty: { color: t.textMuted },
+});
 
 // ---------------------------------------------------------------------------
 // Upload a quotation (PDF)

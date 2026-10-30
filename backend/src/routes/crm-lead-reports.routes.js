@@ -61,10 +61,11 @@ async function reportSubject(req) {
   return employeeId;
 }
 
-// What a converted lead is worth: its latest quotation's final total (after any discount), or the
-// approximate quote when no quotation was sent. Needs the lead as `l`.
-const LEAD_VALUE_SQL = `COALESCE((SELECT q.total_amount FROM crm_lead_quotations q
-  WHERE q.lead_id = l.id AND q.status <> 'CANCELLED' ORDER BY q.sent_at DESC, q.created_at DESC LIMIT 1), l.amount, 0)`;
+// What a converted lead is worth: its closure amount - the deal amount entered when it was
+// converted, which convert-to-customer saves as the lead's amount (crm-lead-quotations.routes.js).
+// Only when that is empty does it fall back to the latest quotation's final total. Needs the lead as `l`.
+const LEAD_VALUE_SQL = `COALESCE(NULLIF(l.amount, 0), (SELECT q.total_amount FROM crm_lead_quotations q
+  WHERE q.lead_id = l.id AND q.status <> 'CANCELLED' ORDER BY q.sent_at DESC, q.created_at DESC LIMIT 1), 0)`;
 // One row per converted lead: who it counts for (the lead's sales person, or whoever converted it
 // when it had none), when it was converted and what it is worth. Targets, the Converted number and
 // the achievement history all read this, so they always agree.

@@ -547,12 +547,21 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
     const [[already]] = await pool.query("SELECT id FROM crm_lead_conversions WHERE lead_id = ?", [lead.id]);
     if (already) throw new HttpError(409, "This lead has already been converted");
     const notes = optionalText(req.body?.notes, 500);
-    // Optional: the deal's final amount, agreed at conversion - it replaces the lead's approximate quote.
+    // The closure amount: the deal's final amount, agreed at conversion - it replaces the lead's
+    // approximate quote and is what the conversion counts for in targets / reports. Not given (the
+    // web form) = the latest quotation's total, when a quotation was sent; else the lead keeps its amount.
     let amount = null;
     if (req.body?.amount !== undefined && req.body?.amount !== null && req.body?.amount !== "") {
       amount = Number(req.body.amount);
       if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) throw new HttpError(400, "Enter a valid amount");
       amount = Math.round(amount * 100) / 100;
+    } else {
+      const [[latest]] = await pool.query(
+        `SELECT total_amount FROM crm_lead_quotations
+          WHERE lead_id = ? AND status <> 'CANCELLED' ORDER BY sent_at DESC, created_at DESC LIMIT 1`,
+        [lead.id]
+      );
+      if (latest && Number(latest.total_amount) > 0) amount = Number(latest.total_amount);
     }
 
     // Who it counts for. Only someone who manages leads may credit another person.

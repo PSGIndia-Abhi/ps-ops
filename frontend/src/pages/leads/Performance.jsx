@@ -295,8 +295,8 @@ function compactINR(n) {
 /**
  * One sales person's achievement beyond this month: last month against its target, everything they
  * have converted so far, and the last six months as bars - the amount on each bar, that month's
- * target as a dashed line. Achieved = what their converted leads are worth: the final quotation
- * amount, else the approximate quote.
+ * target as a dashed line. Achieved = what their converted leads are worth: the deal (closure)
+ * amount entered at conversion.
  */
 function Achievement({ userId, whose }) {
   const [state, setState] = useState({ key: null, data: null, error: "" });
@@ -453,7 +453,7 @@ function Targets({ manager, myId }) {
   return (
     <Card
       title={manager ? "Monthly Targets" : "My Target"}
-      sub={`${monthLabel(month)} - achieved = what the leads converted in the month are worth (final quotation amount, else the quote)`}
+      sub={`${monthLabel(month)} - achieved = the deal (closure) amount of the leads converted in the month`}
       index={0}
       action={<input className="lm-input" type="month" value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" style={{ width: 170 }} />}
       flush={manager}
