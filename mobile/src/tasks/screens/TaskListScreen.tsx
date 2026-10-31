@@ -466,7 +466,7 @@ export function TaskListScreen() {
           ) : undefined
         }
         renderItem={({ item }) => (
-          <TaskRow task={item} showAssignee={item.assigned_to !== viewer.id} onPress={() => navigation.navigate('TaskDetail', { taskId: item.id })} />
+          <TaskRow task={item} showAssignee={item.assigned_to !== viewer.id} meId={viewer.id} onPress={() => navigation.navigate('TaskDetail', { taskId: item.id })} />
         )}
       />
       <ActionSheet

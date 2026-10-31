@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { GlossyBadge } from '../../components/GlossyBadge';
-import { ChevronRightIcon, LockIcon, PlusIcon, UsersIcon } from '../../components/icons';
+import { ChevronRightIcon, CloseIcon, LockIcon, PlusIcon, UsersIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
@@ -40,6 +40,37 @@ function Stars({ value, size = 14 }: { value: number; size?: number }) {
   );
 }
 
+type StarFilter = 'all' | 5 | 4 | 'low';
+const STAR_FILTERS: { key: StarFilter; label: string }[] = [
+  { key: 'all', label: 'All stars' },
+  { key: 5, label: '5' },
+  { key: 4, label: '4' },
+  { key: 'low', label: '3 & below' },
+];
+
+/** One filter chip; `lead` goes before the label (an avatar), `star` puts a small gold star before the label. */
+function FilterChip({ label, on, star, lead, onPress }: { label: string; on: boolean; star?: boolean; lead?: React.ReactNode; onPress: () => void }) {
+  const { styles } = useCrmStyles(factory);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: on }}
+      style={({ pressed }) => [styles.fChip, on && styles.fChipOn, pressed && styles.pressed]}
+    >
+      {lead}
+      {star && (
+        <Svg width={13} height={13} viewBox="0 0 24 24">
+          <Path d={STAR} fill={on ? '#fff' : GOLD} />
+        </Svg>
+      )}
+      <Text style={[styles.fChipText, on && styles.fChipTextOn]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const when = (at: string) => {
   const iso = at.replace(' ', 'T');
   return `${formatDate(iso)}, ${formatTime(iso)}`;
@@ -48,29 +79,43 @@ const when = (at: string) => {
 export function EmployeeFeedbackScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<TaskStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
-  const { viewer } = useTasks();
-  const [filter, setFilter] = useState<TeamMember | null>(null);
-  const [picking, setPicking] = useState(false);
   const [list, setList] = useState<fb.FeedbackEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<fb.FeedbackEntry | null>(null);
   const [busy, setBusy] = useState(false);
+  const { viewer } = useTasks();
+  const [picking, setPicking] = useState(false);
+  // Employee and stars filters - applied here, on everything already loaded.
+  const [person, setPerson] = useState<{ id: number; name: string } | null>(null);
+  const [starFilter, setStarFilter] = useState<StarFilter>('all');
 
   const load = useCallback(() => {
-    fb.listFeedback(filter?.id)
+    fb.listFeedback()
       .then((rows) => {
         setList(rows);
         setError(null);
       })
       .catch((err) => setError(errorMessage(err)));
-  }, [filter]);
+  }, []);
   // Again each time the screen comes back (after adding or editing one).
   useFocusEffect(load);
 
+  // The chosen person's entries, and their average.
+  const theirs = useMemo(() => (list ?? []).filter((e) => !person || e.employee_id === person.id), [list, person]);
   const average = useMemo(() => {
-    if (!list || list.length === 0) return null;
-    return Math.round((list.reduce((s, e) => s + e.rating, 0) / list.length) * 10) / 10;
-  }, [list]);
+    if (theirs.length === 0) return null;
+    return Math.round((theirs.reduce((s, e) => s + e.rating, 0) / theirs.length) * 10) / 10;
+  }, [theirs]);
+
+  const shown = useMemo(
+    () => theirs.filter((e) => starFilter === 'all' || (starFilter === 'low' ? e.rating <= 3 : e.rating === starFilter)),
+    [theirs, starFilter],
+  );
+  const filtering = !!person || starFilter !== 'all';
+  const clearFilters = () => {
+    setPerson(null);
+    setStarFilter('all');
+  };
 
   const remove = async () => {
     if (!removing) return;
@@ -95,7 +140,7 @@ export function EmployeeFeedbackScreen() {
           onBack={() => navigation.goBack()}
           right={
             <Pressable
-              onPress={() => navigation.navigate('FeedbackForm', { employeeId: filter?.id })}
+              onPress={() => navigation.navigate('FeedbackForm', { employeeId: person?.id })}
               accessibilityRole="button"
               accessibilityLabel="Add feedback"
               style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
@@ -112,31 +157,68 @@ export function EmployeeFeedbackScreen() {
           <LockIcon size={14} color={theme.textMuted} />
           <Text style={styles.privateText}>Only you can see this.</Text>
         </View>
-        <Pressable onPress={() => setPicking(true)} accessibilityRole="button" style={({ pressed }) => [styles.filter, pressed && styles.pressed]}>
-          {filter ? <Avatar name={filter.name} id={filter.id} size={34} /> : <GlossyBadge color={theme.accent} size={34} icon={<UsersIcon size={16} color="#fff" />} />}
-          <View style={styles.flex}>
-            <Text style={styles.filterTitle}>{filter ? filter.name : 'All employees'}</Text>
-            <Text style={styles.filterSub}>{filter ? filter.designation || filter.role || 'Tap to change' : 'Tap to see one person'}</Text>
-          </View>
-          {filter ? (
-            <Pressable onPress={() => setFilter(null)} hitSlop={8} accessibilityRole="button" style={styles.clear}>
-              <Text style={styles.clearText}>All</Text>
-            </Pressable>
-          ) : (
-            <ChevronRightIcon size={16} color={theme.textMuted} />
-          )}
-        </Pressable>
 
         {/* one person: their average */}
-        {filter && list && list.length > 0 && (
+        {person && theirs.length > 0 && (
           <View style={styles.score}>
             <Text style={styles.scoreNum}>{average}</Text>
             <View style={styles.flex}>
               <Stars value={average ?? 0} size={18} />
               <Text style={styles.scoreSub}>
-                {list.length} feedback{list.length === 1 ? '' : 's'}
+                {theirs.length} feedback{theirs.length === 1 ? '' : 's'} for {person.name}
               </Text>
             </View>
+          </View>
+        )}
+
+        {/* employee and stars */}
+        {list && list.length > 0 && (
+          <View style={styles.filters}>
+            {/* employee: a dropdown over the whole team */}
+            <Pressable
+              onPress={() => setPicking(true)}
+              accessibilityRole="button"
+              accessibilityLabel={person ? `Employee: ${person.name}` : 'Employee: all'}
+              style={({ pressed }) => [styles.dropdown, pressed && styles.pressed]}
+            >
+              {person ? (
+                <Avatar name={person.name} id={person.id} size={28} />
+              ) : (
+                <GlossyBadge color={theme.accent} size={28} icon={<UsersIcon size={14} color="#fff" />} />
+              )}
+              <Text style={[styles.dropdownText, !person && styles.dropdownAll]} numberOfLines={1}>
+                {person ? person.name : 'All employees'}
+              </Text>
+              {person ? (
+                <Pressable onPress={() => setPerson(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Show all employees" style={styles.dropdownClear}>
+                  <CloseIcon size={14} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+              <View style={styles.chevronDown}>
+                <ChevronRightIcon size={18} color={theme.textMuted} />
+              </View>
+            </Pressable>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {STAR_FILTERS.map((f) => (
+                <FilterChip
+                  key={String(f.key)}
+                  label={f.label}
+                  star={f.key !== 'all'}
+                  on={starFilter === f.key}
+                  onPress={() => setStarFilter(f.key)}
+                />
+              ))}
+            </ScrollView>
+            {filtering && (
+              <View style={styles.matchRow}>
+                <Text style={styles.matchText}>
+                  {shown.length} of {list.length}
+                </Text>
+                <Pressable onPress={clearFilters} hitSlop={8} accessibilityRole="button">
+                  <Text style={styles.matchClear}>Clear filters</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         )}
 
@@ -150,11 +232,18 @@ export function EmployeeFeedbackScreen() {
         ) : list.length === 0 ? (
           <CrmEmptyState
             title="No feedback yet"
-            subtitle={filter ? `Add the first note for ${filter.name}.` : 'Tap Add to write about someone in your team.'}
+            subtitle="Tap Add to write about someone in your team."
             icon={<Stars value={0} size={20} />}
           />
+        ) : shown.length === 0 ? (
+          <CrmEmptyState
+            title="Nothing matches"
+            subtitle="No feedback with these filters."
+            icon={<Stars value={0} size={20} />}
+            action={<PrimaryButton label="Clear filters" variant="secondary" onPress={clearFilters} />}
+          />
         ) : (
-          list.map((e) => (
+          shown.map((e) => (
             <View key={e.id} style={styles.card}>
               <View style={styles.cardHead}>
                 <Avatar name={e.employee_name} id={e.employee_id} size={40} />
@@ -190,10 +279,10 @@ export function EmployeeFeedbackScreen() {
         visible={picking}
         onClose={() => setPicking(false)}
         people={viewer.team}
-        selectedId={filter?.id ?? null}
+        selectedId={person?.id ?? null}
         meId={viewer.id}
         title="Show feedback for"
-        onPick={(p) => setFilter(p)}
+        onPick={(p) => setPerson({ id: p.id, name: p.name })}
       />
       <Sheet visible={!!removing} onClose={() => setRemoving(null)} title="Delete this feedback?">
         <Text style={styles.sheetText}>
@@ -385,6 +474,42 @@ const factory = (t: CrmTheme) => ({
   },
   scoreNum: { fontSize: 32, fontWeight: '800' as const, color: '#b45309' },
   scoreSub: { ...typography.caption, color: '#92400e', marginTop: 3 },
+  filters: { gap: spacing.sm },
+  dropdown: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm + 2,
+    height: 52,
+    paddingLeft: spacing.sm + 2,
+    paddingRight: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+    ...t.cardShadow,
+  },
+  dropdownText: { flex: 1, ...typography.bodyMedium, fontWeight: '600' as const, color: t.textPrimary },
+  dropdownAll: { color: t.textSecondary },
+  dropdownClear: { width: 26, height: 26, borderRadius: 13, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.surfaceAlt },
+  chevronDown: { transform: [{ rotate: '90deg' }] },
+  chipRow: { gap: spacing.xs + 2, paddingRight: spacing.lg },
+  fChip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 5,
+    height: 34,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    backgroundColor: t.surface,
+    borderWidth: 1,
+    borderColor: t.border,
+  },
+  fChipOn: { backgroundColor: t.primary, borderColor: t.primary },
+  fChipText: { ...typography.captionMedium, color: t.textSecondary },
+  fChipTextOn: { color: '#fff' },
+  matchRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingHorizontal: 2 },
+  matchText: { ...typography.caption, color: t.textMuted },
+  matchClear: { ...typography.captionMedium, color: t.primary },
   card: { backgroundColor: t.surface, borderRadius: radii.xl, padding: spacing.md, gap: spacing.sm, ...t.cardShadow },
   cardHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm + 2 },
   name: { ...typography.bodyMedium, fontWeight: '700' as const, color: t.textPrimary },

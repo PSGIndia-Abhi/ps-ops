@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import { useNavigation, type NavigationProp } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { useAppSwitch } from '../../navigation/AppSwitchContext';
+import { useRawRole } from '../../auth/role';
+import { StarIcon } from '../../crm/ui/crmIcons';
+import { FEEDBACK_ROLE, listFeedback } from '../feedbackApi';
+import { SectionTitle } from '../../leads/homeParts';
 import { TaskBrandMark } from '../ui/TaskBrandMark';
-import { AlertTriangleIcon, BellIcon, CalendarIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
+import { AlertTriangleIcon, BellIcon, CalendarIcon, PlayIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
@@ -194,7 +198,7 @@ export function QuickAction({
 }: {
   icon: React.ReactNode;
   label: string;
-  tone: 'info' | 'accent' | 'success' | 'danger';
+  tone: 'info' | 'accent' | 'success' | 'danger' | 'warning';
   count: number;
   onPress: () => void;
 }) {
@@ -274,6 +278,21 @@ export function TaskHomeScreen() {
   // Only offered to people who manage someone; everyone else only ever sees their own work.
   const hasTeam = viewer.team.length > 0;
   const [scope, setScope] = useState<'my' | 'team'>('my');
+  // Managing Director: the first Quick Action is Employee feedback (with how many they've written).
+  const isMD = useRawRole() === FEEDBACK_ROLE;
+  const [feedbackCount, setFeedbackCount] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      if (!isMD) return;
+      let live = true;
+      listFeedback()
+        .then((list) => live && setFeedbackCount(list.length))
+        .catch(() => {});
+      return () => {
+        live = false;
+      };
+    }, [isMD]),
+  );
   const inScope = useCallback(
     (t: WorkTask) => !hasTeam || (scope === 'my' ? t.assigned_to === viewer.id : t.assigned_to !== viewer.id),
     [hasTeam, scope, viewer.id],
@@ -425,25 +444,12 @@ export function TaskHomeScreen() {
         <View style={styles.body}>
           <CrmErrorBanner message={ready && tasks.length === 0 ? error : null} onRetry={refresh} />
 
-          <View style={styles.sectionRow}>
-            <View>
-              <View style={styles.sectionTitleRow}>
-                <Text style={styles.sectionTitle}>{scope === 'team' ? 'Team Recent Tasks' : 'Recent Tasks'}</Text>
-                {/* {ready && recent.length > 0 && (
-                  <View style={styles.countBubble}>
-                    <Text style={styles.countText}>{recent.length}</Text>
-                  </View>
-                )} */}
-              </View>
-              <View style={styles.underline} />
-            </View>
-            {ready && recent.length > 0 && (
-              <Pressable style={styles.sectionAction} onPress={() => openList(scope === 'team' ? 'team' : 'my', false, true)} hitSlop={10} accessibilityRole="button">
-                <Text style={styles.sectionActionText}>View all</Text>
-                <ChevronRightIcon size={16} color={theme.primary} />
-              </Pressable>
-            )}
-          </View>
+          <SectionTitle
+            title={scope === 'team' ? 'Team Recent Tasks' : 'Recent Tasks'}
+            icon="tasks"
+            subtitle={scope === 'team' ? "Your team's newest tasks" : 'Your newest tasks'}
+            onViewAll={ready && recent.length > 0 ? () => openList(scope === 'team' ? 'team' : 'my', false, true) : undefined}
+          />
 
           {!ready && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={84} radius={radii.lg} style={styles.skeletonRow} />)}
           {ready && recent.length === 0 && !error && scope === 'team' && (
@@ -462,24 +468,29 @@ export function TaskHomeScreen() {
             />
           )}
           {recent.map((x, i) => (
-            <TaskRow key={x.id} index={i} task={x} showAssignee={x.assigned_to !== viewer.id} onPress={() => openTask(x.id)} />
+            <TaskRow key={x.id} index={i} task={x} showAssignee={x.assigned_to !== viewer.id} meId={viewer.id} onPress={() => openTask(x.id)} />
           ))}
 
           <View style={styles.quickSection}>
-            <View style={styles.sectionRow}>
-              <View>
-                <Text style={styles.sectionTitle}>Quick Actions</Text>
-                <View style={styles.underline} />
-              </View>
-            </View>
+            <SectionTitle title="Quick Actions" icon="actions" subtitle="Jump straight to your work" />
             <View style={styles.quickRow}>
-              <QuickAction
-                icon={<PlayIcon size={18} color="#FFFFFF" />}
-                label="In Progress"
-                tone="accent"
-                count={quick.progress}
-                onPress={() => openList('progress', scope === 'team')}
-              />
+              {isMD ? (
+                <QuickAction
+                  icon={<StarIcon size={20} color="#FFFFFF" />}
+                  label="Feedback"
+                  tone="warning"
+                  count={feedbackCount}
+                  onPress={() => navigation.navigate('EmployeeFeedback')}
+                />
+              ) : (
+                <QuickAction
+                  icon={<PlayIcon size={18} color="#FFFFFF" />}
+                  label="In Progress"
+                  tone="accent"
+                  count={quick.progress}
+                  onPress={() => openList('progress', scope === 'team')}
+                />
+              )}
               <QuickAction
                 icon={<FlagIcon size={19} color="#FFFFFF" />}
                 label="High Priority"
