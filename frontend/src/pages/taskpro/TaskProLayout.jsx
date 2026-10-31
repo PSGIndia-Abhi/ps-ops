@@ -21,8 +21,10 @@ import {
   FiAlertCircle,
   FiUser,
   FiRefreshCw,
+  FiStar,
 } from "react-icons/fi";
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
+import { FEEDBACK_ROLE } from "./Feedback";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -46,6 +48,8 @@ const NAV = [
   { label: "Requests", to: `${TASKPRO_HOME}/requests`, icon: FiRefreshCw, badge: "requests" },
   { divider: true },
   { label: "Reports", to: `${TASKPRO_HOME}/reports`, icon: FiBarChart2 },
+  // The Managing Director's private notes on their team - see showNavItem below.
+  { label: "Feedback", to: `${TASKPRO_HOME}/feedback`, icon: FiStar, mdOnly: true },
   { divider: true },
   { label: "My Profile", to: `${TASKPRO_HOME}/profile`, icon: FiUser },
 ];
@@ -168,7 +172,9 @@ function TaskProShell() {
 
   // Team Tasks is pointless for someone nobody reports to. Hidden until the
   // team has loaded, so it never flashes up and disappears.
-  const showNavItem = (item) => !item.needsTeam || (viewer.ready && (viewer.isAdmin || viewer.team.length > 0));
+  const showNavItem = (item) =>
+    (!item.needsTeam || (viewer.ready && (viewer.isAdmin || viewer.team.length > 0))) &&
+    (!item.mdOnly || localStorage.getItem("role") === FEEDBACK_ROLE);
 
   const toggleMenu = () => (isMobile ? setDrawer((d) => !d) : setCollapsed((c) => !c));
   const name = viewer.name;

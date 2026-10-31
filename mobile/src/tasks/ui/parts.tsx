@@ -30,6 +30,34 @@ const factory = (t: CrmTheme) => ({
   pressed: { opacity: 0.85 },
   rowPressed: { opacity: 0.9, transform: [{ scale: 0.985 }] },
   rowStripPad: { paddingLeft: spacing.md, overflow: 'hidden' as const, borderWidth: 0 },
+  // the list card: a little roomier, with a "Created by" footer
+  taskCard: {
+    backgroundColor: t.surface,
+    borderRadius: radii.xl,
+    paddingVertical: spacing.md,
+    paddingRight: spacing.md,
+    paddingLeft: spacing.md + 4,
+    marginBottom: spacing.sm + 2,
+    overflow: 'hidden' as const,
+    ...t.cardShadow,
+  },
+  taskTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm + 4 },
+  taskTitle: { ...typography.bodyMedium, fontSize: 16, fontWeight: '700' as const, color: t.textPrimary },
+  taskFoot: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    marginTop: spacing.sm + 2,
+    paddingTop: spacing.sm + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.border,
+  },
+  footLeft: { flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, minWidth: 0 },
+  footRight: { flexShrink: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, maxWidth: '50%' as const },
+  footLabel: { ...typography.caption, color: t.textMuted },
+  footName: { ...typography.captionMedium, color: t.textSecondary, flexShrink: 1 },
+  footMe: { color: t.primary },
+  footArrow: { ...typography.captionMedium, color: t.textMuted },
   strip: { position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: 5 },
   dueLine: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4 },
   rowBody: { flex: 1, gap: 2 },
@@ -153,13 +181,14 @@ export function PriorityPill({ priority }: { priority: TaskPriority }) {
  * icon square, title, ref, due line with a clock, state pill. Rows slide in one
  * after another (`index` staggers them; capped so long lists don't lag).
  */
-type TaskRowProps = { task: WorkTask; onPress: () => void; showAssignee?: boolean; index?: number };
+type TaskRowProps = { task: WorkTask; onPress: () => void; showAssignee?: boolean; index?: number; meId?: number };
 
-function TaskRowView({ task, onPress, showAssignee, index = 0 }: TaskRowProps) {
+function TaskRowView({ task, onPress, showAssignee, index = 0, meId }: TaskRowProps) {
   const { styles, theme } = useCrmStyles(factory);
   const state = taskState(task);
   const strip = toneSolid(theme, STATE_META[state].tone);
   const dueColor = state === 'overdue' ? theme.dangerText : state === 'today' ? theme.warningText : theme.textSecondary;
+  const isMine = meId !== undefined && task.created_by === meId;
   const enter = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(enter, {
@@ -177,33 +206,48 @@ function TaskRowView({ task, onPress, showAssignee, index = 0 }: TaskRowProps) {
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={`${task.title}, ${STATE_META[state].label}`}
-        style={({ pressed }) => [styles.row, styles.rowStripPad, pressed && styles.rowPressed]}
+        style={({ pressed }) => [styles.taskCard, pressed && styles.rowPressed]}
       >
         <View style={[styles.strip, { backgroundColor: strip }]} />
-        <TaskIconSquare task={task} />
-        <View style={styles.rowBody}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {task.title}
-          </Text>
-          {showAssignee && task.assigned_to_name ? (
-            <Text style={styles.rowRef} numberOfLines={1}>
-              {task.assigned_to_name}
+        <View style={styles.taskTop}>
+          <TaskIconSquare task={task} size={50} />
+          <View style={styles.rowBody}>
+            <Text style={styles.taskTitle} numberOfLines={1}>
+              {task.title}
             </Text>
-          ) : null}
-          <View style={styles.dueLine}>
-            <ClockIcon size={12} color={dueColor} />
-            <Text style={[styles.rowDue, { color: dueColor }]} numberOfLines={1}>
-              {state === 'overdue' && task.due_date && task.due_date < todayStr() ? dueInfo(task).text : dueLabel(task.due_date, task.due_time)}
+            <View style={styles.dueLine}>
+              <ClockIcon size={12} color={dueColor} />
+              <Text style={[styles.rowDue, { color: dueColor }]} numberOfLines={1}>
+                {state === 'overdue' && task.due_date && task.due_date < todayStr() ? dueInfo(task).text : dueLabel(task.due_date, task.due_time)}
+              </Text>
+            </View>
+            {!!missedText(task) && (
+              <Text style={[styles.rowDue, { color: theme.dangerText }]} numberOfLines={1}>
+                ⚠ {missedText(task)}
+              </Text>
+            )}
+          </View>
+          <View style={styles.rowRight}>
+            <TaskStatePill task={task} />
+          </View>
+        </View>
+        {/* who made it (you in blue), and who it is for when that is someone else */}
+        <View style={styles.taskFoot}>
+          <View style={styles.footLeft}>
+            <Text style={styles.footLabel}>Created by</Text>
+            <Text style={[styles.footName, isMine && styles.footMe]} numberOfLines={1}>
+              {isMine ? 'You' : task.created_by_name || 'Someone'}
             </Text>
           </View>
-          {!!missedText(task) && (
-            <Text style={[styles.rowDue, { color: theme.dangerText }]} numberOfLines={1}>
-              ⚠ {missedText(task)}
-            </Text>
-          )}
-        </View>
-        <View style={styles.rowRight}>
-          <TaskStatePill task={task} />
+          {showAssignee && task.assigned_to_name ? (
+            <View style={styles.footRight}>
+              <Text style={styles.footArrow}>→</Text>
+              <Avatar name={task.assigned_to_name} id={task.assigned_to} size={20} />
+              <Text style={styles.footName} numberOfLines={1}>
+                {task.assigned_to_name}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Pressable>
     </Animated.View>
@@ -216,7 +260,7 @@ function TaskRowView({ task, onPress, showAssignee, index = 0 }: TaskRowProps) {
  * the task by its id, so the handler it was given earlier still does the same thing.
  */
 export const TaskRow = memo(TaskRowView, (prev, next) =>
-  prev.task === next.task && prev.showAssignee === next.showAssignee && prev.index === next.index,
+  prev.task === next.task && prev.showAssignee === next.showAssignee && prev.index === next.index && prev.meId === next.meId,
 );
 
 /** The task summary card at the top of Details / Reassign / Reschedule / Complete. */

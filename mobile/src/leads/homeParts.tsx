@@ -9,7 +9,7 @@ import type { Tone } from '../crm/ui/StatusBadge';
 import { initials } from '../tasks/format';
 import { TONE_GRADIENT } from '../tasks/theme';
 import { GradientBlock } from '../tasks/ui/parts';
-import { SwapIcon } from '../tasks/ui/taskIcons';
+import { ClipboardIcon, SwapIcon } from '../tasks/ui/taskIcons';
 import { radii, spacing, typography } from '../theme';
 
 /**
@@ -335,6 +335,7 @@ const SECTION_ICONS = {
   leads: { color: '#7c3aed', Icon: UsersIcon },
   actions: { color: '#ea580c', Icon: SparkleIcon },
   meetings: { color: '#16a34a', Icon: CalendarIcon },
+  tasks: { color: '#2563eb', Icon: ClipboardIcon },
 } as const;
 
 /**

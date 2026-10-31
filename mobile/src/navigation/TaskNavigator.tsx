@@ -29,6 +29,7 @@ import { TaskListScreen } from '../tasks/screens/TaskListScreen';
 import { TaskNotificationsScreen } from '../tasks/screens/TaskNotificationsScreen';
 import { TaskProfileScreen } from '../tasks/screens/TaskProfileScreen';
 import { TaskScheduleScreen } from '../tasks/screens/TaskScheduleScreen';
+import { EmployeeFeedbackScreen, FeedbackFormScreen } from '../tasks/screens/FeedbackScreens';
 
 const Tab = createBottomTabNavigator<TaskTabParamList>();
 const Stack = createNativeStackNavigator<TaskStackParamList>();
@@ -169,6 +170,8 @@ export function TaskNavigator() {
         <Stack.Screen name="Profile" component={TaskProfileScreen} />
         <Stack.Screen name="Notifications" component={TaskNotificationsScreen} />
         <Stack.Screen name="TaskReminders" component={TaskRemindersScreen} />
+        <Stack.Screen name="EmployeeFeedback" component={EmployeeFeedbackScreen} />
+        <Stack.Screen name="FeedbackForm" component={FeedbackFormScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="TaskReminderTime" component={ReminderTimeScreen} options={{ animation: 'slide_from_bottom' }} />
       </Stack.Navigator>
     </TasksProvider>
