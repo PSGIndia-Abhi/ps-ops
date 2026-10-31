@@ -33,6 +33,7 @@ const { startShiftAutoEndCron } = require("./src/jobs/shiftAutoEnd.cron");
 const { startPaymentReminderCron } = require("./src/jobs/paymentReminder.cron");
 const { startLeadReminderCron } = require("./src/jobs/leadReminder.cron");
 const { startTaskReminderCron } = require("./src/jobs/taskReminder.cron");
+const { startAuditQueueCron } = require("./src/jobs/auditQueue.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
 const invoicesRoutes = require("./src/routes/invoices.routes");
 const paymentsRoutes = require("./src/routes/payments.routes");
@@ -54,6 +55,7 @@ const crmQuoteMasterRoutes = require("./src/routes/crm-quote-master.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
+const auditsRoutes = require("./src/routes/audits.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -127,6 +129,8 @@ app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
+// Site Audits (supervisor inspections + Option B report)
+app.use("/api/audits", auditsRoutes);
 
 
 
@@ -145,6 +149,7 @@ const PORT = process.env.PORT || 3000;
     startPaymentReminderCron();
     startLeadReminderCron();
     startTaskReminderCron();
+    startAuditQueueCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

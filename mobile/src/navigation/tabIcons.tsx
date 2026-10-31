@@ -4,6 +4,7 @@ import {
   CalendarIcon,
   ClockIcon,
   ChartIcon,
+  DocumentIcon,
   HomeIcon,
   MoreHorizontalIcon,
   UsersIcon,
@@ -30,6 +31,9 @@ export const performanceTabIcon = ({ color, size }: TabIconProps) => (
   <ChartIcon size={size} color={color} />
 );
 export const teamTabIcon = ({ color, size }: TabIconProps) => <UsersIcon size={size} color={color} />;
+export const auditsTabIcon = ({ color, size }: TabIconProps) => (
+  <DocumentIcon size={size} color={color} />
+);
 export const moreTabIcon = ({ color, size }: TabIconProps) => (
   <MoreHorizontalIcon size={size} color={color} />
 );
