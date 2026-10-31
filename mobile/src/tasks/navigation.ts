@@ -27,6 +27,10 @@ export type TaskStackParamList = {
   Profile: undefined;
   /** Opened from the bell on Home. */
   Notifications: undefined;
+  /** Profile -> Employee feedback (Managing Director only): the notes written on the team. */
+  EmployeeFeedback: undefined;
+  /** Add (or, with `id`, edit) one feedback; `employeeId` starts it on that person. */
+  FeedbackForm: { id?: string; employeeId?: number } | undefined;
   /** Profile -> My reminders: the task reminders that will ring for me. */
   TaskReminders: undefined;
   /** Change one task's reminder (date and time) - the Leads app's reminder screen. */

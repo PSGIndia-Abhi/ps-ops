@@ -55,6 +55,7 @@ const crmLeadWorkspaceRoutes = require("./src/routes/crm-lead-workspace.routes")
 const crmQuoteMasterRoutes = require("./src/routes/crm-quote-master.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
+const employeeFeedbackRoutes = require("./src/routes/employee-feedback.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
 const brigadeRoutes = require("./src/routes/brigade.routes");
@@ -132,6 +133,7 @@ app.use("/api/crm", crmQuoteMasterRoutes);
 app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);
+app.use("/api/employee-feedback", employeeFeedbackRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
 // Admin User Activity report (logins + daily app usage, PDF/Excel export).
 app.use("/api/user-activity", userActivityRoutes);

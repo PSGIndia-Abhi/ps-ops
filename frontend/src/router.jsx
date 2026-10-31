@@ -64,6 +64,7 @@ import TaskProRequests from "./pages/taskpro/RescheduleRequests";
 import TaskProReports from "./pages/taskpro/TaskReports";
 import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
+import TaskProFeedback from "./pages/taskpro/Feedback";
 import { ACCOUNTANT_PANEL_ROLES, TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
 import LeadsLayout from "./pages/leads/LeadsLayout";
 import LeadsHome from "./pages/leads/Home";
@@ -355,6 +356,8 @@ const router = createBrowserRouter([
       { path: "reports", element: <TaskProReports /> },
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
+      // The Managing Director's private feedback on their team (the page and the server check the role).
+      { path: "feedback", element: <TaskProFeedback /> },
     ],
   },
 
