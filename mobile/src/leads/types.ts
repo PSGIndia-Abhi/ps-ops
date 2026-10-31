@@ -46,6 +46,8 @@ export interface PipelineLead {
   /** Services asked for: Quotation Master service ids (the quotation starts with them ticked). */
   services: string[];
   createdAt: string;
+  /** One-time or AMC (the lead list's tag): chosen at conversion, else the latest quotation's. */
+  contractType?: 'ONE_TIME' | 'AMC' | null;
 }
 
 export type MeetingStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
@@ -116,6 +118,8 @@ export interface Conversion {
   companyName: string;
   convertedBy: string;
   convertedAt: string;
+  /** One-time or AMC, chosen at conversion (null for customers converted before it was asked). */
+  contractType: 'ONE_TIME' | 'AMC' | null;
 }
 
 /** A lead-related task due today (GET /api/crm/my-tasks/today). */

@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { BrandMark } from '../components/BrandMark';
-import { BellIcon, ChevronRightIcon } from '../components/icons';
+import { GlossyBadge } from '../components/GlossyBadge';
+import { BellIcon, CalendarIcon, ChevronRightIcon, PinIcon, SparkleIcon, UsersIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import type { Tone } from '../crm/ui/StatusBadge';
 import { initials } from '../tasks/format';
@@ -111,11 +112,22 @@ const factory = (t: CrmTheme) => ({
   tileValue: { ...typography.display, fontSize: 26, lineHeight: 32, color: t.textPrimary, marginTop: spacing.xs },
   tileLabel: { ...typography.caption, color: t.textMuted, paddingHorizontal: 4 },
   tileBar: { position: 'absolute' as const, left: '22%' as const, right: '22%' as const, bottom: 0, height: 4, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-  sectionRow: { flexDirection: 'row' as const, alignItems: 'flex-end' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
-  sectionTitle: { ...typography.subtitle, fontSize: 19, color: t.textPrimary },
-  underline: { width: 28, height: 3, borderRadius: 1.5, backgroundColor: t.primary, marginTop: spacing.xs },
-  sectionAction: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2 },
-  sectionActionText: { ...typography.bodyMedium, color: t.primary },
+  // Section heading: a glossy icon, the title with a short line under it, "View all" as a pill
+  sectionRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm + 2, marginBottom: spacing.md },
+  sectionText: { flex: 1 },
+  sectionTitle: { ...typography.subtitle, fontSize: 18, fontWeight: '800' as const, color: t.textPrimary },
+  sectionSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  sectionAction: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 2,
+    minHeight: 34,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
+    borderRadius: radii.pill,
+    backgroundColor: t.primarySoftBg,
+  },
+  sectionActionText: { ...typography.captionMedium, fontSize: 13, color: t.primary },
   quick: {
     alignItems: 'center' as const,
     gap: spacing.xs,
@@ -317,19 +329,48 @@ export function QuickAction({ icon, label, tone, count, onPress }: { icon: React
   );
 }
 
-/** "Recent Leads" with its short underline, and an optional "View all" on the right. */
-export function SectionTitle({ title, onViewAll }: { title: string; onViewAll?: () => void }) {
+/** The section's glossy icon and its colour. */
+const SECTION_ICONS = {
+  visits: { color: '#2563eb', Icon: PinIcon },
+  leads: { color: '#7c3aed', Icon: UsersIcon },
+  actions: { color: '#ea580c', Icon: SparkleIcon },
+  meetings: { color: '#16a34a', Icon: CalendarIcon },
+} as const;
+
+/**
+ * A home section's heading: a glossy icon, the title with a short grey line under it, and an
+ * optional "View all" pill on the right.
+ */
+export function SectionTitle({
+  title,
+  subtitle,
+  icon,
+  onViewAll,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: keyof typeof SECTION_ICONS;
+  onViewAll?: () => void;
+}) {
   const { styles, theme } = useCrmStyles(factory);
+  const meta = icon ? SECTION_ICONS[icon] : null;
   return (
     <View style={styles.sectionRow}>
-      <View>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <View style={styles.underline} />
+      {!!meta && <GlossyBadge color={meta.color} size={36} icon={<meta.Icon size={17} color="#fff" />} />}
+      <View style={styles.sectionText}>
+        <Text style={styles.sectionTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {!!subtitle && (
+          <Text style={styles.sectionSub} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        )}
       </View>
       {!!onViewAll && (
-        <Pressable style={styles.sectionAction} onPress={onViewAll} hitSlop={10} accessibilityRole="button">
+        <Pressable style={({ pressed }) => [styles.sectionAction, pressed && { opacity: 0.8 }]} onPress={onViewAll} hitSlop={6} accessibilityRole="button">
           <Text style={styles.sectionActionText}>View all</Text>
-          <ChevronRightIcon size={16} color={theme.primary} />
+          <ChevronRightIcon size={15} color={theme.primary} />
         </Pressable>
       )}
     </View>

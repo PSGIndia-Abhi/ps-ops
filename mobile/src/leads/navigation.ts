@@ -12,6 +12,10 @@ export type LeadStackParamList = {
   /** A tap on a lead opens this first: details, contact buttons, then Manage lead / Follow-up. */
   LeadDetail: { leadId: string };
   LeadWork: { leadId: string };
+  /** A customer's service agreements (made on the web; viewed here). */
+  LeadAgreements: { leadId: string; name: string };
+  /** A lead's quotations on their own page (opened from Manage lead). */
+  LeadQuotations: { leadId: string; name: string };
   LeadList: { group?: StageGroup } | undefined;
   LeadNew: undefined;
   /** `canQualify`: the lead is at a stage where the call can also mark it genuine / not genuine. */

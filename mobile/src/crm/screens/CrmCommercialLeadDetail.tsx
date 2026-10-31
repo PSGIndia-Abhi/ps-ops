@@ -12,6 +12,7 @@ import {
   PersonIcon,
   PhoneIcon,
   PinIcon,
+  SettingsIcon,
   TagIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -48,8 +49,27 @@ const factory = (t: CrmTheme) => ({
     borderLeftWidth: 4,
     borderLeftColor: t.primary,
     padding: spacing.md,
+    overflow: 'hidden' as const,
     ...t.cardShadow,
   },
+  heroTagged: { paddingTop: spacing.md + 22 }, // the corner tag sits above the name row
+  // The corner tag: One-time or AMC (the Lead app's leads)
+  contractTag: {
+    position: 'absolute' as const,
+    top: 0,
+    right: 0,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderBottomLeftRadius: radii.lg,
+    zIndex: 1,
+  },
+  contractAmc: { backgroundColor: '#ea580c' },
+  contractOnce: { backgroundColor: '#0d9488' },
+  contractDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
+  contractText: { ...typography.captionMedium, fontSize: 11, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
   heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   companyTile: {
     width: 40,
@@ -93,25 +113,34 @@ const factory = (t: CrmTheme) => ({
   syncTextFailed: { color: t.dangerText },
   syncDiscard: { ...typography.captionMedium, color: t.dangerText, marginTop: spacing.xs },
 
-  manage: { marginTop: spacing.lg, marginBottom: spacing.lg },
+  // Manage lead on its own (no Follow-up beside it): a slimmer bar, close to the Call / WhatsApp height
+  manage: { marginTop: spacing.md, marginBottom: spacing.md },
   actionRow: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg, marginBottom: spacing.lg },
-  actionMain: { flex: 1.4 },
+  actionMain: { flex: 1.6 },
   actionSide: { flex: 1 },
   // Manage lead (filled, arrow on the right) and Follow-up (soft blue)
+  // Manage lead: a blue action bar - icon tile, title (+ what is there), arrow
   manageBtn: {
-    minHeight: 54,
-    borderRadius: radii.lg,
+    minHeight: 62,
+    borderRadius: radii.xl,
     backgroundColor: t.primary,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: spacing.sm,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     ...t.raisedShadow,
   },
+  manageTile: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  // beside Follow-up: a smaller tile and tighter spacing, so "Manage lead" fits in full
+  manageBtnCompact: { gap: spacing.sm, paddingHorizontal: spacing.sm + 2 },
+  manageTileCompact: { width: 32, height: 32, borderRadius: 10 },
+  manageBody: { flex: 1 },
   manageText: { ...typography.button, color: '#fff' },
-  manageArrow: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  manageSub: { ...typography.caption, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
+  manageArrow: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
   followBtn: {
-    minHeight: 54,
+    minHeight: 62,
     borderRadius: radii.lg,
     backgroundColor: t.primarySoftBg,
     flexDirection: 'row' as const,
@@ -229,6 +258,7 @@ export function CommercialLeadDetail({
   showPhotos = true,
   extra,
   afterActions,
+  contractType,
 }: {
   lead: Lead;
   stage?: React.ReactNode;
@@ -240,6 +270,8 @@ export function CommercialLeadDetail({
   extra?: React.ReactNode;
   /** Shown right under Manage lead / Follow-up (the Lead Management app's open meeting). */
   afterActions?: React.ReactNode;
+  /** One-time or AMC: a tag on the card's corner (the Lead Management app). */
+  contractType?: 'ONE_TIME' | 'AMC' | null;
 }) {
   const navigation = useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const manage = onManage ?? (() => navigation.navigate('LeadWork', { leadId: lead.id }));
@@ -306,7 +338,13 @@ export function CommercialLeadDetail({
         action={lead.pendingSync || !edit ? undefined : { label: 'Edit', onPress: edit }}
       />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
+        <View style={[styles.hero, !!contractType && styles.heroTagged]}>
+          {!!contractType && (
+            <View style={[styles.contractTag, contractType === 'AMC' ? styles.contractAmc : styles.contractOnce]} accessibilityLabel={contractType === 'AMC' ? 'AMC contract' : 'One-time service'}>
+              <View style={styles.contractDot} />
+              <Text style={styles.contractText}>{contractType === 'AMC' ? 'AMC' : 'ONE-TIME'}</Text>
+            </View>
+          )}
           <View style={styles.heroTop}>
             <View style={styles.companyTile}>
               <BriefcaseIcon size={20} color={theme.primary} />
@@ -376,7 +414,7 @@ export function CommercialLeadDetail({
           <View style={styles.spacer} />
         ) : onFollowUp ? (
           <View style={styles.actionRow}>
-            <ManageButton onPress={manage} style={styles.actionMain} />
+            <ManageButton onPress={manage} style={styles.actionMain} compact />
             <Pressable onPress={onFollowUp} accessibilityRole="button" testID="follow-up" style={({ pressed }) => [styles.followBtn, styles.actionSide, pressed && styles.btnPressed]}>
               <ClockIcon size={18} color={theme.primary} />
               <Text style={styles.followText}>Follow-up</Text>
@@ -455,11 +493,25 @@ export function CommercialLeadDetail({
 }
 
 /** "Manage lead": filled, with an arrow on the right. */
-function ManageButton({ onPress, style }: { onPress: () => void; style?: StyleProp<ViewStyle> }) {
+/** Manage lead: icon tile, title and (with room) what is there, arrow. `compact` = beside Follow-up. */
+function ManageButton({ onPress, style, compact }: { onPress: () => void; style?: StyleProp<ViewStyle>; compact?: boolean }) {
   const { styles } = useCrmStyles(factory);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" testID="manage-lead" style={({ pressed }) => [styles.manageBtn, style, pressed && styles.btnPressed]}>
-      <Text style={styles.manageText}>Manage lead</Text>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      testID="manage-lead"
+      style={({ pressed }) => [styles.manageBtn, compact && styles.manageBtnCompact, style, pressed && styles.btnPressed]}
+    >
+      <View style={[styles.manageTile, compact && styles.manageTileCompact]}>
+        <SettingsIcon size={compact ? 17 : 20} color="#fff" />
+      </View>
+      <View style={styles.manageBody}>
+        <Text style={styles.manageText} numberOfLines={1}>
+          Manage lead
+        </Text>
+        {!compact && <Text style={styles.manageSub}>Next steps, quotations, activity</Text>}
+      </View>
       <View style={styles.manageArrow}>
         <ChevronRightIcon size={15} color="#fff" />
       </View>

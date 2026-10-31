@@ -58,6 +58,7 @@ function toLead(row: Row): PipelineLead {
     salesEmployeeId: idOrNull(row.assigned_sales_employee_id),
     services: Array.isArray(row.services_requested) ? (row.services_requested as unknown[]).map(String) : [],
     createdAt: str(row.created_at),
+    contractType: row.contract_type === 'AMC' || row.contract_type === 'ONE_TIME' ? row.contract_type : null,
   };
 }
 
@@ -149,6 +150,66 @@ export async function getQuotations(id: string): Promise<Quotation[]> {
   return data.map(toQuotation);
 }
 
+/** A customer's service agreement (made on the web by the sales manager). */
+export type Agreement = {
+  id: string;
+  number: string;
+  /** CREATED / SIGNED: the active one (the newest). CANCELLED: a newer one was made. */
+  status: 'CREATED' | 'SIGNED' | 'CANCELLED';
+  clientName: string;
+  monthly: number;
+  termStart: string; // YYYY-MM-DD
+  termEnd: string;
+  hasSigned: boolean;
+  fileName: string;
+  signedFileName: string;
+};
+
+/** The customer's one final agreement: the uploaded signed copy. */
+export type FinalAgreement = { agreementId: string; number: string; fileName: string; uploadedAt: string; uploadedBy: string };
+
+export type Agreements = { agreements: Agreement[]; final: FinalAgreement | null; canUpload: boolean };
+
+/** GET /api/crm/leads/:id/agreements - newest first, and the final one. Sales managers only. */
+export async function getAgreements(id: string): Promise<Agreements> {
+  const { data } = await httpClient.get<{ agreements?: Row[]; final?: Row | null; can_manage?: boolean }>(`/api/crm/leads/${id}/agreements`);
+  const f = data.final;
+  return {
+    agreements: (data.agreements || []).map((r) => ({
+      id: str(r.id),
+      number: str(r.agreement_number),
+      status: r.status === 'SIGNED' || r.status === 'CANCELLED' ? r.status : 'CREATED',
+      clientName: str(r.client_name),
+      monthly: Number(r.monthly_amount) || 0,
+      termStart: str(r.term_start),
+      termEnd: str(r.term_end),
+      hasSigned: !!r.has_signed,
+      fileName: str(r.file_name) || 'Agreement.pdf',
+      signedFileName: str(r.signed_file_name) || 'Agreement_signed.pdf',
+    })),
+    final: f
+      ? {
+          agreementId: str(f.agreement_id),
+          number: str(f.agreement_number),
+          fileName: str(f.file_name) || 'Agreement_signed.pdf',
+          uploadedAt: str(f.uploaded_at),
+          uploadedBy: str(f.uploaded_by_name),
+        }
+      : null,
+    canUpload: !!data.can_manage,
+  };
+}
+
+/** POST /api/crm/leads/:id/agreements/final - THE final (signed) agreement as a PDF; replaces the earlier one. */
+export async function uploadFinalAgreement(leadId: string, file: LocalFile): Promise<void> {
+  const form = new FormData();
+  form.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  await httpClient.post(`/api/crm/leads/${leadId}/agreements/final`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: PDF_UPLOAD_TIMEOUT_MS,
+  });
+}
+
 /** A PDF can be several MB on a slow mobile connection - the default 15s is not enough. */
 const PDF_UPLOAD_TIMEOUT_MS = 90000;
 
@@ -180,7 +241,16 @@ const toConversion = (r: Row): Conversion => ({
   companyName: str(r.company_name),
   convertedBy: str(r.converted_by_name),
   convertedAt: str(r.converted_at),
+  contractType: r.contract_type === 'AMC' || r.contract_type === 'ONE_TIME' ? r.contract_type : null,
 });
+
+/**
+ * PUT /api/crm/leads/:id/conversion/contract-type - One-time or AMC for a customer converted before
+ * it was asked at conversion (sales manager; only fills an empty one).
+ */
+export async function setConversionContractType(id: string, contractType: 'ONE_TIME' | 'AMC'): Promise<void> {
+  await httpClient.put(`/api/crm/leads/${id}/conversion/contract-type`, { contract_type: contractType });
+}
 
 // ---- Lead actions --------------------------------------------------------
 
@@ -211,8 +281,15 @@ export async function markLost(id: string, reason: string, lossReasonId?: number
 
 /** `amount`: the final deal amount agreed at conversion (replaces the approximate quote). */
 /** `creditTo`: who the conversion counts for (the sales manager converting a sales executive's lead). */
-export async function convertLead(id: string, notes: string, amount?: number, creditTo?: number): Promise<Conversion> {
-  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, amount, credit_to: creditTo });
+/** `contractType`: a one-time service or an AMC - asked at conversion. */
+export async function convertLead(
+  id: string,
+  notes: string,
+  contractType: 'ONE_TIME' | 'AMC',
+  amount?: number,
+  creditTo?: number,
+): Promise<Conversion> {
+  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, contract_type: contractType, amount, credit_to: creditTo });
   return toConversion(data);
 }
 
@@ -618,6 +695,8 @@ export interface PerformanceItem {
   at: string;
   detail: string;
   amount: number | null;
+  /** Converted leads only: One-time or AMC (null = not known). */
+  contractType: 'ONE_TIME' | 'AMC' | null;
 }
 
 /** GET /api/crm/reports/sales-performance/items - the records behind one number, by the same rules. */
@@ -634,6 +713,7 @@ export async function performanceItems(metric: PerformanceMetric, from: string, 
     at: str(r.at),
     detail: str(r.detail),
     amount: r.amount === null || r.amount === undefined ? null : Number(r.amount),
+    contractType: r.contract_type === 'AMC' || r.contract_type === 'ONE_TIME' ? r.contract_type : null,
   }));
 }
 

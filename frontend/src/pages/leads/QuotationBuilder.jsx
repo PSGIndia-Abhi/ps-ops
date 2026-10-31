@@ -326,7 +326,6 @@ function stateFromContent(content, master) {
     extraTerms: extra.TERMS,
     table: priceTableFromContent(content.priceTable),
     perOutlet: !!content.perOutlet,
-    contractType: content.contractType || "",
   };
 }
 
@@ -352,7 +351,6 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   // Optional price table in the client's format; its total row's amount is the package price.
   const [table, setTable] = useState(null);
   const [perOutlet, setPerOutlet] = useState(false); // the price is for one outlet
-  const [contractType, setContractType] = useState(""); // "ONE_TIME" | "AMC" - asked when saving
   const [checked, setChecked] = useState(new Set());
   const [extraValue, setExtraValue] = useState([]);
   const [extraTerms, setExtraTerms] = useState([]);
@@ -384,7 +382,6 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           setPkg(st.pkg);
           setTable(st.table);
           setPerOutlet(st.perOutlet);
-          setContractType(st.contractType);
           setChecked(st.checked);
           setExtraValue(st.extraValue);
           setExtraTerms(st.extraTerms);
@@ -541,8 +538,8 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   }
 
   async function send(closeConfirm) {
-    const { content: built } = build();
-    const content = { ...built, contractType };
+    // One-time or AMC is asked at Convert to Customer now, not here.
+    const { content } = build();
     setBusy("send");
     try {
       await generateQuotation(lead.id, content, editing ? { replacesQuotationId: from.id } : {});
@@ -831,25 +828,10 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           actions={(close) => (
             <>
               <Button variant="ghost" onClick={close} disabled={busy === "send"}>Back</Button>
-              <Button icon={<FiSend />} busy={busy === "send"} disabled={!contractType} onClick={() => send(close)}>Save &amp; Send</Button>
+              <Button icon={<FiSend />} busy={busy === "send"} onClick={() => send(close)}>Save &amp; Send</Button>
             </>
           )}
         >
-          <div className="lm-contract">
-            <span className="lm-contract-label">Is this quotation for a one-time service or an AMC?</span>
-            <div className="lm-contract-options" role="radiogroup">
-              {[
-                { key: "ONE_TIME", label: "One-time", sub: "A single service" },
-                { key: "AMC", label: "AMC", sub: "Annual maintenance contract" },
-              ].map((o) => (
-                <button key={o.key} type="button" role="radio" aria-checked={contractType === o.key} className={`lm-contract-option${contractType === o.key ? " on" : ""}`} onClick={() => setContractType(o.key)}>
-                  <strong>{o.label}</strong>
-                  <small>{o.sub}</small>
-                </button>
-              ))}
-            </div>
-            <small className="lm-contract-hint">Shown on the lead&apos;s Quotations - not on the PDF.</small>
-          </div>
           The PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>.
           {editing && (
             <>

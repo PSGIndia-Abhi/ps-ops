@@ -19,7 +19,7 @@ import type { LeadStackParamList } from '../navigation';
 import * as quote from '../quotation';
 import { PriceTableEditor, priceTableForSave, priceTableFromContent, priceTableTotal, type PriceTable } from '../PriceTableEditor';
 import { QuotationPdfDialog, SendQuotationDialog } from '../QuotationDialogs';
-import type { Billing, ContractType, MasterPlan, MasterService, QuoteMaster, SavedQuotationContent, TreatmentRow } from '../quotation';
+import type { Billing, MasterPlan, MasterService, QuoteMaster, SavedQuotationContent, TreatmentRow } from '../quotation';
 import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, useLoad } from '../ui';
 
 /**
@@ -133,7 +133,6 @@ type Start = {
   discount: string;
   checked: Set<string>;
   extra: { VALUE_ADDED: string[]; TERMS: string[] };
-  contractType: ContractType | null;
   /** Services on the saved quotation that are no longer in the master. */
   missing: string[];
 };
@@ -155,7 +154,6 @@ function blankStart(master: QuoteMaster, customer: Start['customer'], asked: str
     discount: '',
     checked: new Set(),
     extra: { VALUE_ADDED: [], TERMS: [] },
-    contractType: null,
     missing: [],
   };
 }
@@ -221,7 +219,6 @@ function startFromSaved(content: SavedQuotationContent, master: QuoteMaster): St
     discount: content.totals?.discount ? String(content.totals.discount) : '',
     checked,
     extra,
-    contractType: content.contractType || null,
     missing,
   };
 }
@@ -823,11 +820,10 @@ function Builder({
       {askSend && (
         <SendQuotationDialog
           name={askSend.customer.name}
-          initial={start.contractType}
           replacing={!!from?.editing}
           onCancel={() => setAskSend(null)}
-          onSend={(contractType) => {
-            const content = { ...askSend, contractType };
+          onSend={() => {
+            const content = askSend;
             setAskSend(null);
             send(content);
           }}

@@ -133,6 +133,7 @@ export function LeadDetailScreen() {
     <CommercialLeadDetail
       lead={lead}
       stage={<StageBadge stage={pipeline.stage} />}
+      contractType={pipeline.contractType ?? null}
       onManage={() => navigation.navigate('LeadWork', { leadId })}
       onFollowUp={canFollowUp ? () => navigation.navigate('LeadFollowUp', { leadId, name }) : undefined}
       onEdit={canEdit ? edit : null}

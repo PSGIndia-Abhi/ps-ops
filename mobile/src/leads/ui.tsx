@@ -21,12 +21,14 @@ import {
   TagIcon,
   UsersIcon,
 } from '../components/icons';
+import { GlossyBadge } from '../components/GlossyBadge';
 import { formatINR } from '../crm/format';
 import { useCrmStyles, useCrmTheme, type CrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import { StatusBadge, toneColors, type Tone } from '../crm/ui/StatusBadge';
 import { fmtDateShort, fmtTime, initials, todayStr } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
+import { formatDate } from '../utils/date';
 import { leadPersonaForRole, STAGE_META } from './stage';
 import type { LeadPersona, Meeting, PipelineLead, PipelineStage } from './types';
 
@@ -371,42 +373,62 @@ export function LeadAvatar({ name, stage }: { name: string; stage: PipelineStage
 
 const leadRowFactory = (t: CrmTheme) => ({
   card: {
-    flexDirection: 'row' as const,
     backgroundColor: t.surface,
-    borderRadius: radii.lg,
+    borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: t.border,
-    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm + 2,
+    marginBottom: spacing.sm + 2,
     overflow: 'hidden' as const,
     ...t.cardShadow,
   },
+  cardTagged: { paddingTop: spacing.md + 18 }, // the corner tag sits above the name row
   pressed: { opacity: 0.9 },
-  accent: { width: 4 },
-  body: { flex: 1, paddingVertical: spacing.md, paddingLeft: spacing.md, paddingRight: spacing.sm },
-  top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
-  company: { ...typography.bodyMedium, fontSize: 16, color: t.textPrimary, flex: 1 },
-  amount: { ...typography.bodyMedium, color: t.textPrimary },
-  bottom: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm },
-  // Who added it: a small coloured initials avatar and their name.
-  by: { flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, minWidth: 0 },
-  byAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: 'center' as const, justifyContent: 'center' as const },
-  byInitials: { fontSize: 10.5, fontWeight: '700' as const },
-  byName: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
-  chevron: { justifyContent: 'center' as const, paddingRight: spacing.sm },
-  // The open arrow: a soft round button rather than a bare grey chevron.
-  chevronDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: t.primarySoftBg,
+  // One-time / AMC: a tag on the card's corner (as on Manage lead)
+  tag: {
+    position: 'absolute' as const,
+    top: 0,
+    right: 0,
+    flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'center' as const,
+    gap: 5,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    borderBottomLeftRadius: radii.md,
+    zIndex: 1,
   },
+  tagAmc: { backgroundColor: '#ea580c' },
+  tagOnce: { backgroundColor: '#0d9488' },
+  tagDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
+  tagText: { fontSize: 10, fontWeight: '800' as const, letterSpacing: 0.8, color: '#fff' },
+  // company initials, name, lead number and date; the amount on the right
+  top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm + 2 },
+  initials: { ...typography.captionMedium, fontSize: 13, fontWeight: '800' as const, color: '#fff' },
+  head: { flex: 1, minWidth: 0 },
+  company: { ...typography.bodyMedium, fontSize: 16, fontWeight: '700' as const, color: t.textPrimary },
+  sub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  money: { alignItems: 'flex-end' as const },
+  amount: { ...typography.subtitle, fontWeight: '800' as const, color: t.textPrimary },
+  amountLabel: { ...typography.caption, fontSize: 11, color: t.textMuted },
+  // who added it, and where it stands
+  bottom: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    marginTop: spacing.sm + 2,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+  },
+  by: { flex: 1 },
+  byName: { ...typography.bodyMedium, fontSize: 14, fontWeight: '700' as const, color: t.textSecondary, flex: 1 },
 });
 
 /**
- * One lead in a list, read top to bottom: the company and its quote, who to talk to, then where it
- * stands. The coloured edge is the stage's colour, so a list scans at a glance.
+ * One lead in a list: the company (initials badge in the stage's colour, date added) and its quote,
+ * then who added it and where it stands. One-time / AMC is a tag on the corner.
  */
 export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => void }) {
   const { styles, theme } = useCrmStyles(leadRowFactory);
@@ -415,43 +437,49 @@ export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => 
   // Who added the lead - "You" for your own (in the app colour), else their name in their own colour.
   const mineLead = !!lead.createdById && lead.createdById === myId;
   const byName = mineLead ? 'You' : lead.createdByName || '';
-  const byTone = mineLead ? { fg: theme.primary, bg: theme.primarySoftBg } : toneColors(theme, personTone(byName));
   const company = lead.companyName || lead.contactPerson;
+  const kind = lead.contractType ?? null;
+  const sub = lead.createdAt ? formatDate(lead.createdAt) : '';
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${company}, ${STAGE_META[lead.stage]?.label ?? lead.stage}, ${formatINR(lead.amount)}`}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      accessibilityLabel={`${company}, ${STAGE_META[lead.stage]?.label ?? lead.stage}, ${formatINR(lead.amount)}${kind ? `, ${kind === 'AMC' ? 'AMC' : 'one-time'}` : ''}`}
+      style={({ pressed }) => [styles.card, !!kind && styles.cardTagged, pressed && styles.pressed]}
     >
-      <View style={[styles.accent, { backgroundColor: toneColors(theme, tone).fg }]} />
-      <View style={styles.body}>
-        <View style={styles.top}>
+      {!!kind && (
+        <View style={[styles.tag, kind === 'AMC' ? styles.tagAmc : styles.tagOnce]}>
+          <View style={styles.tagDot} />
+          <Text style={styles.tagText}>{kind === 'AMC' ? 'AMC' : 'ONE-TIME'}</Text>
+        </View>
+      )}
+      <View style={styles.top}>
+        <GlossyBadge color={toneColors(theme, tone).fg} size={42} icon={<Text style={styles.initials}>{initials(company || '?')}</Text>} />
+        <View style={styles.head}>
           <Text style={styles.company} numberOfLines={1}>
             {company}
           </Text>
-          <Text style={styles.amount}>{formatINR(lead.amount)}</Text>
-        </View>
-        <View style={styles.bottom}>
-          {byName ? (
-            <View style={styles.by}>
-              <View style={[styles.byAvatar, { backgroundColor: byTone.bg }]}>
-                <Text style={[styles.byInitials, { color: byTone.fg }]}>{mineLead ? 'ME' : initials(byName)}</Text>
-              </View>
-              <Text style={[styles.byName, mineLead && { color: theme.primary }]} numberOfLines={1}>
-                {byName}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.by} />
+          {!!sub && (
+            <Text style={styles.sub} numberOfLines={1}>
+              {sub}
+            </Text>
           )}
-          <StageBadge stage={lead.stage} />
+        </View>
+        <View style={styles.money}>
+          <Text style={styles.amount}>{formatINR(lead.amount)}</Text>
+          <Text style={styles.amountLabel}>Approx. quote</Text>
         </View>
       </View>
-      <View style={styles.chevron}>
-        <View style={styles.chevronDot}>
-          <ChevronRightIcon size={15} color={theme.primary} />
-        </View>
+      <View style={styles.bottom}>
+        {byName ? (
+          // who added it: just the name (yours, "You", in the app blue)
+          <Text style={[styles.byName, mineLead && { color: theme.primary }]} numberOfLines={1}>
+            {byName}
+          </Text>
+        ) : (
+          <View style={styles.by} />
+        )}
+        <StageBadge stage={lead.stage} />
       </View>
     </Pressable>
   );

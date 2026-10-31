@@ -2,37 +2,30 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Modal, Pressable, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { GlossyBadge } from '../components/GlossyBadge';
-import { CalendarIcon, CheckCircleIcon, ClockIcon, CloseIcon, DocumentIcon, ExternalLinkIcon, SendIcon } from '../components/icons';
+import { CheckCircleIcon, CloseIcon, DocumentIcon, ExternalLinkIcon, SendIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { radii, spacing, typography } from '../theme';
-import { openPdf, saveToDownloads, sharePdf, type ContractType } from './quotation';
+import { openPdf, saveToDownloads, sharePdf } from './quotation';
 import { errorMessage } from './ui';
 
 // The quotation dialogs, in the app's own design instead of the plain Android alert: a card that
 // pops in, a glossy coloured badge in a soft halo, a bold title, the client's name in a chip, and
 // the choices as colourful round buttons.
 
-/**
- * "Save and send?" before a quotation is numbered and saved - with "One-time or AMC?", which is
- * saved with it and shown on the lead (not on the PDF).
- */
+/** "Save and send?" before a quotation is numbered and saved. (One-time or AMC is asked at Convert to customer.) */
 export function SendQuotationDialog({
   name,
-  initial = null,
   replacing = false,
   onCancel,
   onSend,
 }: {
   name: string;
-  /** The choice already made (a quotation opened again to edit or duplicate). */
-  initial?: ContractType | null;
   /** An edit: the quotation it came from is marked Cancelled - replaced. */
   replacing?: boolean;
   onCancel: () => void;
-  onSend: (contractType: ContractType) => void;
+  onSend: () => void;
 }) {
   const { styles, theme } = useCrmStyles(factory);
-  const [kind, setKind] = useState<ContractType | null>(initial);
   return (
     <Card onClose={onCancel}>
       <Badge color={theme.primary} icon={<SendIcon size={24} color="#fff" />} />
@@ -43,35 +36,13 @@ export function SendQuotationDialog({
           ? 'A new quotation is saved on the lead. The current one stays in the list, marked "Cancelled - replaced".'
           : 'The quotation is saved on the lead and the lead moves to "Quotation sent".'}
       </Text>
-      <Text style={styles.kindLabel}>Is this for a one-time service or an AMC?</Text>
-      <View style={styles.kindRow}>
-        {(
-          [
-            { key: 'ONE_TIME', label: 'One-time', sub: 'A single service', Icon: ClockIcon, color: theme.warning },
-            { key: 'AMC', label: 'AMC', sub: 'Annual contract', Icon: CalendarIcon, color: theme.accent },
-          ] as const
-        ).map((o) => {
-          const on = kind === o.key;
-          return (
-            <Pressable key={o.key} onPress={() => setKind(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }} style={({ pressed }) => [styles.kind, on && styles.kindOn, pressed && styles.pressed]}>
-              <View style={styles.kindTop}>
-                <GlossyBadge color={o.color} size={32} icon={<o.Icon size={16} color="#fff" />} />
-                <View style={[styles.radio, on && styles.radioOn]}>{on && <View style={styles.radioDot} />}</View>
-              </View>
-              <Text style={[styles.kindTitle, on && styles.kindTitleOn]}>{o.label}</Text>
-              <Text style={styles.kindSub}>{o.sub}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
       <View style={styles.row}>
         <Pressable onPress={onCancel} style={({ pressed }) => [styles.btn, styles.grow, styles.btnOutline, pressed && styles.pressed]} accessibilityRole="button">
           <Text style={styles.btnOutlineText}>Back</Text>
         </Pressable>
         <Pressable
-          onPress={() => kind && onSend(kind)}
-          disabled={!kind}
-          style={({ pressed }) => [styles.btn, styles.grow, styles.btnPrimary, !kind && styles.btnDisabled, pressed && styles.pressed]}
+          onPress={onSend}
+          style={({ pressed }) => [styles.btn, styles.grow, styles.btnPrimary, pressed && styles.pressed]}
           accessibilityRole="button"
         >
           <SendIcon size={16} color="#fff" />
@@ -95,9 +66,15 @@ export function QuotationPdfDialog({
   onClose,
   onEdit,
   onDuplicate,
+  title = 'Quotation PDF',
+  shareMessage,
 }: {
   name: string;
   saved?: boolean;
+  /** The heading (another document - e.g. an agreement - reuses this card). */
+  title?: string;
+  /** The message sent with the PDF when it is shared (default: "Quotation for <name> - Bestserve..."). */
+  shareMessage?: string;
   /** Downloads the PDF to the phone and returns its path. */
   getFile: () => Promise<string>;
   /** After the PDF opened in the viewer. */
@@ -120,7 +97,7 @@ export function QuotationPdfDialog({
     try {
       const file = await getFile();
       if (kind === 'share') {
-        await sharePdf(file, name ? `Quotation for ${name} - Bestserve Pest Management Pvt. Ltd.` : undefined);
+        await sharePdf(file, shareMessage ?? (name ? `Quotation for ${name} - Bestserve Pest Management Pvt. Ltd.` : undefined));
         setBusy('');
         return;
       }
@@ -145,7 +122,7 @@ export function QuotationPdfDialog({
         color={saved ? theme.success : theme.primary}
         icon={saved ? <CheckCircleIcon size={26} color="#fff" /> : <DocumentIcon size={24} color="#fff" />}
       />
-      <Text style={styles.title}>{saved ? 'Quotation saved' : 'Quotation PDF'}</Text>
+      <Text style={styles.title}>{saved ? 'Quotation saved' : title}</Text>
       {!!name && <NameChip name={name} />}
 
       {/* Only a problem is spelled out; a saved copy shows on its own button. */}
@@ -375,18 +352,6 @@ const factory = (t: CrmTheme) => ({
   btn: { minHeight: 50, borderRadius: radii.lg, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8 },
   btnPrimary: { backgroundColor: t.primary },
   btnDisabled: { opacity: 0.45 },
-  // One-time or AMC on "Save and send?"
-  kindLabel: { ...typography.captionMedium, color: t.textPrimary, alignSelf: 'stretch' as const, marginTop: spacing.md, marginBottom: spacing.xs },
-  kindRow: { flexDirection: 'row' as const, gap: spacing.sm, alignSelf: 'stretch' as const },
-  kind: { flex: 1, padding: spacing.sm, borderRadius: radii.lg, borderWidth: 1.5, borderColor: t.border, gap: 2 },
-  kindOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
-  kindTop: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.xs },
-  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
-  radioOn: { borderColor: t.primary },
-  radioDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: t.primary },
-  kindTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  kindTitleOn: { color: t.primary },
-  kindSub: { ...typography.caption, color: t.textMuted },
   btnPrimaryText: { ...typography.button, color: '#fff' },
   btnOutline: { borderWidth: 1.5, borderColor: t.border, backgroundColor: t.surface },
   btnOutlineText: { ...typography.button, color: t.textPrimary },

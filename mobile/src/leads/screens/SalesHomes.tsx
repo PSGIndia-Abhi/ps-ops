@@ -227,7 +227,7 @@ export function SalesExecHome() {
 
 
           <View style={styles.section}>
-            <SectionTitle title="Recent Leads" onViewAll={leads.length > 0 ? () => openGroup('all') : undefined} />
+            <SectionTitle title="Recent Leads" icon="leads" subtitle="Your newest leads" onViewAll={leads.length > 0 ? () => openGroup('all') : undefined} />
             {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={92} radius={radii.lg} style={styles.skeleton} />)}
             {!!data && leads.length === 0 && !error && <CrmEmptyState title="No leads yet" subtitle="Leads you add or are given will appear here." />}
             {leads.slice(0, RECENT_LIMIT).map((lead) => (
@@ -236,7 +236,7 @@ export function SalesExecHome() {
           </View>
 
           <View style={styles.section}>
-            <SectionTitle title="Quick Actions" />
+            <SectionTitle title="Quick Actions" icon="actions" subtitle="Jump straight to your work" />
             <View style={styles.quickRow}>
               <QuickAction icon={<ClockIcon size={19} color={WHITE} />} label="Follow-ups" tone="warning" count={followUps.length} onPress={() => navigation.navigate('Tasks')} />
               <QuickAction icon={<CalendarIcon size={19} color={WHITE} />} label="Meetings" tone="accent" onPress={() => navigation.navigate('LeadMeetings')} />
@@ -300,13 +300,13 @@ export function SalesManagerHome() {
 
           {/* Today's team visits at a glance */}
           <View style={styles.section}>
-            <SectionTitle title="Team visits today" />
+            <SectionTitle title="Team visits today" icon="visits" subtitle="Who is out on visits right now" />
             <TeamVisitsTimeline visits={data ? data.visits : null} onPress={() => navigation.navigate('LeadTeamVisits')} />
           </View>
 
 
           <View style={styles.section}>
-            <SectionTitle title="Recent Leads" onViewAll={leads.length > 0 ? () => openGroup('all') : undefined} />
+            <SectionTitle title="Recent Leads" icon="leads" subtitle="Your newest leads" onViewAll={leads.length > 0 ? () => openGroup('all') : undefined} />
             {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={92} radius={radii.lg} style={styles.skeleton} />)}
             {!!data && leads.length === 0 && !error && <CrmEmptyState title="No leads yet" subtitle="Verified leads will appear here." />}
             {leads.slice(0, RECENT_LIMIT).map((lead) => (
@@ -315,7 +315,7 @@ export function SalesManagerHome() {
           </View>
 
           <View style={styles.section}>
-            <SectionTitle title="Quick Actions" />
+            <SectionTitle title="Quick Actions" icon="actions" subtitle="Jump straight to your work" />
             <View style={styles.quickRow}>
               <QuickAction icon={<PinIcon size={19} color={WHITE} />} label="Team visits" tone="accent" onPress={() => navigation.navigate('LeadTeamVisits')} />
               <QuickAction icon={<DocumentIcon size={19} color={WHITE} />} label="Quoted" tone="info" count={counts.quoted} onPress={() => openGroup('quoted')} />

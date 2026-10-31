@@ -213,6 +213,13 @@ function toActivity(row) {
       return { ...base, type: "LOST", text: `Marked as Lost${note ? ` - ${note}` : ""}` };
     case "CONVERTED":
       return { ...base, type: "WON", text: "Lead converted to customer", note };
+    case "AGREEMENT_CREATED":
+      // Saved as "AG-2026-000001: Customer, 2026-10-01 to 2027-09-30, Rs. 30000 per month".
+      return { ...base, type: "AGREEMENT", text: `Agreement ${note.split(":")[0]} created${who}`, note: note.split(": ").slice(1).join(": ") };
+    case "CONTRACT_TYPE_SET":
+      return { ...base, type: "WON", text: `${note || "Service type set"}${who}` };
+    case "AGREEMENT_SIGNED":
+      return { ...base, type: "AGREEMENT", text: `Signed agreement ${note.split(":")[0]} uploaded${who}` };
     default:
       return { ...base, type: "STATUS", text: String(row.action || "Updated").replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase()), note };
   }
@@ -715,14 +722,15 @@ export function leadSalesOwner(lead) {
 /**
  * POST /leads/{id}/convert-to-customer (won) or /leads/{id}/mark-lost (lost).
  * `creditTo`: who a conversion counts for (the sales manager converting a sales executive's lead).
+ * `contractType`: "ONE_TIME" | "AMC", chosen at conversion.
  */
-export async function closeLead(leadId, { won, reason, notes, creditTo }) {
+export async function closeLead(leadId, { won, reason, notes, contractType, creditTo }) {
   if (!won && !reason) throw new Error("Choose why this lead was lost.");
   const extra = notes?.trim();
   if (won) {
     await request(`/api/crm/leads/${leadId}/convert-to-customer`, {
       method: "POST",
-      body: { notes: extra || "", ...(creditTo ? { credit_to: Number(creditTo) } : {}) },
+      body: { notes: extra || "", contract_type: contractType || undefined, ...(creditTo ? { credit_to: Number(creditTo) } : {}) },
     });
   }
   else {
@@ -830,6 +838,15 @@ export async function getPerformanceItems({ metric, from, to, employeeId }) {
 /** GET /targets/history - one sales person's last months against their targets, and their lifetime total. */
 export const getTargetHistory = (userId, months = 6) =>
   request(`/api/crm/targets/history?months=${months}${userId ? `&userId=${userId}` : ""}`);
+
+/**
+ * PUT /leads/{id}/conversion/contract-type - One-time or AMC for a customer converted before it was
+ * asked at conversion (sales manager; only fills an empty one).
+ */
+export async function setConversionContractType(leadId, contractType) {
+  await request(`/api/crm/leads/${leadId}/conversion/contract-type`, { method: "PUT", body: { contract_type: contractType } });
+  await loadWorkspace();
+}
 
 /** GET /leads/{id}/conversion - the customer a converted lead became; null when it has not been converted. */
 export async function getConversion(leadId) {
@@ -944,5 +961,78 @@ export async function fetchQuotationPdf(leadId, quotationId) {
     headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
   });
   if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not open the quotation.");
+  return URL.createObjectURL(await res.blob());
+}
+
+// ---- service agreements (converted leads) -----------------------------------
+
+const toAgreement = (r) => ({
+  id: r.id,
+  number: r.agreement_number,
+  status: r.status, // CREATED | SIGNED | CANCELLED (a newer one was made)
+  clientName: r.client_name || "",
+  monthly: Number(r.monthly_amount) || 0,
+  termStart: r.term_start,
+  termEnd: r.term_end,
+  hasPdf: !!r.has_pdf,
+  hasSigned: !!r.has_signed,
+  signedAt: wall(r.signed_uploaded_at),
+  signedBy: r.signed_uploaded_by_name || "",
+  createdBy: r.created_by_name || "",
+  createdAt: wall(r.created_at),
+  fileName: r.file_name,
+  signedFileName: r.signed_file_name,
+});
+
+/**
+ * GET /leads/{id}/agreements - { canManage, agreements (newest first), final }. `final` is the
+ * customer's one final agreement - the uploaded signed copy - or null.
+ */
+export async function listAgreements(leadId) {
+  const data = await request(`/api/crm/leads/${leadId}/agreements`);
+  const f = data.final;
+  return {
+    canManage: !!data.can_manage,
+    agreements: (data.agreements || []).map(toAgreement),
+    final: f ? { agreementId: f.agreement_id, number: f.agreement_number, fileName: f.file_name, uploadedAt: wall(f.uploaded_at), uploadedBy: f.uploaded_by_name || "" } : null,
+  };
+}
+
+/** GET /leads/{id}/agreements/prefill - the form filled from the customer and its latest quotation. */
+export const getAgreementPrefill = (leadId) => request(`/api/crm/leads/${leadId}/agreements/prefill`);
+
+/** GET /leads/{id}/agreements/{aid}/content - what an agreement was made from (to make another from it). */
+export const getAgreementContent = (leadId, agreementId) => request(`/api/crm/leads/${leadId}/agreements/${agreementId}/content`);
+
+/** POST /leads/{id}/agreements/preview - the agreement PDF, not saved; a blob URL (revoke it when done). */
+export async function previewAgreement(leadId, content) {
+  const res = await apiFetch(`/api/crm/leads/${leadId}/agreements/preview`, { method: "POST", body: JSON.stringify(content) });
+  if (!res) throw new Error("Your session has ended. Please sign in again.");
+  if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not make the preview.");
+  return URL.createObjectURL(await res.blob());
+}
+
+/** POST /leads/{id}/agreements - numbers and saves the agreement and its PDF. */
+export async function createAgreement(leadId, content) {
+  const row = await request(`/api/crm/leads/${leadId}/agreements`, { method: "POST", body: content });
+  await loadWorkspace(); // its activity entry
+  return toAgreement(row);
+}
+
+/** POST /leads/{id}/agreements/final - THE final (signed) agreement, a PDF; replaces the earlier one. */
+export async function uploadFinalAgreement(leadId, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const row = await request(`/api/crm/leads/${leadId}/agreements/final`, { method: "POST", form });
+  await loadWorkspace();
+  return toAgreement(row);
+}
+
+/** The agreement (or its signed copy) as a blob URL (revoke it when done). */
+export async function fetchAgreementPdf(leadId, agreementId, signed = false) {
+  const res = await fetch(`${API_BASE}/api/crm/leads/${leadId}/agreements/${agreementId}/${signed ? "signed" : "pdf"}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+  });
+  if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not open the agreement.");
   return URL.createObjectURL(await res.blob());
 }

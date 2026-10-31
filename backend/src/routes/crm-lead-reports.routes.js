@@ -170,6 +170,7 @@ router.get("/reports/sales-performance", auth, requirePermission("CRM_VIEW_LEAD"
 // ---------------------------------------------------------------------------
 // GET /api/crm/reports/sales-performance/items?metric=leadsConverted&from=&to=&employeeId=
 //   -> { metric, items: [{ lead_id, lead_number, company, contact, stage, at, detail, amount }] }
+//      (leadsConverted items also carry contract_type: ONE_TIME | AMC | null)
 // The records behind one number of the report above, by the same rules, so a list always matches
 // its number. Same period and permission rules as the report. Newest first, at most 500.
 // ---------------------------------------------------------------------------
@@ -189,7 +190,15 @@ const PERFORMANCE_ITEMS = {
       FROM crm_lead_quotations q WHERE q.created_by = ? AND q.status <> 'CANCELLED' AND DATE(q.sent_at) BETWEEN ? AND ?`,
   followUpsDue: `SELECT t.source_id AS lead_id, TIMESTAMP(t.due_date, COALESCE(t.due_time, '00:00:00')) AS at, t.status AS a, NULL AS b, NULL AS amount
       FROM work_tasks t WHERE t.assigned_to = ? AND t.source_module = 'LEAD' AND t.task_type = 'LEAD_FOLLOW_UP' AND t.due_date BETWEEN ? AND ?`,
-  leadsConverted: `SELECT w.lead_id, w.converted_at AS at, NULL AS a, NULL AS b, w.value AS amount
+  // a = One-time or AMC: chosen at conversion, else the latest standing quotation's choice, else NULL
+  leadsConverted: `SELECT w.lead_id, w.converted_at AS at,
+        COALESCE((SELECT c2.contract_type FROM crm_lead_conversions c2 WHERE c2.lead_id = w.lead_id),
+          (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType'))
+             FROM crm_lead_quotations q JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
+            WHERE q.lead_id = w.lead_id AND q.status <> 'CANCELLED'
+              AND JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) IN ('ONE_TIME', 'AMC')
+            ORDER BY q.created_at DESC LIMIT 1)) AS a,
+        NULL AS b, w.value AS amount
       FROM (${CONVERTED_LEADS_SQL}) w WHERE w.user_id = ? AND DATE(w.converted_at) BETWEEN ? AND ?`,
   leadsLost: `SELECT h.lead_id, MAX(h.changed_at) AS at, NULL AS a, NULL AS b, NULL AS amount
       FROM crm_lead_history h WHERE h.action = 'MARK_LOST' AND h.changed_by = ? AND DATE(h.changed_at) BETWEEN ? AND ?
@@ -232,6 +241,8 @@ router.get("/reports/sales-performance/items", auth, requirePermission("CRM_VIEW
         at: r.at,
         detail: itemDetail(metric, r),
         amount: r.amount === null || r.amount === undefined ? null : Number(r.amount),
+        // converted leads only: "ONE_TIME" | "AMC" | null (not known)
+        ...(metric === "leadsConverted" ? { contract_type: r.a === "ONE_TIME" || r.a === "AMC" ? r.a : null } : {}),
       })),
     });
   } catch (err) {

@@ -607,3 +607,13 @@ export function ShieldIcon({ size = 20, color = '#6B7280' }: IconProps) {
     </Svg>
   );
 }
+
+/** An arrow up out of a tray - uploading a file. */
+export function UploadIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}

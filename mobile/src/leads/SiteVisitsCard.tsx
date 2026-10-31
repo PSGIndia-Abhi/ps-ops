@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { GlossyBadge } from '../components/GlossyBadge';
 import { BriefcaseIcon, ChevronRightIcon, PersonIcon, UsersIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { StatusBadge, toneColors, type Tone } from '../crm/ui/StatusBadge';
@@ -22,11 +23,18 @@ const factory = (t: CrmTheme) => ({
     marginBottom: spacing.md,
     ...t.cardShadow,
   },
-  titleRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.xs, marginBottom: spacing.xs },
-  title: { ...typography.overline, color: t.textMuted },
-  count: { ...typography.captionMedium, color: t.textMuted },
+  // The fold: closed at first (like Details) - a tap opens the visits
+  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, minHeight: 60 },
+  foldText: { flex: 1 },
+  foldTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  foldHint: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  count: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, backgroundColor: t.accentBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  countText: { ...typography.captionMedium, fontSize: 12, color: t.accentText },
+  foldChevron: { width: 32, height: 32, borderRadius: 16, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const, transform: [{ rotate: '90deg' }] },
+  foldChevronOpen: { transform: [{ rotate: '-90deg' }] },
   visit: { flexDirection: 'row' as const, gap: spacing.sm, paddingVertical: spacing.md },
   divider: { borderTopWidth: 1, borderTopColor: t.border },
+  firstVisit: { marginTop: spacing.xs },
   icon: { width: 36, height: 36, borderRadius: 12, backgroundColor: t.accentBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   body: { flex: 1, gap: 4 },
   top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs },
@@ -47,26 +55,42 @@ const when = (at: string) => formatLeadWhen(at.replace(' ', 'T'));
 /**
  * A lead's visit history on its details page: every meeting, newest first - when, with whom,
  * whether it happened (start / end time and the GPS position captured at each), and the outcome.
- * A tap opens the meeting.
+ * Folded away at first (the newest visit is named on the fold); a tap on a visit opens the meeting.
  */
 export function SiteVisitsCard({ visits, onOpen }: { visits: LeadVisit[]; onOpen: (meetingId: string) => void }) {
   const { styles, theme } = useCrmStyles(factory);
   const [all, setAll] = useState(false);
+  const [open, setOpen] = useState(false);
   if (visits.length === 0) return null;
   const shown = all ? visits : visits.slice(0, PREVIEW);
+  const newest = visits[0];
+  const newestMeta = newest.status === 'SCHEDULED' && !!newest.checkInAt ? 'In progress' : MEETING_STATUS_META[newest.status].label;
 
   return (
     <View style={styles.card}>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>SITE VISITS</Text>
-        <Text style={styles.count}>{visits.length}</Text>
-      </View>
-      {shown.map((v, i) => {
+      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={styles.foldHead}>
+        <GlossyBadge color={theme.accent} size={38} icon={<BriefcaseIcon size={17} color="#fff" />} />
+        <View style={styles.foldText}>
+          <Text style={styles.foldTitle}>Site visits</Text>
+          {!open && (
+            <Text style={styles.foldHint} numberOfLines={1}>
+              Last: {when(`${newest.date} ${newest.time || '00:00:00'}`)} · {newestMeta}
+            </Text>
+          )}
+        </View>
+        <View style={styles.count}>
+          <Text style={styles.countText}>{visits.length}</Text>
+        </View>
+        <View style={[styles.foldChevron, open && styles.foldChevronOpen]}>
+          <ChevronRightIcon size={18} color={theme.textMuted} />
+        </View>
+      </Pressable>
+      {open && shown.map((v, i) => {
         const inProgress = v.status === 'SCHEDULED' && !!v.checkInAt;
         const meta: { label: string; tone: Tone } = inProgress ? { label: 'In progress', tone: 'warning' } : MEETING_STATUS_META[v.status];
         const office = v.type === 'OFFICE';
         return (
-          <Pressable key={v.id} onPress={() => onOpen(v.id)} accessibilityRole="button" style={[styles.visit, i > 0 && styles.divider]}>
+          <Pressable key={v.id} onPress={() => onOpen(v.id)} accessibilityRole="button" style={[styles.visit, styles.divider, i === 0 && styles.firstVisit]}>
             <View style={styles.icon}>{office ? <UsersIcon size={18} color={theme.accent} /> : <BriefcaseIcon size={18} color={theme.accent} />}</View>
             <View style={styles.body}>
               <View style={styles.top}>
@@ -100,7 +124,7 @@ export function SiteVisitsCard({ visits, onOpen }: { visits: LeadVisit[]; onOpen
           </Pressable>
         );
       })}
-      {visits.length > PREVIEW && (
+      {open && visits.length > PREVIEW && (
         <Pressable onPress={() => setAll((x) => !x)} accessibilityRole="button" style={styles.more}>
           <Text style={styles.moreText}>{all ? 'Show less' : `Show all ${visits.length} visits`}</Text>
         </Pressable>

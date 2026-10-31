@@ -16,7 +16,7 @@ import type { Person } from '../types';
 import { StatTile, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 import { formatINR } from '../../crm/format';
 import { AchievementCard } from '../AchievementCard';
-import { TargetCard, targetPercent, type PeriodFigures } from '../TargetCard';
+import { TargetCard, targetPercent, type ContractKind, type PeriodFigures } from '../TargetCard';
 import { TeamMemberRow, TeamSummary } from '../TeamReportParts';
 
 const factory = (t: CrmTheme) => ({
@@ -142,11 +142,23 @@ export function PerformanceScreen() {
     [range, from, to, employeeId],
   );
   const { data: converted, refresh: refreshConverted } = useLoad(convertedLoader, '');
+  // All / One-time / AMC on the Target card: with a type picked, the leads converted in the period
+  // (each carries its One-time / AMC) are added up for that type.
+  const [kind, setKind] = useState<ContractKind>('ALL');
+  const typedLoader = useCallback(
+    () => (kind === 'ALL' ? Promise.resolve(null) : api.performanceItems('leadsConverted', from, to, employeeId).catch(() => null)),
+    [kind, from, to, employeeId],
+  );
+  const { data: typedItems, loading: typedLoading, refresh: refreshTyped } = useLoad(typedLoader, '');
+  const typedOnes = (typedItems ?? []).filter((i) => i.contractType === kind);
+  const kindFigures =
+    kind === 'ALL' ? null : typedLoading && !typedItems ? undefined : { achieved: typedOnes.reduce((s, i) => s + (i.amount ?? 0), 0), converted: typedOnes.length };
   const refresh = () => {
     refreshReport();
     refreshTarget();
     refreshHistory();
     refreshConverted();
+    refreshTyped();
   };
   const periodLabel = range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`;
   const period = target ? periodFigures(range, target, history ?? null, converted ?? null) : undefined;
@@ -170,6 +182,9 @@ export function PerformanceScreen() {
               reloadHistory();
             }}
             onHistory={() => navigation.navigate('LeadAchievementHistory', { employeeId, name: params?.name ?? 'My achievement' })}
+            kind={kind}
+            onKindChange={setKind}
+            kindFigures={kindFigures}
           />
         )}
         <CrmErrorBanner message={error} onRetry={reload} />

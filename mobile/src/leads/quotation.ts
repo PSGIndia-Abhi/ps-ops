@@ -41,7 +41,7 @@ export type QuotationContent = {
   priceTable: { rows: string[][]; title?: string } | null;
   /** The price is for one outlet. */
   perOutlet: boolean;
-  /** One-time or AMC - asked when saving; shown on the lead, not on the PDF. */
+  /** One-time or AMC - on older quotations only (it is asked at Convert to customer now). */
   contractType?: ContractType | null;
   valueAdded: string[];
   terms: string[];
@@ -168,6 +168,10 @@ export const previewQuotationPdf = (leadId: string, content: QuotationContent) =
 /** A saved quotation's PDF, under its file name (CLIENTNAME_PROPOSAL_YEAR.pdf). */
 export const savedQuotationPdf = (leadId: string, quotationId: string, fileName: string) =>
   fetchPdf('GET', `/api/crm/leads/${leadId}/quotations/${quotationId}/pdf`, safePdfName(fileName));
+
+/** A service agreement's PDF (or its signed copy), downloaded to the app's cache; returns its path. */
+export const savedAgreementPdf = (leadId: string, agreementId: string, fileName: string, signed = false) =>
+  fetchPdf('GET', `/api/crm/leads/${leadId}/agreements/${agreementId}/${signed ? 'signed' : 'pdf'}`, safePdfName(fileName));
 
 /** Opens a PDF file in the phone's PDF viewer (it has its own Share button). */
 export async function openPdf(path: string): Promise<void> {

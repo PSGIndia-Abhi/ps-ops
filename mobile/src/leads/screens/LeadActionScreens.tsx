@@ -1108,6 +1108,8 @@ export function LeadConvertScreen() {
   const manager = persona === 'sales_manager';
   const [owner, setOwner] = useState<Person | null>(null);
   const [creditTo, setCreditTo] = useState<number | null>(null);
+  // A one-time service or an AMC - asked here, when the deal is won.
+  const [contractType, setContractType] = useState<'ONE_TIME' | 'AMC' | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1178,8 +1180,9 @@ export function LeadConvertScreen() {
       onSubmit={() => {
         const total = amount ? Number(amount) : undefined;
         if (total !== undefined && (!Number.isFinite(total) || total <= 0)) return setError('Enter a valid amount, or leave it empty.');
+        if (!contractType) return setError('Choose One-time or AMC.');
         submit(async () => {
-          await api.convertLead(leadId, notes.trim(), total, owner && creditTo !== null ? creditTo : undefined);
+          await api.convertLead(leadId, notes.trim(), contractType, total, owner && creditTo !== null ? creditTo : undefined);
         });
       }}
     >
@@ -1232,6 +1235,46 @@ export function LeadConvertScreen() {
                 <Text style={cs.reqText}>{lead.notes}</Text>
               </View>
             )}
+          </View>
+
+          {/* One-time service or AMC */}
+          <View style={cs.card}>
+            <View style={cs.cardHead}>
+              <IconTile icon={<DocumentIcon />} color={theme.primary} size={32} />
+              <View style={cs.flex1}>
+                <Text style={cs.cardTitle}>Service type</Text>
+                <Text style={cs.cardSub}>Is this a one-time service or an AMC?</Text>
+              </View>
+            </View>
+            <View style={cs.kindRow}>
+              {(
+                [
+                  { key: 'ONE_TIME', label: 'One-time', sub: 'A single service', Icon: ClockIcon, color: theme.warning },
+                  { key: 'AMC', label: 'AMC', sub: 'Annual contract', Icon: CalendarIcon, color: theme.accent },
+                ] as const
+              ).map((o) => {
+                const on = contractType === o.key;
+                return (
+                  <Pressable
+                    key={o.key}
+                    onPress={() => {
+                      setContractType(o.key);
+                      setError(null);
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                    style={({ pressed }) => [cs.kind, on && cs.choiceOn, pressed && cs.pressed]}
+                  >
+                    <View style={cs.kindTop}>
+                      <GlossyBadge color={o.color} size={36} icon={<o.Icon size={18} color={WHITE} />} />
+                      <View style={[cs.radio, on && cs.radioOn]}>{on && <View style={cs.radioDot} />}</View>
+                    </View>
+                    <Text style={[cs.choiceTitle, on && cs.kindTitleOn]}>{o.label}</Text>
+                    <Text style={cs.choiceSub}>{o.sub}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           {!!owner && (
@@ -1349,6 +1392,11 @@ const convertFactory = (t: CrmTheme) => ({
     marginTop: spacing.xs,
   },
   choiceOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  // One-time / AMC: two big cards side by side
+  kindRow: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.xs },
+  kind: { flex: 1, minHeight: 112, padding: spacing.md, borderRadius: radii.lg, borderWidth: 1.5, borderColor: t.border, gap: 2 },
+  kindTop: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
+  kindTitleOn: { color: t.primary },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
   avatarOn: { backgroundColor: t.primary },
   avatarText: { ...typography.bodyMedium, color: t.textSecondary },

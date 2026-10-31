@@ -47,6 +47,7 @@ const crmLeadManagementRoutes = require("./src/routes/crm-lead-management.routes
 const crmLeadMeetingsRoutes = require("./src/routes/crm-lead-meetings.routes");
 const crmLeadFollowupsRoutes = require("./src/routes/crm-lead-followups.routes");
 const crmLeadQuotationsRoutes = require("./src/routes/crm-lead-quotations.routes");
+const crmLeadAgreementsRoutes = require("./src/routes/crm-lead-agreements.routes");
 const crmLeadProviderRoutes = require("./src/routes/crm-lead-provider.routes");
 const crmLeadReportsRoutes = require("./src/routes/crm-lead-reports.routes");
 const crmLeadMobileRoutes = require("./src/routes/crm-lead-mobile.routes");
@@ -122,6 +123,7 @@ app.use("/api/crm", crmLeadManagementRoutes);
 app.use("/api/crm", crmLeadMeetingsRoutes);
 app.use("/api/crm", crmLeadFollowupsRoutes);
 app.use("/api/crm", crmLeadQuotationsRoutes);
+app.use("/api/crm", crmLeadAgreementsRoutes);
 app.use("/api/crm", crmLeadProviderRoutes);
 app.use("/api/crm", crmLeadReportsRoutes);
 app.use("/api/crm", crmLeadMobileRoutes);
