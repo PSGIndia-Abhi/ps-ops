@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import DashboardActions from "../components/DashboardActions";
 import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
+import AuditsNav from "../pages/audits/AuditsNav";
 import {
   getPendingGroupManagementCounts,
   getPendingGroupManagementTotal,
@@ -266,6 +267,8 @@ export default function AdminLayout() {
                 Tasks
               </button>
 
+              {isAdmin && <AuditsNav base="/admin" />}
+
               {/* Lead Management is its own area (pages/leads); admin can look at every dashboard there. */}
               {role === "admin" && (
                 <button className="nav-btn" onClick={() => navigate("/leads")}>
@@ -406,6 +409,17 @@ export default function AdminLayout() {
           >
             Tasks
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/audits");
+              }}
+            >
+              Site Audits
+            </button>
+          )}
 
           <button
             onClick={() => {

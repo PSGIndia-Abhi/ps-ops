@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import DashboardActions from "../components/DashboardActions";
 import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
+import AuditsNav from "../pages/audits/AuditsNav";
 
 export default function SupervisorLayout() {
   const navigate = useNavigate();
@@ -142,6 +143,8 @@ export default function SupervisorLayout() {
               >
                 Tickets
               </button>
+
+              <AuditsNav base="/supervisor" />
             </nav>
           </aside>
         )}
@@ -189,8 +192,16 @@ export default function SupervisorLayout() {
               >
                 Tickets
               </button>
-          
-          
+
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/supervisor/audits");
+            }}
+          >
+            Site Audits
+          </button>
+
           <button
             onClick={() => {
               setMobilePanel(null);

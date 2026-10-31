@@ -88,6 +88,8 @@ import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
+import AuditsList from "./pages/audits/AuditsList";
+import AuditDetail from "./pages/audits/AuditDetail";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -144,6 +146,8 @@ const router = createBrowserRouter([
       { path: "invoices", element: <InvoicesPage /> },
       { path: "payments", element: <PaymentsPage /> },
       { path: "tasks", element: <TasksPage /> },
+      { path: "audits", element: <AuditsList /> },
+      { path: "audits/:auditId", element: <AuditDetail /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
@@ -194,6 +198,8 @@ const router = createBrowserRouter([
       { path: "bookings", element: <BookingsPage /> },
       { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
       { path: "tickets", element: <AdminTickets /> },
+      { path: "audits", element: <AuditsList /> },
+      { path: "audits/:auditId", element: <AuditDetail /> },
       { path: "profile", element: <ProfilePage /> },
     ],
   },
