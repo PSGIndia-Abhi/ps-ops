@@ -5,7 +5,7 @@
 // BestServe's standard agreement with Annexure-1.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiCheckCircle, FiCopy, FiEdit2, FiEye, FiFileText, FiPlus, FiSave, FiTrash2, FiUpload } from "react-icons/fi";
+import { FiCheckCircle, FiCopy, FiEdit2, FiEye, FiFileText, FiPlus, FiPrinter, FiSave, FiTrash2, FiUpload } from "react-icons/fi";
 import { money } from "./format";
 import { useToast } from "./hooks";
 import {
@@ -92,10 +92,10 @@ export function AgreementsTab({ lead, refreshKey }) {
     };
   }, [lead.id, refreshKey, reload]);
 
-  async function open(id, signed, fileName) {
-    setOpening(`${id}:${signed ? "signed" : "pdf"}`);
+  async function open(id, signed, fileName, letterhead = false) {
+    setOpening(`${id}:${signed ? "signed" : letterhead ? "letterhead" : "pdf"}`);
     try {
-      const url = await fetchAgreementPdf(lead.id, id, signed);
+      const url = await fetchAgreementPdf(lead.id, id, signed, letterhead);
       setViewing({ url, fileName });
     } catch (err) {
       toast(err.message || "Could not open the agreement.", true);
@@ -242,6 +242,15 @@ export function AgreementsTab({ lead, refreshKey }) {
                       <span style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                         <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === `${a.id}:pdf`} onClick={() => open(a.id, false, a.fileName)}>
                           View PDF
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<FiPrinter />}
+                          busy={opening === `${a.id}:letterhead`}
+                          onClick={() => open(a.id, false, (a.fileName || "AGREEMENT.pdf").replace(/\.pdf$/i, "_LETTERHEAD.pdf"), true)}
+                        >
+                          Letterhead PDF
                         </Button>
                         {canManage && !cancelled && !a.hasSigned && (
                           <Button size="sm" variant="ghost" icon={<FiEdit2 />} onClick={() => setBuilding({ from: a, mode: "edit" })}>

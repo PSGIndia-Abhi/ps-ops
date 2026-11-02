@@ -1028,9 +1028,13 @@ export async function uploadFinalAgreement(leadId, file) {
   return toAgreement(row);
 }
 
-/** The agreement (or its signed copy) as a blob URL (revoke it when done). */
-export async function fetchAgreementPdf(leadId, agreementId, signed = false) {
-  const res = await fetch(`${API_BASE}/api/crm/leads/${leadId}/agreements/${agreementId}/${signed ? "signed" : "pdf"}`, {
+/**
+ * The agreement (or its signed copy) as a blob URL (revoke it when done). `letterhead`: laid out for
+ * printing on the company letterhead (no header / footer of ours).
+ */
+export async function fetchAgreementPdf(leadId, agreementId, signed = false, letterhead = false) {
+  const path = signed ? "signed" : `pdf${letterhead ? "?letterhead=1" : ""}`;
+  const res = await fetch(`${API_BASE}/api/crm/leads/${leadId}/agreements/${agreementId}/${path}`, {
     headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
   });
   if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not open the agreement.");

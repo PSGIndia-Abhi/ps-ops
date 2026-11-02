@@ -338,9 +338,21 @@ async function streamPdf(res, objectKey, name) {
   stream.pipe(res);
 }
 
+// ?letterhead=1: the same agreement laid out for printing on the company letterhead (no header /
+// footer of ours, room left for the printed ones), made fresh from the saved details.
 router.get("/leads/:id/agreements/:agreementId/pdf", auth, requirePermission("CRM_VIEW_LEAD"), precheckRead, async (req, res) => {
   try {
     const { row } = await loadAgreement(req);
+    if (req.query.letterhead === "1") {
+      const content = typeof row.content === "string" ? JSON.parse(row.content) : row.content;
+      const pdf = await renderAgreementPdf(content, { number: row.agreement_number, draft: false, letterhead: true });
+      const name = fileName(row.client_name, row.created_at_text, false).replace(/\.pdf$/i, "_LETTERHEAD.pdf");
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+      res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.send(pdf);
+    }
     if (!row.pdf_object_key) throw new HttpError(404, "This agreement has no PDF");
     await streamPdf(res, row.pdf_object_key, fileName(row.client_name, row.created_at_text, false));
   } catch (err) {

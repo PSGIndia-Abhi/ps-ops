@@ -351,6 +351,11 @@ const R = PAGE_W - 56;
 const W = R - L;
 const TOP = 86; // content starts below the page header
 const BOTTOM = PAGE_H - 62; // and stops above the footer
+// Letterhead version (meta.letterhead): no header / footer of ours - the company's printed letterhead
+// has its logo at the top (to ~3.2 cm) and its address block from ~25.9 cm, so text runs 4.0-25.2 cm.
+const CM = 72 / 2.54;
+const LETTERHEAD_TOP = 4.0 * CM;
+const LETTERHEAD_BOTTOM = 25.2 * CM;
 const SIZE = 9.6;
 const GAP = 3.2;
 const INDENT = [0, 26, 52];
@@ -390,16 +395,18 @@ function renderAgreementPdf(content, meta) {
 }
 
 function draw(doc, a, meta) {
-  let y = TOP;
+  const pageTop = meta.letterhead ? LETTERHEAD_TOP : TOP;
+  const pageBottom = meta.letterhead ? LETTERHEAD_BOTTOM : BOTTOM;
+  let y = pageTop;
   const font = (name, size, color = C.body) => doc.font(name).fontSize(size).fillColor(color);
   const hLine = (yy, color = C.line, width = 0.7, x1 = L, x2 = R) => doc.moveTo(x1, yy).lineTo(x2, yy).lineWidth(width).strokeColor(color).stroke();
 
   function newPage() {
     doc.addPage();
-    y = TOP;
+    y = pageTop;
   }
   function ensure(h) {
-    if (y + h > BOTTOM) {
+    if (y + h > pageBottom) {
       newPage();
       return true;
     }
@@ -504,9 +511,10 @@ function draw(doc, a, meta) {
     rich(b.text, x, y, w);
     y += h + 7;
   }
-  function heading(b) {
-    // keep a heading with at least three lines of what follows
-    ensure(78);
+  // Headings, sub-headings and labels: `keep` is the room for themselves plus what follows them
+  // (worked out in the run below), so a title never sits alone at the foot of a page.
+  function heading(b, keep = 78) {
+    ensure(keep);
     y += 6;
     font("XB", 10.4, C.navy).text(b.no, L, y, { width: INDENT[1] - 4, lineBreak: false });
     font("XB", 10.4, C.navy).text(b.title.toUpperCase(), L + INDENT[1], y, { width: W - INDENT[1], characterSpacing: 0.6 });
@@ -514,14 +522,14 @@ function draw(doc, a, meta) {
     hLine(y, C.line, 0.7, L + INDENT[1], R);
     y += 8;
   }
-  function sub(b) {
-    ensure(40);
+  function sub(b, keep = 40) {
+    ensure(keep);
     font("B", SIZE, C.ink).text(b.no, L + INDENT[1], y, { lineBreak: false });
     font("B", SIZE, C.ink).text(b.title, L + INDENT[2], y, { lineBreak: false });
     y += 15;
   }
-  function label(b) {
-    ensure(40);
+  function label(b, keep = 40) {
+    ensure(keep);
     y += 4;
     font("XB", 9.8, C.ink).text(b.text, L, y, { width: W, characterSpacing: 0.5 });
     y += 18;
@@ -658,8 +666,8 @@ function draw(doc, a, meta) {
         // the rows of this service that fit on the page (at least one; the name cell needs room)
         let used = 0;
         let j = i;
-        while (j < svc.rows.length && y + used + heights[j] <= BOTTOM) used += heights[j++];
-        if (j === i || (first && y + Math.max(used, nameH) > BOTTOM)) {
+        while (j < svc.rows.length && y + used + heights[j] <= pageBottom) used += heights[j++];
+        if (j === i || (first && y + Math.max(used, nameH) > pageBottom)) {
           newPage();
           headerRow();
           continue;
@@ -714,9 +722,28 @@ function draw(doc, a, meta) {
   // ---------------- run
   titleBlock();
   const run = { para, item, heading, sub, label, party, and, address, signatures, annexure };
-  for (const b of agreementBlocks(a, meta)) run[b.t](b);
+  const blocks = agreementBlocks(a, meta);
+  // How tall a title draws, and how tall what follows it is (a paragraph moves to a new page whole).
+  const titleH = (b) => {
+    if (b.t === "heading") {
+      font("XB", 10.4);
+      return 6 + doc.heightOfString(b.title.toUpperCase(), { width: W - INDENT[1], characterSpacing: 0.6 }) + 11;
+    }
+    return b.t === "label" ? 22 : 15;
+  };
+  const blockH = (b) => {
+    if (b.t === "para") return measure(b.text, R - (L + INDENT[b.indent || 0])) + 8;
+    if (b.t === "item") return measure(b.text, R - (L + INDENT[b.level || 1])) + 7;
+    if (b.t === "party") return measure(b.text, W) + 6;
+    return 40; // anything else (a table, the address box...) brings its own page check
+  };
+  const isTitle = (b) => b && (b.t === "heading" || b.t === "sub" || b.t === "label");
+  // a title keeps with the next block; a run of titles keeps together with the block after them
+  const keepOf = (i) => (isTitle(blocks[i]) ? titleH(blocks[i]) + keepOf(i + 1) : blocks[i] ? blockH(blocks[i]) : 0);
+  blocks.forEach((b, i) => (isTitle(b) ? run[b.t](b, Math.min(keepOf(i), pageBottom - pageTop)) : run[b.t](b)));
 
-  // ---------------- page header + footer on every page
+  // ---------------- page header + footer on every page (the letterhead has its own)
+  if (meta.letterhead) return;
   const range = doc.bufferedPageRange();
   const total = range.count;
   for (let p = 0; p < total; p += 1) {
