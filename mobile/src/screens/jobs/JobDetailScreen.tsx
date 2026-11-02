@@ -34,7 +34,9 @@ import {
   TagIcon,
   UsersIcon,
 } from '../../components/icons';
-import { jobsApi, visitsApi, ApiError } from '../../api';
+import { jobsApi, visitsApi, brigadeApi, ApiError } from '../../api';
+import type { BrigadeJobDetails, VisitPhotoStatus } from '../../api/brigade';
+import { BrigadeWorkPhotos, photoCount } from '../../components/BrigadeWorkPhotos';
 import type { ReassignScope } from '../../api/jobs';
 import { useAuth } from '../../auth/AuthContext';
 import { useUserRole } from '../../auth/role';
@@ -60,6 +62,24 @@ interface Feedback {
 }
 
 /** Turns any thrown error into the right Banner variant + a safe, short message. */
+/**
+ * The technician's single "what do I do next" visit for this job: the first
+ * of their visits that is scheduled / missed / in progress, else awaiting
+ * approval, else completed. Drives the docked bottom action bar.
+ */
+/** Brigade before/after photo updates - shown in the Work photos card, so left out of Activity there. */
+const WORK_PHOTO_ACTIONS = ['BEFORE_PHOTOS', 'AFTER_PHOTOS'];
+
+function pickPrimaryVisit(visits: JobVisit[] | null, userId: unknown): JobVisit | null {
+  const mine = (visits ?? []).filter((v) => v.technicians.some((t) => String(t.id) === String(userId)));
+  return (
+    mine.find((v) => (['SCHEDULED', 'MISSED', 'IN_PROGRESS'] as VisitStatus[]).includes(v.status)) ??
+    mine.find((v) => v.status === 'AWAITING_APPROVAL') ??
+    mine.find((v) => v.status === 'COMPLETED') ??
+    null
+  );
+}
+
 function feedbackFromError(err: unknown, fallback: string): Feedback {
   if (err instanceof ApiError) {
     if (err.isNetworkError) {
@@ -140,6 +160,11 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
+  // Brigade bookings only: before/after work photos gate End Visit. Null
+  // (or is_brigade false) = every other job, whose flow is unchanged.
+  const [brigade, setBrigade] = useState<BrigadeJobDetails | null>(null);
+  const [photoStatus, setPhotoStatus] = useState<VisitPhotoStatus | null>(null);
+
   const load = useCallback(
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true);
@@ -151,6 +176,13 @@ export function JobDetailScreen({ route, navigation }: Props) {
         ]);
         setJob(jobData);
         setHistory(historyData);
+
+        // Any failure here just means "not a Brigade job" - never blocks the screen.
+        try {
+          setBrigade(await brigadeApi.getJobDetails(jobId));
+        } catch {
+          setBrigade(null);
+        }
 
         // Visits require VIEW_VISIT, which not every role/deployment may
         // grant - a failure here just means the Visits section is omitted,
@@ -207,7 +239,13 @@ export function JobDetailScreen({ route, navigation }: Props) {
       await (isMissed
         ? visitsApi.startVisitAnyway(visit.id, location)
         : visitsApi.startVisit(visit.id, location));
-      setFeedback({ message: 'Visit started successfully', variant: 'success' });
+      setFeedback({
+        message:
+          isTechnician && brigade?.is_brigade
+            ? `Visit started. Please upload at least ${photoCount(brigade.min_visit_photos ?? 1)} before you start your work.`
+            : 'Visit started successfully',
+        variant: 'success',
+      });
       await load();
     } catch (err) {
       if (err instanceof LocationServicesDisabledError || err instanceof LocationError) {
@@ -246,7 +284,10 @@ export function JobDetailScreen({ route, navigation }: Props) {
     setFeedback(null);
     try {
       await visitsApi.submitVisit(visit.id);
-      setFeedback({ message: 'Visit submitted for approval', variant: 'success' });
+      setFeedback({
+        message: brigade?.is_brigade ? 'Visit ended and sent for approval' : 'Visit submitted for approval',
+        variant: 'success',
+      });
       await load();
     } catch (err) {
       setFeedback(feedbackFromError(err, 'Unable to submit this visit.'));
@@ -374,6 +415,27 @@ export function JobDetailScreen({ route, navigation }: Props) {
     }
   }
 
+  // Brigade bookings: before/after photo counts for the technician's current
+  // visit. Kept above the loading return below so hooks always run in order.
+  const isBrigadeJob = isTechnician && !!brigade?.is_brigade;
+  const photoVisit = isBrigadeJob ? pickPrimaryVisit(visits, user?.id) : null;
+  const photoVisitId = photoVisit?.id ?? null;
+  const photoVisitState = photoVisit?.status;
+  const loadPhotoStatus = useCallback(async () => {
+    if (!photoVisitId) {
+      setPhotoStatus(null);
+      return;
+    }
+    try {
+      setPhotoStatus(await brigadeApi.getVisitPhotos(photoVisitId));
+    } catch {
+      setPhotoStatus(null);
+    }
+  }, [photoVisitId]);
+  useEffect(() => {
+    loadPhotoStatus();
+  }, [loadPhotoStatus, photoVisitState]);
+
   if (!job && !error) {
     return (
       <View style={styles.screenFlex}>
@@ -400,14 +462,13 @@ export function JobDetailScreen({ route, navigation }: Props) {
   // applies, not a new capability. Admin/Supervisor never see this bar (they
   // already have their own status-management card above); a technician with
   // no visit on this job at all sees no bar rather than a dead one.
-  const myVisits = isTechnician
-    ? (visits ?? []).filter((v) => v.technicians.some((t) => String(t.id) === String(user?.id)))
-    : [];
-  const primaryVisit =
-    myVisits.find((v) => (['SCHEDULED', 'MISSED', 'IN_PROGRESS'] as VisitStatus[]).includes(v.status)) ??
-    myVisits.find((v) => v.status === 'AWAITING_APPROVAL') ??
-    myVisits.find((v) => v.status === 'COMPLETED') ??
-    null;
+  const primaryVisit = isTechnician ? pickPrimaryVisit(visits, user?.id) : null;
+
+  const showWorkPhotos = isBrigadeJob && !!primaryVisit && !!brigade && primaryVisit.status !== 'CANCELED';
+  // End Visit (= submit) waits for the before + after photos; the backend enforces the same.
+  const minPhotos = photoStatus?.required || brigade?.min_visit_photos || 1;
+  const endVisitBlocked =
+    isBrigadeJob && primaryVisit?.status === 'IN_PROGRESS' && !(photoStatus?.before_done && photoStatus?.after_done);
 
   return (
     <View style={styles.screenFlex}>
@@ -477,6 +538,20 @@ export function JobDetailScreen({ route, navigation }: Props) {
               <FactItem icon={<TagIcon size={16} color={colors.primary} />} value={job.service_type} label="Category" />
             </View>
           </Card>
+
+          {showWorkPhotos && primaryVisit && brigade && (
+            <BrigadeWorkPhotos
+              jobId={jobId}
+              visit={primaryVisit}
+              details={brigade}
+              status={photoStatus}
+              history={history}
+              onUploaded={async () => {
+                await Promise.all([loadPhotoStatus(), load()]);
+              }}
+              onMessage={(message, variant) => setFeedback({ message, variant })}
+            />
+          )}
 
           {/* Below the hero/facts, not above them - with the native header
               hidden for this screen's full-bleed gradient, a banner at the
@@ -676,7 +751,9 @@ export function JobDetailScreen({ route, navigation }: Props) {
               ) : history.length === 0 ? (
                 <Text style={styles.emptyText}>No activity yet.</Text>
               ) : (
-                history.map((entry) => <HistoryRow key={entry.id} entry={entry} />)
+                history
+                  .filter((entry) => !(showWorkPhotos && WORK_PHOTO_ACTIONS.includes(entry.action)))
+                  .map((entry) => <HistoryRow key={entry.id} entry={entry} />)
               )}
             </View>
           </View>
@@ -744,6 +821,12 @@ export function JobDetailScreen({ route, navigation }: Props) {
         locationPhase={visitActionId === primaryVisit.id ? locationPhase : null}
         onStart={() => handleStartVisit(primaryVisit)}
         onSubmit={() => handleSubmitVisit(primaryVisit)}
+        submitLabel={isBrigadeJob ? 'End Visit' : 'Submit for Approval'}
+        submitBlockedReason={
+          endVisitBlocked
+            ? `Upload ${minPhotos} before and ${minPhotos} after work ${minPhotos === 1 ? 'photo' : 'photos'} to end the visit.`
+            : null
+        }
       />
     )}
     </View>
@@ -889,6 +972,10 @@ interface TechnicianActionBarProps {
   locationPhase: 'locating' | 'verifying' | null;
   onStart: () => void;
   onSubmit: () => void;
+  /** "Submit for Approval", or "End Visit" for Brigade bookings. */
+  submitLabel?: string;
+  /** When set, the submit action is shown disabled with this reason (Brigade work photos missing). */
+  submitBlockedReason?: string | null;
 }
 
 /**
@@ -901,7 +988,15 @@ interface TechnicianActionBarProps {
 /** Defined once at module scope, not inline in the render below - an inline arrow function passed as a prop gets a new identity every render, which is exactly what `react/no-unstable-nested-components` flags. */
 const renderPlayIcon = (color: string) => <PlayIcon size={16} color={color} />;
 
-function TechnicianActionBar({ visit, loading, locationPhase, onStart, onSubmit }: TechnicianActionBarProps) {
+function TechnicianActionBar({
+  visit,
+  loading,
+  locationPhase,
+  onStart,
+  onSubmit,
+  submitLabel = 'Submit for Approval',
+  submitBlockedReason = null,
+}: TechnicianActionBarProps) {
   const insets = useSafeAreaInsets();
   const containerStyle = [styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm }];
 
@@ -936,13 +1031,16 @@ function TechnicianActionBar({ visit, loading, locationPhase, onStart, onSubmit 
   return (
     <View style={containerStyle}>
       <ArrowButton
-        label={isSubmit ? 'Submit for Approval' : isMissed ? 'Start Anyway' : 'Start Visit'}
+        label={isSubmit ? submitLabel : isMissed ? 'Start Anyway' : 'Start Visit'}
         onPress={isSubmit ? onSubmit : onStart}
         loading={loading}
-        disabled={loading}
+        disabled={loading || (isSubmit && !!submitBlockedReason)}
         style={styles.bottomBarButton}
         icon={isSubmit ? undefined : renderPlayIcon}
       />
+      {isSubmit && !!submitBlockedReason && (
+        <Text style={styles.bottomBarHint}>{submitBlockedReason}</Text>
+      )}
       {!isSubmit && <LocationPhaseNote phase={locationPhase} />}
     </View>
   );
@@ -1138,6 +1236,12 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
+  },
+  bottomBarHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.xxs,
   },
   bottomBarButton: {
     // Half-width and centered, not a full-bleed bar - it's a single

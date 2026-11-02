@@ -7,6 +7,7 @@ const bcrypt = require("bcrypt");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { v4: uuid } = require("uuid");
+const { recordLogin } = require("../utils/userActivity");
 
 async function ensureTemporaryAccessIssuerCanManageJob(req, job) {
   if (!job) return false;
@@ -96,6 +97,8 @@ LIMIT 1
       process.env.JWT_SECRET,
       { expiresIn: client === "mobile" ? MOBILE_TOKEN_TTL : WEB_TOKEN_TTL }
     );
+
+    recordLogin(req, client, user.id);
 
     res.json({
       token,

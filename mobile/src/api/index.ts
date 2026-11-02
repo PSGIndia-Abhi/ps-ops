@@ -13,6 +13,7 @@ import * as usersApi from './users';
 import * as contactsApi from './contacts';
 import * as crmApi from './crm';
 import * as shiftsApi from './shifts';
+import * as brigadeApi from './brigade';
 export {
   authApi,
   jobsApi,
@@ -28,4 +29,5 @@ export {
   contactsApi,
   crmApi,
   shiftsApi,
+  brigadeApi,
 };

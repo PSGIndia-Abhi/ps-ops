@@ -259,30 +259,33 @@ async function changeVisibility(itemId, newValue) {
                     const fileInfo = attachmentMap[att.id];
 
                     if (att.type === "IMAGE") {
-                      if (!fileInfo?.url) {
-                        return (
-                          <button
-                            key={att.id}
-                            type="button"
-                            className="attachment-load-btn"
-                            onClick={() => fetchAttachment(att)}
-                          >
-                            Load image
-                          </button>
-                        );
-                      }
-
-
-
-
+                      // Photo + its own Download button (the download fetches the file if not loaded yet).
                       return (
-                        <img
-                          key={att.id}
-                          src={fileInfo.url}
-                          alt={att.file_name}
-                          className="attachment-thumb"
-                          onClick={() => setActiveImage(fileInfo.url)}
-                        />
+                        <div key={att.id} className="attachment-photo">
+                          {fileInfo?.url ? (
+                            <img
+                              src={fileInfo.url}
+                              alt={att.file_name}
+                              className="attachment-thumb"
+                              onClick={() => setActiveImage(fileInfo.url)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="attachment-load-btn"
+                              onClick={() => fetchAttachment(att)}
+                            >
+                              Load image
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="attachment-download-btn"
+                            onClick={() => handleDownload(att)}
+                          >
+                            Download
+                          </button>
+                        </div>
                       );
                     }
 

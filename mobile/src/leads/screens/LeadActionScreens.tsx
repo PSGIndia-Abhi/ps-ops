@@ -1012,22 +1012,37 @@ export function LeadConvertScreen() {
   const [lead, setLead] = useState<PipelineLead | null>(null);
   // The deal amount, filled with the approximate quote and changeable before converting.
   const [amount, setAmount] = useState('');
+  // The sales manager converting a sales executive's lead chooses who it counts for: that sales
+  // person (picked to start with) or themselves.
+  const { persona, myIdNum } = useMe();
+  const manager = persona === 'sales_manager';
+  const [owner, setOwner] = useState<Person | null>(null);
+  const [creditTo, setCreditTo] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
     // Only to show what the customer record will contain; converting does not depend on it.
     api
       .getLead(leadId)
-      .then((l) => {
+      .then(async (l) => {
         if (!alive) return;
         setLead(l);
         setAmount((a) => a || (l.amount > 0 ? String(Math.round(l.amount)) : ''));
+        if (!manager) return;
+        // Whose lead it is: its sales person, else the sales executive who added it.
+        const people = await api.salesEmployees().catch(() => [] as Person[]);
+        const byId = (id: string | null) => (id ? people.find((p) => String(p.id) === String(id)) : undefined);
+        const who = byId(l.salesEmployeeId) ?? byId(l.createdById);
+        if (alive && who && who.id !== myIdNum) {
+          setOwner(who);
+          setCreditTo(who.id);
+        }
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [leadId]);
+  }, [leadId, manager, myIdNum]);
 
   return (
     <FormShell
@@ -1040,7 +1055,7 @@ export function LeadConvertScreen() {
         const total = amount ? Number(amount) : undefined;
         if (total !== undefined && (!Number.isFinite(total) || total <= 0)) return setError('Enter a valid amount, or leave it empty.');
         submit(async () => {
-          await api.convertLead(leadId, notes.trim(), total);
+          await api.convertLead(leadId, notes.trim(), total, owner && creditTo !== null ? creditTo : undefined);
         });
       }}
     >
@@ -1051,6 +1066,19 @@ export function LeadConvertScreen() {
         <CrmSkeleton height={220} radius={16} />
       ) : (
         <>
+          {!!owner && (
+            <>
+              <Text style={styles.section}>COUNT THIS CONVERSION FOR</Text>
+              <Card style={styles.reviewCard}>
+                <RadioRow
+                  label={`${owner.name} · ${api.roleName(owner.role)}${String(lead.salesEmployeeId) === String(owner.id) ? ' (assigned)' : ' (added this lead)'}`}
+                  selected={creditTo === owner.id}
+                  onPress={() => setCreditTo(owner.id)}
+                />
+                <RadioRow label="Me - count it towards my own target" selected={creditTo === myIdNum} onPress={() => setCreditTo(myIdNum)} />
+              </Card>
+            </>
+          )}
           <Text style={styles.section}>COMPANY</Text>
           <Card style={styles.reviewCard}>
             <InfoLine label="Customer (company)" value={lead.companyName || name} />

@@ -97,6 +97,7 @@
 
 const jwt = require("jsonwebtoken");
 const { pool } = require("../../db");
+const { touchDailyActivity } = require("../utils/userActivity");
 
 async function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
@@ -205,7 +206,9 @@ async function authMiddleware(req, res, next) {
       scopes: normalizedScopes
     };
 
-    
+    // Admin User Activity report: "who used which app today". Never awaited, never throws.
+    touchDailyActivity(req, user.id);
+
 
     next();
 

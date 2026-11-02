@@ -1,0 +1,655 @@
+.ua-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 40px;
+  min-width: 0;
+}
+
+.ua-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ua-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.ua-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ua-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ua-primary,
+.ua-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.ua-primary {
+  border: none;
+  background: #2563eb;
+  color: #fff;
+}
+
+.ua-secondary {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #0f172a;
+}
+
+.ua-primary:disabled,
+.ua-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ua-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+/* Today | Yesterday switch, first in the filter row */
+.ua-day {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.ua-day button {
+  height: 30px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ua-day button.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.ua-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ua-filters input,
+.ua-filters select {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.ua-search {
+  flex: 1 1 200px;
+}
+
+.ua-search > span {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ua-search svg {
+  position: absolute;
+  left: 10px;
+  color: var(--muted);
+}
+
+.ua-search input {
+  width: 100%;
+  padding-left: 30px;
+}
+
+.ua-error {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ua-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---- summary cards ---- */
+
+.ua-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.ua-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  font: inherit;
+}
+
+button.ua-card {
+  cursor: pointer;
+}
+
+.ua-card span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ua-card strong {
+  font-size: 24px;
+  color: #0f172a;
+}
+
+.ua-card-good strong {
+  color: #15803d;
+}
+
+.ua-card-muted strong {
+  color: #64748b;
+}
+
+.ua-card.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+/* ---- tables ---- */
+
+.ua-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.ua-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ua-table th,
+.ua-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ua-table th {
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.ua-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ua-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ua-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ua-status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ua-status.on {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ua-status.off {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.ua-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ua-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ua-badge-web {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.ua-badge-android_app {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ua-badge-old_android_app {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+@media (max-width: 768px) {
+  .ua-actions {
+    width: 100%;
+  }
+
+  .ua-actions > button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .ua-filters label {
+    flex: 1 1 140px;
+  }
+}
+
+/* ---- Module report ---- */
+.mr-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mr-back:hover {
+  color: var(--text, #0f172a);
+}
+
+.mr-clear {
+  align-self: flex-end;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mr-loading {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.mr-note {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Equal cards: same width per column, and every card in a row as tall as the tallest. */
+.mr-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.mr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.mr-card.mr-off {
+  opacity: 0.7;
+}
+
+.mr-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 56px;
+}
+
+.mr-card-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.mr-card-head p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.mr-tag {
+  flex: none;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.mr-users {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mr-users-figs {
+  display: flex;
+  gap: 24px;
+}
+
+.mr-users-figs div {
+  display: flex;
+  flex-direction: column;
+}
+
+.mr-users-figs strong {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.mr-users-figs span,
+.mr-users small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mr-good {
+  color: #15803d;
+}
+
+.mr-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.mr-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #22c55e;
+}
+
+/* Figure groups: "In the chosen days" and "Right now", each with its own small heading. */
+.mr-work-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mr-work-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Figures: one row of equal boxes (up to five fit). */
+.mr-work {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.mr-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.mr-fig strong {
+  font-size: 18px;
+}
+
+.mr-fig span {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.mr-fig.mr-ok strong {
+  color: #15803d;
+}
+
+.mr-fig.mr-warn strong {
+  color: #b45309;
+}
+
+.mr-fig.mr-bad strong {
+  color: #dc2626;
+}
+
+.mr-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.mr-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary, #0284c7);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mr-toggle:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Long role lists stop at one line; the full list is in the tooltip. */
+.mr-roles {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The users of a module, in a dialog. */
+.mr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.mr-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 85vh;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+}
+
+.mr-dialog header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mr-dialog h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.mr-dialog header p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.mr-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.mr-dialog-body {
+  overflow: auto;
+}
+
+.mr-user-table {
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.mr-user-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.mr-user-table th,
+.mr-user-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mr-user-table .ua-name,
+.mr-user-table .ua-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mr-col-name {
+  width: 40%;
+}
+
+.mr-col-role {
+  width: 24%;
+}
+
+.mr-col-date {
+  width: 18%;
+}
+
+.mr-col-status {
+  width: 18%;
+}
+
+.mr-user-table .ua-status {
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .mr-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .mr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mr-work {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

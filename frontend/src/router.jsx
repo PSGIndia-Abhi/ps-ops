@@ -53,6 +53,7 @@ import AdminUserManagement from "./pages/AdminUserManagement";
 import AdminGroupManagement from "./pages/AdminGroupManagement";
 import AdminUserHierarchy from "./pages/AdminUserHierarchy";
 import AdminDepartments from "./pages/AdminDepartments";
+import AdminUserActivity from "./pages/AdminUserActivity";
 import StaffLayout from "./layouts/StaffLayout";
 // TaskPro (task management) — self-contained module, see pages/taskpro/
 import TaskProLayout from "./pages/taskpro/TaskProLayout";
@@ -83,6 +84,24 @@ import PaymentsPage from "./pages/PaymentsPage";
 import TasksPage from "./pages/TasksPage";
 import AuditsList from "./pages/audits/AuditsList";
 import AuditDetail from "./pages/audits/AuditDetail";
+// Brigade Executive module — see pages/brigade/
+import BrigadeLayout from "./pages/brigade/BrigadeLayout";
+import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
+import BrigadeMasters from "./pages/brigade/BrigadeMasters";
+import BrigadeBilling from "./pages/brigade/BrigadeBilling";
+import BrigadePos from "./pages/brigade/BrigadePos";
+// Customer Feedback desk + the customer's form — see pages/feedback/
+import FeedbackLayout from "./pages/feedback/FeedbackLayout";
+import FeedbackCallList from "./pages/feedback/CallList";
+import FeedbackCallPage from "./pages/feedback/CallPage";
+import FeedbackTicketList from "./pages/feedback/TicketList";
+import FeedbackTicketPage from "./pages/feedback/TicketPage";
+import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
+import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
+import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
+import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
+import FeedbackGate from "./pages/feedback/FeedbackGate";
+import { FEEDBACK_HOME } from "./pages/feedback/access";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -127,6 +146,7 @@ const router = createBrowserRouter([
       { path: "user-management", element: <AdminUserManagement /> },
       { path: "user-hierarchy", element: <AdminUserHierarchy /> },
       { path: "departments", element: <AdminDepartments /> },
+      { path: "user-activity", element: <AdminUserActivity /> },
       { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
       { path: "branches", element: <AdminBranches /> },
@@ -144,6 +164,31 @@ const router = createBrowserRouter([
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "tracking/history/:technicianId", element: <TrackingHistory /> },
+    ],
+  },
+
+  // -------------------------
+  // BRIGADE EXECUTIVE (protected) — Brigade Group only (scoped by the backend)
+  // -------------------------
+  {
+    path: "/brigade",
+    element: (
+      <ProtectedRoute allowedRoles={["brigade_executive"]}>
+        <BrigadeLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      // Jobs (same dashboard as admin, limited to Brigade Group by the backend) + Flats view.
+      { index: true, element: <BrigadeDashboard /> },
+      { path: "companies", element: <AdminCompanies /> },
+      { path: "group-management", element: <AdminGroupManagement /> },
+      { path: "contacts", element: <ContactsPage /> },
+      { path: "contacts/:contactId", element: <ContactsPage /> },
+      { path: "masters", element: <BrigadeMasters /> },
+      { path: "pos", element: <BrigadePos /> },
+      { path: "billing", element: <BrigadeBilling /> },
+      { path: "jobs/:jobId", element: <JobPage /> },
+      { path: "profile", element: <ProfilePage /> },
     ],
   },
 
@@ -329,6 +374,32 @@ const router = createBrowserRouter([
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
     ],
+  },
+
+  // CUSTOMER FEEDBACK — monthly feedback calls, tickets, report and masters. Opened by permission:
+  // any role with a FEEDBACK_* permission (Roles & Permissions); screens per /api/feedback/me.
+  // -------------------------
+  {
+    path: FEEDBACK_HOME,
+    element: (
+      <FeedbackGate>
+        <FeedbackLayout />
+      </FeedbackGate>
+    ),
+    children: [
+      { index: true, element: <FeedbackCallList /> },
+      { path: "calls/:id", element: <FeedbackCallPage /> },
+      { path: "tickets", element: <FeedbackTicketList /> },
+      { path: "tickets/:id", element: <FeedbackTicketPage /> },
+      { path: "report", element: <FeedbackCustomerReport /> },
+      { path: "questions", element: <FeedbackQuestions /> },
+      { path: "settings", element: <FeedbackTemplatesSettings /> },
+    ],
+  },
+  // The customer's feedback form from the WhatsApp link — no login, the token is the key.
+  {
+    path: "/feedback/:token",
+    element: <PublicFeedbackForm />,
   },
 
   {

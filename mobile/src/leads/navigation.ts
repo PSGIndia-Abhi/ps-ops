@@ -59,6 +59,17 @@ export type LeadStackParamList = {
   LeadNotifications: undefined;
   /** No employeeId = the signed-in user's own numbers. */
   LeadPerformance: { employeeId?: number; name?: string } | undefined;
+  /** The records behind one number of a performance report (a tapped tile). */
+  LeadPerformanceItems: {
+    metric: import('./api').PerformanceMetric;
+    label: string;
+    from: string;
+    to: string;
+    employeeId?: number;
+    /** Whose numbers - shown under the title. */
+    name: string;
+    periodLabel: string;
+  };
 };
 
 /** "NewLeadTab" is the raised centre action and never renders a screen (it opens LeadNew). */

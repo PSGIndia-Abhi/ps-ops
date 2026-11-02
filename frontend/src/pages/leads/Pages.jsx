@@ -2,7 +2,7 @@
 // meetings and the provider list.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { FiArrowLeft, FiCalendar, FiCheckCircle, FiChevronRight, FiClock, FiExternalLink, FiPause, FiPhoneCall, FiPlay, FiPlus, FiShield } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { CallVerifyModal, FollowUpCallModal, FollowUpModal, LeadForm, ScheduleMeetingModal } from "./dialogs";
@@ -684,8 +684,17 @@ export function Meetings() {
   const { leads, meetings } = useLeadData();
   const ready = useLoaded();
   const [tab, setTab] = useState("today");
+  // One sales person's meetings, when opened from the sales manager's dashboard with a person picked.
+  const [params, setParams] = useSearchParams();
+  const salesPerson = params.get("sales") || "";
 
-  const mine = useMemo(() => visibleMeetings(meetings, viewer).sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)), [meetings, viewer]);
+  const mine = useMemo(
+    () =>
+      visibleMeetings(meetings, viewer)
+        .filter((m) => !salesPerson || String(m.salesId) === salesPerson)
+        .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)),
+    [meetings, viewer, salesPerson],
+  );
   const groups = {
     today: mine.filter((m) => isToday(m.scheduledAt)),
     upcoming: mine.filter((m) => !isToday(m.scheduledAt) && !isPast(m.scheduledAt)),
@@ -698,8 +707,19 @@ export function Meetings() {
       <div className="lm-head">
         <div>
           <h1>Meetings</h1>
-          <p>{everyone ? "Sales meetings and site visits across the team." : "Your sales meetings and site visits."}</p>
+          <p>
+            {salesPerson
+              ? `${userName(salesPerson) || "This sales person"}'s sales meetings and site visits.`
+              : everyone
+                ? "Sales meetings and site visits across the team."
+                : "Your sales meetings and site visits."}
+          </p>
         </div>
+        {salesPerson && (
+          <Button variant="ghost" onClick={() => setParams({}, { replace: true })}>
+            Show everyone
+          </Button>
+        )}
       </div>
 
       <Card flush>

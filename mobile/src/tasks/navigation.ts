@@ -4,7 +4,7 @@ import type { ListMode } from './format';
 export type TaskTabParamList = {
   Home: undefined;
   /** `q` pre-fills the search (e.g. a person's name from Insights' Team workload). */
-  Tasks: { mode?: ListMode; q?: string; at?: number; teamScoped?: boolean; focused?: boolean } | undefined;
+  Tasks: { mode?: ListMode; q?: string; at?: number; teamScoped?: boolean; focused?: boolean; activeOnly?: boolean } | undefined;
   /** Centre "+" slot - never shown; tapping it opens NewTask. */
   NewTaskTab: undefined;
   Schedule: undefined;

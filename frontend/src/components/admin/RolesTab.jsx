@@ -31,6 +31,8 @@ const PERMISSION_CATEGORIES = {
       { name: "START_VISIT", desc: "Start/begin visits" },
       { name: "SUBMIT_VISIT", desc: "Submit visit reports" },
       { name: "APPROVE_VISIT", desc: "Approve submitted visits" },
+      { name: "START_VISIT_ANYWHERE", desc: "Start visits from anywhere (no location check)" },
+      { name: "END_VISIT_WITHOUT_PHOTOS", desc: "End Brigade visits without before/after photos" },
     ],
   },
   contacts: {
@@ -91,6 +93,16 @@ const PERMISSION_CATEGORIES = {
       { name: "VIEW_ANALYTICS", desc: "View analytics dashboards" },
       { name: "VIEW_BRANCH_ANALYTICS", desc: "View branch-level analytics" },
       { name: "VIEW_GLOBAL_ANALYTICS", desc: "View system-wide analytics" },
+    ],
+  },
+  feedback: {
+    label: "Customer Feedback",
+    icon: "💬",
+    permissions: [
+      { name: "FEEDBACK_VIEW", desc: "Open the Feedback Desk: see all calls, tickets and the customer report" },
+      { name: "FEEDBACK_COLLECT", desc: "Take feedback calls, record answers, send form links and thank-you messages, raise tickets" },
+      { name: "FEEDBACK_MANAGE", desc: "Change, close and reopen tickets; give calls to another collector" },
+      { name: "FEEDBACK_ADMIN", desc: "Masters: feedback questions, WhatsApp and email templates, settings" },
     ],
   },
 };

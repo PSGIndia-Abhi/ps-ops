@@ -41,6 +41,14 @@ function resolveNotificationPath(notification, role) {
     return `/accountant/follow-ups/${notification.entity_id}`;
   }
 
+  // Customer Feedback: a ticket given to you, a call given to you, a form sent back, a call-back due.
+  if (notification.entity_type === "feedback_ticket" && notification.entity_id) {
+    return `/feedback-desk/tickets/${notification.entity_id}`;
+  }
+  if (notification.entity_type === "feedback_call" && notification.entity_id) {
+    return `/feedback-desk/calls/${notification.entity_id}`;
+  }
+
   if (notification.entity_type === "job" && notification.entity_id) {
     return role === "client"
       ? `/client/jobs/${notification.entity_id}`

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../api";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import "./contactspage.css";
 import CreateContactModal from "../components/CreateContactModal";
 
@@ -13,6 +13,8 @@ export default function ContactsPage() {
     const token = localStorage.getItem("token");
     const navigate = useNavigate();
     const { contactId } = useParams();
+    // Same page serves the admin panel and the Brigade panel; links stay in the current one.
+    const basePath = useLocation().pathname.startsWith("/brigade") ? "/brigade" : "/admin";
 
     // ✅ fetch all contacts and companies
     useEffect(() => {
@@ -79,7 +81,7 @@ export default function ContactsPage() {
         alert("Saved");
 
         // refresh list
-        navigate("/admin/contacts");
+        navigate(`${basePath}/contacts`);
     }
 
     return (
@@ -107,7 +109,7 @@ export default function ContactsPage() {
                                 <div className="contact-actions">
                                     <button
                                         className="primary"
-                                        onClick={() => navigate(`/admin/contacts/${c.id}`)}
+                                        onClick={() => navigate(`${basePath}/contacts/${c.id}`)}
                                     >
                                         Edit
                                     </button>
@@ -150,7 +152,7 @@ export default function ContactsPage() {
 
                                     <div className="edit-actions">
                                         <button className="save" onClick={handleSave}>Save</button>
-                                        <button onClick={() => navigate("/admin/contacts")}>
+                                        <button onClick={() => navigate(`${basePath}/contacts`)}>
                                             Cancel
                                         </button>
                                     </div>

@@ -28,7 +28,8 @@ import { fmtDateShort, fmtTime } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import { openPdf, savedQuotationPdf, saveToDownloads } from '../quotation';
+import { savedQuotationPdf } from '../quotation';
+import { QuotationPdfDialog } from '../QuotationDialogs';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
 import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
@@ -340,26 +341,9 @@ export function LeadWorkScreen() {
 
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
 
-  // A saved quotation's PDF: open it in the phone's PDF viewer, or save a copy to Downloads.
-  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
-  const quotationPdf = (quotationId: string, number: string) => {
-    const run = async (work: (file: string) => Promise<void>) => {
-      setPdfBusy(quotationId);
-      setActionError(null);
-      try {
-        await work(await savedQuotationPdf(leadId, quotationId, number));
-      } catch (err) {
-        setActionError(errorMessage(err, 'Could not open the quotation PDF.'));
-      } finally {
-        setPdfBusy(null);
-      }
-    };
-    Alert.alert(number, 'What would you like to do with this quotation?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Save to Downloads', onPress: () => run(async (f) => { await saveToDownloads(f); setNotice(`${number}.pdf saved in Downloads/BestServe.`); }) },
-      { text: 'Open PDF', onPress: () => run(openPdf) },
-    ]);
-  };
+  // A saved quotation's PDF: open it in the phone's PDF viewer, or save a copy to Downloads
+  // (QuotationPdfDialog does both and shows how it went).
+  const [pdfFor, setPdfFor] = useState<{ id: string; number: string } | null>(null);
 
   const lead = data?.lead;
   const openMeeting = data?.openMeeting ?? null;
@@ -567,8 +551,8 @@ export function LeadWorkScreen() {
                   // A tap opens the PDF (with an option to save it to Downloads for WhatsApp / email).
                   <Pressable
                     key={q.id}
-                    disabled={!q.hasPdf || pdfBusy === q.id}
-                    onPress={() => quotationPdf(q.id, q.number)}
+                    disabled={!q.hasPdf}
+                    onPress={() => setPdfFor({ id: q.id, number: q.number })}
                     accessibilityRole="button"
                     style={({ pressed }) => [styles.quoteItem, i > 0 && styles.quoteDivider, pressed && { opacity: 0.7 }]}
                   >
@@ -580,7 +564,7 @@ export function LeadWorkScreen() {
                       <Text style={styles.quoteMeta}>
                         {formatINR(q.total)}
                         {q.sentAt ? ` · ${formatLeadWhen(q.sentAt)}` : ''}
-                        {q.hasPdf ? (pdfBusy === q.id ? ' · Opening...' : ' · Tap to open PDF') : ''}
+                        {q.hasPdf ? ' · Tap to open PDF' : ''}
                       </Text>
                     </View>
                     <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
@@ -628,6 +612,14 @@ export function LeadWorkScreen() {
           </>
         )}
       </CrmScreen>
+      {pdfFor && (
+        <QuotationPdfDialog
+          name={data?.lead.companyName || pdfFor.number}
+          getFile={() => savedQuotationPdf(leadId, pdfFor.id, pdfFor.number)}
+          onOpened={() => setPdfFor(null)}
+          onClose={() => setPdfFor(null)}
+        />
+      )}
     </LeadScreen>
   );
 }

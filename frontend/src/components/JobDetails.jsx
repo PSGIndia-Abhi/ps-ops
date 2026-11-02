@@ -221,7 +221,7 @@ export default function JobDetails({ job, onDelete }) {
 
             <DetailTile
               icon="team"
-              label="Team Members"
+              label="Technician"
               value={
                 teamLoading
                   ? "Loading..."

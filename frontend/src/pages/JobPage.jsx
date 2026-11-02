@@ -4,6 +4,7 @@ import JobHeader from "../components/JobHeader";
 import JobUpdateComposer from "../components/JobUpdateComposer";
 import JobTimeline from "../components/JobTimeline";
 import "./jobpage.css";
+import BrigadeJobInfo from "./brigade/BrigadeJobInfo";
 import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import { apiFetch } from "../api";
 import { AdvancedMarker } from "@vis.gl/react-google-maps";
@@ -36,6 +37,7 @@ export default function JobPage() {
   const role = localStorage.getItem("role");
   const isTemporaryWorker = role === "temporary_worker";
   const isTechnician = role === "technician";
+  // The Brigade Executive gets the same controls as admin; the backend limits them to Brigade jobs.
   const canAssign = !isTechnician && !isTemporaryWorker;
   const canGenerateRecurring = ["admin", "branch_admin", "supervisor"].includes(role);
   const canGenerateTemporaryAccess = ["admin", "branch_admin", "supervisor"].includes(role);
@@ -52,8 +54,8 @@ export default function JobPage() {
   const [revokingAccessId, setRevokingAccessId] = useState(null);
   const [openAccordions, setOpenAccordions] = useState({
     schedule: true,
-    booking: true,
-    temporaryAccess: true,
+    booking: false,
+    temporaryAccess: false,
   });
 
   // Visit scheduling state
@@ -314,9 +316,13 @@ export default function JobPage() {
     });
   }
 
+  // Admin may start a visit from anywhere (the backend skips the location check for them), so the
+  // browser isn't asked for a position. Everyone else must share it, as before.
+  const locationForStart = () => (role === "admin" ? Promise.resolve({}) : getCurrentLocation());
+
   async function startVisit(visitId) {
     try {
-      const location = await getCurrentLocation();
+      const location = await locationForStart();
       const res = await apiFetch(`/api/visits/${visitId}/start`, {
         method: "PATCH",
         body: JSON.stringify(location),
@@ -355,7 +361,7 @@ export default function JobPage() {
 
   async function startVisitAnyway(visitId) {
     try {
-      const location = await getCurrentLocation();
+      const location = await locationForStart();
       const res = await apiFetch(
         `/api/visits/${visitId}/start-anyway`,
         {
@@ -900,6 +906,8 @@ console.log("Map ID:", import.meta.env.VITE_GOOGLE_MAP_ID);
         <div className="job-left">
           <JobHeader job={job} setIsAssignOpen={canAssign ? setIsAssignOpen : null} />
 
+          <BrigadeJobInfo jobId={job.id} />
+
           {canManageJobSchedule && (
             <section className="job-accordion job-schedule-card">
               <button
@@ -1362,11 +1370,6 @@ console.log("Map ID:", import.meta.env.VITE_GOOGLE_MAP_ID);
           <JobTimeline history={history} />
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="job-right">
-          <h4>Files & Documents</h4>
-          <p>No files yet</p>
-        </div>
         {canAssign && (
           <AssignWorkOrderModal
             isOpen={isAssignOpen}

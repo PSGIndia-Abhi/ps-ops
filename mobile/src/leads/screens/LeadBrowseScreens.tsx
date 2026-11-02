@@ -6,22 +6,21 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SearchIcon } from '../../crm/ui/crmIcons';
-import { PersonIcon, UsersIcon } from '../../components/icons';
 import { toneColors } from '../../crm/ui/StatusBadge';
-import { initials } from '../../tasks/format';
-import { ActionSheet, type SheetAction } from '../../tasks/ui/sheets';
-import { ChevronDownIcon } from '../../tasks/ui/taskIcons';
+import { fmtDateShort, initials, toDateStr, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
 import type { Person, PipelineLead } from '../types';
+import { ActiveFilterChips, ANY_TIME, FilterButton, LeadFilterSheet, whenDay, whenLabel, type WhenFilter, type WhoOption } from '../LeadFilterSheet';
 import { LeadRow, personTone, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const factory = (t: CrmTheme) => ({
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
   title: { ...typography.display, color: t.textPrimary, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xs },
-  search: { paddingHorizontal: spacing.lg },
+  searchRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.sm, paddingHorizontal: spacing.lg },
+  searchField: { flex: 1 },
   chips: { paddingHorizontal: spacing.lg, gap: spacing.xs, paddingBottom: spacing.sm },
   chip: {
     minHeight: 36,
@@ -36,23 +35,6 @@ const factory = (t: CrmTheme) => ({
   chipOn: { backgroundColor: t.primary, borderColor: t.primary },
   chipText: { ...typography.captionMedium, color: t.textSecondary },
   chipTextOn: { color: t.textOnPrimary },
-  // Sales manager: whose leads (Everyone / a sales executive / Unassigned / Added by me)
-  personRow: { flexDirection: 'row' as const, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  person: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 6,
-    minHeight: 38,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
-  },
-  personOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
-  personText: { ...typography.bodyMedium, color: t.textPrimary },
-  personTextOn: { color: t.primary },
-  initials: { ...typography.captionMedium },
   taskRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   taskIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: t.warningBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   taskBody: { flex: 1 },
@@ -75,6 +57,12 @@ const factory = (t: CrmTheme) => ({
 // ---------------------------------------------------------------------------
 
 type ListRoute = RouteProp<{ Leads: { group?: StageGroup; at?: number } | undefined }, 'Leads'>;
+
+/** The day a lead was added, on this phone's calendar ('YYYY-MM-DD'). */
+const addedOn = (l: PipelineLead) => {
+  const d = new Date(l.createdAt.includes('T') ? l.createdAt : l.createdAt.replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? l.createdAt.slice(0, 10) : toDateStr(d);
+};
 
 export function LeadListScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
@@ -100,51 +88,42 @@ export function LeadListScreen() {
   const { data: loaded, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load leads.');
   const people = useMemo(() => loaded?.[1] ?? [], [loaded]);
 
-  // Sales manager: whose leads to show - 'all', 'mine' (added by me), 'none' (unassigned) or a person's id.
+  // The filters behind the filter icon. Whose leads (sales manager only): 'all', 'mine' (added by me),
+  // 'none' (unassigned) or a person's id. When: the day they were added.
   const [who, setWho] = useState<string>('all');
-  const [pickWho, setPickWho] = useState(false);
-  const data = useMemo(() => {
-    const all = loaded?.[0];
-    if (!all || !manager || who === 'all') return all;
-    if (who === 'mine') return all.filter((l) => l.createdById === myId);
-    if (who === 'none') return all.filter((l) => !l.salesEmployeeId);
-    return all.filter((l) => l.salesEmployeeId === who);
-  }, [loaded, manager, who, myId]);
-  const whoLabel =
-    who === 'all' ? 'Everyone' : who === 'mine' ? 'Added by me' : who === 'none' ? 'Unassigned' : people.find((p) => String(p.id) === who)?.name ?? 'Someone';
-  const countFor = (key: string) => {
-    const all = loaded?.[0] ?? [];
-    if (key === 'all') return all.length;
-    if (key === 'mine') return all.filter((l) => l.createdById === myId).length;
-    if (key === 'none') return all.filter((l) => !l.salesEmployeeId).length;
-    return all.filter((l) => l.salesEmployeeId === key).length;
-  };
-  // Each option's circle: a group, me, nobody yet - and a person's initials on their own tint.
-  const whoActions: SheetAction[] = [
-    { key: 'all', label: 'Everyone', sub: `${countFor('all')} leads`, icon: <UsersIcon size={18} color={theme.primary} />, selected: who === 'all', onPress: () => setWho('all') },
-    { key: 'mine', label: 'Added by me', sub: `${countFor('mine')} leads`, icon: <PersonIcon size={18} color={theme.primary} />, selected: who === 'mine', onPress: () => setWho('mine') },
-    {
-      key: 'none',
-      label: 'Unassigned',
-      sub: `${countFor('none')} leads`,
-      icon: <PersonIcon size={18} color={theme.textMuted} />,
-      iconBg: theme.surfaceAlt,
-      selected: who === 'none',
-      onPress: () => setWho('none'),
+  const [when, setWhen] = useState<WhenFilter>(ANY_TIME);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterLeads = useCallback(
+    (list: PipelineLead[], w: string, wh: WhenFilter) => {
+      let out = list;
+      if (manager && w !== 'all') {
+        if (w === 'mine') out = out.filter((l) => l.createdById === myId);
+        else if (w === 'none') out = out.filter((l) => !l.salesEmployeeId);
+        else out = out.filter((l) => l.salesEmployeeId === w);
+      }
+      const day = whenDay(wh);
+      return day ? out.filter((l) => addedOn(l) === day) : out;
     },
+    [manager, myId],
+  );
+  // The stage chips, their counts, the list and the search all follow the filters.
+  const data = useMemo(() => (loaded?.[0] ? filterLeads(loaded[0], who, when) : undefined), [loaded, who, when, filterLeads]);
+  const onDay = whenDay(when);
+  const whoLabel =
+    who === 'mine' ? 'Added by me' : who === 'none' ? 'Unassigned' : people.find((p) => String(p.id) === who)?.name ?? 'Someone';
+  const whoOptions: WhoOption[] = [
+    { key: 'all', label: 'Everyone' },
+    { key: 'mine', label: 'Added by me' },
+    { key: 'none', label: 'Unassigned' },
     ...people.map((p) => {
       const id = String(p.id);
       const tint = toneColors(theme, personTone(p.name));
-      return {
-        key: id,
-        icon: <Text style={[styles.initials, { color: tint.fg }]}>{initials(p.name)}</Text>,
-        iconBg: tint.bg,
-        label: id === myId ? `${p.name} (me)` : p.name,
-        sub: `${api.roleName(p.role)} · ${countFor(id)} leads`,
-        selected: who === id,
-        onPress: () => setWho(id),
-      };
+      return { key: id, label: id === myId ? `${p.name} (me)` : p.name, avatar: { text: initials(p.name), bg: tint.bg, fg: tint.fg } };
     }),
+  ];
+  const activeFilters = [
+    ...(manager && who !== 'all' ? [{ key: 'who', label: whoLabel, onRemove: () => setWho('all') }] : []),
+    ...(when.kind !== 'any' ? [{ key: 'when', label: `Added ${whenLabel(when) === 'Today' || whenLabel(when) === 'Yesterday' ? whenLabel(when).toLowerCase() : `on ${whenLabel(when)}`}`, onRemove: () => setWhen(ANY_TIME) }] : []),
   ];
 
   const counts = useMemo(() => countByGroup(data ?? []), [data]);
@@ -167,32 +146,21 @@ export function LeadListScreen() {
   return (
     <LeadScreen edges={['top']}>
       {pushed ? <TopBar title="Commercial leads" onBack={() => navigation.goBack()} /> : <Text style={styles.title}>Leads</Text>}
-      <View style={styles.search}>
-        <CrmTextField
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search company, contact, phone…"
-          icon={<SearchIcon size={18} color={theme.textMuted} />}
-          autoCorrect={false}
-          returnKeyType="search"
-        />
-      </View>
-      {manager && (
-        <View style={styles.personRow}>
-          <Pressable
-            onPress={() => setPickWho(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`Whose leads: ${whoLabel}`}
-            style={({ pressed }) => [styles.person, who !== 'all' && styles.personOn, pressed && { opacity: 0.85 }]}
-          >
-            <PersonIcon size={16} color={who !== 'all' ? theme.primary : theme.textSecondary} />
-            <Text style={[styles.personText, who !== 'all' && styles.personTextOn]} numberOfLines={1}>
-              {whoLabel}
-            </Text>
-            <ChevronDownIcon size={16} color={who !== 'all' ? theme.primary : theme.textMuted} />
-          </Pressable>
+      {/* Search, with the filters (whose leads, day added) behind the icon at its end. */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchField}>
+          <CrmTextField
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search company, contact, phone…"
+            icon={<SearchIcon size={18} color={theme.textMuted} />}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
         </View>
-      )}
+        <FilterButton count={activeFilters.length} onPress={() => setFiltersOpen(true)} />
+      </View>
+      <ActiveFilterChips items={activeFilters} />
       <View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {groups.map((g) => (
@@ -221,12 +189,27 @@ export function LeadListScreen() {
           loading ? (
             <CrmSkeleton height={120} radius={radii.lg} />
           ) : error ? undefined : (
-            <CrmEmptyState title="No leads here" subtitle={query ? 'Nothing matches your search.' : 'There are no leads at this stage.'} />
+            <CrmEmptyState
+              title="No leads here"
+              subtitle={query ? 'Nothing matches your search.' : onDay ? `No leads were added on ${onDay === todayStr() ? 'today' : fmtDateShort(onDay)}.` : 'There are no leads at this stage.'}
+            />
           )
         }
         renderItem={({ item }) => <LeadRow lead={item} onPress={() => navigation.navigate('LeadDetail', { leadId: item.id })} />}
       />
-      {manager && <ActionSheet visible={pickWho} onClose={() => setPickWho(false)} title="Whose leads" actions={whoActions} />}
+      <LeadFilterSheet
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        showWho={manager}
+        whoOptions={whoOptions}
+        who={who}
+        when={when}
+        countWith={(w, wh) => filterLeads(loaded?.[0] ?? [], w, wh).length}
+        onApply={(w, wh) => {
+          setWho(w);
+          setWhen(wh);
+        }}
+      />
     </LeadScreen>
   );
 }

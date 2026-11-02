@@ -3,6 +3,8 @@ import { apiFetch } from "../api";
 import CreateContactModal from "./CreateContactModal";
 import AssignWorkOrderModal from "./AssignWorkOrderModal";
 import StatusAlertModal from "./StatusAlertModal";
+// Shared two-panel booking form styles (bgm-* / bg-*), also used by the Brigade booking form.
+import "../pages/brigade/brigade.css";
 
 
 
@@ -498,92 +500,6 @@ const operationServices = [
     }
   }
 
-  /* ---------- STYLES ---------- */
-
-  const overlay = {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.45)",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1200,
-  };
-
-  const modal = {
-    width: "600px",
-    maxWidth: "90vw",
-    maxHeight: "90vh",
-    background: "#ffffff",
-    borderRadius: "12px",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-  };
-
-  const body = {
-    flex: 1,
-    overflowY: "auto",
-    padding: "24px",
-  };
-
-  const section = { marginBottom: "28px" };
-
-  const input = {
-    padding: "10px",
-    borderRadius: "8px",
-    border: "1px solid #d1d5db",
-    fontSize: "14px",
-    width: "100%",
-  };
-
-  const pillRow = {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
-  };
-
-  const pill = active => ({
-    padding: "8px 14px",
-    borderRadius: "999px",
-    border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
-    background: active ? "#eff6ff" : "#ffffff",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: 500,
-  });
-
-  const dayPill = active => ({
-    ...pill(active),
-    padding: "6px 10px",
-    fontSize: "12px",
-  });
-
-  const subGrid = {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "10px",
-    maxHeight: "160px",
-    overflowY: "auto",
-  };
-
-  const subItem = active => ({
-    padding: "10px",
-    borderRadius: "8px",
-    border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
-    background: active ? "#eff6ff" : "#ffffff",
-    fontSize: "13px",
-    cursor: "pointer",
-    textAlign: "center",
-  });
-
-  const serviceScheduleCard = {
-    border: "1px solid #e5e7eb",
-    borderRadius: "10px",
-    padding: "12px",
-    background: "#f9fafb",
-  };
-
   const daysOfWeek = [
     { value: 0, label: "Sunday" },
     { value: 1, label: "Monday" },
@@ -632,368 +548,380 @@ const operationServices = [
   }, []);
 
 
-  function getShortName(name) {
-  // Pest control
-    if (name.includes("Pre-Construction")) return "Termite Pre";
-  if (name.includes("Post-Construction")) return "Termite Post";
-  if (name.includes("Indoor Residual Spray")) return "Mosquito IRS";
-  if (name.includes("Larval")) return "Mosquito Larval";
-  if (name.includes("General Pest Control + Rodent Control")) return "GPC + Rodent Control";
-  // Deep cleaning
-  if (name === "Electrical New Point Installation") return "Electrical Point";
-  if (name === "Plumbing Work") return "Plumbing";
-  if (name === "Painting Work") return "Painting";
-  if (name === "Deep Cleaning with Scrubbing") return "Deep Clean + Scrub";
-  if (name === "Deep Cleaning with Sticker Removal") return "Deep Clean + Sticker";
-
-
-  return name;
-}
-
   /* ---------- RENDER ---------- */
 
+  const isClient = role === "client";
+  const needsSupervisor = !isClient && role !== "supervisor";
+
+  const serviceTypes = [
+    { key: "PEST", label: "Pest Control" },
+    { key: "DEEP", label: "Deep Cleaning" },
+    { key: "BOTH", label: "Both" },
+    { key: "SALES", label: "Sales" },
+    { key: "OPERATION", label: "Operation" },
+  ];
+  const serviceTypeLabel = serviceTypes.find(s => s.key === form.serviceType)?.label || "—";
+
+  const recurrenceTypes = [
+    { value: "DAILY", label: "Daily" },
+    { value: "WEEKLY", label: "Weekly" },
+    { value: "CUSTOM_DAYS", label: "Every X days" },
+    { value: "CUSTOM_WEEKS", label: "Every X weeks" },
+    { value: "CUSTOM_MONTHS", label: "Every X months" },
+  ];
+  const recurrenceSummary = recurrenceActive
+    ? `${recurrenceTypes.find(r => r.value === form.recurrenceType)?.label || ""}${
+        recurrenceNeedsInterval ? ` (×${form.recurrenceInterval || 1})` : ""
+      }${form.recurrenceEndDate ? ` until ${formatShortDate(form.recurrenceEndDate)}` : ""}`
+    : "One time";
+
+  const contactCompany = selectedContact
+    ? [selectedContact.company_name, selectedContact.company_site].filter(Boolean).join(" – ")
+    : "";
+
+  // Mirrors handleSubmit's checks so the summary can say what is still missing.
+  const missing = [];
+  if (!form.contactId) missing.push(isClient ? "Your contact profile is missing" : "Choose who is requesting");
+  if (!form.subServices.length) missing.push("Pick at least one service");
+  const undated = form.subServices.filter(s => !serviceSchedules[s]?.start_date);
+  if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
+  if (recurrenceActive && !form.recurrenceEndDate) missing.push("Set the recurrence end date");
+  if (needsSupervisor && !assignedSupervisorId) missing.push("Assign a supervisor");
+  if (!isClient && !assignedTechnicianIds?.length) missing.push("Assign at least one technician");
+
+  const stepDone = {
+    contact: Boolean(form.contactId),
+    address: Boolean(form.location?.trim()),
+    services: form.subServices.length > 0,
+    schedule: form.subServices.length > 0 && undated.length === 0,
+    team: (!needsSupervisor || Boolean(assignedSupervisorId)) && assignedTechnicianIds?.length > 0,
+  };
+
+  // Same date/time for every picked service.
+  function applyFirstScheduleToAll() {
+    const first = serviceSchedules[form.subServices[0]];
+    if (!first) return;
+    setServiceSchedules(prev => {
+      const next = { ...prev };
+      for (const s of form.subServices) next[s] = { ...first };
+      return next;
+    });
+  }
+
+  let step = 0;
+  const nextStep = () => ++step;
+
   return (
-    <div style={overlay}>
-      <div style={modal}>
-        {/* HEADER */}
-        <div style={{ padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>
-          <h3>Create Booking</h3>
+    <div className="bgm-overlay">
+      <div className="bgm-modal" role="dialog" aria-modal="true" aria-labelledby="cbm-title">
+        <div className="bgm-header">
+          <div>
+            <h3 id="cbm-title">Create Booking</h3>
+            <p>{isClient ? "Request a service visit" : "Requester, services, schedule and team"}</p>
+          </div>
+          <button type="button" className="bgm-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
         </div>
 
-        {/* BODY */}
-        <div style={body}>
-          {role !== "client" && (
-            <>
-              {/* REQUESTED BY */}
-              <div style={section}>
-                <h4>Requested By</h4>
-
-                <div ref={contactDropdownRef} style={{ position: "relative" }}>
-
-                  <input
-                    type="text"
-                    value={contactSearch}
-                    onFocus={() => setShowContactResults(true)}
-                    onChange={(e) => {
-                      setContactSearch(e.target.value);
-                      setShowContactResults(true);
-                    }}
-                    placeholder="Search contacts by name, phone, email, or company"
-                    style={input}
-                  />
-                  {showContactResults && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        right: 0,
-                        background: "#fff",
-                        border: "1px solid #d1d5db",
-                        borderRadius: "8px",
-                        maxHeight: "220px",
-                        overflowY: "auto",
-                        marginTop: "4px",
-                        zIndex: 50
+        <div className="bgm-content">
+          <div className="bgm-main">
+            {/* REQUESTED BY */}
+            {!isClient && (
+              <section className="bgm-section">
+                <SectionHead step={nextStep()} title="Requested by" done={stepDone.contact} />
+                <div ref={contactDropdownRef} className="bgm-search">
+                  <div className="bg-field">
+                    <input
+                      type="text"
+                      value={contactSearch}
+                      onFocus={() => setShowContactResults(true)}
+                      onChange={(e) => {
+                        setContactSearch(e.target.value);
+                        setShowContactResults(true);
                       }}
-                    >
+                      placeholder="Search contacts by name, phone, email, or company"
+                      aria-label="Search contacts"
+                    />
+                  </div>
+                  {showContactResults && (
+                    <div className="bgm-search-results" role="listbox">
                       {loadingContacts ? (
-                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
-                          Loading contacts…
-                        </div>
+                        <div className="bgm-search-empty">Loading contacts…</div>
                       ) : filteredContacts.length === 0 ? (
-                        <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
-                          No contacts found
-                        </div>
+                        <div className="bgm-search-empty">No contacts found</div>
                       ) : (
                         filteredContacts.map(c => {
-                          const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
+                          const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" – ");
                           const phoneLabel = c.phone || c.contact_phone || "";
-
                           return (
-                            <div
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={String(form.contactId) === String(c.id)}
                               key={c.id}
-                              style={{
-                                padding: "10px",
-                                cursor: "pointer",
-                                borderBottom: "1px solid #f3f4f6",
-                                fontSize: "13px"
-                              }}
+                              className="bgm-search-item"
                               onClick={() => {
                                 setForm(prev => ({ ...prev, contactId: c.id }));
-                                setContactSearch(`${c.name} - ${c.phone || c.contact_phone || ""}`);
+                                setContactSearch(`${c.name} - ${phoneLabel}`);
                                 setShowContactResults(false);
                               }}
-
                             >
-                              <strong>{c.name}</strong>
-                              {phoneLabel ? ` • ${phoneLabel}` : ""}
-                              {companyLabel ? ` • ${companyLabel}` : ""}
-                              {c.company_code ? ` (${c.company_code})` : ""}
-                            </div>
+                              <span className="bgm-contact-name">{c.name}</span>
+                              <span className="bgm-contact-sub">
+                                {[phoneLabel, companyLabel, c.company_code ? `(${c.company_code})` : ""].filter(Boolean).join(" · ")}
+                              </span>
+                            </button>
                           );
                         })
                       )}
                     </div>
                   )}
-
                 </div>
 
-                <button
-                  style={{ marginTop: "10px" }}
-                  onClick={() => setIsContactModalOpen(true)}
-                >
-                  + Create Contact
-                </button>
-              </div>
-
-              {isContactModalOpen && (
-                <CreateContactModal
-                  onClose={() => setIsContactModalOpen(false)}
-                  onCreated={(newContact) => {
-                    if (newContact?.id) {
-                      setContacts(prev => {
-                        const exists = prev.some(c => c.id === newContact.id);
-                        if (exists) return prev;
-                        return [newContact, ...prev];
-                      });
-                      setForm(prev => ({ ...prev, contactId: newContact.id }));
-                      const phoneLabel = newContact.phone || newContact.contact_phone || "";
-                      setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
-                      setShowContactResults(false);
-                    } else {
-                      reloadContacts();
-                    }
-                    setIsContactModalOpen(false);
-                  }}
-                  companies={companies}
-                />
-              )}
-            </>
-          )}
-
-
-          {/* ADDRESS / LOCATION */}
-          <div style={section}>
-            <h4>Service Address / Location</h4>
-            <input
-              type="text"
-              value={form.location}
-              onChange={e => update("location", e.target.value)}
-              placeholder="Enter service address or location"
-              style={input}
-            />
-            {selectedContact?.company_id && (
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", fontSize: "13px" }}>
-                <input
-                  type="checkbox"
-                  checked={useCompanyAddress}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setUseCompanyAddress(checked);
-                    if (checked && companyAddress) {
-                      setForm(prev => ({ ...prev, location: companyAddress }));
-                    }
-                  }}
-                  disabled={!companyAddress}
-                />
-                Use company address
-              </label>
-            )}
-          </div>
-
-          {/* SERVICE TYPE */}
-          <div style={section}>
-            <h4>Service Type</h4>
-            <div style={pillRow}>
-              {[
-                { key: "PEST", label: "Pest Control" },
-                { key: "DEEP", label: "Deep Cleaning" },
-                { key: "BOTH", label: "Both" },
-                { key: "SALES", label: "Sales" },
-                { key: "OPERATION", label: "Operation" },
-              ].map(s => (
-                <div
-                  key={s.key}
-                  style={pill(form.serviceType === s.key)}
-                  onClick={() => update("serviceType", s.key)}
-                >
-                  {s.label}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SUB SERVICES */}
-          <div style={section}>
-            <h4>Sub Services</h4>
-            <div style={subGrid}>
-              {visibleSubServices.map(service => (
-                <div
-                  key={service}
-                  style={subItem(form.subServices.includes(service))}
-                  onClick={() => toggleSubService(service)}
-                >
-                  {getShortName(service)}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SERVICE SCHEDULES */}
-          <div style={section}>
-            <h4>Service Schedules</h4>
-            {form.subServices.length === 0 ? (
-              <div style={{ fontSize: "13px", color: "#6b7280" }}>
-                Select services to set dates.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                {form.subServices.map(service => {
-                  const schedule = serviceSchedules[service] || defaultSchedule;
-                  return (
-                    <div key={service} style={serviceScheduleCard}>
-                      <div style={{ fontWeight: 600, marginBottom: 8 }}>{service}</div>
-                      <div>
-                        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                          First Service Visit Date
-                        </div>
-                        <input
-                          type="date"
-                          value={schedule.start_date || ""}
-                          min={new Date().toISOString().split("T")[0]}
-                          onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
-                          style={input}
-                        />
-
-                        <input
-                          type="time"
-                          value={schedule.time || ""}
-                          onChange={e => updateServiceSchedule(service, { time: e.target.value })}
-                          style={{ ...input, marginTop: "8px" }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* RECURRENCE */}
-          <div style={section}>
-            <h4>Recurring</h4>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px" }}>
-              <input
-                type="checkbox"
-                checked={form.recurrenceEnabled}
-                onChange={e => update("recurrenceEnabled", e.target.checked)}
-              />
-              Repeat this booking
-            </label>
-
-            {recurrenceActive && (
-              <div style={{ marginTop: "12px" }}>
-                <div style={{ marginBottom: "12px" }}>
-                  <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                    Recurrence End Date
-                  </div>
-                  <input
-                    type="date"
-                    value={form.recurrenceEndDate}
-                    onChange={(e) => update("recurrenceEndDate", e.target.value)}
-                    style={input}
-                  />
-                </div>
-                <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                  Frequency
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                  {[
-                    { value: "DAILY", label: "Daily" },
-                    { value: "WEEKLY", label: "Weekly" },
-                    { value: "CUSTOM_DAYS", label: "Every X Days" },
-                    { value: "CUSTOM_WEEKS", label: "Every X Weeks" },
-                    { value: "CUSTOM_MONTHS", label: "Every X Months" },
-                  ].map(option => (
-                    <label
-                      key={option.value}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px 10px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: "8px",
-                        cursor: "pointer",
-                        fontSize: "13px",
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="recurrenceType"
-                        value={option.value}
-                        checked={form.recurrenceType === option.value}
-                        onChange={() => update("recurrenceType", option.value)}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-
-                {recurrenceNeedsInterval && (
-                  <div style={{ marginTop: "12px" }}>
-                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                      Interval
-                    </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={form.recurrenceInterval}
-                        onChange={e => update("recurrenceInterval", e.target.value)}
-                        style={{ ...input, width: "120px" }}
-                      />
-                      <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                        {form.recurrenceType === "CUSTOM_DAYS"
-                          ? "days"
-                          : form.recurrenceType === "CUSTOM_WEEKS"
-                            ? "weeks"
-                            : "months"}
-                      </div>
-                    </div>
+                {selectedContact && (
+                  <div className="bgm-flat-strip">
+                    <strong>{selectedContact.name}</strong>
+                    {(selectedContact.phone || selectedContact.contact_phone) && (
+                      <span>{selectedContact.phone || selectedContact.contact_phone}</span>
+                    )}
+                    {contactCompany && <span className="bg-chip accent">{contactCompany}</span>}
                   </div>
                 )}
 
-                {recurrenceIsMonthly && (
-                  <div style={{ marginTop: "12px" }}>
-                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                      Monthly Pattern
-                    </div>
-                    <div style={pillRow}>
-                      {[
-                        { key: "day_of_month", label: "Day of Month" },
-                        { key: "week_day", label: "Week & Day" },
-                      ].map(option => (
-                        <div
-                          key={option.key}
-                          style={pill(form.recurrenceMonthMode === option.key)}
-                          onClick={() => update("recurrenceMonthMode", option.key)}
-                        >
-                          {option.label}
+                <button
+                  type="button"
+                  className="bg-link-btn"
+                  style={{ marginTop: 8, paddingLeft: 0 }}
+                  onClick={() => setIsContactModalOpen(true)}
+                >
+                  + Create contact
+                </button>
+
+                {isContactModalOpen && (
+                  <CreateContactModal
+                    onClose={() => setIsContactModalOpen(false)}
+                    onCreated={(newContact) => {
+                      if (newContact?.id) {
+                        setContacts(prev => {
+                          const exists = prev.some(c => c.id === newContact.id);
+                          if (exists) return prev;
+                          return [newContact, ...prev];
+                        });
+                        setForm(prev => ({ ...prev, contactId: newContact.id }));
+                        const phoneLabel = newContact.phone || newContact.contact_phone || "";
+                        setContactSearch(`${newContact.name || "Contact"}${phoneLabel ? ` - ${phoneLabel}` : ""}`);
+                        setShowContactResults(false);
+                      } else {
+                        reloadContacts();
+                      }
+                      setIsContactModalOpen(false);
+                    }}
+                    companies={companies}
+                  />
+                )}
+              </section>
+            )}
+
+            {/* ADDRESS */}
+            <section className="bgm-section">
+              <SectionHead step={nextStep()} title="Service address" done={stepDone.address} hint="Optional" />
+              <div className="bg-field">
+                <input
+                  type="text"
+                  value={form.location}
+                  onChange={e => update("location", e.target.value)}
+                  placeholder="Enter service address or location"
+                  aria-label="Service address"
+                />
+              </div>
+              {selectedContact?.company_id && (
+                <label className="bgm-check">
+                  <input
+                    type="checkbox"
+                    checked={useCompanyAddress}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setUseCompanyAddress(checked);
+                      if (checked && companyAddress) {
+                        setForm(prev => ({ ...prev, location: companyAddress }));
+                      }
+                    }}
+                    disabled={!companyAddress}
+                  />
+                  Use company address{companyAddress ? ` (${companyAddress})` : ""}
+                </label>
+              )}
+            </section>
+
+            {/* SERVICES */}
+            <section className="bgm-section">
+              <SectionHead
+                step={nextStep()}
+                title="Services"
+                done={stepDone.services}
+                hint={form.subServices.length ? `${form.subServices.length} selected` : null}
+              />
+              <div className="bg-filter-chips" role="radiogroup" aria-label="Service type" style={{ marginBottom: 12 }}>
+                {serviceTypes.map(s => (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={form.serviceType === s.key}
+                    key={s.key}
+                    className={`bg-filter-chip ${form.serviceType === s.key ? "active" : ""}`}
+                    onClick={() => update("serviceType", s.key)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div className="bgm-svc-grid">
+                {visibleSubServices.map(service => {
+                  const checked = form.subServices.includes(service);
+                  return (
+                    <label key={service} className={`bgm-svc-tile ${checked ? "active" : ""}`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleSubService(service)} />
+                      <span>{service}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* SCHEDULE */}
+            <section className="bgm-section">
+              <SectionHead
+                step={nextStep()}
+                title="Schedule"
+                done={stepDone.schedule}
+                hint={
+                  form.subServices.length > 1 && serviceSchedules[form.subServices[0]]?.start_date ? (
+                    <button type="button" className="bg-link-btn" onClick={applyFirstScheduleToAll}>
+                      Use first date for all
+                    </button>
+                  ) : null
+                }
+              />
+              {form.subServices.length === 0 ? (
+                <div className="bg-field-hint">Pick services to set their first visit date.</div>
+              ) : (
+                <div>
+                  {form.subServices.map(service => {
+                    const schedule = serviceSchedules[service] || defaultSchedule;
+                    return (
+                      <div key={service} className="bgm-schedule-row">
+                        <div className="bgm-schedule-name">{service}</div>
+                        <div className="bg-field">
+                          <input
+                            type="date"
+                            value={schedule.start_date || ""}
+                            min={new Date().toISOString().split("T")[0]}
+                            onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
+                            aria-label={`First visit date for ${service}`}
+                          />
                         </div>
-                      ))}
+                        <div className="bg-field">
+                          <input
+                            type="time"
+                            value={schedule.time || ""}
+                            onChange={e => updateServiceSchedule(service, { time: e.target.value })}
+                            aria-label={`Visit time for ${service}`}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* RECURRENCE */}
+              <div className="bgm-subsection">
+                <label className="bgm-check" style={{ marginTop: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.recurrenceEnabled}
+                    onChange={e => update("recurrenceEnabled", e.target.checked)}
+                  />
+                  <strong>Repeat this booking</strong>
+                </label>
+
+                {recurrenceActive && (
+                  <div className="bgm-recur">
+                    <div className="bg-field">
+                      <span className="bg-label">Frequency</span>
+                      <div className="bg-filter-chips" role="radiogroup" aria-label="Frequency">
+                        {recurrenceTypes.map(option => (
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={form.recurrenceType === option.value}
+                            key={option.value}
+                            className={`bg-filter-chip ${form.recurrenceType === option.value ? "active" : ""}`}
+                            onClick={() => update("recurrenceType", option.value)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    {form.recurrenceMonthMode === "day_of_month" ? (
-                      <div style={{ marginTop: "12px" }}>
-                        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                          Day of Month
+                    <div className="bg-grid-2">
+                      {recurrenceNeedsInterval && (
+                        <div className="bg-field">
+                          <label htmlFor="cbm-interval">
+                            Every how many {form.recurrenceType === "CUSTOM_DAYS" ? "days" : form.recurrenceType === "CUSTOM_WEEKS" ? "weeks" : "months"}
+                          </label>
+                          <input
+                            id="cbm-interval"
+                            type="number"
+                            min="1"
+                            value={form.recurrenceInterval}
+                            onChange={e => update("recurrenceInterval", e.target.value)}
+                          />
                         </div>
+                      )}
+                      <div className="bg-field">
+                        <label htmlFor="cbm-recur-end">Repeat until</label>
+                        <input
+                          id="cbm-recur-end"
+                          type="date"
+                          value={form.recurrenceEndDate}
+                          onChange={(e) => update("recurrenceEndDate", e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {recurrenceIsMonthly && (
+                      <div className="bg-field">
+                        <span className="bg-label">Monthly pattern</span>
+                        <div className="bg-filter-chips" role="radiogroup" aria-label="Monthly pattern">
+                          {[
+                            { key: "day_of_month", label: "Day of month" },
+                            { key: "week_day", label: "Week & day" },
+                          ].map(option => (
+                            <button
+                              type="button"
+                              role="radio"
+                              aria-checked={form.recurrenceMonthMode === option.key}
+                              key={option.key}
+                              className={`bg-filter-chip ${form.recurrenceMonthMode === option.key ? "active" : ""}`}
+                              onClick={() => update("recurrenceMonthMode", option.key)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {recurrenceIsMonthly && form.recurrenceMonthMode === "day_of_month" && (
+                      <div className="bg-field" style={{ maxWidth: 260 }}>
+                        <label htmlFor="cbm-dom">Day of month</label>
                         <select
+                          id="cbm-dom"
                           value={form.recurrenceDayOfMonth}
                           onChange={e => update("recurrenceDayOfMonth", e.target.value)}
-                          style={input}
                         >
                           <option value="">Use start date</option>
                           {monthDays.map(day => (
@@ -1001,130 +929,183 @@ const operationServices = [
                           ))}
                         </select>
                       </div>
-                    ) : (
-                      <div style={{ marginTop: "12px", display: "grid", gap: "12px" }}>
-                        <div>
-                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                            Weeks of Month
-                          </div>
-                          <div style={pillRow}>
+                    )}
+
+                    {recurrenceIsMonthly && form.recurrenceMonthMode === "week_day" && (
+                      <>
+                        <div className="bg-field">
+                          <span className="bg-label">Weeks of month</span>
+                          <div className="bg-filter-chips">
                             {monthWeeks.map(week => (
-                              <div
+                              <button
+                                type="button"
                                 key={week.value}
-                                style={pill(form.recurrenceWeeksOfMonth.includes(week.value))}
+                                aria-pressed={form.recurrenceWeeksOfMonth.includes(week.value)}
+                                className={`bg-filter-chip ${form.recurrenceWeeksOfMonth.includes(week.value) ? "active" : ""}`}
                                 onClick={() => toggleMonthWeek(week.value)}
                               >
                                 {week.label}
-                              </div>
+                              </button>
                             ))}
                           </div>
                         </div>
-                        <div>
-                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                            Days of Week
-                          </div>
-                          <div style={pillRow}>
+                        <div className="bg-field">
+                          <span className="bg-label">Days of week</span>
+                          <div className="bg-filter-chips">
                             {daysOfWeek.map(day => (
-                              <div
+                              <button
+                                type="button"
                                 key={day.value}
-                                style={dayPill(form.recurrenceMonthWeekdays.includes(day.value))}
+                                aria-pressed={form.recurrenceMonthWeekdays.includes(day.value)}
+                                className={`bg-filter-chip ${form.recurrenceMonthWeekdays.includes(day.value) ? "active" : ""}`}
                                 onClick={() => toggleMonthWeekday(day.value)}
                               >
-                                {day.label}
-                              </div>
+                                {day.label.slice(0, 3)}
+                              </button>
                             ))}
                           </div>
+                        </div>
+                      </>
+                    )}
+
+                    {recurrenceUsesWeekdays && (
+                      <div className="bg-field">
+                        <span className="bg-label">Days of week</span>
+                        <div className="bg-filter-chips">
+                          {daysOfWeek.map(day => (
+                            <button
+                              type="button"
+                              key={day.value}
+                              aria-pressed={form.recurrenceDaysOfWeek.includes(day.value)}
+                              className={`bg-filter-chip ${form.recurrenceDaysOfWeek.includes(day.value) ? "active" : ""}`}
+                              onClick={() => toggleRecurrenceDay(day.value)}
+                            >
+                              {day.label.slice(0, 3)}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     )}
                   </div>
                 )}
+              </div>
+            </section>
 
-                {recurrenceUsesWeekdays && (
-                  <div style={{ marginTop: "12px" }}>
-                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                      Days of Week
+            {/* TEAM */}
+            {!isClient && (
+              <section className="bgm-section">
+                <SectionHead step={nextStep()} title="Team" done={stepDone.team} />
+                <div className="bgm-team">
+                  <button type="button" className="secondary" onClick={() => setShowAssignModal(true)}>
+                    {assignedSupervisorId || assignedTechnicianIds?.length ? "Change team" : "Assign team"}
+                  </button>
+                  {assignedSupervisorId || assignedTechnicianIds?.length ? (
+                    <div className="bgm-team-chips">
+                      {assignedSupervisorName && <span className="bg-chip accent">Supervisor: {assignedSupervisorName}</span>}
+                      {assignedTechnicianName && <span className="bg-chip muted">{assignedTechnicianName}</span>}
                     </div>
-                    <div style={pillRow}>
-                      {daysOfWeek.map(day => (
-                        <div
-                          key={day.value}
-                          style={dayPill(form.recurrenceDaysOfWeek.includes(day.value))}
-                          onClick={() => toggleRecurrenceDay(day.value)}
-                        >
-                          {day.label}
+                  ) : (
+                    <span className="bg-field-hint">
+                      {needsSupervisor ? "A supervisor and at least one technician." : "At least one technician from your team."}
+                    </span>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* NOTES */}
+            <section className="bgm-section">
+              <SectionHead step={nextStep()} title="Notes" hint="Optional" />
+              <div className="bg-field">
+                <textarea
+                  rows={3}
+                  value={form.notes}
+                  placeholder="Anything the team should know"
+                  onChange={e => update("notes", e.target.value)}
+                  aria-label="Notes"
+                />
+              </div>
+            </section>
+          </div>
+
+          {/* SUMMARY RAIL */}
+          <aside className="bgm-summary" aria-label="Booking summary">
+            <div className="bgm-summary-body">
+              <h4>Booking summary</h4>
+
+              <div className="bgm-sum-rows">
+                {!isClient && (
+                  <div className="bgm-sum-row"><span>Requested by</span><span>{selectedContact?.name || "—"}</span></div>
+                )}
+                {contactCompany && (
+                  <div className="bgm-sum-row"><span>Company</span><span>{contactCompany}</span></div>
+                )}
+                <div className="bgm-sum-row"><span>Service type</span><span>{serviceTypeLabel}</span></div>
+                <div className="bgm-sum-row"><span>Repeats</span><span>{recurrenceSummary}</span></div>
+                {form.location?.trim() && (
+                  <div className="bgm-sum-row"><span>Address</span><span>{form.location}</span></div>
+                )}
+              </div>
+
+              <div>
+                <h4 style={{ marginBottom: 10 }}>Services · {form.subServices.length}</h4>
+                {form.subServices.length === 0 ? (
+                  <div className="bg-field-hint">No services picked yet.</div>
+                ) : (
+                  <div className="bgm-sum-lines">
+                    {form.subServices.map(s => {
+                      const sch = serviceSchedules[s];
+                      return (
+                        <div key={s} className="bgm-sum-line">
+                          <span>{s}</span>
+                          <span className={sch?.start_date ? "" : "bg-field-hint"}>
+                            {sch?.start_date ? `${formatShortDate(sch.start_date)}${sch.time ? ` · ${sch.time}` : ""}` : "No date"}
+                          </span>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* Assignment */}
-          {role !== "client" && (
-            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setShowAssignModal(true)}
-              >
-                Assign Team
-              </button>
-
-              {(assignedSupervisorId || assignedTechnicianIds) && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    background: "#eef2ff",
-                    border: "1px solid #c7d2fe",
-                    fontSize: 13,
-                    color: "#1e3a8a",
-                  }}
-                >
-                  <strong>Assigned:</strong>{" "}
-                  {assignedSupervisorName || "No supervisor"}
-                  {"  •  "}
-                  {assignedTechnicianName || "No technician"}
+              {!isClient && (
+                <div className="bgm-sum-rows">
+                  <h4 style={{ marginBottom: 4 }}>Team</h4>
+                  {needsSupervisor && (
+                    <div className="bgm-sum-row"><span>Supervisor</span><span>{assignedSupervisorName || "—"}</span></div>
+                  )}
+                  <div className="bgm-sum-row"><span>Technicians</span><span>{assignedTechnicianName || "—"}</span></div>
                 </div>
               )}
+
+              {missing.length ? (
+                <div>
+                  <h4 style={{ marginBottom: 8 }}>Still needed</h4>
+                  <ul className="bgm-todo">
+                    {missing.map(m => (
+                      <li key={m}>{m}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="bgm-ready">Everything is filled in — ready to create.</div>
+              )}
             </div>
-          )}
 
-
-          {/* NOTES */}
-          <div style={section}>
-            <h4>Notes</h4>
-            <textarea
-              style={{ ...input, minHeight: "80px" }}
-              placeholder="Optional notes"
-              onChange={e => update("notes", e.target.value)}
-            />
-          </div>
-        </div>
-
-        {/* FOOTER */}
-        <div
-          style={{
-            padding: "16px 24px",
-            borderTop: "1px solid #e5e7eb",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "12px",
-          }}
-        >
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={handleSubmit}>
-            Create Booking
-          </button>
+            <div className="bgm-summary-foot">
+              <button type="button" className="primary" onClick={handleSubmit}>
+                Create booking
+              </button>
+              <button type="button" onClick={onClose}>Cancel</button>
+            </div>
+          </aside>
         </div>
       </div>
+
       <AssignWorkOrderModal
         isOpen={showAssignModal}
         jobCount={1}
+        hideScope
         role={role}
         onClose={() => setShowAssignModal(false)}
         hideSupervisor={role === "supervisor"}
@@ -1141,7 +1122,7 @@ const operationServices = [
 
           const techNames = selectedTechs.map(t => t.name).join(", ");
 
-          setAssignedSupervisorName(sup?.name || `Supervisor #${supervisorId}`);
+          setAssignedSupervisorName(sup?.name || (supervisorId ? `Supervisor #${supervisorId}` : ""));
           setAssignedTechnicianName(techNames || "No technician");
 
           setShowAssignModal(false);
@@ -1160,4 +1141,20 @@ const operationServices = [
     </div>
 
   );
+}
+
+function SectionHead({ step, title, done, hint }) {
+  return (
+    <div className="bgm-section-head">
+      <span className={`bgm-step ${done ? "done" : ""}`} aria-hidden="true">{done ? "✓" : step}</span>
+      <h4>{title}</h4>
+      {hint && <span className="bg-field-hint">{hint}</span>}
+    </div>
+  );
+}
+
+function formatShortDate(value) {
+  const d = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }

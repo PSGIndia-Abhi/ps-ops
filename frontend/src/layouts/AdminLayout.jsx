@@ -228,6 +228,16 @@ export default function AdminLayout() {
                 </div>
               )}
 
+              {/* Logins and daily app usage of every user - admin only (the API refuses other roles). */}
+              {isAdmin && (
+                <button
+                  className={`nav-btn ${isActive("/admin/user-activity") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/user-activity")}
+                >
+                  User Activity
+                </button>
+              )}
+
               <button
                 className={`nav-btn ${isActive("/admin/group-management") ? "active" : ""}`}
                 onClick={() => navigate("/admin/group-management")}
@@ -263,6 +273,13 @@ export default function AdminLayout() {
               {role === "admin" && (
                 <button className="nav-btn" onClick={() => navigate("/leads")}>
                   Lead Management
+                </button>
+              )}
+
+              {/* Customer Feedback desk is its own area (pages/feedback). */}
+              {role === "admin" && (
+                <button className="nav-btn" onClick={() => navigate("/feedback-desk")}>
+                  Customer Feedback
                 </button>
               )}
 
@@ -356,6 +373,14 @@ export default function AdminLayout() {
               >
                 Departments
               </button>
+              <button
+                onClick={() => {
+                  setMobilePanel(null);
+                  navigate("/admin/user-activity");
+                }}
+              >
+                User Activity
+              </button>
             </>
           )}
           <button
@@ -400,6 +425,17 @@ export default function AdminLayout() {
               }}
             >
               Site Audits
+            </button>
+          )}
+
+          {role === "admin" && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/feedback-desk");
+              }}
+            >
+              Customer Feedback
             </button>
           )}
 

@@ -6,15 +6,15 @@ import { AlertTriangleIcon, CalendarIcon, InboxIcon, MenuIcon, PersonIcon, PlayI
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
-import { byNewest, isOverdue, LIST_MODES, todayStr, type ListMode } from '../format';
+import { addDays, byNewest, isActive, isOverdue, LIST_MODES, todayStr, type ListMode } from '../format';
 import type { TaskStackParamList, TaskTabParamList } from '../navigation';
 import { useTasks } from '../TasksContext';
 import { NotStartedSeries } from '../ui/NotStartedSeries';
 import { TaskRow, inputStyle } from '../ui/parts';
-import { ActionSheet } from '../ui/sheets';
+import { ActionSheet, PeopleSheet } from '../ui/sheets';
 import { SeriesSheet } from '../ui/SeriesSheet';
 import { CheckIcon, ClipboardIcon, FlagIcon, RepeatIcon, SearchIcon, SwapIcon } from '../ui/taskIcons';
-import type { WorkTask } from '../types';
+import type { TeamMember, WorkTask } from '../types';
 
 const CHIP_ORDER: ListMode[] = ['all', 'today', 'overdue', 'my', 'upcoming', 'team', 'completed'];
 const EXTRA_MODES: ListMode[] = ['progress', 'high', 'delegated'];
@@ -22,7 +22,8 @@ const EXTRA_MODES: ListMode[] = ['progress', 'high', 'delegated'];
 const MY_PART: ListMode[] = ['my', 'today', 'overdue', 'upcoming', 'progress', 'high', 'completed'];
 const TEAM_PART: ListMode[] = ['team', 'today', 'overdue', 'upcoming', 'progress', 'high', 'completed'];
 // Date views: "mine" or "my team's" depending on the part they are in.
-const DATE_MODES: ListMode[] = ['today', 'overdue', 'upcoming'];
+// Tomorrow is reached from Notifications' "Due tomorrow" only.
+const DATE_MODES: ListMode[] = ['today', 'overdue', 'upcoming', 'tomorrow'];
 // Quick Action views (from Home). Scoped to My or Team like the date views.
 const QUICK_MODES: ListMode[] = ['progress', 'high', 'completed', 'recurring'];
 const TEAM_LABEL: Partial<Record<ListMode, string>> = { today: 'Team Today', overdue: 'Team Overdue', upcoming: 'Team Upcoming' };
@@ -35,6 +36,7 @@ function dateOnlyMatch(m: ListMode, t: WorkTask): boolean {
   if (m === 'today') return t.due_date === todayStr() && t.status !== 'CANCELLED';
   if (m === 'overdue') return isOverdue(t);
   if (m === 'upcoming') return t.status === 'OPEN' && !!t.due_date && !isOverdue(t);
+  if (m === 'tomorrow') return isActive(t) && t.due_date === addDays(todayStr(), 1);
   return false;
 }
 // "My Tasks" itself isn't a date filter - dateOnlyMatch doesn't know it, so fall back to its own LIST_MODES definition.
@@ -43,6 +45,9 @@ const myRelatedMatch = (m: ListMode, t: WorkTask, me: number) =>
 // Same proxy for "my team" the generic Team chip already uses: anyone visible who isn't me.
 const teamRelatedMatch = (m: ListMode, t: WorkTask, me: number) =>
   m === 'team' ? LIST_MODES.team.match(t, me) : t.assigned_to !== me && dateOnlyMatch(m, t);
+
+/** The "All team" row in the team member picker. */
+const ALL_TEAM = 0;
 
 type DelegatedSub = 'all' | 'overdue' | 'progress' | 'completed';
 const DELEGATED_SUBS: [DelegatedSub, string][] = [
@@ -122,6 +127,31 @@ const factory = (t: CrmTheme) => ({
   scopeText: { ...typography.captionMedium, color: t.textSecondary },
   scopeTextOn: { color: t.primary, fontWeight: '700' as const },
   skeleton: { marginBottom: spacing.sm },
+  member: {
+    ...inputStyle(t),
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    paddingVertical: 0,
+    minHeight: 50,
+    marginBottom: spacing.sm,
+  },
+  memberLabel: { ...typography.caption, color: t.textMuted },
+  memberName: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
+  memberClear: { ...typography.captionMedium, color: t.primary, paddingHorizontal: spacing.xs },
+  caret: { ...typography.body, color: t.textMuted },
+  note: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    backgroundColor: t.primarySoftBg,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  noteText: { ...typography.caption, color: t.primary },
+  noteLink: { ...typography.captionMedium, color: t.primary },
 });
 
 /** My Tasks / My Team - list + search, with the same filter views as the web sidebar. */
@@ -140,13 +170,18 @@ export function TaskListScreen() {
   const [teamScoped, setTeamScoped] = useState(!!route.params?.teamScoped);
   // Set when arriving from Home's "View all": shows only My Tasks or Team Tasks, with no switch.
   const [focused, setFocused] = useState(!!route.params?.focused);
+  // From Notifications' "Needs attention": only tasks still open (no completed ones). Cleared by any filter change.
+  const [activeOnly, setActiveOnly] = useState(!!route.params?.activeOnly);
+  // My Team: one team member's tasks only (null = everyone).
+  const [member, setMember] = useState<number | null>(null);
+  const [memberOpen, setMemberOpen] = useState(false);
 
   const hasTeam = viewer.team.length > 0 || viewer.isAdmin;
   // Which part is showing: the mode decides it for My/Team, otherwise the teamScoped flag does.
   const partTeam = mode === 'team' || (mode !== 'my' && teamScoped);
   const inPart = MY_PART.includes(mode) || TEAM_PART.includes(mode);
   // Every part view and the Quick Action views (Recurring, Assigned by Me) show the filter row.
-  const showRow = inPart || mode === 'recurring' || mode === 'delegated';
+  const showRow = inPart || mode === 'recurring' || mode === 'delegated' || mode === 'tomorrow';
   const showSwitch = hasTeam && inPart && !focused;
   // The row's chips: the fixed set for this part, plus the current mode first if it isn't in that set (Recurring).
   const rowChips: ListMode[] = inPart ? (partTeam ? TEAM_PART : MY_PART) : [mode, ...MY_PART];
@@ -157,12 +192,14 @@ export function TaskListScreen() {
     setMode(m);
     setTeamScoped(team);
     setFocused(false);
+    setActiveOnly(false);
   };
   // The My Tasks / My Team switch keeps the current filter (Overdue stays Overdue, and so on).
   const switchPart = (team: boolean) => {
     setMode(mode === 'my' || mode === 'team' ? (team ? 'team' : 'my') : mode);
     setTeamScoped(team);
     setFocused(false);
+    setActiveOnly(false);
   };
 
   // Keep the selected chip in view: arriving from Home or the filter sheet scrolls
@@ -185,6 +222,7 @@ export function TaskListScreen() {
     if (route.params?.q !== undefined) setQ(route.params.q);
     if (route.params?.mode) setTeamScoped(!!route.params.teamScoped);
     if (route.params?.mode) setFocused(!!route.params.focused);
+    if (route.params?.mode) setActiveOnly(!!route.params.activeOnly);
     if (route.params?.mode === 'delegated') setDelegatedSub('all');
   }, [route.params]);
 
@@ -205,7 +243,7 @@ export function TaskListScreen() {
   );
 
   /** Whether a task belongs to the view `m`, within the current part (My or Team). */
-  const matchFor = useCallback(
+  const baseMatch = useCallback(
     (m: ListMode, x: WorkTask): boolean => {
       const me = viewer.id;
       if (m === 'delegated') return delegatedSubMatch(delegatedSub, x, me);
@@ -215,6 +253,31 @@ export function TaskListScreen() {
     },
     [viewer.id, delegatedSub, partTeam, hasTeam],
   );
+  // The picked team member (My Team only) and "open only" narrow every view - the list and the chip counts alike.
+  const memberOn = partTeam && member !== null;
+  const matchFor = useCallback(
+    (m: ListMode, x: WorkTask): boolean => baseMatch(m, x) && (!memberOn || x.assigned_to === member) && (!activeOnly || isActive(x)),
+    [baseMatch, memberOn, member, activeOnly],
+  );
+
+  // Everyone whose tasks I can see besides me (my team, and for an admin everyone), with their open / late counts.
+  const members = useMemo(() => {
+    const byId = new Map<number, { name: string; open: number; late: number }>();
+    for (const m of viewer.team) if (m.id !== viewer.id) byId.set(m.id, { name: m.name, open: 0, late: 0 });
+    for (const x of tasks) {
+      if (x.assigned_to == null || x.assigned_to === viewer.id) continue;
+      const row = byId.get(x.assigned_to) ?? { name: x.assigned_to_name || `User ${x.assigned_to}`, open: 0, late: 0 };
+      if (isActive(x)) row.open += 1;
+      if (isOverdue(x)) row.late += 1;
+      byId.set(x.assigned_to, row);
+    }
+    return [...byId.entries()].map(([id, r]) => ({ id, ...r })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasks, viewer.team, viewer.id]);
+  const memberName = members.find((m) => m.id === member)?.name ?? '';
+  const memberChoices: TeamMember[] = [
+    { id: ALL_TEAM, name: 'All team', designation: `${members.reduce((n, m) => n + m.open, 0)} open` },
+    ...members.map((m) => ({ id: m.id, name: m.name, designation: `${m.open} open${m.late ? ` · ${m.late} late` : ''}` })),
+  ];
   // Chip counts. "Assigned by Me" always counts all of them, whatever sub-filter is picked.
   const countFor = (m: ListMode) => tasks.filter((x) => (m === 'delegated' ? LIST_MODES.delegated.match(x, viewer.id) : matchFor(m, x))).length;
 
@@ -267,6 +330,30 @@ export function TaskListScreen() {
                     </Pressable>
                   );
                 })}
+              </View>
+            )}
+            {partTeam && showSwitch && (
+              <Pressable onPress={() => setMemberOpen(true)} style={styles.member} accessibilityRole="button" accessibilityLabel="Filter by team member">
+                <UsersIcon size={18} color={theme.textMuted} />
+                <Text style={styles.memberLabel}>Team member:</Text>
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {memberOn ? memberName : 'All'}
+                </Text>
+                {memberOn ? (
+                  <Pressable onPress={() => setMember(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Show the whole team">
+                    <Text style={styles.memberClear}>Clear</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.caret}>▾</Text>
+                )}
+              </Pressable>
+            )}
+            {activeOnly && (
+              <View style={styles.note}>
+                <Text style={styles.noteText}>Open tasks only</Text>
+                <Pressable onPress={() => setActiveOnly(false)} hitSlop={8} accessibilityRole="button">
+                  <Text style={styles.noteLink}>Show all</Text>
+                </Pressable>
               </View>
             )}
             <View style={styles.searchRow}>
@@ -398,6 +485,15 @@ export function TaskListScreen() {
             onPress: () => selectMode(m, false),
           };
         })}
+      />
+      <PeopleSheet
+        visible={memberOpen}
+        onClose={() => setMemberOpen(false)}
+        title="Team member"
+        people={memberChoices}
+        selectedId={memberOn ? member : ALL_TEAM}
+        meId={viewer.id}
+        onPick={(p) => setMember(p.id === ALL_TEAM ? null : p.id)}
       />
       {openSeries && (
         <SeriesSheet

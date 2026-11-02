@@ -140,10 +140,11 @@ export function TaskNotificationsScreen() {
 
   const counts = useMemo(
     () => ({
-      overdue: tasks.filter(isOverdue).length,
-      // Same rule as Home's "Today's Tasks" tile and the list it opens.
-      today: tasks.filter((x) => LIST_MODES.today.match(x, viewer.id)).length,
-      tomorrow: tasks.filter((x) => LIST_MODES.tomorrow.match(x, viewer.id)).length,
+      // Only the viewer's own tasks that are still open - the same set each box opens in My Tasks
+      // (the list is told activeOnly, so a task already completed today is neither counted nor shown).
+      overdue: tasks.filter((x) => x.assigned_to === viewer.id && isOverdue(x)).length,
+      today: tasks.filter((x) => x.assigned_to === viewer.id && isActive(x) && x.due_date === todayStr()).length,
+      tomorrow: tasks.filter((x) => x.assigned_to === viewer.id && LIST_MODES.tomorrow.match(x, viewer.id)).length,
     }),
     [tasks, viewer.id],
   );
@@ -165,7 +166,8 @@ export function TaskNotificationsScreen() {
   const earlierNotifs = allEarlier.slice(0, MAX_SHOWN - todayNotifs.length - shownDue.length);
   const nothing = todayNotifs.length + earlierNotifs.length + shownDue.length === 0;
 
-  const openList = (mode: ListMode) => navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode, q: '', at: Date.now() } });
+  const openList = (mode: ListMode) =>
+    navigation.navigate('TaskTabs', { screen: 'Tasks', params: { mode, q: '', at: Date.now(), teamScoped: false, activeOnly: true } });
 
   const renderNotif = (n: TaskNotification) => {
     const look = KIND_LOOK[n.kind] ?? KIND_LOOK.created;

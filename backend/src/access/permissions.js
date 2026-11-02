@@ -16,6 +16,9 @@ const PERMISSIONS = {
   START_VISIT: 'START_VISIT',
   SUBMIT_VISIT: 'SUBMIT_VISIT',
   APPROVE_VISIT: 'APPROVE_VISIT',
+  // Overrides: admin always has them; any other role only when granted in Team Management -> Roles.
+  START_VISIT_ANYWHERE: 'START_VISIT_ANYWHERE', // start a visit without being at the job location
+  END_VISIT_WITHOUT_PHOTOS: 'END_VISIT_WITHOUT_PHOTOS', // end a Brigade visit without the before/after photos
 
   // Contacts
   VIEW_CONTACT: 'VIEW_CONTACT',
@@ -93,6 +96,9 @@ const PERMISSIONS = {
   GENERATE_AUDIT_REPORT: 'GENERATE_AUDIT_REPORT',
   OVERRIDE_AUDIT_RISK: 'OVERRIDE_AUDIT_RISK',
   MANAGE_AUDIT_SETTINGS: 'MANAGE_AUDIT_SETTINGS',
+  // Brigade Executive module (see services/brigade.service.js)
+  BRIGADE_ACCESS: 'BRIGADE_ACCESS',
+  BRIGADE_MANAGE_MASTERS: 'BRIGADE_MANAGE_MASTERS',
 };
 
 module.exports = PERMISSIONS;

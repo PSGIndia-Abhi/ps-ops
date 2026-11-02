@@ -204,8 +204,9 @@ export async function markLost(id: string, reason: string, lossReasonId?: number
 }
 
 /** `amount`: the final deal amount agreed at conversion (replaces the approximate quote). */
-export async function convertLead(id: string, notes: string, amount?: number): Promise<Conversion> {
-  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, amount });
+/** `creditTo`: who the conversion counts for (the sales manager converting a sales executive's lead). */
+export async function convertLead(id: string, notes: string, amount?: number, creditTo?: number): Promise<Conversion> {
+  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, amount, credit_to: creditTo });
   return toConversion(data);
 }
 
@@ -596,6 +597,62 @@ export async function performance(from: string, to: string, employeeId?: number)
     params: { from, to, employeeId },
   });
   return data;
+}
+
+/** The numbers of the performance report that open a list of their records. */
+export type PerformanceMetric = Exclude<keyof Performance, 'locationsVisited'>;
+
+/** One record behind a number of the performance report: the lead, when, and a short line. */
+export interface PerformanceItem {
+  leadId: string;
+  leadNumber: string | null;
+  company: string;
+  contact: string;
+  stage: PipelineStage | null;
+  at: string;
+  detail: string;
+  amount: number | null;
+}
+
+/** GET /api/crm/reports/sales-performance/items - the records behind one number, by the same rules. */
+export async function performanceItems(metric: PerformanceMetric, from: string, to: string, employeeId?: number): Promise<PerformanceItem[]> {
+  const { data } = await httpClient.get<{ items: Row[] }>('/api/crm/reports/sales-performance/items', {
+    params: { metric, from, to, employeeId },
+  });
+  return (data.items || []).map((r) => ({
+    leadId: str(r.lead_id),
+    leadNumber: r.lead_number ? str(r.lead_number) : null,
+    company: str(r.company),
+    contact: str(r.contact),
+    stage: (r.stage as PipelineStage | null) ?? null,
+    at: str(r.at),
+    detail: str(r.detail),
+    amount: r.amount === null || r.amount === undefined ? null : Number(r.amount),
+  }));
+}
+
+/** One sales person's achievement: the last months against their targets, and everything so far. */
+export interface AchievementHistory {
+  months: { month: string; target: number | null; achieved: number; converted: number }[];
+  lifetime: { achieved: number; converted: number; since: string | null };
+}
+
+/** GET /api/crm/targets/history - no userId = the signed-in user. Months are oldest first. */
+export async function targetHistory(userId?: number, months = 6): Promise<AchievementHistory> {
+  const { data } = await httpClient.get<{ months: Row[]; lifetime: Row }>('/api/crm/targets/history', { params: { userId, months } });
+  return {
+    months: (data.months || []).map((m) => ({
+      month: str(m.month),
+      target: m.target === null || m.target === undefined ? null : Number(m.target),
+      achieved: Number(m.achieved) || 0,
+      converted: Number(m.converted) || 0,
+    })),
+    lifetime: {
+      achieved: Number(data.lifetime?.achieved) || 0,
+      converted: Number(data.lifetime?.converted) || 0,
+      since: data.lifetime?.since ? str(data.lifetime.since) : null,
+    },
+  };
 }
 
 /** GET /api/crm/lead-assignees - who the sales manager can give a lead to (sales executives, telecallers, managers). */

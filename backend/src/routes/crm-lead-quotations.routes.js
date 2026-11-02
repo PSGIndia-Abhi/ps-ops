@@ -5,6 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  findLeadAssignee,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
 const { notifyLead } = require("../utils/crmLeadNotifications");
@@ -56,6 +57,17 @@ const QUOTATION_COLUMNS = `
   DATE_FORMAT(responded_at, '%Y-%m-%d %H:%i:%s') AS responded_at,
   created_by, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
 `;
+
+// Who a quotation is for when it carries no name of its own (an uploaded PDF).
+const leadClientName = (lead) => lead.company_name || lead.customer_name || "Customer";
+
+// The file a quotation PDF downloads as: CLIENTNAME_PROPOSAL_YEAR.pdf, e.g.
+// ABC_Foods_Pvt_Ltd_PROPOSAL_2026.pdf (the year the quotation was made).
+function proposalFileName(clientName, createdAt) {
+  const name = String(clientName || "Customer").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "Customer";
+  const year = /^\d{4}/.test(String(createdAt || "")) ? String(createdAt).slice(0, 4) : String(new Date().getFullYear());
+  return `${name}_PROPOSAL_${year}.pdf`;
+}
 
 async function loadVisibleLead(req, leadId) {
   const [[lead]] = await pool.query("SELECT * FROM crm_leads WHERE id = ? AND lead_type = 'commercial'", [leadId]);
@@ -272,10 +284,28 @@ router.post("/leads/:id/quotations/preview", auth, requirePermission("CRM_VIEW_L
   }
 });
 
+// Body: the quotation content, plus optional replacesQuotationId when it is an edit of an existing
+// quotation. An edit never changes the old one: the new quotation gets its own number and the old
+// one is marked CANCELLED ("replaced by QT-..."), in the same transaction. Replacing needs the same
+// right as cancelling (whoever sent it, a lead manager or admin).
 router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_LEAD"), precheckQuotationWrite, async (req, res) => {
   const lead = req.lead;
   let objectKey = null;
   try {
+    let replaces = null;
+    if (req.body?.replacesQuotationId) {
+      const [[old]] = await pool.query(
+        "SELECT id, quotation_number, status, created_by FROM crm_lead_quotations WHERE id = ? AND lead_id = ?",
+        [String(req.body.replacesQuotationId), lead.id]
+      );
+      if (!old) throw new HttpError(404, "The quotation being edited was not found");
+      if (old.status === "CANCELLED") throw new HttpError(400, "A cancelled quotation cannot be edited");
+      const uploader = Number(old.created_by) === Number(req.user.id);
+      if (!uploader && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) {
+        throw new HttpError(403, "Only the person who sent this quotation or a sales manager can edit it");
+      }
+      replaces = old;
+    }
     const content = await readContent(req);
     content.preparedBy = await preparedBy(req.user.id); // saved with the quotation's content
     const quotationId = uuid();
@@ -298,9 +328,17 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
       await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
       const per = { MONTHLY: " per month", YEARLY: " per year", ONE_TIME: "" }[content.totals.primaryBilling];
       await logLeadHistory(conn, lead.id, "QUOTATION_SENT", {
-        note: `${number} for Rs. ${total}${per}${content.totals.discount ? ` (after Rs. ${content.totals.discount} discount)` : ""}: ${content.services.map((s) => s.name).join(", ")}`.slice(0, 500),
+        note: `${number}${replaces ? ` (revised, replaces ${replaces.quotation_number})` : ""} for Rs. ${total}${per}${content.totals.discount ? ` (after Rs. ${content.totals.discount} discount)` : ""}: ${content.services.map((s) => s.name).join(", ")}`.slice(0, 500),
         changedBy: req.user.id,
       });
+      if (replaces) {
+        const [done] = await conn.query("UPDATE crm_lead_quotations SET status = 'CANCELLED' WHERE id = ? AND status <> 'CANCELLED'", [replaces.id]);
+        if (done.affectedRows === 0) throw new HttpError(409, "The quotation being edited was cancelled meanwhile");
+        await logLeadHistory(conn, lead.id, "QUOTATION_CANCELLED", {
+          note: `${replaces.quotation_number} cancelled: replaced by ${number}`,
+          changedBy: req.user.id,
+        });
+      }
       return number;
     });
 
@@ -318,10 +356,45 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
 router.get("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
-    const [rows] = await pool.query(`SELECT ${QUOTATION_COLUMNS} FROM crm_lead_quotations WHERE lead_id = ? ORDER BY created_at DESC`, [lead.id]);
-    res.json(rows.map((r) => ({ ...r, total_amount: Number(r.total_amount) })));
+    // has_content: built with Create Quotation, so it can be opened again to edit or duplicate.
+    // client_name: the name on the quotation (else the lead's), shown in place of the number.
+    const [rows] = await pool.query(
+      `SELECT ${QUOTATION_COLUMNS},
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.customer.name')) FROM crm_lead_quotation_documents d
+                WHERE d.quotation_id = crm_lead_quotations.id) AS client_name
+       FROM crm_lead_quotations WHERE lead_id = ? ORDER BY created_at DESC`,
+      [lead.id]
+    );
+    res.json(
+      rows.map(({ client_name: name, ...r }) => ({
+        ...r,
+        total_amount: Number(r.total_amount),
+        has_content: name !== null,
+        client_name: name || leadClientName(lead),
+        file_name: proposalFileName(name || leadClientName(lead), r.created_at),
+      }))
+    );
   } catch (err) {
     sendError(res, err, "Failed to load quotations");
+  }
+});
+
+// GET /api/crm/leads/:id/quotations/:quotationId/content -- what went into a quotation built
+// with Create Quotation (customer, services, prices, clauses), to open it again in the builder.
+// Uploaded-PDF quotations have none (404).
+router.get("/leads/:id/quotations/:quotationId/content", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    const [[row]] = await pool.query(
+      `SELECT d.content FROM crm_lead_quotation_documents d
+       JOIN crm_lead_quotations q ON q.id = d.quotation_id
+       WHERE q.id = ? AND q.lead_id = ?`,
+      [req.params.quotationId, lead.id]
+    );
+    if (!row) throw new HttpError(404, "This quotation has no saved details to open");
+    res.json(typeof row.content === "string" ? JSON.parse(row.content) : row.content);
+  } catch (err) {
+    sendError(res, err, "Failed to load the quotation");
   }
 });
 
@@ -383,15 +456,21 @@ router.get("/leads/:id/quotations/:quotationId/pdf", auth, requirePermission("CR
   try {
     const lead = await loadVisibleLead(req, req.params.id);
     const [[row]] = await pool.query(
-      "SELECT quotation_number, pdf_object_key FROM crm_lead_quotations WHERE id = ? AND lead_id = ?",
+      `SELECT q.pdf_object_key, DATE_FORMAT(q.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+              JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.customer.name')) AS client_name
+       FROM crm_lead_quotations q
+       LEFT JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
+       WHERE q.id = ? AND q.lead_id = ?`,
       [req.params.quotationId, lead.id]
     );
     if (!row) throw new HttpError(404, "Quotation not found");
     if (!row.pdf_object_key) throw new HttpError(404, "This quotation has no PDF");
 
     const stream = await minioClient.getObject(process.env.MINIO_BUCKET, row.pdf_object_key);
+    const fileName = proposalFileName(row.client_name || leadClientName(lead), row.created_at);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(`${row.quotation_number}.pdf`)}`);
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
     res.setHeader("X-Content-Type-Options", "nosniff");
     stream.on("error", (err) => {
       console.error("Quotation PDF stream failed:", err.message);
@@ -446,6 +525,10 @@ router.post("/leads/:id/mark-lost", auth, requirePermission("CRM_VIEW_LEAD"), as
 // lead_id enforces one conversion per lead), and moves the lead to CONVERTED.
 // Gated by CONVERT_LEAD specifically -- a step up from ordinary lead
 // management, since it creates a real customer record.
+//
+// credit_to (optional): who the conversion counts for - the sales manager converting a sales
+// executive's lead picks them or themselves. The lead's sales person becomes that person, so their
+// target, Converted count and achievement show it (see CONVERTED_LEADS_SQL in the reports).
 // ---------------------------------------------------------------------------
 router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -466,6 +549,17 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       amount = Number(req.body.amount);
       if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) throw new HttpError(400, "Enter a valid amount");
       amount = Math.round(amount * 100) / 100;
+    }
+
+    // Who it counts for. Only someone who manages leads may credit another person.
+    let creditTo = null;
+    if (req.body?.credit_to !== undefined && req.body?.credit_to !== null && req.body?.credit_to !== "") {
+      const wanted = Number(req.body.credit_to);
+      if (wanted !== Number(req.user.id) && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) {
+        throw new HttpError(403, "You cannot count this conversion for someone else");
+      }
+      creditTo = await findLeadAssignee(pool, wanted, req.user.id);
+      if (!creditTo) throw new HttpError(400, "Choose who this conversion counts for");
     }
 
     const conversionId = uuid();
@@ -491,8 +585,15 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       if (amount !== null && amount !== Number(lead.amount)) {
         await conn.query("UPDATE crm_leads SET amount = ? WHERE id = ?", [amount, lead.id]);
       }
+      if (creditTo && Number(lead.assigned_sales_employee_id) !== creditTo.id) {
+        await conn.query("UPDATE crm_leads SET assigned_sales_employee_id = ? WHERE id = ?", [creditTo.id, lead.id]);
+      }
       const amountNote = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
-      await logLeadHistory(conn, lead.id, "CONVERTED", { note: `Converted to company "${companyName}"${amountNote}${notes ? `: ${notes}` : ""}`.slice(0, 500), changedBy: req.user.id });
+      const creditNote = creditTo && creditTo.id !== Number(req.user.id) ? ` - counted for ${creditTo.name}` : "";
+      await logLeadHistory(conn, lead.id, "CONVERTED", {
+        note: `Converted to company "${companyName}"${amountNote}${creditNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
+        changedBy: req.user.id,
+      });
       return newCompanyId;
     });
 

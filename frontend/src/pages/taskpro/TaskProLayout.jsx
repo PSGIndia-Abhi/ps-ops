@@ -15,6 +15,7 @@ import {
   FiList,
   FiLogOut,
   FiMenu,
+  FiMessageSquare,
   FiPlus,
   FiSearch,
   FiUsers,
@@ -23,6 +24,8 @@ import {
   FiRefreshCw,
 } from "react-icons/fi";
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
+import { FEEDBACK_HOME } from "../feedback/access";
+import useHasFeedbackAccess from "../feedback/useHasFeedbackAccess";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -86,6 +89,7 @@ function NewTaskButton() {
 }
 
 function TaskProShell() {
+  const hasFeedback = useHasFeedbackAccess();
   const navigate = useNavigate();
   const location = useLocation();
   const viewer = useViewer();
@@ -229,6 +233,13 @@ function TaskProShell() {
             <button type="button" className="tp-nav-item" onClick={() => navigate("/accountant")} title={collapsed ? "Accountant Panel" : undefined}>
               <FiArrowLeft className="tp-nav-icon" />
               <span className="tp-nav-label">Accountant Panel</span>
+            </button>
+          )}
+          {/* Roles that admin gave a Customer Feedback permission (e.g. Operations Manager) open the desk here. */}
+          {hasFeedback && (
+            <button type="button" className="tp-nav-item" onClick={() => navigate(FEEDBACK_HOME)} title={collapsed ? "Customer Feedback" : undefined}>
+              <FiMessageSquare className="tp-nav-icon" />
+              <span className="tp-nav-label">Customer Feedback</span>
             </button>
           )}
           <button type="button" className="tp-nav-item tp-exit" onClick={logout} title="Log out">

@@ -32,6 +32,8 @@ export default function JobRow({
   const displayStatus = job.display_status || job.status || "";
   const location = job.site || job.company_site || job.address || "Not Available";
   const workType = job.companyname ? "Corporate Work Order" : "Individual Customer";
+  // Set only on the Brigade Executive dashboard, for Brigade booking jobs.
+  const brigadeFlat = job.brigade_flat;
   const scheduleDate = job.dueDate || job.start_date;
 
   function formatScheduleDate(date) {
@@ -64,7 +66,13 @@ export default function JobRow({
               <div className="job-meta-line">
                 <span className="job-location">{location}</span>
                 <span className="job-meta-separator" />
-                <span className="job-tag">{workType}</span>
+                {brigadeFlat ? (
+                  <span className="job-tag job-tag-flat">
+                    Flat {brigadeFlat.flat_number} · {brigadeFlat.bhk}
+                  </span>
+                ) : (
+                  <span className="job-tag">{workType}</span>
+                )}
               </div>
             </div>
 

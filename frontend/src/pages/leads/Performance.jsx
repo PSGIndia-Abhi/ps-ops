@@ -3,13 +3,13 @@
 // picks anyone on the team, sets each person's monthly target and gets the whole team side by side.
 
 import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
-import { FiAward, FiCalendar, FiCheckCircle, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
-import { LEADS_HOME } from "./access";
-import { getPerformance, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
+import { Navigate, useNavigate } from "react-router-dom";
+import { FiAward, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
+import { LEADS_HOME, ROLE_ALIASES } from "./access";
+import { getPerformance, getPerformanceItems, getTargetHistory, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
 import { money } from "./format";
 import { useToast } from "./hooks";
-import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, Who } from "./ui";
+import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, StageBadge, Who } from "./ui";
 import { useViewer } from "./viewer";
 
 /** A YYYY-MM-DD in the user's own time zone (the server reads the dates as wall-clock days). */
@@ -62,6 +62,7 @@ export default function Performance() {
   // Each answer is kept with the question it answers, so an old one is never shown for a new period.
   const [result, setResult] = useState({ key: null, data: null, error: "" });
   const [teamResult, setTeamResult] = useState({ key: null, rows: null });
+  const [opened, setOpened] = useState(null); // the card whose records are showing
 
   const today = ymd(new Date());
   const from = range === "custom" ? custom.from : RANGES.find((r) => r.key === range).from();
@@ -103,6 +104,11 @@ export default function Performance() {
   const teamRows = teamResult.key === teamKey ? teamResult.rows : null;
   const period = { from, to };
   const whose = personId ? team.find((u) => u.id === personId)?.name || "Team member" : me?.name || "You";
+  // The achievement card is for sales people (they have targets), not telecallers.
+  const rawRole = personId ? team.find((u) => u.id === personId)?.role : viewer.persona;
+  const whoseRole = ROLE_ALIASES[rawRole] || rawRole; // "Sales Executive" -> "sales"
+  const showAchievement = whoseRole === "sales" || whoseRole === "sales_manager";
+  const periodText = range === "lifetime" ? "All time" : period.from === period.to ? period.from : `${period.from} to ${period.to}`;
 
   return (
     <>
@@ -150,7 +156,9 @@ export default function Performance() {
 
       {(manager || viewer.persona === "sales") && <Targets manager={manager} myId={String(me?.id || "")} />}
 
-      <Card title={whose} sub={range === "lifetime" ? "All time" : period.from === period.to ? period.from : `${period.from} to ${period.to}`} index={0}>
+      {showAchievement && <Achievement userId={personId || undefined} whose={whose} />}
+
+      <Card title={whose} sub={`${periodText} - click a number to see what is behind it`} index={0}>
         {error ? (
           <Empty title="Could not load the report" text={error} icon={<FiCheckCircle />} />
         ) : !report || badCustom ? (
@@ -159,7 +167,7 @@ export default function Performance() {
           // `key` replays the numbers when the period or person changes.
           <div className="lm-grid kpi" key={`${period.from}:${period.to}:${personId}`} style={{ marginBottom: 0 }}>
             {METRICS.map((m, i) => (
-              <Kpi key={m.key} index={i} label={m.label} value={report[m.key] || 0} icon={m.icon} tone={m.tone} foot={m.foot} />
+              <Kpi key={m.key} index={i} label={m.label} value={report[m.key] || 0} icon={m.icon} tone={m.tone} foot={m.foot} onClick={() => setOpened(m)} />
             ))}
           </div>
         )}
@@ -212,7 +220,188 @@ export default function Performance() {
           )}
         </Card>
       )}
+
+      {opened && (
+        <ReportItems metric={opened} from={from} to={to} employeeId={personId || undefined} whose={whose} periodText={periodText} onClose={() => setOpened(null)} />
+      )}
     </>
+  );
+}
+
+/** "17 Oct, 11:00 AM" (or "17 Oct" for a follow-up's day), with the year only when it is not this year. */
+function whenText(iso, dayOnly) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const opts = { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) };
+  const day = d.toLocaleDateString("en-IN", opts);
+  return dayOnly ? day : `${day}, ${d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}`;
+}
+
+/** The records behind one number (a clicked card): the leads, meetings, quotations or follow-ups. */
+function ReportItems({ metric, from, to, employeeId, whose, periodText, onClose }) {
+  const navigate = useNavigate();
+  const [state, setState] = useState({ items: null, error: "" });
+  useEffect(() => {
+    let alive = true;
+    getPerformanceItems({ metric: metric.key, from, to, employeeId })
+      .then((items) => alive && setState({ items, error: "" }))
+      .catch((err) => alive && setState({ items: [], error: err.message || "Could not load the list." }));
+    return () => {
+      alive = false;
+    };
+  }, [metric.key, from, to, employeeId]);
+  const { items, error } = state;
+  return (
+    <Modal wide title={metric.label} sub={`${whose} - ${periodText}${items ? ` - ${items.length} ${items.length === 1 ? "record" : "records"}` : ""}`} onClose={onClose}>
+      {error && <Note tone="warn">{error}</Note>}
+      {!items ? (
+        <SkeletonRows rows={4} />
+      ) : items.length === 0 ? (
+        !error && <Empty title="Nothing here" text="No records for this period." icon={metric.icon} />
+      ) : (
+        <div className="lm-report-items">
+          {items.map((it, i) => (
+            <button key={`${it.lead_id}-${it.at}-${i}`} type="button" className="lm-report-item" onClick={() => navigate(`/leads/${it.lead_id}`)}>
+              <span className="lm-report-item-main">
+                <strong>{it.company || it.contact || "Lead"}</strong>
+                <small>{[it.detail, whenText(it.at, metric.key === "followUpsDue")].filter(Boolean).join("  ·  ")}</small>
+              </span>
+              <span className="lm-report-item-side">
+                {it.amount !== null && it.amount !== undefined && <b>{money(it.amount)}</b>}
+                <span className="lm-report-item-meta">
+                  {!!it.lead_number && <small>{it.lead_number}</small>}
+                  {!!it.stage && <StageBadge stage={it.stage === "CONVERTED" ? "WON" : it.stage === "CANCELLED" ? "LOST" : it.stage} />}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+const shortMonth = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "short" });
+
+/** ₹27.6K, ₹1.2L - short enough to sit on a bar. */
+function compactINR(n) {
+  const trim = (v) => String(Math.round(v * 10) / 10).replace(/\.0$/, "");
+  if (n >= 10000000) return `₹${trim(n / 10000000)}Cr`;
+  if (n >= 100000) return `₹${trim(n / 100000)}L`;
+  if (n >= 1000) return `₹${trim(n / 1000)}K`;
+  return `₹${Math.round(n)}`;
+}
+
+/**
+ * One sales person's achievement beyond this month: last month against its target, everything they
+ * have converted so far, and the last six months as bars - the amount on each bar, that month's
+ * target as a dashed line. Achieved = what their converted leads are worth: the final quotation
+ * amount, else the approximate quote.
+ */
+function Achievement({ userId, whose }) {
+  const [state, setState] = useState({ key: null, data: null, error: "" });
+  const [open, setOpen] = useState(false); // closed to start with: the header gives the headline numbers
+  const key = userId || "me";
+  useEffect(() => {
+    let alive = true;
+    getTargetHistory(userId)
+      .then((data) => alive && setState({ key, data, error: "" }))
+      .catch((err) => alive && setState({ key, data: null, error: err.message || "Could not load the achievement." }));
+    return () => {
+      alive = false;
+    };
+  }, [userId, key]);
+  const current = state.key === key ? state : null;
+  const data = current?.data;
+  const months = data?.months || [];
+  const last = months.length >= 2 ? months[months.length - 2] : null;
+  const lastPct = last?.target ? Math.round((last.achieved / last.target) * 100) : null;
+  const top = Math.max(1, ...months.map((m) => Math.max(m.achieved, m.target || 0)));
+  const pctOfTop = (v) => `${(v / top) * 100}%`;
+  return (
+    <Card index={1} className="lm-achieve-card">
+      <button type="button" className={`lm-achieve-toggle${open ? " open" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="lm-achieve-toggle-icon">
+          <FiBarChart2 />
+        </span>
+        <span className="lm-achieve-toggle-text">
+          <strong>Achievement</strong>
+          <small>
+            {data ? (
+              <>
+                Lifetime <b>{money(data.lifetime.achieved)}</b> - Last month <b>{money(last?.achieved || 0)}</b> - {whose}
+              </>
+            ) : (
+              `${whose} - last month, lifetime and the last six months`
+            )}
+          </small>
+        </span>
+        <span className="lm-achieve-toggle-chevron">
+          <FiChevronDown />
+        </span>
+      </button>
+      {!open ? null : current?.error ? (
+        <Note tone="warn">{current.error}</Note>
+      ) : !data ? (
+        <SkeletonRows rows={2} />
+      ) : (
+        <div className="lm-achieve">
+          <div className="lm-achieve-stats">
+            <div>
+              <small>Last month{last ? ` (${shortMonth(last.month)})` : ""}</small>
+              <strong>{money(last?.achieved || 0)}</strong>
+              <span>{last?.target ? `of ${money(last.target)} - ${lastPct}%` : "No target set"}</span>
+              <span>{last?.converted || 0} converted</span>
+            </div>
+            <div>
+              <small>Lifetime</small>
+              <strong>{money(data.lifetime.achieved)}</strong>
+              <span>{data.lifetime.converted} converted</span>
+              {!!data.lifetime.since && (
+                <span>since {new Date(data.lifetime.since).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</span>
+              )}
+            </div>
+          </div>
+          <div className="lm-achieve-head">
+            <b>Last 6 months</b>
+            <span className="lm-achieve-key">
+              <i className="bar" /> Achieved <i className="dash" /> Target
+            </span>
+          </div>
+          <div className="lm-achieve-chart">
+            {months.map((m, i) => {
+              const now = i === months.length - 1;
+              const hit = !!m.target && m.achieved >= m.target;
+              // The target's amount is left out when it would sit on the bar's own amount.
+              const showTargetText = !!m.target && Math.abs(m.target - m.achieved) / top > 0.22;
+              return (
+                <div
+                  key={m.month}
+                  className={`lm-achieve-col${now ? " now" : ""}${hit ? " hit" : ""}`}
+                  title={`${shortMonth(m.month)}: ${money(m.achieved)}${m.target ? ` of ${money(m.target)} target` : ""} - ${m.converted} converted`}
+                >
+                  <div className="lm-achieve-area">
+                    {m.achieved > 0 ? (
+                      <span className="lm-achieve-bar" style={{ height: pctOfTop(m.achieved) }}>
+                        <em>{compactINR(m.achieved)}</em>
+                      </span>
+                    ) : (
+                      <span className="lm-achieve-none">-</span>
+                    )}
+                    {!!m.target && (
+                      <span className="lm-achieve-target" style={{ bottom: pctOfTop(m.target) }}>
+                        {showTargetText && <em>{compactINR(m.target)}</em>}
+                      </span>
+                    )}
+                  </div>
+                  <small>{shortMonth(m.month)}</small>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -264,7 +453,7 @@ function Targets({ manager, myId }) {
   return (
     <Card
       title={manager ? "Monthly Targets" : "My Target"}
-      sub={`${monthLabel(month)} - achieved = the amounts of the leads converted in the month`}
+      sub={`${monthLabel(month)} - achieved = what the leads converted in the month are worth (final quotation amount, else the quote)`}
       index={0}
       action={<input className="lm-input" type="month" value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" style={{ width: 170 }} />}
       flush={manager}

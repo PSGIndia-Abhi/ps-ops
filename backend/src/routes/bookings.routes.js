@@ -7,6 +7,8 @@ const PERMISSIONS = require("../access/permissions");
 const {pool} = require("../../db");
 const { createBooking } = require("../controllers/bookings.controller");
 const { generateRecurringJobsForBooking } = require("../services/recurring.service");
+const { isBrigadeExecutive } = require("../services/brigade.service");
+const { listBrigadeBookings } = require("../controllers/brigade.controller");
 
 
 /*
@@ -15,6 +17,9 @@ Supervisor → only bookings created by them
 */
 
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_BOOKING), async (req,res)=>{
+  // Brigade Executive: only Brigade Group bookings (any branch).
+  if (isBrigadeExecutive(req.user)) return listBrigadeBookings(req, res);
+
   const userId = req.user.id;
   const role = req.user.role;
   const includeUnbooked = req.query.include_unbooked === "1";
@@ -245,7 +250,13 @@ const [bookings] = await connection.query(
 });
 
 // Create booking (optionally with recurrence)
-router.post("/", auth, requirePermission(PERMISSIONS.CREATE_BOOKING), createBooking);
+// A Brigade Executive books through POST /api/brigade/bookings (property, flat, price checks).
+router.post("/", auth, requirePermission(PERMISSIONS.CREATE_BOOKING), (req, res, next) => {
+  if (isBrigadeExecutive(req.user)) {
+    return res.status(403).json({ error: "Please use the Brigade booking form" });
+  }
+  next();
+}, createBooking);
 
 // Generate next 30 days of recurring jobs for a booking
 router.post("/:bookingId/generate-jobs", auth, requirePermission(PERMISSIONS.CREATE_JOB), async (req, res) => {

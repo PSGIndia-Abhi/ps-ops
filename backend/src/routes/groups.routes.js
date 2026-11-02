@@ -6,6 +6,24 @@ const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { v4: uuid } = require("uuid");
 const { resolveGroupTable } = require("../utils/groupTable");
+const { isBrigadeExecutive, BRIGADE_GROUP_NAME } = require("../services/brigade.service");
+
+// The Brigade module finds its group by name, so "Brigade Group" can't be
+// renamed or deleted (by anyone), and a Brigade Executive can't create,
+// rename or delete groups at all.
+async function denyBrigadeGroupChange(req, res, groupId) {
+  if (isBrigadeExecutive(req.user)) {
+    res.status(403).json({ error: "Brigade Executive cannot change groups" });
+    return true;
+  }
+  if (!groupId) return false;
+  const [[group]] = await pool.query("SELECT name FROM `group_name` WHERE id = ?", [groupId]);
+  if (group?.name === BRIGADE_GROUP_NAME) {
+    res.status(400).json({ error: `"${BRIGADE_GROUP_NAME}" is used by the Brigade module and cannot be renamed or deleted` });
+    return true;
+  }
+  return false;
+}
 
 // GET /api/groups
 router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, res) => {
@@ -13,11 +31,14 @@ router.get("/", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req, r
     const groupTable = await resolveGroupTable(pool);
     const tableRef = "`group_name`";
 
+    // Brigade Executive only sees Brigade Group.
+    const brigadeOnly = isBrigadeExecutive(req.user);
     const [rows] = await pool.query(
       `SELECT id, name, created_at
        FROM ${tableRef}
-       WHERE is_active = 1
-       ORDER BY name ASC`
+       WHERE is_active = 1${brigadeOnly ? " AND name = ?" : ""}
+       ORDER BY name ASC`,
+      brigadeOnly ? [BRIGADE_GROUP_NAME] : []
     );
 
     res.json(rows);
@@ -36,6 +57,7 @@ router.post("/", auth, requirePermission(PERMISSIONS.CREATE_CONTACT), async (req
   }
 
   try {
+    if (await denyBrigadeGroupChange(req, res, null)) return;
     const groupTable = await resolveGroupTable(pool);
     const tableRef = "`group_name`";
     const [existing] = await pool.query(
@@ -70,7 +92,7 @@ router.get("/:id", auth, requirePermission(PERMISSIONS.VIEW_CONTACT), async (req
       [id]
     );
 
-    if (!group) {
+    if (!group || (isBrigadeExecutive(req.user) && group.name !== BRIGADE_GROUP_NAME)) {
       return res.status(404).json({ error: "Group not found" });
     }
 
@@ -104,6 +126,7 @@ router.put("/:id", auth, requirePermission(PERMISSIONS.UPDATE_CONTACT), async (r
     if (!existingGroup) {
       return res.status(404).json({ error: "Group not found" });
     }
+    if (await denyBrigadeGroupChange(req, res, id)) return;
 
     const [duplicates] = await pool.query(
       `SELECT id FROM ${tableRef} WHERE name = ? AND id != ?`,
@@ -138,6 +161,7 @@ router.delete("/:id", auth, requirePermission(PERMISSIONS.DELETE_CONTACT), async
     if (!existingGroup) {
       return res.status(404).json({ error: "Group not found" });
     }
+    if (await denyBrigadeGroupChange(req, res, id)) return;
 
     const [[{ company_count }]] = await pool.query(
       "SELECT COUNT(*) AS company_count FROM companies WHERE group_id = ? AND is_active = 1",
