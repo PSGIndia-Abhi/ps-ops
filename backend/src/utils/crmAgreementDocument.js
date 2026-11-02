@@ -356,6 +356,7 @@ const BOTTOM = PAGE_H - 62; // and stops above the footer
 const CM = 72 / 2.54;
 const LETTERHEAD_TOP = 4.0 * CM;
 const LETTERHEAD_BOTTOM = 25.2 * CM;
+const LETTERHEAD_PAGE_NO_Y = 25.4 * CM; // a 7.6pt line, ending ~25.7 cm - clear of the footer line
 const SIZE = 9.6;
 const GAP = 3.2;
 const INDENT = [0, 26, 52];
@@ -742,10 +743,18 @@ function draw(doc, a, meta) {
   const keepOf = (i) => (isTitle(blocks[i]) ? titleH(blocks[i]) + keepOf(i + 1) : blocks[i] ? blockH(blocks[i]) : 0);
   blocks.forEach((b, i) => (isTitle(b) ? run[b.t](b, Math.min(keepOf(i), pageBottom - pageTop)) : run[b.t](b)));
 
-  // ---------------- page header + footer on every page (the letterhead has its own)
-  if (meta.letterhead) return;
   const range = doc.bufferedPageRange();
   const total = range.count;
+  // ---------------- letterhead: only "Page 1 of 7" on the right, in the gap between our text
+  // (to 25.2 cm) and the letterhead's printed footer line (~25.9 cm)
+  if (meta.letterhead) {
+    for (let p = 0; p < total; p += 1) {
+      doc.switchToPage(range.start + p);
+      font("B", 7.6, C.ink).text(`Page ${p + 1} of ${total}`, L, LETTERHEAD_PAGE_NO_Y, { width: W, align: "right", lineBreak: false });
+    }
+    return;
+  }
+  // ---------------- page header + footer on every page
   for (let p = 0; p < total; p += 1) {
     doc.switchToPage(range.start + p);
     // header: logo left, document name + number right, a thin rule
