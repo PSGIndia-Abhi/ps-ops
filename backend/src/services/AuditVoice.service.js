@@ -1,4 +1,5 @@
 const minioClient = require("../lib/minio");
+const { pool } = require("../../db");
 const { TARGET_PESTS } = require("../utils/audits");
 
 // ---------------------------------------------------------------------------
@@ -18,8 +19,8 @@ const TIMEOUT_MS = 20 * 1000;
 // The backup model starts only if the main one has not answered by then
 // (asking both every time would use up the daily quota twice as fast).
 const FALLBACK_AFTER_MS = 6 * 1000;
-// Longer recordings (the app allows up to 5 minutes) take Gemini longer, so both waits grow with
-// the recording: up to 1 minute keeps the times above, a 5-minute note gets about 80 s / 42 s.
+// Longer recordings (the app allows up to 3 minutes) take Gemini longer, so both waits grow with
+// the recording: up to 1 minute keeps the times above, a 3-minute note gets about 50 s / 24 s.
 const AUDIO_BYTES_PER_SECOND = 25 * 1024; // m4a from the app: about 1.5 MB a minute
 function waitTimes(base64Audio) {
   const seconds = Math.max(0, (base64Audio.length * 0.75) / AUDIO_BYTES_PER_SECOND - 60);
@@ -112,7 +113,7 @@ function buildCombinedPrompt(sourceLanguage) {
     '  - "area_name": the area name as said (English, 1-5 words), else "".',
     '  - "target_pests": a list of the pests mentioned. Use COCKROACHES, RODENTS (rats, mice, bandicoots), MOSQUITOES, FLIES, TERMITES for those; any other pest as a short English name (e.g. "Lizards"); [] if no pest is mentioned.',
     '  - "title": a short name for the problem, at most 5 words, no area name in it (e.g. "Gap under the shutter", "Rodent entry point"), else "".',
-    ...CATEGORY_GUIDE,
+    ...categoryGuide(),
     '  - "risk_level": LOW, MEDIUM, HIGH or CRITICAL - the level the supervisor said, or else your suggestion from how serious the problem described is (e.g. live pests or droppings in a food area = HIGH or CRITICAL); "" if there is no problem described.',
     '  - "fix_within_days": a whole number of days only if the supervisor said a time (e.g. "within a week" = 7, "immediately" = 0), else null.',
     "1. Write an exact transcript in the language and script that was spoken.",
@@ -130,22 +131,74 @@ const RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
 // How the AI picks the risk categories (one or more) - the same for one area and for a whole-site walkthrough.
 const CATEGORY_CODES = ["HARBOURAGE", "CRACKS", "BURROWS", "ENTRY_POINT", "FOOD_SOURCE", "WATER"];
+// "Other" names typed in earlier audits (read from the saved findings, refreshed every few minutes):
+// the AI reuses the same name for the same problem instead of a new wording each time.
+let knownOtherNames = [];
+let knownOtherLoadedAt = 0;
+const KNOWN_OTHER_REFRESH_MS = 5 * 60 * 1000;
+async function refreshKnownOtherNames() {
+  if (Date.now() - knownOtherLoadedAt < KNOWN_OTHER_REFRESH_MS) return;
+  knownOtherLoadedAt = Date.now();
+  try {
+    const [rows] = await pool.query(
+      "SELECT risk_category FROM audit_findings WHERE risk_category <> '' ORDER BY created_at DESC LIMIT 2000",
+    );
+    // Most used first; the spelling used most often wins.
+    const counts = new Map();
+    for (const r of rows) {
+      for (const name of String(r.risk_category).split(",").map((c) => c.trim())) {
+        if (!name || CATEGORY_CODES.includes(name.toUpperCase()) || name.toUpperCase() === "OTHER") continue;
+        const key = name.toLowerCase();
+        const entry = counts.get(key) || { n: 0, spellings: new Map() };
+        entry.n += 1;
+        entry.spellings.set(name, (entry.spellings.get(name) || 0) + 1);
+        counts.set(key, entry);
+      }
+    }
+    knownOtherNames = [...counts.values()]
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 40)
+      .map((e) => [...e.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+  } catch (err) {
+    console.error("Could not load the saved Other categories", err.message);
+  }
+}
+
+function categoryGuide() {
+  return [
+    ...CATEGORY_GUIDE,
+    ...(knownOtherNames.length
+      ? [`    Names already used in earlier audits: ${knownOtherNames.map((n) => JSON.stringify(n)).join(", ")}.`,
+        "    When the problem is the same as one of these, use that exact name instead of a new wording."]
+      : []),
+  ];
+}
+
 const CATEGORY_GUIDE = [
   '  - "risk_categories": a list of the categories for the problem described (one or more). Use a code ONLY when',
   "    the supervisor actually describes that exact problem - never because of the pest's name alone:",
-  "      HARBOURAGE = ONLY rats / mice / rodents hiding or nesting (rodent nests, rodents in clutter or stored goods). Never for insects.",
+  "      HARBOURAGE = ALWAYS when rats / mice / rodents / bandicoots are mentioned (together with any other code that fits). Never for insects.",
   "      CRACKS = ONLY when cracks or crevices are actually mentioned (wall cracks, gaps, crevices) as the place pests hide.",
   "        Cockroaches alone, without cracks being mentioned, are NOT CRACKS.",
   "      BURROWS = holes dug in soil or under floors (rodent burrows, termite mud tubes),",
   "      ENTRY_POINT = ways in from outside (gaps under doors or shutters, holes in walls, open drains, pipe openings),",
-  "      FOOD_SOURCE = food or waste the pests eat (spills, open bins, food left out, garbage),",
-  "      WATER = stagnant water, leaks, damp areas (mosquito breeding, drain water).",
+  "      FOOD_SOURCE = ONLY when food or waste is actually mentioned (spills, open bins, food left out, garbage). Never just because of the pest.",
+  "      WATER = stagnant water, leaks, damp areas (mosquito breeding, drain water). Mosquitoes usually mean WATER, not FOOD_SOURCE.",
   '    If the problem fits none of these exactly (e.g. bed bugs in a bed box, cockroach infestation, termite damage), add ONE short',
   '    English name for it instead (e.g. "Bed bug infestation", "Cockroach infestation", "Damaged wood"). Never return an empty list when a problem is described.',
 ];
 
-/** The AI's categories -> "HARBOURAGE,CRACKS,Damaged wood" (known codes first, at most one typed name). */
-function categoryList(value) {
+// Rodents mentioned in the English text: Rodent harbourage is always one of the categories.
+const RODENT_RE = /\b(rodents?|rats?|mice|mouse|bandicoots?)\b/i;
+// Words that mean food or waste really was mentioned.
+const FOOD_RE = /\b(food|foods|waste|garbage|trash|rubbish|bins?|dustbins?|spills?|spilled|spilt|leftovers?|grains?|crumbs|eat|eating|feeding|scraps)\b/i;
+
+/**
+ * The AI's categories -> "HARBOURAGE,CRACKS,Damaged wood" (known codes first, at most one typed name).
+ * `rodents` = rodents were mentioned: Rodent harbourage is added even if the AI left it out
+ * (and a typed name about rodents is then not needed). `spoken` = the English text, to check the AI's choice.
+ */
+function categoryList(value, rodents = false, spoken = "") {
   const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
   const codes = [];
   let typed = "";
@@ -155,6 +208,12 @@ function categoryList(value) {
     const code = text.toUpperCase().replace(/\s+/g, "_");
     if (CATEGORY_CODES.includes(code)) { if (!codes.includes(code)) codes.push(code); } else if (!typed && code !== "OTHER") typed = text;
   }
+  if (rodents && !codes.includes("HARBOURAGE")) codes.unshift("HARBOURAGE");
+  // Food source only when food or waste was really said (e.g. not for a mosquito problem near water).
+  if (codes.includes("FOOD_SOURCE") && spoken && !FOOD_RE.test(spoken)) codes.splice(codes.indexOf("FOOD_SOURCE"), 1);
+  if (rodents && RODENT_RE.test(typed)) typed = "";
+  // The same name as an earlier audit, written the same way ("bed bug infestation" -> "Bed bug infestation").
+  if (typed) typed = knownOtherNames.find((n) => n.toLowerCase() === typed.toLowerCase()) || typed;
   return [...codes, ...(typed ? [typed] : [])].join(",");
 }
 
@@ -192,6 +251,7 @@ function buildPrompt(sourceLanguage) {
  * Throws on any failure; the caller records the error and keeps the audio.
  */
 async function transcribeAndTranslate({ objectKey, mimeType, sourceLanguage, combined = false }) {
+  await refreshKnownOtherNames();
   if (!isConfigured()) throw new VoiceConfigError("Translation is not set up on the server (GEMINI_API_KEY missing)");
   const main = process.env.GEMINI_MODEL || DEFAULT_MODEL;
   const fallback = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
@@ -370,7 +430,11 @@ function parseResult(raw, model, combined = false) {
       targetPests: pestList(out.target_pests),
       title: str(out.title).slice(0, 250),
       // One or more: "HARBOURAGE,CRACKS" (older answers had a single "risk_category").
-      riskCategory: categoryList(out.risk_categories ?? out.risk_category),
+      riskCategory: categoryList(
+        out.risk_categories ?? out.risk_category,
+        pestList(out.target_pests).includes("RODENTS") || RODENT_RE.test(`${str(out.title)} ${str(out.observation)}`),
+        [out.title, out.observation, out.customer_action, out.bestserve_action].map(str).join(" "),
+      ),
       riskLevel: RISK_LEVELS.includes(level) ? level : "",
       fixWithinDays: days,
     }
@@ -411,7 +475,7 @@ function buildWalkthroughPrompt(sourceLanguage) {
     "Only improve the wording: fix grammar, remove filler words and repetitions. Keep pest-control terms (rodent, burrow, harbourage, bait station, gel baiting, drain, debris).",
     "For each area: area_name (English, 1-5 words), zone_name (building / block / floor if said, else \"\").",
     "For each finding: title (a short name for the problem, at most 5 words), observation, customer_action, bestserve_action (\"\" if not said),",
-    ...CATEGORY_GUIDE,
+    ...categoryGuide(),
     "risk_level: LOW, MEDIUM, HIGH or CRITICAL - what was said, or else your suggestion from how serious the problem is;",
     "fix_within_days: a whole number only if a time was said (\"within a week\" = 7, \"immediately\" = 0), else null.",
     'If there is no clear speech, set "no_speech": true and return an empty "areas" list. Never invent text.',
@@ -456,7 +520,11 @@ function parseWalkthrough(raw, model) {
       const days = Number.isInteger(f?.fix_within_days) && f.fix_within_days >= 0 && f.fix_within_days <= 365 ? f.fix_within_days : null;
       return {
         title: str(f?.title, 250),
-        riskCategory: categoryList(f?.risk_categories ?? f?.risk_category),
+        riskCategory: categoryList(
+          f?.risk_categories ?? f?.risk_category,
+          RODENT_RE.test(`${str(f?.title, 250)} ${str(f?.observation, 4000)}`),
+          [f?.title, f?.observation, f?.customer_action, f?.bestserve_action].map((t) => str(t, 4000)).join(" "),
+        ),
         riskLevel: RISK_LEVELS.includes(level) ? level : "",
         fixWithinDays: days,
         observation: str(f?.observation, 4000),
@@ -477,6 +545,7 @@ function parseWalkthrough(raw, model) {
 
 /** One walkthrough recording -> areas and findings. Tries the main, backup and lite models in turn. */
 async function transcribeWalkthrough({ objectKey, mimeType, sourceLanguage }) {
+  await refreshKnownOtherNames();
   if (!isConfigured()) throw new VoiceConfigError("Translation is not set up on the server (GEMINI_API_KEY missing)");
   const audio = await readObject(objectKey);
   if (!audio.length) throw new Error("The recording is empty");

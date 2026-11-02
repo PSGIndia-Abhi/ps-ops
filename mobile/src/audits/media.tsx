@@ -332,7 +332,7 @@ function voiceErrorMessage(error: string | null | undefined): { text: string; re
 /** How often the recording timer / bars update while recording (seconds). */
 export const RECORD_UPDATE_SECONDS = 0.25;
 /** Longest one-area recording: it stops by itself here (longer ones take too long to translate). */
-const MAX_RECORD_SECONDS = 5 * 60;
+const MAX_RECORD_SECONDS = 3 * 60;
 /** A countdown shows for the last this-many seconds. */
 const WARN_SECONDS = 30;
 
@@ -455,7 +455,7 @@ export function VoiceField({
     }
   }
 
-  // At 5 minutes the recording stops and uploads by itself.
+  // At 3 minutes the recording stops and uploads by itself.
   const stopping = useRef(false);
   useEffect(() => {
     if (recording && seconds >= MAX_RECORD_SECONDS) stop();
