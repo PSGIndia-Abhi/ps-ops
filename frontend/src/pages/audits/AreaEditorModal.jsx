@@ -44,7 +44,7 @@ function splitPests(text) {
 
 function blankFinding(defaultLevel = "MEDIUM") {
   return {
-    id: newId(), isNew: true, title: "", riskCategory: "HARBOURAGE", riskTypeText: "", riskLevel: defaultLevel,
+    id: newId(), isNew: true, title: "", riskCategory: "", riskTypeText: "", riskLevel: defaultLevel,
     actionWithinDays: "", observationText: "", customerActionText: "", bestserveActionText: "", noPhotoReason: "",
   };
 }

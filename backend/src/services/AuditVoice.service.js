@@ -131,14 +131,17 @@ const RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 // How the AI picks the risk categories (one or more) - the same for one area and for a whole-site walkthrough.
 const CATEGORY_CODES = ["HARBOURAGE", "CRACKS", "BURROWS", "ENTRY_POINT", "FOOD_SOURCE", "WATER"];
 const CATEGORY_GUIDE = [
-  '  - "risk_categories": a list of EVERY category that applies to the problem described (one or more):',
-  "      HARBOURAGE = rodent harbourage: places where rats / mice hide or nest (clutter, debris, stored goods, false ceilings, rodent nests),",
-  "      CRACKS = cracks and crevices where cockroaches (or other insects) hide and breed (wall cracks, gaps behind sinks, cabinets, equipment),",
+  '  - "risk_categories": a list of the categories for the problem described (one or more). Use a code ONLY when',
+  "    the supervisor actually describes that exact problem - never because of the pest's name alone:",
+  "      HARBOURAGE = ONLY rats / mice / rodents hiding or nesting (rodent nests, rodents in clutter or stored goods). Never for insects.",
+  "      CRACKS = ONLY when cracks or crevices are actually mentioned (wall cracks, gaps, crevices) as the place pests hide.",
+  "        Cockroaches alone, without cracks being mentioned, are NOT CRACKS.",
   "      BURROWS = holes dug in soil or under floors (rodent burrows, termite mud tubes),",
   "      ENTRY_POINT = ways in from outside (gaps under doors or shutters, holes in walls, open drains, pipe openings),",
   "      FOOD_SOURCE = food or waste the pests eat (spills, open bins, food left out, garbage),",
   "      WATER = stagnant water, leaks, damp areas (mosquito breeding, drain water).",
-  '    If a problem fits none of these, add ONE short English name for it (e.g. "Damaged wood"). Never return an empty list when a problem is described.',
+  '    If the problem fits none of these exactly (e.g. bed bugs in a bed box, cockroach infestation, termite damage), add ONE short',
+  '    English name for it instead (e.g. "Bed bug infestation", "Cockroach infestation", "Damaged wood"). Never return an empty list when a problem is described.',
 ];
 
 /** The AI's categories -> "HARBOURAGE,CRACKS,Damaged wood" (known codes first, at most one typed name). */

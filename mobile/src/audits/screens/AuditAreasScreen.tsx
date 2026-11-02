@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { CalendarIcon, CameraIcon, ChevronRightIcon, DocumentIcon, MicIcon, PencilIcon, PinIcon } from '../../components/icons';
+import { CalendarIcon, CameraIcon, ChevronRightIcon, PencilIcon, PinIcon } from '../../components/icons';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import { auditsApi, type Audit, type RiskLevelCode } from '../api';
 import { fmtDate } from '../format';
@@ -63,8 +63,6 @@ export function AuditAreasScreen() {
     );
   }
 
-  const c = audit.counts;
-  const pct = c.areas ? Math.round((c.areasCompleted / c.areas) * 100) : 0;
   // The first area that is not finished yet gets a "Start" / "Continue" highlight.
   const nextId = audit.areas.find(x => x.status !== 'COMPLETED')?.id;
 
@@ -74,13 +72,22 @@ export function AuditAreasScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={ag.green} />}
       >
-        {/* Audit card: customer, place, date and number; progress once there are areas */}
+        {/* Audit card: customer, status + Edit, place, then date and overall risk */}
         <View style={styles.headCard}>
           <View style={styles.head}>
             <Text style={[styles.company, styles.flex]} numberOfLines={2}>{audit.company.name}</Text>
-            <View style={styles.right}>
+            <View style={styles.topRight}>
               <AuditStatusPill status={audit.status} />
-              <RiskBadge level={audit.overallRisk} />
+              {editable ? (
+                <Pressable
+                  onPress={() => navigation.navigate('StartAudit', { auditId })}
+                  style={({ pressed }) => [styles.editChip, pressed && styles.pressed]}
+                  accessibilityLabel="Edit audit details"
+                >
+                  <PencilIcon size={13} color={colors.textPrimary} />
+                  <Text style={styles.editChipText}>Edit</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
           <View style={styles.metaRow}>
@@ -94,30 +101,8 @@ export function AuditAreasScreen() {
               <CalendarIcon size={13} color={ag.greenDark} />
               <Text style={styles.metaChipText}>{fmtDate(audit.auditDate)}</Text>
             </View>
-            <View style={styles.metaChip}>
-              <DocumentIcon size={13} color={ag.greenDark} />
-              <Text style={styles.metaChipText}>{audit.auditNumber}</Text>
-            </View>
-            {editable ? (
-              <Pressable
-                onPress={() => navigation.navigate('StartAudit', { auditId })}
-                style={({ pressed }) => [styles.editChip, pressed && styles.pressed]}
-                accessibilityLabel="Edit audit details"
-              >
-                <PencilIcon size={13} color={colors.textPrimary} />
-                <Text style={styles.editChipText}>Edit</Text>
-              </Pressable>
-            ) : null}
+            <RiskBadge level={audit.overallRisk} />
           </View>
-          {c.areas ? (
-            <>
-              <View style={styles.progressRow}>
-                <Text style={a.muted}>Areas completed</Text>
-                <Text style={styles.pct}>{c.areasCompleted} / {c.areas}</Text>
-              </View>
-              <View style={styles.track}><View style={[styles.fill, { width: `${pct}%` }]} /></View>
-            </>
-          ) : null}
         </View>
 
         {error ? <MessageBox tone="error" title={error} /> : null}
@@ -180,16 +165,12 @@ export function AuditAreasScreen() {
         })}
       </ScrollView>
 
-      {/* With areas: add more (two small choices), then one main button to finish. Without areas the
-          two choice cards above are the actions, so no bottom buttons. */}
+      {/* With areas: add one more, then one main button to finish. Without areas the
+          card above is the action, so no bottom buttons. */}
       {editable && audit.areas.length ? (
         <BottomBar>
           <Text style={styles.moreLabel}>Add more areas</Text>
           <View style={styles.footer}>
-            <Pressable onPress={() => navigation.navigate('Walkthrough', { auditId })} style={({ pressed }) => [styles.addMore, pressed && styles.addMorePressed]}>
-              <MicIcon size={18} color={ag.green} />
-              <Text style={styles.addMoreText}>Record many</Text>
-            </Pressable>
             <Pressable onPress={() => navigation.navigate('AreaInspect', { auditId })} style={({ pressed }) => [styles.addMore, pressed && styles.addMorePressed]}>
               <CameraIcon size={18} color={ag.green} />
               <Text style={styles.addMoreText}>Add one</Text>
@@ -254,10 +235,11 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs },
   metaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-  editChip: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto', paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  editChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   pressed: { opacity: 0.6 },
   editChipText: { ...typography.caption, color: colors.textPrimary, fontWeight: '600' },
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
   metaChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: ag.greenSofter,
     borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 5,
@@ -265,11 +247,6 @@ const styles = StyleSheet.create({
   metaChipText: { ...typography.caption, color: ag.greenDark, fontWeight: '600' },
   company: { ...typography.subtitle, color: colors.textPrimary },
   flex: { flex: 1 },
-  right: { alignItems: 'flex-end', gap: spacing.xxs },
-  progressRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
-  pct: { ...typography.captionMedium, color: ag.greenDark, fontWeight: '700' },
-  track: { height: 8, borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, marginTop: 6, overflow: 'hidden' },
-  fill: { height: '100%', backgroundColor: ag.green, borderRadius: radii.pill },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surface, borderRadius: radii.lg,
     borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.xs,

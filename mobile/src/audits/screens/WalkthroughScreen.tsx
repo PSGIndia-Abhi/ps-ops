@@ -143,8 +143,8 @@ export function WalkthroughScreen() {
         const level = (RISK_LEVELS.includes(x.riskLevel as RiskLevelCode) ? x.riskLevel : 'MEDIUM') as RiskLevelCode;
         return {
           id: newId(), isNew: true, title: x.title,
-          // One or more categories heard ("HARBOURAGE,CRACKS"); nothing heard = Rodent harbourage to start with.
-          ...(x.riskCategory ? splitCategories(x.riskCategory, categories) : { riskCategory: 'HARBOURAGE', categoryOther: '' }),
+          // One or more categories heard ("HARBOURAGE,CRACKS"); nothing heard = none chosen (the supervisor picks).
+          ...splitCategories(x.riskCategory, categories),
           riskLevel: level,
           ...daysFor(level, x.fixWithinDays),
           observation: x.observation, customerAction: x.customerAction, bestserveAction: x.bestserveAction,
@@ -199,7 +199,7 @@ export function WalkthroughScreen() {
           rowVersion: x.isNew ? undefined : x.rowVersion,
           title: x.title,
           riskLevel: x.riskLevel,
-          riskCategory: categoriesToSave(x) || 'HARBOURAGE',
+          riskCategory: categoriesToSave(x),
           actionWithinDays: x.days === '' ? undefined : Number(x.days),
           observationText: x.observation,
           customerActionText: x.customerAction,

@@ -95,7 +95,7 @@ const TEXT_KEY: Record<VoiceFieldType, TextKey> = {
 };
 
 const blankFinding = (): FindingForm => ({
-  id: newId(), isNew: true, title: '', riskLevel: 'MEDIUM', riskCategory: 'HARBOURAGE', categoryOther: '', riskTypeText: '', days: '', daysOther: false,
+  id: newId(), isNew: true, title: '', riskLevel: 'MEDIUM', riskCategory: '', categoryOther: '', riskTypeText: '', days: '', daysOther: false,
   observation: '', customerAction: '', bestserveAction: '', dueDate: null, photos: [], notes: {},
 });
 
@@ -287,8 +287,8 @@ export function AreaInspectScreen() {
           rowVersion: x.isNew ? undefined : versions[x.id] ?? x.rowVersion,
           title: x.title,
           riskLevel: x.riskLevel,
-          // A draft saved before any category is chosen keeps the first one (the server needs one).
-          riskCategory: categoriesToSave(x) || 'HARBOURAGE',
+          // Nothing chosen yet is fine for a draft; completing the area needs at least one.
+          riskCategory: categoriesToSave(x),
           riskTypeText: x.riskTypeText,
           actionWithinDays: x.days === '' ? undefined : Number(x.days),
           observationText: x.observation,
@@ -511,7 +511,7 @@ export function AreaInspectScreen() {
     : step === STEP_PHOTOS && noPhoto
     ? 'Take or choose at least 1 photo to continue'
     : step === STEP_RECORD && obsEmpty
-    ? 'Record (or type) the details to continue'
+    ? 'The observation is required: record it (or type it) to continue'
     : saveOff
     ? `Fill in the ${detailsMissing.join(', ')} to save`
     : null;
@@ -523,7 +523,17 @@ export function AreaInspectScreen() {
 
   return (
     <View style={styles.screen}>
-      <Stepper steps={STEPS} current={step} onPress={i => setStep(i)} />
+      {/* Going back is always allowed; going forward needs the same as "Next" (a photo, then the observation). */}
+      <Stepper
+        steps={STEPS}
+        current={step}
+        onPress={i => {
+          if (i <= step) return setStep(i);
+          if (noPhoto || photoBusy) return setStep(STEP_PHOTOS);
+          if (i > STEP_RECORD && (obsEmpty || obsNotAccepted)) return setStep(STEP_RECORD);
+          setStep(i);
+        }}
+      />
 
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {savedNote ? <MessageBox tone="ok" title={`✓ ${savedNote} saved — now the next area`} /> : null}

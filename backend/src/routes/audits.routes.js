@@ -657,7 +657,8 @@ router.put("/:id/areas/:areaId", ...can(PERMISSIONS.UPDATE_AUDIT), async (req, r
             throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
           }
         }
-        if (!picked.length) throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
+        // A draft (photos added before the recording) may have no category yet; completing the area needs one.
+        if (!picked.length && markCompleted) throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
         const riskCategory = picked.join(",");
         if (riskCategory.length > 255) throw new HttpError(400, "VALIDATION", `${label}: too many risk categories`);
         let days = levelMap[riskLevel].default_days;
