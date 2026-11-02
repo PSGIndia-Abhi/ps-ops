@@ -255,14 +255,22 @@ router.get("/reports/sales-performance/items", auth, requirePermission("CRM_VIEW
 // convert in a month; achieved = what the commercial leads that person converted that month are
 // worth (see CONVERTED_LEADS_SQL: the final quotation amount, else the approximate quote).
 //
-// GET /api/crm/targets?month=YYYY-MM -> [{ user_id, name, role, target, achieved, converted }]
-//   the sales manager / admin: every sales executive and sales manager; anyone else: themselves.
+// GET /api/crm/targets?month=YYYY-MM -> [{ user_id, name, role, target, achieved, converted, can_set }]
+//   the sales manager / admin: every sales executive, sales manager and Personal Assistant; anyone
+//   else: themselves. `can_set` says whether this viewer may set that person's target.
 // PUT /api/crm/targets/:userId { month, target_amount } -- sales manager / admin only;
-//   0 or empty removes the target.
+//   0 or empty removes the target. A Personal Assistant's target is set by the Managing Director
+//   (or admin) only - she works leads as a sales manager, so it isn't hers or a sales manager's to set.
 // ---------------------------------------------------------------------------
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const thisMonth = () => today().slice(0, 7);
 const canSetTargets = (req) => req.user.role === "admin" || hasPerm(req, "MANAGE_LEADS");
+const PA_ROLE = "Personal Assistant";
+// Who can have a target: the people leads are assigned to, and the Personal Assistant.
+const TARGET_ROLES = [...LEAD_ASSIGNEE_ROLES, PA_ROLE];
+/** May this viewer set the target of someone with `role`? */
+const canSetTargetOf = (req, role) =>
+  canSetTargets(req) && (role !== PA_ROLE || req.user.role === "Managing Director" || req.user.role === "admin");
 
 router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -274,7 +282,7 @@ router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res
          FROM users u JOIN roles r ON r.id = u.role_id
         WHERE ${everyone ? "u.is_active = 1 AND r.name IN (?)" : "u.id = ?"}
         ORDER BY u.name ASC`,
-      [everyone ? LEAD_ASSIGNEE_ROLES : Number(req.user.id)]
+      [everyone ? TARGET_ROLES : Number(req.user.id)]
     );
     if (people.length === 0) return res.json([]);
     const ids = people.map((p) => p.id);
@@ -300,6 +308,7 @@ router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res
         target: targetOf.get(Number(p.id)) ?? null,
         achieved: Number(wonOf.get(Number(p.id))?.achieved || 0),
         converted: Number(wonOf.get(Number(p.id))?.converted || 0),
+        can_set: canSetTargetOf(req, p.role),
       }))
     );
   } catch (err) {
@@ -318,10 +327,11 @@ router.put("/targets/:userId", auth, requirePermission("CRM_VIEW_LEAD"), async (
     const amount = raw === null || raw === undefined || raw === "" ? 0 : Number(raw);
     if (!Number.isFinite(amount) || amount < 0 || amount > 9999999999) throw new HttpError(400, "Enter a valid target amount");
     const [[person]] = await pool.query(
-      "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1 AND r.name IN (?)",
-      [userId, LEAD_ASSIGNEE_ROLES]
+      "SELECT u.id, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1 AND r.name IN (?)",
+      [userId, TARGET_ROLES]
     );
-    if (!person) throw new HttpError(400, "Targets are set for sales executives and sales managers");
+    if (!person) throw new HttpError(400, "Targets are set for sales executives, sales managers and the Personal Assistant");
+    if (!canSetTargetOf(req, person.role)) throw new HttpError(403, "Only the Managing Director can set the Personal Assistant's target");
     if (amount === 0) {
       await pool.query("DELETE FROM crm_sales_targets WHERE user_id = ? AND month = ?", [userId, month]);
     } else {

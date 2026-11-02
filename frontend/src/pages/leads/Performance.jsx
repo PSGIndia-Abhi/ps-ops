@@ -490,9 +490,12 @@ function Targets({ manager, myId }) {
                     </td>
                     <td className="num">{t.converted}</td>
                     <td className="num">
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
-                        {t.target ? "Change" : "Set target"}
-                      </Button>
+                      {/* only the Managing Director sets the Personal Assistant's target */}
+                      {t.can_set !== false && (
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                          {t.target ? "Change" : "Set target"}
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -327,6 +327,8 @@ export interface SalesTarget {
   /** The amounts of the leads they converted that month. */
   achieved: number;
   converted: number;
+  /** Whether you may set this person's target (only the Managing Director sets the Personal Assistant's). */
+  canSet: boolean;
 }
 
 /** GET /api/crm/targets - this month's (or `month`'s): the sales manager gets the team, others themselves. */
@@ -340,6 +342,7 @@ export async function listTargets(month?: string): Promise<SalesTarget[]> {
     target: r.target === null || r.target === undefined ? null : Number(r.target),
     achieved: Number(r.achieved) || 0,
     converted: Number(r.converted) || 0,
+    canSet: r.can_set !== false,
   }));
 }
 

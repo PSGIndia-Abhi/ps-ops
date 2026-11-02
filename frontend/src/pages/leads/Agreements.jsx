@@ -27,6 +27,22 @@ const ROW_KEYS = ["defense_area", "material_used", "treatment_area", "frequency"
 const BLANK_ROW = { defense_area: "", material_used: "", treatment_area: "", frequency: "" };
 // The word used for the customer in the agreement text ("...the Apartment has agreed...").
 const INDUSTRY_WORDS = ["Apartment", "Hospital", "Restaurant", "QSR", "IT", "Builder", "Company", "Society", "Association"];
+// The usual agreement terms; any other number of months is "Custom".
+const TERM_CHOICES = [
+  { months: 6, label: "6 months" },
+  { months: 12, label: "1 year" },
+  { months: 24, label: "2 years" },
+  { months: 36, label: "3 years" },
+  { months: 48, label: "4 years" },
+  { months: 60, label: "5 years" },
+];
+/** The last day of a term: the day before the same date `months` later ("2026-11-01" + 24 -> "2028-10-31"). */
+function termEndFor(start, months) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start || "");
+  if (!m || !(months > 0)) return "";
+  const d = new Date(Number(m[1]), Number(m[2]) - 1 + months, Number(m[3]) - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 // "sales_manager" -> "Sales Manager": a person's role as a starting designation (still editable).
 const roleTitle = (role) => {
   const t = String(role || "").replace(/_/g, " ").trim();
@@ -465,6 +481,14 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
           <Field label="Represented by" required hint="e.g. Committee Members, or the person's name and designation">
             <input className="lm-input" value={form.customer.representative} maxLength={120} onChange={(e) => setCustomer({ representative: e.target.value })} />
           </Field>
+          <Field label="Representative's designation" hint='e.g. Facility Manager - prints as "represented herein by Ramesh, Facility Manager"'>
+            <input
+              className="lm-input"
+              value={form.customer.representativeDesignation || ""}
+              maxLength={80}
+              onChange={(e) => setCustomer({ representativeDesignation: e.target.value })}
+            />
+          </Field>
           <Field label="Customer address" required wide>
             <textarea className="lm-textarea" style={{ minHeight: 64 }} value={form.customer.address} maxLength={400} onChange={(e) => setCustomer({ address: e.target.value })} />
           </Field>
@@ -502,20 +526,52 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
 
       <Step no="2" title="Term & charges">
         <div className="lm-form">
-          <Field label="Term starts" required>
-            <input className="lm-input" type="date" value={form.termStart} onChange={(e) => set({ termStart: e.target.value })} />
+          {/* The term drives the months and the end date; both stay editable. */}
+          <Field label="Agreement term" required hint='Prints as "for a period of Two years..."'>
+            <select
+              className="lm-select"
+              value={TERM_CHOICES.some((c) => c.months === months) ? String(months) : "custom"}
+              onChange={(e) => {
+                if (e.target.value === "custom") return;
+                const m = Number(e.target.value);
+                set({ months: String(m), termEnd: termEndFor(form.termStart, m) || form.termEnd });
+              }}
+            >
+              {TERM_CHOICES.map((c) => (
+                <option key={c.months} value={c.months}>
+                  {c.label}
+                </option>
+              ))}
+              <option value="custom">Custom ({months || 0} months)</option>
+            </select>
           </Field>
-          <Field label="Term ends" required>
+          <Field label="Number of months" required hint="Type any number for a custom term">
+            <input
+              className="lm-input"
+              inputMode="numeric"
+              value={form.months}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, "").slice(0, 2);
+                set({ months: v, termEnd: termEndFor(form.termStart, Number(v)) || form.termEnd });
+              }}
+            />
+          </Field>
+          <Field label="Term starts" required>
+            <input
+              className="lm-input"
+              type="date"
+              value={form.termStart}
+              onChange={(e) => set({ termStart: e.target.value, termEnd: termEndFor(e.target.value, months) || form.termEnd })}
+            />
+          </Field>
+          <Field label="Term ends" required hint="Worked out from the start and the term - change it if needed">
             <input className="lm-input" type="date" value={form.termEnd} min={form.termStart || undefined} onChange={(e) => set({ termEnd: e.target.value })} />
           </Field>
           <Field label="Monthly charge (Rs.)" required hint="Taxes are extra, as the agreement says">
             <input className="lm-input" inputMode="decimal" value={form.monthlyCharge} onChange={(e) => set({ monthlyCharge: e.target.value.replace(/[^\d.]/g, "") })} placeholder="e.g. 30000" />
           </Field>
-          <Field label="Number of months" required>
-            <input className="lm-input" inputMode="numeric" value={form.months} onChange={(e) => set({ months: e.target.value.replace(/\D/g, "").slice(0, 2) })} />
-          </Field>
           <Field
-            label="Yearly amount (Rs.)"
+            label="Total amount (Rs.)"
             required
             hint={
               form.totalEdited && total !== autoTotal ? (

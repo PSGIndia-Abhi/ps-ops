@@ -47,7 +47,7 @@ function isoDate(value, label) {
  * Checks and tidies the web form's body. Throws AgreementInputError (a 400) with a readable
  * message. Shape:
  * {
- *   customer: { name, shortName, industryWord, address, representative },
+ *   customer: { name, shortName, industryWord, address, representative, representativeDesignation },
  *   signatory: { name, designation },          // who signs for BestServe
  *   customerSignatory: { name, designation, date },  // the customer's side (optional - blank = by hand)
  *   termStart, termEnd, signingDate,           // YYYY-MM-DD
@@ -66,6 +66,7 @@ function normalizeAgreementContent(body) {
     industryWord: text(c.industryWord, "industry word", 40, { required: true }),
     address: text(c.address, "customer address", 400, { required: true, min: 5 }),
     representative: text(c.representative, "customer representative", 120, { required: true }),
+    representativeDesignation: text(c.representativeDesignation, "representative's designation", 80),
   };
   const s = b.signatory || {};
   const signatory = {
@@ -177,6 +178,21 @@ const periodWords = (months) =>
 // Blocks drawn in order. Text may mark bold with **...**. `S` = the customer's short name,
 // `IND` = its industry word (in place of the old template's "Society").
 
+/**
+ * "Ramesh, Facility Manager": the customer's representative, then their designation. The designation
+ * may be typed in its own field or as "Ramesh (Facility Manager)"; brackets around it are dropped.
+ */
+function representedBy(c) {
+  let who = c.representative;
+  let role = (c.representativeDesignation || "").replace(/^\((.*)\)$/, "$1").trim();
+  const m = /^(.+?)\s*\((.+)\)\s*$/.exec(who);
+  if (m) {
+    who = m[1];
+    if (!role) role = m[2].trim();
+  }
+  return role ? `${who}, ${role}` : who;
+}
+
 function agreementBlocks(a, meta) {
   const S = a.customer.shortName;
   const IND = a.customer.industryWord;
@@ -197,7 +213,7 @@ function agreementBlocks(a, meta) {
     {
       t: "party",
       text:
-        `**${a.customer.name.toUpperCase()}**, located at ${a.customer.address}, and represented herein by ${a.customer.representative} ` +
+        `**${a.customer.name.toUpperCase()}**, located at ${a.customer.address}, and represented herein by ${representedBy(a.customer)} ` +
         `(hereinafter referred to as the “**${S}**”, which expression shall unless repugnant to the meaning or context thereof be deemed ` +
         "to mean and include its successors in interest and permitted assigns) of the **OTHER PART**.",
     },
@@ -206,15 +222,15 @@ function agreementBlocks(a, meta) {
     { t: "label", text: "WHEREAS:" },
     { t: "item", no: "A.", text: `The ${B} is in the business of providing General Pest Control and Rodent Control Service.` },
     { t: "item", no: "B.", text: `The ${B} has offered to provide “**Pest Management Services**” (as defined hereinafter) by representing to the ${S} that:` },
-    { t: "item", no: "a.", level: 2, text: `The ${B} has the experience, expertise and necessary infrastructure to meet the requirement, in providing support and catering to any requests/requirements made by the ${B}.` },
-    { t: "item", no: "b.", level: 2, text: `The ${B} will render the Pest Management Services during the term of this Agreement and any extended period thereof, without any interruption whatsoever to the ${B}.` },
+    { t: "item", no: "a.", level: 2, text: `The ${B} has the experience, expertise and necessary infrastructure to meet the requirement, in providing support and catering to any requests/requirements made by the ${IND}.` },
+    { t: "item", no: "b.", level: 2, text: `The ${B} will render the Pest Management Services during the term of this Agreement and any extended period thereof, without any interruption whatsoever to the ${IND}.` },
     { t: "item", no: "c.", level: 2, text: `Relying on the representations of the ${B}, the ${IND} has agreed to accept the Pest Management Services offered by the ${B} on the terms and subject to the conditions specified hereunder for their above-mentioned office.` },
 
     { t: "label", text: "NOW THIS AGREEMENT WITNESSES AS FOLLOWS:" },
     { t: "heading", no: "1", title: "Definitions and Interpretation" },
     { t: "para", text: "Unless the context otherwise requires, when used in this Agreement:", indent: 1 },
     { t: "item", no: "1.1", text: "“**Agreement**” shall mean this agreement, including any subsequent written modifications and amendments thereto in terms hereof." },
-    { t: "item", no: "1.2", text: "“**Confidential Information**” shall mean and include all information, data related to the Company during the term of this agreement." },
+    { t: "item", no: "1.2", text: `“**Confidential Information**” shall mean and include all information, data related to the ${S} during the term of this agreement.` },
     { t: "item", no: "1.3", text: `“**Pest Management Services**” shall mean and include the maintenance services agreed to be rendered by the ${B} to the ${S} in terms hereof.` },
     { t: "item", no: "1.4", text: "“**Month**” shall mean the calendar month of the year." },
     { t: "item", no: "1.5", text: `“**Term**” shall mean the tenure of this Agreement commencing from **${start}** and ending on **${end}**.` },
@@ -224,7 +240,7 @@ function agreementBlocks(a, meta) {
       t: "para",
       indent: 1,
       text:
-        `In consideration of the charges hereinafter reserved and agreed to be paid by the ${B} as set out in this Agreement and the Parties ` +
+        `In consideration of the charges hereinafter reserved and agreed to be paid by the ${S} as set out in this Agreement and the Parties ` +
         `agreeing to comply with the covenants and conditions mentioned herein, the ${B} hereby agrees to provide Pest Management Services to ` +
         `the ${S}, for a period of ${periodWords(a.months)} commencing with effect from **${start}** and ending on **${end}**. Notwithstanding ` +
         "any provision to the contrary, the Parties shall not be entitled to terminate this Agreement during the Term except in accordance " +
@@ -243,8 +259,8 @@ function agreementBlocks(a, meta) {
       text:
         `In consideration of the ${B} providing Pest Management Services for the ${a.servicesPhrase}, the ${S} shall pay ` +
         `**${rs(a.monthlyCharge)} (${amountInWords(a.monthlyCharge)})** per month as charges (“**Charges**”) for a term of ` +
-        `${numberWord(a.months)} months, **Total ${rs(a.total)} (${amountInWords(a.total)})**. All taxes are extra as applicable. ` +
-        `A monthly report will be submitted by the ${B} along with the bill.`,
+        `${periodWords(a.months).toLowerCase()}, **Total ${rs(a.total)} (${amountInWords(a.total)})**. All taxes are extra as applicable. ` +
+        `Supporting documents will be submitted by the ${B} along with the bill.`,
     },
     { t: "item", no: "4.2", text: "The payment of Charges would be subject to deduction of income tax and other taxes and cesses as may be required to be made under any other applicable law." },
 
@@ -252,7 +268,7 @@ function agreementBlocks(a, meta) {
     { t: "item", no: "5.1", text: `The ${B} is ready to sign a Non-Disclosure Agreement with the ${IND} to ensure that the Confidentiality clause shall be strictly adhered to. For security reasons, the personnel duly authorised by the ${B} to render services at the premises of the ${S} are also ready to sign a Non-Disclosure Agreement.` },
     { t: "item", no: "5.2", text: `The ${B} shall ensure that the personnel deputed by the ${B} are well trained and will not cause unnecessary hindrance to the ${S} or its employees.` },
 
-    { t: "heading", no: "6", title: `Obligations of the ${B}` },
+    { t: "heading", no: "6", title: `Obligations of the ${S}` },
     { t: "para", indent: 1, text: `The ${S} shall ensure that during the contracted period, they will not engage any other person or agency who is not authorised by the ${B} to attend to the Pest Management related tasks.` },
 
     { t: "heading", no: "7", title: "Confidentiality" },
@@ -280,7 +296,7 @@ function agreementBlocks(a, meta) {
         `The ${IND} entering into this Agreement reserves the right to audit the services and verify the operating environment and other areas ` +
         `of service of the ${B}, the ${B}’s representatives and any other identified individuals in respect of the information held by them on ` +
         `the ${S} data, the ${S} client’s data, performance data, equipment provided etc., to ensure that the ${B} is maintaining adequate ` +
-        `controls and security measures, that the ${B}’s billings to the Company are correct, and that reports relating to the Service ` +
+        `controls and security measures, that the ${B}’s billings to the ${S} are correct, and that reports relating to the Service ` +
         `Provider’s performance are accurate. If found guilty of misconduct, the ${IND} is authorised to take legal action.`,
     },
 
@@ -357,6 +373,14 @@ function renderAgreementPdf(content, meta) {
     doc.on("error", reject);
     try {
       for (const [name, file] of Object.entries(FONTS)) doc.registerFont(name, path.join(FONT_DIR, file));
+      // These faces have a very narrow space (~0.17em); widen the gaps between words in every plain
+      // text run (tables, address box, signature block...) to ~0.27em, the same as the body text in
+      // layout(). Measuring gets the same spacing, so wrapped cells still size correctly.
+      const wide = (o) => ({ wordSpacing: doc._fontSize * 0.1, ...o });
+      const plainText = doc.text.bind(doc);
+      const plainHeight = doc.heightOfString.bind(doc);
+      doc.text = (str, x, y, o) => plainText(str, x, y, wide(o));
+      doc.heightOfString = (str, o) => plainHeight(str, wide(o));
       draw(doc, content, meta);
       doc.end();
     } catch (err) {
@@ -410,7 +434,9 @@ function draw(doc, a, meta) {
       }, 0),
     }));
     font("R", size);
-    const space = doc.widthOfString(" ");
+    // This face's own space is very narrow (~0.17em), which made unjustified lines (single lines,
+    // the last line of a paragraph) look squashed next to justified ones - so never go below 0.27em.
+    const space = Math.max(doc.widthOfString(" "), size * 0.27);
     const lh = doc.currentLineHeight(true) + GAP;
     const lines = [];
     let line = [];
@@ -544,20 +570,26 @@ function draw(doc, a, meta) {
       ["Title / Designation", a.signatory.designation, cs.designation || ""],
       ...(b.withDate ? [["Date", shortDate(a.signingDate), cs.date ? shortDate(cs.date) : ""]] : []),
     ];
-    const tableH = 34 + rows.length * rowH + sealH;
+    const half = W / 2;
+    // heading row: tall enough for the longer party name (a long customer name wraps), never under 34
+    const names = [COMPANY.nameCaps, a.customer.name.toUpperCase()];
+    const nameOpts = { width: half - 24, lineGap: 1.5 };
+    font("B", 8.6);
+    const nameH = names.map((n) => doc.heightOfString(n, nameOpts));
+    const headH = Math.max(34, Math.max(...nameH) + 22);
+    const tableH = headH + rows.length * rowH + sealH;
     ensure(introH + tableH + 10);
     y += 8;
     if (b.intro) {
       font("XB", 9.4, C.ink).text(b.intro, L, y, { width: W, lineGap: 2 });
       y += introH;
     }
-    const half = W / 2;
     const top = y;
-    // heading row
-    doc.rect(L, top, W, 34).fill(C.navy);
-    font("B", 8.6, "#ffffff").text(COMPANY.nameCaps, L + 12, top + 12, { width: half - 24, lineBreak: false });
-    font("B", 8.6, "#ffffff").text(a.customer.name.toUpperCase(), L + half + 12, top + 12, { width: half - 24, lineBreak: false, ellipsis: true });
-    let ry = top + 34;
+    doc.rect(L, top, W, headH).fill(C.navy);
+    names.forEach((n, i) => {
+      font("B", 8.6, "#ffffff").text(n, L + i * half + 12, top + (headH - nameH[i]) / 2, nameOpts);
+    });
+    let ry = top + headH;
     rows.forEach(([k, ours, theirs]) => {
       font("B", 6.8, C.muted).text(k.toUpperCase(), L + 12, ry + 7, { characterSpacing: 0.8, lineBreak: false });
       font("B", 9.6, C.ink).text(ours, L + 12, ry + 16, { width: half - 24, lineBreak: false });
