@@ -6,8 +6,8 @@ import { createSound, type RecordBackType } from 'react-native-nitro-sound';
 import { MicIcon, StopIcon } from '../../components/icons';
 import { colors, radii, spacing } from '../../theme';
 import { auditsApi, newId, type Audit, type Lookups, type RiskLevelCode, type WalkthroughArea } from '../api';
-import { addDays, describeMissing, fmtDate } from '../format';
-import { PhotoGrid, askPermission, type PhotoItem } from '../media';
+import { addDays, catList, categoriesToSave, describeMissing, fmtDate, splitCategories } from '../format';
+import { PhotoGrid, RECORD_UPDATE_SECONDS, askPermission, type PhotoItem } from '../media';
 import { BottomBar, ChipRow, GreenButton, Input, MessageBox, RiskSegment, auditStyles as a } from '../ui';
 import { ag } from '../theme';
 import type { AuditsStackParamList } from '../AuditsNavigator';
@@ -15,7 +15,6 @@ import type { AuditsStackParamList } from '../AuditsNavigator';
 type Nav = NativeStackNavigationProp<AuditsStackParamList>;
 type Route = RouteProp<AuditsStackParamList, 'Walkthrough'>;
 
-const KNOWN_CATEGORIES = ['HARBOURAGE', 'BURROWS', 'ENTRY_POINT', 'FOOD_SOURCE', 'WATER'];
 const RISK_LEVELS: RiskLevelCode[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const DAY_CHIPS = ['0', '7', '15', '30'];
 const DAYS_OTHER = 'OTHER';
@@ -100,6 +99,8 @@ export function WalkthroughScreen() {
     if (!(await askPermission('mic'))) return setError('Microphone permission was denied. Enable it in Settings.');
     const r = recorder.current!;
     try {
+      // Battery: only the timer shows, so a few updates a second is enough.
+      r.setSubscriptionDuration(RECORD_UPDATE_SECONDS);
       await r.startRecorder(undefined, undefined, true);
       r.addRecordBackListener((e: RecordBackType) => setSeconds(Math.floor(e.currentPosition / 1000)));
       setRecording(true);
@@ -140,12 +141,10 @@ export function WalkthroughScreen() {
       done: false,
       findings: (w.findings.length ? w.findings : [{ title: '', riskCategory: '', riskLevel: '', fixWithinDays: null, observation: '', customerAction: '', bestserveAction: '' }]).map(x => {
         const level = (RISK_LEVELS.includes(x.riskLevel as RiskLevelCode) ? x.riskLevel : 'MEDIUM') as RiskLevelCode;
-        const code = x.riskCategory.toUpperCase().replace(/\s+/g, '_');
-        const known = KNOWN_CATEGORIES.includes(code);
         return {
           id: newId(), isNew: true, title: x.title,
-          riskCategory: known ? code : x.riskCategory ? 'OTHER' : 'HARBOURAGE',
-          categoryOther: known ? '' : x.riskCategory,
+          // One or more categories heard ("HARBOURAGE,CRACKS"); nothing heard = none chosen (the supervisor picks).
+          ...splitCategories(x.riskCategory, categories),
           riskLevel: level,
           ...daysFor(level, x.fixWithinDays),
           observation: x.observation, customerAction: x.customerAction, bestserveAction: x.bestserveAction,
@@ -200,7 +199,7 @@ export function WalkthroughScreen() {
           rowVersion: x.isNew ? undefined : x.rowVersion,
           title: x.title,
           riskLevel: x.riskLevel,
-          riskCategory: x.riskCategory === 'OTHER' && x.categoryOther.trim() ? x.categoryOther.trim() : x.riskCategory,
+          riskCategory: categoriesToSave(x),
           actionWithinDays: x.days === '' ? undefined : Number(x.days),
           observationText: x.observation,
           customerActionText: x.customerAction,
@@ -239,7 +238,7 @@ export function WalkthroughScreen() {
         !x.customerAction.trim() ? `customer action${n}` : null,
         !x.bestserveAction.trim() ? `BestServe action${n}` : null,
         x.days === '' ? `"Fix within"${n}` : null,
-        x.riskCategory === 'OTHER' && !x.categoryOther.trim() ? `risk category${n}` : null,
+        !categoriesToSave(x) ? `risk category${n}` : null,
       ];
     }),
   ].filter(Boolean) as string[];
@@ -336,11 +335,18 @@ export function WalkthroughScreen() {
                   <Input label="What did you find? (Optional)" value={x.title} onChangeText={t => setFinding(ci, fi, { title: t })} maxLength={250} />
                   <ChipRow
                     label="Risk Category *"
-                    options={categories.map(k => ({ value: k.code, label: k.code === 'OTHER' ? '＋ Other' : k.label }))}
-                    selected={[x.riskCategory]}
-                    onToggle={v => setFinding(ci, fi, { riskCategory: v })}
+                    options={categories.map(k => {
+                      const on = catList(x.riskCategory).includes(k.code);
+                      return { value: k.code, label: k.code === 'OTHER' ? (on ? 'Other ✓' : '＋ Other') : on ? `${k.label} ✓` : k.label };
+                    })}
+                    selected={catList(x.riskCategory)}
+                    // One or more: tap to add, tap again to remove.
+                    onToggle={v => {
+                      const list = catList(x.riskCategory);
+                      setFinding(ci, fi, { riskCategory: (list.includes(v) ? list.filter(k => k !== v) : [...list, v]).join(',') });
+                    }}
                   />
-                  {x.riskCategory === 'OTHER' ? (
+                  {catList(x.riskCategory).includes('OTHER') ? (
                     <Input label="Other risk category" required value={x.categoryOther} onChangeText={t => setFinding(ci, fi, { categoryOther: t })} maxLength={50} />
                   ) : null}
                   <Text style={styles.fieldLabel}>Risk Level <Text style={styles.req}>*</Text></Text>

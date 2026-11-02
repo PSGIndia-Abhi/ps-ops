@@ -5,8 +5,12 @@ const { v4: uuid } = require("uuid");
 // Design: docs/Site Audit - Architecture.docx, API Payloads.docx, Table Design.docx
 // ---------------------------------------------------------------------------
 
+// A finding may have several categories: stored together in risk_category as "HARBOURAGE,CRACKS"
+// (a category typed under "Other" is stored as its text, e.g. "HARBOURAGE,Damaged wood").
 const RISK_CATEGORIES = [
   { code: "HARBOURAGE", label: "Rodent harbourage", chainStep: "SHELTER" },
+  // Where cockroaches hide and breed.
+  { code: "CRACKS", label: "Cracks & crevices", chainStep: "SHELTER" },
   { code: "BURROWS", label: "Burrows", chainStep: "BURROWS" },
   { code: "ENTRY_POINT", label: "Entry point", chainStep: "ENTRY" },
   { code: "FOOD_SOURCE", label: "Food source", chainStep: null },
@@ -249,8 +253,14 @@ async function computeReadiness(db, audit, { excludeNotStartedAreas = false } = 
 // stored as an OBSERVATION note whose file name carries ".all3." (no database change needed).
 const isCombinedVoice = (objectKey) => /\.all3\.[a-z0-9]+$/i.test(objectKey || "");
 
+/** "HARBOURAGE,CRACKS,Damaged wood" -> ["HARBOURAGE", "CRACKS", "Damaged wood"]. */
+const splitCategories = (value) => String(value || "").split(",").map((c) => c.trim()).filter(Boolean);
+/** Names for the report and lists: "Rodent harbourage, Cracks & crevices, Damaged wood". */
+const categoryLabels = (value) =>
+  splitCategories(value).map((c) => RISK_CATEGORIES.find((x) => x.code === c)?.label || c).join(", ");
+
 module.exports = {
-  isCombinedVoice,
+  isCombinedVoice, splitCategories, categoryLabels,
   RISK_CATEGORIES, AUDIT_TYPES, TARGET_PESTS, LANGUAGES, REQUIRE_PHOTO, EDITABLE_STATUSES, AUDIT_SELECT,
   HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition,
   loadAudit, assertEditable, logHistory, noteHandover, touchAudit, loadRiskLevels,

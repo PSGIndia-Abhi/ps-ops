@@ -51,3 +51,15 @@ export function todayIso() {
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+// Risk categories: a finding can have several, stored together ("HARBOURAGE,CRACKS,Damaged wood").
+export const CATEGORY_LABEL = {
+  HARBOURAGE: "Rodent harbourage",
+  CRACKS: "Cracks & crevices",
+  BURROWS: "Burrows",
+  ENTRY_POINT: "Entry point",
+  FOOD_SOURCE: "Food source",
+  WATER: "Water stagnation",
+};
+export const categoryNames = (value) =>
+  String(value || "").split(",").map((c) => c.trim()).filter(Boolean).map((c) => CATEGORY_LABEL[c] || c).join(", ");

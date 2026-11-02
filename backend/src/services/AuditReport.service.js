@@ -5,7 +5,7 @@ const { v4: uuid } = require("uuid");
 const sharp = require("sharp");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
-const { AUDIT_SELECT, RISK_CATEGORIES, loadRiskLevels } = require("../utils/audits");
+const { AUDIT_SELECT, categoryLabels, loadRiskLevels } = require("../utils/audits");
 const { loadAuditTree } = require("../utils/auditTree");
 const { renderAuditReportPdf } = require("../utils/auditReportPdf");
 
@@ -19,7 +19,6 @@ const { renderAuditReportPdf } = require("../utils/auditReportPdf");
 
 const TEMPLATE_VERSION = "B1";
 const MAX_ATTEMPTS = 3;
-const PHOTOS_PER_FINDING = 8;
 
 const AUDIT_TYPE_LABEL = {
   PRE_SALE: "Pre-sale audit", COMPLAINT: "Complaint audit", ROUTINE: "Routine audit", OTHER: "Other",
@@ -46,7 +45,6 @@ async function buildSnapshot(audit, version) {
   const levels = (await loadRiskLevels(pool)).map((l) => ({
     code: l.code, label: l.label, color: l.color_hex, bucket: l.timeline_bucket, defaultDays: l.default_days,
   }));
-  const categoryLabel = (code) => RISK_CATEGORIES.find((c) => c.code === code)?.label || code;
 
   const findings = [];
   for (const area of tree.areas) {
@@ -60,7 +58,8 @@ async function buildSnapshot(audit, version) {
         where: area.zoneName ? `${area.areaName} — ${area.zoneName}` : area.areaName,
         title: f.title,
         categoryCode: f.riskCategory,
-        category: categoryLabel(f.riskCategory),
+        // Several categories are listed together: "Rodent harbourage, Cracks & crevices".
+        category: categoryLabels(f.riskCategory),
         riskType: f.riskTypeText,
         riskLevel: f.riskLevel,
         days: f.actionWithinDays,
@@ -69,7 +68,8 @@ async function buildSnapshot(audit, version) {
         customerAction: f.customerActionText,
         bestserveAction: f.bestserveActionText,
         noPhotoReason: f.noPhotoReason,
-        photoIds: f.photos.filter((p) => p.includeInReport !== false).slice(0, PHOTOS_PER_FINDING).map((p) => p.id),
+        // Every photo the supervisor added: 2 on the finding page, the rest on "more photos" pages.
+        photoIds: f.photos.filter((p) => p.includeInReport !== false).map((p) => p.id),
       });
     }
   }
@@ -104,8 +104,18 @@ async function buildSnapshot(audit, version) {
   };
 }
 
+/**
+ * Which photos the PDF needs. The cover and the 2 big photos on each finding page get the full copy;
+ * the rest (6 to a "more photos" page) get a smaller one, so a report with many photos stays small.
+ */
+function reportPhotoIds(snap) {
+  const big = new Set([snap.coverPhotoId, ...snap.findings.flatMap((f) => f.photoIds.slice(0, 2))].filter(Boolean));
+  const all = [...new Set([...big, ...snap.findings.flatMap((f) => f.photoIds)])];
+  return { ids: all, small: new Set(all.filter((id) => !big.has(id))) };
+}
+
 /** Photo bytes for the PDF, shrunk to JPEG so a 30-finding report stays small. Missing photos are skipped. */
-async function loadImages(auditId, ids) {
+async function loadImages(auditId, ids, small = new Set()) {
   if (!ids.length) return {};
   const [rows] = await pool.query(
     "SELECT id, object_key FROM audit_finding_photos WHERE audit_id = ? AND id IN (?)",
@@ -118,9 +128,11 @@ async function loadImages(auditId, ids) {
       const chunks = [];
       for await (const c of stream) chunks.push(c);
       const raw = Buffer.concat(chunks);
-      out[r.id] = await sharp(raw).rotate().resize({ width: 1400, height: 1400, fit: "inside" }).jpeg({ quality: 72 }).toBuffer();
+      // "More photos" pages show 6 small photos a page: a smaller copy looks the same and keeps the PDF light.
+      const [size, quality] = small.has(r.id) ? [900, 65] : [1400, 72];
+      out[r.id] = await sharp(raw).rotate().resize({ width: size, height: size, fit: "inside" }).jpeg({ quality }).toBuffer();
       // Soft blurred copy: fills the frame behind portrait / odd-shaped photos instead of a hard crop.
-      out[`${r.id}#blur`] = await sharp(raw).rotate().resize({ width: 480, height: 480, fit: "inside" })
+      out[`${r.id}#blur`] = await sharp(raw).rotate().resize({ width: small.has(r.id) ? 320 : 480, height: small.has(r.id) ? 320 : 480, fit: "inside" })
         .blur(14).modulate({ brightness: 0.8 }).jpeg({ quality: 60 }).toBuffer();
     } catch (err) {
       console.error("Audit report photo skipped", r.id, err.message);
@@ -166,8 +178,8 @@ async function generate(reportId) {
     const [[audit]] = await pool.query(`${AUDIT_SELECT} WHERE a.id = ?`, [report.audit_id]);
     if (!audit) throw new Error("Audit not found");
     const snap = await buildSnapshot(audit, report.version);
-    const ids = [...new Set([snap.coverPhotoId, ...snap.findings.flatMap((f) => f.photoIds)].filter(Boolean))];
-    const images = await loadImages(audit.id, ids);
+    const { ids, small } = reportPhotoIds(snap);
+    const images = await loadImages(audit.id, ids, small);
     await addCoverBackdrop(snap, images);
 
     const { buffer, pageCount } = await renderAuditReportPdf(snap, images);
@@ -200,8 +212,8 @@ async function renderPreview(auditId) {
   if (!audit) throw new Error("Audit not found");
   const snap = await buildSnapshot(audit, 0);
   snap.draft = true;
-  const ids = [...new Set([snap.coverPhotoId, ...snap.findings.flatMap((f) => f.photoIds)].filter(Boolean))];
-  const images = await loadImages(audit.id, ids);
+  const { ids, small } = reportPhotoIds(snap);
+  const images = await loadImages(audit.id, ids, small);
   await addCoverBackdrop(snap, images);
   const { buffer } = await renderAuditReportPdf(snap, images);
   return { buffer, auditNumber: audit.audit_number };

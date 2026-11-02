@@ -14,7 +14,20 @@ const FIELD_LABEL = {
   findings: "At least one finding",
 };
 
-const KNOWN_CATEGORIES = ["HARBOURAGE", "BURROWS", "ENTRY_POINT", "FOOD_SOURCE", "WATER", "OTHER"];
+const KNOWN_CATEGORIES = ["HARBOURAGE", "CRACKS", "BURROWS", "ENTRY_POINT", "FOOD_SOURCE", "WATER", "OTHER"];
+// A finding can have several categories (the same as the mobile app). In the form they are kept as
+// "HARBOURAGE,CRACKS,OTHER" (OTHER = the typed one); the server stores "HARBOURAGE,CRACKS,Damaged wood".
+const catList = (value) => String(value || "").split(",").map((c) => c.trim()).filter(Boolean);
+function splitCategories(value) {
+  const codes = catList(value).filter((c) => KNOWN_CATEGORIES.includes(c) && c !== "OTHER");
+  const other = catList(value).find((c) => !KNOWN_CATEGORIES.includes(c)) || "";
+  return { riskCategory: [...codes, ...(other ? ["OTHER"] : [])].join(","), categoryOther: other };
+}
+function categoriesToSave(f) {
+  const list = catList(f.riskCategory).filter((c) => c !== "OTHER");
+  if (catList(f.riskCategory).includes("OTHER") && f.categoryOther?.trim()) list.push(f.categoryOther.trim().replace(/,/g, " "));
+  return list.join(",");
+}
 
 // Target pests of the area (the same as the mobile app): saved in the area's zone box as text,
 // e.g. "Cockroaches, Rodents, Lizards". Known pests are chips; anything else is typed under "Other".
@@ -31,7 +44,7 @@ function splitPests(text) {
 
 function blankFinding(defaultLevel = "MEDIUM") {
   return {
-    id: newId(), isNew: true, title: "", riskCategory: "HARBOURAGE", riskTypeText: "", riskLevel: defaultLevel,
+    id: newId(), isNew: true, title: "", riskCategory: "", riskTypeText: "", riskLevel: defaultLevel,
     actionWithinDays: "", observationText: "", customerActionText: "", bestserveActionText: "", noPhotoReason: "",
   };
 }
@@ -50,7 +63,7 @@ export default function AreaEditorModal({ audit, area, lookups, onClose, onSaved
       ? area.findings.map((f) => ({
         ...f, actionWithinDays: f.actionWithinDays ?? "", riskTypeText: f.riskTypeText || "", noPhotoReason: f.noPhotoReason || "",
         // A category typed under "Other" comes back as its text: show it as Other + the text.
-        ...(KNOWN_CATEGORIES.includes(f.riskCategory) ? {} : { riskCategory: "OTHER", categoryOther: f.riskCategory }),
+        ...splitCategories(f.riskCategory),
       }))
       : [blankFinding()]);
   const [removed, setRemoved] = useState([]);
@@ -93,8 +106,11 @@ export default function AreaEditorModal({ audit, area, lookups, onClose, onSaved
     setError("");
     setMissing([]);
     if (!form.areaName.trim()) return setError("Enter the area name");
-    const noOther = findings.findIndex((f) => f.riskCategory === "OTHER" && !f.categoryOther?.trim());
+    const noOther = findings.findIndex((f) => catList(f.riskCategory).includes("OTHER") && !f.categoryOther?.trim());
     if (noOther >= 0) return setError(`Finding ${noOther + 1}: type the risk category (Other)`);
+    // A draft may have no category yet (the same as the mobile app); completing the area needs one.
+    const noCategory = markCompleted ? findings.findIndex((f) => !categoriesToSave(f)) : -1;
+    if (noCategory >= 0) return setError(`Finding ${noCategory + 1}: choose at least one risk category`);
     setSaving(true);
     try {
       let current = form.rowVersion;
@@ -182,7 +198,7 @@ export default function AreaEditorModal({ audit, area, lookups, onClose, onSaved
           rowVersion: versions[f.id] ?? (f.isNew ? undefined : f.rowVersion),
           title: f.title,
           // "Other" is saved as the typed text (the same as the mobile app).
-          riskCategory: f.riskCategory === "OTHER" && f.categoryOther?.trim() ? f.categoryOther.trim() : f.riskCategory,
+          riskCategory: categoriesToSave(f),
           riskTypeText: f.riskTypeText,
           riskLevel: f.riskLevel,
           actionWithinDays: f.actionWithinDays === "" ? undefined : Number(f.actionWithinDays),
@@ -271,11 +287,22 @@ export default function AreaEditorModal({ audit, area, lookups, onClose, onSaved
                 </div>
               </div>
               <div className="au-field">
-                <label>Risk category *</label>
-                <select className="au-input" value={f.riskCategory} onChange={(e) => setF(i, "riskCategory", e.target.value)}>
-                  {categories.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-                </select>
-                {f.riskCategory === "OTHER" && (
+                <label>Risk category * <span className="au-muted">(one or more)</span></label>
+                <div className="au-chips">
+                  {categories.map((c) => {
+                    const on = catList(f.riskCategory).includes(c.code);
+                    const toggle = () => {
+                      const list = catList(f.riskCategory);
+                      setF(i, "riskCategory", (on ? list.filter((x) => x !== c.code) : [...list, c.code]).join(","));
+                    };
+                    return (
+                      <button type="button" key={c.code} className={`au-chip ${on ? "active" : ""}`} onClick={toggle}>
+                        {c.code === "OTHER" ? (on ? "Other ✓" : "＋ Other") : on ? `${c.label} ✓` : c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {catList(f.riskCategory).includes("OTHER") && (
                   <input className="au-input au-mt8" value={f.categoryOther || ""} maxLength={50} placeholder="Type the risk category, e.g. Drain blockage"
                     onChange={(e) => setF(i, "categoryOther", e.target.value)} />
                 )}

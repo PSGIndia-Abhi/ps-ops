@@ -92,3 +92,37 @@ export function describeMissing(m: string): string {
   if (match) return `Finding ${Number(match[1]) + 1}: ${FIELD_LABEL[match[2]] || match[2]}`;
   return FIELD_LABEL[m] || m;
 }
+
+// ---- risk categories ---------------------------------------------------------
+
+// Category codes the backend knows; anything else is a category typed under "Other".
+export const KNOWN_CATEGORIES = ['HARBOURAGE', 'CRACKS', 'BURROWS', 'ENTRY_POINT', 'FOOD_SOURCE', 'WATER', 'OTHER'];
+// A finding can have several categories. In the form they are kept together as "HARBOURAGE,CRACKS,OTHER"
+// (OTHER = the typed one); on the server as "HARBOURAGE,CRACKS,Damaged wood".
+export const catList = (value: string) => value.split(',').map(c => c.trim()).filter(Boolean);
+/** Saved / heard categories -> chips (codes, OTHER for a typed one) and the typed text. */
+export function splitCategories(value: string, labels: { code: string; label: string }[] = []) {
+  const codes: string[] = [];
+  let other = '';
+  catList(value).forEach(c => {
+    const code = labels.find(x => x.label.toLowerCase() === c.toLowerCase())?.code || c.toUpperCase().replace(/\s+/g, '_');
+    if (KNOWN_CATEGORIES.includes(code) && code !== 'OTHER') { if (!codes.includes(code)) codes.push(code); } else if (!other) other = c;
+  });
+  return { riskCategory: [...codes, ...(other ? ['OTHER'] : [])].join(','), categoryOther: other };
+}
+/** What the server stores: the chosen codes and the typed "Other" text. */
+export function categoriesToSave(x: { riskCategory: string; categoryOther: string }) {
+  const list = catList(x.riskCategory).filter(c => c !== 'OTHER');
+  if (catList(x.riskCategory).includes('OTHER') && x.categoryOther.trim()) list.push(x.categoryOther.trim().replace(/,/g, ' '));
+  return list.join(',');
+}
+/** Names for showing: "Rodent harbourage, Cracks & crevices, Damaged wood". */
+export const CATEGORY_LABEL: Record<string, string> = {
+  HARBOURAGE: 'Rodent harbourage',
+  CRACKS: 'Cracks & crevices',
+  BURROWS: 'Burrows',
+  ENTRY_POINT: 'Entry point',
+  FOOD_SOURCE: 'Food source',
+  WATER: 'Water stagnation',
+};
+export const categoryNames = (value: string) => catList(value).map(c => CATEGORY_LABEL[c] || titleCase(c)).join(', ');

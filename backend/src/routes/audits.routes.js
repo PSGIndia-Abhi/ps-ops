@@ -9,7 +9,7 @@ const multer = require("multer");
 const sharp = require("sharp");
 const minioClient = require("../lib/minio");
 const {
-  isConfigured: isVoiceConfigured, transcribeWalkthrough, VoiceBusyError, VoiceNoSpeechError, VoiceQuotaError, VoiceConfigError,
+  isConfigured: isVoiceConfigured, transcribeWalkthrough, userMessage, VoiceBusyError, VoiceNoSpeechError, VoiceQuotaError, VoiceConfigError,
 } = require("../services/AuditVoice.service");
 const { translateNow } = require("../jobs/auditQueue.cron");
 const { queueReport, generateNow, renderPreview } = require("../services/AuditReport.service");
@@ -18,6 +18,7 @@ const {
   HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition,
   loadAudit, assertEditable, logHistory, noteHandover, touchAudit, loadRiskLevels,
   nextAuditNumber, renumberFindings, recomputeOverallRisk, findingMissing, computeReadiness, isCombinedVoice,
+  splitCategories, categoryLabels,
 } = require("../utils/audits");
 const { shapeFinding, shapeArea, FINDING_SELECT, AREA_SELECT, loadAuditTree } = require("../utils/auditTree");
 const { parseMarks, renderMarked, isMarked, markVersion, originalKey, marksKey } = require("../utils/photoMarks");
@@ -642,12 +643,24 @@ router.put("/:id/areas/:areaId", ...can(PERMISSIONS.UPDATE_AUDIT), async (req, r
         if (!isUuid(fIn.id)) throw new HttpError(400, "VALIDATION", `${label}.id must be a UUID made on the device`);
         const riskLevel = String(fIn.riskLevel || "").toUpperCase();
         if (!levelMap[riskLevel]) throw new HttpError(400, "VALIDATION", `${label}: choose a risk level`);
-        // A known category is stored as its code; an "Other" category as the text typed for it.
-        const rawCategory = String(fIn.riskCategory || "").trim();
-        const riskCategory = categories.includes(rawCategory.toUpperCase()) ? rawCategory.toUpperCase() : rawCategory;
-        if (!categories.includes(riskCategory) && !CUSTOM_TEXT_RE.test(riskCategory)) {
-          throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
+        // One or more categories ("HARBOURAGE,CRACKS"). A known category is stored as its code;
+        // an "Other" category as the text typed for it (at most one typed category).
+        const picked = [];
+        let typed = 0;
+        for (const raw of splitCategories(fIn.riskCategory)) {
+          const code = raw.toUpperCase();
+          if (categories.includes(code) && code !== "OTHER") {
+            if (!picked.includes(code)) picked.push(code);
+          } else if (CUSTOM_TEXT_RE.test(raw) && !typed++) {
+            picked.push(raw);
+          } else {
+            throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
+          }
         }
+        // A draft (photos added before the recording) may have no category yet; completing the area needs one.
+        if (!picked.length && markCompleted) throw new HttpError(400, "VALIDATION", `${label}: choose a risk category, or describe it under Other`);
+        const riskCategory = picked.join(",");
+        if (riskCategory.length > 255) throw new HttpError(400, "VALIDATION", `${label}: too many risk categories`);
         let days = levelMap[riskLevel].default_days;
         if (fIn.actionWithinDays !== undefined && fIn.actionWithinDays !== null && fIn.actionWithinDays !== "") {
           days = Number(fIn.actionWithinDays);
@@ -657,9 +670,7 @@ router.put("/:id/areas/:areaId", ...can(PERMISSIONS.UPDATE_AUDIT), async (req, r
         }
         const values = {
           // Optional: when left blank, the risk category ("Burrows", or the typed one) is used as the title.
-          title: text(fIn.title, "finding title", 250)
-            || RISK_CATEGORIES.find((c) => c.code === riskCategory)?.label
-            || riskCategory,
+          title: text(fIn.title, "finding title", 250) || categoryLabels(riskCategory).slice(0, 250),
           risk_category: riskCategory,
           risk_type_text: text(fIn.riskTypeText, "risk type", 250),
           risk_level: riskLevel,
@@ -1236,10 +1247,13 @@ router.post("/:id/walkthrough", ...can(PERMISSIONS.UPDATE_AUDIT), receiveFile, a
     try {
       result = await transcribeWalkthrough({ objectKey, mimeType: mime, sourceLanguage });
     } catch (err) {
+      // The supervisor gets a short message; Google's own error goes to the server log only.
       if (err instanceof VoiceNoSpeechError) throw new HttpError(422, "NO_SPEECH", "No clear areas were heard in this recording. Record again, speaking area by area.");
-      if (err instanceof VoiceQuotaError) throw new HttpError(429, "QUOTA", err.message);
-      if (err instanceof VoiceBusyError || err instanceof VoiceConfigError) throw new HttpError(503, "BUSY", "Translation is busy or slow right now. Tap Try again.");
-      throw new HttpError(502, "TRANSLATE_FAILED", err.message || "Could not read the recording");
+      console.error("Audit walkthrough translation failed", req.params.id, err.message);
+      if (err instanceof VoiceQuotaError) throw new HttpError(429, "QUOTA", userMessage(err));
+      if (err instanceof VoiceConfigError) throw new HttpError(503, "UNAVAILABLE", userMessage(err));
+      if (err instanceof VoiceBusyError) throw new HttpError(503, "BUSY", userMessage(err));
+      throw new HttpError(502, "TRANSLATE_FAILED", userMessage(err));
     }
     res.json({ areas: result.areas, detectedLanguage: result.detectedLanguage, recordingKey: objectKey });
   } catch (err) {
