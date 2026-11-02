@@ -551,6 +551,15 @@ function isDesk(req) {
   return hasAnyPerm(req, DESK_PERMISSIONS);
 }
 
+// SQL: the user in `column` is a desk user (admin, manager, service coordinator...). A collector
+// also sees the calls those users took (to read them; working on them stays with that user).
+const deskUserSql = (column) => `EXISTS (
+    SELECT 1 FROM users du JOIN roles dr ON dr.id = du.role_id
+    WHERE du.id = ${column}
+      AND (dr.name = 'admin' OR EXISTS (
+            SELECT 1 FROM role_permissions drp JOIN permissions dp ON dp.id = drp.permission_id
+            WHERE drp.role_id = du.role_id AND dp.name IN (${DESK_PERMISSIONS.map((p) => `'${p}'`).join(", ")}))))`;
+
 /* ------------------------------------------------------------ monthly calls */
 
 // The services the feedback is about: every visit assigned to the customer (any status except
@@ -599,7 +608,7 @@ function callListPeriod(query) {
 
 // GET /calls: every site that had a completed visit in the month, one row per site and month,
 // with its call status (TO_CALL until someone works on it). A collector without a desk
-// permission sees sites nobody has taken yet plus their own.
+// permission sees sites nobody has taken yet, their own, and calls taken by desk users.
 // Query: month (2026-10; "all" = every month, newest first; none = this month), or from / to
 //        (2026-09-01 .. 2026-09-15: services completed between those dates, rows still per month),
 //        status (comma list, OPEN = not DONE), q (customer / site), company_id, mine=1, page, page_size.
@@ -610,7 +619,7 @@ async function callList(req) {
   const outer = [];
   const outerParams = [];
   if (!isDesk(req)) {
-    outer.push("(x.collector_user_id IS NULL OR x.collector_user_id = ?)");
+    outer.push(`(x.collector_user_id IS NULL OR x.collector_user_id = ? OR ${deskUserSql("x.collector_user_id")})`);
     outerParams.push(req.user.id);
   }
   if (query.mine === "1" || query.mine === "true") {
@@ -790,7 +799,10 @@ async function getCall(req, id) {
     [id]
   );
   if (!r) throw new HttpError(404, "Feedback call not found");
-  if (!isDesk(req) && Number(r.collector_user_id) !== Number(req.user.id)) throw new HttpError(404, "Feedback call not found");
+  if (!isDesk(req) && Number(r.collector_user_id) !== Number(req.user.id)) {
+    const [[taken]] = await pool.query(`SELECT ${deskUserSql("?")} AS by_desk`, [r.collector_user_id]);
+    if (!r.collector_user_id || !Number(taken.by_desk)) throw new HttpError(404, "Feedback call not found");
+  }
 
   const { start, next } = monthRange(r.month);
   const [contacts] = await pool.query(
@@ -1190,8 +1202,10 @@ async function finishCall(req, requestId, body) {
 /* ------------------------------------------------------------ tickets (issues only) */
 
 // The re-visit booked in Jobs for a ticket: its job, date, status and technicians (the ticket's
-// "technician" and "work done" stages).
+// "technician" and "work done" stages), and the services of its booking (one job per service).
 const REVISIT_FIELDS = `rj.code AS revisit_job_code, rv.status AS revisit_status,
+         (SELECT GROUP_CONCAT(DISTINCT COALESCE(NULLIF(bj.sub_service, ''), bj.service_type) SEPARATOR ', ')
+          FROM jobs bj WHERE bj.booking_id = rj.booking_id) AS revisit_services,
          DATE_FORMAT(COALESCE(rv.completed_at, rv.scheduled_date), '%Y-%m-%d') AS revisit_date, rv.completed_at AS revisit_completed_at,
          (SELECT GROUP_CONCAT(ru.name ORDER BY ru.name SEPARATOR ', ')
           FROM visit_technicians rvt JOIN users ru ON ru.id = rvt.technician_id WHERE rvt.visit_id = rv.id) AS revisit_technicians`;
@@ -1202,7 +1216,7 @@ function revisitOf(t) {
   if (!t.revisit_visit_id) return null;
   return {
     id: t.revisit_visit_id, job_code: t.revisit_job_code, status: t.revisit_status, date: t.revisit_date,
-    completed_at: t.revisit_completed_at, technicians: t.revisit_technicians,
+    completed_at: t.revisit_completed_at, technicians: t.revisit_technicians, services: t.revisit_services,
   };
 }
 
@@ -1357,7 +1371,7 @@ async function getTicket(req, id) {
 /* ------------------------------------------------------------ labels */
 
 // No bell / phone notifications: the Feedback Desk sidebar shows counts instead (GET /badges).
-const ACTION_LABELS = { RESOLVED_ON_CALL: "Resolved on call", SCHEDULE_REVISIT: "Schedule re-visit", ESCALATE_OPERATIONS: "Escalate to Operations", OTHER: "Other" };
+const ACTION_LABELS = { RESOLVED_ON_CALL: "Resolved on call", SCHEDULE_REVISIT: "Book a re-visit", ESCALATE_OPERATIONS: "Escalate to Operations", OTHER: "Other" };
 const PRIORITY_LABELS = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" };
 
 /* ------------------------------------------------------------ WhatsApp click-to-send (B6) */
@@ -1725,7 +1739,11 @@ async function updateTicket(req, id, body) {
     const finalAction = set.action ?? t.action;
     const finalNote = has("action_note") ? set.action_note : t.action_note;
     if (finalAction === "OTHER" && !finalNote) throw new HttpError(400, "Describe what will be done for Other (in the note)");
-
+    // Choosing "Book a re-visit" (or removing its visit) needs the re-visit visit linked.
+    const finalRevisit = has("revisit_visit_id") ? set.revisit_visit_id : t.revisit_visit_id;
+    if (finalAction === "SCHEDULE_REVISIT" && !finalRevisit && (set.action || has("revisit_visit_id"))) {
+      throw new HttpError(400, "Book the re-visit first - \"Book a re-visit\" needs the visit booked");
+    }
     const keys = Object.keys(set);
     await conn.query(
       `UPDATE feedback_tickets SET ${keys.map((k) => `${k} = ?`).join(", ")}, row_version = row_version + 1 WHERE id = ?`,

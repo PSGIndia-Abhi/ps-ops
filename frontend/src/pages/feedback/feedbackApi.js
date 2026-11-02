@@ -134,15 +134,15 @@ export const PRIORITY = {
 export const PRIORITIES = ["HIGH", "MEDIUM", "LOW"];
 export const ACTIONS = {
   RESOLVED_ON_CALL: { label: "Resolved on the call", hint: "You sorted it out on the phone. The ticket closes immediately." },
-  // Older tickets only: it meant the same as escalating to operations, so it reads the same.
-  SCHEDULE_REVISIT: { label: "Escalate to operations", hint: "Needs a manager to look into it." },
+  SCHEDULE_REVISIT: { label: "Book a re-visit", hint: "A technician goes back. The visit is booked on the ticket." },
+  // Older tickets only (no longer offered on a ticket).
   ESCALATE_OPERATIONS: { label: "Escalate to operations", hint: "Needs a manager to look into it." },
   OTHER: { label: "Other", hint: "Something else - type what will be done." },
 };
 
-// Actions offered now (SCHEDULE_REVISIT is shown on older tickets only).
+// Actions offered now. On a ticket, "Book a re-visit" needs the visit booked from the ticket page.
 export const RAISE_ACTIONS = ["RESOLVED_ON_CALL", "ESCALATE_OPERATIONS", "OTHER"];
-export const TICKET_ACTIONS = ["ESCALATE_OPERATIONS", "OTHER"];
+export const TICKET_ACTIONS = ["SCHEDULE_REVISIT", "OTHER"];
 
 /** "Visits: 1 Nov · Job 2026-871 · Mosquito Fogging; …" (older tickets) as "Services: Mosquito Fogging, …". */
 function servicesLine(line) {
@@ -287,6 +287,12 @@ function historyNote(event, note) {
   if (event === "WHATSAPP_SENT") {
     const m = /^(\w+) to (\w+) \((\d+)\)$/.exec(note);
     if (m) return `${TEMPLATE_NAMES[m[1]] || m[1]} to the ${m[2].toLowerCase()} · ${prettyPhone(m[3])}`;
+  }
+  if (event === "TICKET_RAISED") {
+    // "FB-0001 · MEDIUM · Other: … - <problem text>": the number, priority and next step only
+    // (the problem and the answers are on the ticket itself).
+    const [number, priority, ...rest] = note.split(" - ")[0].split(" · ");
+    return [number, PRIORITY[priority] ? `${PRIORITY[priority].label} priority` : priority, rest.join(" · ")].filter(Boolean).join(" · ");
   }
   return note.replace(/\b(91\d{10})\b/g, (x) => prettyPhone(x));
 }

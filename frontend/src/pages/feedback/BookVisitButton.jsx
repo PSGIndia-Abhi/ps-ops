@@ -3,9 +3,10 @@ import { FiCalendar } from "react-icons/fi";
 import { apiFetch } from "../../api";
 import CreateBookingModal from "../../components/CreateBookingModal";
 
-// "Book a visit" in the Feedback Desk header: opens the same Create Booking form as the admin panel
-// and saves through POST /api/bookings. The backend needs CREATE_BOOKING (bookings) and VIEW_USER
-// (the supervisor / technician lists) for the user's role.
+// "Book a visit" (Feedback Desk header, and a ticket's re-visit): opens the same Create Booking form
+// as the admin panel and saves through POST /api/bookings. The backend needs CREATE_BOOKING (bookings)
+// and VIEW_USER (the supervisor / technician lists) for the user's role. contactId / services fill
+// the form in, siteId limits the contacts to that site; onBooked(jobs) gets the jobs created.
 async function usersByRole(role) {
   const res = await apiFetch(`/api/users?role=${role}`);
   if (!res?.ok) return [];
@@ -13,7 +14,7 @@ async function usersByRole(role) {
   return Array.isArray(data) ? data : [];
 }
 
-export default function BookVisitButton() {
+export default function BookVisitButton({ onBooked, contactId, siteId, services, label = "Book a visit", className = "fb-btn fb-btn-primary fb-book-btn", disabled = false }) {
   const [open, setOpen] = useState(false);
   const [people, setPeople] = useState({ supervisors: [], technicians: [] });
 
@@ -56,13 +57,14 @@ export default function BookVisitButton() {
       // The form shows this in its error popup.
       throw new Error(message);
     }
-    await res.json();
+    const data = await res.json();
+    onBooked?.(data.jobs || []);
   }
 
   return (
     <>
-      <button type="button" className="fb-btn fb-btn-primary fb-book-btn" onClick={() => setOpen(true)}>
-        <FiCalendar aria-hidden="true" /> Book a visit
+      <button type="button" className={className} onClick={() => setOpen(true)} disabled={disabled}>
+        <FiCalendar aria-hidden="true" /> {label}
       </button>
       {open && (
         <CreateBookingModal
@@ -71,6 +73,9 @@ export default function BookVisitButton() {
           onCreate={createBooking}
           supervisors={people.supervisors}
           technicians={people.technicians}
+          initialContactId={contactId}
+          initialSubServices={services}
+          siteId={siteId}
         />
       )}
     </>

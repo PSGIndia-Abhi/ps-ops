@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FiCheck, FiMail } from "react-icons/fi";
+import { FiCheck, FiChevronDown, FiMail } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -13,8 +13,6 @@ import {
   endOfDay,
   formatDate,
   formatDateTime,
-  formatDay,
-  getPeople,
   getRevisitOptions,
   getTicket,
   historyItems,
@@ -32,18 +30,69 @@ import {
 } from "./feedbackApi";
 import useMe from "../../hooks/useMe";
 import { useFeedbackAccess } from "./feedbackContext";
+import BookVisitButton from "./BookVisitButton";
+import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { Card, Chip, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, TicketStatusChip, Timeline } from "./ui";
+
+const SERVICES = [...pestServices, ...deepCleaningServices];
 
 function formFrom(t) {
   return {
     issue_summary: t.issue_summary || "",
     priority: t.priority,
-    action: t.action === "RESOLVED_ON_CALL" || t.action === "SCHEDULE_REVISIT" ? "ESCALATE_OPERATIONS" : t.action,
-    owner: t.action_owner?.id ? String(t.action_owner.id) : "",
+    action: t.action === "RESOLVED_ON_CALL" ? "ESCALATE_OPERATIONS" : t.action,
     due: t.action_due_at ? toLocalInput(t.action_due_at).slice(0, 10) : "",
-    revisit: t.revisit_visit_id || "",
     note: t.action_note || "",
   };
+}
+
+/** The linked re-visit: "Mosquito Fogging, Ant Treatment · Job 2026-871 · Ravi · Scheduled". */
+function revisitText(v) {
+  const status = v.status ? v.status.charAt(0) + v.status.slice(1).toLowerCase().replace(/_/g, " ") : "";
+  return [v.services, `Job ${v.job_code}`, v.technicians || "no technician assigned yet", status].filter(Boolean).join(" · ");
+}
+
+/** Services to re-visit: a dropdown of checkboxes (more than one can be ticked). */
+function ServicePicker({ picked, onChange }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef(null);
+  const toggle = (s) => onChange(picked.includes(s) ? picked.filter((x) => x !== s) : [...picked, s]);
+
+  // close the list on a click outside it or Escape
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div className="fb-svc-pick" ref={ref}>
+      <button type="button" className="fb-select fb-svc-toggle" aria-haspopup="listbox" aria-expanded={menuOpen} aria-labelledby="fb-t-svc-label" onClick={() => setMenuOpen((o) => !o)}>
+        <span>{picked.length ? picked.join(", ") : "Choose services"}</span>
+        <FiChevronDown aria-hidden="true" />
+      </button>
+      {menuOpen && (
+        <div className="fb-svc-menu" role="listbox" aria-multiselectable="true" aria-labelledby="fb-t-svc-label">
+          {SERVICES.map((s) => (
+            <label key={s} className={`fb-svc-opt ${picked.includes(s) ? "is-on" : ""}`}>
+              <input type="checkbox" checked={picked.includes(s)} onChange={() => toggle(s)} />
+              <span>{s}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function TicketPage() {
@@ -53,8 +102,8 @@ export default function TicketPage() {
 
   const [ticket, setTicket] = useState(null);
   const [form, setForm] = useState(null);
-  const [collectors, setCollectors] = useState([]);
-  const [visits, setVisits] = useState([]);
+  const [services, setServices] = useState([]); // ticked for the re-visit booking
+  const [revisitError, setRevisitError] = useState(""); // shown under the Book a visit button
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -78,21 +127,16 @@ export default function TicketPage() {
 
   useEffect(() => {
     load();
-    getPeople()
-      .then((p) => setCollectors(p.collectors))
-      .catch(() => {});
     getEmailTemplates()
       .then((d) => setEmailTemplates(d.templates))
       .catch(() => {});
   }, [load]);
 
-  const ticketId = ticket?.id;
+  // Start with the ticket's own service ticked, when it is one that can be booked.
+  const ticketService = ticket?.service_label;
   useEffect(() => {
-    if (!ticketId) return;
-    getRevisitOptions(ticketId)
-      .then((d) => setVisits(d.visits))
-      .catch(() => {});
-  }, [ticketId]);
+    if (ticketService && SERVICES.includes(ticketService)) setServices([ticketService]);
+  }, [ticketService]);
 
   if (!ticket || !form) return error ? <ErrorBox error={error} onRetry={load} /> : <Loading />;
 
@@ -108,13 +152,34 @@ export default function TicketPage() {
     if (form.issue_summary.trim() !== before.issue_summary.trim()) body.issue_summary = form.issue_summary.trim() || null;
     if (form.priority !== ticket.priority) body.priority = form.priority;
     if (form.action !== before.action) body.action = form.action;
-    if (form.owner !== before.owner) body.action_owner_user_id = form.owner ? Number(form.owner) : null;
     if (form.due !== before.due) body.action_due_at = endOfDay(form.due);
-    if (form.revisit !== before.revisit) body.revisit_visit_id = form.revisit || null;
     if (form.note.trim() !== before.note.trim()) body.action_note = form.note.trim() || null;
     return body;
   }
   const dirty = Object.keys(changes()).length > 0;
+  // "Book a re-visit" needs the visit booked (booking it links it and saves the step).
+  const revisitMissing = form.action === "SCHEDULE_REVISIT" && !ticket.revisit_visit_id;
+
+  // A visit was just booked from this ticket: link its first visit at the ticket's site as the
+  // re-visit. Unsaved edits in the form stay as they are.
+  async function linkBooking(jobs) {
+    const jobIds = new Set(jobs.map((j) => String(j.id)));
+    setRevisitError("");
+    try {
+      const { visits } = await getRevisitOptions(ticket.id);
+      const visit = visits.find((v) => jobIds.has(String(v.job_id)));
+      if (!visit) {
+        setRevisitError(`That visit was booked for another site, not ${ticket.site.name}, so it isn't linked. Book it again with a ${ticket.site.name} contact.`);
+        return;
+      }
+      const fresh = await getTicket(ticket.id);
+      setTicket(await updateTicket(ticket.id, { row_version: fresh.row_version, action: "SCHEDULE_REVISIT", revisit_visit_id: visit.id }));
+      setForm((f) => ({ ...f, action: "SCHEDULE_REVISIT" }));
+      setNotice(`Re-visit booked and linked: Job ${visit.job_code}.`);
+    } catch (err) {
+      setRevisitError(`The visit was booked but couldn't be linked: ${err.message}`);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -260,91 +325,112 @@ export default function TicketPage() {
           </Card>
 
           <Card title="Action" aside={editable ? null : open ? "Only the desk managers can change this" : "Reopen the ticket to change it"}>
-            <div className="fb-stack" style={{ gap: 14 }}>
-              <div className="fb-form-grid">
-                <label className="fb-field" htmlFor="fb-t-priority">
-                  Priority
-                  <select id="fb-t-priority" className="fb-select" value={form.priority} onChange={set("priority")} disabled={!editable}>
-                    {PRIORITIES.map((p) => (
-                      <option key={p} value={p}>
-                        {PRIORITY[p].label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="fb-field" htmlFor="fb-t-action">
-                  Next step
-                  <select id="fb-t-action" className="fb-select" value={editable ? form.action : ticket.action} onChange={set("action")} disabled={!editable}>
-                    {(editable ? TICKET_ACTIONS : [ticket.action]).map((a) => (
-                      <option key={a} value={a}>
-                        {ACTIONS[a].label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="fb-field" htmlFor="fb-t-owner">
-                  Assign to
-                  <select id="fb-t-owner" className="fb-select" value={form.owner} onChange={set("owner")} disabled={!editable}>
-                    <option value="">Not assigned</option>
-                    {ticket.action_owner && !collectors.some((u) => u.id === ticket.action_owner.id) && <option value={ticket.action_owner.id}>{ticket.action_owner.name}</option>}
-                    {collectors.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} · feedback collector
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="fb-field" htmlFor="fb-t-due">
-                  Due by {late && <span className="fb-danger-text">· overdue</span>}
-                  <input id="fb-t-due" type="date" className="fb-input" value={form.due} onChange={set("due")} disabled={!editable} />
-                </label>
-              </div>
-              <label className="fb-field" htmlFor="fb-t-revisit">
-                Technician re-visit
-                <span className="fb-field-hint">Book a re-visit with a technician in Jobs, then pick it here. The ticket shows "Work done" when that visit is completed.</span>
-                <select id="fb-t-revisit" className="fb-select" value={form.revisit} onChange={set("revisit")} disabled={!editable}>
-                  <option value="">Not linked</option>
-                  {visits.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {formatDay(v.date)} · Job {v.job_code} · {v.service} · {v.status.toLowerCase().replace(/_/g, " ")}
-                      {v.technicians ? ` · ${v.technicians}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {ticket.revisit && form.revisit === ticket.revisit.id && (
-                  <span className="fb-field-hint">
-                    Job {ticket.revisit.job_code} · {ticket.revisit.technicians || "no technician assigned yet"} ·{" "}
-                    {ticket.revisit.status === "COMPLETED" ? `completed ${formatDateTime(ticket.revisit.completed_at)}` : `${ticket.revisit.status.toLowerCase().replace(/_/g, " ")} for ${formatDay(ticket.revisit.date)}`}
-                  </span>
+            {editable ? (
+              <div className="fb-stack" style={{ gap: 14 }}>
+                <div className="fb-form-grid">
+                  <label className="fb-field" htmlFor="fb-t-priority">
+                    Priority
+                    <select id="fb-t-priority" className="fb-select" value={form.priority} onChange={set("priority")}>
+                      {PRIORITIES.map((p) => (
+                        <option key={p} value={p}>
+                          {PRIORITY[p].label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="fb-field" htmlFor="fb-t-action">
+                    Next step
+                    <select id="fb-t-action" className="fb-select" value={form.action} onChange={set("action")}>
+                      {(TICKET_ACTIONS.includes(ticket.action) ? TICKET_ACTIONS : [ticket.action, ...TICKET_ACTIONS]).map((a) => (
+                        <option key={a} value={a}>
+                          {ACTIONS[a].label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="fb-field" htmlFor="fb-t-due">
+                    Due by {late && <span className="fb-danger-text">· overdue</span>}
+                    <input id="fb-t-due" type="date" className="fb-input" value={form.due} onChange={set("due")} />
+                  </label>
+                </div>
+                {form.action === "OTHER" && (
+                  <label className="fb-field" htmlFor="fb-t-note">
+                    <span>
+                      What will be done? <span className="fb-req">*</span>
+                    </span>
+                    <textarea id="fb-t-note" className="fb-textarea" rows={3} maxLength={2000} placeholder="Type what will be done" value={form.note} onChange={set("note")} />
+                  </label>
                 )}
-              </label>
-              <label className="fb-field" htmlFor="fb-t-summary">
-                Problem summary
-                <textarea id="fb-t-summary" className="fb-textarea" rows={2} maxLength={500} value={form.issue_summary} onChange={set("issue_summary")} disabled={!editable} />
-              </label>
-              <label className="fb-field" htmlFor="fb-t-note">
-                {(editable ? form.action : ticket.action) === "OTHER" ? (
-                  <span>
-                    What will be done? <span className="fb-req">*</span>
-                  </span>
-                ) : (
-                  "Note"
+                {form.action === "SCHEDULE_REVISIT" && (
+                  <div className="fb-field">
+                    <span id="fb-t-svc-label">
+                      Technician re-visit <span className="fb-req">*</span>
+                    </span>
+                    <span className="fb-field-hint">
+                      {ticket.revisit
+                        ? `Booked: ${revisitText(ticket.revisit)}`
+                        : `Tick the services, then book the visit for ${ticket.site.name}. It is linked to this ticket, which shows "Work done" once the visit is completed.`}
+                    </span>
+                    <ServicePicker picked={services} onChange={setServices} />
+                    {revisitError && <ErrorBox error={revisitError} />}
+                    <div>
+                      <BookVisitButton
+                        onBooked={linkBooking}
+                        contactId={ticket.contacts[0]?.id}
+                        siteId={ticket.site.id}
+                        services={services}
+                        label={ticket.revisit ? "Book another visit" : "Book a visit"}
+                        className={`fb-btn ${ticket.revisit ? "" : "fb-btn-primary"}`}
+                      />
+                    </div>
+                  </div>
                 )}
-                <textarea id="fb-t-note" className="fb-textarea" rows={2} maxLength={2000} value={form.note} onChange={set("note")} disabled={!editable} />
-              </label>
-              {editable && (
+                <label className="fb-field" htmlFor="fb-t-summary">
+                  Problem summary
+                  <textarea id="fb-t-summary" className="fb-textarea" rows={2} maxLength={500} value={form.issue_summary} onChange={set("issue_summary")} />
+                </label>
+                {form.action !== "OTHER" && (
+                  <label className="fb-field" htmlFor="fb-t-note">
+                    Note
+                    <textarea id="fb-t-note" className="fb-textarea" rows={2} maxLength={2000} value={form.note} onChange={set("note")} />
+                  </label>
+                )}
                 <div className="fb-row" style={{ justifyContent: "flex-end" }}>
                   {dirty && (
                     <button type="button" className="fb-btn" onClick={() => setForm(formFrom(ticket))} disabled={saving}>
                       Undo changes
                     </button>
                   )}
-                  <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving || !dirty}>
+                  {revisitMissing && dirty && <span className="fb-small fb-muted">Book the re-visit above to save.</span>}
+                  <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving || !dirty || revisitMissing}>
                     {saving ? "Saving…" : "Save changes"}
                   </button>
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              // Read-only: the same details as plain text, so it doesn't look like a form to fill in.
+              <dl className="fb-kv">
+                <dt>Priority</dt>
+                <dd>
+                  <PriorityChip priority={ticket.priority} />
+                </dd>
+                <dt>Next step</dt>
+                <dd>{ACTIONS[ticket.action]?.label || ticket.action}</dd>
+                {ticket.action_note && (
+                  <>
+                    <dt>{ticket.action === "OTHER" ? "What will be done" : "Note"}</dt>
+                    <dd style={{ whiteSpace: "pre-line" }}>{ticket.action_note}</dd>
+                  </>
+                )}
+                <dt>Due by</dt>
+                <dd>
+                  {ticket.action_due_at ? formatDate(ticket.action_due_at) : "No date set"}
+                  {late && <span className="fb-danger-text"> · overdue</span>}
+                </dd>
+                <dt>Technician re-visit</dt>
+                <dd>{ticket.revisit ? revisitText(ticket.revisit) : "Not booked yet"}</dd>
+              </dl>
+            )}
           </Card>
         </div>
 

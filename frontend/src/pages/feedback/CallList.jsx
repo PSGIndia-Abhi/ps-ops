@@ -178,7 +178,7 @@ export default function CallList() {
     <>
       <PageHead
         crumb="Feedback Desk › Dashboard"
-        title={mode === "all" ? "Dashboard" : `Dashboard · ${periodText}`}
+        title="Dashboard"
         sub={
           mode === "all"
             ? "All customers with a service, newest month first. Each site is called once per month. Click a row to see the customer's details."
