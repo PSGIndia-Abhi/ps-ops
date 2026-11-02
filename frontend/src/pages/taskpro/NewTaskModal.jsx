@@ -68,7 +68,7 @@ function repeatText(freq, rec) {
  * Searchable "assign to" picker. With no search text people are grouped by
  * department (you first); typing searches name, designation and department.
  */
-function PersonPicker({ people, value, onChange, viewerId }) {
+export function PersonPicker({ people, value, onChange, viewerId }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef(null);
@@ -178,7 +178,7 @@ function PersonPicker({ people, value, onChange, viewerId }) {
 }
 
 /** One labelled row of the properties panel. */
-function Prop({ icon, label, children, top = false }) {
+export function Prop({ icon, label, children, top = false }) {
   const Icon = icon;
   return (
     <div className={`tp-nt-prop ${top ? "top" : ""}`}>

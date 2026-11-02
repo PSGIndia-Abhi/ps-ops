@@ -5,6 +5,11 @@ import { httpClient } from '../api/httpClient';
 
 export const FEEDBACK_ROLE = 'Managing Director';
 
+/** Marks are given out of this. */
+export const MAX_MARK = 10;
+export const SENTIMENTS = ['Positive', 'Neutral', 'Negative'] as const;
+export type Sentiment = (typeof SENTIMENTS)[number];
+
 export interface FeedbackEntry {
   id: string;
   employee_id: number;
@@ -12,6 +17,9 @@ export interface FeedbackEntry {
   feedback_type: string;
   comments: string;
   rating: number;
+  /** Empty on feedback saved before tones existed. */
+  sentiment: Sentiment | null;
+  reward: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -21,6 +29,8 @@ export interface FeedbackInput {
   feedback_type: string;
   comments: string;
   rating: number;
+  sentiment: Sentiment;
+  reward: string;
 }
 
 /** Newest first; `employeeId` narrows it to one person. */

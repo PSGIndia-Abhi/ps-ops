@@ -7,15 +7,16 @@ const { getTeamUserIds, loadUserCards } = require("../utils/hierarchy");
 
 // ---------------------------------------------------------------------------
 // Employee feedback (Task Management) - the Managing Director's private notes on their employees:
-// a free type ("Punctuality", "Customer handling"...), what they have to say, and 1-5 stars.
+// a free type ("Punctuality", "Customer handling"...), what they have to say, a mark out of 10,
+// a tone (Positive / Neutral / Negative) and an optional reward.
 // Only the Managing Director can see or touch any of it (not the employee, their managers, the
 // Personal Assistant or admin). Stored per employee (users.id), for an HRMS to pick up later.
 //
-//   GET    /api/employee-feedback/employees          -> the MD's team, each with count / average stars
+//   GET    /api/employee-feedback/employees          -> the MD's team, each with count / average mark
 //   GET    /api/employee-feedback/types              -> types used before (suggestions, like task types)
 //   GET    /api/employee-feedback?employee_id=        -> entries, newest first
 //   GET    /api/employee-feedback/report/:employeeId -> one employee: average, per type, every entry
-//   POST   /api/employee-feedback                    -> { employee_id, feedback_type, comments, rating }
+//   POST   /api/employee-feedback                    -> { employee_id, feedback_type, comments, rating, sentiment, reward }
 //   PUT    /api/employee-feedback/:id                -> the same fields (any of them)
 //   DELETE /api/employee-feedback/:id
 // ---------------------------------------------------------------------------
@@ -23,6 +24,9 @@ const { getTeamUserIds, loadUserCards } = require("../utils/hierarchy");
 const MD_ROLE = "Managing Director";
 const MAX_TYPE = 100;
 const MAX_COMMENTS = 2000;
+const MAX_REWARD = 500;
+const MAX_RATING = 10;
+const SENTIMENTS = ["Positive", "Neutral", "Negative"];
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -72,14 +76,26 @@ function readBody(body, { partial = false } = {}) {
   }
   if (!partial || b.rating !== undefined) {
     const r = Number(b.rating);
-    if (!Number.isInteger(r) || r < 1 || r > 5) throw new HttpError(400, "Give 1 to 5 stars");
+    if (!Number.isInteger(r) || r < 1 || r > MAX_RATING) throw new HttpError(400, `Give a mark from 1 to ${MAX_RATING}`);
     out.rating = r;
+  }
+  // Optional, so older app builds that don't send them keep working.
+  if (b.sentiment !== undefined) {
+    const s = text(b.sentiment);
+    if (s && !SENTIMENTS.includes(s)) throw new HttpError(400, "Choose Positive, Neutral or Negative");
+    out.sentiment = s || null;
+  }
+  if (b.reward !== undefined) {
+    const w = text(b.reward);
+    if (w.length > MAX_REWARD) throw new HttpError(400, `The reward is too long (max ${MAX_REWARD} characters)`);
+    out.reward = w || null;
   }
   return out;
 }
 
 const ENTRY_SQL = `
   SELECT f.id, f.employee_id, e.name AS employee_name, f.feedback_type, f.comments, f.rating,
+         f.sentiment, f.reward,
          f.created_by, c.name AS created_by_name,
          DATE_FORMAT(f.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
          DATE_FORMAT(f.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
@@ -176,8 +192,9 @@ router.post("/", auth, requireMD, async (req, res) => {
     if (!team.map(Number).includes(input.employee_id)) throw new HttpError(400, "Choose someone from your team");
     const id = uuid();
     await pool.query(
-      `INSERT INTO employee_feedback (id, employee_id, feedback_type, comments, rating, created_by) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, input.employee_id, input.feedback_type, input.comments, input.rating, req.user.id]
+      `INSERT INTO employee_feedback (id, employee_id, feedback_type, comments, rating, sentiment, reward, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, input.employee_id, input.feedback_type, input.comments, input.rating, input.sentiment ?? null, input.reward ?? null, req.user.id]
     );
     const [[row]] = await pool.query(`${ENTRY_SQL} WHERE f.id = ?`, [id]);
     res.status(201).json(row);

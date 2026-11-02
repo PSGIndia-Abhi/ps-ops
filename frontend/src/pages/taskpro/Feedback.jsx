@@ -1,17 +1,35 @@
 // Employee feedback - the Managing Director's private notes on their team (only the MD sees this
-// page; the server refuses everyone else). Left: the team with each person's average stars. Right:
-// the chosen employee's report - overall stars, stars per type, every entry (edit / delete) - and a
+// page; the server refuses everyone else). Left: the team with each person's average mark. Right:
+// the chosen employee's report - overall mark, mark per type, every entry (edit / delete) - and a
 // printable copy. "Add Feedback" picks the employee, a free type (types used before are offered as
-// chips, like the task type), what to say, and 1-5 stars.
+// chips, like the task type), what to say, a tone (Positive / Neutral / Negative), a mark out of 10
+// and an optional reward.
 
-import { useEffect, useMemo, useState } from "react";
-import { FiEdit2, FiMessageSquare, FiPlus, FiPrinter, FiSearch, FiStar, FiTrash2 } from "react-icons/fi";
+import { useEffect, useId, useMemo, useState } from "react";
+import { FiAward, FiEdit2, FiMessageSquare, FiMinusCircle, FiPlus, FiPrinter, FiSearch, FiStar, FiTag, FiThumbsDown, FiThumbsUp, FiTrash2, FiUser, FiX, FiZap } from "react-icons/fi";
 import { apiFetch, safeJson } from "../../api";
 import { useToast } from "./toastContext";
-import { Avatar, EmptyState, Modal, Skeleton } from "./ui";
+import { PersonPicker, Prop } from "./NewTaskModal";
+import { Avatar, Drawer, EmptyState, Modal, Skeleton } from "./ui";
 import "./feedback.css";
 
 export const FEEDBACK_ROLE = "Managing Director";
+const MAX_MARK = 10;
+const SENTIMENTS = ["Positive", "Neutral", "Negative"];
+const MARK_WORDS = ["", "Very poor", "Poor", "Weak", "Below average", "Average", "Fair", "Good", "Very good", "Excellent", "Outstanding"];
+/** Colour band of a mark: red when low, amber in the middle, blue when good, green at the top. */
+const markBand = (m) => (m >= 9 ? "top" : m >= 7 ? "good" : m >= 5 ? "mid" : "low");
+const TONE_ICONS = { Positive: FiThumbsUp, Neutral: FiMinusCircle, Negative: FiThumbsDown };
+/** Quick picks under the reward box, so it rarely needs typing. */
+const REWARD_TITLE = "Reward / Achievement";
+/** A field label with the red "required" star. */
+const req = (text) => (
+  <>
+    {text}
+    <b className="tp-fb-req">*</b>
+  </>
+);
+const FORM_ID = "tp-feedback-form";
 
 async function call(method, path, body) {
   const res = await apiFetch(`/api/employee-feedback${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -28,45 +46,79 @@ const fmtWhen = (s) =>
     : "";
 const roleOf = (e) => e?.designation || e?.role || "";
 
-/** Read-only stars; `value` may be a decimal (4.3 shows 4 full stars and a partly filled fifth). */
-function Stars({ value, size = 16 }) {
+/** "8/10" in the mark's colour; `value` may be a decimal (an average). */
+function Mark({ value }) {
+  if (value == null) return <span className="tp-fb-mark">-</span>;
   return (
-    <span className="tp-fb-stars" style={{ fontSize: size }} aria-label={value ? `${value} out of 5` : "No rating"}>
-      {[1, 2, 3, 4, 5].map((i) => {
-        const fill = Math.max(0, Math.min(1, (value || 0) - (i - 1)));
-        return (
-          <span key={i} className="tp-fb-star">
-            <FiStar className="off" />
-            <span className="on" style={{ width: `${fill * 100}%` }}>
-              <FiStar />
-            </span>
-          </span>
-        );
-      })}
+    <span className={`tp-fb-mark ${markBand(value)}`} aria-label={`${value} out of ${MAX_MARK}`}>
+      {value}
+      <small>/{MAX_MARK}</small>
     </span>
   );
 }
 
-/** The 1-5 star picker on the form. */
-function StarPicker({ value, onChange }) {
-  const [hover, setHover] = useState(0);
-  const shown = hover || value;
-  const words = ["", "Poor", "Needs work", "Good", "Very good", "Excellent"];
+/** The mark as a ring that fills up to it, the number in the middle; `value` may be an average. */
+function Ring({ value, size = 52, stroke = 5 }) {
+  const r = (size - stroke) / 2;
+  const len = 2 * Math.PI * r;
+  const fill = Math.min(value || 0, MAX_MARK) / MAX_MARK;
+  const gradId = `ring${useId().replace(/:/g, "")}`;
   return (
-    <div className="tp-fb-picker" onMouseLeave={() => setHover(0)}>
-      {[1, 2, 3, 4, 5].map((i) => (
+    <span className={`tp-fb-ring ${markBand(value || 0)}`} style={{ width: size, height: size }} aria-label={`${value} out of ${MAX_MARK}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" className="g1" />
+            <stop offset="1" className="g2" />
+          </linearGradient>
+        </defs>
+        {/* soft glow, the track, then the filled arc */}
+        <circle className="glow" cx={size / 2} cy={size / 2} r={r - stroke / 2 - 1} />
+        <circle className="track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} />
+        <circle
+          className="fill"
+          stroke={`url(#${gradId})`}
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          strokeWidth={stroke}
+          strokeDasharray={len}
+          strokeDashoffset={len * (1 - fill)}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <b style={{ fontSize: Math.round(size * 0.32) }}>{value ?? "-"}</b>
+    </span>
+  );
+}
+
+function Tone({ value }) {
+  return (
+    <span className={`tp-fb-tone ${value.toLowerCase()}`}>
+      <i />
+      {value}
+    </span>
+  );
+}
+
+/** The 1-10 marks as one rounded track: it fills up to the picked mark, which sits in a raised bubble. */
+function MarkPicker({ value, onChange }) {
+  return (
+    <div className="tp-fb-meter">
+      {/* the gradient is sized to the whole track, so each mark keeps its own colour */}
+      <span className="tp-fb-meter-fill" style={{ width: `${(value / MAX_MARK) * 100}%`, backgroundSize: value ? `${(MAX_MARK / value) * 100}% 100%` : undefined }} />
+      {Array.from({ length: MAX_MARK }, (_, i) => i + 1).map((m) => (
         <button
-          key={i}
+          key={m}
           type="button"
-          className={`tp-fb-pick ${i <= shown ? "on" : ""}`}
-          onMouseEnter={() => setHover(i)}
-          onClick={() => onChange(i)}
-          aria-label={`${i} star${i > 1 ? "s" : ""}`}
+          className={`tp-fb-meter-cell ${m < value ? "filled" : ""} ${m === value ? `on ${markBand(m)}` : ""}`}
+          onClick={() => onChange(m)}
+          aria-label={`${m} out of ${MAX_MARK}`}
+          aria-pressed={m === value}
         >
-          <FiStar />
+          <span>{m}</span>
         </button>
       ))}
-      <span className="tp-fb-pick-word">{shown ? words[shown] : "Tap to rate"}</span>
     </div>
   );
 }
@@ -133,14 +185,14 @@ export default function Feedback() {
   function printReport() {
     if (!report) return;
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-    const star = (n) => "★".repeat(Math.round(n || 0)) + "☆".repeat(5 - Math.round(n || 0));
+    const mark = (n) => (n == null ? "-" : `${n}/${MAX_MARK}`);
     const e = report.employee;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Feedback - ${esc(e.name)}</title>
 <style>
   body{font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;margin:32px;}
   h1{font-size:22px;margin:0} .sub{color:#64748b;margin:4px 0 18px}
   .sum{display:flex;gap:28px;padding:14px 18px;border:1px solid #e6eaf2;border-radius:12px;margin-bottom:18px}
-  .sum b{font-size:22px} .st{color:#f59e0b;letter-spacing:2px}
+  .sum b{font-size:22px} .st{color:#b45309;font-weight:700;white-space:nowrap}
   table{width:100%;border-collapse:collapse;margin-bottom:18px} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:13px;vertical-align:top}
   th{background:#f4f6fb;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:#64748b}
   h2{font-size:14px;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.8px;color:#475569}
@@ -148,14 +200,17 @@ export default function Feedback() {
 </style></head><body>
 <h1>Employee feedback - ${esc(e.name)}</h1>
 <div class="sub">${esc(roleOf(e))}${e.unit_name ? ` · ${esc(e.unit_name)}` : ""} · Confidential</div>
-<div class="sum"><div>Overall<br><b>${report.average ?? "-"}</b> <span class="st">${star(report.average)}</span></div><div>Feedback given<br><b>${report.count}</b></div></div>
+<div class="sum"><div>Overall<br><b>${mark(report.average)}</b></div><div>Feedback given<br><b>${report.count}</b></div></div>
 <h2>By type</h2>
 <table><tr><th>Type</th><th>Average</th><th>Count</th></tr>${report.by_type
-      .map((t) => `<tr><td>${esc(t.type)}</td><td><span class="st">${star(t.average)}</span> ${t.average}</td><td>${t.count}</td></tr>`)
+      .map((t) => `<tr><td>${esc(t.type)}</td><td class="st">${mark(t.average)}</td><td>${t.count}</td></tr>`)
       .join("")}</table>
 <h2>All feedback</h2>
-<table><tr><th>Date</th><th>Type</th><th>Stars</th><th>Feedback</th></tr>${report.entries
-      .map((x) => `<tr><td>${esc(fmtDate(x.created_at))}</td><td>${esc(x.feedback_type)}</td><td class="st">${star(x.rating)}</td><td>${esc(x.comments)}</td></tr>`)
+<table><tr><th>Date</th><th>Type</th><th>Mark</th><th>Tone</th><th>Feedback</th><th>${REWARD_TITLE}</th></tr>${report.entries
+      .map(
+        (x) =>
+          `<tr><td>${esc(fmtDate(x.created_at))}</td><td>${esc(x.feedback_type)}</td><td class="st">${mark(x.rating)}</td><td>${esc(x.sentiment || "-")}</td><td>${esc(x.comments)}</td><td>${esc(x.reward || "-")}</td></tr>`
+      )
       .join("")}</table>
 <div class="foot">Printed ${esc(new Date().toLocaleString("en-IN"))} · BestServe Task Management</div>
 <script>window.onload=()=>{window.print();}</script></body></html>`;
@@ -220,7 +275,8 @@ export default function Feedback() {
                         {p.count ? (
                           <>
                             <b>
-                              <FiStar /> {p.average}
+                              {p.average}
+                              <small>/{MAX_MARK}</small>
                             </b>
                             <small>{p.count}</small>
                           </>
@@ -239,7 +295,7 @@ export default function Feedback() {
           <div className="tp-fb-report">
             {!current ? (
               <div className="tp-card">
-                <EmptyState icon={FiMessageSquare} title="Pick an employee" text="Their feedback and stars show here." />
+                <EmptyState icon={FiMessageSquare} title="Pick an employee" text="Their feedback and marks show here." />
               </div>
             ) : reportLoading ? (
               <div className="tp-card tp-fb-pad">
@@ -258,11 +314,19 @@ export default function Feedback() {
                     </p>
                   </div>
                   <div className="tp-fb-score">
-                    <span className="tp-fb-score-num">{report.average ?? "-"}</span>
-                    <Stars value={report.average} size={18} />
-                    <small>
-                      {report.count} feedback{report.count === 1 ? "" : "s"}
-                    </small>
+                    {report.average != null ? (
+                      <Ring value={report.average} size={64} stroke={6} />
+                    ) : (
+                      <span className="tp-fb-ring-empty" aria-hidden="true">
+                        –
+                      </span>
+                    )}
+                    <span>
+                      <b>{report.average != null ? `Average ${report.average}/${MAX_MARK}` : "No marks yet"}</b>
+                      <small>
+                        {report.count} feedback{report.count === 1 ? "" : "s"}
+                      </small>
+                    </span>
                   </div>
                   <button type="button" className="tp-btn ghost tp-fb-hero-add" onClick={() => setEditing({ employeeId: report.employee.id })}>
                     <FiPlus /> Add
@@ -286,11 +350,11 @@ export default function Feedback() {
                           <div key={t.type} className="tp-fb-type">
                             <span className="tp-fb-type-name">{t.type}</span>
                             <span className="tp-fb-bar">
-                              <span style={{ width: `${(t.average / 5) * 100}%` }} />
+                              <span className={markBand(t.average)} style={{ width: `${(t.average / MAX_MARK) * 100}%` }} />
                             </span>
-                            <Stars value={t.average} size={14} />
+                            <Mark value={t.average} />
                             <span className="tp-fb-type-n">
-                              {t.average} · {t.count}
+                              {t.count} feedback{t.count === 1 ? "" : "s"}
                             </span>
                           </div>
                         ))}
@@ -302,23 +366,37 @@ export default function Feedback() {
                       <ul className="tp-fb-entries">
                         {report.entries.map((x) => (
                           <li key={x.id} className="tp-fb-entry">
-                            <div className="tp-fb-entry-top">
-                              <span className="tp-fb-chip">{x.feedback_type}</span>
-                              <Stars value={x.rating} size={14} />
-                              <span className="tp-fb-entry-date" title={x.updated_at ? `Edited ${fmtWhen(x.updated_at)}` : undefined}>
-                                {fmtWhen(x.created_at)}
-                                {x.updated_at ? " · edited" : ""}
-                              </span>
-                              <span className="tp-fb-entry-actions">
-                                <button type="button" className="tp-icon-btn" onClick={() => setEditing({ entry: x })} aria-label="Edit">
-                                  <FiEdit2 />
-                                </button>
-                                <button type="button" className="tp-icon-btn" onClick={() => setRemoving(x)} aria-label="Delete">
-                                  <FiTrash2 />
-                                </button>
-                              </span>
+                            <Ring value={x.rating} />
+                            <div className="tp-fb-entry-body">
+                              <div className="tp-fb-entry-top">
+                                <span className="tp-fb-chip">{x.feedback_type}</span>
+                                {x.sentiment && <Tone value={x.sentiment} />}
+                                <span className="tp-fb-entry-date" title={x.updated_at ? `Edited ${fmtWhen(x.updated_at)}` : undefined}>
+                                  {fmtWhen(x.created_at)}
+                                  {x.updated_at ? " · edited" : ""}
+                                </span>
+                              </div>
+                              <p>{x.comments}</p>
+                              {x.reward && (
+                                <span className="tp-fb-reward">
+                                  <i className="tp-fb-gloss amber">
+                                    <FiAward />
+                                  </i>
+                                  <span>
+                                    <small>{REWARD_TITLE}</small>
+                                    <b>{x.reward}</b>
+                                  </span>
+                                </span>
+                              )}
                             </div>
-                            <p>{x.comments}</p>
+                            <span className="tp-fb-entry-actions">
+                              <button type="button" className="tp-fb-gloss blue" onClick={() => setEditing({ entry: x })} aria-label="Edit" title="Edit">
+                                <FiEdit2 />
+                              </button>
+                              <button type="button" className="tp-fb-gloss red" onClick={() => setRemoving(x)} aria-label="Delete" title="Delete">
+                                <FiTrash2 />
+                              </button>
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -375,13 +453,15 @@ export default function Feedback() {
   );
 }
 
-/** Add or edit one feedback: employee, type (free, with past types as chips), what to say, stars. */
+/** Add or edit one feedback: employee, type (free, with past types as chips), what to say, tone, mark, reward. */
 function FeedbackForm({ people, entry, employeeId, onClose, onSaved }) {
   const toast = useToast();
   const [employee, setEmployee] = useState(String(entry?.employee_id ?? employeeId ?? ""));
   const [type, setType] = useState(entry?.feedback_type ?? "");
   const [comments, setComments] = useState(entry?.comments ?? "");
   const [rating, setRating] = useState(entry?.rating ?? 0);
+  const [sentiment, setSentiment] = useState(entry?.sentiment ?? "");
+  const [reward, setReward] = useState(entry?.reward ?? "");
   const [types, setTypes] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -389,17 +469,19 @@ function FeedbackForm({ people, entry, employeeId, onClose, onSaved }) {
   useEffect(() => {
     call("GET", "/types").then(setTypes).catch(() => setTypes([]));
   }, []);
-  const suggestions = types.filter((t) => t.toLowerCase() !== type.trim().toLowerCase() && (!type.trim() || t.toLowerCase().includes(type.trim().toLowerCase()))).slice(0, 8);
+  // A few at a time, not the whole list - narrows as you type (like the task type).
+  const suggestions = types.filter((t) => t.toLowerCase() !== type.trim().toLowerCase() && (!type.trim() || t.toLowerCase().includes(type.trim().toLowerCase()))).slice(0, 4);
 
   async function save(close) {
     setError("");
     if (!employee) return setError("Choose the employee.");
     if (!type.trim()) return setError("Enter the feedback type.");
     if (comments.trim().length < 3) return setError("Write the feedback.");
-    if (!rating) return setError("Give 1 to 5 stars.");
+    if (!sentiment) return setError("Choose Positive, Neutral or Negative.");
+    if (!rating) return setError(`Give a mark out of ${MAX_MARK}.`);
     setBusy(true);
     try {
-      const body = { employee_id: Number(employee), feedback_type: type.trim(), comments: comments.trim(), rating };
+      const body = { employee_id: Number(employee), feedback_type: type.trim(), comments: comments.trim(), rating, sentiment, reward: reward.trim() };
       const row = entry ? await call("PUT", `/${entry.id}`, body) : await call("POST", "", body);
       toast.push({ type: "success", title: entry ? "Feedback updated" : "Feedback saved" });
       close();
@@ -410,59 +492,127 @@ function FeedbackForm({ people, entry, employeeId, onClose, onSaved }) {
     }
   }
 
+  // The task form's person picker groups by `dept` and shows `designation`; feedback's team carries
+  // them as unit_name and (often) only a role.
+  const team = useMemo(() => people.map((p) => ({ ...p, dept: p.unit_name, designation: roleOf(p) })), [people]);
+  const who = team.find((p) => p.id === Number(employee));
+
   return (
-    <Modal title={entry ? "Edit Feedback" : "Add Feedback"} onClose={onClose}>
-      {(close) => (
-        <div className="tp-fb-form">
-          <label className="tp-fb-field">
-            <span>Employee</span>
-            <select className="tp-input" value={employee} onChange={(e) => setEmployee(e.target.value)}>
-              <option value="">Select an employee</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {roleOf(p) ? ` - ${roleOf(p)}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="tp-fb-field">
-            <span>Type</span>
-            <input className="tp-input" value={type} maxLength={100} onChange={(e) => setType(e.target.value)} placeholder="e.g. Punctuality, Customer handling, Teamwork" />
-          </label>
-          {suggestions.length > 0 && (
-            <div className="tp-fb-suggest">
-              {suggestions.map((t) => (
-                <button key={t} type="button" className="tp-fb-chip pick" onClick={() => setType(t)}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <label className="tp-fb-field">
-            <span>Feedback</span>
-            <textarea className="tp-input" rows={4} maxLength={2000} value={comments} onChange={(e) => setComments(e.target.value)} placeholder="What do you want to note about them?" />
-          </label>
-
-          <div className="tp-fb-field">
-            <span>Rating</span>
-            <StarPicker value={rating} onChange={setRating} />
-          </div>
-
-          {!!error && <p className="tp-fb-error">{error}</p>}
-
-          <div className="tp-fb-form-foot">
-            <button type="button" className="tp-btn ghost" onClick={close} disabled={busy}>
-              Cancel
-            </button>
-            <button type="button" className="tp-btn primary" onClick={() => save(close)} disabled={busy}>
-              {busy ? "Saving..." : entry ? "Save changes" : "Save Feedback"}
-            </button>
-          </div>
-        </div>
+    <Drawer
+      title={entry ? "Edit feedback" : "Add feedback"}
+      subtitle={entry ? `For ${entry.employee_name}. Change anything you need, then save.` : "A private note on someone in your team"}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <span className="tp-nt-kbd">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+          </span>
+          <button type="button" className="tp-btn ghost" onClick={close} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" form={FORM_ID} className="tp-btn primary" disabled={busy}>
+            {busy ? "Saving…" : entry ? "Save changes" : "Save feedback"}
+          </button>
+        </>
       )}
-    </Modal>
+    >
+      {(close) => (
+        <form
+          id={FORM_ID}
+          className="tp-nt tp-fb-panel"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save(close);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              save(close);
+            }
+          }}
+          noValidate
+        >
+          {/* what was said, up top like the task title */}
+          <div className="tp-nt-head">
+            <textarea
+              className="tp-fb-note"
+              rows={3}
+              maxLength={2000}
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
+              placeholder="What do you want to note about them?"
+              aria-label="Feedback"
+              autoFocus
+            />
+            <div className="tp-fb-counter">
+              <span>{req("Feedback")}</span>
+              <small>{comments.length}/2000</small>
+            </div>
+          </div>
+
+          <div className="tp-nt-props">
+            <Prop icon={FiUser} label={req("Employee")}>
+              <PersonPicker people={team} value={Number(employee)} onChange={(id) => setEmployee(String(id))} />
+            </Prop>
+
+            <Prop icon={FiTag} label={req("Type")} top>
+              <input className="tp-input" value={type} maxLength={100} onChange={(e) => setType(e.target.value)} placeholder="e.g. Punctuality, Teamwork" />
+              {suggestions.length > 0 && (
+                <div className="tp-fb-suggest">
+                  {suggestions.map((t) => (
+                    <button key={t} type="button" className="tp-fb-chip pick" onClick={() => setType(t)}>
+                      <FiPlus /> {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Prop>
+
+            <Prop icon={FiThumbsUp} label={req("Tone")}>
+              <div className="tp-fb-seg">
+                {SENTIMENTS.map((t) => {
+                  const Icon = TONE_ICONS[t];
+                  return (
+                    <button key={t} type="button" className={`${t.toLowerCase()} ${sentiment === t ? "on" : ""}`} onClick={() => setSentiment(t)} aria-pressed={sentiment === t}>
+                      <Icon /> {t}
+                    </button>
+                  );
+                })}
+              </div>
+            </Prop>
+
+            <Prop icon={FiStar} label={req("Marks")} top>
+              <MarkPicker value={rating} onChange={setRating} />
+              <span className={`tp-fb-live ${rating ? markBand(rating) : ""}`}>{rating ? `${rating}/${MAX_MARK} · ${MARK_WORDS[rating]}` : "Pick a mark"}</span>
+            </Prop>
+
+            <Prop icon={FiAward} label={REWARD_TITLE} top>
+              <div className="tp-fb-iconinput">
+                <input value={reward} maxLength={500} onChange={(e) => setReward(e.target.value)} placeholder="Optional - e.g. Gift voucher, Top performer of the month" aria-label={REWARD_TITLE} />
+                {!!reward && (
+                  <button type="button" onClick={() => setReward("")} aria-label="Clear reward">
+                    <FiX />
+                  </button>
+                )}
+              </div>
+            </Prop>
+          </div>
+
+          {/* one line saying what will be saved, like the task form */}
+          <div className="tp-nt-summary" aria-live="polite">
+            <span className="tp-nt-summary-icon">
+              <FiZap />
+            </span>
+            <p>
+              <strong>{who ? who.name : "Someone"}</strong> gets {sentiment ? `a ${sentiment.toLowerCase()}` : "a"}{" "}
+              {rating ? `${rating}/${MAX_MARK}` : "unrated"} feedback{type.trim() ? ` on ${type.trim()}` : ""}
+              {reward.trim() ? `, with ${reward.trim()}` : ""}.
+            </p>
+          </div>
+
+          {!!error && <em className="tp-error">{error}</em>}
+        </form>
+      )}
+    </Drawer>
   );
 }
