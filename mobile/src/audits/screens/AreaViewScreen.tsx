@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { API_BASE_URL } from '../../config/env';
 import { colors, radii, spacing, typography } from '../../theme';
 import { auditsApi, type Area, type Audit } from '../api';
-import { fmtDate, titleCase } from '../format';
+import { categoryNames, fmtDate } from '../format';
 import { useAuthHeader } from '../media';
 import { AreaStatusPill, MessageBox, RiskBadge, auditStyles as a } from '../ui';
 import { ag } from '../theme';
@@ -14,13 +14,6 @@ import type { AuditsStackParamList } from '../AuditsNavigator';
 type Nav = NativeStackNavigationProp<AuditsStackParamList>;
 type Route = RouteProp<AuditsStackParamList, 'AreaView'>;
 
-const CATEGORY_LABEL: Record<string, string> = {
-  HARBOURAGE: 'Rodent harbourage',
-  BURROWS: 'Burrows',
-  ENTRY_POINT: 'Entry point',
-  FOOD_SOURCE: 'Food source',
-  WATER: 'Water stagnation',
-};
 
 /** Read-only view of one area (submitted audits): details, photos, observation and actions of each finding. */
 export function AreaViewScreen() {
@@ -73,14 +66,14 @@ export function AreaViewScreen() {
               <RiskBadge level={f.riskLevel} />
             </View>
             <Text style={[a.muted, styles.gapSm]}>
-              {CATEGORY_LABEL[f.riskCategory] || titleCase(f.riskCategory)}
+              {categoryNames(f.riskCategory)}
               {f.actionDueDate ? ` · fix by ${fmtDate(f.actionDueDate)}` : ' · monitor every visit'}
             </Text>
 
             {f.photos.length ? (
               <View style={styles.photos}>
                 {f.photos.map(p => (
-                  <Pressable key={p.id} onPress={() => setFull(src(p.url, p.v).uri)} style={styles.photoWrap}>
+                  <Pressable key={p.id} onPress={() => setFull(src(p.url, p.v, 'view').uri)} style={styles.photoWrap}>
                     {auth ? (
                       <Image source={src(p.url, p.v, 'view')} style={{ width: photoW, height: photoW * 0.75 }} resizeMode="cover" />
                     ) : <View style={{ width: photoW, height: photoW * 0.75 }} />}

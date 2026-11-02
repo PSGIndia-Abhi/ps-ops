@@ -9,7 +9,7 @@ import {
   auditsApi, newId, type Audit, type Lookups, type RiskLevelCode, type SaveAreaResult, type VoiceField as VoiceFieldType,
   type VoiceNote,
 } from '../api';
-import { addDays, describeMissing, fmtDate, titleCase } from '../format';
+import { addDays, catList, categoriesToSave, describeMissing, fmtDate, splitCategories, titleCase } from '../format';
 import { PhotoGrid, VoiceField, type PhotoItem } from '../media';
 import {
   BottomBar, ChipRow, ConfirmDialog, GreenButton, Input, MessageBox, RiskSegment, Stepper, auditStyles as a,
@@ -20,8 +20,6 @@ import type { AuditsStackParamList } from '../AuditsNavigator';
 type Nav = NativeStackNavigationProp<AuditsStackParamList>;
 type Route = RouteProp<AuditsStackParamList, 'AreaInspect'>;
 
-// Category codes the backend knows; anything else is a category typed under "Other".
-const KNOWN_CATEGORIES = ['HARBOURAGE', 'BURROWS', 'ENTRY_POINT', 'FOOD_SOURCE', 'WATER', 'OTHER'];
 const RISK_LEVELS: RiskLevelCode[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 // 1. Photos  2. One recording (area, problem, observation, both actions)  3. Check / edit everything and save.
@@ -39,6 +37,16 @@ const dayLabel = (d: string) => (d === '0' ? 'Now' : d === DAYS_OTHER ? '＋ Oth
 const FALLBACK_DAYS = 30;
 // Saved for a new area until its name is known (from the recording or typed on the last step).
 const PLACEHOLDER_AREA = 'New area';
+
+// A finding saved before its title was known gets the category name as its title from the server
+// (e.g. "Rodent harbourage"). Shown as empty, so the recording (or the supervisor) fills a real one.
+// With several categories the automatic title lists them all: "Rodent harbourage, Cracks & crevices".
+const AUTO_TITLES = ['rodent harbourage', 'harbourage (hiding place)', 'cracks & crevices', 'burrows', 'entry point', 'food source', 'water stagnation'];
+const realTitle = (title: string, category: string) => {
+  const parts = title.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+  const auto = parts.length > 0 && parts.every(t => AUTO_TITLES.includes(t) || catList(category).some(c => c.toLowerCase() === t));
+  return auto ? '' : title;
+};
 
 // Target pests of the area, saved in the area's zone box as text, e.g. "Cockroaches, Rodents, Lizards".
 const PEST_CODES = ['COCKROACHES', 'RODENTS', 'MOSQUITOES', 'FLIES', 'TERMITES'];
@@ -177,11 +185,10 @@ export function AreaInspectScreen() {
           return '';
         };
         return {
-          id: f.id, isNew: false, rowVersion: f.rowVersion, findingNumber: f.findingNumber, title: f.title,
+          id: f.id, isNew: false, rowVersion: f.rowVersion, findingNumber: f.findingNumber, title: realTitle(f.title, f.riskCategory),
           riskLevel: f.riskLevel,
           // A category typed under "Other" comes back as its text.
-          riskCategory: KNOWN_CATEGORIES.includes(f.riskCategory) ? f.riskCategory : 'OTHER',
-          categoryOther: KNOWN_CATEGORIES.includes(f.riskCategory) ? '' : f.riskCategory,
+          ...splitCategories(f.riskCategory),
           riskTypeText: f.riskTypeText || '',
           days: f.actionWithinDays == null ? '' : String(f.actionWithinDays),
           daysOther: f.actionWithinDays != null && !DAY_CHIPS.includes(String(f.actionWithinDays)),
@@ -225,7 +232,7 @@ export function AreaInspectScreen() {
         setStep(STEP_DETAILS);
         return null;
       }
-      const noOther = findings.findIndex(x => x.riskCategory === 'OTHER' && !x.categoryOther.trim());
+      const noOther = findings.findIndex(x => catList(x.riskCategory).includes('OTHER') && !x.categoryOther.trim());
       if (noOther >= 0) {
         setError('Type the risk category (Other)');
         setActive(noOther);
@@ -280,7 +287,8 @@ export function AreaInspectScreen() {
           rowVersion: x.isNew ? undefined : versions[x.id] ?? x.rowVersion,
           title: x.title,
           riskLevel: x.riskLevel,
-          riskCategory: x.riskCategory === 'OTHER' && x.categoryOther.trim() ? x.categoryOther.trim() : x.riskCategory,
+          // A draft saved before any category is chosen keeps the first one (the server needs one).
+          riskCategory: categoriesToSave(x) || 'HARBOURAGE',
           riskTypeText: x.riskTypeText,
           actionWithinDays: x.days === '' ? undefined : Number(x.days),
           observationText: x.observation,
@@ -404,19 +412,8 @@ export function AreaInspectScreen() {
       if (!nx.customerAction.trim() && p.customerAction) nx.customerAction = p.customerAction;
       if (!nx.bestserveAction.trim() && p.bestserveAction) nx.bestserveAction = p.bestserveAction;
       if (p.riskLevel && RISK_LEVELS.includes(p.riskLevel as RiskLevelCode)) nx.riskLevel = p.riskLevel as RiskLevelCode;
-      if (p.riskCategory) {
-        // A known category by its code or its name (e.g. "Water stagnation"); anything else goes to "Other" as typed text.
-        const said = p.riskCategory.trim().toLowerCase();
-        const byLabel = (lookups?.riskCategories || []).find(c => c.label.toLowerCase() === said)?.code;
-        const code = byLabel || p.riskCategory.toUpperCase().replace(/\s+/g, '_');
-        if (KNOWN_CATEGORIES.includes(code) && code !== 'OTHER') {
-          nx.riskCategory = code;
-          nx.categoryOther = '';
-        } else {
-          nx.riskCategory = 'OTHER';
-          nx.categoryOther = p.riskCategory;
-        }
-      }
+      // Every category heard (by code or name, e.g. "Water stagnation"); anything else goes to "Other" as typed text.
+      if (p.riskCategory) Object.assign(nx, splitCategories(p.riskCategory, lookups?.riskCategories));
       if (nx.days === '' || nx.daysAuto) {
         if (p.fixWithinDays != null) Object.assign(nx, daysPatch(p.fixWithinDays), { daysAuto: false });
         else Object.assign(nx, daysForLevel(nx.riskLevel));
@@ -462,7 +459,24 @@ export function AreaInspectScreen() {
     onText: (t: string) => setFindings(list => list.map(x => (x.id === f.id ? { ...x, observation: t } : x))),
     note: f.notes.OBSERVATION || null,
     onNote: (n: VoiceNote | null) => {
-      setFindings(list => list.map(x => (x.id === f.id ? { ...x, notes: { ...x.notes, OBSERVATION: n } } : x)));
+      // Recording again (n = null): clear what the old recording filled, unless the supervisor changed it,
+      // so the new recording fills those fields instead.
+      const old = n ? null : f.notes.OBSERVATION?.parts;
+      setFindings(list => list.map(x => {
+        if (x.id !== f.id) return x;
+        const nx = { ...x, notes: { ...x.notes, OBSERVATION: n } };
+        if (old) {
+          if (old.title && nx.title === old.title) nx.title = '';
+          if (old.customerAction && nx.customerAction === old.customerAction) nx.customerAction = '';
+          if (old.bestserveAction && nx.bestserveAction === old.bestserveAction) nx.bestserveAction = '';
+        }
+        return nx;
+      }));
+      if (old?.areaName) setAreaName(cur => (cur === old.areaName ? '' : cur));
+      if (old?.targetPests?.length) {
+        const heard = splitPests(old.targetPests);
+        if (zoneName === pestText(heard.codes, heard.other)) setPestList([]);
+      }
       if (n) applyRecording(n);
     },
     // Accepting saves the text on the server and bumps the finding's version: keep ours in step,
@@ -485,6 +499,7 @@ export function AreaInspectScreen() {
   const nextOff = (step === STEP_PHOTOS && (noPhoto || photoBusy)) || (step === STEP_RECORD && (obsNotAccepted || obsEmpty));
   const detailsMissing = [
     !areaName.trim() ? 'area name' : null,
+    !categoriesToSave(f) ? 'risk category' : null,
     !f.observation.trim() ? 'observation' : null,
     !f.customerAction.trim() ? customerLabel.toLowerCase() : null,
     !f.bestserveAction.trim() ? 'BestServe action' : null,
@@ -583,11 +598,18 @@ export function AreaInspectScreen() {
             <Input label="What did you find? (Optional)" value={f.title} onChangeText={t => setF({ title: t })} placeholder="e.g. Renovation debris near the wall" maxLength={250} />
             <ChipRow
               label="Risk Category *"
-              options={categories.map(c => ({ value: c.code, label: c.code === 'OTHER' ? (f.riskCategory === 'OTHER' ? 'Other ✓' : '＋ Other') : c.label }))}
-              selected={[f.riskCategory]}
-              onToggle={v => setF({ riskCategory: v })}
+              options={categories.map(c => {
+                const on = catList(f.riskCategory).includes(c.code);
+                return { value: c.code, label: c.code === 'OTHER' ? (on ? 'Other ✓' : '＋ Other') : on ? `${c.label} ✓` : c.label };
+              })}
+              selected={catList(f.riskCategory)}
+              // One or more: tap to add, tap again to remove.
+              onToggle={v => {
+                const list = catList(f.riskCategory);
+                setF({ riskCategory: (list.includes(v) ? list.filter(c => c !== v) : [...list, v]).join(',') });
+              }}
             />
-            {f.riskCategory === 'OTHER' ? (
+            {catList(f.riskCategory).includes('OTHER') ? (
               <Input label="Other risk category" required value={f.categoryOther} onChangeText={t => setF({ categoryOther: t })} placeholder="e.g. Drain blockage" maxLength={50} />
             ) : null}
             <Text style={styles.fieldLabel}>Risk Level <Text style={styles.req}>*</Text></Text>

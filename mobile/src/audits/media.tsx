@@ -98,7 +98,8 @@ export function PhotoGrid({
     }
     const res = source === 'camera'
       ? await launchCamera(PICKER_OPTIONS)
-      : await launchImageLibrary({ ...PICKER_OPTIONS, selectionLimit: 6 });
+      // 0 = no limit: pick as many as needed at once (they upload one by one below).
+      : await launchImageLibrary({ ...PICKER_OPTIONS, selectionLimit: 0 });
     if (res.didCancel) return;
     if (res.errorMessage) {
       setError('Could not open the camera or gallery.');
@@ -176,7 +177,9 @@ export function PhotoGrid({
   const [viewing, setViewing] = useState<PhotoItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  // Download saves the full photo; "View" shows the screen-size copy (1600 px), which loads much faster.
   const fullUri = (p: PhotoItem) => `${API_BASE_URL}${p.url}?v=${p.v || 0}`;
+  const viewUri = (p: PhotoItem) => `${API_BASE_URL}${p.url}?size=view&v=${p.v || 0}`;
 
   function tapPhoto(p: PhotoItem) {
     if (p.state === 'failed') return retry(p);
@@ -271,7 +274,7 @@ export function PhotoGrid({
       <Modal visible={!!viewing} transparent animationType="fade" onRequestClose={() => setViewing(null)}>
         <Pressable style={styles.viewBg} onPress={() => setViewing(null)}>
           {viewing && auth ? (
-            <Image source={{ uri: fullUri(viewing), headers: { Authorization: auth } }} style={styles.viewImg} resizeMode="contain" />
+            <Image source={{ uri: viewUri(viewing), headers: { Authorization: auth } }} style={styles.viewImg} resizeMode="contain" />
           ) : null}
           <Text style={styles.viewHint}>Tap anywhere to close</Text>
         </Pressable>
@@ -308,6 +311,30 @@ export const VOICE_LANGUAGES = [
 const PENDING = ['UPLOADED', 'QUEUED', 'PROCESSING'];
 const BARS = 28;
 const MAX_WAIT_SECONDS = 30;
+/**
+ * The message a failed translation shows: always short and simple. Recordings saved before the server
+ * sent short messages may still carry Google's own text (codes, links, billing); that is never shown.
+ * `retry: false` = trying again cannot help (no speech, the day's translations used up, not set up).
+ */
+function voiceErrorMessage(error: string | null | undefined): { text: string; retry: boolean } {
+  const e = error || '';
+  if (/no clear speech/i.test(e)) return { text: 'No clear speech was heard. Tap Record again, or type the text.', retry: false };
+  if (/used up/i.test(e) && !/credit|prepay/i.test(e)) return { text: "Today's translations are used up. Please type the English text below.", retry: false };
+  if (/not available|402|401|403|prepay|billing|credit|api key|not set up/i.test(e)) {
+    return { text: 'Translation is not available right now. Please type the English text below.', retry: false };
+  }
+  if (/busy|429|500|502|503|504|did not answer|could not reach|many translations|timeout/i.test(e)) {
+    return { text: 'Translation is busy right now. Tap Retry in a minute, or type the English text.', retry: true };
+  }
+  return { text: 'Could not translate this recording. Tap Retry, or type the English text.', retry: true };
+}
+
+/** How often the recording timer / bars update while recording (seconds). */
+export const RECORD_UPDATE_SECONDS = 0.25;
+/** Longest one-area recording: it stops by itself here (longer ones take too long to translate). */
+const MAX_RECORD_SECONDS = 5 * 60;
+/** A countdown shows for the last this-many seconds. */
+const WARN_SECONDS = 30;
 
 const fmtSecs = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -407,7 +434,15 @@ export function VoiceField({
     if (!(await ensureSaved())) return;
     const r = recorder.current!;
     try {
+      // Battery: the timer and bars update 4 times a second (not on every audio frame).
+      r.setSubscriptionDuration(RECORD_UPDATE_SECONDS);
       await r.startRecorder(undefined, undefined, true);
+      // Recording again: the old recording leaves the screen (no more "Translating…" for it,
+      // and its late translation can never fill the box). It stays on the server as evidence.
+      if (note) {
+        onNote(null);
+        onText('');
+      }
       r.addRecordBackListener((e: RecordBackType) => {
         setSeconds(Math.floor(e.currentPosition / 1000));
         const db = typeof e.currentMetering === 'number' ? e.currentMetering : -60 + Math.random() * 50;
@@ -420,7 +455,16 @@ export function VoiceField({
     }
   }
 
+  // At 5 minutes the recording stops and uploads by itself.
+  const stopping = useRef(false);
+  useEffect(() => {
+    if (recording && seconds >= MAX_RECORD_SECONDS) stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording, seconds]);
+
   async function stop() {
+    if (stopping.current) return;
+    stopping.current = true;
     const r = recorder.current!;
     const uri = await r.stopRecorder();
     r.removeRecordBackListener();
@@ -441,6 +485,7 @@ export function VoiceField({
       setError(e instanceof Error ? e.message : 'Upload failed. Please record again.');
     } finally {
       setBusy(false);
+      stopping.current = false;
     }
   }
 
@@ -529,9 +574,9 @@ export function VoiceField({
   const pending = !!note && PENDING.includes(note.status);
   // After 30 s the supervisor stops waiting and types instead (translation keeps trying in the background).
   const tooSlow = pending && tooSlowTimer;
-  // Gemini heard no speech: retrying the same audio will not help, so only Retake is offered.
-  // No speech, or the daily translation limit is used up: "Retry" would fail again.
-  const noSpeech = note?.status === 'FAILED' && /no clear speech|limit is used up/i.test(note.error || '');
+  // A short message only (never Google's codes or links). No speech, the day's translations used up,
+  // or translation not set up: "Retry" would fail again, so only Record again / typing is offered.
+  const failMsg = note?.status === 'FAILED' ? voiceErrorMessage(note.error) : null;
   const showRecorder = recording || !note || compact === false;
 
   return (
@@ -550,6 +595,11 @@ export function VoiceField({
                     <Text style={styles.recTitle}>Listening…</Text>
                   </View>
                   <Text style={styles.timer}>{fmtSecs(seconds)}</Text>
+                  <Text style={[styles.timeLeft, seconds >= MAX_RECORD_SECONDS - WARN_SECONDS && styles.timeLeftWarn]}>
+                    {seconds >= MAX_RECORD_SECONDS - WARN_SECONDS
+                      ? `Stops in ${Math.max(0, MAX_RECORD_SECONDS - seconds)} seconds`
+                      : `Up to ${MAX_RECORD_SECONDS / 60} minutes`}
+                  </Text>
                   <View style={styles.wave}>
                     {bars.map((h, i) => <View key={i} style={[styles.bar, { height: 6 + h * 46 }]} />)}
                   </View>
@@ -581,16 +631,10 @@ export function VoiceField({
             </View>
           ) : null}
 
-          {note && note.status === 'FAILED' ? (
+          {failMsg ? (
             <View style={styles.failBox}>
-              {noSpeech ? (
-                <Text style={styles.failBoxText}>{note.error}</Text>
-              ) : (
-                <>
-                  <Text style={styles.failBoxText}>{note.error || 'Translation failed.'} You can type the English below.</Text>
-                  <Pressable onPress={retry} hitSlop={8}><Text style={styles.link}>Retry</Text></Pressable>
-                </>
-              )}
+              <Text style={styles.failBoxText}>{failMsg.text}</Text>
+              {failMsg.retry ? <Pressable onPress={retry} hitSlop={8}><Text style={styles.link}>Retry</Text></Pressable> : null}
             </View>
           ) : null}
 
@@ -768,6 +812,8 @@ const styles = StyleSheet.create({
   recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: ag.red },
   recTitle: { ...typography.bodyMedium, color: colors.textPrimary },
   timer: { fontSize: 30, fontWeight: '700', color: colors.textPrimary, letterSpacing: 1 },
+  timeLeft: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  timeLeftWarn: { color: colors.danger, fontWeight: '700' },
   wave: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 56 },
   bar: { width: 4, borderRadius: 2, backgroundColor: ag.green },
   stopBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: ag.red, alignItems: 'center', justifyContent: 'center' },

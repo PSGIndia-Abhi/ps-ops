@@ -446,20 +446,25 @@ function drawFinding(ctx, f) {
     box(body || "—", x, cy + 37, cw, H - 56 - (cy + 37));
   });
 
-  // 3 or more photos: one extra page with the rest.
-  const rest = f.photoIds.slice(2, 8);
-  if (!rest.length) return;
-  ctx.newPage({ kind: "normal" });
-  font("B", 10.5, C.green).text(`FINDING ${num} · MORE PHOTOS`, M, 40, { characterSpacing: 1.4, lineBreak: false });
-  font("XB", 22, C.ink);
-  box(f.title, M, 56, W - 2 * M, 30, { lineBreak: false });
-  const cols3 = rest.length <= 2 ? rest.length : 3;
-  const rows = Math.ceil(rest.length / cols3);
-  const gw = (W - 2 * M - (cols3 - 1) * 12) / cols3;
-  const gh = (470 - 100 - (rows - 1) * 12) / rows;
-  rest.forEach((id, i) => {
-    photo(id, M + (i % cols3) * (gw + 12), 100 + Math.floor(i / cols3) * (gh + 12), gw, gh, 10);
-  });
+  // 3 or more photos: every other photo on "more photos" pages, 6 to a page, as many pages as needed.
+  const rest = f.photoIds.slice(2);
+  const PER_PAGE = 6;
+  const pages = Math.ceil(rest.length / PER_PAGE);
+  for (let p = 0; p < pages; p++) {
+    const chunk = rest.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+    ctx.newPage({ kind: "normal" });
+    const label = pages > 1 ? `FINDING ${num} · MORE PHOTOS (${p + 1}/${pages})` : `FINDING ${num} · MORE PHOTOS`;
+    font("B", 10.5, C.green).text(label, M, 40, { characterSpacing: 1.4, lineBreak: false });
+    font("XB", 22, C.ink);
+    box(f.title, M, 56, W - 2 * M, 30, { lineBreak: false });
+    const cols3 = chunk.length <= 2 ? chunk.length : 3;
+    const rows = Math.ceil(chunk.length / cols3);
+    const gw = (W - 2 * M - (cols3 - 1) * 12) / cols3;
+    const gh = (470 - 100 - (rows - 1) * 12) / rows;
+    chunk.forEach((id, i) => {
+      photo(id, M + (i % cols3) * (gw + 12), 100 + Math.floor(i / cols3) * (gh + 12), gw, gh, 10);
+    });
+  }
 }
 
 // ---- action timeline -----------------------------------------------------------------

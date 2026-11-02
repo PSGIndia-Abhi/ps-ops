@@ -6,7 +6,7 @@ import AreaEditorModal from "./AreaEditorModal";
 import MarkPhotoModal from "./MarkPhotoModal";
 import useMe from "../../hooks/useMe";
 import { AuthImage, Modal, RiskBadge, StatusPill } from "./shared";
-import { AREA_STATUS, AUDIT_TYPE_LABEL, fmtDate, fmtDateTime, titleCase, useAuditBase } from "./format";
+import { AREA_STATUS, AUDIT_TYPE_LABEL, categoryNames, fmtDate, fmtDateTime, titleCase, useAuditBase } from "./format";
 import "./audits.css";
 
 /**
@@ -274,7 +274,7 @@ function AreaCard({ area, audit, editable, onEdit, onRemove }) {
             <span className="au-mono">{String(f.findingNumber).padStart(2, "0")}</span>
             <span className="au-strong">{f.title}</span>
             <RiskBadge level={f.riskLevel} />
-            <span className="au-muted">{titleCase(f.riskCategory)}{f.actionDueDate ? ` · due ${fmtDate(f.actionDueDate)}` : ""}</span>
+            <span className="au-muted">{categoryNames(f.riskCategory)}{f.actionDueDate ? ` · due ${fmtDate(f.actionDueDate)}` : ""}</span>
           </div>
           {f.photos.length > 0 && (
             <div className="au-photos">

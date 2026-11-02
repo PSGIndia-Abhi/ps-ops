@@ -1,7 +1,7 @@
 const cron = require("node-cron");
 const { pool } = require("../../db");
 const {
-  transcribeAndTranslate, VoiceConfigError, VoiceBusyError, VoiceNoSpeechError, VoiceQuotaError,
+  transcribeAndTranslate, userMessage, VoiceConfigError, VoiceBusyError, VoiceRateLimitError, VoiceNoSpeechError, VoiceQuotaError,
 } = require("../services/AuditVoice.service");
 const { processReports } = require("../services/AuditReport.service");
 const { isCombinedVoice } = require("../utils/audits");
@@ -20,6 +20,8 @@ const { isCombinedVoice } = require("../utils/audits");
 // Gemini being busy (503 / slow) gets more tries than a real error.
 const MAX_ATTEMPTS = 3;
 const MAX_BUSY_ATTEMPTS = 5;
+// "Too many this minute" (free plan) clears by itself, so it gets more tries, each after Google's wait.
+const MAX_RATE_LIMIT_ATTEMPTS = 8;
 const BATCH = 3;
 const RETRY_AFTER_MS = 2000;
 let running = false;
@@ -55,17 +57,21 @@ async function processNote(noteId) {
     // Config problems, silent recordings and a used-up daily quota never fix themselves on retry;
     // busy Gemini gets more tries.
     const final = err instanceof VoiceConfigError || err instanceof VoiceNoSpeechError || err instanceof VoiceQuotaError;
-    const limit = err instanceof VoiceBusyError ? MAX_BUSY_ATTEMPTS : MAX_ATTEMPTS;
+    const rateLimited = err instanceof VoiceRateLimitError;
+    const limit = rateLimited ? MAX_RATE_LIMIT_ATTEMPTS : err instanceof VoiceBusyError ? MAX_BUSY_ATTEMPTS : MAX_ATTEMPTS;
     const giveUp = final || note.attempts >= limit;
+    // The app shows this text, so it is always a short message for the supervisor;
+    // Google's own error (codes, links, billing) goes to the server log only.
     await pool.query(
       `UPDATE audit_voice_notes SET status = ?, error_message = ?, processed_at = NOW()
        WHERE id = ? AND status = 'PROCESSING'`,
-      [giveUp ? "FAILED" : "QUEUED", String(err.message || err).slice(0, 1000), note.id],
+      [giveUp ? "FAILED" : "QUEUED", userMessage(err), note.id],
     );
-    if (!final) console.error("Audit voice translation failed", note.id, err.message);
-    // Busy or network blip: try again in 2 s instead of waiting for the 30 s cron.
+    if (!(err instanceof VoiceNoSpeechError)) console.error("Audit voice translation failed", note.id, err.message);
+    // Busy or network blip: try again in 2 s instead of waiting for the 30 s cron;
+    // "too many this minute": wait as long as Google said (asking sooner only fails again).
     if (!giveUp && err instanceof VoiceBusyError) {
-      setTimeout(() => processNote(note.id).catch(() => undefined), RETRY_AFTER_MS);
+      setTimeout(() => processNote(note.id).catch(() => undefined), rateLimited ? err.retryAfterMs + 1000 : RETRY_AFTER_MS);
     }
   }
 }
