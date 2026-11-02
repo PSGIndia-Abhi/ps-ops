@@ -108,7 +108,8 @@ export default function AreaEditorModal({ audit, area, lookups, onClose, onSaved
     if (!form.areaName.trim()) return setError("Enter the area name");
     const noOther = findings.findIndex((f) => catList(f.riskCategory).includes("OTHER") && !f.categoryOther?.trim());
     if (noOther >= 0) return setError(`Finding ${noOther + 1}: type the risk category (Other)`);
-    const noCategory = findings.findIndex((f) => !categoriesToSave(f));
+    // A draft may have no category yet (the same as the mobile app); completing the area needs one.
+    const noCategory = markCompleted ? findings.findIndex((f) => !categoriesToSave(f)) : -1;
     if (noCategory >= 0) return setError(`Finding ${noCategory + 1}: choose at least one risk category`);
     setSaving(true);
     try {

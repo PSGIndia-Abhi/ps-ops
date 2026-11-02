@@ -310,7 +310,8 @@ export const VOICE_LANGUAGES = [
 ];
 const PENDING = ['UPLOADED', 'QUEUED', 'PROCESSING'];
 const BARS = 28;
-const MAX_WAIT_SECONDS = 30;
+/** Translating takes about 30-60 s; after this long the field switches to "type it yourself". */
+const MAX_WAIT_SECONDS = 60;
 /**
  * The message a failed translation shows: always short and simple. Recordings saved before the server
  * sent short messages may still carry Google's own text (codes, links, billing); that is never shown.
@@ -382,7 +383,7 @@ export function VoiceField({
   const [error, setError] = useState<string | null>(null);
   const textRef = useRef(text);
   textRef.current = text;
-  // After 30 s of waiting the field switches to "type it yourself" (one timer, not a ticking counter).
+  // After 60 s of waiting the field switches to "type it yourself" (one timer, not a ticking counter).
   const [tooSlowTimer, setTooSlowTimer] = useState(false);
   useEffect(() => {
     setTooSlowTimer(false);
@@ -572,7 +573,7 @@ export function VoiceField({
   const acceptOff = accepting || !text.trim() || isCurrentAccepted;
 
   const pending = !!note && PENDING.includes(note.status);
-  // After 30 s the supervisor stops waiting and types instead (translation keeps trying in the background).
+  // After 60 s the supervisor stops waiting and types instead (translation keeps trying in the background).
   const tooSlow = pending && tooSlowTimer;
   // A short message only (never Google's codes or links). No speech, the day's translations used up,
   // or translation not set up: "Retry" would fail again, so only Record again / typing is offered.
@@ -626,7 +627,7 @@ export function VoiceField({
           {pending && !tooSlow ? (
             <View style={styles.gemini}>
               <SparkleIcon size={16} color={colors.primary} />
-              <Text style={styles.geminiText}>Translating to English…</Text>
+              <Text style={styles.geminiText}>Translating to English… usually takes 30–60 seconds</Text>
               <ActivityIndicator size="small" color={colors.primary} />
             </View>
           ) : null}
