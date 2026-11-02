@@ -53,6 +53,18 @@ export const ROLE_HOME = {
 
   // Brigade Group bookings, masters and analysis (pages/brigade).
   brigade_executive: "/brigade",
+
+  // Customer Feedback desk (pages/feedback): monthly feedback calls.
+  feedback_collector: "/feedback-desk",
 };
 
 export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";
+
+// The page a role opens right after login, when it is not the role's own panel above.
+// The panel stays the same (job links, route checks and "Back" links still use ROLE_HOME).
+const LOGIN_HOME = {
+  // Operations Manager starts in the Customer Feedback desk; Task Management is one click away.
+  "Operations Manager": "/feedback-desk",
+};
+
+export const loginHomePath = (role) => LOGIN_HOME[role] || roleBasePath(role);

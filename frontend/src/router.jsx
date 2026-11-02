@@ -88,6 +88,18 @@ import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
+// Customer Feedback desk + the customer's form — see pages/feedback/
+import FeedbackLayout from "./pages/feedback/FeedbackLayout";
+import FeedbackCallList from "./pages/feedback/CallList";
+import FeedbackCallPage from "./pages/feedback/CallPage";
+import FeedbackTicketList from "./pages/feedback/TicketList";
+import FeedbackTicketPage from "./pages/feedback/TicketPage";
+import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
+import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
+import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
+import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
+import FeedbackGate from "./pages/feedback/FeedbackGate";
+import { FEEDBACK_HOME } from "./pages/feedback/access";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -356,6 +368,32 @@ const router = createBrowserRouter([
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
     ],
+  },
+
+  // CUSTOMER FEEDBACK — monthly feedback calls, tickets, report and masters. Opened by permission:
+  // any role with a FEEDBACK_* permission (Roles & Permissions); screens per /api/feedback/me.
+  // -------------------------
+  {
+    path: FEEDBACK_HOME,
+    element: (
+      <FeedbackGate>
+        <FeedbackLayout />
+      </FeedbackGate>
+    ),
+    children: [
+      { index: true, element: <FeedbackCallList /> },
+      { path: "calls/:id", element: <FeedbackCallPage /> },
+      { path: "tickets", element: <FeedbackTicketList /> },
+      { path: "tickets/:id", element: <FeedbackTicketPage /> },
+      { path: "report", element: <FeedbackCustomerReport /> },
+      { path: "questions", element: <FeedbackQuestions /> },
+      { path: "settings", element: <FeedbackTemplatesSettings /> },
+    ],
+  },
+  // The customer's feedback form from the WhatsApp link — no login, the token is the key.
+  {
+    path: "/feedback/:token",
+    element: <PublicFeedbackForm />,
   },
 
   {

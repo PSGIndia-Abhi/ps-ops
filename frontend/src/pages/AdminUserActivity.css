@@ -442,6 +442,21 @@ button.ua-card {
   background: #22c55e;
 }
 
+/* Figure groups: "In the chosen days" and "Right now", each with its own small heading. */
+.mr-work-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mr-work-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* Figures: one row of equal boxes (up to five fit). */
 .mr-work {
   display: grid;

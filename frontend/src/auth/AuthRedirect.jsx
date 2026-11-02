@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { roleBasePath } from "./roleBasePath";
+import { loginHomePath } from "./roleBasePath";
 
 export default function AuthRedirect() {
   const navigate = useNavigate();
@@ -22,7 +22,7 @@ export default function AuthRedirect() {
       return;
     }
 
-    const path = roleBasePath(role);
+    const path = loginHomePath(role);
 
     // invalid role mapping → login
     if (!path) {
