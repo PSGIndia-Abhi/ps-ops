@@ -117,7 +117,7 @@ function nextVisit(meetings: Meeting[], myId: string): Meeting | null {
   if (live) return live;
   return [...mine].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))[0] ?? null;
 }
-
+//updated
 export function SalesExecHome() {
   const { navigation, band, actionError, setActionError } = useHomeBasics();
   const { myId } = useMe();
