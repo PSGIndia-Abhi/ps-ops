@@ -213,7 +213,7 @@ export function TelecallerHome() {
           
           {/* Newest leads */}
           <View style={styles.section}>
-            <SectionTitle title="Recent Leads" onViewAll={recent.length > 0 ? () => openGroup('all') : undefined} />
+            <SectionTitle title="Recent Leads" icon="leads" subtitle="Your newest leads" onViewAll={recent.length > 0 ? () => openGroup('all') : undefined} />
             {loading && !data && [0, 1, 2].map((i) => <CrmSkeleton key={i} height={92} radius={radii.lg} style={styles.skeleton} />)}
             {!!data && recent.length === 0 && !error && <CrmEmptyState title="No leads yet" subtitle="New leads to verify will appear here." />}
             {recent.map((lead) => (
@@ -222,7 +222,7 @@ export function TelecallerHome() {
           </View>
 
           <View style={styles.section}>
-            <SectionTitle title="Quick Actions" />
+            <SectionTitle title="Quick Actions" icon="actions" subtitle="Jump straight to your work" />
             <View style={styles.quickRow}>
               <QuickAction icon={<ClockIcon size={19} color={white} />} label="Follow-ups" tone="warning" count={followUps.length} onPress={() => navigation.navigate('Tasks')} />
               <QuickAction icon={<ClipboardListIcon size={19} color={white} />} label="All Leads" tone="info" count={counts.all} onPress={() => openGroup('all')} />

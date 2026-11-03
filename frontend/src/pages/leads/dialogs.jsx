@@ -30,7 +30,7 @@ import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
-import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner } from "./leadsApi";
+import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner, MANAGER_ROLES } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -650,12 +650,18 @@ export function CloseLeadModal({ lead, won, onClose }) {
   const owner = won && viewer.persona === "sales_manager" ? leadSalesOwner(lead) : null;
   const askCredit = !!owner && String(owner.id) !== myId;
   const [creditTo, setCreditTo] = useState(() => (askCredit ? String(owner.id) : ""));
+  // One-time service or AMC - asked here, when the deal is won.
+  const [contractType, setContractType] = useState("");
 
   async function save(close) {
     if (busy) return;
+    if (won && !contractType) {
+      toast("Choose One-time or AMC.", true);
+      return;
+    }
     setBusy(true);
     try {
-      await closeLead(lead.id, { won, reason, notes, creditTo: askCredit ? creditTo : undefined }, viewer.me);
+      await closeLead(lead.id, { won, reason, notes, contractType, creditTo: askCredit ? creditTo : undefined }, viewer.me);
       toast(won ? `${lead.company} converted to a customer` : "Lead marked as lost");
       close();
     } catch (err) {
@@ -681,6 +687,19 @@ export function CloseLeadModal({ lead, won, onClose }) {
       )}
     >
       <LeadBar lead={lead} />
+      {won && (
+        <Field label="Is this a one-time service or an AMC?" required>
+          <Choice
+            name="contract"
+            value={contractType}
+            onChange={setContractType}
+            options={[
+              { value: "ONE_TIME", label: "One-time", sub: "A single service", tone: "teal" },
+              { value: "AMC", label: "AMC", sub: "Annual maintenance contract", tone: "info" },
+            ]}
+          />
+        </Field>
+      )}
       {won && askCredit && (
         <Field label="Count this conversion for" required>
           <Choice
@@ -973,7 +992,7 @@ export function AssignLeadModal({ lead, onClose }) {
   const groups = people
     ? [
         { title: "Sales Executives", list: people.filter((p) => p.role === "Sales Executive") },
-        { title: "Sales Managers", list: people.filter((p) => p.role === "sales_manager" && p.id !== myId) },
+        { title: "Sales Managers", list: people.filter((p) => MANAGER_ROLES.includes(p.role) && p.id !== myId) },
       ].filter((g) => g.list.length > 0)
     : [];
 

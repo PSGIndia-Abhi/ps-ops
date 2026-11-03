@@ -64,6 +64,7 @@ import TaskProRequests from "./pages/taskpro/RescheduleRequests";
 import TaskProReports from "./pages/taskpro/TaskReports";
 import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
+import TaskProFeedback from "./pages/taskpro/Feedback";
 import { ACCOUNTANT_PANEL_ROLES, TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
 import LeadsLayout from "./pages/leads/LeadsLayout";
 import LeadsHome from "./pages/leads/Home";
@@ -89,6 +90,8 @@ import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
+import AuditsList from "./pages/audits/AuditsList";
+import AuditDetail from "./pages/audits/AuditDetail";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -145,6 +148,8 @@ const router = createBrowserRouter([
       { path: "invoices", element: <InvoicesPage /> },
       { path: "payments", element: <PaymentsPage /> },
       { path: "tasks", element: <TasksPage /> },
+      { path: "audits", element: <AuditsList /> },
+      { path: "audits/:auditId", element: <AuditDetail /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },
@@ -195,6 +200,8 @@ const router = createBrowserRouter([
       { path: "bookings", element: <BookingsPage /> },
       { path: "sites/:siteId/contacts", element: <SiteContactsPage /> },
       { path: "tickets", element: <AdminTickets /> },
+      { path: "audits", element: <AuditsList /> },
+      { path: "audits/:auditId", element: <AuditDetail /> },
       { path: "profile", element: <ProfilePage /> },
     ],
   },
@@ -357,6 +364,8 @@ const router = createBrowserRouter([
       { path: "reports", element: <TaskProReports /> },
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
+      // The Managing Director's private feedback on their team (the page and the server check the role).
+      { path: "feedback", element: <TaskProFeedback /> },
     ],
   },
 

@@ -14,6 +14,7 @@ import { useReminders } from '../reminders-engine/useReminders';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
 import { radii, shadows } from '../theme';
+import { salesTabIcon } from './salesTabIcon';
 import type { TaskStackParamList, TaskTabParamList } from '../tasks/navigation';
 import { TasksProvider, useTasks } from '../tasks/TasksContext';
 import { NewTaskScreen } from '../tasks/screens/NewTaskScreen';
@@ -28,6 +29,7 @@ import { TaskListScreen } from '../tasks/screens/TaskListScreen';
 import { TaskNotificationsScreen } from '../tasks/screens/TaskNotificationsScreen';
 import { TaskProfileScreen } from '../tasks/screens/TaskProfileScreen';
 import { TaskScheduleScreen } from '../tasks/screens/TaskScheduleScreen';
+import { EmployeeFeedbackScreen, FeedbackFormScreen } from '../tasks/screens/FeedbackScreens';
 
 const Tab = createBottomTabNavigator<TaskTabParamList>();
 const Stack = createNativeStackNavigator<TaskStackParamList>();
@@ -35,11 +37,11 @@ const Stack = createNativeStackNavigator<TaskStackParamList>();
 const BASE_HEIGHT = 66;
 const BASE_PADDING_BOTTOM = 6;
 
-type TabIconProps = { color: string; size: number };
-const homeIcon = ({ color, size }: TabIconProps) => <HomeIcon size={size} color={color} />;
-const tasksIcon = ({ color, size }: TabIconProps) => <ClipboardListIcon size={size} color={color} />;
-const calendarIcon = ({ color, size }: TabIconProps) => <CalendarIcon size={size} color={color} />;
-const insightsIcon = ({ color, size }: TabIconProps) => <ChartIcon size={size} color={color} />;
+// Coloured tab icons, the same style as the sales apps (salesTabIcon.tsx).
+const homeIcon = salesTabIcon(HomeIcon);
+const tasksIcon = salesTabIcon(ClipboardListIcon, 'accent');
+const calendarIcon = salesTabIcon(CalendarIcon, 'warning');
+const insightsIcon = salesTabIcon(ChartIcon, 'success');
 
 /** Tab label with a small dot under the active one. */
 function TabLabel({ focused, color, children }: { focused: boolean; color: string; children: string }) {
@@ -168,6 +170,8 @@ export function TaskNavigator() {
         <Stack.Screen name="Profile" component={TaskProfileScreen} />
         <Stack.Screen name="Notifications" component={TaskNotificationsScreen} />
         <Stack.Screen name="TaskReminders" component={TaskRemindersScreen} />
+        <Stack.Screen name="EmployeeFeedback" component={EmployeeFeedbackScreen} />
+        <Stack.Screen name="FeedbackForm" component={FeedbackFormScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="TaskReminderTime" component={ReminderTimeScreen} options={{ animation: 'slide_from_bottom' }} />
       </Stack.Navigator>
     </TasksProvider>

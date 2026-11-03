@@ -1,9 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   AlertCircleIcon,
+  AlertTriangleIcon,
   BriefcaseIcon,
   CalendarIcon,
   CheckCircleIcon,
@@ -16,25 +18,37 @@ import {
   PinIcon,
   SendIcon,
   SparkleIcon,
+  TagIcon,
+  UploadIcon,
   UsersIcon,
 } from '../../components/icons';
-import { formatINR, formatLeadWhen } from '../../crm/format';
+import { GlossyBadge } from '../../components/GlossyBadge';
+import { formatINR } from '../../crm/format';
 import { whatsappUrl } from '../../crm/leadHelpers';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { WhatsAppIcon } from '../../crm/ui/crmIcons';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton, NoticeBanner } from '../../crm/ui/CrmScreen';
-import { StatusBadge, toneColors, type Tone } from '../../crm/ui/StatusBadge';
+import { toneColors, type Tone } from '../../crm/ui/StatusBadge';
 import { fmtDateShort, fmtTime } from '../../tasks/format';
+import { formatDate, formatTime, isToday } from '../../utils/date';
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import { savedQuotationPdf } from '../quotation';
-import { QuotationPdfDialog } from '../QuotationDialogs';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
 import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
-const HISTORY_PREVIEW = 5;
+const HISTORY_PREVIEW = 4;
+
+/** The day an activity entry falls on: "Today", "Yesterday" or "Oct 29". */
+function dayLabel(at: string): string {
+  if (isToday(at)) return 'Today';
+  const d = new Date(at);
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  if (d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() && d.getDate() === y.getDate()) return 'Yesterday';
+  return formatDate(at);
+}
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -53,6 +67,25 @@ const factory = (t: CrmTheme) => ({
   // Who, how much, where it stands
   hero: { borderLeftWidth: 5, borderLeftColor: t.primary, ...t.raisedShadow },
   heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  heroTagged: { paddingTop: spacing.lg + spacing.lg }, // the corner tag sits above the name row
+  // The corner tag: One-time or AMC, from the latest quotation
+  contractTag: {
+    position: 'absolute' as const,
+    top: -1,
+    right: -1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderTopRightRadius: radii.xl,
+    borderBottomLeftRadius: radii.lg,
+    zIndex: 1,
+  },
+  contractAmc: { backgroundColor: '#ea580c' },
+  contractOnce: { backgroundColor: '#0d9488' },
+  contractDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
+  contractText: { ...typography.captionMedium, fontSize: 11, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
   heroIcon: {
     width: 52,
     height: 52,
@@ -85,21 +118,14 @@ const factory = (t: CrmTheme) => ({
   progressClosed: { backgroundColor: t.danger },
   progressText: { ...typography.caption, color: t.textMuted, marginTop: 6 },
 
-  // Contact buttons
-  contactBtns: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.lg },
-  contactBtn: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radii.lg,
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: spacing.xs,
-  },
+  // Call / WhatsApp: two round buttons on the card's name row
+  contactBtns: { flexDirection: 'row' as const, gap: spacing.sm },
+  contactBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center' as const, justifyContent: 'center' as const, ...t.cardShadow },
   contactCall: { backgroundColor: t.primary },
   contactWa: { backgroundColor: '#25D366' },
   contactPressed: { opacity: 0.85 },
-  contactLabel: { ...typography.captionMedium, color: '#FFFFFF' },
+  contactOff: { opacity: 0.4 },
+  nextTitle: { marginTop: spacing.sm },
 
   // The recommended next step
   primary: {
@@ -162,27 +188,96 @@ const factory = (t: CrmTheme) => ({
   },
 
   // Customer + quotations
-  infoRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, paddingVertical: 6 },
-  infoLabel: { ...typography.caption, color: t.textMuted },
-  infoValue: { ...typography.bodyMedium, color: t.textPrimary },
-  quoteItem: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.sm },
-  quoteDivider: { borderTopWidth: 1, borderTopColor: t.border },
-  quoteIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: t.accentBg, alignItems: 'center' as const, justifyContent: 'center' as const },
-  quoteBody: { flex: 1 },
-  quoteNumber: { ...typography.bodyMedium, color: t.textPrimary },
-  quoteMeta: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  // The count pill on the Quotations / Agreements buttons
+  quotesCount: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  quotesCountText: { ...typography.captionMedium, fontSize: 12, color: t.primary },
+  // One-time / AMC not set (customers converted before it was asked)
+  typeCard: {
+    backgroundColor: t.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1.5,
+    borderColor: t.warning,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.md,
+    ...t.cardShadow,
+  },
+  typeHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  typeIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.warningBg },
+  typeText: { flex: 1 },
+  typeTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  typeSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  typeRow: { flexDirection: 'row' as const, gap: spacing.sm },
+  typeBtn: {
+    flex: 1,
+    minHeight: 52,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    borderColor: t.border,
+  },
+  typeBtnText: { ...typography.bodyMedium, color: t.textPrimary },
+  // Agreements: one button to the customer's Agreements page
+  agBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+    backgroundColor: t.surface,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    ...t.cardShadow,
+  },
+  agBtnText: { flex: 1 },
+  agBtnTitle: { ...typography.bodyMedium, color: t.textPrimary },
+  agBtnSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  qPressed: { opacity: 0.8 },
 
-  // Activity
-  entry: { flexDirection: 'row' as const, gap: spacing.sm },
-  entryRail: { alignItems: 'center' as const, width: 32 },
-  entryIcon: { width: 32, height: 32, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
-  entryLine: { flex: 1, width: 2, backgroundColor: t.border, marginVertical: 2 },
+  // Activity: grouped by day, a coloured icon on a rail, title and time, the note in a soft box
+  actHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.xs },
+  actTitle: { ...typography.overline, color: t.textMuted, flex: 1 },
+  day: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.sm },
+  dayText: { ...typography.overline, fontSize: 10, color: t.textSecondary },
+  dayLine: { flex: 1, height: 1, backgroundColor: t.border },
+  entry: { flexDirection: 'row' as const, gap: spacing.sm + 2 },
+  entryRail: { alignItems: 'center' as const, width: 34 },
+  entryLine: { flex: 1, width: 2, borderRadius: 1, backgroundColor: t.border, marginVertical: 3 },
   entryBody: { flex: 1, paddingBottom: spacing.md },
-  entryTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  entryNote: { ...typography.caption, color: t.textSecondary, marginTop: 2, lineHeight: 18 },
-  entryMeta: { ...typography.caption, color: t.textMuted, marginTop: 3 },
-  showAll: { alignSelf: 'center' as const, paddingVertical: spacing.xs, paddingHorizontal: spacing.md },
+  entryTop: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.sm },
+  entryTitle: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
+  entryTime: { ...typography.caption, color: t.textMuted, marginTop: 2 },
+  entryNote: {
+    ...typography.caption,
+    color: t.textSecondary,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radii.md,
+    backgroundColor: t.surfaceAlt,
+  },
+  entryBy: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, marginTop: spacing.xs },
+  entryByText: { ...typography.caption, color: t.textMuted },
+  showAll: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 4,
+    alignSelf: 'center' as const,
+    marginTop: spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    backgroundColor: t.primarySoftBg,
+  },
   showAllText: { ...typography.captionMedium, color: t.primary },
+  showAllChevron: { transform: [{ rotate: '90deg' }] },
+  showAllChevronUp: { transform: [{ rotate: '-90deg' }] },
   empty: { ...typography.caption, color: t.textMuted },
 });
 
@@ -237,8 +332,11 @@ const HISTORY_META: Record<string, { title: string; tone: Tone; icon: IconFn }> 
   VISIT_CHECK_IN: { title: 'Visit started', tone: 'accent', icon: (c) => <PinIcon size={15} color={c} /> },
   VISIT_COMPLETED: { title: 'Visit completed', tone: 'accent', icon: (c) => <PinIcon size={15} color={c} /> },
   FOLLOW_UP_SCHEDULED: { title: 'Follow-up set', tone: 'warning', icon: (c) => <ClockIcon size={15} color={c} /> },
-  QUOTATION_SENT: { title: 'Quotation sent', tone: 'accent', icon: (c) => <DocumentIcon size={15} color={c} /> },
+  QUOTATION_SENT: { title: 'Quotation sent', tone: 'info', icon: (c) => <SendIcon size={14} color={c} /> },
   CONVERTED: { title: 'Converted to customer', tone: 'success', icon: (c) => <UsersIcon size={15} color={c} /> },
+  AGREEMENT_CREATED: { title: 'Agreement created', tone: 'accent', icon: (c) => <DocumentIcon size={15} color={c} /> },
+  CONTRACT_TYPE_SET: { title: 'One-time / AMC set', tone: 'success', icon: (c) => <TagIcon size={15} color={c} /> },
+  AGREEMENT_SIGNED: { title: 'Signed agreement uploaded', tone: 'success', icon: (c) => <UploadIcon size={15} color={c} /> },
   MARK_LOST: { title: 'Marked lost', tone: 'danger', icon: (c) => <CloseIcon size={15} color={c} /> },
   FEEDBACK_SENT: { title: 'Feedback sent to provider', tone: 'neutral', icon: (c) => <SendIcon size={15} color={c} /> },
 };
@@ -275,15 +373,17 @@ export function LeadWorkScreen() {
   const loader = useCallback(async () => {
     const lead = await api.getLead(leadId);
     // The lead is what the screen needs; a failure in one of the extras must not hide it.
-    const [timeline, quotations, conversion, openMeeting] = await Promise.all([
+    const [timeline, quotations, conversion, openMeeting, agreements] = await Promise.all([
       api.getTimeline(leadId).catch(() => []),
       api.getQuotations(leadId).catch(() => []),
       lead.stage === 'CONVERTED' ? api.getConversion(leadId).catch(() => null) : Promise.resolve(null),
       // A scheduled meeting turns "Schedule meeting" into "View meeting".
       api.openMeeting(leadId).catch(() => null),
+      // A customer's service agreements - sales managers only.
+      lead.stage === 'CONVERTED' && persona === 'sales_manager' ? api.getAgreements(leadId).catch(() => null) : Promise.resolve(null),
     ]);
-    return { lead, timeline, quotations, conversion, openMeeting };
-  }, [leadId]);
+    return { lead, timeline, quotations, conversion, openMeeting, agreements };
+  }, [leadId, persona]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load this lead.');
 
   const runInline = async (action: LeadAction, work: () => Promise<void>, done: string) => {
@@ -306,10 +406,10 @@ export function LeadWorkScreen() {
       case 'claim':
         return runInline(action, () => api.claimLead(lead.id, myIdNum), 'This lead is now yours to verify.');
       case 'genuine':
-        return Alert.alert('Mark as genuine?', `${name} will be qualified and can be given to the sales team.`, [
+        return appAlert('Mark as genuine?', `${name} will be qualified and can be given to the sales team.`, [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Mark genuine', onPress: () => runInline(action, () => api.qualifyLead(lead.id, 'GENUINE'), 'Lead marked as genuine.') },
-        ]);
+        ], { tone: 'success', Icon: CheckCircleIcon });
       case 'needInfo':
         return runInline(action, () => api.qualifyLead(lead.id, 'NEEDS_INFO'), 'Marked as needing more information.');
       case 'call':
@@ -341,11 +441,32 @@ export function LeadWorkScreen() {
 
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
 
-  // A saved quotation's PDF: open it in the phone's PDF viewer, or save a copy to Downloads
-  // (QuotationPdfDialog does both and shows how it went).
-  const [pdfFor, setPdfFor] = useState<{ id: string; number: string } | null>(null);
 
   const lead = data?.lead;
+  // One-time or AMC - the tag on the lead card: chosen at conversion, else the latest standing quotation's.
+  const quotedType = data?.quotations?.find((q) => q.status !== 'CANCELLED' && q.contractType)?.contractType ?? null;
+  const contractType = data?.conversion?.contractType ?? quotedType;
+  // A customer converted before One-time / AMC was asked: the sales manager sets it once.
+  const askType = !!data?.conversion && !contractType && persona === 'sales_manager';
+  const setType = (kind: 'ONE_TIME' | 'AMC') => {
+    const label = kind === 'AMC' ? 'AMC' : 'One-time';
+    appAlert(`Set as ${label}?`, `It counts in the ${label} tab of the sales target from now on. It cannot be changed afterwards.`, [
+      { text: 'Back', style: 'cancel' },
+      {
+        text: `Set ${label}`,
+        onPress: async () => {
+          setActionError(null);
+          try {
+            await api.setConversionContractType(leadId, kind);
+            setNotice(`Set as ${label}.`);
+            reload();
+          } catch (err) {
+            setActionError(errorMessage(err, 'Could not save. Please try again.'));
+          }
+        },
+      },
+    ], { tone: 'success', Icon: CheckCircleIcon });
+  };
   const openMeeting = data?.openMeeting ?? null;
   const baseActions = lead ? leadActions(lead, persona, myId) : [];
   // An open meeting is always reachable from here (as "View meeting"), whoever runs the visit.
@@ -369,6 +490,8 @@ export function LeadWorkScreen() {
 
   const journeyIndex = lead ? JOURNEY.findIndex((s) => s.stages.includes(lead.stage)) : -1;
   const closedBadly = !!lead && isTerminal(lead.stage) && journeyIndex === -1;
+  // The quotation the customer is looking at: the newest one that still stands.
+  const latestQuote = data?.quotations.find((q) => q.status !== 'CANCELLED') ?? null;
 
   const history = data ? [...data.timeline].reverse() : [];
   const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
@@ -394,7 +517,13 @@ export function LeadWorkScreen() {
         {lead && (
           <>
             {/* Who, how much, where it stands */}
-            <View style={[styles.card, styles.hero]}>
+            <View style={[styles.card, styles.hero, !!contractType && styles.heroTagged]}>
+              {!!contractType && (
+                <View style={[styles.contractTag, contractType === 'AMC' ? styles.contractAmc : styles.contractOnce]} accessibilityLabel={contractType === 'AMC' ? 'AMC contract' : 'One-time service'}>
+                  <View style={styles.contractDot} />
+                  <Text style={styles.contractText}>{contractType === 'AMC' ? 'AMC' : 'ONE-TIME'}</Text>
+                </View>
+              )}
               <View style={styles.heroTop}>
                 <View style={styles.heroIcon}>
                   <BriefcaseIcon size={26} color={theme.primary} />
@@ -411,6 +540,29 @@ export function LeadWorkScreen() {
                       </Text>
                     </View>
                   )}
+                </View>
+                {/* Reach the customer */}
+                <View style={styles.contactBtns}>
+                  <Pressable
+                    onPress={() => open(`tel:${lead.phone}`, 'This phone cannot place calls.')}
+                    disabled={!lead.phone}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Call ${lead.contactPerson || 'customer'}`}
+                    style={({ pressed }) => [styles.contactBtn, styles.contactCall, !lead.phone && styles.contactOff, pressed && styles.contactPressed]}
+                  >
+                    <PhoneIcon size={19} color="#FFFFFF" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => open(whatsappUrl(lead.phone), 'Could not open WhatsApp on this phone.')}
+                    disabled={!lead.phone}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`WhatsApp ${lead.contactPerson || 'customer'}`}
+                    style={({ pressed }) => [styles.contactBtn, styles.contactWa, !lead.phone && styles.contactOff, pressed && styles.contactPressed]}
+                  >
+                    <WhatsAppIcon size={20} color="#FFFFFF" />
+                  </Pressable>
                 </View>
               </View>
               <View style={styles.quoteRow}>
@@ -439,32 +591,8 @@ export function LeadWorkScreen() {
               </View>
             </View>
 
-            {/* Reach the customer */}
-            <View style={styles.contactBtns}>
-              <Pressable
-                onPress={() => open(`tel:${lead.phone}`, 'This phone cannot place calls.')}
-                disabled={!lead.phone}
-                accessibilityRole="button"
-                accessibilityLabel={`Call ${lead.contactPerson || 'customer'}`}
-                style={({ pressed }) => [styles.contactBtn, styles.contactCall, pressed && styles.contactPressed]}
-              >
-                <PhoneIcon size={17} color="#FFFFFF" />
-                <Text style={styles.contactLabel}>Call</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => open(whatsappUrl(lead.phone), 'Could not open WhatsApp on this phone.')}
-                disabled={!lead.phone}
-                accessibilityRole="button"
-                accessibilityLabel={`WhatsApp ${lead.contactPerson || 'customer'}`}
-                style={({ pressed }) => [styles.contactBtn, styles.contactWa, pressed && styles.contactPressed]}
-              >
-                <WhatsAppIcon size={18} color="#FFFFFF" />
-                <Text style={styles.contactLabel}>WhatsApp</Text>
-              </Pressable>
-            </View>
-
             {/* What to do next */}
-            <Text style={styles.sectionTitle}>NEXT STEP</Text>
+            <Text style={[styles.sectionTitle, styles.nextTitle]}>NEXT STEP</Text>
             {actions.length === 0 ? (
               <Text style={styles.waiting}>
                 {lead.stage === 'NEW'
@@ -526,56 +654,106 @@ export function LeadWorkScreen() {
               </>
             )}
 
-            {data?.conversion && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>CUSTOMER</Text>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Customer</Text>
-                  <Text style={styles.infoValue}>{data.conversion.companyName}</Text>
+            {askType && (
+              <View style={styles.typeCard}>
+                <View style={styles.typeHead}>
+                  <View style={styles.typeIcon}>
+                    <AlertTriangleIcon size={18} color={theme.warningText} />
+                  </View>
+                  <View style={styles.typeText}>
+                    <Text style={styles.typeTitle}>One-time or AMC?</Text>
+                    <Text style={styles.typeSub}>Not set - this customer was converted before it was asked.</Text>
+                  </View>
                 </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Customer ID</Text>
-                  <Text style={styles.infoValue}>{data.conversion.companyId}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Converted by</Text>
-                  <Text style={styles.infoValue}>{data.conversion.convertedBy}</Text>
+                <View style={styles.typeRow}>
+                  {(
+                    [
+                      { key: 'ONE_TIME', label: 'One-time', Icon: ClockIcon, color: theme.warning },
+                      { key: 'AMC', label: 'AMC', Icon: CalendarIcon, color: theme.accent },
+                    ] as const
+                  ).map((o) => (
+                    <Pressable
+                      key={o.key}
+                      onPress={() => setType(o.key)}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.typeBtn, pressed && styles.qPressed]}
+                    >
+                      <GlossyBadge color={o.color} size={30} icon={<o.Icon size={15} color="#fff" />} />
+                      <Text style={styles.typeBtnText}>{o.label}</Text>
+                    </Pressable>
+                  ))}
                 </View>
               </View>
             )}
 
+            {/* A customer's agreements: one button to their own page */}
+            {data?.agreements && lead?.stage === 'CONVERTED' && (
+              <Pressable
+                onPress={() => navigation.navigate('LeadAgreements', { leadId, name: lead.companyName || lead.contactPerson || '' })}
+                accessibilityRole="button"
+                accessibilityLabel={`Agreements, ${data.agreements.agreements.length}`}
+                style={({ pressed }) => [styles.agBtn, pressed && styles.qPressed]}
+              >
+                <GlossyBadge color={theme.accent} size={44} icon={<DocumentIcon size={20} color="#fff" />} />
+                <View style={styles.agBtnText}>
+                  <Text style={styles.agBtnTitle}>Agreements</Text>
+                  <Text style={styles.agBtnSub} numberOfLines={1}>
+                    {data.agreements.agreements.length === 0
+                      ? 'None yet - made on the web'
+                      : data.agreements.final
+                        ? 'Final agreement uploaded'
+                        : 'Final agreement not uploaded yet'}
+                  </Text>
+                </View>
+                {data.agreements.agreements.length > 0 && (
+                  <View style={styles.quotesCount}>
+                    <Text style={styles.quotesCountText}>{data.agreements.agreements.length}</Text>
+                  </View>
+                )}
+                <ChevronRightIcon size={18} color={theme.textMuted} />
+              </Pressable>
+            )}
+
+            {/* A lead's quotations: one button to their own page */}
             {data && data.quotations.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>QUOTATIONS</Text>
-                {data.quotations.map((q, i) => (
-                  // A tap opens the PDF (with an option to save it to Downloads for WhatsApp / email).
-                  <Pressable
-                    key={q.id}
-                    disabled={!q.hasPdf}
-                    onPress={() => setPdfFor({ id: q.id, number: q.number })}
-                    accessibilityRole="button"
-                    style={({ pressed }) => [styles.quoteItem, i > 0 && styles.quoteDivider, pressed && { opacity: 0.7 }]}
-                  >
-                    <View style={styles.quoteIcon}>
-                      <DocumentIcon size={18} color={theme.accent} />
-                    </View>
-                    <View style={styles.quoteBody}>
-                      <Text style={styles.quoteNumber}>{q.number}</Text>
-                      <Text style={styles.quoteMeta}>
-                        {formatINR(q.total)}
-                        {q.sentAt ? ` · ${formatLeadWhen(q.sentAt)}` : ''}
-                        {q.hasPdf ? ' · Tap to open PDF' : ''}
-                      </Text>
-                    </View>
-                    <StatusBadge label={actionLabel(q.status)} tone="accent" dot={false} />
-                  </Pressable>
-                ))}
-              </View>
+              <Pressable
+                onPress={() => navigation.navigate('LeadQuotations', { leadId, name: lead.companyName || lead.contactPerson || '' })}
+                accessibilityRole="button"
+                accessibilityLabel={`Quotations, ${data.quotations.length}`}
+                style={({ pressed }) => [styles.agBtn, pressed && styles.qPressed]}
+              >
+                <GlossyBadge color="#dc2626" size={44} icon={<DocumentIcon size={20} color="#fff" />} />
+                <View style={styles.agBtnText}>
+                  <Text style={styles.agBtnTitle}>Quotations</Text>
+                  <Text style={styles.agBtnSub} numberOfLines={1}>
+                    {latestQuote
+                      ? [
+                          `Latest: ${formatINR(latestQuote.total)}`,
+                          latestQuote.contractType ? (latestQuote.contractType === 'AMC' ? 'AMC' : 'One-time') : '',
+                          actionLabel(latestQuote.status),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
+                      : 'All cancelled'}
+                  </Text>
+                </View>
+                <View style={styles.quotesCount}>
+                  <Text style={styles.quotesCountText}>{data.quotations.length}</Text>
+                </View>
+                <ChevronRightIcon size={18} color={theme.textMuted} />
+              </Pressable>
             )}
 
-            {/* What has happened, newest first */}
+            {/* What has happened, newest first - grouped by day */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>ACTIVITY</Text>
+              <View style={styles.actHead}>
+                <Text style={styles.actTitle}>ACTIVITY</Text>
+                {history.length > 0 && (
+                  <View style={styles.quotesCount}>
+                    <Text style={styles.quotesCountText}>{history.length}</Text>
+                  </View>
+                )}
+              </View>
               {history.length === 0 && <Text style={styles.empty}>No activity yet.</Text>}
               {shownHistory.map((entry: TimelineEntry, i) => {
                 // A verification call can end "genuine" or "need more information": the note says which.
@@ -585,41 +763,51 @@ export function LeadWorkScreen() {
                   : HISTORY_META[entry.action] ?? { title: actionLabel(entry.action), tone: 'neutral' as Tone, icon: historyFallbackIcon };
                 const c = toneColors(theme, meta.tone);
                 const note = entry.note ? humanNote(entry.note) : '';
-                const last = i === shownHistory.length - 1;
+                const day = dayLabel(entry.at);
+                const newDay = i === 0 || dayLabel(shownHistory[i - 1].at) !== day;
+                const lastOfDay = i === shownHistory.length - 1 || dayLabel(shownHistory[i + 1].at) !== day;
                 return (
-                  <View key={entry.id} style={styles.entry}>
-                    <View style={styles.entryRail}>
-                      <View style={[styles.entryIcon, { backgroundColor: c.bg }]}>{meta.icon(c.fg)}</View>
-                      {!last && <View style={styles.entryLine} />}
-                    </View>
-                    <View style={styles.entryBody}>
-                      <Text style={styles.entryTitle}>{meta.title}</Text>
-                      {!!note && <Text style={styles.entryNote}>{note}</Text>}
-                      <Text style={styles.entryMeta}>
-                        {formatLeadWhen(entry.at)}
-                        {entry.by ? ` · ${entry.by}` : ''}
-                      </Text>
+                  <View key={entry.id}>
+                    {newDay && (
+                      <View style={styles.day}>
+                        <Text style={styles.dayText}>{day.toUpperCase()}</Text>
+                        <View style={styles.dayLine} />
+                      </View>
+                    )}
+                    <View style={styles.entry}>
+                      <View style={styles.entryRail}>
+                        <GlossyBadge color={c.fg} size={32} icon={meta.icon('#FFFFFF')} />
+                        {!lastOfDay && <View style={styles.entryLine} />}
+                      </View>
+                      <View style={styles.entryBody}>
+                        <View style={styles.entryTop}>
+                          <Text style={styles.entryTitle}>{meta.title}</Text>
+                          <Text style={styles.entryTime}>{formatTime(entry.at)}</Text>
+                        </View>
+                        {!!note && <Text style={styles.entryNote}>{note}</Text>}
+                        {!!entry.by && (
+                          <View style={styles.entryBy}>
+                            <PersonIcon size={12} color={theme.textMuted} />
+                            <Text style={styles.entryByText}>{entry.by}</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </View>
                 );
               })}
               {history.length > HISTORY_PREVIEW && (
-                <Pressable onPress={() => setShowAllHistory((v) => !v)} accessibilityRole="button" style={styles.showAll}>
+                <Pressable onPress={() => setShowAllHistory((v) => !v)} accessibilityRole="button" style={({ pressed }) => [styles.showAll, pressed && styles.qPressed]}>
                   <Text style={styles.showAllText}>{showAllHistory ? 'Show less' : `Show all ${history.length} updates`}</Text>
+                  <View style={showAllHistory ? styles.showAllChevronUp : styles.showAllChevron}>
+                    <ChevronRightIcon size={14} color={theme.primary} />
+                  </View>
                 </Pressable>
               )}
             </View>
           </>
         )}
       </CrmScreen>
-      {pdfFor && (
-        <QuotationPdfDialog
-          name={data?.lead.companyName || pdfFor.number}
-          getFile={() => savedQuotationPdf(leadId, pdfFor.id, pdfFor.number)}
-          onOpened={() => setPdfFor(null)}
-          onClose={() => setPdfFor(null)}
-        />
-      )}
     </LeadScreen>
   );
 }

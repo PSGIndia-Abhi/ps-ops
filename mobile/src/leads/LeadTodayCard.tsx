@@ -62,7 +62,7 @@ export function LeadTodayCard() {
         />
       </View>
 
-      <SectionTitle title="Lead Quick Actions" />
+      <SectionTitle title="Lead Quick Actions" icon="actions" subtitle="Jump straight to your work" />
       <View style={styles.row}>
         <QuickAction icon={<ClockIcon size={19} color={WHITE} />} label="Follow-ups" tone="warning" count={data.summary.todayFollowUpsCount} onPress={() => navigation.navigate('LeadTasks')} />
         <QuickAction icon={<CalendarIcon size={19} color={WHITE} />} label="Meetings" tone="accent" count={data.today.length} onPress={openMeetings} />
@@ -72,7 +72,7 @@ export function LeadTodayCard() {
 
       {data.today.length > 0 && (
         <>
-          <SectionTitle title={`Today's Meetings (${data.today.length})`} onViewAll={openMeetings} />
+          <SectionTitle title={`Today's Meetings (${data.today.length})`} icon="meetings" subtitle="Your visits and meetings today" onViewAll={openMeetings} />
           {data.today.slice(0, MAX_ROWS).map((m) => (
             <AgendaRow key={m.id} meeting={m} title={data.names.get(m.leadId) || m.address || 'Meeting'} onPress={() => navigation.navigate('LeadMeeting', { meetingId: m.id })} />
           ))}

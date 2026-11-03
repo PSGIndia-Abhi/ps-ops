@@ -23,6 +23,7 @@ import { roleLabel, useUserRole } from '../../auth/role';
 import { dashboardApi, jobsApi, teamsApi, ApiError } from '../../api';
 import { formatTime, getGreeting } from '../../utils/date';
 import { summarizeTodaysOperations, type TodaysOperationsSummary } from '../../utils/todaysOperations';
+import { summaryFromJobs } from '../../utils/summaryFromJobs';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { DashboardSummary } from '../../types/dashboard';
 import type { TeamMember } from '../../types/team';
@@ -46,11 +47,20 @@ export function SupervisorDashboardScreen() {
     if (isRefresh) setRefreshing(true);
     setError(null);
     try {
-      const [summaryData, jobs, teamData] = await Promise.all([
-        dashboardApi.fetchDashboardSummary(),
-        jobsApi.listJobs(),
-        teamsApi.listMyTeam(),
-      ]);
+      const [jobs, teamData] = await Promise.all([jobsApi.listJobs(), teamsApi.listMyTeam()]);
+      // The summary endpoint needs VIEW_ANALYTICS, which the supervisor role
+      // does not have. When it is refused, build the same cards from the job
+      // list instead of failing the whole screen.
+      let summaryData: DashboardSummary;
+      try {
+        summaryData = await dashboardApi.fetchDashboardSummary();
+      } catch (summaryErr) {
+        if (summaryErr instanceof ApiError && summaryErr.status === 403) {
+          summaryData = summaryFromJobs(jobs);
+        } else {
+          throw summaryErr;
+        }
+      }
       setSummary(summaryData);
       setToday(summarizeTodaysOperations(jobs));
       setTeam(teamData);

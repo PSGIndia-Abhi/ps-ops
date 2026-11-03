@@ -1,0 +1,588 @@
+const minioClient = require("../lib/minio");
+const { pool } = require("../../db");
+const { TARGET_PESTS } = require("../utils/audits");
+
+// ---------------------------------------------------------------------------
+// Site Audit voice notes: audio (kept in MinIO) -> Gemini -> transcript + English.
+// Called only by the queue worker (jobs/auditQueue.cron.js), never from the app,
+// so the API key stays on the server. Request format: Gemini REST generateContent
+// with the audio inline (base64, < 20 MB), JSON output.
+// ---------------------------------------------------------------------------
+
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const DEFAULT_MODEL = "gemini-3.6-flash"; // fastest reliable (about 4-7 s)
+// Tried when the main model is busy (503 / 429) or does not answer in time.
+const DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash";
+const MAX_INLINE_BYTES = 18 * 1024 * 1024;
+// One Gemini call may take at most this long; the worker retries right away after it.
+const TIMEOUT_MS = 20 * 1000;
+// The backup model starts only if the main one has not answered by then
+// (asking both every time would use up the daily quota twice as fast).
+const FALLBACK_AFTER_MS = 6 * 1000;
+// Longer recordings (the app allows up to 3 minutes) take Gemini longer, so both waits grow with
+// the recording: up to 1 minute keeps the times above, a 3-minute note gets about 50 s / 24 s.
+const AUDIO_BYTES_PER_SECOND = 25 * 1024; // m4a from the app: about 1.5 MB a minute
+function waitTimes(base64Audio) {
+  const seconds = Math.max(0, (base64Audio.length * 0.75) / AUDIO_BYTES_PER_SECOND - 60);
+  return {
+    timeoutMs: Math.min(TIMEOUT_MS + seconds * 250, 120 * 1000),
+    fallbackAfterMs: FALLBACK_AFTER_MS + seconds * 150,
+  };
+}
+
+/** Gemini was busy or slow: worth trying again later (the worker retries). */
+class VoiceBusyError extends Error {}
+
+/**
+ * Too many requests this minute (free plan: 5 a minute per model). Another model has its own
+ * limit, so the lite models are tried at once; otherwise the worker waits as long as Google says.
+ */
+class VoiceRateLimitError extends VoiceBusyError {
+  constructor(retryAfterMs) {
+    super(RATE_LIMIT_MESSAGE);
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+const RATE_LIMIT_MESSAGE = "Many translations at the same time. Trying again automatically in a moment...";
+
+/** The API key's daily request limit is used up: retrying today will not help. */
+class VoiceQuotaError extends Error {}
+const QUOTA_MESSAGE = "Today's translations are used up. Please type the English text below.";
+
+/** The recording has no clear speech: retrying the same audio will not help. */
+class VoiceNoSpeechError extends Error {}
+const NO_SPEECH_MESSAGE = "No clear speech was heard. Tap Record again, or type the text.";
+
+const LANGUAGE_NAMES = { kn: "Kannada", hi: "Hindi", ta: "Tamil", te: "Telugu", en: "English" };
+
+/** Set-up problems (no key, billing / credit, key not allowed): retrying will not help until an admin fixes it. */
+class VoiceConfigError extends Error {}
+
+// What the supervisor sees. Google's own error text (codes, links, billing words) is only written
+// to the server log; the app shows one of these short messages.
+const USER_MESSAGES = {
+  unavailable: "Translation is not available right now. Please type the English text below.",
+  busy: "Translation is busy right now. Tap Retry in a minute, or type the English text.",
+  quota: QUOTA_MESSAGE,
+  noSpeech: NO_SPEECH_MESSAGE,
+  other: "Could not translate this recording. Tap Retry, or type the English text.",
+};
+/** Any translation error -> the short message for the supervisor. */
+function userMessage(err) {
+  if (err instanceof VoiceNoSpeechError) return USER_MESSAGES.noSpeech;
+  if (err instanceof VoiceQuotaError) return USER_MESSAGES.quota;
+  if (err instanceof VoiceConfigError) return USER_MESSAGES.unavailable;
+  if (err instanceof VoiceBusyError) return USER_MESSAGES.busy;
+  return USER_MESSAGES.other;
+}
+
+function isConfigured() {
+  return !!process.env.GEMINI_API_KEY;
+}
+
+async function readObject(objectKey) {
+  const stream = await minioClient.getObject(process.env.MINIO_BUCKET, objectKey);
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+// Gemini lists audio/m4a, audio/aac, audio/mp3, audio/wav, audio/ogg ...
+function geminiMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  if (m === "audio/mp4" || m === "audio/x-m4a") return "audio/m4a";
+  if (m === "audio/mpeg") return "audio/mp3";
+  return m || "audio/m4a";
+}
+
+/**
+ * "All in one" recording: the supervisor says the observation, the customer's action and
+ * BestServe's action in one go; Gemini translates and splits it into the three parts.
+ */
+function buildCombinedPrompt(sourceLanguage) {
+  const lang = LANGUAGE_NAMES[sourceLanguage];
+  return [
+    "You are transcribing a voice note recorded by a pest-control supervisor during a site inspection in India.",
+    lang ? `The speaker is most likely speaking ${lang}, possibly mixed with English words.` : "Detect the spoken language (it may be Kannada, Hindi, Tamil, Telugu or English, possibly mixed).",
+    "In this one recording the supervisor usually says, in this order:",
+    "  - the AREA name (e.g. kitchen, store room, front yard) and the PEST(S) found there (e.g. cockroaches, rats),",
+    "  a) OBSERVATION: what was seen at the site (the problem, where, signs of pests).",
+    "  b) CUSTOMER ACTION: what the customer / site staff must do (e.g. seal gaps, clean, repair, keep doors closed).",
+    "  c) BESTSERVE ACTION: what BestServe (the pest-control company, 'we', 'our team') will do (e.g. place bait stations, spray, inspect again).",
+    "Also fill these short fields:",
+    '  - "area_name": the area name as said (English, 1-5 words), else "".',
+    '  - "target_pests": a list of the pests mentioned. Use COCKROACHES, RODENTS (rats, mice, bandicoots), MOSQUITOES, FLIES, TERMITES for those; any other pest as a short English name (e.g. "Lizards"); [] if no pest is mentioned.',
+    '  - "title": a short name for the problem, at most 5 words, no area name in it (e.g. "Gap under the shutter", "Rodent entry point"), else "".',
+    ...categoryGuide(),
+    '  - "risk_level": LOW, MEDIUM, HIGH or CRITICAL - the level the supervisor said, or else your suggestion from how serious the problem described is (e.g. live pests or droppings in a food area = HIGH or CRITICAL); "" if there is no problem described.',
+    '  - "fix_within_days": a whole number of days only if the supervisor said a time (e.g. "within a week" = 7, "immediately" = 0), else null.',
+    "1. Write an exact transcript in the language and script that was spoken.",
+    "2. Translate into professional, grammatically correct English for a formal customer inspection report, and put each sentence in the part it belongs to.",
+    "Keep exactly the same meaning as what was said: do not add, remove, interpret or summarise anything, and do not invent actions that were not said.",
+    "Only improve the wording: fix grammar, remove filler words and repetitions, write complete sentences. Keep names, places and counts exactly as spoken.",
+    "Keep pest-control terms as they are (rodent, burrow, harbourage, bait station, gel baiting, drain, debris).",
+    "If a part was not said, leave it as an empty string. Do not copy a sentence into more than one part.",
+    'If there is no clear speech (silence, noise, or words you cannot make out), set "no_speech": true and leave everything else empty. Never invent text.',
+    'Reply with JSON only: {"no_speech": false, "detected_language": "<ISO 639-1 code>", "transcript": "...", "area_name": "...", "target_pests": [], "title": "...", "risk_categories": [], "risk_level": "...", "fix_within_days": null, "observation": "...", "customer_action": "...", "bestserve_action": "...", "confidence": "high|medium|low"}',
+  ].join("\n");
+}
+
+const RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+// How the AI picks the risk categories (one or more) - the same for one area and for a whole-site walkthrough.
+const CATEGORY_CODES = ["HARBOURAGE", "CRACKS", "BURROWS", "ENTRY_POINT", "FOOD_SOURCE", "WATER"];
+// "Other" names typed in earlier audits (read from the saved findings, refreshed every few minutes):
+// the AI reuses the same name for the same problem instead of a new wording each time.
+let knownOtherNames = [];
+let knownOtherLoadedAt = 0;
+const KNOWN_OTHER_REFRESH_MS = 5 * 60 * 1000;
+async function refreshKnownOtherNames() {
+  if (Date.now() - knownOtherLoadedAt < KNOWN_OTHER_REFRESH_MS) return;
+  knownOtherLoadedAt = Date.now();
+  try {
+    const [rows] = await pool.query(
+      "SELECT risk_category FROM audit_findings WHERE risk_category <> '' ORDER BY created_at DESC LIMIT 2000",
+    );
+    // Most used first; the spelling used most often wins.
+    const counts = new Map();
+    for (const r of rows) {
+      for (const name of String(r.risk_category).split(",").map((c) => c.trim())) {
+        if (!name || CATEGORY_CODES.includes(name.toUpperCase()) || name.toUpperCase() === "OTHER") continue;
+        const key = name.toLowerCase();
+        const entry = counts.get(key) || { n: 0, spellings: new Map() };
+        entry.n += 1;
+        entry.spellings.set(name, (entry.spellings.get(name) || 0) + 1);
+        counts.set(key, entry);
+      }
+    }
+    knownOtherNames = [...counts.values()]
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 40)
+      .map((e) => [...e.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+  } catch (err) {
+    console.error("Could not load the saved Other categories", err.message);
+  }
+}
+
+function categoryGuide() {
+  return [
+    ...CATEGORY_GUIDE,
+    ...(knownOtherNames.length
+      ? [`    Names already used in earlier audits: ${knownOtherNames.map((n) => JSON.stringify(n)).join(", ")}.`,
+        "    When the problem is the same as one of these, use that exact name instead of a new wording."]
+      : []),
+  ];
+}
+
+const CATEGORY_GUIDE = [
+  '  - "risk_categories": a list of the categories for the problem described (one or more). Use a code ONLY when',
+  "    the supervisor actually describes that exact problem - never because of the pest's name alone:",
+  "      HARBOURAGE = ALWAYS when rats / mice / rodents / bandicoots are mentioned (together with any other code that fits). Never for insects.",
+  "      CRACKS = ONLY when cracks or crevices are actually mentioned (wall cracks, gaps, crevices) as the place pests hide.",
+  "        Cockroaches alone, without cracks being mentioned, are NOT CRACKS.",
+  "      BURROWS = holes dug in soil or under floors (rodent burrows, termite mud tubes),",
+  "      ENTRY_POINT = ways in from outside (gaps under doors or shutters, holes in walls, open drains, pipe openings),",
+  "      FOOD_SOURCE = ONLY when food or waste is actually mentioned (spills, open bins, food left out, garbage). Never just because of the pest.",
+  "      WATER = stagnant water, leaks, damp areas (mosquito breeding, drain water). Mosquitoes usually mean WATER, not FOOD_SOURCE.",
+  '    If the problem fits none of these exactly (e.g. bed bugs in a bed box, cockroach infestation, termite damage), add ONE short',
+  '    English name for it instead (e.g. "Bed bug infestation", "Cockroach infestation", "Damaged wood"). Never return an empty list when a problem is described.',
+];
+
+// Rodents mentioned in the English text: Rodent harbourage is always one of the categories.
+const RODENT_RE = /\b(rodents?|rats?|mice|mouse|bandicoots?)\b/i;
+// Words that mean food or waste really was mentioned.
+const FOOD_RE = /\b(food|foods|waste|garbage|trash|rubbish|bins?|dustbins?|spills?|spilled|spilt|leftovers?|grains?|crumbs|eat|eating|feeding|scraps)\b/i;
+
+/**
+ * The AI's categories -> "HARBOURAGE,CRACKS,Damaged wood" (known codes first, at most one typed name).
+ * `rodents` = rodents were mentioned: Rodent harbourage is added even if the AI left it out
+ * (and a typed name about rodents is then not needed). `spoken` = the English text, to check the AI's choice.
+ */
+function categoryList(value, rodents = false, spoken = "") {
+  const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const codes = [];
+  let typed = "";
+  for (const raw of list) {
+    const text = typeof raw === "string" ? raw.replace(/,/g, " ").trim().slice(0, 50) : "";
+    if (!text) continue;
+    const code = text.toUpperCase().replace(/\s+/g, "_");
+    if (CATEGORY_CODES.includes(code)) { if (!codes.includes(code)) codes.push(code); } else if (!typed && code !== "OTHER") typed = text;
+  }
+  if (rodents && !codes.includes("HARBOURAGE")) codes.unshift("HARBOURAGE");
+  // Food source only when food or waste was really said (e.g. not for a mosquito problem near water).
+  if (codes.includes("FOOD_SOURCE") && spoken && !FOOD_RE.test(spoken)) codes.splice(codes.indexOf("FOOD_SOURCE"), 1);
+  if (rodents && RODENT_RE.test(typed)) typed = "";
+  // The same name as an earlier audit, written the same way ("bed bug infestation" -> "Bed bug infestation").
+  if (typed) typed = knownOtherNames.find((n) => n.toLowerCase() === typed.toLowerCase()) || typed;
+  return [...codes, ...(typed ? [typed] : [])].join(",");
+}
+
+// Pests the AI heard: known codes in capitals, any other pest as short text (max 5).
+function pestList(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const raw of value) {
+    const text = typeof raw === "string" ? raw.trim().slice(0, 40) : "";
+    if (!text) continue;
+    const v = TARGET_PESTS.includes(text.toUpperCase()) ? text.toUpperCase() : text;
+    if (!out.includes(v)) out.push(v);
+  }
+  return out.slice(0, 5);
+}
+
+function buildPrompt(sourceLanguage) {
+  const lang = LANGUAGE_NAMES[sourceLanguage];
+  return [
+    "You are transcribing a voice note recorded by a pest-control supervisor during a site inspection in India.",
+    lang ? `The speaker is most likely speaking ${lang}, possibly mixed with English words.` : "Detect the spoken language (it may be Kannada, Hindi, Tamil, Telugu or English, possibly mixed).",
+    "1. Write an exact transcript in the language and script that was spoken.",
+    "2. Translate the transcript into professional, grammatically correct English suitable for a formal customer inspection report.",
+    "The English must keep exactly the same meaning as what was said: do not add, remove, interpret, analyse or summarise anything.",
+    "Do not add advice, causes, facts, numbers, places or details that were not said. Keep names, places, counts and areas exactly as spoken.",
+    "Only improve the wording: fix grammar, remove filler words (e.g. 'sir', 'okay', 'that's it', repetitions), and write complete sentences.",
+    "Keep pest-control terms as they are (rodent, burrow, harbourage, bait station, gel baiting, drain, debris).",
+    'If there is no clear speech (silence, noise, or words you cannot make out), set "no_speech": true and leave transcript and english empty. Never invent text.',
+    'Reply with JSON only: {"no_speech": false, "detected_language": "<ISO 639-1 code>", "transcript": "...", "english": "...", "confidence": "high|medium|low"}',
+  ].join("\n");
+}
+
+/**
+ * Sends one recording to Gemini. Returns { detectedLanguage, transcript, english, confidence, model }.
+ * Throws on any failure; the caller records the error and keeps the audio.
+ */
+async function transcribeAndTranslate({ objectKey, mimeType, sourceLanguage, combined = false }) {
+  await refreshKnownOtherNames();
+  if (!isConfigured()) throw new VoiceConfigError("Translation is not set up on the server (GEMINI_API_KEY missing)");
+  const main = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const fallback = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
+  const models = [main, fallback].filter((m, i, all) => m && all.indexOf(m) === i);
+
+  const audio = await readObject(objectKey);
+  if (!audio.length) throw new Error("The recording is empty");
+  if (audio.length > MAX_INLINE_BYTES) throw new Error("The recording is too long to translate (over 18 MB)");
+  const data = audio.toString("base64");
+  const waiting = [];
+  const startNext = () => waiting.forEach((go) => go());
+
+  // Ask every model at the same time and take the first good answer, so one
+  // busy model never makes the supervisor wait. The others are then cancelled.
+  // A "no speech" answer also ends the wait at once (it is a final answer, not a failure to retry).
+  // The backup model starts after FALLBACK_AFTER_MS, or at once if the main one fails first.
+  const controllers = models.map(() => new AbortController());
+  const timers = [];
+  try {
+    const first = await Promise.any(models.map((model, i) => {
+      const run = () => callModel(model, data, mimeType, sourceLanguage, controllers[i].signal, combined).catch((err) => {
+        if (err instanceof VoiceNoSpeechError) return { noSpeech: err };
+        throw err;
+      });
+      if (i === 0) {
+        const p = run();
+        p.catch(() => startNext());
+        return p;
+      }
+      return new Promise((resolve, reject) => {
+        let started = false;
+        const go = () => { if (!started) { started = true; run().then(resolve, reject); } };
+        waiting.push(go);
+        timers.push(setTimeout(go, waitTimes(data).fallbackAfterMs));
+      });
+    }));
+    if (first.noSpeech) throw first.noSpeech;
+    return first;
+  } catch (agg) {
+    if (agg instanceof VoiceNoSpeechError) throw agg;
+    const errors = agg?.errors || [agg];
+    // Every main model has used today's quota or this minute's limit: try the lite models
+    // (their own limits, about 2-3 s) one by one, so the supervisor still gets English quickly.
+    if (errors.length && errors.every((e) => e instanceof VoiceQuotaError || e instanceof VoiceRateLimitError)) {
+      return quotaFallback(data, mimeType, sourceLanguage, combined, errors);
+    }
+    // Busy -> retry soon; quota -> stop for today; anything else is a real error.
+    throw errors.find((e) => !(e instanceof VoiceBusyError) && !(e instanceof VoiceQuotaError))
+      || errors.find((e) => e instanceof VoiceBusyError)
+      || errors[0];
+  } finally {
+    timers.forEach(clearTimeout);
+    controllers.forEach((c) => c.abort());
+  }
+}
+
+// Used only when the main models hit the daily or per-minute limit (free plan: 20 a day, 5 a minute per model).
+// Lite models have their own quota; tested on Hindi audio: about 2-3 s with a faithful translation.
+const DEFAULT_QUOTA_FALLBACK = "gemini-3.5-flash-lite,gemini-flash-lite-latest";
+
+async function quotaFallback(data, mimeType, sourceLanguage, combined, mainErrors = []) {
+  const models = (process.env.GEMINI_QUOTA_FALLBACK_MODELS ?? DEFAULT_QUOTA_FALLBACK).split(",").map((m) => m.trim()).filter(Boolean);
+  const errors = [...mainErrors];
+  for (const model of models) {
+    try {
+      return await callModel(model, data, mimeType, sourceLanguage, undefined, combined);
+    } catch (err) {
+      if (err instanceof VoiceNoSpeechError) throw err;
+      if (!(err instanceof VoiceQuotaError) && !(err instanceof VoiceBusyError)) throw err;
+      errors.push(err);
+    }
+  }
+  // Some model is only limited for this minute: wait for the shortest limit, then try again.
+  const waits = errors.filter((e) => e instanceof VoiceRateLimitError).map((e) => e.retryAfterMs);
+  if (waits.length) throw new VoiceRateLimitError(Math.min(...waits));
+  throw errors.find((e) => e instanceof VoiceQuotaError) || errors[errors.length - 1] || new VoiceQuotaError(QUOTA_MESSAGE);
+}
+
+async function callModel(model, data, mimeType, sourceLanguage, outerSignal, combined = false) {
+  const body = {
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: geminiMime(mimeType), data } },
+        { text: combined ? buildCombinedPrompt(sourceLanguage) : buildPrompt(sourceLanguage) },
+      ],
+    }],
+    generationConfig: {
+      response_mime_type: "application/json",
+      // 0 = the same recording always gives the same, literal translation.
+      temperature: 0,
+      // Transcription needs little reasoning; lower thinking answers much faster.
+      thinkingConfig: { thinkingLevel: process.env.GEMINI_THINKING_LEVEL || "low" },
+    },
+  };
+
+  try {
+    return parseResult(await postGemini(model, body, outerSignal, waitTimes(data).timeoutMs), model, combined);
+  } catch (err) {
+    // A model that does not accept the thinking setting: try once without it.
+    if (err.status === 400 && /thinking/i.test(err.message)) {
+      delete body.generationConfig.thinkingConfig;
+      return parseResult(await postGemini(model, body, outerSignal, waitTimes(data).timeoutMs), model, combined);
+    }
+    throw err;
+  }
+}
+
+/** POSTs to generateContent; returns the raw body. Busy / slow answers throw VoiceBusyError. */
+async function postGemini(model, body, outerSignal, timeoutMs = TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  outerSignal?.addEventListener("abort", () => controller.abort(), { once: true });
+  let res;
+  try {
+    res = await fetch(`${GEMINI_URL}/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === "AbortError") throw new VoiceBusyError(`Gemini (${model}) did not answer in ${timeoutMs / 1000} s`);
+    throw new VoiceBusyError(`Could not reach Gemini: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  const raw = await res.text();
+  if (res.ok) return raw;
+  let msg = raw.slice(0, 300);
+  let perDay = false;
+  let retryAfterMs = 0;
+  try {
+    const e = JSON.parse(raw)?.error;
+    msg = e?.message || msg;
+    perDay = (e?.details || []).some((d) => (d.violations || []).some((v) => /PerDay/i.test(v.quotaId || "")));
+    // Google says how long to wait, e.g. RetryInfo { retryDelay: "26s" }.
+    const delay = (e?.details || []).map((d) => d.retryDelay).find(Boolean);
+    if (delay) retryAfterMs = Math.ceil(parseFloat(delay) * 1000);
+  } catch { /* keep raw */ }
+  if (res.status === 429 && perDay) throw new VoiceQuotaError(QUOTA_MESSAGE);
+  if (res.status === 429) throw new VoiceRateLimitError(Math.min(Math.max(retryAfterMs, 5000), 60000) || 30000);
+  // Paid plan with no prepaid credit left: nothing to retry until someone adds credit.
+  // Set-up problems an admin must fix (no prepaid credit, wrong key, key not allowed). Full text goes to the log only.
+  if ([401, 402, 403].includes(res.status)) throw new VoiceConfigError(`Gemini error ${res.status}: ${msg}`);
+  if ([429, 500, 502, 503, 504].includes(res.status)) throw new VoiceBusyError(`Gemini is busy (${res.status}): ${msg}`);
+  const err = new Error(`Gemini error ${res.status}: ${msg}`);
+  err.status = res.status;
+  throw err;
+}
+
+function parseResult(raw, model, combined = false) {
+  let text;
+  try {
+    const data = JSON.parse(raw);
+    text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+  } catch {
+    throw new Error("Gemini returned an unreadable response");
+  }
+  let out;
+  try {
+    out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    throw new Error("Gemini did not return the expected JSON");
+  }
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  // "All in one": the three parts; english = the observation (shown in the Observation box).
+  // Also the area details and a suggested risk; each is checked and left empty when unclear.
+  const days = Number.isInteger(out.fix_within_days) && out.fix_within_days >= 0 && out.fix_within_days <= 365 ? out.fix_within_days : null;
+  const level = str(out.risk_level).toUpperCase();
+  const parts = combined
+    ? {
+      observation: str(out.observation),
+      customerAction: str(out.customer_action),
+      bestserveAction: str(out.bestserve_action),
+      areaName: str(out.area_name).slice(0, 200),
+      targetPests: pestList(out.target_pests),
+      title: str(out.title).slice(0, 250),
+      // One or more: "HARBOURAGE,CRACKS" (older answers had a single "risk_category").
+      riskCategory: categoryList(
+        out.risk_categories ?? out.risk_category,
+        pestList(out.target_pests).includes("RODENTS") || RODENT_RE.test(`${str(out.title)} ${str(out.observation)}`),
+        [out.title, out.observation, out.customer_action, out.bestserve_action].map(str).join(" "),
+      ),
+      riskLevel: RISK_LEVELS.includes(level) ? level : "",
+      fixWithinDays: days,
+    }
+    : null;
+  const english = combined ? parts.observation : str(out.english);
+  // Silence or noise: Gemini says so, or returns no real words (e.g. "0.0").
+  const spoken = combined ? [parts.observation, parts.customerAction, parts.bestserveAction, parts.areaName, parts.title].join(" ") : english;
+  const letters = (spoken.match(/\p{L}/gu) || []).length;
+  if (out.no_speech === true || letters < 3) throw new VoiceNoSpeechError(NO_SPEECH_MESSAGE);
+
+  return {
+    detectedLanguage: typeof out.detected_language === "string" ? out.detected_language.slice(0, 10) : null,
+    transcript: typeof out.transcript === "string" ? out.transcript.trim() : null,
+    english,
+    parts,
+    confidence: ["high", "medium", "low"].includes(out.confidence) ? out.confidence : null,
+    model,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Site walkthrough: ONE recording describing many areas -> a list of areas, each with its findings.
+// Longer recordings take Gemini longer, so this call gets its own, longer time limit.
+// ---------------------------------------------------------------------------
+const WALKTHROUGH_TIMEOUT_MS = 120 * 1000;
+
+function buildWalkthroughPrompt(sourceLanguage) {
+  const lang = LANGUAGE_NAMES[sourceLanguage];
+  return [
+    "You are processing a voice recording made by a pest-control supervisor while walking through a customer site in India.",
+    lang ? `The speaker is most likely speaking ${lang}, possibly mixed with English words.` : "Detect the spoken language (it may be Kannada, Hindi, Tamil, Telugu or English, possibly mixed).",
+    "The supervisor goes area by area (e.g. front yard, backyard, first floor, kitchen, store room). For each area they say the problem,",
+    "what the customer should do, and what BestServe (the pest-control company, 'we', 'our team') will do.",
+    "Split the recording into areas in the order they were spoken. Each area has exactly ONE finding: put everything said about",
+    "that area (all pests, problems, cracks, gaps, causes and actions) together in that one finding. Never return two findings for one area.",
+    "Translate everything into professional, grammatically correct English for a formal inspection report.",
+    "Keep exactly the same meaning as what was said: do not add, remove or invent problems, actions, places or numbers.",
+    "Only improve the wording: fix grammar, remove filler words and repetitions. Keep pest-control terms (rodent, burrow, harbourage, bait station, gel baiting, drain, debris).",
+    "For each area: area_name (English, 1-5 words), zone_name (building / block / floor if said, else \"\").",
+    "For each finding: title (a short name for the problem, at most 5 words), observation, customer_action, bestserve_action (\"\" if not said),",
+    ...categoryGuide(),
+    "risk_level: LOW, MEDIUM, HIGH or CRITICAL - what was said, or else your suggestion from how serious the problem is;",
+    "fix_within_days: a whole number only if a time was said (\"within a week\" = 7, \"immediately\" = 0), else null.",
+    'If there is no clear speech, set "no_speech": true and return an empty "areas" list. Never invent text.',
+    'Reply with JSON only: {"no_speech": false, "detected_language": "<ISO 639-1>", "transcript": "...", "areas": [{"area_name": "...", "zone_name": "...", "findings": [{"title": "...", "risk_categories": [], "risk_level": "...", "fix_within_days": null, "observation": "...", "customer_action": "...", "bestserve_action": "..."}]}]}',
+  ].join("\n");
+}
+
+/**
+ * One finding per area: if the AI still split an area, join its findings. The first title is kept,
+ * all their categories, the most serious risk level and the shortest "fix within", and the texts are joined.
+ */
+function mergeFindings(list) {
+  const join = (key) => list.map((f) => f[key]).filter(Boolean).join(" ");
+  const levels = list.map((f) => f.riskLevel).filter(Boolean);
+  const days = list.map((f) => f.fixWithinDays).filter((d) => d != null);
+  return {
+    title: list.find((f) => f.title)?.title || "",
+    riskCategory: categoryList(list.map((f) => f.riskCategory).join(",")),
+    riskLevel: levels.sort((x, y) => RISK_LEVELS.indexOf(y) - RISK_LEVELS.indexOf(x))[0] || "",
+    fixWithinDays: days.length ? Math.min(...days) : null,
+    observation: join("observation").slice(0, 4000),
+    customerAction: join("customerAction").slice(0, 2000),
+    bestserveAction: join("bestserveAction").slice(0, 2000),
+  };
+}
+
+function parseWalkthrough(raw, model) {
+  let out;
+  try {
+    const data = JSON.parse(raw);
+    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+    out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+  } catch {
+    throw new Error("Gemini did not return the expected JSON");
+  }
+  const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+  const areas = (Array.isArray(out.areas) ? out.areas : []).slice(0, 60).map((a) => ({
+    areaName: str(a?.area_name, 200),
+    zoneName: str(a?.zone_name, 150),
+    findings: (Array.isArray(a?.findings) ? a.findings : []).slice(0, 10).map((f) => {
+      const level = str(f?.risk_level, 10).toUpperCase();
+      const days = Number.isInteger(f?.fix_within_days) && f.fix_within_days >= 0 && f.fix_within_days <= 365 ? f.fix_within_days : null;
+      return {
+        title: str(f?.title, 250),
+        riskCategory: categoryList(
+          f?.risk_categories ?? f?.risk_category,
+          RODENT_RE.test(`${str(f?.title, 250)} ${str(f?.observation, 4000)}`),
+          [f?.title, f?.observation, f?.customer_action, f?.bestserve_action].map((t) => str(t, 4000)).join(" "),
+        ),
+        riskLevel: RISK_LEVELS.includes(level) ? level : "",
+        fixWithinDays: days,
+        observation: str(f?.observation, 4000),
+        customerAction: str(f?.customer_action, 2000),
+        bestserveAction: str(f?.bestserve_action, 2000),
+      };
+    }).filter((f) => f.observation || f.title || f.customerAction || f.bestserveAction),
+  })).filter((a) => a.areaName || a.findings.length)
+    .map((a) => ({ ...a, findings: a.findings.length > 1 ? [mergeFindings(a.findings)] : a.findings }));
+  if (out.no_speech === true || !areas.length) throw new VoiceNoSpeechError(NO_SPEECH_MESSAGE);
+  return {
+    areas,
+    transcript: typeof out.transcript === "string" ? out.transcript.trim() : null,
+    detectedLanguage: typeof out.detected_language === "string" ? out.detected_language.slice(0, 10) : null,
+    model,
+  };
+}
+
+/** One walkthrough recording -> areas and findings. Tries the main, backup and lite models in turn. */
+async function transcribeWalkthrough({ objectKey, mimeType, sourceLanguage }) {
+  await refreshKnownOtherNames();
+  if (!isConfigured()) throw new VoiceConfigError("Translation is not set up on the server (GEMINI_API_KEY missing)");
+  const audio = await readObject(objectKey);
+  if (!audio.length) throw new Error("The recording is empty");
+  if (audio.length > MAX_INLINE_BYTES) throw new Error("The recording is too long (over 18 MB). Record the site in two parts.");
+  const data = audio.toString("base64");
+  const main = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const fallback = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_FALLBACK_MODEL;
+  const lite = (process.env.GEMINI_QUOTA_FALLBACK_MODELS ?? DEFAULT_QUOTA_FALLBACK).split(",").map((m) => m.trim());
+  const models = [main, fallback, ...lite].filter((m, i, all) => m && all.indexOf(m) === i);
+  const body = {
+    contents: [{ parts: [{ inline_data: { mime_type: geminiMime(mimeType), data } }, { text: buildWalkthroughPrompt(sourceLanguage) }] }],
+    generationConfig: { response_mime_type: "application/json", temperature: 0, thinkingConfig: { thinkingLevel: process.env.GEMINI_THINKING_LEVEL || "low" } },
+  };
+  let last = null;
+  for (const model of models) {
+    try {
+      let raw;
+      try {
+        raw = await postGemini(model, body, undefined, WALKTHROUGH_TIMEOUT_MS);
+      } catch (err) {
+        if (err.status === 400 && /thinking/i.test(err.message)) {
+          const plain = { ...body, generationConfig: { response_mime_type: "application/json", temperature: 0 } };
+          raw = await postGemini(model, plain, undefined, WALKTHROUGH_TIMEOUT_MS);
+        } else throw err;
+      }
+      return parseWalkthrough(raw, model);
+    } catch (err) {
+      if (err instanceof VoiceNoSpeechError) throw err;
+      last = err;
+      // Busy, slow or out of today's quota: try the next model; anything else is a real error.
+      if (!(err instanceof VoiceBusyError) && !(err instanceof VoiceQuotaError)) throw err;
+    }
+  }
+  throw last || new VoiceBusyError("Translation is busy. Try again in a minute.");
+}
+
+module.exports = {
+  transcribeWalkthrough, transcribeAndTranslate, isConfigured, userMessage,
+  VoiceConfigError, VoiceBusyError, VoiceRateLimitError, VoiceNoSpeechError, VoiceQuotaError,
+};

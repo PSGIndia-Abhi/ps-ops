@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, Text, TextInput, View } from 'react-native';
-import { ChevronRightIcon } from '../components/icons';
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ChartIcon, ChevronRightIcon } from '../components/icons';
 import { formatINR } from '../crm/format';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { MONTHS_LONG } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import * as api from './api';
+import { Badge, Card, NameChip } from './QuotationDialogs';
 import { errorMessage } from './ui';
 
 const factory = (t: CrmTheme) => ({
@@ -33,20 +34,36 @@ const factory = (t: CrmTheme) => ({
     minHeight: 36,
   },
   historyText: { ...typography.bodyMedium, color: t.primary },
-  // Set-target dialog (a month's target; only shown on the Month filter)
-  backdrop: { flex: 1, backgroundColor: t.overlay, justifyContent: 'center' as const, padding: spacing.lg },
-  dialog: { backgroundColor: t.surface, borderRadius: radii.xl, padding: spacing.lg, gap: spacing.sm },
-  dTitle: { ...typography.subtitle, color: t.textPrimary },
-  dSub: { ...typography.caption, color: t.textMuted },
-  input: { ...typography.title, color: t.textPrimary, borderWidth: 1, borderColor: t.border, borderRadius: radii.lg, paddingHorizontal: spacing.md, minHeight: 54 },
-  error: { ...typography.caption, color: t.danger },
-  actions: { flexDirection: 'row' as const, justifyContent: 'flex-end' as const, gap: spacing.sm, marginTop: spacing.xs },
-  btn: { minHeight: 44, paddingHorizontal: spacing.lg, borderRadius: radii.pill, justifyContent: 'center' as const },
-  btnGhost: { borderWidth: 1, borderColor: t.border },
-  btnPrimary: { backgroundColor: t.primary },
-  saving: { opacity: 0.6 },
+  // All / One-time / AMC
+  tabs: { flexDirection: 'row' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 3, marginBottom: spacing.md },
+  tab: { flex: 1, minHeight: 34, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
+  tabOn: { backgroundColor: t.surface, ...t.cardShadow },
+  tabText: { ...typography.captionMedium, color: t.textMuted },
+  tabTextOn: { color: t.primary },
+  kindLoading: { marginVertical: spacing.md },
+  // Set-target popup (a month's target; only shown on the Month filter), in the app's popup style
+  dTitle: { ...typography.title, color: t.textPrimary, textAlign: 'center' as const },
+  dSub: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.xs },
+  amountBox: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'stretch' as const,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: 58,
+    borderRadius: radii.lg,
+    backgroundColor: t.surfaceAlt,
+  },
+  rupee: { ...typography.title, color: t.textMuted, marginRight: spacing.xs },
+  input: { ...typography.title, flex: 1, color: t.textPrimary, paddingVertical: 0 },
+  error: { ...typography.caption, color: t.danger, textAlign: 'center' as const, marginTop: spacing.xs },
+  actions: { flexDirection: 'row' as const, gap: spacing.sm, alignSelf: 'stretch' as const, marginTop: spacing.lg, marginBottom: spacing.xs },
+  btn: { flex: 1, minHeight: 50, borderRadius: radii.lg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  btnGhost: { borderWidth: 1.5, borderColor: t.border, backgroundColor: t.surface },
+  btnPrimary: { backgroundColor: t.success },
+  saving: { opacity: 0.7 },
   btnText: { ...typography.button, color: t.textPrimary },
-  btnTextPrimary: { ...typography.button, color: t.textOnPrimary },
+  btnTextPrimary: { ...typography.button, color: '#fff' },
 });
 
 export const monthName = (month: string) => {
@@ -57,6 +74,14 @@ export const monthName = (month: string) => {
 /** Achieved against target as a whole percentage (null when there is no target). */
 export const targetPercent = (t: Pick<api.SalesTarget, 'target' | 'achieved'>) =>
   t.target ? Math.round((t.achieved / t.target) * 100) : null;
+
+/** Which conversions the card counts: all of them, or only one-time / AMC customers. */
+export type ContractKind = 'ALL' | 'ONE_TIME' | 'AMC';
+const KINDS: { value: ContractKind; label: string }[] = [
+  { value: 'ALL', label: 'All' },
+  { value: 'ONE_TIME', label: 'One-time' },
+  { value: 'AMC', label: 'AMC' },
+];
 
 /** What the card shows for a chosen period (Today / 7 days / Lifetime) instead of the month. */
 export interface PeriodFigures {
@@ -76,7 +101,9 @@ export interface PeriodFigures {
  * One sales person's target: target, achieved (the amounts of the leads they converted), and how
  * far along they are - for the month, or for `period` (the performance filter: today, 7 days,
  * lifetime). `canSet` (the sales manager) adds "Change target" (the month's target);
- * `onHistory` adds "View achievement history".
+ * `onHistory` adds "View achievement history". `onKindChange` adds the All / One-time / AMC tabs:
+ * with a type picked, `kindFigures` (what that type's conversions are worth) replace Achieved and the
+ * count; the target stays the month's (or the period's) one target.
  */
 export function TargetCard({
   target,
@@ -84,18 +111,27 @@ export function TargetCard({
   onChanged,
   period,
   onHistory,
+  kind = 'ALL',
+  onKindChange,
+  kindFigures,
 }: {
   target: api.SalesTarget;
   canSet?: boolean;
   onChanged?: () => void;
   period?: PeriodFigures;
   onHistory?: () => void;
+  kind?: ContractKind;
+  onKindChange?: (kind: ContractKind) => void;
+  kindFigures?: { achieved: number; converted: number } | null;
 }) {
   const { styles, theme } = useCrmStyles(factory);
   const [editing, setEditing] = useState(false);
-  const shown = period
+  const base = period
     ? { target: period.target, achieved: period.achieved, converted: period.converted }
     : { target: target.target, achieved: target.achieved, converted: target.converted };
+  const typed = kind !== 'ALL';
+  const shown = typed ? { ...base, achieved: kindFigures?.achieved ?? 0, converted: kindFigures?.converted ?? 0 } : base;
+  const kindWord = kind === 'AMC' ? 'AMC ' : kind === 'ONE_TIME' ? 'one-time ' : '';
   const when = period?.when ?? 'this month';
   const pct = targetPercent(shown);
   const fill = pct === null ? 0 : Math.min(100, pct);
@@ -111,7 +147,27 @@ export function TargetCard({
           </Pressable>
         )}
       </View>
-      {shown.target ? (
+      {!!onKindChange && (
+        <View style={styles.tabs} accessibilityRole="tablist">
+          {KINDS.map((k) => {
+            const on = k.value === kind;
+            return (
+              <Pressable
+                key={k.value}
+                onPress={() => onKindChange(k.value)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
+                style={[styles.tab, on && styles.tabOn]}
+              >
+                <Text style={[styles.tabText, on && styles.tabTextOn]}>{k.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+      {typed && kindFigures === undefined ? (
+        <ActivityIndicator color={theme.primary} style={styles.kindLoading} />
+      ) : shown.target ? (
         <>
           <View style={styles.row}>
             <View style={styles.cell}>
@@ -131,7 +187,7 @@ export function TargetCard({
             <View style={[styles.barFill, { width: `${fill}%`, backgroundColor: tone }]} />
           </View>
           <Text style={styles.foot}>
-            {shown.converted} lead{shown.converted === 1 ? '' : 's'} converted {when}
+            {shown.converted} {kindWord}lead{shown.converted === 1 ? '' : 's'} converted {when}
             {shown.achieved < shown.target ? ` · ${formatINR(shown.target - shown.achieved)} to go` : ' · target reached'}
           </Text>
           {!!period?.note && <Text style={styles.foot}>{period.note}</Text>}
@@ -139,7 +195,7 @@ export function TargetCard({
       ) : (
         <Text style={styles.none}>
           No target set{period ? '' : ' for this month'}.
-          {shown.achieved > 0 ? ` Converted ${when}: ${formatINR(shown.achieved)}.` : ''}
+          {shown.achieved > 0 ? ` Converted ${kindWord}${when}: ${formatINR(shown.achieved)}.` : ''}
         </Text>
       )}
       {!!onHistory && (
@@ -170,31 +226,32 @@ function SetTargetDialog({ target, onClose, onSaved }: { target: api.SalesTarget
     }
   };
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.dialog} onPress={() => {}}>
-          <Text style={styles.dTitle}>Target for {target.name}</Text>
-          <Text style={styles.dSub}>{monthName(target.month)} - the amount of leads to convert. Leave empty to remove it.</Text>
-          <TextInput
-            value={amount}
-            onChangeText={(v) => setAmount(v.replace(/\D/g, '').slice(0, 10))}
-            keyboardType="number-pad"
-            placeholder="₹ 0"
-            placeholderTextColor={theme.textMuted}
-            style={styles.input}
-            autoFocus
-          />
-          {!!error && <Text style={styles.error}>{error}</Text>}
-          <View style={styles.actions}>
-            <Pressable onPress={onClose} style={[styles.btn, styles.btnGhost]} accessibilityRole="button">
-              <Text style={styles.btnText}>Cancel</Text>
-            </Pressable>
-            <Pressable onPress={save} disabled={saving} style={[styles.btn, styles.btnPrimary, saving && styles.saving]} accessibilityRole="button">
-              <Text style={styles.btnTextPrimary}>{saving ? 'Saving…' : 'Save target'}</Text>
-            </Pressable>
-          </View>
+    <Card onClose={saving ? () => undefined : onClose}>
+      <Badge color={theme.success} icon={<ChartIcon size={24} color="#fff" />} />
+      <Text style={styles.dTitle}>Set target</Text>
+      <NameChip name={`${target.name} · ${monthName(target.month)}`} />
+      <View style={styles.amountBox}>
+        <Text style={styles.rupee}>₹</Text>
+        <TextInput
+          value={amount}
+          onChangeText={(v) => setAmount(v.replace(/\D/g, '').slice(0, 10))}
+          keyboardType="number-pad"
+          placeholder="0"
+          placeholderTextColor={theme.textMuted}
+          style={styles.input}
+          autoFocus
+        />
+      </View>
+      <Text style={styles.dSub}>Leave empty to remove the target.</Text>
+      {!!error && <Text style={styles.error}>{error}</Text>}
+      <View style={styles.actions}>
+        <Pressable onPress={onClose} disabled={saving} style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && styles.saving]} accessibilityRole="button">
+          <Text style={styles.btnText}>Cancel</Text>
         </Pressable>
-      </Pressable>
-    </Modal>
+        <Pressable onPress={save} disabled={saving} style={({ pressed }) => [styles.btn, styles.btnPrimary, (saving || pressed) && styles.saving]} accessibilityRole="button">
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnTextPrimary}>Save target</Text>}
+        </Pressable>
+      </View>
+    </Card>
   );
 }

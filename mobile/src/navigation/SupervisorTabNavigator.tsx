@@ -4,7 +4,8 @@ import { SupervisorDashboardScreen } from '../screens/supervisor/SupervisorDashb
 import { JobsListScreen } from '../screens/jobs/JobsListScreen';
 import { TeamScreen } from '../screens/supervisor/TeamScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
-import { homeTabIcon, jobsTabIcon, moreTabIcon, teamTabIcon } from './tabIcons';
+import { AuditsNavigator } from '../audits/AuditsNavigator';
+import { auditsTabIcon, homeTabIcon, jobsTabIcon, moreTabIcon, teamTabIcon } from './tabIcons';
 import { useSharedTabScreenOptions } from './tabBarOptions';
 import type { SupervisorTabParamList } from './types';
 
@@ -21,6 +22,7 @@ export function SupervisorTabNavigator() {
       />
       <Tab.Screen name="Jobs" component={JobsListScreen} options={{ tabBarIcon: jobsTabIcon }} />
       <Tab.Screen name="Team" component={TeamScreen} options={{ tabBarIcon: teamTabIcon }} />
+      <Tab.Screen name="Audits" component={AuditsNavigator} options={{ tabBarIcon: auditsTabIcon }} />
       {/* Same fix as TechnicianTabNavigator - "More" used to open MoreScreen,
           which for a non-technician role was just an empty state pointing
           back at the header avatar. Renders Profile directly now. */}

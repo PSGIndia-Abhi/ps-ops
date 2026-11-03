@@ -1,0 +1,180 @@
+/* Employee feedback page (Task Management, Managing Director only). Scoped under .tp-root. */
+.tp-root {
+  .tp-fb-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 960px) { .tp-fb-grid { grid-template-columns: 1fr; } }
+
+  .tp-fb-pad { display: grid; gap: 10px; padding: 16px; }
+  .tp-fb-none { color: var(--tp-muted); padding: 18px; text-align: center; }
+
+  /* the team */
+  .tp-fb-people { padding: 0; overflow: hidden; position: sticky; top: 84px; }
+  .tp-fb-search {
+    display: flex; align-items: center; gap: 8px; margin: 12px; padding: 0 12px; height: 40px;
+    border: 1px solid var(--tp-border); border-radius: 12px; background: var(--tp-bg); color: var(--tp-soft);
+    input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; color: var(--tp-text); }
+  }
+  .tp-fb-list { list-style: none; margin: 0; padding: 0 8px 8px; max-height: calc(100vh - 230px); overflow: auto; }
+  .tp-fb-person {
+    width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 12px;
+    background: transparent; text-align: left; cursor: pointer; font: inherit; color: inherit; transition: background .15s;
+    &:hover { background: var(--tp-bg); }
+    &.on { background: #eef4ff; box-shadow: inset 3px 0 0 var(--tp-primary); }
+  }
+  .tp-fb-person-text { flex: 1; min-width: 0; display: grid;
+    strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    small { color: var(--tp-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  }
+  .tp-fb-person-score { display: grid; justify-items: end; gap: 1px;
+    b { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; color: #b45309; svg { fill: #f59e0b; color: #f59e0b; } }
+    small { color: var(--tp-muted); font-size: 11.5px; }
+  }
+
+  .tp-fb-person-score b small { font-size: 10.5px; font-weight: 700; opacity: .75; }
+
+  /* marks out of 10: red low, amber middle, blue good, green top */
+  .tp-fb-mark { display: inline-flex; align-items: baseline; padding: 3px 10px; border-radius: 999px; font-weight: 800; font-size: 14px;
+    background: var(--tp-line); color: #334155;
+    small { font-size: 10.5px; font-weight: 700; opacity: .8; }
+    &.low { background: #fee2e2; color: #b91c1c; } &.mid { background: #fef3c7; color: #b45309; }
+    &.good { background: #dbeafe; color: #1d4ed8; } &.top { background: #dcfce7; color: #15803d; }
+  }
+
+  /* tone */
+  .tp-fb-tone { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+    i { width: 8px; height: 8px; border-radius: 50%; }
+    &.positive { background: #dcfce7; color: #15803d; i { background: #22c55e; } }
+    &.neutral { background: #f1f5f9; color: #475569; i { background: #94a3b8; } }
+    &.negative { background: #fee2e2; color: #b91c1c; i { background: #ef4444; } }
+  }
+  .tp-fb-reward { display: inline-flex; align-items: center; gap: 10px; margin-top: 10px; padding: 4px 16px 4px 4px; border-radius: 999px;
+    background: linear-gradient(135deg, #fffaf0, #fff3dc); border: 1px solid #fde7bf;
+    > span { display: grid; line-height: 1.2; }
+    small { font-size: 10px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: #c2780a; }
+    b { font-size: 13px; font-weight: 700; color: #7c3d06; }
+    .tp-fb-gloss { width: 30px; height: 30px; font-size: 14px; box-shadow: 0 3px 8px rgba(245, 158, 11, .35); }
+  }
+
+  /* glossy round badges: a diagonal gradient sphere with a highlight and a coloured shadow */
+  .tp-fb-gloss { position: relative; display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; color: #fff; font-size: 16px;
+    font-style: normal; flex: none; overflow: hidden; transition: transform .15s, box-shadow .15s;
+    &::after { content: ""; position: absolute; inset: 2px 6px auto; height: 45%; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, .45), rgba(255, 255, 255, 0)); }
+    svg { position: relative; z-index: 1; }
+    &.blue { background: linear-gradient(135deg, #7cb2ff, #2563eb); box-shadow: 0 4px 12px rgba(37, 99, 235, .35); }
+    &.red { background: linear-gradient(135deg, #ff8f8f, #dc2626); box-shadow: 0 4px 12px rgba(220, 38, 38, .32); }
+    &.amber { background: linear-gradient(135deg, #fcd34d, #e08a06); }
+  }
+  button.tp-fb-gloss:hover { transform: translateY(-2px); }
+
+  /* score ring: fills up to the mark */
+  .tp-fb-ring { position: relative; display: inline-grid; place-items: center; flex: none;
+    svg { position: absolute; inset: 0; }
+    circle { fill: none; } .fill { stroke-linecap: round; transition: stroke-dashoffset .5s ease; }
+    b { position: relative; font-weight: 800; line-height: 1; }
+    .glow { opacity: .55; }
+    &.low { .track, .glow { stroke: #fee2e2; fill: #fee2e2; } .g1 { stop-color: #fb8a8a; } .g2 { stop-color: #dc2626; } b { color: #b91c1c; } }
+    &.mid { .track, .glow { stroke: #fef3c7; fill: #fef3c7; } .g1 { stop-color: #fcc95a; } .g2 { stop-color: #d97706; } b { color: #b45309; } }
+    &.good { .track, .glow { stroke: #dbeafe; fill: #dbeafe; } .g1 { stop-color: #7cb2ff; } .g2 { stop-color: #2563eb; } b { color: #1d4ed8; } }
+    &.top { .track, .glow { stroke: #dcfce7; fill: #dcfce7; } .g1 { stop-color: #5fd68a; } .g2 { stop-color: #16a34a; } b { color: #15803d; } }
+    .track { fill: none; } .glow { stroke: none; }
+  }
+
+  /* report */
+  .tp-fb-report { display: grid; gap: 16px; }
+  .tp-fb-hero {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px;
+    background: linear-gradient(135deg, #ffffff 0%, #f5f8ff 100%);
+  }
+  .tp-fb-hero-text { flex: 1; min-width: 160px;
+    h2 { font-size: 20px; letter-spacing: -.2px; }
+    p { color: var(--tp-muted); margin-top: 2px; }
+  }
+  .tp-fb-score { display: flex; align-items: center; gap: 12px; padding: 8px 18px 8px 8px; border-radius: 999px; background: #fff;
+    border: 1px solid var(--tp-border); box-shadow: 0 2px 10px rgba(15, 23, 42, .05);
+    > span { display: grid; gap: 2px; } b { font-size: 14.5px; } small { color: var(--tp-muted); font-size: 12px; }
+  }
+  .tp-fb-hero-add { align-self: flex-start; }
+  .tp-fb-h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--tp-muted); margin-bottom: 12px; }
+
+  .tp-fb-types { display: grid; gap: 10px; }
+  .tp-fb-type { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(80px, 2fr) auto 70px; align-items: center; gap: 12px; }
+  .tp-fb-type-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tp-fb-bar { height: 8px; border-radius: 4px; background: var(--tp-line); overflow: hidden;
+    span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #fbbf24, #f59e0b);
+      &.low { background: #ef4444; } &.mid { background: #f59e0b; } &.good { background: #3b82f6; } &.top { background: #22c55e; } }
+  }
+  .tp-fb-type-n { color: var(--tp-muted); font-size: 12.5px; text-align: right; }
+  @media (max-width: 600px) { .tp-fb-type { grid-template-columns: 1fr auto; .tp-fb-bar { display: none; } } }
+
+  .tp-fb-entries { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .tp-fb-entry { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border: 1px solid var(--tp-border); border-radius: 16px; background: #fff;
+    transition: box-shadow .15s, border-color .15s;
+    &:hover { border-color: #d6e0f0; box-shadow: 0 4px 16px rgba(15, 23, 42, .06); }
+    p { margin-top: 8px; line-height: 1.55; white-space: pre-wrap; color: #334155; }
+  }
+  .tp-fb-entry-body { flex: 1; min-width: 0; }
+  .tp-fb-entry-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tp-fb-entry-date { color: var(--tp-muted); font-size: 12.5px; margin-left: 2px; }
+  .tp-fb-entry-actions { display: inline-flex; gap: 8px; }
+  .tp-fb-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+    background: #eef4ff; color: var(--tp-primary); border: 1px solid #d6e3ff;
+    &.pick { cursor: pointer; font-family: inherit; padding: 5px 12px; border-color: transparent; &:hover { background: #dfeaff; } }
+  }
+
+  /* "no marks yet": an empty dashed ring keeps the pill's shape */
+  .tp-fb-ring-empty { display: grid; place-items: center; width: 64px; height: 64px; flex: none; border-radius: 50%;
+    border: 3px dashed #d6dde8; color: #94a3b8; font-size: 22px; font-weight: 800; }
+
+  /* add / edit panel (same shape as the New task panel) */
+  .tp-fb-note { width: 100%; border: 0; outline: 0; resize: vertical; background: transparent; font: inherit; font-size: 18px; font-weight: 600;
+    line-height: 1.45; color: var(--tp-text); min-height: 84px;
+    &::placeholder { color: #a7b2c4; font-weight: 600; }
+  }
+  .tp-fb-counter { display: flex; justify-content: space-between; align-items: center; color: var(--tp-muted); font-size: 11.5px;
+    span { font-size: 12.5px; font-weight: 600; color: #475569; }
+  }
+  .tp-fb-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tp-fb-live { display: block; margin-top: 8px; font-weight: 700; font-size: 13px; color: var(--tp-muted);
+    &.low { color: #b91c1c; } &.mid { color: #b45309; } &.good { color: #1d4ed8; } &.top { color: #15803d; }
+  }
+
+  /* tone: one segmented switch */
+  .tp-fb-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 999px; background: #e9eef6;
+    button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; border-radius: 999px; font-weight: 700;
+      font-size: 13.5px; color: #475569; transition: background .15s, color .15s, box-shadow .15s;
+      &:hover { color: var(--tp-text); }
+      &.on { box-shadow: 0 2px 8px rgba(15, 23, 42, .1); }
+      &.positive.on { background: #dcfce7; color: #15803d; }
+      &.neutral.on { background: #fff; color: #334155; }
+      &.negative.on { background: #fee2e2; color: #b91c1c; }
+    }
+  }
+
+  /* marks: one rounded track that fills up to the picked mark (red -> amber -> green) */
+  .tp-fb-meter { position: relative; display: grid; grid-template-columns: repeat(10, 1fr); height: 48px; padding: 3px; border-radius: 999px;
+    background: #e9eef6; overflow: hidden;
+  }
+  .tp-fb-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; transition: width .3s ease, background-size .3s ease;
+    background: linear-gradient(90deg, #f43f5e 0%, #f59e0b 45%, #84cc16 75%, #16a34a 100%) left / 100% 100% no-repeat;
+  }
+  .tp-fb-meter-cell { position: relative; display: grid; place-items: center; font-weight: 700; font-size: 14.5px; color: #475569;
+    span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; transition: transform .15s, background .15s; }
+    &:hover span { background: rgba(255, 255, 255, .35); }
+    &.filled { color: #fff; }
+    &.on span { width: 40px; height: 40px; background: #fff; font-size: 16px; font-weight: 900; box-shadow: 0 4px 12px rgba(15, 23, 42, .25); transform: scale(1.02); }
+    &.on.low { color: #b91c1c; } &.on.mid { color: #b45309; } &.on.good { color: #1d4ed8; } &.on.top { color: #15803d; }
+  }
+
+  /* reward */
+  .tp-fb-iconinput { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border: 1px solid var(--tp-border); border-radius: 10px; background: #fff;
+    &:focus-within { border-color: var(--tp-primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+    > svg { color: #b45309; flex: none; }
+    input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; color: var(--tp-text); }
+    button { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--tp-bg); color: var(--tp-muted); }
+  }
+  .tp-fb-req { color: #dc2626; margin-left: 3px; font-weight: 700; }
+  /* feedback panel only: keep label icons full size when a label wraps, and stars next to their word */
+  .tp-fb-panel .tp-nt-prop-label { svg { flex: none; } .tp-fb-req { margin-left: -5px; } }
+
+  .tp-fb-form-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+  .tp-fb-confirm { padding: 4px 20px 20px; display: grid; gap: 14px; p { color: #334155; } }
+}

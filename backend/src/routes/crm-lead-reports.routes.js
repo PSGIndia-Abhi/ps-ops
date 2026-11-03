@@ -61,10 +61,11 @@ async function reportSubject(req) {
   return employeeId;
 }
 
-// What a converted lead is worth: its latest quotation's final total (after any discount), or the
-// approximate quote when no quotation was sent. Needs the lead as `l`.
-const LEAD_VALUE_SQL = `COALESCE((SELECT q.total_amount FROM crm_lead_quotations q
-  WHERE q.lead_id = l.id AND q.status <> 'CANCELLED' ORDER BY q.sent_at DESC, q.created_at DESC LIMIT 1), l.amount, 0)`;
+// What a converted lead is worth: its closure amount - the deal amount entered when it was
+// converted, which convert-to-customer saves as the lead's amount (crm-lead-quotations.routes.js).
+// Only when that is empty does it fall back to the latest quotation's final total. Needs the lead as `l`.
+const LEAD_VALUE_SQL = `COALESCE(NULLIF(l.amount, 0), (SELECT q.total_amount FROM crm_lead_quotations q
+  WHERE q.lead_id = l.id AND q.status <> 'CANCELLED' ORDER BY q.sent_at DESC, q.created_at DESC LIMIT 1), 0)`;
 // One row per converted lead: who it counts for (the lead's sales person, or whoever converted it
 // when it had none), when it was converted and what it is worth. Targets, the Converted number and
 // the achievement history all read this, so they always agree.
@@ -169,6 +170,7 @@ router.get("/reports/sales-performance", auth, requirePermission("CRM_VIEW_LEAD"
 // ---------------------------------------------------------------------------
 // GET /api/crm/reports/sales-performance/items?metric=leadsConverted&from=&to=&employeeId=
 //   -> { metric, items: [{ lead_id, lead_number, company, contact, stage, at, detail, amount }] }
+//      (leadsConverted items also carry contract_type: ONE_TIME | AMC | null)
 // The records behind one number of the report above, by the same rules, so a list always matches
 // its number. Same period and permission rules as the report. Newest first, at most 500.
 // ---------------------------------------------------------------------------
@@ -188,7 +190,15 @@ const PERFORMANCE_ITEMS = {
       FROM crm_lead_quotations q WHERE q.created_by = ? AND q.status <> 'CANCELLED' AND DATE(q.sent_at) BETWEEN ? AND ?`,
   followUpsDue: `SELECT t.source_id AS lead_id, TIMESTAMP(t.due_date, COALESCE(t.due_time, '00:00:00')) AS at, t.status AS a, NULL AS b, NULL AS amount
       FROM work_tasks t WHERE t.assigned_to = ? AND t.source_module = 'LEAD' AND t.task_type = 'LEAD_FOLLOW_UP' AND t.due_date BETWEEN ? AND ?`,
-  leadsConverted: `SELECT w.lead_id, w.converted_at AS at, NULL AS a, NULL AS b, w.value AS amount
+  // a = One-time or AMC: chosen at conversion, else the latest standing quotation's choice, else NULL
+  leadsConverted: `SELECT w.lead_id, w.converted_at AS at,
+        COALESCE((SELECT c2.contract_type FROM crm_lead_conversions c2 WHERE c2.lead_id = w.lead_id),
+          (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType'))
+             FROM crm_lead_quotations q JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
+            WHERE q.lead_id = w.lead_id AND q.status <> 'CANCELLED'
+              AND JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) IN ('ONE_TIME', 'AMC')
+            ORDER BY q.created_at DESC LIMIT 1)) AS a,
+        NULL AS b, w.value AS amount
       FROM (${CONVERTED_LEADS_SQL}) w WHERE w.user_id = ? AND DATE(w.converted_at) BETWEEN ? AND ?`,
   leadsLost: `SELECT h.lead_id, MAX(h.changed_at) AS at, NULL AS a, NULL AS b, NULL AS amount
       FROM crm_lead_history h WHERE h.action = 'MARK_LOST' AND h.changed_by = ? AND DATE(h.changed_at) BETWEEN ? AND ?
@@ -231,6 +241,8 @@ router.get("/reports/sales-performance/items", auth, requirePermission("CRM_VIEW
         at: r.at,
         detail: itemDetail(metric, r),
         amount: r.amount === null || r.amount === undefined ? null : Number(r.amount),
+        // converted leads only: "ONE_TIME" | "AMC" | null (not known)
+        ...(metric === "leadsConverted" ? { contract_type: r.a === "ONE_TIME" || r.a === "AMC" ? r.a : null } : {}),
       })),
     });
   } catch (err) {
@@ -243,14 +255,22 @@ router.get("/reports/sales-performance/items", auth, requirePermission("CRM_VIEW
 // convert in a month; achieved = what the commercial leads that person converted that month are
 // worth (see CONVERTED_LEADS_SQL: the final quotation amount, else the approximate quote).
 //
-// GET /api/crm/targets?month=YYYY-MM -> [{ user_id, name, role, target, achieved, converted }]
-//   the sales manager / admin: every sales executive and sales manager; anyone else: themselves.
+// GET /api/crm/targets?month=YYYY-MM -> [{ user_id, name, role, target, achieved, converted, can_set }]
+//   the sales manager / admin: every sales executive, sales manager and Personal Assistant; anyone
+//   else: themselves. `can_set` says whether this viewer may set that person's target.
 // PUT /api/crm/targets/:userId { month, target_amount } -- sales manager / admin only;
-//   0 or empty removes the target.
+//   0 or empty removes the target. A Personal Assistant's target is set by the Managing Director
+//   (or admin) only - she works leads as a sales manager, so it isn't hers or a sales manager's to set.
 // ---------------------------------------------------------------------------
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const thisMonth = () => today().slice(0, 7);
 const canSetTargets = (req) => req.user.role === "admin" || hasPerm(req, "MANAGE_LEADS");
+const PA_ROLE = "Personal Assistant";
+// Who can have a target: the people leads are assigned to, and the Personal Assistant.
+const TARGET_ROLES = [...LEAD_ASSIGNEE_ROLES, PA_ROLE];
+/** May this viewer set the target of someone with `role`? */
+const canSetTargetOf = (req, role) =>
+  canSetTargets(req) && (role !== PA_ROLE || req.user.role === "Managing Director" || req.user.role === "admin");
 
 router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -262,7 +282,7 @@ router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res
          FROM users u JOIN roles r ON r.id = u.role_id
         WHERE ${everyone ? "u.is_active = 1 AND r.name IN (?)" : "u.id = ?"}
         ORDER BY u.name ASC`,
-      [everyone ? LEAD_ASSIGNEE_ROLES : Number(req.user.id)]
+      [everyone ? TARGET_ROLES : Number(req.user.id)]
     );
     if (people.length === 0) return res.json([]);
     const ids = people.map((p) => p.id);
@@ -288,6 +308,7 @@ router.get("/targets", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res
         target: targetOf.get(Number(p.id)) ?? null,
         achieved: Number(wonOf.get(Number(p.id))?.achieved || 0),
         converted: Number(wonOf.get(Number(p.id))?.converted || 0),
+        can_set: canSetTargetOf(req, p.role),
       }))
     );
   } catch (err) {
@@ -306,10 +327,11 @@ router.put("/targets/:userId", auth, requirePermission("CRM_VIEW_LEAD"), async (
     const amount = raw === null || raw === undefined || raw === "" ? 0 : Number(raw);
     if (!Number.isFinite(amount) || amount < 0 || amount > 9999999999) throw new HttpError(400, "Enter a valid target amount");
     const [[person]] = await pool.query(
-      "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1 AND r.name IN (?)",
-      [userId, LEAD_ASSIGNEE_ROLES]
+      "SELECT u.id, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1 AND r.name IN (?)",
+      [userId, TARGET_ROLES]
     );
-    if (!person) throw new HttpError(400, "Targets are set for sales executives and sales managers");
+    if (!person) throw new HttpError(400, "Targets are set for sales executives, sales managers and the Personal Assistant");
+    if (!canSetTargetOf(req, person.role)) throw new HttpError(403, "Only the Managing Director can set the Personal Assistant's target");
     if (amount === 0) {
       await pool.query("DELETE FROM crm_sales_targets WHERE user_id = ? AND month = ?", [userId, month]);
     } else {

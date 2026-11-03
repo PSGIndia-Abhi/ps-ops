@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, Text, TextInput, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BellIcon, CalendarIcon, CheckCircleIcon, ClockIcon, ExternalLinkIcon, PauseIcon, PhoneIcon, PlayIcon, PlusIcon } from '../../components/icons';
@@ -264,7 +265,7 @@ export function LeadFollowUpHistoryScreen() {
     });
   };
   const removeReminder = (t: api.LeadFollowUpTask) =>
-    Alert.alert('Remove this reminder?', `It will not ring at ${reminderText(t)}.`, [
+    appAlert('Remove this reminder?', `It will not ring at ${reminderText(t)}.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => work(t, () => api.removeTaskReminder(t.id), 'Could not remove the reminder.') },
     ]);
@@ -279,7 +280,7 @@ export function LeadFollowUpHistoryScreen() {
   };
 
   const remove = (t: api.LeadFollowUpTask) =>
-    Alert.alert('Delete this follow-up?', `${name} · ${fmtDateTime(t.dueDate, t.dueTime)}`, [
+    appAlert('Delete this follow-up?', `${name} · ${fmtDateTime(t.dueDate, t.dueTime)}`, [
       { text: 'Keep', style: 'cancel' },
       {
         text: 'Delete',

@@ -875,6 +875,12 @@
   .lm-hero h1 { font-size: 26px; letter-spacing: -.5px; }
   .lm-hero-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; color: #cfe0ff; font-size: 13px; span { display: inline-flex; align-items: center; gap: 6px; } }
   .lm-hero .lm-badge { background: rgba(255, 255, 255, .18); color: #fff; backdrop-filter: blur(4px); }
+  /* One-time / AMC corner tag on the lead header (LeadDetail.jsx) */
+  .lm-contract-tag { position: absolute; top: 0; right: 0; z-index: 2; display: inline-flex; align-items: center; gap: 7px; padding: 7px 16px 7px 14px; border-radius: 0 20px 0 16px; font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #fff; box-shadow: 0 6px 16px rgba(15, 23, 42, .25); }
+  .lm-contract-tag i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .9); }
+  .lm-contract-tag.amc { background: linear-gradient(135deg, #f59e0b, #ea580c); }
+  .lm-contract-tag.once { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+  .lm-hero.tagged .lm-hero-quote { margin-top: 26px; }
   .lm-hero-quote { text-align: right; small { color: #cfe0ff; font-size: 12px; } strong { display: block; font-size: 28px; letter-spacing: -.6px; font-variant-numeric: tabular-nums; } }
   .lm-hero-actions { position: relative; z-index: 1; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
   .lm-hero-actions a, .lm-hero-actions button {
@@ -1134,4 +1140,50 @@
 .lm-root, body {
   .lm-reminder-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .lm-reminder-row .lm-input { max-width: 260px; }
+}
+
+/* Save & Send: One-time or AMC (QuotationBuilder.jsx) */
+.lm-root, body {
+  .lm-contract { display: grid; gap: 8px; margin-bottom: 14px; text-align: left; }
+  .lm-contract-label { font-weight: 600; color: var(--lm-text); }
+  .lm-contract-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lm-contract-option { display: grid; gap: 2px; padding: 12px 14px; text-align: left; font: inherit; color: inherit; background: var(--lm-surface, #fff); border: 1.5px solid var(--lm-border); border-radius: 12px; cursor: pointer; transition: border-color .2s, background .2s; }
+  .lm-contract-option strong { font-size: 15px; }
+  .lm-contract-option small { color: var(--lm-muted); font-size: 12px; }
+  .lm-contract-option.on { border-color: var(--lm-primary); background: rgba(37, 99, 235, .06); }
+  .lm-contract-option.on strong { color: var(--lm-primary); }
+  .lm-contract-hint { color: var(--lm-muted); font-size: 12px; }
+}
+
+/* Quotation builder: the price table step (PriceTable.jsx) and "price is per outlet" */
+.lm-root, body {
+  .lm-ptable-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 14px 16px; border: 1px dashed var(--lm-border); border-radius: 12px; background: #f8fafc; }
+  .lm-ptable-empty > div { display: grid; gap: 2px; }
+  .lm-ptable { display: grid; gap: 10px; }
+  .lm-ptable-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .lm-ptable-stepper { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; border: 1px solid var(--lm-border); border-radius: 999px; font-size: 13px; color: var(--lm-muted); }
+  .lm-ptable-stepper b { min-width: 18px; text-align: center; color: var(--lm-text); }
+  .lm-ptable-stepper button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--lm-line); color: var(--lm-text); cursor: pointer; }
+  .lm-ptable-stepper button:disabled { opacity: .4; cursor: default; }
+  .lm-ptable-bar .lm-btn { margin-left: auto; }
+  .lm-ptable-wrap { overflow-x: auto; border: 1px solid var(--lm-border); border-radius: 12px; }
+  .lm-ptable-wrap table { width: 100%; border-collapse: collapse; }
+  .lm-ptable-wrap td { padding: 0; border-bottom: 1px solid var(--lm-line); border-right: 1px solid var(--lm-line); min-width: 120px; }
+  .lm-ptable-wrap td:last-child { border-right: 0; }
+  .lm-ptable-wrap tr:last-child td { border-bottom: 0; }
+  .lm-ptable-wrap input { width: 100%; padding: 11px 12px; border: 0; background: transparent; font: inherit; color: inherit; outline: none; }
+  .lm-ptable-wrap input:focus { background: rgba(37, 99, 235, .06); box-shadow: inset 0 0 0 2px var(--lm-primary); }
+  .lm-ptable-wrap td.num input { text-align: right; }
+  .lm-ptable-wrap tr.head td { background: #e4e9f1; }
+  .lm-ptable-wrap tr.head input { font-weight: 700; }
+  .lm-ptable-wrap tr.total td { background: #e8eef7; }
+  .lm-ptable-wrap tr.total input { font-weight: 700; }
+  .lm-ptable-wrap td.auto { padding: 11px 12px; text-align: right; font-weight: 700; }
+  .lm-ptable-auto { display: inline-flex; align-items: center; gap: 8px; small { padding: 1px 7px; border-radius: 999px; background: rgba(37, 99, 235, .12); color: var(--lm-primary); font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; } }
+  .lm-ptable-foot { font-size: 13px; color: var(--lm-text); }
+  .lm-ptable-foot.empty { color: var(--lm-muted); }
+  .lm-outlet { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--lm-border); border-radius: 12px; cursor: pointer; transition: border-color .2s, background .2s; }
+  .lm-outlet.on { border-color: var(--lm-primary); background: rgba(37, 99, 235, .05); }
+  .lm-outlet input { width: 18px; height: 18px; accent-color: var(--lm-primary); }
+  .lm-outlet span { display: grid; gap: 1px; strong { font-size: 14px; } small { color: var(--lm-muted); font-size: 12px; } }
 }

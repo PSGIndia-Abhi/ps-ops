@@ -361,13 +361,17 @@ router.get("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), as
     const [rows] = await pool.query(
       `SELECT ${QUOTATION_COLUMNS},
               (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.customer.name')) FROM crm_lead_quotation_documents d
-                WHERE d.quotation_id = crm_lead_quotations.id) AS client_name
+                WHERE d.quotation_id = crm_lead_quotations.id) AS client_name,
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) FROM crm_lead_quotation_documents d
+                WHERE d.quotation_id = crm_lead_quotations.id) AS contract_type
        FROM crm_lead_quotations WHERE lead_id = ? ORDER BY created_at DESC`,
       [lead.id]
     );
     res.json(
-      rows.map(({ client_name: name, ...r }) => ({
+      rows.map(({ client_name: name, contract_type: kind, ...r }) => ({
         ...r,
+        // One-time or AMC, chosen when it was saved (null for older and uploaded quotations).
+        contract_type: kind === "ONE_TIME" || kind === "AMC" ? kind : null,
         total_amount: Number(r.total_amount),
         has_content: name !== null,
         client_name: name || leadClientName(lead),
@@ -543,12 +547,27 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
     const [[already]] = await pool.query("SELECT id FROM crm_lead_conversions WHERE lead_id = ?", [lead.id]);
     if (already) throw new HttpError(409, "This lead has already been converted");
     const notes = optionalText(req.body?.notes, 500);
-    // Optional: the deal's final amount, agreed at conversion - it replaces the lead's approximate quote.
+    // One-time service or AMC, chosen at conversion. Optional, so app builds that do not ask it still convert.
+    let contractType = null;
+    if (req.body?.contract_type !== undefined && req.body?.contract_type !== null && req.body?.contract_type !== "") {
+      if (!["ONE_TIME", "AMC"].includes(req.body.contract_type)) throw new HttpError(400, "contract_type must be ONE_TIME or AMC");
+      contractType = req.body.contract_type;
+    }
+    // The closure amount: the deal's final amount, agreed at conversion - it replaces the lead's
+    // approximate quote and is what the conversion counts for in targets / reports. Not given (the
+    // web form) = the latest quotation's total, when a quotation was sent; else the lead keeps its amount.
     let amount = null;
     if (req.body?.amount !== undefined && req.body?.amount !== null && req.body?.amount !== "") {
       amount = Number(req.body.amount);
       if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) throw new HttpError(400, "Enter a valid amount");
       amount = Math.round(amount * 100) / 100;
+    } else {
+      const [[latest]] = await pool.query(
+        `SELECT total_amount FROM crm_lead_quotations
+          WHERE lead_id = ? AND status <> 'CANCELLED' ORDER BY sent_at DESC, created_at DESC LIMIT 1`,
+        [lead.id]
+      );
+      if (latest && Number(latest.total_amount) > 0) amount = Number(latest.total_amount);
     }
 
     // Who it counts for. Only someone who manages leads may credit another person.
@@ -574,8 +593,8 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
         [newCompanyId, companyName]
       );
       await conn.query(
-        "INSERT INTO crm_lead_conversions (id, lead_id, company_id, converted_by, notes) VALUES (?, ?, ?, ?, ?)",
-        [conversionId, lead.id, newCompanyId, req.user.id, notes]
+        "INSERT INTO crm_lead_conversions (id, lead_id, company_id, converted_by, notes, contract_type) VALUES (?, ?, ?, ?, ?, ?)",
+        [conversionId, lead.id, newCompanyId, req.user.id, notes, contractType]
       );
       const [upd] = await conn.query(
         "UPDATE crm_leads SET pipeline_stage = 'CONVERTED', lead_status = 'converted', row_version = row_version + 1 WHERE id = ? AND row_version = ?",
@@ -590,8 +609,9 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       }
       const amountNote = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
       const creditNote = creditTo && creditTo.id !== Number(req.user.id) ? ` - counted for ${creditTo.name}` : "";
+      const kindNote = contractType ? ` (${contractType === "AMC" ? "AMC" : "one-time"})` : "";
       await logLeadHistory(conn, lead.id, "CONVERTED", {
-        note: `Converted to company "${companyName}"${amountNote}${creditNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
+        note: `Converted to company "${companyName}"${kindNote}${amountNote}${creditNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
         changedBy: req.user.id,
       });
       return newCompanyId;
@@ -599,7 +619,7 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
 
     const [[conversion]] = await pool.query(
       `SELECT c.id, c.lead_id, c.company_id, c.converted_by, u.name AS converted_by_name,
-              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes,
+              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes, c.contract_type,
               co.name AS company_name
          FROM crm_lead_conversions c
          LEFT JOIN users u ON u.id = c.converted_by
@@ -614,13 +634,40 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
   }
 });
 
+// PUT /api/crm/leads/:id/conversion/contract-type { contract_type: ONE_TIME | AMC } -- for a customer
+// converted before One-time / AMC was asked at conversion: the sales manager sets it once. Only an
+// empty one is filled; a type already chosen is never changed here.
+router.put("/leads/:id/conversion/contract-type", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    if (req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "Only a sales manager can set this");
+    const kind = req.body?.contract_type;
+    if (!["ONE_TIME", "AMC"].includes(kind)) throw new HttpError(400, "contract_type must be ONE_TIME or AMC");
+    const [[conversion]] = await pool.query("SELECT id, contract_type FROM crm_lead_conversions WHERE lead_id = ?", [lead.id]);
+    if (!conversion) throw new HttpError(400, "This lead has not been converted");
+    if (conversion.contract_type) throw new HttpError(409, "One-time / AMC is already set for this customer");
+
+    await inTransaction(async (conn) => {
+      const [upd] = await conn.query("UPDATE crm_lead_conversions SET contract_type = ? WHERE id = ? AND contract_type IS NULL", [kind, conversion.id]);
+      if (!upd.affectedRows) throw new HttpError(409, "One-time / AMC is already set for this customer");
+      await logLeadHistory(conn, lead.id, "CONTRACT_TYPE_SET", {
+        note: `Service type set: ${kind === "AMC" ? "AMC" : "One-time"}`,
+        changedBy: req.user.id,
+      });
+    });
+    res.json({ lead_id: lead.id, contract_type: kind });
+  } catch (err) {
+    sendError(res, err, "Failed to set One-time / AMC");
+  }
+});
+
 // GET /api/crm/leads/:id/conversion
 router.get("/leads/:id/conversion", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
     const [[conversion]] = await pool.query(
       `SELECT c.id, c.lead_id, c.company_id, c.converted_by, u.name AS converted_by_name,
-              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes,
+              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes, c.contract_type,
               co.name AS company_name
          FROM crm_lead_conversions c
          LEFT JOIN users u ON u.id = c.converted_by

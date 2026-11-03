@@ -13,27 +13,39 @@ import { radii, spacing, typography } from '../theme';
 // and the day they were added. The sheet edits a draft; "Show N leads" applies it. What is applied
 // shows as small removable chips under the search (ActiveFilterChips).
 
-export type WhenKind = 'any' | 'today' | 'yesterday' | 'date';
+export type WhenKind = 'any' | 'today' | 'yesterday' | 'range';
 export interface WhenFilter {
   kind: WhenKind;
-  /** 'YYYY-MM-DD', for kind 'date'. */
-  date?: string;
+  /** 'YYYY-MM-DD', for kind 'range' (both ends included; from = to is a single day). */
+  from?: string;
+  to?: string;
 }
 export const ANY_TIME: WhenFilter = { kind: 'any' };
 
-/** The day a When filter stands for ('YYYY-MM-DD'), or null for any day. */
-export function whenDay(w: WhenFilter): string | null {
-  if (w.kind === 'today') return todayStr();
-  if (w.kind === 'yesterday') return addDays(todayStr(), -1);
-  if (w.kind === 'date') return w.date ?? null;
+/** The days a When filter stands for ('YYYY-MM-DD', both included), or null for any day. */
+export function whenRange(w: WhenFilter): { from: string; to: string } | null {
+  if (w.kind === 'today') return { from: todayStr(), to: todayStr() };
+  if (w.kind === 'yesterday') {
+    const y = addDays(todayStr(), -1);
+    return { from: y, to: y };
+  }
+  if (w.kind === 'range' && w.from && w.to) return { from: w.from, to: w.to };
   return null;
+}
+
+/** The single day a When filter stands for, or null (any time, or a range of several days). */
+export function whenDay(w: WhenFilter): string | null {
+  const r = whenRange(w);
+  return r && r.from === r.to ? r.from : null;
 }
 
 const shortDay = (d: string) => fmtDateShort(d).replace(/, \d{4}$/, '');
 export function whenLabel(w: WhenFilter): string {
   if (w.kind === 'today') return 'Today';
   if (w.kind === 'yesterday') return 'Yesterday';
-  if (w.kind === 'date' && w.date) return shortDay(w.date);
+  if (w.kind === 'range' && w.from && w.to) {
+    return w.from === w.to ? shortDay(w.from) : `${shortDay(w.from)} - ${shortDay(w.to)}`;
+  }
   return 'Any time';
 }
 
@@ -151,7 +163,8 @@ export function LeadFilterSheet({
   const { styles, theme } = useCrmStyles(factory);
   const [draftWho, setDraftWho] = useState(who);
   const [draftWhen, setDraftWhen] = useState<WhenFilter>(when);
-  const [calendar, setCalendar] = useState(false);
+  // Which end of the date range the calendar is open for.
+  const [calendar, setCalendar] = useState<'from' | 'to' | null>(null);
   const [q, setQ] = useState('');
   const [dropOpen, setDropOpen] = useState(false);
   // Group choices (Everyone / Added by me / Unassigned) have no avatar; people do.
@@ -387,29 +400,31 @@ export function LeadFilterSheet({
               </Pressable>
             );
           })}
-          <Pressable
-            onPress={() => setCalendar(true)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: draftWhen.kind === 'date' }}
-            style={({ pressed }) => [
-              styles.pill,
-              draftWhen.kind === 'date' && styles.pillOn,
-              pressed && styles.pressed,
-            ]}
-          >
-            <CalendarIcon
-              size={15}
-              color={draftWhen.kind === 'date' ? '#fff' : theme.textSecondary}
-            />
-            <Text
-              style={[
-                styles.pillText,
-                draftWhen.kind === 'date' && styles.pillTextOn,
-              ]}
-            >
-              {draftWhen.kind === 'date' ? whenLabel(draftWhen) : 'Pick a date'}
-            </Text>
-          </Pressable>
+        </View>
+
+        {/* Or a date range: From and To (both included). */}
+        <View style={styles.rangeRow}>
+          {(['from', 'to'] as const).map(end => {
+            const value = draftWhen.kind === 'range' ? draftWhen[end] : undefined;
+            const on = !!value;
+            return (
+              <Pressable
+                key={end}
+                onPress={() => setCalendar(end)}
+                accessibilityRole="button"
+                accessibilityLabel={`${end === 'from' ? 'From' : 'To'} date${value ? `, ${shortDay(value)}` : ''}`}
+                style={({ pressed }) => [styles.rangeBox, on && styles.rangeBoxOn, pressed && styles.pressed]}
+              >
+                <CalendarIcon size={16} color={on ? theme.primary : theme.textMuted} />
+                <View style={styles.rangeText}>
+                  <Text style={styles.rangeLabel}>{end === 'from' ? 'FROM' : 'TO'}</Text>
+                  <Text style={[styles.rangeValue, !on && styles.rangePlaceholder]} numberOfLines={1}>
+                    {value ? fmtDateShort(value) : 'Select date'}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -427,13 +442,22 @@ export function LeadFilterSheet({
       </Pressable>
 
       <DateSheet
-        visible={calendar}
-        onClose={() => setCalendar(false)}
-        value={draftWhen.kind === 'date' ? draftWhen.date ?? null : null}
-        title="Leads added on"
+        visible={calendar !== null}
+        onClose={() => setCalendar(null)}
+        value={calendar && draftWhen.kind === 'range' ? draftWhen[calendar] ?? null : null}
+        minDate={calendar === 'to' && draftWhen.kind === 'range' ? draftWhen.from : undefined}
+        title={calendar === 'to' ? 'Added up to' : 'Added from'}
         onPick={d => {
-          setDraftWhen({ kind: 'date', date: d });
-          setCalendar(false);
+          // Picking one end alone gives a one-day range; a From after the To moves the To along.
+          const cur: WhenFilter = draftWhen.kind === 'range' ? draftWhen : ANY_TIME;
+          let from = calendar === 'from' ? d : cur.from ?? d;
+          let to = calendar === 'to' ? d : cur.to ?? d;
+          if (from > to) {
+            if (calendar === 'from') to = from;
+            else from = to;
+          }
+          setDraftWhen({ kind: 'range', from, to });
+          setCalendar(null);
         }}
       />
     </Sheet>
@@ -521,6 +545,24 @@ const factory = (t: CrmTheme) => ({
   pillOn: { backgroundColor: t.primary, borderColor: t.primary },
   pillText: { ...typography.captionMedium, fontSize: 14, color: t.textPrimary },
   pillTextOn: { color: '#fff' },
+  rangeRow: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.sm },
+  rangeBox: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    minHeight: 54,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+  },
+  rangeBoxOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  rangeText: { flex: 1, minWidth: 0 },
+  rangeLabel: { ...typography.overline, fontSize: 10, color: t.textMuted },
+  rangeValue: { ...typography.bodyMedium, fontSize: 14, color: t.textPrimary },
+  rangePlaceholder: { color: t.textMuted, fontWeight: '400' as const },
   pillCount: { ...typography.caption, color: t.textMuted },
   quick: { flexDirection: 'row' as const, gap: spacing.xs },
   quickItem: {

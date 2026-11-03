@@ -1,15 +1,18 @@
 import React, { useCallback, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { GlossyBadge } from '../../components/GlossyBadge';
 import {
   BriefcaseIcon,
   ChevronRightIcon,
   ClockIcon,
+  DocumentIcon,
   EmailIcon,
   PersonIcon,
   PhoneIcon,
   PinIcon,
+  SettingsIcon,
   TagIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -29,7 +32,6 @@ import {
 import { WhatsAppIcon } from '../ui/crmIcons';
 import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
-import { PrimaryButton } from '../ui/PrimaryButton';
 import { LeadStatusBadge } from '../ui/StatusBadge';
 import { TopBar } from '../ui/TopBar';
 
@@ -47,8 +49,27 @@ const factory = (t: CrmTheme) => ({
     borderLeftWidth: 4,
     borderLeftColor: t.primary,
     padding: spacing.md,
+    overflow: 'hidden' as const,
     ...t.cardShadow,
   },
+  heroTagged: { paddingTop: spacing.md + 22 }, // the corner tag sits above the name row
+  // The corner tag: One-time or AMC (the Lead app's leads)
+  contractTag: {
+    position: 'absolute' as const,
+    top: 0,
+    right: 0,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderBottomLeftRadius: radii.lg,
+    zIndex: 1,
+  },
+  contractAmc: { backgroundColor: '#ea580c' },
+  contractOnce: { backgroundColor: '#0d9488' },
+  contractDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
+  contractText: { ...typography.captionMedium, fontSize: 11, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
   heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   companyTile: {
     width: 40,
@@ -92,10 +113,43 @@ const factory = (t: CrmTheme) => ({
   syncTextFailed: { color: t.dangerText },
   syncDiscard: { ...typography.captionMedium, color: t.dangerText, marginTop: spacing.xs },
 
-  manage: { marginTop: spacing.lg, marginBottom: spacing.lg },
+  // Manage lead on its own (no Follow-up beside it): a slimmer bar, close to the Call / WhatsApp height
+  manage: { marginTop: spacing.md, marginBottom: spacing.md },
   actionRow: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg, marginBottom: spacing.lg },
-  actionMain: { flex: 1.4 },
+  actionMain: { flex: 1.6 },
   actionSide: { flex: 1 },
+  // Manage lead (filled, arrow on the right) and Follow-up (soft blue)
+  // Manage lead: a blue action bar - icon tile, title (+ what is there), arrow
+  manageBtn: {
+    minHeight: 62,
+    borderRadius: radii.xl,
+    backgroundColor: t.primary,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    ...t.raisedShadow,
+  },
+  manageTile: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  // beside Follow-up: a smaller tile and tighter spacing, so "Manage lead" fits in full
+  manageBtnCompact: { gap: spacing.sm, paddingHorizontal: spacing.sm + 2 },
+  manageTileCompact: { width: 32, height: 32, borderRadius: 10 },
+  manageBody: { flex: 1 },
+  manageText: { ...typography.button, color: '#fff' },
+  manageSub: { ...typography.caption, color: 'rgba(255,255,255,0.8)', marginTop: 1 },
+  manageArrow: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  followBtn: {
+    minHeight: 62,
+    borderRadius: radii.lg,
+    backgroundColor: t.primarySoftBg,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 6,
+  },
+  followText: { ...typography.button, color: t.primary },
+  btnPressed: { opacity: 0.85 },
   spacer: { height: spacing.lg },
 
   card: {
@@ -111,9 +165,9 @@ const factory = (t: CrmTheme) => ({
   cardTitle: { ...typography.overline, color: t.textMuted, marginTop: spacing.xs, marginBottom: spacing.xs },
   subBlock: { borderTopWidth: 1, borderTopColor: t.border, paddingTop: spacing.sm, marginTop: spacing.xs, paddingBottom: spacing.sm },
   subTitle: { ...typography.caption, color: t.textMuted, marginBottom: spacing.xs },
-  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, minHeight: 48 },
+  foldHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, minHeight: 60 },
   foldText: { flex: 1 },
-  foldTitle: { marginBottom: 0 },
+  foldTitle: { ...typography.bodyMedium, color: t.textPrimary },
   foldHint: { ...typography.caption, color: t.textMuted, marginTop: 2 },
   foldChevron: { width: 32, height: 32, borderRadius: 16, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const, transform: [{ rotate: '90deg' }] },
   foldChevronOpen: { transform: [{ rotate: '-90deg' }] },
@@ -204,6 +258,7 @@ export function CommercialLeadDetail({
   showPhotos = true,
   extra,
   afterActions,
+  contractType,
 }: {
   lead: Lead;
   stage?: React.ReactNode;
@@ -215,6 +270,8 @@ export function CommercialLeadDetail({
   extra?: React.ReactNode;
   /** Shown right under Manage lead / Follow-up (the Lead Management app's open meeting). */
   afterActions?: React.ReactNode;
+  /** One-time or AMC: a tag on the card's corner (the Lead Management app). */
+  contractType?: 'ONE_TIME' | 'AMC' | null;
 }) {
   const navigation = useNavigation<NativeStackNavigationProp<CrmStackParamList>>();
   const manage = onManage ?? (() => navigation.navigate('LeadWork', { leadId: lead.id }));
@@ -281,7 +338,13 @@ export function CommercialLeadDetail({
         action={lead.pendingSync || !edit ? undefined : { label: 'Edit', onPress: edit }}
       />
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
+        <View style={[styles.hero, !!contractType && styles.heroTagged]}>
+          {!!contractType && (
+            <View style={[styles.contractTag, contractType === 'AMC' ? styles.contractAmc : styles.contractOnce]} accessibilityLabel={contractType === 'AMC' ? 'AMC contract' : 'One-time service'}>
+              <View style={styles.contractDot} />
+              <Text style={styles.contractText}>{contractType === 'AMC' ? 'AMC' : 'ONE-TIME'}</Text>
+            </View>
+          )}
           <View style={styles.heroTop}>
             <View style={styles.companyTile}>
               <BriefcaseIcon size={20} color={theme.primary} />
@@ -351,18 +414,14 @@ export function CommercialLeadDetail({
           <View style={styles.spacer} />
         ) : onFollowUp ? (
           <View style={styles.actionRow}>
-            <PrimaryButton label="Manage lead" onPress={manage} style={styles.actionMain} testID="manage-lead" />
-            <PrimaryButton
-              label="Follow-up"
-              variant="secondary"
-              icon={<ClockIcon size={17} color={theme.primary} />}
-              onPress={onFollowUp}
-              style={styles.actionSide}
-              testID="follow-up"
-            />
+            <ManageButton onPress={manage} style={styles.actionMain} compact />
+            <Pressable onPress={onFollowUp} accessibilityRole="button" testID="follow-up" style={({ pressed }) => [styles.followBtn, styles.actionSide, pressed && styles.btnPressed]}>
+              <ClockIcon size={18} color={theme.primary} />
+              <Text style={styles.followText}>Follow-up</Text>
+            </Pressable>
           </View>
         ) : (
-          <PrimaryButton label="Manage lead" onPress={manage} style={styles.manage} testID="manage-lead" />
+          <ManageButton onPress={manage} style={styles.manage} />
         )}
 
         {afterActions}
@@ -375,8 +434,9 @@ export function CommercialLeadDetail({
             accessibilityState={{ expanded: detailsOpen }}
             style={styles.foldHead}
           >
+            <GlossyBadge color={theme.accent} size={38} icon={<DocumentIcon size={17} color="#fff" />} />
             <View style={styles.foldText}>
-              <Text style={[styles.cardTitle, styles.foldTitle]}>DETAILS</Text>
+              <Text style={styles.foldTitle}>Details</Text>
               {!detailsOpen && (
                 <Text style={styles.foldHint} numberOfLines={1}>
                   {[...rows.map((r) => r.label), ...(lead.notes ? ['Requirement'] : []), ...(competitor ? ['Competitor'] : []), ...(showPhotos ? ['Photos'] : [])].join(' · ')}
@@ -429,5 +489,32 @@ export function CommercialLeadDetail({
 
       </ScrollView>
     </CrmScreen>
+  );
+}
+
+/** "Manage lead": filled, with an arrow on the right. */
+/** Manage lead: icon tile, title and (with room) what is there, arrow. `compact` = beside Follow-up. */
+function ManageButton({ onPress, style, compact }: { onPress: () => void; style?: StyleProp<ViewStyle>; compact?: boolean }) {
+  const { styles } = useCrmStyles(factory);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      testID="manage-lead"
+      style={({ pressed }) => [styles.manageBtn, compact && styles.manageBtnCompact, style, pressed && styles.btnPressed]}
+    >
+      <View style={[styles.manageTile, compact && styles.manageTileCompact]}>
+        <SettingsIcon size={compact ? 17 : 20} color="#fff" />
+      </View>
+      <View style={styles.manageBody}>
+        <Text style={styles.manageText} numberOfLines={1}>
+          Manage lead
+        </Text>
+        {!compact && <Text style={styles.manageSub}>Next steps, quotations, activity</Text>}
+      </View>
+      <View style={styles.manageArrow}>
+        <ChevronRightIcon size={15} color="#fff" />
+      </View>
+    </Pressable>
   );
 }

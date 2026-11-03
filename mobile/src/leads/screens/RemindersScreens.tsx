@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../AppDialog';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AlertTriangleIcon, BellIcon, BriefcaseIcon, CalendarIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, PhoneIcon, PlusIcon } from '../../components/icons';
+import { GlossyBadge } from '../../components/GlossyBadge';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
@@ -72,25 +74,39 @@ const factory = (t: CrmTheme) => ({
 
   // Form
   formBody: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
-  linkCard: {
+  hero: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: spacing.sm,
-    backgroundColor: t.primarySoftBg,
-    borderRadius: radii.lg,
-    padding: spacing.md,
-  },
-  linkText: { ...typography.bodyMedium, color: t.primary, flex: 1 },
-  how: {
-    flexDirection: 'row' as const,
-    gap: spacing.sm,
+    gap: spacing.md,
     backgroundColor: t.surface,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: spacing.md,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    ...t.raisedShadow,
   },
-  howText: { ...typography.caption, color: t.textSecondary, flex: 1, lineHeight: 18 },
+  heroBody: { flex: 1 },
+  heroLabel: { ...typography.overline, color: t.textMuted },
+  heroTime: { ...typography.display, color: t.textPrimary },
+  heroDate: { ...typography.bodyMedium, color: t.primary },
+  leadChip: {
+    position: 'absolute' as const,
+    top: spacing.md,
+    right: spacing.md,
+    maxWidth: 150,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    backgroundColor: t.primarySoftBg,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  leadChipText: { ...typography.captionMedium, color: t.primary, flexShrink: 1 },
+  quickRow: { flexDirection: 'row' as const, gap: spacing.sm, flexWrap: 'wrap' as const },
+  quick: { minHeight: 38, paddingHorizontal: spacing.md, borderRadius: radii.pill, justifyContent: 'center' as const, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border },
+  quickOn: { backgroundColor: t.primary, borderColor: t.primary },
+  quickText: { ...typography.captionMedium, color: t.textSecondary },
+  quickTextOn: { color: '#fff' },
+  howText: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const },
   notes: { minHeight: 90, textAlignVertical: 'top' as const },
   rowButtons: { flexDirection: 'row' as const, gap: spacing.sm },
   flex1: { flex: 1 },
@@ -121,10 +137,10 @@ function confirmClash(items: ReminderItem[], date: string, time: string | null, 
   if (clash.length === 0) return Promise.resolve(true);
   const what = clash.map((c) => `• ${KIND_LOOK[c.kind].label}: ${c.title}`).join('\n');
   return new Promise((resolve) =>
-    Alert.alert(`You already have something at ${fmtTime(time as string)}`, `${fmtDateShort(date)}\n${what}`, [
+    appAlert(`You already have something at ${fmtTime(time as string)}`, `${fmtDateShort(date)}\n${what}`, [
       { text: 'Pick another time', style: 'cancel', onPress: () => resolve(false) },
       { text: 'Keep both', onPress: () => resolve(true) },
-    ]),
+    ], { tone: 'warning', Icon: ClockIcon }),
   );
 }
 
@@ -237,7 +253,7 @@ export function RemindersScreen({ embedded = false }: { embedded?: boolean } = {
     }
   };
   const remove = (i: ReminderItem) =>
-    Alert.alert('Delete this reminder?', i.title, [
+    appAlert('Delete this reminder?', i.title, [
       { text: 'Keep', style: 'cancel' },
       {
         text: 'Delete',
@@ -429,6 +445,20 @@ function nextSlot(): { date: string; time: string } {
   return { date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
 }
 
+/** One-tap times: in 30 minutes, in an hour, tomorrow at 10 AM. */
+function quickTimes(): { label: string; date: string; time: string }[] {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const at = (mins: number) => {
+    const d = new Date(Date.now() + mins * 60_000);
+    return { date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
+  };
+  return [
+    { label: 'In 30 min', ...at(30) },
+    { label: 'In 1 hr', ...at(60) },
+    { label: 'Tomorrow 10 AM', date: addDays(todayStr(), 1), time: '10:00' },
+  ];
+}
+
 export function ReminderEditScreen() {
   const navigation = useNavigation<Nav>();
   const { taskId, leadId, leadName } = useRoute<RouteProp<LeadStackParamList, 'LeadReminderEdit'>>().params ?? {};
@@ -493,7 +523,7 @@ export function ReminderEditScreen() {
   };
 
   const remove = () =>
-    Alert.alert('Delete this reminder?', 'It will not ring.', [
+    appAlert('Delete this reminder?', 'It will not ring.', [
       { text: 'Keep', style: 'cancel' },
       {
         text: 'Delete',
@@ -515,16 +545,35 @@ export function ReminderEditScreen() {
       <TopBar title={editing ? 'Edit reminder' : 'New reminder'} onBack={() => navigation.goBack()} icon="close" />
       <CrmScreen edges={[]} transparent contentStyle={styles.formBody}>
         <CrmErrorBanner message={error} />
-        {!!linkedLead && (
-          <Pressable onPress={() => navigation.navigate('LeadDetail', { leadId: linkedLead })} style={styles.linkCard} accessibilityRole="button">
-            <BriefcaseIcon size={18} color={theme.primary} />
-            <Text style={styles.linkText} numberOfLines={1}>
-              For lead: {leadName || 'Open the lead'}
-            </Text>
-            <ChevronRightIcon size={16} color={theme.primary} />
-          </Pressable>
-        )}
+        {/* When it rings, big - the first thing on the page. */}
+        <View style={styles.hero}>
+          <GlossyBadge color={theme.primary} size={52} icon={<BellIcon size={24} color="#fff" />} />
+          <View style={styles.heroBody}>
+            <Text style={styles.heroLabel}>RINGS AT</Text>
+            <Text style={styles.heroTime}>{fmtTime(time)}</Text>
+            <Text style={styles.heroDate}>{fmtDateShort(date)}</Text>
+          </View>
+          {!!linkedLead && (
+            <Pressable onPress={() => navigation.navigate('LeadDetail', { leadId: linkedLead })} style={styles.leadChip} accessibilityRole="button">
+              <BriefcaseIcon size={14} color={theme.primary} />
+              <Text style={styles.leadChipText} numberOfLines={1}>
+                {leadName || 'Lead'}
+              </Text>
+              <ChevronRightIcon size={13} color={theme.primary} />
+            </Pressable>
+          )}
+        </View>
         <CrmTextField label="Remind me to" value={title} onChangeText={setTitle} placeholder="e.g. Call Ravi about the quotation" maxLength={200} />
+        <View style={styles.quickRow}>
+          {quickTimes().map((q) => {
+            const on = q.date === date && q.time === time;
+            return (
+              <Pressable key={q.label} onPress={() => { setDate(q.date); setTime(q.time); }} style={[styles.quick, on && styles.quickOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+                <Text style={[styles.quickText, on && styles.quickTextOn]}>{q.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <FieldRow>
           <PickField label="Date" value={fmtDateShort(date)} placeholder="Pick a date" icon={<CalendarIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('date')} />
           <PickField label="Time" value={fmtTime(time)} placeholder="Pick a time" icon={<ClockIcon size={18} color={theme.textMuted} />} onPress={() => setSheet('time')} />
@@ -532,12 +581,7 @@ export function ReminderEditScreen() {
         <ClashNotice clashes={clashes} date={date} time={time} />
         <CrmTextField label="Note (optional)" value={note} onChangeText={setNote} placeholder="Anything to remember" multiline maxLength={1000} style={styles.notes} />
 
-        <View style={styles.how}>
-          <BellIcon size={18} color={theme.primary} />
-          <Text style={styles.howText}>
-            Your phone rings like an alarm at {fmtTime(time)} on {fmtDateShort(date)} - even with the app closed - with Snooze 10 min and Dismiss.
-          </Text>
-        </View>
+        <Text style={styles.howText}>Rings like an alarm, even with the app closed.</Text>
 
         <PrimaryButton label={editing ? 'Save changes' : 'Set reminder'} onPress={save} loading={saving} />
         {editing && <PrimaryButton label="Delete reminder" variant="secondary" onPress={remove} disabled={saving} />}

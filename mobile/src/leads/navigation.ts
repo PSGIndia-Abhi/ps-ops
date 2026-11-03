@@ -12,6 +12,10 @@ export type LeadStackParamList = {
   /** A tap on a lead opens this first: details, contact buttons, then Manage lead / Follow-up. */
   LeadDetail: { leadId: string };
   LeadWork: { leadId: string };
+  /** A customer's service agreements (made on the web; viewed here). */
+  LeadAgreements: { leadId: string; name: string };
+  /** A lead's quotations on their own page (opened from Manage lead). */
+  LeadQuotations: { leadId: string; name: string };
   LeadList: { group?: StageGroup } | undefined;
   LeadNew: undefined;
   /** `canQualify`: the lead is at a stage where the call can also mark it genuine / not genuine. */
@@ -36,7 +40,8 @@ export type LeadStackParamList = {
   /** `amount` pre-fills the total with the lead's approximate quote. */
   LeadQuote: { leadId: string; name: string; amount: number };
   /** Build a quotation from the quotation master (services, plans, prices, terms) - the PDF is made by the server. */
-  LeadQuoteBuild: { leadId: string; name: string };
+  /** `fromId` + `mode`: open a saved quotation - "edit" saves a replacement, "duplicate" a new one. */
+  LeadQuoteBuild: { leadId: string; name: string; fromId?: string; mode?: 'edit' | 'duplicate' };
   LeadFeedback: { leadId: string; name: string };
   LeadMeetings: undefined;
   LeadMeeting: { meetingId: string };

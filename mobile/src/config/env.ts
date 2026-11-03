@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 
 /**
  * Backend base URL configuration.
@@ -49,7 +49,35 @@ import { Platform } from 'react-native';
 const androidModel = Platform.OS === 'android' ? String((Platform.constants as { Model?: string }).Model ?? '') : '';
 const isAndroidEmulator = /^sdk_|emulator|android sdk built for/i.test(androidModel);
 
-const DEV_API_BASE_URL = isAndroidEmulator ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+/**
+ * The PC address the app loaded its code (Metro) from, e.g. "192.168.31.194".
+ * A phone on Wi-Fi reaches Metro through the PC's Wi-Fi address (set once in the
+ * app's shake menu: Settings -> Debug server host & port), so the backend on the
+ * same PC is reached at that address too. USB (adb reverse) gives "localhost".
+ */
+function metroHost(): string | null {
+  try {
+    const sourceCode = NativeModules.SourceCode as { scriptURL?: string; getConstants?: () => { scriptURL?: string } } | undefined;
+    const url = sourceCode?.scriptURL || sourceCode?.getConstants?.().scriptURL || '';
+    const match = /^https?:\/\/([^/:]+)/.exec(url);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The PC's Wi-Fi address, for a test APK that has the app code inside it (no Metro):
+ * phones on the same Wi-Fi then reach the backend here. Update it if the PC's address changes.
+ */
+const DEV_PC_WIFI_IP = '192.168.31.194';
+
+const devHost = metroHost();
+const fromMetro = devHost && devHost !== 'localhost' && devHost !== '127.0.0.1' ? devHost : null;
+// USB (adb reverse) gives "localhost" from Metro; no Metro at all (code inside the APK) -> the PC's Wi-Fi address.
+const DEV_API_BASE_URL = isAndroidEmulator
+  ? 'http://10.0.2.2:3000'
+  : `http://${fromMetro || (devHost ? 'localhost' : DEV_PC_WIFI_IP)}:3000`;
 const PROD_API_BASE_URL = 'https://bestserve.co.in';
 
 export const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : PROD_API_BASE_URL;

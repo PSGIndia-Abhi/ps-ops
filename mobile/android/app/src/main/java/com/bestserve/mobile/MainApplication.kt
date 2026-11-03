@@ -10,6 +10,8 @@ import com.bestserve.mobile.locationenabler.LocationEnablerPackage
 import com.bestserve.mobile.reversegeocoder.ReverseGeocoderPackage
 import com.bestserve.mobile.reminders.RemindersPackage
 import com.bestserve.mobile.fieldtracking.FieldTrackingPackage
+import com.bestserve.mobile.filesharer.FileSharerPackage
+import com.bestserve.mobile.sharefile.ShareFilePackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -24,6 +26,8 @@ class MainApplication : Application(), ReactApplication {
           add(ReverseGeocoderPackage())
           add(RemindersPackage())
           add(FieldTrackingPackage())
+          add(FileSharerPackage())
+          add(ShareFilePackage())
         },
     )
   }

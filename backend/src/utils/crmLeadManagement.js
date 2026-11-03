@@ -125,6 +125,12 @@ async function isHiddenSalesOwnLead(executor, req, lead) {
 const UNVERIFIED_STAGES = ["NEW", "TO_CALL", "NEED_MORE_INFO"];
 // The only roles a lead (or a meeting, or a follow-up picked from a list) is given to.
 const LEAD_ASSIGNEE_ROLES = ["Sales Executive", "sales_manager"];
+// Managing Director / Personal Assistant work Lead Management as sales managers, each with their
+// own leads: a lead can be given to them, and a manager can filter by them. Kept out of
+// LEAD_ASSIGNEE_ROLES so they are NOT on the team report / targets, meeting picker or site visits.
+const LEAD_MANAGER_ROLES = ["Managing Director", "Personal Assistant"];
+// Who a lead can be assigned to (and who appears in the assign / filter list).
+const LEAD_OWNER_ROLES = [...LEAD_ASSIGNEE_ROLES, ...LEAD_MANAGER_ROLES];
 const CLOSED_STAGES = ["WON", "CONVERTED", "NOT_GENUINE", "LOST", "CANCELLED"];
 
 /**
@@ -142,7 +148,7 @@ async function findLeadAssignee(executor, userId, selfId = null) {
        FROM users u JOIN roles r ON r.id = u.role_id
        JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id
       WHERE u.id = ? AND u.is_active = 1 AND p.name = 'CRM_VIEW_LEAD'${self ? "" : " AND r.name IN (?)"}`,
-    self ? [id] : [id, LEAD_ASSIGNEE_ROLES]
+    self ? [id] : [id, LEAD_OWNER_ROLES]
   );
   return user || null;
 }
@@ -264,5 +270,5 @@ module.exports = {
   INDUSTRY_TYPES, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
-  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, readCompetitor, COMPETITOR_SET_SQL,
+  findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
 };

@@ -3,7 +3,8 @@ import { Pressable, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthContext';
-import { BellIcon, ChevronRightIcon, LockIcon, LogoutIcon, UsersIcon } from '../../components/icons';
+import { useRawRole } from '../../auth/role';
+import { BellIcon, ChevronRightIcon, LockIcon, LogoutIcon, SparkleIcon, UsersIcon } from '../../components/icons';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import type { TaskStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -11,6 +12,7 @@ import { CrmScreen } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
+import { FEEDBACK_ROLE } from '../feedbackApi';
 import { isActive, isOverdue } from '../format';
 import { useTasks } from '../TasksContext';
 import { Avatar, ScreenHeader } from '../ui/parts';
@@ -67,6 +69,8 @@ const factory = (t: CrmTheme) => ({
   rowIconDanger: { backgroundColor: t.dangerBg },
   rowLabel: { flex: 1, ...typography.bodyMedium, color: t.textPrimary },
   rowIconWarn: { backgroundColor: t.warningBg },
+  rowIconStar: { backgroundColor: '#fff7e6' },
+  rowFeedback: { borderBottomWidth: 1, borderBottomColor: t.border },
   rowHint: { ...typography.caption, color: t.textMuted },
   rowLabelDanger: { color: t.dangerText },
   memberPad: { paddingBottom: spacing.sm },
@@ -81,6 +85,8 @@ export function TaskProfileScreen() {
   const { styles, theme } = useCrmStyles(factory);
   const { user, logout } = useAuth();
   const { viewer, tasks, refresh } = useTasks();
+  // Employee feedback is the Managing Director's alone.
+  const isMD = useRawRole() === FEEDBACK_ROLE;
   // Read the tasks again each time Profile opens, so "My reminders" counts a reminder just set.
   useFocusEffect(
     useCallback(() => {
@@ -163,6 +169,16 @@ export function TaskProfileScreen() {
       )}
 
       <View style={styles.group}>
+        {isMD && (
+          <Pressable onPress={() => taskNavigation.navigate('EmployeeFeedback')} style={({ pressed }) => [styles.row, styles.rowFeedback, pressed && { opacity: 0.7 }]} accessibilityRole="button">
+            <View style={[styles.rowIcon, styles.rowIconStar]}>
+              <SparkleIcon size={18} color="#b45309" />
+            </View>
+            <Text style={styles.rowLabel}>Employee feedback</Text>
+            <Text style={styles.rowHint}>Only you</Text>
+            <ChevronRightIcon size={16} color={theme.textMuted} />
+          </Pressable>
+        )}
         <Pressable onPress={() => taskNavigation.navigate('TaskReminders')} style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]} accessibilityRole="button">
           <View style={[styles.rowIcon, styles.rowIconWarn]}>
             <BellIcon size={18} color={theme.warningText} />

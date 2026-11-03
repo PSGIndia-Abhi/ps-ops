@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiDownload, FiRefreshCw, FiSearch } from "react-icons/fi";
+import { FiBarChart2, FiDownload, FiRefreshCw, FiSearch } from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 import { downloadFile } from "./accountant/download";
+import AdminModuleReport from "./AdminModuleReport";
 import "./AdminUserActivity.css";
 
 // Admin-only list of who used the website / apps today (or yesterday).
@@ -31,6 +32,7 @@ export default function AdminUserActivity() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [downloading, setDownloading] = useState(null); // null | "pdf" | "xlsx"
+  const [showReport, setShowReport] = useState(false); // the Module report
 
   useEffect(() => {
     apiFetch("/api/user-activity/roles")
@@ -90,6 +92,8 @@ export default function AdminUserActivity() {
   if (day === "yesterday") shownDate.setDate(shownDate.getDate() - 1);
   const dateLabel = shownDate.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
+  if (showReport) return <AdminModuleReport onBack={() => setShowReport(false)} />;
+
   return (
     <div className="ua-page">
       <div className="ua-header">
@@ -98,6 +102,9 @@ export default function AdminUserActivity() {
           <p>Who used the website or the Android apps {day === "yesterday" ? "yesterday" : "today"} — {dateLabel}</p>
         </div>
         <div className="ua-actions">
+          <button className="ua-primary" onClick={() => setShowReport(true)}>
+            <FiBarChart2 /> Module report
+          </button>
           <button className="ua-secondary" onClick={load} disabled={loading}>
             <FiRefreshCw /> Refresh
           </button>

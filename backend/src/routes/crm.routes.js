@@ -191,6 +191,25 @@ router.get("/services", auth, requirePermission("CRM_VIEW_SERVICE_PRICE"), async
 // --------------------
 // LEADS
 // --------------------
+// One-time or AMC for commercial leads (the tag on the app's lead list): chosen at conversion, else
+// the latest standing quotation's choice. Map of lead id -> "ONE_TIME" | "AMC" (leads with neither
+// are left out).
+async function contractTypesFor(leadIds) {
+  if (!leadIds.length) return new Map();
+  const [rows] = await pool.query(
+    `SELECT l.id,
+            COALESCE((SELECT c.contract_type FROM crm_lead_conversions c WHERE c.lead_id = l.id),
+              (SELECT JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType'))
+                 FROM crm_lead_quotations q JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
+                WHERE q.lead_id = l.id AND q.status <> 'CANCELLED'
+                  AND JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) IN ('ONE_TIME', 'AMC')
+                ORDER BY q.created_at DESC LIMIT 1)) AS contract_type
+       FROM crm_leads l WHERE l.id IN (?)`,
+    [leadIds]
+  );
+  return new Map(rows.filter((r) => r.contract_type === "ONE_TIME" || r.contract_type === "AMC").map((r) => [r.id, r.contract_type]));
+}
+
 // GET /api/crm/leads -> newest first (capped)
 // Consumer leads only unless ?lead_type=commercial or ?lead_type=all is sent, so app versions
 // from before commercial leads existed keep getting exactly the list they always got.
@@ -226,7 +245,8 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
         `${LEAD_WITH_CREATOR_SQL} WHERE ${where.join(" AND ")} ORDER BY l.created_at DESC LIMIT ${LIST_LIMIT}`,
         params
       );
-      return res.json(rows.map(toLead));
+      const kinds = await contractTypesFor(rows.map((r) => r.id));
+      return res.json(rows.map((r) => ({ ...toLead(r), contract_type: kinds.get(r.id) || null })));
     }
 
     const where = [];
@@ -263,6 +283,8 @@ router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, r
         return res.status(404).json({ error: "Lead not found" });
       }
       if (await isHiddenSalesOwnLead(pool, req, row)) return res.status(404).json({ error: "Lead not found" });
+      const kinds = await contractTypesFor([row.id]);
+      return res.json({ ...toLead(row), contract_type: kinds.get(row.id) || null });
     } else if (!canViewAllLeads(req) && Number(row.created_by_user_id) !== Number(req.user.id)) {
       return res.status(404).json({ error: "Lead not found" });
     }

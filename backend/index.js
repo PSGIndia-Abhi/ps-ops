@@ -34,6 +34,7 @@ const { startPaymentReminderCron } = require("./src/jobs/paymentReminder.cron");
 const { startLeadReminderCron } = require("./src/jobs/leadReminder.cron");
 const { startTaskReminderCron } = require("./src/jobs/taskReminder.cron");
 const { startUserActivityCleanupCron } = require("./src/jobs/userActivityCleanup.cron");
+const { startAuditQueueCron } = require("./src/jobs/auditQueue.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
 const invoicesRoutes = require("./src/routes/invoices.routes");
 const paymentsRoutes = require("./src/routes/payments.routes");
@@ -47,6 +48,7 @@ const crmLeadManagementRoutes = require("./src/routes/crm-lead-management.routes
 const crmLeadMeetingsRoutes = require("./src/routes/crm-lead-meetings.routes");
 const crmLeadFollowupsRoutes = require("./src/routes/crm-lead-followups.routes");
 const crmLeadQuotationsRoutes = require("./src/routes/crm-lead-quotations.routes");
+const crmLeadAgreementsRoutes = require("./src/routes/crm-lead-agreements.routes");
 const crmLeadProviderRoutes = require("./src/routes/crm-lead-provider.routes");
 const crmLeadReportsRoutes = require("./src/routes/crm-lead-reports.routes");
 const crmLeadMobileRoutes = require("./src/routes/crm-lead-mobile.routes");
@@ -54,11 +56,13 @@ const crmLeadWorkspaceRoutes = require("./src/routes/crm-lead-workspace.routes")
 const crmQuoteMasterRoutes = require("./src/routes/crm-quote-master.routes");
 const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
+const employeeFeedbackRoutes = require("./src/routes/employee-feedback.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
 const salesFieldTrackingRoutes = require("./src/routes/sales-field-tracking.routes");
 const { startSalesShiftAutoEndCron } = require("./src/jobs/salesShiftAutoEnd.cron");
 const brigadeRoutes = require("./src/routes/brigade.routes");
+const auditsRoutes = require("./src/routes/audits.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -124,6 +128,7 @@ app.use("/api/crm", crmLeadManagementRoutes);
 app.use("/api/crm", crmLeadMeetingsRoutes);
 app.use("/api/crm", crmLeadFollowupsRoutes);
 app.use("/api/crm", crmLeadQuotationsRoutes);
+app.use("/api/crm", crmLeadAgreementsRoutes);
 app.use("/api/crm", crmLeadProviderRoutes);
 app.use("/api/crm", crmLeadReportsRoutes);
 app.use("/api/crm", crmLeadMobileRoutes);
@@ -132,11 +137,14 @@ app.use("/api/crm", crmQuoteMasterRoutes);
 app.use("/api/public", crmPublicRoutes);
 // Generic Task Management module -- separate from /api/tasks (Accountant module).
 app.use("/api/work-tasks", workTasksRoutes);
+app.use("/api/employee-feedback", employeeFeedbackRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
 // Admin User Activity report (logins + daily app usage, PDF/Excel export).
 app.use("/api/user-activity", userActivityRoutes);
 // Sales Executive Field Tracking (shift, background GPS, manager's day review).
 app.use("/api/field-tracking", salesFieldTrackingRoutes);
+// Site Audits (supervisor inspections + Option B report)
+app.use("/api/audits", auditsRoutes);
 
 
 
@@ -157,6 +165,7 @@ const PORT = process.env.PORT || 3000;
     startTaskReminderCron();
     startSalesShiftAutoEndCron();
     startUserActivityCleanupCron();
+    startAuditQueueCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

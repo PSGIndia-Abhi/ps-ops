@@ -47,6 +47,8 @@ export type SupervisorTabParamList = {
   Home: undefined;
   Jobs: { filter?: JobsListFilter } | undefined;
   Team: undefined;
+  /** Site Audits (audits/AuditsNavigator) - its own stack inside the tab. */
+  Audits: undefined;
   More: undefined;
 };
 

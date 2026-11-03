@@ -21,6 +21,7 @@ import {
   FiPhoneCall,
   FiPlus,
   FiSend,
+  FiShare2,
   FiSmartphone,
   FiThumbsDown,
   FiUser,
@@ -41,8 +42,11 @@ import {
   ScheduleMeetingModal,
   VisitModal,
 } from "./dialogs";
-import { fetchQuotationPdf, getConversion, listQuotations, providerName, useLeadData, userName } from "./leadsApi";
+import { fetchQuotationPdf, getConversion, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
 import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
+import { AgreementsTab } from "./Agreements";
+import { ShareFallback } from "./ShareQuotation";
+import { shareFile } from "./shareFile";
 import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
@@ -60,6 +64,7 @@ const EVENT = {
   VISIT: { icon: <FiMapPin />, tone: "teal" },
   QUOTATION: { icon: <FiFileText />, tone: "violet" },
   WON: { icon: <FiAward />, tone: "success" },
+  AGREEMENT: { icon: <FiFileText />, tone: "teal" },
   LOST: { icon: <FiThumbsDown />, tone: "danger" },
 };
 
@@ -155,6 +160,8 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
   const [error, setError] = useState("");
   const [opening, setOpening] = useState(null);
   const [viewing, setViewing] = useState(null); // { url, fileName } of the PDF on screen
+  const [sharing, setSharing] = useState(null); // quotation id being fetched to share
+  const [fallback, setFallback] = useState(null); // { file, text } when the browser cannot share files
 
   // The lead's history grows with every upload or cancellation, which is what brings the change in.
   useEffect(() => {
@@ -166,6 +173,24 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
       alive = false;
     };
   }, [lead.id, lead.updatedAt, refreshKey]);
+
+  // The system share sheet with the PDF attached (WhatsApp, Mail...), else WhatsApp / Email / Download.
+  async function share(q) {
+    setSharing(q.id);
+    try {
+      const url = await fetchQuotationPdf(lead.id, q.id);
+      const blob = await (await fetch(url)).blob();
+      URL.revokeObjectURL(url);
+      const file = new File([blob], q.fileName, { type: "application/pdf" });
+      const text = `Quotation for ${q.clientName || lead.company} - Bestserve Pest Management Pvt. Ltd.`;
+      const shared = await shareFile(file, { title: q.fileName, text });
+      if (!shared) setFallback({ file, text });
+    } catch (err) {
+      toast(err.message || "Could not share the quotation.", true);
+    } finally {
+      setSharing(null);
+    }
+  }
 
   async function open(q) {
     setOpening(q.id);
@@ -200,6 +225,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
           <thead>
             <tr>
               <th>Client</th>
+              <th>Type</th>
               <th>Amount</th>
               <th>Sent</th>
               <th>Status</th>
@@ -212,6 +238,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                 <td>
                   <strong style={q.status === "CANCELLED" ? { textDecoration: "line-through" } : undefined}>{q.clientName || lead.company || lead.contact}</strong>
                 </td>
+                <td>{q.contractType === "AMC" ? <Badge tone="info">AMC</Badge> : q.contractType === "ONE_TIME" ? <Badge tone="teal">One-time</Badge> : <span className="muted">-</span>}</td>
                 <td className="num">{money(q.total)}</td>
                 <td className="muted">{dateTime(q.sentAt)}</td>
                 <td>
@@ -220,9 +247,16 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                 <td style={{ textAlign: "right" }}>
                   <span style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
                     {q.hasPdf ? (
-                      <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
-                        View PDF
-                      </Button>
+                      <>
+                        <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
+                          View PDF
+                        </Button>
+                        {q.status !== "CANCELLED" && (
+                          <Button size="sm" icon={<FiShare2 />} busy={sharing === q.id} onClick={() => share(q)}>
+                            Share
+                          </Button>
+                        )}
+                      </>
                     ) : (
                       <span className="muted">No PDF</span>
                     )}
@@ -248,6 +282,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
           </tbody>
         </table>
       </div>
+      {fallback && <ShareFallback file={fallback.file} text={fallback.text} phone={lead.phone} email={lead.email} onClose={() => setFallback(null)} />}
       {viewing && (
         <PreviewOverlay
           url={viewing.url}
@@ -264,6 +299,67 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
 }
 
 /** The customer record a converted lead became (GET /leads/{id}/conversion). */
+/**
+ * A customer converted before One-time / AMC was asked at conversion: the sales manager sets it once,
+ * so the customer counts in the right tab of the target card.
+ */
+function SetContractType({ lead }) {
+  const toast = useToast();
+  const [asking, setAsking] = useState(null); // "ONE_TIME" | "AMC"
+  const [busy, setBusy] = useState(false);
+  const label = (k) => (k === "AMC" ? "AMC" : "One-time");
+
+  async function save(close) {
+    setBusy(true);
+    try {
+      await setConversionContractType(lead.id, asking);
+      toast(`${lead.company} set as ${label(asking)}`);
+      close();
+    } catch (err) {
+      toast(err.message || "Could not save.", true);
+      setBusy(false);
+    }
+  }
+
+  const pill = { border: 0, borderRadius: 999, padding: "7px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer", background: "#fff", color: "var(--lm-navy)" };
+  return (
+    <div className="lm-stop" style={{ flexWrap: "wrap" }}>
+      <FiAlertTriangle />
+      <span style={{ flex: 1, minWidth: 220 }}>One-time or AMC is not set for this customer (converted before it was asked).</span>
+      <span style={{ display: "inline-flex", gap: 8 }}>
+        <button type="button" style={pill} onClick={() => setAsking("ONE_TIME")}>
+          One-time
+        </button>
+        <button type="button" style={pill} onClick={() => setAsking("AMC")}>
+          AMC
+        </button>
+      </span>
+      {asking && (
+        <Alert
+          icon={<FiCheck />}
+          title={`Set ${lead.company} as ${label(asking)}?`}
+          onClose={() => {
+            setAsking(null);
+            setBusy(false);
+          }}
+          actions={(close) => (
+            <>
+              <Button variant="ghost" onClick={close} disabled={busy}>
+                Back
+              </Button>
+              <Button busy={busy} onClick={() => save(close)}>
+                Set {label(asking)}
+              </Button>
+            </>
+          )}
+        >
+          It counts in the {label(asking)} tab of the sales target from now on. It cannot be changed afterwards.
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 function ConversionCard({ leadId, isAdmin }) {
   const [state, setState] = useState({ leadId: null, data: null, error: "" });
 
@@ -510,6 +606,7 @@ export default function LeadDetail() {
   const canManage = !provider && (viewer.canPick || !!me?.canManage || [lead.createdBy, lead.telecallerId, lead.salesId].some((uid) => uid && String(uid) === myId));
   const myOpenMeeting = leadMeetings.find((m) => m.status !== "COMPLETED" && (viewer.canPick || String(m.salesId) === myId));
   const canConvert = viewer.canPick || !!me?.canConvert;
+  const seesAgreements = viewer.canPick || !!me?.canManage;
 
   // The provider sees only the lead's details: its activity would tell them its status.
   const events = provider ? [] : timeline;
@@ -521,6 +618,8 @@ export default function LeadDetail() {
         { key: "activity", label: "Activities", count: events.length },
         { key: "meetings", label: "Site Visits", count: leadMeetings.length },
         { key: "quotations", label: "Quotations" },
+        // A customer's service agreements - sales managers only (sales executives never see them).
+        ...(lead.stage === "WON" && seesAgreements ? [{ key: "agreements", label: "Agreements" }] : []),
       ];
 
   // Back to wherever the lead was opened from; a page opened directly goes to the lead list.
@@ -532,7 +631,14 @@ export default function LeadDetail() {
         <FiArrowLeft /> Back
       </button>
 
-      <section className="lm-hero">
+      <section className={`lm-hero${!provider && lead.contractType ? " tagged" : ""}`}>
+        {/* One-time or AMC, from the latest quotation */}
+        {!provider && lead.contractType && (
+          <span className={`lm-contract-tag ${lead.contractType === "AMC" ? "amc" : "once"}`} title={lead.contractType === "AMC" ? "AMC contract (latest quotation)" : "One-time service (latest quotation)"}>
+            <i />
+            {lead.contractType === "AMC" ? "AMC" : "One-time"}
+          </span>
+        )}
         <div className="lm-hero-top">
           <div>
             {!provider && <StageBadge stage={lead.stage} />}
@@ -588,6 +694,7 @@ export default function LeadDetail() {
         )}
 
         {lead.stage === "WON" && !provider && <ConversionCard leadId={lead.id} isAdmin={viewer.canPick} />}
+        {lead.stage === "WON" && !lead.contractType && seesAgreements && <SetContractType lead={lead} />}
       </section>
 
       {!provider && !closed && (
@@ -713,6 +820,8 @@ export default function LeadDetail() {
               refreshKey={timeline.length}
             />
           )}
+
+          {tab === "agreements" && lead.stage === "WON" && seesAgreements && <AgreementsTab lead={lead} refreshKey={timeline.length} />}
         </div>
       </Card>
 

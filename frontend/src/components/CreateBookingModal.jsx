@@ -19,6 +19,8 @@ export default function CreateBookingModal({
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  // True while the booking is being saved, so a double click can't create it twice.
+  const [submitting, setSubmitting] = useState(false);
 
   const [assignedSupervisorId, setAssignedSupervisorId] = useState(null);
   const [assignedTechnicianIds, setAssignedTechnicianIds] = useState([]);
@@ -304,6 +306,7 @@ const operationServices = [
   }
 
   async function handleSubmit() {
+    if (submitting) return;
     if (!form.contactId) {
       setStatus({
         type: "error",
@@ -311,6 +314,11 @@ const operationServices = [
           ? "Your contact profile is missing. Please contact support."
           : "Please select who is requesting this booking",
       });
+      return;
+    }
+
+    if (!form.location?.trim()) {
+      setStatus({ type: "error", message: "Please enter the service address" });
       return;
     }
 
@@ -412,6 +420,14 @@ const operationServices = [
         ? Math.floor((startDateObj.getDate() - 1) / 7) + 1
         : 1;
 
+      if (recurrenceNeedsInterval) {
+        const interval = Number(form.recurrenceInterval || 1);
+        if (!Number.isInteger(interval) || interval < 1) {
+          setStatus({ type: "error", message: "Repeat interval must be at least 1" });
+          return;
+        }
+      }
+
       switch (form.recurrenceType) {
         case "DAILY":
           frequency = "CUSTOM_DAYS";
@@ -476,6 +492,7 @@ const operationServices = [
 
     const locationValue = typeof form.location === "string" ? form.location.trim() : "";
 
+    setSubmitting(true);
     try {
       await onCreate({
         contact_id: form.contactId,
@@ -497,6 +514,8 @@ const operationServices = [
     } catch (err) {
       console.error("Create booking failed", err);
       setStatus({ type: "error", message: err?.message || "Failed to create booking" });
+      // Only re-enabled on failure; on success the modal closes after the message.
+      setSubmitting(false);
     }
   }
 
@@ -582,6 +601,7 @@ const operationServices = [
   // Mirrors handleSubmit's checks so the summary can say what is still missing.
   const missing = [];
   if (!form.contactId) missing.push(isClient ? "Your contact profile is missing" : "Choose who is requesting");
+  if (!form.location?.trim()) missing.push("Enter the service address");
   if (!form.subServices.length) missing.push("Pick at least one service");
   const undated = form.subServices.filter(s => !serviceSchedules[s]?.start_date);
   if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
@@ -725,7 +745,7 @@ const operationServices = [
 
             {/* ADDRESS */}
             <section className="bgm-section">
-              <SectionHead step={nextStep()} title="Service address" done={stepDone.address} hint="Optional" />
+              <SectionHead step={nextStep()} title="Service address" done={stepDone.address} hint="Required" />
               <div className="bg-field">
                 <input
                   type="text"
@@ -1093,8 +1113,14 @@ const operationServices = [
             </div>
 
             <div className="bgm-summary-foot">
-              <button type="button" className="primary" onClick={handleSubmit}>
-                Create booking
+              <button
+                type="button"
+                className="primary"
+                onClick={handleSubmit}
+                disabled={submitting}
+                style={submitting ? { opacity: 0.7, cursor: "wait" } : undefined}
+              >
+                {submitting ? "Creating…" : "Create booking"}
               </button>
               <button type="button" onClick={onClose}>Cancel</button>
             </div>
