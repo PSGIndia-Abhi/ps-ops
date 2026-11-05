@@ -68,7 +68,12 @@ function hasPerm(req, name) {
   return req.user?.role === "admin" || (req.user?.permissions || []).includes(name);
 }
 
-const seesAll = (user) => user.role === "admin" || (user.scopes || []).some((s) => s.scope_type === "global");
+// Admin sees every audit; so does any other role with "all access" (global) - except supervisors:
+// a supervisor always sees only their own audits here, even with all access elsewhere in the app.
+const seesAll = (user) => user.role === "admin"
+  || (user.role !== "supervisor" && (user.scopes || []).some((s) => s.scope_type === "global"));
+// Starting an audit: admin and "all access" users may pick any site (supervisors included).
+const anyArea = (user) => user.role === "admin" || (user.scopes || []).some((s) => s.scope_type === "global");
 
 // Who may SEE an audit: admin and global see everything; everyone else only the audits they did
 // themselves (like technicians and their own jobs), plus customers / sites given to them on purpose.
@@ -97,7 +102,7 @@ function scopeCondition(user) {
 // Where a user may START an audit: the sites in their area (branch / company / site), as before.
 function inArea(user, place) {
   if (!user) return false;
-  if (seesAll(user)) return true;
+  if (anyArea(user)) return true;
   return (user.scopes || []).some((s) =>
     (s.scope_type === "branch" && s.scope_id === place.branch_id) ||
     (s.scope_type === "company" && s.scope_id === place.company_id) ||
@@ -106,7 +111,7 @@ function inArea(user, place) {
 
 // SQL condition (alias `a` = audits) for the user's area - used to copy a site's areas from its last audit.
 function areaCondition(user) {
-  if (seesAll(user)) return { sql: "1=1", params: [] };
+  if (anyArea(user)) return { sql: "1=1", params: [] };
   const parts = ["a.auditor_user_id = ?"];
   const params = [user.id];
   for (const s of user.scopes || []) {
