@@ -15,7 +15,7 @@ const { translateNow } = require("../jobs/auditQueue.cron");
 const { queueReport, generateNow, renderPreview } = require("../services/AuditReport.service");
 const {
   RISK_CATEGORIES, AUDIT_TYPES, TARGET_PESTS, LANGUAGES,
-  HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition,
+  HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition, inArea, areaCondition,
   loadAudit, assertEditable, logHistory, noteHandover, touchAudit, loadRiskLevels,
   nextAuditNumber, renumberFindings, recomputeOverallRisk, findingMissing, computeReadiness, isCombinedVoice,
   splitCategories, categoryLabels,
@@ -153,7 +153,8 @@ router.get("/lookups", ...can(PERMISSIONS.VIEW_AUDIT), async (req, res) => {
 router.get("/area-suggestions", ...can(PERMISSIONS.CREATE_AUDIT), async (req, res) => {
   try {
     const siteId = text(req.query.siteId, "site", 20, true);
-    const scope = scopeCondition(req.user);
+    // Any earlier audit of this site in the supervisor's area (only its area names are copied).
+    const scope = areaCondition(req.user);
     const [[last]] = await pool.query(
       `SELECT a.id, a.audit_number FROM audits a
        WHERE a.site_id = ? AND a.status <> 'CANCELLED' AND ${scope.sql}
@@ -379,9 +380,9 @@ router.post("/", ...can(PERMISSIONS.CREATE_AUDIT), async (req, res) => {
     if (company.is_active === 0 || site.is_active === 0) {
       throw new HttpError(422, "SITE_INACTIVE", "This customer or site is inactive");
     }
-    // Scope check against the site (the auditor is the creator, so canAccess alone would always pass).
+    // The site must be in the supervisor's area (branch / company / site).
     const probe = { branch_id: site.branch_id, company_id: companyId, site_id: siteId, auditor_user_id: null };
-    if (!canAccess(req.user, probe)) throw new HttpError(403, "OUT_OF_SCOPE", "This site is not in your area");
+    if (!inArea(req.user, probe)) throw new HttpError(403, "OUT_OF_SCOPE", "This site is not in your area");
 
     const id = uuid();
     const year = Number(b.auditDate.slice(0, 4));

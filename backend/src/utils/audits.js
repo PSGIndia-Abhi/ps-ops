@@ -68,24 +68,50 @@ function hasPerm(req, name) {
   return req.user?.role === "admin" || (req.user?.permissions || []).includes(name);
 }
 
-// Same rules as buildScopeFilter: admin and global see everything, otherwise the
-// user's branch / company / site scopes. The auditor always sees their own audit.
+// Admin sees every audit; so does any other role with "all access" (global) - except supervisors:
+// a supervisor always sees only their own audits here, even with all access elsewhere in the app.
+const seesAll = (user) => user.role === "admin"
+  || (user.role !== "supervisor" && (user.scopes || []).some((s) => s.scope_type === "global"));
+// Starting an audit: admin and "all access" users may pick any site (supervisors included).
+const anyArea = (user) => user.role === "admin" || (user.scopes || []).some((s) => s.scope_type === "global");
+
+// Who may SEE an audit: admin and global see everything; everyone else only the audits they did
+// themselves (like technicians and their own jobs), plus customers / sites given to them on purpose.
+// The branch alone is not enough: supervisors of one branch do not see each other's audits.
 function canAccess(user, audit) {
   if (!user) return false;
-  if (user.role === "admin") return true;
+  if (seesAll(user)) return true;
   if (audit.auditor_user_id != null && String(audit.auditor_user_id) === String(user.id)) return true;
   return (user.scopes || []).some((s) =>
-    s.scope_type === "global" ||
-    (s.scope_type === "branch" && s.scope_id === audit.branch_id) ||
     (s.scope_type === "company" && s.scope_id === audit.company_id) ||
     (s.scope_type === "site" && s.scope_id === audit.site_id));
 }
 
-// SQL condition for list queries (alias `a` = audits).
+// SQL condition for list queries (alias `a` = audits): the same rule as canAccess.
 function scopeCondition(user) {
-  if (user.role === "admin" || (user.scopes || []).some((s) => s.scope_type === "global")) {
-    return { sql: "1=1", params: [] };
+  if (seesAll(user)) return { sql: "1=1", params: [] };
+  const parts = ["a.auditor_user_id = ?"];
+  const params = [user.id];
+  for (const s of user.scopes || []) {
+    if (s.scope_type === "company") { parts.push("a.company_id = ?"); params.push(s.scope_id); }
+    if (s.scope_type === "site") { parts.push("a.site_id = ?"); params.push(s.scope_id); }
   }
+  return { sql: `(${parts.join(" OR ")})`, params };
+}
+
+// Where a user may START an audit: the sites in their area (branch / company / site), as before.
+function inArea(user, place) {
+  if (!user) return false;
+  if (anyArea(user)) return true;
+  return (user.scopes || []).some((s) =>
+    (s.scope_type === "branch" && s.scope_id === place.branch_id) ||
+    (s.scope_type === "company" && s.scope_id === place.company_id) ||
+    (s.scope_type === "site" && s.scope_id === place.site_id));
+}
+
+// SQL condition (alias `a` = audits) for the user's area - used to copy a site's areas from its last audit.
+function areaCondition(user) {
+  if (anyArea(user)) return { sql: "1=1", params: [] };
   const parts = ["a.auditor_user_id = ?"];
   const params = [user.id];
   for (const s of user.scopes || []) {
@@ -262,7 +288,7 @@ const categoryLabels = (value) =>
 module.exports = {
   isCombinedVoice, splitCategories, categoryLabels,
   RISK_CATEGORIES, AUDIT_TYPES, TARGET_PESTS, LANGUAGES, REQUIRE_PHOTO, EDITABLE_STATUSES, AUDIT_SELECT,
-  HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition,
+  HttpError, sendError, isUuid, isRealDate, text, hasPerm, canAccess, scopeCondition, inArea, areaCondition,
   loadAudit, assertEditable, logHistory, noteHandover, touchAudit, loadRiskLevels,
   nextAuditNumber, renumberFindings, recomputeOverallRisk, findingMissing, computeReadiness,
 };
