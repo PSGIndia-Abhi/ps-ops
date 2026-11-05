@@ -147,12 +147,13 @@ export default function AccountantDashboard() {
   // ---- apply the filters to each list --------------------------------------------------------
   const inRange = (date) => (!effectiveRange.from || (date && date >= effectiveRange.from)) && (!effectiveRange.to || (date && date <= effectiveRange.to));
 
-  const fInvoices = invoices.filter((i) =>
+  // Invoices matching the menu filters, whatever their date. Used by the "from today" card (Due This Week).
+  const scopedInvoices = invoices.filter((i) =>
     (!filters.customer || i.customer_name === filters.customer) &&
     (!filters.site || i.site_name === filters.site) &&
-    (!filters.status || i.status === filters.status) &&
-    inRange(i.invoice_date)
+    (!filters.status || i.status === filters.status)
   );
+  const fInvoices = scopedInvoices.filter((i) => inRange(i.invoice_date));
   const fPayments = payments.filter((p) =>
     p.status !== "CANCELLED" &&
     (!filters.customer || p.customer_name === filters.customer) &&
@@ -170,7 +171,12 @@ export default function AccountantDashboard() {
   const live = fInvoices.filter((i) => i.status !== "CANCELLED");
   const unpaid = live.filter((i) => i.pending_amount > 0);
   const overdueInvoices = live.filter((i) => i.status === "OVERDUE");
-  const dueThisWeek = unpaid.filter((i) => { const d = daysOverdue(i.due_date); return d != null && d <= 0 && d >= -7; });
+  // Due in the next 7 days counted from today, so the From/To dates do not apply (like Today's Follow-ups).
+  const dueThisWeek = scopedInvoices.filter((i) => {
+    if (i.status === "CANCELLED" || !(i.pending_amount > 0)) return false;
+    const d = daysOverdue(i.due_date);
+    return d != null && d <= 0 && d >= -7;
+  });
   const followupsToday = dueFollowUps.filter((f) => f.display_status === "TODAY").length;
   const followupsLate = dueFollowUps.length - followupsToday;
   // Live outstanding for a follow-up: its invoice's pending, or the customer's total pending.
@@ -187,7 +193,7 @@ export default function AccountantDashboard() {
 
   const kpis = [
     { key: "blue", icon: FiFileText, label: "Total Invoices", value: live.length, note: money(sum(live, "invoice_amount")) },
-    { key: "green", icon: FiCheckCircle, label: "Total Collected", value: money(sum(live, "paid_amount")), note: "Received" },
+    { key: "green", icon: FiCheckCircle, label: "Total Collected", value: money(sum(fPayments, "received_amount")), note: "Received" },
     { key: "orange", icon: FiClock, label: "Outstanding", value: money(sum(unpaid, "pending_amount")), note: `${unpaid.length} invoice${unpaid.length === 1 ? "" : "s"}` },
     { key: "red", icon: FiAlertTriangle, label: "Overdue", value: money(sum(overdueInvoices, "pending_amount")), note: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? "" : "s"}` },
     { key: "purple", icon: FiCalendar, label: "Due This Week", value: money(sum(dueThisWeek, "pending_amount")), note: `${dueThisWeek.length} invoice${dueThisWeek.length === 1 ? "" : "s"}` },
@@ -241,8 +247,9 @@ export default function AccountantDashboard() {
           <p className="ac-sub">Here's your collection overview</p>
         </div>
         <div className="ac-actions">
-          <div className="ac-date-field"><span>From</span><DateInput value={effectiveRange.from} onChange={(v) => setRange({ ...effectiveRange, from: v })} ariaLabel="From date" /></div>
-          <div className="ac-date-field"><span>To</span><DateInput value={effectiveRange.to} onChange={(v) => setRange({ ...effectiveRange, to: v })} ariaLabel="To date" /></div>
+          {/* DateInput sends "" while a date is half-typed; keep the last full date so the cards don't jump. */}
+          <div className="ac-date-field"><span>From</span><DateInput value={effectiveRange.from} onChange={(v) => v && setRange({ ...effectiveRange, from: v })} ariaLabel="From date" /></div>
+          <div className="ac-date-field"><span>To</span><DateInput value={effectiveRange.to} onChange={(v) => v && setRange({ ...effectiveRange, to: v })} ariaLabel="To date" /></div>
           <div className="ac-dropdown-wrap" ref={filterRef}>
             <button type="button" className={`ac-btn ${showFilters ? "ac-btn-primary" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters} aria-haspopup="true">
               Filters{activeFilters > 0 ? ` (${activeFilters})` : ""} <FiChevronDown />
