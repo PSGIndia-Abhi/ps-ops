@@ -43,8 +43,9 @@ const within = (col, range) =>
     ? { sql: ` AND ${col} >= ? AND ${col} < DATE_ADD(?, INTERVAL 1 DAY)`, params: [range.from, range.to] }
     : { sql: "", params: [] };
 
-// Each module: who uses it (roles) and its work figures. A figure: { label, value, tone? }.
-// Assigned / added / completed count within the chosen days; "open" / "unpaid" / "overdue" are as of now.
+// Each module: who uses it (roles) and its work figures. A figure: { scope, label, value, tone? }.
+// scope "period": counted within the chosen days (assigned / added / completed);
+// scope "now": a snapshot of today, whatever the chosen days (open / unpaid / overdue).
 const MODULES = [
   {
     key: "field_service",
@@ -55,10 +56,10 @@ const MODULES = [
       const c = within("created_at", range);
       const done = within("completed_at", range);
       return [
-        { label: "Jobs assigned", value: await count(`SELECT COUNT(*) n FROM jobs WHERE status <> 'CANCELED'${c.sql}`, c.params) },
-        { label: "Open now", value: await count("SELECT COUNT(*) n FROM jobs WHERE status IN ('CREATED','NOT_STARTED','IN_PROGRESS','PAUSED')"), tone: "warn" },
-        { label: "Completed", value: await count(`SELECT COUNT(*) n FROM jobs WHERE status = 'COMPLETED'${done.sql}`, done.params), tone: "ok" },
-        { label: "Visits scheduled", value: await count(`SELECT COUNT(*) n FROM job_visits WHERE status <> 'CANCELED'${c.sql}`, c.params) },
+        { scope: "period", label: "Jobs assigned", value: await count(`SELECT COUNT(*) n FROM jobs WHERE status <> 'CANCELED'${c.sql}`, c.params) },
+        { scope: "now", label: "Open now", value: await count("SELECT COUNT(*) n FROM jobs WHERE status IN ('CREATED','NOT_STARTED','IN_PROGRESS','PAUSED')"), tone: "warn" },
+        { scope: "period", label: "Completed", value: await count(`SELECT COUNT(*) n FROM jobs WHERE status = 'COMPLETED'${done.sql}`, done.params), tone: "ok" },
+        { scope: "period", label: "Visits scheduled", value: await count(`SELECT COUNT(*) n FROM job_visits WHERE status <> 'CANCELED'${c.sql}`, c.params) },
       ];
     },
   },
@@ -70,15 +71,16 @@ const MODULES = [
     async work(range) {
       const c = within("created_at", range);
       return [
-        { label: "Leads added", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE lead_type = 'commercial'${c.sql}`, c.params) },
+        { scope: "period", label: "Leads added", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE lead_type = 'commercial'${c.sql}`, c.params) },
         {
+          scope: "now",
           label: "Open leads",
           value: await count("SELECT COUNT(*) n FROM crm_leads WHERE lead_type = 'commercial' AND COALESCE(pipeline_stage,'NEW') NOT IN ('WON','CONVERTED','LOST','NOT_GENUINE','CANCELLED')"),
           tone: "warn",
         },
-        { label: "Converted", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE lead_type = 'commercial' AND pipeline_stage IN ('WON','CONVERTED')${c.sql}`, c.params), tone: "ok" },
-        { label: "Meetings", value: await count(`SELECT COUNT(*) n FROM crm_lead_meetings WHERE status <> 'CANCELLED'${c.sql}`, c.params) },
-        { label: "Follow-ups", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE task_type = 'LEAD_FOLLOW_UP'${c.sql}`, c.params) },
+        { scope: "period", label: "Converted", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE lead_type = 'commercial' AND pipeline_stage IN ('WON','CONVERTED')${c.sql}`, c.params), tone: "ok" },
+        { scope: "period", label: "Meetings", value: await count(`SELECT COUNT(*) n FROM crm_lead_meetings WHERE status <> 'CANCELLED'${c.sql}`, c.params) },
+        { scope: "period", label: "Follow-ups", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE task_type = 'LEAD_FOLLOW_UP'${c.sql}`, c.params) },
       ];
     },
   },
@@ -90,8 +92,8 @@ const MODULES = [
     async work(range) {
       const c = within("created_at", range);
       return [
-        { label: "Leads added", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE COALESCE(lead_type,'residential') <> 'commercial'${c.sql}`, c.params) },
-        { label: "Converted", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE COALESCE(lead_type,'residential') <> 'commercial' AND lead_status = 'converted'${c.sql}`, c.params), tone: "ok" },
+        { scope: "period", label: "Leads added", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE COALESCE(lead_type,'residential') <> 'commercial'${c.sql}`, c.params) },
+        { scope: "period", label: "Converted", value: await count(`SELECT COUNT(*) n FROM crm_leads WHERE COALESCE(lead_type,'residential') <> 'commercial' AND lead_status = 'converted'${c.sql}`, c.params), tone: "ok" },
       ];
     },
   },
@@ -105,10 +107,10 @@ const MODULES = [
       const c = within("created_at", range);
       const done = within("completed_at", range);
       return [
-        { label: "Tasks assigned", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own}${c.sql}`, [LEAD_TASK_TYPES, ...c.params]) },
-        { label: "Open now", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status IN ('OPEN','IN_PROGRESS','PAUSED')`, [LEAD_TASK_TYPES]), tone: "warn" },
-        { label: "Overdue", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status IN ('OPEN','IN_PROGRESS','PAUSED') AND due_date < CURDATE()`, [LEAD_TASK_TYPES]), tone: "bad" },
-        { label: "Completed", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status = 'COMPLETED'${done.sql}`, [LEAD_TASK_TYPES, ...done.params]), tone: "ok" },
+        { scope: "period", label: "Tasks assigned", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own}${c.sql}`, [LEAD_TASK_TYPES, ...c.params]) },
+        { scope: "now", label: "Open now", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status IN ('OPEN','IN_PROGRESS','PAUSED')`, [LEAD_TASK_TYPES]), tone: "warn" },
+        { scope: "now", label: "Overdue", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status IN ('OPEN','IN_PROGRESS','PAUSED') AND due_date < CURDATE()`, [LEAD_TASK_TYPES]), tone: "bad" },
+        { scope: "period", label: "Completed", value: await count(`SELECT COUNT(*) n FROM work_tasks WHERE ${own} AND status = 'COMPLETED'${done.sql}`, [LEAD_TASK_TYPES, ...done.params]), tone: "ok" },
       ];
     },
   },
@@ -120,10 +122,10 @@ const MODULES = [
     async work(range) {
       const c = within("created_at", range);
       return [
-        { label: "Invoices added", value: await count(`SELECT COUNT(*) n FROM invoices WHERE status <> 'CANCELLED'${c.sql}`, c.params) },
-        { label: "Unpaid now", value: await count("SELECT COUNT(*) n FROM invoices WHERE status IN ('PENDING','PARTIAL','OVERDUE')"), tone: "warn" },
-        { label: "Payments recorded", value: await count(`SELECT COUNT(*) n FROM payments WHERE status = 'POSTED'${c.sql}`, c.params), tone: "ok" },
-        { label: "Follow-ups open", value: await count("SELECT COUNT(*) n FROM tasks WHERE status = 'OPEN'") },
+        { scope: "period", label: "Invoices added", value: await count(`SELECT COUNT(*) n FROM invoices WHERE status <> 'CANCELLED'${c.sql}`, c.params) },
+        { scope: "now", label: "Unpaid now", value: await count("SELECT COUNT(*) n FROM invoices WHERE status IN ('PENDING','PARTIAL','OVERDUE')"), tone: "warn" },
+        { scope: "period", label: "Payments recorded", value: await count(`SELECT COUNT(*) n FROM payments WHERE status = 'POSTED'${c.sql}`, c.params), tone: "ok" },
+        { scope: "now", label: "Follow-ups open", value: await count("SELECT COUNT(*) n FROM tasks WHERE status = 'OPEN'") },
       ];
     },
   },
@@ -138,10 +140,10 @@ const MODULES = [
       const inv = within("created_at", range);
       const jobs = (status) => `SELECT COUNT(*) n FROM jobs j JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id WHERE ${status}`;
       return [
-        { label: "Services booked", value: await count(`${jobs("j.status <> 'CANCELED'")}${b.sql}`, b.params) },
-        { label: "Open now", value: await count(jobs("j.status IN ('CREATED','NOT_STARTED','IN_PROGRESS','PAUSED')")), tone: "warn" },
-        { label: "Completed", value: await count(`${jobs("j.status = 'COMPLETED'")}${done.sql}`, done.params), tone: "ok" },
-        { label: "Invoices issued", value: await count(`SELECT COUNT(*) n FROM brigade_invoices WHERE 1=1${inv.sql}`, inv.params) },
+        { scope: "period", label: "Services booked", value: await count(`${jobs("j.status <> 'CANCELED'")}${b.sql}`, b.params) },
+        { scope: "now", label: "Open now", value: await count(jobs("j.status IN ('CREATED','NOT_STARTED','IN_PROGRESS','PAUSED')")), tone: "warn" },
+        { scope: "period", label: "Completed", value: await count(`${jobs("j.status = 'COMPLETED'")}${done.sql}`, done.params), tone: "ok" },
+        { scope: "period", label: "Invoices issued", value: await count(`SELECT COUNT(*) n FROM brigade_invoices WHERE 1=1${inv.sql}`, inv.params) },
       ];
     },
   },
@@ -276,19 +278,22 @@ async function renderXlsx(report) {
       m.users.with_access,
       m.users.active,
       `${pct(m.users.active, m.users.with_access)}%`,
-      m.work.map((w) => `${w.label}: ${value(w)}`).join("   |   "),
+      [
+        `In these days - ${m.work.filter((w) => w.scope === "period").map((w) => `${w.label}: ${value(w)}`).join(", ")}`,
+        m.work.some((w) => w.scope === "now") ? `Right now - ${m.work.filter((w) => w.scope === "now").map((w) => `${w.label}: ${value(w)}`).join(", ")}` : "",
+      ].filter(Boolean).join("\n"),
     ]);
     row.getCell(5).alignment = { wrapText: true, vertical: "top" };
   }
 
   // The same figures one per row, for filtering and charts.
   const fig = wb.addWorksheet("Figures");
-  fig.columns = [{ header: "Module", width: 34 }, { header: "Figure", width: 22 }, { header: "Value", width: 12 }];
+  fig.columns = [{ header: "Module", width: 34 }, { header: "Figure", width: 22 }, { header: "Value", width: 12 }, { header: "Counted", width: 16 }];
   fig.getRow(1).font = { bold: true };
   for (const m of report.modules) {
-    fig.addRow([m.name, "Users with access", m.users.with_access]);
-    fig.addRow([m.name, "Used it", m.users.active]);
-    for (const w of m.work) fig.addRow([m.name, w.label, w.value === null ? "" : w.value]);
+    fig.addRow([m.name, "Users with access", m.users.with_access, "Right now"]);
+    fig.addRow([m.name, "Used it", m.users.active, "In these days"]);
+    for (const w of m.work) fig.addRow([m.name, w.label, w.value === null ? "" : w.value, w.scope === "now" ? "Right now" : "In these days"]);
   }
 
   ws.addRow([]);
@@ -339,7 +344,7 @@ function renderPdf(report) {
         doc.roundedRect(bx, y + 55, bw, 28, 4).fill("#f1f5f9");
         const color = w.tone === "ok" ? "#15803d" : w.tone === "warn" ? "#b45309" : w.tone === "bad" ? "#dc2626" : "#0f172a";
         doc.font("Helvetica-Bold").fontSize(10.5).fillColor(color).text(String(value(w)), bx + 6, y + 58, { width: bw - 12, lineBreak: false });
-        doc.font("Helvetica").fontSize(7.2).fillColor("#64748b").text(w.label, bx + 6, y + 72, { width: bw - 12, lineBreak: false, ellipsis: true });
+        doc.font("Helvetica").fontSize(7.2).fillColor("#64748b").text(w.scope === "now" ? `${w.label} (right now)` : w.label, bx + 6, y + 72, { width: bw - 12, lineBreak: false, ellipsis: true });
       });
       doc.y = y + boxH + 10;
     }

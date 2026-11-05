@@ -2,6 +2,8 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { ListMode } from './format';
 
 export type TaskTabParamList = {
+  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
+  FeedbackTickets: undefined;
   Home: undefined;
   /** `q` pre-fills the search (e.g. a person's name from Insights' Team workload). */
   Tasks: { mode?: ListMode; q?: string; at?: number; teamScoped?: boolean; focused?: boolean; activeOnly?: boolean } | undefined;

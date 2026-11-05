@@ -4,6 +4,8 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 export type ReminderListTab = 'ALL' | 'TODAY' | 'OVERDUE' | 'UPCOMING' | 'COMPLETED';
 
 export type ReminderTabParamList = {
+  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
+  FeedbackTickets: undefined;
   Home: undefined;
   /** `tab` opens the list on that tab (from Home's tiles); `at` makes a repeat tap count as new. */
   Reminders: { tab?: ReminderListTab; at?: number } | undefined;

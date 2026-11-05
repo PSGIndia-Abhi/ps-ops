@@ -33,8 +33,9 @@ const { startShiftAutoEndCron } = require("./src/jobs/shiftAutoEnd.cron");
 const { startPaymentReminderCron } = require("./src/jobs/paymentReminder.cron");
 const { startLeadReminderCron } = require("./src/jobs/leadReminder.cron");
 const { startTaskReminderCron } = require("./src/jobs/taskReminder.cron");
-const { startUserActivityCleanupCron } = require("./src/jobs/userActivityCleanup.cron");
 const { startAuditQueueCron } = require("./src/jobs/auditQueue.cron");
+const { startUserActivityCleanupCron } = require("./src/jobs/userActivityCleanup.cron");
+const { startFeedbackCron } = require("./src/jobs/feedbackDaily.cron");
 const shiftRoutes = require("./src/routes/shifts.routes");
 const invoicesRoutes = require("./src/routes/invoices.routes");
 const paymentsRoutes = require("./src/routes/payments.routes");
@@ -58,9 +59,11 @@ const crmPublicRoutes = require("./src/routes/crm.public.routes");
 const workTasksRoutes = require("./src/routes/work-tasks.routes");
 const employeeFeedbackRoutes = require("./src/routes/employee-feedback.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
+const auditsRoutes = require("./src/routes/audits.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
 const brigadeRoutes = require("./src/routes/brigade.routes");
-const auditsRoutes = require("./src/routes/audits.routes");
+const feedbackRoutes = require("./src/routes/feedback.routes");
+const feedbackPublicRoutes = require("./src/routes/feedback.public.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -137,10 +140,13 @@ app.use("/api/public", crmPublicRoutes);
 app.use("/api/work-tasks", workTasksRoutes);
 app.use("/api/employee-feedback", employeeFeedbackRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
-// Admin User Activity report (logins + daily app usage, PDF/Excel export).
-app.use("/api/user-activity", userActivityRoutes);
 // Site Audits (supervisor inspections + Option B report)
 app.use("/api/audits", auditsRoutes);
+// Admin User Activity report (logins + daily app usage, PDF/Excel export).
+app.use("/api/user-activity", userActivityRoutes);
+// Customer Feedback Tickets (feedback_* tables): questions master, tickets, desk.
+app.use("/api/feedback", feedbackRoutes);
+app.use("/api/public/feedback", feedbackPublicRoutes); // customer's form (no login, token in the link)
 
 
 
@@ -159,8 +165,9 @@ const PORT = process.env.PORT || 3000;
     startPaymentReminderCron();
     startLeadReminderCron();
     startTaskReminderCron();
-    startUserActivityCleanupCron();
     startAuditQueueCron();
+    startUserActivityCleanupCron();
+    startFeedbackCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

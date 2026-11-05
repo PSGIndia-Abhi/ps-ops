@@ -109,14 +109,28 @@ function ModuleCard({ module: m, daysLabel, onShowUsers }) {
         <small>{m.users.with_access ? `${usage}% of the users with access were active` : "No user accounts in this module's roles yet"}</small>
       </div>
 
-      <div className="mr-work">
-        {m.work.map((w) => (
-          <div key={w.label} className={`mr-fig ${w.tone ? `mr-${w.tone}` : ""}`}>
-            <strong>{w.value === null ? "—" : w.value.toLocaleString("en-IN")}</strong>
-            <span>{w.label}</span>
+      {/* Two kinds of figure: what happened in the chosen days, and how things stand today
+          (whatever days are chosen) - labelled, so e.g. "0 added" next to "8 unpaid" makes sense. */}
+      {[
+        ["period", `In ${daysLabel.startsWith("last") || daysLabel === "all time" ? "the " + daysLabel : daysLabel}`],
+        ["now", "Right now"],
+      ].map(([scope, title]) => {
+        const figs = m.work.filter((w) => (w.scope || "period") === scope);
+        if (!figs.length) return null;
+        return (
+          <div key={scope} className="mr-work-group">
+            <div className="mr-work-title">{title}</div>
+            <div className="mr-work">
+              {figs.map((w) => (
+                <div key={w.label} className={`mr-fig ${w.tone ? `mr-${w.tone}` : ""}`}>
+                  <strong>{w.value === null ? "—" : w.value.toLocaleString("en-IN")}</strong>
+                  <span>{w.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
 
       {/* Footer pinned to the bottom, so every card in a row lines up. */}
       <footer className="mr-card-foot">
@@ -270,8 +284,8 @@ export default function AdminModuleReport({ onBack }) {
           </div>
 
           <p className="mr-note">
-            "Used it" = signed in or used the website or an app in these days. Assigned, added and completed are for these days; "open", "unpaid" and
-            "overdue" are as of now. Admins can open every module and are not counted.
+            "Used it" = signed in or used the website or an app in these days. Each card shows what happened in the chosen days, and separately how
+            things stand right now (open, unpaid, overdue - whatever days are chosen). Admins can open every module and are not counted.
           </p>
 
           <div className="mr-grid">

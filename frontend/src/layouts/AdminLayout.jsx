@@ -269,6 +269,13 @@ export default function AdminLayout() {
                 </button>
               )}
 
+              {/* Customer Feedback desk is its own area (pages/feedback). */}
+              {role === "admin" && (
+                <button className="nav-btn" onClick={() => navigate("/feedback-desk")}>
+                  Customer Feedback
+                </button>
+              )}
+
             </nav>
           </aside>
         )}
@@ -403,6 +410,17 @@ export default function AdminLayout() {
               }}
             >
               Site Audits
+            </button>
+          )}
+
+          {role === "admin" && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/feedback-desk");
+              }}
+            >
+              Customer Feedback
             </button>
           )}
 

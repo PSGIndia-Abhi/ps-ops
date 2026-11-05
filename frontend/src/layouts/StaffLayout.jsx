@@ -2,6 +2,7 @@ import { Outlet, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import UserMenu from "../components/UserMenu";
+import useHasFeedbackAccess from "../pages/feedback/useHasFeedbackAccess";
 
 // A minimal shell for the "staff" role — people placed in the org hierarchy
 // (Marketing Executive, Accounts Head, Tech Lead, ...) who don't fit the
@@ -10,6 +11,7 @@ import UserMenu from "../components/UserMenu";
 export default function StaffLayout() {
   const navigate = useNavigate();
   const { user } = useMe();
+  const hasFeedback = useHasFeedbackAccess();
 
   function logout() {
     localStorage.removeItem("token");
@@ -25,7 +27,7 @@ export default function StaffLayout() {
           <span className="header-title">My Workspace</span>
         </div>
         <div className="header-right">
-          <UserMenu user={user} onLogout={logout} actions={[]} />
+          <UserMenu user={user} onLogout={logout} actions={hasFeedback ? [{ label: "Customer Feedback", onClick: () => navigate("/feedback-desk") }] : []} />
         </div>
       </header>
 

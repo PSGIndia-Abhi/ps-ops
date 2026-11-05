@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { canSwitchToSales, isAccountantRole, isTaskRole, useRawRole, useUserRole } from '../auth/role';
@@ -9,6 +9,9 @@ import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
 import { LeadsNavigator } from './LeadsNavigator';
 import { RemindersNavigator } from './RemindersNavigator';
+import { FeedbackNavigator } from './FeedbackNavigator';
+import { getMyAccess, getOpenTicketCount } from '../feedback/api';
+import { TICKETS_ONLY, TicketsTabContext } from '../feedback/FeedbackTicketsTab';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
@@ -53,7 +56,43 @@ export function RoleTabs() {
   const residentialToo = leadPersona === 'sales' || leadPersona === 'sales_manager';
   const accountant = isAccountantRole(rawRole);
   const taskRole = isTaskRole(rawRole);
-  const apps = useMemo<AppKind[]>(
+  // Customer Feedback: the feedback collector opens there and can switch to Task Management; anyone else whose role has a
+  // FEEDBACK_* permission (the backend says - GET /api/feedback/me) can switch to it as well.
+  const feedbackCollector = (rawRole || '').toLowerCase().trim() === 'feedback_collector';
+  const [feedbackAccess, setFeedbackAccess] = useState(false);
+  // Only tickets (a department's team such as Accounts, an assigned supervisor / salesperson): a
+  // "Tickets" tab in their own app instead of the Customer Feedback app.
+  const [ticketsTab, setTicketsTab] = useState(false);
+  // The number on the Tickets tab: open tickets waiting for them (every minute, and when the list shows).
+  const [ticketCount, setTicketCount] = useState(0);
+  const refreshTickets = useCallback(() => {
+    getOpenTicketCount()
+      .then(setTicketCount)
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!ticketsTab) return undefined;
+    refreshTickets();
+    const timer = setInterval(refreshTickets, 60000);
+    return () => clearInterval(timer);
+  }, [ticketsTab, refreshTickets]);
+  const ticketsValue = useMemo(() => ({ show: ticketsTab, count: ticketCount, refresh: refreshTickets }), [ticketsTab, ticketCount, refreshTickets]);
+  useEffect(() => {
+    if (!rawRole || feedbackCollector) return undefined;
+    let alive = true;
+    getMyAccess()
+      .then((perms) => {
+        if (!alive) return;
+        const only = perms.length > 0 && perms.every((p) => TICKETS_ONLY.includes(p));
+        setTicketsTab(only);
+        setFeedbackAccess(perms.length > 0 && !only);
+      })
+      .catch(() => alive && setFeedbackAccess(false));
+    return () => {
+      alive = false;
+    };
+  }, [rawRole, feedbackCollector]);
+  const baseApps = useMemo<AppKind[]>(
     () =>
       salesSwitch
         ? ['tasks', 'leads', 'residential']
@@ -67,6 +106,10 @@ export function RoleTabs() {
         ? ['tasks']
         : [],
     [salesSwitch, leadRole, residentialToo, accountant, taskRole],
+  );
+  const apps = useMemo<AppKind[]>(
+    () => (feedbackCollector ? ['feedback', 'tasks'] : feedbackAccess && baseApps.length ? [...baseApps, 'feedback'] : baseApps),
+    [feedbackCollector, feedbackAccess, baseApps],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);
@@ -108,54 +151,64 @@ export function RoleTabs() {
     [canSwitch, current],
   );
 
-  if (apps.length > 0) {
-    return (
-      <AppSwitchProvider value={appSwitch}>
-        {swapping || defaultApp === undefined ? (
-          <View style={styles.blank} />
-        ) : current === 'leads' ? (
-          <LeadsNavigator />
-        ) : current === 'sales' || current === 'residential' ? (
-          <CrmNavigator />
-        ) : current === 'reminders' ? (
-          <RemindersNavigator />
-        ) : (
-          <TaskNavigator />
-        )}
-        {canSwitch && (
-          <AppSwitchSheet
-            visible={sheet !== null}
-            current={current}
-            apps={apps}
-            defaultApp={defaultApp ?? null}
-            onSetDefault={chooseDefault}
-            onPick={app => {
-              setSheet(null);
-              setSwapping(true);
-              setTimeout(() => {
-                setPicked(app);
-                setSwapping(false);
-              }, SWAP_MS);
-            }}
-            onProfile={sheet?.onProfile}
-            onClose={() => setSheet(null)}
-          />
-        )}
-      </AppSwitchProvider>
-    );
-  }
+  return (
+    <TicketsTabContext.Provider value={ticketsValue}>
+      {body()}
+    </TicketsTabContext.Provider>
+  );
 
-  switch (role) {
-    case 'supervisor':
-      return <SupervisorTabNavigator />;
-    case 'technician':
-      return <TechnicianTabNavigator />;
-    // Sales and Marketing get the CRM app instead of the field-service tabs.
-    case 'sales':
-    case 'marketing':
-      return <CrmNavigator />;
-    default:
-      return <UnsupportedRoleScreen />;
+  function body() {
+    if (apps.length > 0) {
+      return (
+        <AppSwitchProvider value={appSwitch}>
+          {swapping || defaultApp === undefined ? (
+            <View style={styles.blank} />
+          ) : current === 'leads' ? (
+            <LeadsNavigator />
+          ) : current === 'sales' || current === 'residential' ? (
+            <CrmNavigator />
+          ) : current === 'reminders' ? (
+            <RemindersNavigator />
+          ) : current === 'feedback' ? (
+            <FeedbackNavigator />
+          ) : (
+            <TaskNavigator />
+          )}
+          {canSwitch && (
+            <AppSwitchSheet
+              visible={sheet !== null}
+              current={current}
+              apps={apps}
+              defaultApp={defaultApp ?? null}
+              onSetDefault={chooseDefault}
+              onPick={app => {
+                setSheet(null);
+                setSwapping(true);
+                setTimeout(() => {
+                  setPicked(app);
+                  setSwapping(false);
+                }, SWAP_MS);
+              }}
+              onProfile={sheet?.onProfile}
+              onClose={() => setSheet(null)}
+            />
+          )}
+        </AppSwitchProvider>
+      );
+    }
+
+    switch (role) {
+      case 'supervisor':
+        return <SupervisorTabNavigator />;
+      case 'technician':
+        return <TechnicianTabNavigator />;
+      // Sales and Marketing get the CRM app instead of the field-service tabs.
+      case 'sales':
+      case 'marketing':
+        return <CrmNavigator />;
+      default:
+        return <UnsupportedRoleScreen />;
+    }
   }
 }
 

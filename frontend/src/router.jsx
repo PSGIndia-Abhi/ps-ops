@@ -83,14 +83,30 @@ import StaffHome from "./pages/StaffHome";
 import InvoicesPage from "./pages/InvoicesPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import TasksPage from "./pages/TasksPage";
+import AuditsList from "./pages/audits/AuditsList";
+import AuditDetail from "./pages/audits/AuditDetail";
 // Brigade Executive module — see pages/brigade/
 import BrigadeLayout from "./pages/brigade/BrigadeLayout";
 import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
-import AuditsList from "./pages/audits/AuditsList";
-import AuditDetail from "./pages/audits/AuditDetail";
+// Customer Feedback desk + the customer's form — see pages/feedback/
+import FeedbackLayout from "./pages/feedback/FeedbackLayout";
+import FeedbackCallList from "./pages/feedback/CallList";
+import FeedbackCallPage from "./pages/feedback/CallPage";
+import FeedbackTicketList from "./pages/feedback/TicketList";
+import FeedbackTicketPage from "./pages/feedback/TicketPage";
+import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
+import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
+import FeedbackIssues from "./pages/feedback/IssuesMaster";
+import FeedbackTicketsShell from "./pages/feedback/FeedbackTicketsShell";
+import FeedbackRequests from "./pages/feedback/NumberRequests";
+import FeedbackSchedule from "./pages/feedback/ScheduleMaster";
+import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
+import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
+import FeedbackGate from "./pages/feedback/FeedbackGate";
+import { FEEDBACK_HOME } from "./pages/feedback/access";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -364,7 +380,45 @@ const router = createBrowserRouter([
       { path: "notifications", element: <TaskProNotifications /> },
       // The Managing Director's private feedback on their team (the page and the server check the role).
       { path: "feedback", element: <TaskProFeedback /> },
+      // Customer Feedback tickets for a department's team (e.g. Accounts) and assigned people.
+      {
+        path: "tickets",
+        element: <FeedbackTicketsShell base={`${TASKPRO_HOME}/tickets`} />,
+        children: [
+          { index: true, element: <FeedbackTicketList /> },
+          { path: ":id", element: <FeedbackTicketPage /> },
+        ],
+      },
     ],
+  },
+
+  // CUSTOMER FEEDBACK — monthly feedback calls, tickets, report and masters. Opened by permission:
+  // any role with a FEEDBACK_* permission (Roles & Permissions); screens per /api/feedback/me.
+  // -------------------------
+  {
+    path: FEEDBACK_HOME,
+    element: (
+      <FeedbackGate>
+        <FeedbackLayout />
+      </FeedbackGate>
+    ),
+    children: [
+      { index: true, element: <FeedbackCallList /> },
+      { path: "calls/:id", element: <FeedbackCallPage /> },
+      { path: "tickets", element: <FeedbackTicketList /> },
+      { path: "tickets/:id", element: <FeedbackTicketPage /> },
+      { path: "report", element: <FeedbackCustomerReport /> },
+      { path: "questions", element: <FeedbackQuestions /> },
+      { path: "issues", element: <FeedbackIssues /> },
+          { path: "schedule", element: <FeedbackSchedule /> },
+      { path: "requests", element: <FeedbackRequests /> },
+      { path: "settings", element: <FeedbackTemplatesSettings /> },
+    ],
+  },
+  // The customer's feedback form from the WhatsApp link — no login, the token is the key.
+  {
+    path: "/feedback/:token",
+    element: <PublicFeedbackForm />,
   },
 
   {

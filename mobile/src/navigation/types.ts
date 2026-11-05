@@ -44,6 +44,8 @@ export type AdminTabParamList = {
 };
 
 export type SupervisorTabParamList = {
+  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
+  FeedbackTickets: undefined;
   Home: undefined;
   Jobs: { filter?: JobsListFilter } | undefined;
   Team: undefined;

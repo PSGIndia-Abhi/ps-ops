@@ -6,6 +6,50 @@ import StatusAlertModal from "./StatusAlertModal";
 // Shared two-panel booking form styles (bgm-* / bg-*), also used by the Brigade booking form.
 import "../pages/brigade/brigade.css";
 
+// The services a booking can include (also offered when booking a re-visit from a feedback ticket).
+export const pestServices = [
+  "General Pest Control (GPC)",
+  "General Pest Control + Rodent Control (GPC + RC)",
+  "Mosquito Treatment",
+  "Mosquito Fogging",
+  "Mosquito IRS (Indoor Residual Spray)",
+  "Mosquito Larval Treatment",
+  "Cockroach Treatment",
+  "Cockroach Gel Treatment",
+  "Ant Treatment",
+  "Fly Treatment",
+  "Bed Bug Treatment",
+  "Snake Control",
+  "Honey Bee Treatment",
+  "Rodent Control",
+  "Drainage Treatment",
+  "Termite Pre-Construction Treatment",
+  "Termite Post-Construction Treatment",
+  "Lizard Control",
+  "Deep Fumigation"
+];
+
+export const deepCleaningServices = [
+  "Floor Protection",
+  "Electrical Shifting",
+  "Electrical New Point Installation",
+  "Plumbing Work",
+  "Painting Work",
+  "Regular Cleaning",
+  "Deep Cleaning",
+  "Deep Cleaning with Scrubbing",
+  "Deep Cleaning with Sticker Removal",
+  "Debris Removal"
+];
+
+const salesServices = [
+  "Invoice Submission"
+];
+
+const operationServices = [
+  "CRM"
+];
+
 
 
 export default function CreateBookingModal({
@@ -15,6 +59,11 @@ export default function CreateBookingModal({
   supervisors,
   technicians,
   clientContact,
+  // Optional (the Feedback Desk's re-visit booking): a starting contact and services, and siteId
+  // to offer only that site's contacts.
+  initialContactId = "",
+  initialSubServices = [],
+  siteId = null,
 }) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -33,9 +82,9 @@ export default function CreateBookingModal({
   const [showContactResults, setShowContactResults] = useState(false);
 
   const [form, setForm] = useState({
-    contactId: "",
+    contactId: initialContactId ? String(initialContactId) : "",
     serviceType: "BOTH",
-    subServices: [],
+    subServices: initialSubServices,
     location: "",
     notes: "",
     recurrenceEnabled: false,
@@ -49,7 +98,7 @@ export default function CreateBookingModal({
     recurrenceEndDate: "",
   });
   const defaultSchedule = { scheduleType: "single", start_date: "", end_date: "" };
-  const [serviceSchedules, setServiceSchedules] = useState({});
+  const [serviceSchedules, setServiceSchedules] = useState(() => Object.fromEntries(initialSubServices.map((s) => [s, { ...defaultSchedule }])));
 
   const [contacts, setContacts] = useState([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -148,8 +197,9 @@ export default function CreateBookingModal({
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
-    if (!query) return contacts;
-    return contacts.filter((c) => {
+    const atSite = siteId ? contacts.filter((c) => String(c.company_id) === String(siteId)) : contacts;
+    if (!query) return atSite;
+    return atSite.filter((c) => {
       const name = (c.name || "").toLowerCase();
       const phone = (c.phone || c.contact_phone || "").toLowerCase();
       const email = (c.email || c.contact_email || "").toLowerCase();
@@ -161,7 +211,7 @@ export default function CreateBookingModal({
         company.includes(query)
       );
     });
-  }, [contacts, contactSearch]);
+  }, [contacts, contactSearch, siteId]);
 
   async function reloadContacts() {
     if (role === "client") return;
@@ -178,48 +228,6 @@ export default function CreateBookingModal({
 
 
 
-  const pestServices = [
-  "General Pest Control (GPC)",
-  "General Pest Control + Rodent Control (GPC + RC)",
-  "Mosquito Treatment",
-  "Mosquito Fogging",
-  "Mosquito IRS (Indoor Residual Spray)",
-  "Mosquito Larval Treatment",
-  "Cockroach Treatment",
-  "Cockroach Gel Treatment",
-  "Ant Treatment",
-  "Fly Treatment",
-  "Bed Bug Treatment",
-  "Snake Control",
-  "Honey Bee Treatment",
-  "Rodent Control",
-  "Drainage Treatment",
-  "Termite Pre-Construction Treatment",
-  "Termite Post-Construction Treatment",
-  "Lizard Control",
-  "Deep Fumigation"
-];
-
-const deepCleaningServices = [
-  "Floor Protection",
-  "Electrical Shifting",
-  "Electrical New Point Installation",
-  "Plumbing Work",
-  "Painting Work",
-  "Regular Cleaning",
-  "Deep Cleaning",
-  "Deep Cleaning with Scrubbing",
-  "Deep Cleaning with Sticker Removal",
-  "Debris Removal"
-];
-
-const salesServices = [
-  "Invoice Submission"
-];
-
-const operationServices = [
-  "CRM"
-];
 
   const visibleSubServices =
     form.serviceType === "PEST"
@@ -650,6 +658,35 @@ const operationServices = [
             {!isClient && (
               <section className="bgm-section">
                 <SectionHead step={nextStep()} title="Requested by" done={stepDone.contact} />
+                {/* Booked from a feedback ticket: the site's contacts, all listed to pick from. */}
+                {siteId ? (
+                  <div className="bgm-search-results" role="listbox" style={{ position: "static", boxShadow: "none", maxHeight: 260 }}>
+                    {loadingContacts ? (
+                      <div className="bgm-search-empty">Loading contacts…</div>
+                    ) : filteredContacts.length === 0 ? (
+                      <div className="bgm-search-empty">No contacts saved for this site</div>
+                    ) : (
+                      filteredContacts.map(c => {
+                        const on = String(form.contactId) === String(c.id);
+                        const phoneLabel = c.phone || c.contact_phone || "";
+                        return (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={on}
+                            key={c.id}
+                            className="bgm-search-item"
+                            style={on ? { background: "#eff6ff", boxShadow: "inset 3px 0 0 #2563eb" } : undefined}
+                            onClick={() => setForm(prev => ({ ...prev, contactId: c.id }))}
+                          >
+                            <span className="bgm-contact-name">{c.name}{on ? " ✓" : ""}</span>
+                            <span className="bgm-contact-sub">{[phoneLabel, c.role, c.email].filter(Boolean).join(" · ")}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : (
                 <div ref={contactDropdownRef} className="bgm-search">
                   <div className="bg-field">
                     <input
@@ -698,6 +735,7 @@ const operationServices = [
                     </div>
                   )}
                 </div>
+                )}
 
                 {selectedContact && (
                   <div className="bgm-flat-strip">

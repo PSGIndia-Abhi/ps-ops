@@ -70,7 +70,12 @@ services:
     restart: unless-stopped
 
   minio:
-    image: quay.io/minio/minio:latest
+    # MinIO Inc. no longer publishes public images: quay.io/minio/minio returns 401 and
+    # minio/minio on Docker Hub is gone ("repository does not exist"). pgsty/minio is the
+    # community build of the same server (same `minio server` CLI, env vars and console).
+    # Pinned so ":latest" can't silently change the MinIO version under the stored files.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    pull_policy: missing
     container_name: ps-minio
     command: server /data --console-address ":9001"
     environment:

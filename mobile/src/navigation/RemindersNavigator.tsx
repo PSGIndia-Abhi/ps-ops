@@ -21,6 +21,7 @@ import { ReminderListScreen, RepeatingScreen } from '../reminders/screens/Remind
 import { ReminderNotificationsScreen } from '../reminders/screens/ReminderNotificationsScreen';
 import { ReminderProfileScreen } from '../reminders/screens/ReminderProfileScreen';
 import { RepeatIcon } from '../tasks/ui/taskIcons';
+import { FeedbackTicketsTab, ticketsTabIcon, useTicketsTab } from '../feedback/FeedbackTicketsTab';
 import { radii, shadows } from '../theme';
 
 const Tab = createBottomTabNavigator<ReminderTabParamList>();
@@ -101,6 +102,7 @@ function ReminderTabs() {
     tabBarLabel: tabLabel,
   };
 
+  const tickets = useTicketsTab();
   return (
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={ReminderHomeScreen} options={{ tabBarIcon: homeIcon }} />
@@ -117,6 +119,9 @@ function ReminderTabs() {
         })}
       />
       <Tab.Screen name="Repeating" component={RepeatingScreen} options={{ tabBarIcon: repeatingIcon }} />
+      {tickets.show && (
+        <Tab.Screen name="FeedbackTickets" component={FeedbackTicketsTab} options={{ title: 'Tickets', tabBarIcon: ticketsTabIcon, tabBarBadge: tickets.count || undefined }} />
+      )}
       <Tab.Screen
         name="ProfileTab"
         component={NewReminderPlaceholder}

@@ -26,6 +26,7 @@ const APP_NAMES: Record<AppKind, string> = {
   tasks: 'Task Management',
   sales: 'Sales',
   reminders: 'Payment Reminders',
+  feedback: 'Customer Feedback',
 };
 
 const factory = (t: CrmTheme) => ({

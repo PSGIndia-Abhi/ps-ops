@@ -17,7 +17,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <APIProvider apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY} 
     libraries={["geometry"]}
     >
-      <RouterProvider router={router} />
+      <RouterProvider
+       router={router}/>
     </APIProvider>
   </React.StrictMode>
 );

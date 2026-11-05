@@ -81,6 +81,8 @@ export type LeadStackParamList = {
 
 /** "NewLeadTab" is the raised centre action and never renders a screen (it opens LeadNew). */
 export type LeadTabParamList = {
+  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
+  FeedbackTickets: undefined;
   Home: undefined;
   /** `at` changes on every navigation so re-opening with the same group still re-applies it. */
   Leads: { group?: StageGroup; at?: number } | undefined;

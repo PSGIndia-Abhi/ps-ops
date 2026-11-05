@@ -15,6 +15,7 @@ import {
   FiList,
   FiLogOut,
   FiMenu,
+  FiMessageSquare,
   FiPlus,
   FiSearch,
   FiUsers,
@@ -25,6 +26,8 @@ import {
 } from "react-icons/fi";
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import { FEEDBACK_ROLE } from "./Feedback";
+import { FEEDBACK_HOME } from "../feedback/access";
+import { useFeedbackPermissions, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -90,8 +93,14 @@ function NewTaskButton() {
 }
 
 function TaskProShell() {
+  // Customer Feedback: desk users get a link to the Feedback Desk; those who only work tickets (a
+  // department's team such as Accounts, an assigned supervisor / salesperson) get "Tickets" here.
+  const { permissions: feedbackPerms, ticketsOnly } = useFeedbackPermissions();
+  const hasFeedback = feedbackPerms.length > 0 && !ticketsOnly;
   const navigate = useNavigate();
   const location = useLocation();
+  // Open tickets waiting for them: the number on "Tickets" (reloaded on each page change).
+  const ticketCount = useFeedbackTicketCount(ticketsOnly, location.pathname);
   const viewer = useViewer();
   const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
@@ -214,6 +223,18 @@ function TaskProShell() {
                 </NavLink>
               ),
             )}
+            {ticketsOnly && (
+              <NavLink
+                to={`${TASKPRO_HOME}/tickets`}
+                className={({ isActive }) => `tp-nav-item ${isActive ? "active" : ""}`}
+                onClick={() => setDrawer(false)}
+                title={collapsed ? "Tickets" : undefined}
+              >
+                <FiMessageSquare className="tp-nav-icon" />
+                <span className="tp-nav-label">Tickets</span>
+                {ticketCount > 0 && <span className="tp-nav-badge">{ticketCount}</span>}
+              </NavLink>
+            )}
           </nav>
 
           {/* Lead staff come here from Lead Management, so they get a way back without logging in again. */}
@@ -235,6 +256,13 @@ function TaskProShell() {
             <button type="button" className="tp-nav-item" onClick={() => navigate("/accountant")} title={collapsed ? "Accountant Panel" : undefined}>
               <FiArrowLeft className="tp-nav-icon" />
               <span className="tp-nav-label">Accountant Panel</span>
+            </button>
+          )}
+          {/* Roles that admin gave a Customer Feedback permission (e.g. Operations Manager) open the desk here. */}
+          {hasFeedback && (
+            <button type="button" className="tp-nav-item" onClick={() => navigate(FEEDBACK_HOME)} title={collapsed ? "Customer Feedback" : undefined}>
+              <FiMessageSquare className="tp-nav-icon" />
+              <span className="tp-nav-label">Customer Feedback</span>
             </button>
           )}
           <button type="button" className="tp-nav-item tp-exit" onClick={logout} title="Log out">
@@ -310,6 +338,20 @@ function TaskProShell() {
               </button>
               {userOpen && (
                 <div className="tp-popover tp-user-pop">
+                  {/* Switch app: people with Customer Feedback (e.g. the Operations / Accounts team). */}
+                  {hasFeedback && (
+                    <button
+                      type="button"
+                      className="tp-pop-row"
+                      onClick={() => {
+                        setUserOpen(false);
+                        navigate(FEEDBACK_HOME);
+                      }}
+                    >
+                      <FiMessageSquare />
+                      <span>Switch to Customer Feedback</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="tp-pop-row"

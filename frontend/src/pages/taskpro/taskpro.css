@@ -71,7 +71,8 @@
   ul, ol { list-style: none; }
   a { color: inherit; text-decoration: none; }
   small { font-size: 12px; color: var(--tp-muted); }
-  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; border-radius: 0; cursor: pointer; text-align: left; }
+  /* Not inside the Customer Feedback tickets (Tickets in the sidebar): those buttons keep their own look. */
+  button:where(:not(.fb-embed *)) { font: inherit; color: inherit; background: none; border: 0; padding: 0; border-radius: 0; cursor: pointer; text-align: left; }
   button:disabled { opacity: .55; cursor: not-allowed; }
   input, select, textarea { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--tp-primary); outline-offset: 2px; border-radius: 8px; }
