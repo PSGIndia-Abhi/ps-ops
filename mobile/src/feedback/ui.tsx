@@ -7,8 +7,8 @@ import { StatusBadge } from '../crm/ui/StatusBadge';
 import { DateSheet, Sheet } from '../tasks/ui/sheets';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { radii, spacing, typography } from '../theme';
-import { PRIORITY, QUESTION_MODES, longDay, monthLabel, type Period, type QuestionMode } from './format';
-import type { Question, Response, Submission } from './types';
+import { PRIORITY, longDay, monthLabel, questionModes, type Period, type QuestionMode } from './format';
+import type { Department, Question, Response, Submission } from './types';
 
 /** Small building blocks shared by the Customer Feedback screens. */
 const factory = (t: CrmTheme) => ({
@@ -182,6 +182,7 @@ export function QuestionForm({
   onMode,
   counts,
   onSkip,
+  departments = [],
 }: {
   questions: Question[];
   answers: Record<number, number>;
@@ -189,10 +190,12 @@ export function QuestionForm({
   other: string;
   onOther: (text: string) => void;
   otherEnabled: boolean;
-  /** Which questions are asked: General, Service-based or Both (with how many each gives). */
+  /** Which questions are asked: General, Service-based, Both or a department (with how many each gives). */
   mode: QuestionMode;
   onMode: (mode: QuestionMode) => void;
-  counts: Record<QuestionMode, number>;
+  counts: Record<string, number>;
+  /** The departments whose questions can be asked instead. */
+  departments?: Department[];
   /** Clears the answer of an optional question (skips it). */
   onSkip: (questionId: number) => void;
 }) {
@@ -202,7 +205,7 @@ export function QuestionForm({
   return (
     <View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modes}>
-        <Chips options={QUESTION_MODES.filter((m) => counts[m.value] > 0).map((m) => ({ value: m.value, label: `${m.label} · ${counts[m.value]}` }))} value={mode} onChange={onMode} />
+        <Chips options={questionModes(departments).filter((m) => counts[m.value] > 0).map((m) => ({ value: m.value, label: `${m.label} · ${counts[m.value]}` }))} value={mode} onChange={onMode} />
       </ScrollView>
       {questions.length > 0 && (
         <View style={styles.progress}>

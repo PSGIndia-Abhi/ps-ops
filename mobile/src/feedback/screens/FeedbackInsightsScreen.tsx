@@ -11,7 +11,7 @@ import type { CallList, CallStatus, Ticket } from '../types';
 import { HeroHeader, HeroPill } from '../Hero';
 import { PeriodPicker } from '../ui';
 
-const STATUSES: CallStatus[] = ['TO_CALL', 'NOT_ANSWERED', 'FORM_SENT', 'FORM_RECEIVED', 'TICKET_OPEN', 'DONE'];
+const STATUSES: CallStatus[] = ['TO_CALL', 'NOT_ANSWERED', 'WRONG_NUMBER', 'FORM_SENT', 'FORM_RECEIVED', 'TICKET_OPEN', 'DONE'];
 
 const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },

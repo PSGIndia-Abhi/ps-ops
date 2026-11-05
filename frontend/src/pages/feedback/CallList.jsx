@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiPhoneOff, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
 import { formatDate, formatDay, isPast, listCalls, monthLabel, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
@@ -14,6 +14,7 @@ const FILTERS = [
   { value: "ALL", label: "All" },
   { value: "TO_CALL", label: "To call" },
   { value: "NOT_ANSWERED", label: "Not answered" },
+  { value: "WRONG_NUMBER", label: "Wrong number" },
   { value: "FORM_SENT", label: "Form sent" },
   { value: "FORM_RECEIVED", label: "Form received" },
   { value: "TICKET_OPEN", label: "Ticket open" },
@@ -171,6 +172,7 @@ export default function CallList() {
           { label: mode === "month" ? "Sites this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
           tile("TO_CALL", "To call", "muted", FiPhoneCall),
           tile("NOT_ANSWERED", "Not answered", "warn", FiPhoneMissed, dueNow ? `${dueNow} call-back due now` : undefined),
+          tile("WRONG_NUMBER", "Wrong number", "danger", FiPhoneOff, counts.WRONG_NUMBER ? "Find the right number" : undefined),
           tile("FORM_SENT", "Form sent", "info", FiSend),
           tile("FORM_RECEIVED", "Form received", "violet", FiInbox, counts.FORM_RECEIVED ? "Needs your review" : undefined),
           tile("TICKET_OPEN", "Ticket open", "danger", FiAlertTriangle, counts.TICKET_OPEN ? "Waiting for the ticket" : undefined),

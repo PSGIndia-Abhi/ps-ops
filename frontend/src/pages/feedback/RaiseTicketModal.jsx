@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { FiChevronDown } from "react-icons/fi";
-import { ACTIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, endOfDay } from "./feedbackApi";
+import { FiBriefcase, FiCheck, FiChevronDown, FiFileText, FiTool } from "react-icons/fi";
+import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHint, endOfDay, formatDay, getCallInvoices, rupees } from "./feedbackApi";
+import { useFeedbackAccess } from "./feedbackContext";
 import { ErrorBox, Modal } from "./ui";
+
+const deptIcon = (d) => (d.kind === OPERATIONS ? FiTool : d.with_invoices ? FiFileText : FiBriefcase);
 
 /**
  * Raise a ticket for a problem the customer reported. A new ticket reaches every operations
@@ -11,7 +14,31 @@ import { ErrorBox, Modal } from "./ui";
  * once, from the month's visits); the ticket stores one visit - the first visit of the first ticked
  * service (its technician) - and all ticked services are listed in the problem text.
  */
-export default function RaiseTicketModal({ title, visits, suggested, defaultSummary, submitLabel = "Raise ticket", note, onSubmit, onClose }) {
+export default function RaiseTicketModal({ callId, title, visits, suggested, defaultSummary, submitLabel = "Raise ticket", note, onSubmit, onClose }) {
+  // Departments: which teams get the ticket (several can be ticked; each has its own section).
+  const { departmentList } = useFeedbackAccess();
+  const departments = departmentList?.length ? departmentList : [{ kind: OPERATIONS, name: "Operations Team", label: "Operations" }];
+  const [depts, setDepts] = useState([OPERATIONS].filter((k) => departments.some((d) => d.kind === k)));
+  const forOps = depts.includes(OPERATIONS);
+  // The other ticked departments, each with its own part: { issue_summary, priority, invoice_ids }.
+  const others = departments.filter((d) => d.kind !== OPERATIONS && depts.includes(d.kind));
+  const blankPart = { issue_summary: "", priority: suggested || "MEDIUM", invoice_ids: [] };
+  const [parts, setParts] = useState({});
+  const partOf = (kind) => parts[kind] || blankPart;
+  const setPart = (kind, patch) => setParts((p) => ({ ...p, [kind]: { ...(p[kind] || blankPart), ...patch } }));
+  const needInvoices = others.some((d) => d.with_invoices);
+  const [invoices, setInvoices] = useState(null);
+  useEffect(() => {
+    if (!needInvoices || invoices || !callId) return;
+    getCallInvoices(callId)
+      .then((d) => setInvoices(d.invoices || []))
+      .catch(() => setInvoices([]));
+  }, [needInvoices, invoices, callId]);
+  const toggleDept = (kind) => setDepts((d) => (d.includes(kind) ? d.filter((x) => x !== kind) : [...d, kind]));
+  const toggleInvoice = (kind, id) => {
+    const ids = partOf(kind).invoice_ids;
+    setPart(kind, { invoice_ids: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] });
+  };
   const [form, setForm] = useState({
     issue_summary: defaultSummary || "",
     priority: suggested || "MEDIUM",
@@ -58,23 +85,41 @@ export default function RaiseTicketModal({ title, visits, suggested, defaultSumm
   }, [menuOpen]);
 
   async function submit() {
-    if (isOther && !form.action_note.trim()) {
+    if (!depts.length) {
+      setError("Choose at least one department");
+      return;
+    }
+    if (forOps && isOther && !form.action_note.trim()) {
       setError("Type what will be done for Other");
+      return;
+    }
+    const missing = others.find((d) => !partOf(d.kind).issue_summary.trim());
+    if (missing) {
+      setError(`Describe the issue for ${missing.name}`);
       return;
     }
     setSaving(true);
     setError("");
     const summary = form.issue_summary.trim();
     const servicesLine = chosenServices.length > 1 ? `Services: ${chosenServices.join(", ")}` : "";
+    const ops = forOps
+      ? {
+          issue_summary: [summary, servicesLine].filter(Boolean).join("\n").slice(0, 500) || null,
+          visit_id: visits.find((v) => v.service === chosenServices[0])?.id || null,
+          priority: form.priority,
+          action: form.action,
+          action_due_at: closesNow ? null : endOfDay(form.due),
+          action_note: form.action_note.trim() || null,
+        }
+      : {};
+    const partBody = Object.fromEntries(
+      others.map((d) => {
+        const p = partOf(d.kind);
+        return [d.kind, { issue_summary: p.issue_summary.trim(), priority: p.priority, invoice_ids: d.with_invoices ? p.invoice_ids : [] }];
+      }),
+    );
     try {
-      await onSubmit({
-        issue_summary: [summary, servicesLine].filter(Boolean).join("\n").slice(0, 500) || null,
-        visit_id: visits.find((v) => v.service === chosenServices[0])?.id || null,
-        priority: form.priority,
-        action: form.action,
-        action_due_at: closesNow ? null : endOfDay(form.due),
-        action_note: form.action_note.trim() || null,
-      });
+      await onSubmit({ departments: depts, ...ops, ...(others.length ? { parts: partBody } : {}) });
     } catch (err) {
       setError(err.message);
       setSaving(false);
@@ -98,6 +143,35 @@ export default function RaiseTicketModal({ title, visits, suggested, defaultSumm
       }
     >
       <ErrorBox error={error} />
+      <div className="fb-field">
+        <span>
+          Departments <span className="fb-req">*</span> <span className="fb-small fb-muted">(choose one or more)</span>
+        </span>
+        <div className="fb-dept-pick" role="group" aria-label="Departments">
+          {departments.map((d) => {
+            const on = depts.includes(d.kind);
+            const Icon = deptIcon(d);
+            return (
+              <button key={d.kind} type="button" className={`fb-dept-opt ${on ? "is-on" : ""}`} aria-pressed={on} onClick={() => toggleDept(d.kind)}>
+                <span className="fb-dept-icon" aria-hidden="true">
+                  <Icon />
+                </span>
+                <span className="fb-dept-text">
+                  <b>{d.name}</b>
+                  <small>{departmentHint(d)}</small>
+                </span>
+                <span className="fb-dept-check" aria-hidden="true">
+                  {on && <FiCheck />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {forOps && departments.length > 1 && <div className="fb-section-label">{departments.find((d) => d.kind === OPERATIONS)?.name || "Operations"}</div>}
+      {forOps && (
+      <>
       <label className="fb-field" htmlFor="fb-rt-summary">
         What is the problem? (in the customer's words)
         <textarea id="fb-rt-summary" className="fb-textarea" rows={3} maxLength={500} placeholder="The bad answers are attached to the ticket already" value={form.issue_summary} onChange={set("issue_summary")} />
@@ -186,6 +260,65 @@ export default function RaiseTicketModal({ title, visits, suggested, defaultSumm
         </label>
       )}
       {!closesNow && <div className="fb-small fb-muted">The ticket appears in the Tickets list for operations managers and admin.</div>}
+      </>
+      )}
+
+      {others.map((d) => {
+        const p = partOf(d.kind);
+        const id = `fb-rt-${d.kind.toLowerCase()}`;
+        return (
+          <div key={d.kind}>
+            <div className="fb-section-label">{d.name}</div>
+            <label className="fb-field" htmlFor={`${id}-summary`}>
+              <span>
+                {d.with_invoices ? "What is the invoice issue?" : `What should ${d.name} look into?`} <span className="fb-req">*</span>
+              </span>
+              <textarea
+                id={`${id}-summary`}
+                className="fb-textarea"
+                rows={2}
+                maxLength={500}
+                placeholder={d.with_invoices ? "e.g. Invoice for October not received, please send a copy" : "Describe the issue for this team"}
+                value={p.issue_summary}
+                onChange={(e) => setPart(d.kind, { issue_summary: e.target.value })}
+              />
+            </label>
+            <label className="fb-field" htmlFor={`${id}-priority`} style={{ maxWidth: 260 }}>
+              Priority
+              <select id={`${id}-priority`} className="fb-select" value={p.priority} onChange={(e) => setPart(d.kind, { priority: e.target.value })}>
+                {PRIORITIES.map((x) => (
+                  <option key={x} value={x}>
+                    {PRIORITY[x].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {d.with_invoices && (
+              <div className="fb-field">
+                <span>Related invoices (optional)</span>
+                {!invoices ? (
+                  <span className="fb-field-hint">Loading invoices…</span>
+                ) : !invoices.length ? (
+                  <span className="fb-field-hint">No invoices found for this customer.</span>
+                ) : (
+                  <div className="fb-inv-list">
+                    {invoices.map((i) => (
+                      <label key={i.id} className={`fb-inv-opt ${p.invoice_ids.includes(i.id) ? "is-on" : ""}`}>
+                        <input type="checkbox" checked={p.invoice_ids.includes(i.id)} onChange={() => toggleInvoice(d.kind, i.id)} />
+                        <span className="fb-strong">{i.number}</span>
+                        <span className="fb-small fb-muted">{formatDay(i.date)}</span>
+                        <span className="fb-small">{rupees(i.amount)}</span>
+                        <span className={`fb-small ${i.pending > 0 ? "fb-danger-text" : "fb-muted"}`}>{i.pending > 0 ? `${rupees(i.pending)} due` : "Paid"}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="fb-small fb-muted">{d.name} sees this part and marks it done; then you call the customer back.</div>
+          </div>
+        );
+      })}
     </Modal>
   );
 }

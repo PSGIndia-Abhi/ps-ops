@@ -1,18 +1,19 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
-import { AlertTriangleIcon, ClockIcon, PhoneIcon } from '../../components/icons';
+import { AlertTriangleIcon, BriefcaseIcon, ClockIcon, PhoneIcon } from '../../components/icons';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
-import { spacing, typography } from '../../theme';
-import { errorText, getTicket } from '../api';
-import { ACTIONS, PRIORITY, TICKET_STATUS, formatDateTime, formatDay, monthLabel } from '../format';
+import { radii, spacing, typography } from '../../theme';
+import { errorText, getTicket, markPartDone } from '../api';
+import { useFeedback } from '../FeedbackContext';
+import { ACTIONS, OPERATIONS, PRIORITY, TICKET_STATUS, formatDateTime, formatDay, monthLabel, rupees } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
-import type { Ticket } from '../types';
+import type { Ticket, TicketPart } from '../types';
 import { AnswersList, CustomerCard, Panel } from '../ui';
 
 const factory = (t: CrmTheme) => ({
@@ -25,6 +26,12 @@ const factory = (t: CrmTheme) => ({
   step: { flexDirection: 'row' as const, gap: spacing.xs, alignItems: 'center' as const, paddingVertical: 4 },
   stepDot: { width: 10, height: 10, borderRadius: 5 },
   stepText: { ...typography.caption, color: t.textPrimary, flex: 1 },
+  inv: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.xs, borderTopWidth: 1, borderTopColor: t.surfaceAlt, marginTop: spacing.xs },
+  invNo: { ...typography.bodyMedium, color: t.textPrimary },
+  invAmt: { ...typography.captionMedium, color: t.textSecondary, textAlign: 'right' as const },
+  done: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, backgroundColor: t.successBg },
+  doneText: { ...typography.captionMedium, color: t.successText },
+  noteInput: { minHeight: 46, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, paddingHorizontal: spacing.sm, marginTop: spacing.sm, color: t.textPrimary, ...typography.body },
 });
 
 /**
@@ -40,6 +47,9 @@ export function FeedbackTicketScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const { can, myDepartments, deptOnly } = useFeedback();
+  const [partNotes, setPartNotes] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,14 +80,41 @@ export function FeedbackTicketScreen() {
 
   const open = ticket.status === 'ACTION_PENDING';
   const visit = ticket.revisit;
-  const ready = open && (ticket.action === 'OTHER' || visit?.status === 'COMPLETED');
+  const parts = ticket.parts || [];
+  // Tickets from before departments have no parts = Operations.
+  const hasOps = !parts.length || parts.some((p) => p.kind === OPERATIONS);
+  // The other departments' parts, each finished by its own team.
+  const others = parts.filter((p) => p.kind !== OPERATIONS);
+  const opsDone = !hasOps || ticket.action === 'OTHER' || visit?.status === 'COMPLETED';
+  const ready = open && (ticket.follow_up_due ?? opsDone);
+  const canFinish = (p: TicketPart) => open && p.status !== 'DONE' && (can('FEEDBACK_MANAGE') || myDepartments.includes(p.kind));
   const followUps = (ticket.history || []).filter((h) => h.event === 'FOLLOWUP_CALL');
   const steps: [string, boolean][] = [
     [`Raised ${formatDay(ticket.created_at)}`, true],
-    [visit ? `Re-visit booked · Job ${visit.job_code}${visit.technicians ? ` · ${visit.technicians}` : ''}` : ticket.action === 'OTHER' ? 'No technician visit (Other)' : 'Re-visit to be booked', !!visit || ticket.action === 'OTHER'],
-    [visit?.status === 'COMPLETED' ? `Work done ${formatDay(visit.completed_at || visit.date)}` : 'Work done', visit?.status === 'COMPLETED' || ticket.action === 'OTHER'],
+    ...(hasOps
+      ? ([
+          [visit ? `Re-visit booked · Job ${visit.job_code}${visit.technicians ? ` · ${visit.technicians}` : ''}` : ticket.action === 'OTHER' ? 'No technician visit (Other)' : 'Re-visit to be booked', !!visit || ticket.action === 'OTHER'],
+          [visit?.status === 'COMPLETED' ? `Work done ${formatDay(visit.completed_at || visit.date)}` : 'Work done', visit?.status === 'COMPLETED' || ticket.action === 'OTHER'],
+        ] as [string, boolean][])
+      : []),
+    ...others.map((p) => [p.status === 'DONE' ? `${p.label} done · ${p.done_note || ''}` : `With ${p.label}`, p.status === 'DONE' || !open] as [string, boolean]),
     [open ? 'Customer confirms on the follow-up call' : `Closed ${formatDay(ticket.closed_at)}`, !open],
   ];
+  const waitingFor = [!opsDone ? (visit ? 'the re-visit to be completed' : 'the re-visit to be booked and completed') : null, ...others.filter((p) => p.status !== 'DONE').map((p) => p.label)].filter(Boolean);
+
+  async function finishPart(p: TicketPart) {
+    setSaving(true);
+    try {
+      await markPartDone(ticket!.id, p.kind, (partNotes[p.kind] || '').trim());
+      setPartNotes((n) => ({ ...n, [p.kind]: '' }));
+      setToast({ message: `${p.label} part marked done.`, variant: 'success' });
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // Messages to the customer about this ticket.
   const base = { ticketId: ticket.id, ticketNumber: ticket.ticket_number, issue: ticket.issue_summary, revisitDate: visit?.date || null, closeNote: ticket.close_note };
@@ -93,6 +130,9 @@ export function FeedbackTicketScreen() {
       <HeroHeader eyebrow={`Ticket · raised ${formatDay(ticket.created_at)}`} title={ticket.ticket_number} subtitle={`${ticket.site.name} · ${ticket.customer.name}`} onBack={() => navigation.goBack()}>
         <HeroPill label={TICKET_STATUS[ticket.status].label} tone={TICKET_STATUS[ticket.status].tone} />
         <HeroPill label={`${PRIORITY[ticket.priority].label} priority`} tone={PRIORITY[ticket.priority].tone} />
+        {parts.map((p) => (
+          <HeroPill key={p.kind} label={`${p.label || p.kind}${p.kind !== OPERATIONS && p.status === 'DONE' ? ' ✓' : ''}`} tone={p.kind !== OPERATIONS ? (p.status === 'DONE' ? 'success' : 'warning') : 'accent'} />
+        ))}
       </HeroHeader>
       <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.primary} colors={[theme.primary]} />}>
         <CustomerCard
@@ -113,6 +153,51 @@ export function FeedbackTicketScreen() {
           ))}
         </Panel>
 
+        {others.map((p) => (
+          <Panel key={p.kind} title={`${p.label}${p.with_invoices ? ' · invoice issue' : ''}`} icon={<BriefcaseIcon size={17} color={theme.warningText} />}>
+            <Text style={styles.v}>{p.issue_summary || 'No details written.'}</Text>
+            {!!p.priority && (
+              <View style={[styles.kv, { marginTop: spacing.xs }]}>
+                <Text style={styles.k}>Priority</Text>
+                <Text style={styles.v}>{PRIORITY[p.priority].label}</Text>
+              </View>
+            )}
+            {p.invoices.map((i) => (
+              <View key={i.id} style={styles.inv}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.invNo}>{i.number}</Text>
+                  <Text style={styles.small}>{formatDay(i.date)}</Text>
+                </View>
+                <View>
+                  <Text style={styles.invAmt}>{rupees(i.amount)}</Text>
+                  <Text style={[styles.small, { textAlign: 'right', color: i.pending > 0 ? theme.dangerText : theme.textMuted }]}>{i.pending > 0 ? `${rupees(i.pending)} due` : 'Paid'}</Text>
+                </View>
+              </View>
+            ))}
+            {p.status === 'DONE' ? (
+              <View style={styles.done}>
+                <Text style={styles.doneText}>✓ Done · {p.done_note}</Text>
+                <Text style={styles.small}>{[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(' · ')}</Text>
+              </View>
+            ) : canFinish(p) ? (
+              <>
+                <TextInput
+                  style={styles.noteInput}
+                  value={partNotes[p.kind] || ''}
+                  onChangeText={(v) => setPartNotes((n) => ({ ...n, [p.kind]: v }))}
+                  maxLength={500}
+                  placeholder={p.with_invoices ? 'What was done? e.g. Invoice copy sent' : 'What was done?'}
+                  placeholderTextColor={theme.textMuted}
+                />
+                <PrimaryButton label={`Mark ${p.label} done`} onPress={() => finishPart(p)} loading={saving} disabled={!(partNotes[p.kind] || '').trim()} style={{ marginTop: spacing.xs }} />
+              </>
+            ) : (
+              <Text style={[styles.small, { marginTop: spacing.xs }]}>{open ? `Waiting for ${p.label}.` : 'Closed.'}</Text>
+            )}
+          </Panel>
+        ))}
+
+        {hasOps && (
         <Panel title="Problem" icon={<AlertTriangleIcon size={17} color={theme.danger} />}>
           <View style={styles.kv}>
             <Text style={styles.k}>Service</Text>
@@ -128,6 +213,7 @@ export function FeedbackTicketScreen() {
           </View>
           {!!ticket.feedback && <AnswersList submission={ticket.feedback} onlyBad />}
         </Panel>
+        )}
 
         <Panel title="Follow-up call" icon={<PhoneIcon size={17} color={theme.primary} />}>
           {followUps.map((h) => (
@@ -139,15 +225,16 @@ export function FeedbackTicketScreen() {
           {open ? (
             <>
               <Text style={styles.small}>
-                {ready ? 'The work is done. Call the customer and ask the questions again: if they are satisfied the ticket closes.' : visit ? 'Opens when the technician completes the re-visit.' : 'Opens once the re-visit is booked and completed.'}
+                {ready ? 'The work is done. Call the customer and ask the questions again: if they are satisfied the ticket closes.' : `Waiting for ${waitingFor.join(' and ') || 'the work'}. Then the customer is called back.`}
               </Text>
-              <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ marginTop: spacing.sm }} />
+              {!deptOnly && <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ marginTop: spacing.sm }} />}
             </>
           ) : (
             <Text style={styles.small}>{ticket.close_note || 'Closed.'}</Text>
           )}
         </Panel>
 
+        {!deptOnly && (
         <MessagesPanel
           callId={ticket.request_id}
           contacts={ticket.contacts || []}
@@ -156,8 +243,9 @@ export function FeedbackTicketScreen() {
           onSent={(message) => setToast({ message, variant: 'success' })}
           onError={(message) => setToast({ message, variant: 'error' })}
         />
+        )}
 
-        {!ready && (
+        {!ready && !deptOnly && (
           <PrimaryButton label="View the call" variant="secondary" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} />
         )}
       </ScrollView>

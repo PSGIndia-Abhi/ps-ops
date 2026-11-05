@@ -4,7 +4,7 @@
  */
 
 /** TICKET_OPEN: a done call whose ticket is not closed yet (as the list and the call show it). */
-export type CallStatus = 'TO_CALL' | 'NOT_ANSWERED' | 'FORM_SENT' | 'FORM_RECEIVED' | 'DONE' | 'TICKET_OPEN';
+export type CallStatus = 'TO_CALL' | 'NOT_ANSWERED' | 'WRONG_NUMBER' | 'FORM_SENT' | 'FORM_RECEIVED' | 'DONE' | 'TICKET_OPEN';
 export type CallOutcome = 'ANSWERED' | 'NO_ANSWER' | 'BUSY' | 'WRONG_NUMBER';
 export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
 export type TicketStatus = 'ACTION_PENDING' | 'CLOSED';
@@ -77,6 +77,47 @@ export interface Submission {
   responses: Response[];
 }
 
+/**
+ * A department's key. Departments come from the user hierarchy (the admin adds them on the web,
+ * Masters > Questions > Department). OPERATIONS = service issue (re-visit); every other department
+ * gets an issue + priority (+ invoices when with_invoices) and marks its part done.
+ */
+export type DepartmentKind = string;
+
+/** A department tickets go to. */
+export interface Department {
+  kind: DepartmentKind;
+  label: string;
+  name: string;
+  org_unit_id: string;
+  with_invoices?: boolean;
+  is_operations?: boolean;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  date: string | null;
+  amount: number;
+  pending: number;
+  status: string;
+}
+
+/** A ticket's department part. Every department but Operations has its own issue, priority (and invoices); its team marks it done. */
+export interface TicketPart {
+  id: string;
+  kind: DepartmentKind;
+  label: string;
+  with_invoices?: boolean;
+  issue_summary: string | null;
+  priority: Priority | null;
+  invoices: Invoice[];
+  status: 'PENDING' | 'DONE';
+  done_by: Person | null;
+  done_at: string | null;
+  done_note: string | null;
+}
+
 export interface CallTicket {
   id: string;
   ticket_number: string;
@@ -86,8 +127,9 @@ export interface CallTicket {
   issue_summary: string | null;
   created_at: string;
   has_revisit: boolean;
-  /** The re-visit is completed: call the customer back with the same questions. */
+  /** Every department finished (re-visit completed, Accounts done): call the customer back. */
   follow_up_due: boolean;
+  parts?: TicketPart[];
 }
 
 export interface HistoryItem {
@@ -132,8 +174,9 @@ export interface Question {
   id: number;
   question_text: string;
   /** GENERAL = asked on every feedback; SERVICE = asked when the site had one of `services` that month. */
-  question_type?: 'GENERAL' | 'SERVICE';
+  question_type?: 'GENERAL' | 'SERVICE' | 'DEPARTMENT';
   services?: string[];
+  departments?: string[];
   is_required: boolean;
   options: QuestionOption[];
 }
@@ -167,6 +210,10 @@ export interface Ticket {
   closed_at: string | null;
   close_note: string | null;
   created_at: string;
+  /** The departments it went to (a department member sees only their own part). */
+  parts?: TicketPart[];
+  /** Every department finished: the collector calls the customer back. */
+  follow_up_due?: boolean;
   /** On GET /tickets/:id only. */
   feedback?: Submission | null;
   contacts?: Contact[];
@@ -188,11 +235,16 @@ export interface FeedbackBody {
   responses: { question_id: number; option_id: number }[];
   other_feedback: string | null;
   started_at: string | null;
-  /** Which questions were asked: GENERAL, SERVICE or BOTH. */
+  /** Which questions were asked: GENERAL, SERVICE, BOTH or DEPARTMENT (+ question_department). */
   question_mode?: string;
+  question_department?: string;
 }
 
 export interface NewTicket {
+  /** The departments it goes to; left out = Operations. */
+  departments?: DepartmentKind[];
+  /** Each other department's part, by key. */
+  parts?: Record<string, { issue_summary: string; priority: Priority; invoice_ids: string[] }>;
   issue_summary: string | null;
   visit_id: string | null;
   priority: Priority;

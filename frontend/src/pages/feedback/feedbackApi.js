@@ -68,6 +68,11 @@ export const reopenTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/
 export const deleteTicket = (id, note) => feedbackRequest(`/tickets/${id}`, send("DELETE", note ? { note } : {}));
 export const getRevisitOptions = (id) => feedbackRequest(`/tickets/${id}/revisit-options`);
 /** The call back after the work, with the call's questions: all good closes the ticket, a bad answer keeps it open. */
+export const markPartDone = (id, kind, note) => feedbackRequest(`/tickets/${id}/parts/${kind}/done`, send("POST", { note }));
+export const getCallInvoices = (id) => feedbackRequest(`/calls/${id}/invoices`);
+export const getDepartments = () => feedbackRequest("/departments");
+export const getDepartmentSetup = () => feedbackRequest("/departments?all=1");
+export const saveDepartments = (departments) => feedbackRequest("/departments", send("PUT", { departments }));
 export const recordFollowUp = (id, body) => feedbackRequest(`/tickets/${id}/follow-up`, send("POST", body));
 
 /* ---- customer report ---- */
@@ -118,6 +123,7 @@ export function openWhatsapp(url) {
 export const CALL_STATUS = {
   TO_CALL: { label: "To call", tone: "muted" },
   NOT_ANSWERED: { label: "Not answered", tone: "warn" },
+  WRONG_NUMBER: { label: "Wrong number", tone: "danger" },
   FORM_SENT: { label: "Form sent", tone: "info" },
   FORM_RECEIVED: { label: "Form received", tone: "violet" },
   DONE: { label: "Completed", tone: "ok" },
@@ -454,7 +460,36 @@ export function lastFollowUp(t) {
  */
 export function followUpReady(t) {
   if (t.status !== "ACTION_PENDING") return false;
+  // The server says when every department has finished (re-visit completed, the others marked done).
+  if (typeof t.follow_up_due === "boolean") return t.follow_up_due;
   return t.action === "OTHER" || t.revisit?.status === "COMPLETED";
+}
+
+/* ---- departments a ticket goes to ---- */
+// Departments come from the user hierarchy (Masters › Questions › Department), by key. OPERATIONS
+// keeps the service flow (re-visit); every other department has an issue + priority (+ invoices).
+export const OPERATIONS = "OPERATIONS";
+/** One line under a department's name: what happens when a ticket goes there. */
+export function departmentHint(d) {
+  if (d?.kind === OPERATIONS) return "Service issue - a re-visit is booked";
+  if (d?.with_invoices) return "Invoice issue - pick the customer's invoices";
+  return "Their team handles it and marks it done";
+}
+/** A department's name by key (from the department list; the key when it isn't there). */
+export function departmentName(list, kind) {
+  const d = (list || []).find((x) => x.kind === kind);
+  return d?.name || d?.label || (kind === OPERATIONS ? "Operations" : String(kind || "").replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()));
+}
+/** The ticket has an Operations part (tickets from before departments have no parts = Operations). */
+export function hasOpsPart(t) {
+  return !t.parts?.length || t.parts.some((p) => p.kind === OPERATIONS);
+}
+/** The ticket's parts for departments other than Operations (each marked done by its team). */
+export function otherParts(t) {
+  return (t.parts || []).filter((p) => p.kind !== OPERATIONS);
+}
+export function rupees(n) {
+  return `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
 /**
@@ -463,6 +498,24 @@ export function followUpReady(t) {
  * Only the customer confirming on the follow-up call closes a ticket.
  */
 export function ticketStages(t) {
+  const steps = opsStages(t);
+  const others = otherParts(t);
+  if (!others.length) return markCurrent(steps, t.status === "CLOSED");
+  // Each other department: its own step before the customer confirms; without Operations they
+  // replace the manager / technician / work steps.
+  const closed = t.status === "CLOSED";
+  const deptSteps = others.map((p) => ({
+    key: `dept-${p.kind}`,
+    label: p.label || departmentName(null, p.kind),
+    sub: p.status === "DONE" ? [p.done_note, formatDay(p.done_at)].filter(Boolean).join(" · ") : closed ? "Closed" : `With ${p.label || "the team"}`,
+    state: p.status === "DONE" || closed ? "done" : "todo",
+  }));
+  const at = steps.findIndex((s) => s.key === "confirmed");
+  const next = hasOpsPart(t) ? [...steps.slice(0, at), ...deptSteps, ...steps.slice(at)] : [steps[0], ...deptSteps, ...steps.slice(at)];
+  return markCurrent(next, closed);
+}
+
+function opsStages(t) {
   const closed = t.status === "CLOSED";
   const owner = t.action_owner;
   const visit = t.revisit;
@@ -493,7 +546,7 @@ export function ticketStages(t) {
     { key: "confirmed", ...confirmedStep(t, closed, onCall) },
     { key: "closed", label: "Closed", sub: closed ? formatDay(t.closed_at) : "When the customer confirms", state: closed ? "done" : "todo" },
   ];
-  return markCurrent(steps, closed);
+  return steps;
 }
 
 /** The "Customer confirmed" stage: the follow-up call after the work. */
@@ -569,9 +622,24 @@ export function openCustomerEmail(template, info, contacts) {
 /* ---- which questions a feedback asks ---- */
 // General, Service-based (the questions for the services the site had that month) or Both.
 /** The questions a feedback asks for a mode and the month's services (as the server checks them). */
+// A department's questions use the mode "DEPT:<kind>" here (sent as DEPARTMENT + question_department).
 export function questionsFor(questions, mode, services) {
   const had = new Set((services || []).map((x) => String(x).trim().toLowerCase()));
-  return questions.filter((q) =>
-    q.question_type === "SERVICE" ? mode !== "GENERAL" && (q.services || []).some((x) => had.has(x.trim().toLowerCase())) : mode !== "SERVICE",
-  );
+  const dept = String(mode || "").startsWith("DEPT:") ? mode.slice(5) : null;
+  return questions.filter((q) => {
+    if (q.question_type === "DEPARTMENT") return Boolean(dept) && (q.departments || []).includes(dept);
+    if (dept) return false;
+    return q.question_type === "SERVICE" ? mode !== "GENERAL" && (q.services || []).some((x) => had.has(x.trim().toLowerCase())) : mode !== "SERVICE";
+  });
+}
+
+/** The API fields for a question mode: { question_mode, question_department? }. */
+export function modeBody(mode) {
+  return String(mode || "").startsWith("DEPT:") ? { question_mode: "DEPARTMENT", question_department: mode.slice(5) } : { question_mode: mode };
+}
+
+/** How many questions each mode asks: GENERAL, SERVICE, BOTH and DEPT:<kind> per department. */
+export function modeCounts(questions, services, departments = []) {
+  const modes = ["GENERAL", "SERVICE", "BOTH", ...departments.map((d) => `DEPT:${d.kind}`)];
+  return Object.fromEntries(modes.map((m) => [m, questionsFor(questions, m, services).length]));
 }

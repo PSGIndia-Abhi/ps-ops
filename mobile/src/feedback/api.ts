@@ -1,5 +1,5 @@
 import { httpClient } from '../api/httpClient';
-import type { Call, CallList, CallOutcome, Contact, EmailTemplate, FeedbackBody, NewTicket, Question, Ticket } from './types';
+import type { Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, NewTicket, Question, Ticket } from './types';
 
 /**
  * Customer Feedback data access - the same /api/feedback endpoints the web Feedback Desk uses
@@ -8,8 +8,33 @@ import type { Call, CallList, CallOutcome, Contact, EmailTemplate, FeedbackBody,
 
 /** The signed-in user's FEEDBACK_* permissions ([] = no access to this app). */
 export async function getMyAccess(): Promise<string[]> {
-  const { data } = await httpClient.get<{ permissions: string[] }>('/api/feedback/me');
-  return data.permissions || [];
+  return (await getMyAccessFull()).permissions;
+}
+
+/**
+ * Permissions plus the departments the user works in. FEEDBACK_DEPT = a member of the Operations /
+ * Accounts team: they see only their department's tickets.
+ */
+export async function getMyAccessFull(): Promise<{ permissions: string[]; departments: DepartmentKind[] }> {
+  const { data } = await httpClient.get<{ permissions: string[]; departments?: DepartmentKind[] }>('/api/feedback/me');
+  return { permissions: data.permissions || [], departments: data.departments || [] };
+}
+
+/** The departments a ticket can go to (switched on in Masters). */
+export async function getDepartments(): Promise<Department[]> {
+  const { data } = await httpClient.get<{ departments: Department[] }>('/api/feedback/departments');
+  return data.departments || [];
+}
+
+/** The customer's invoices - for an Accounts issue. */
+export async function getCallInvoices(callId: string): Promise<Invoice[]> {
+  const { data } = await httpClient.get<{ invoices: Invoice[] }>(`/api/feedback/calls/${callId}/invoices`);
+  return data.invoices || [];
+}
+
+/** The Accounts team finishes its part of a ticket (note = what was done). */
+export async function markPartDone(ticketId: string, kind: DepartmentKind, note: string): Promise<void> {
+  await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/done`, { note });
 }
 
 /** month = one month's calls; from / to (2026-11-01) = sites with services between those dates instead. */
@@ -129,9 +154,9 @@ export async function prepareWhatsapp(
 }
 
 /** The tickets this user can see (a collector: the ones they raised). */
-export async function listTickets(status: 'OPEN' | 'CLOSED' | ''): Promise<Ticket[]> {
+export async function listTickets(status: 'OPEN' | 'CLOSED' | '', department: DepartmentKind | '' = ''): Promise<Ticket[]> {
   const { data } = await httpClient.get<{ tickets: Ticket[] }>('/api/feedback/tickets', {
-    params: { status: status === 'OPEN' ? 'ACTION_PENDING' : status || undefined, page_size: 100 },
+    params: { status: status === 'OPEN' ? 'ACTION_PENDING' : status || undefined, department: department || undefined, page_size: 100 },
   });
   return data.tickets;
 }

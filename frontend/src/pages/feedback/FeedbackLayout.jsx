@@ -4,7 +4,7 @@ import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
-import { getMyAccess } from "./feedbackApi";
+import { getDepartments, getMyAccess } from "./feedbackApi";
 import { FeedbackContext } from "./feedbackContext";
 import { ErrorBox, Loading } from "./ui";
 import "./feedback.css";
@@ -12,8 +12,10 @@ import "./feedback.css";
 // Customer Feedback desk. Same shell classes as the admin panel; the sidebar shows only the
 // screens the user's FEEDBACK_* permissions allow (from GET /api/feedback/me).
 const DESK = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
+// A department member (Operations / Accounts team, FEEDBACK_DEPT only) works their tickets only.
+const WORKERS = ["FEEDBACK_COLLECT", ...DESK];
 const NAV = [
-  { path: FEEDBACK_HOME, label: "Dashboard", exact: true, match: [`${FEEDBACK_HOME}/calls`] },
+  { path: FEEDBACK_HOME, label: "Dashboard", exact: true, match: [`${FEEDBACK_HOME}/calls`], needs: WORKERS },
   { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets" },
   { path: `${FEEDBACK_HOME}/report`, label: "Customer report", needs: DESK },
   { group: "MASTERS", needs: ["FEEDBACK_ADMIN"] },
@@ -29,6 +31,7 @@ export default function FeedbackLayout() {
   const back = feedbackBackLink(role);
 
   const [access, setAccess] = useState(null);
+  const [departmentList, setDepartmentList] = useState([]);
   const [error, setError] = useState("");
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -43,6 +46,18 @@ export default function FeedbackLayout() {
   }, []);
 
   useEffect(load, [load]);
+  const loadDepartments = useCallback(() => {
+    getDepartments()
+      .then((d) => setDepartmentList(d.departments || []))
+      .catch(() => {});
+  }, []);
+  useEffect(loadDepartments, [loadDepartments]);
+
+  // A department member opens straight on their tickets.
+  const deptOnly = Boolean(access) && !WORKERS.some((p) => (access.permissions || []).includes(p));
+  useEffect(() => {
+    if (deptOnly && location.pathname === FEEDBACK_HOME) navigate(`${FEEDBACK_HOME}/tickets`, { replace: true });
+  }, [deptOnly, location.pathname, navigate]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -58,8 +73,13 @@ export default function FeedbackLayout() {
       role: access?.role ?? role,
       can: (p) => permissions.includes(p),
       isDesk: DESK.some((p) => permissions.includes(p)),
+      // departments: the keys of the departments this user works in (["ACCOUNTS"]); departmentList: every active one.
+      departments: access?.departments || [],
+      departmentList,
+      reloadDepartments: loadDepartments,
+      deptOnly: !WORKERS.some((p) => permissions.includes(p)),
     };
-  }, [access, role]);
+  }, [access, role, departmentList, loadDepartments]);
 
   const nav = NAV.filter((item) => !item.needs || item.needs.some((p) => context.permissions.includes(p)));
 
@@ -151,9 +171,11 @@ export default function FeedbackLayout() {
 
       {isMobile && (
         <div className="mobile-tabbar three-col">
-          <button onClick={() => go(FEEDBACK_HOME)} className={isActive(NAV[0]) && !menuOpen ? "active" : ""}>
-            Dashboard
-          </button>
+          {!deptOnly && (
+            <button onClick={() => go(FEEDBACK_HOME)} className={isActive(NAV[0]) && !menuOpen ? "active" : ""}>
+              Dashboard
+            </button>
+          )}
           <button onClick={() => go(`${FEEDBACK_HOME}/tickets`)} className={isActive(NAV[1]) && !menuOpen ? "active" : ""}>
             Tickets
           </button>

@@ -1,10 +1,11 @@
 import type { Tone } from '../crm/ui/StatusBadge';
-import type { CallOutcome, CallStatus, EmailTemplate, Priority, Question, Response, TicketAction, TicketStatus } from './types';
+import type { CallOutcome, CallStatus, Department, DepartmentKind, EmailTemplate, Priority, Question, Response, TicketAction, TicketStatus } from './types';
 
 /** Labels and badge tones - the same words the web Feedback Desk uses (feedbackApi.js). */
 export const CALL_STATUS: Record<CallStatus, { label: string; tone: Tone }> = {
   TO_CALL: { label: 'To call', tone: 'neutral' },
   NOT_ANSWERED: { label: 'Not answered', tone: 'warning' },
+  WRONG_NUMBER: { label: 'Wrong number', tone: 'danger' },
   FORM_SENT: { label: 'Form sent', tone: 'info' },
   FORM_RECEIVED: { label: 'Form received', tone: 'accent' },
   DONE: { label: 'Completed', tone: 'success' },
@@ -45,6 +46,7 @@ export const CALL_FILTERS: { value: string; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'TO_CALL', label: 'To call' },
   { value: 'NOT_ANSWERED', label: 'Not answered' },
+  { value: 'WRONG_NUMBER', label: 'Wrong number' },
   { value: 'FORM_SENT', label: 'Form sent' },
   { value: 'FORM_RECEIVED', label: 'Form received' },
   { value: 'TICKET_OPEN', label: 'Ticket open' },
@@ -196,7 +198,8 @@ export function mailtoUrl(to: string, subject: string, body: string): string {
 }
 
 /* ---- which questions a feedback asks ---- */
-export type QuestionMode = 'GENERAL' | 'SERVICE' | 'BOTH';
+/** GENERAL, SERVICE, BOTH, or one department's questions as "DEPT:ACCOUNTS". */
+export type QuestionMode = string;
 export const QUESTION_MODES: { value: QuestionMode; label: string }[] = [
   { value: 'GENERAL', label: 'General' },
   { value: 'SERVICE', label: 'Service-based' },
@@ -206,9 +209,48 @@ export const QUESTION_MODES: { value: QuestionMode; label: string }[] = [
 /** The questions asked for a mode and the month's services (the same rule the server checks). */
 export function questionsFor(questions: Question[], mode: QuestionMode, services: string[]): Question[] {
   const had = new Set(services.map((x) => x.trim().toLowerCase()));
-  return questions.filter((q) =>
-    q.question_type === 'SERVICE' ? mode !== 'GENERAL' && (q.services || []).some((x) => had.has(x.trim().toLowerCase())) : mode !== 'SERVICE',
-  );
+  const dept = mode.startsWith('DEPT:') ? mode.slice(5) : null;
+  return questions.filter((q) => {
+    if (q.question_type === 'DEPARTMENT') return !!dept && (q.departments || []).includes(dept);
+    if (dept) return false;
+    return q.question_type === 'SERVICE' ? mode !== 'GENERAL' && (q.services || []).some((x) => had.has(x.trim().toLowerCase())) : mode !== 'SERVICE';
+  });
+}
+
+/** The API fields for a mode: { question_mode, question_department? }. */
+export function modeBody(mode: QuestionMode): { question_mode: string; question_department?: string } {
+  return mode.startsWith('DEPT:') ? { question_mode: 'DEPARTMENT', question_department: mode.slice(5) } : { question_mode: mode };
+}
+
+/** Every mode with its label: General / Service-based / Both and one per department. */
+export function questionModes(departments: Department[]): { value: QuestionMode; label: string }[] {
+  return [...QUESTION_MODES, ...departments.map((d) => ({ value: `DEPT:${d.kind}`, label: d.name || d.label }))];
+}
+
+/** How many questions each mode asks. */
+export function modeCounts(questions: Question[], services: string[], departments: Department[]): Record<string, number> {
+  return Object.fromEntries(questionModes(departments).map((m) => [m.value, questionsFor(questions, m.value, services).length]));
+}
+
+/* ---- departments a ticket goes to ---- */
+export const OPERATIONS: DepartmentKind = 'OPERATIONS';
+
+/** One line under a department's name: what happens when a ticket goes there. */
+export function departmentHint(d: { kind: DepartmentKind; with_invoices?: boolean }): string {
+  if (d.kind === OPERATIONS) return 'Service issue - a re-visit is booked';
+  if (d.with_invoices) return "Invoice issue - pick the customer's invoices";
+  return 'Their team handles it and marks it done';
+}
+
+/** A call's badge: a done call closed without an answer shows "Not responded". */
+export function callStatusMeta(status: string, result?: string | null): { label: string; tone: Tone } {
+  if (status === 'DONE' && result === 'NO_RESPONSE') return { label: 'Not responded', tone: 'neutral' };
+  return CALL_STATUS[status as CallStatus] || { label: status, tone: 'neutral' };
+}
+
+/** "₹12,500" */
+export function rupees(n: number): string {
+  return `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
 /** The highest priority the bad answers suggest. */

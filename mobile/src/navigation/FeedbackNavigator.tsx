@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChartIcon, HomeIcon, PhoneIcon } from '../components/icons';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
-import { FeedbackProvider } from '../feedback/FeedbackContext';
+import { FeedbackProvider, useFeedback } from '../feedback/FeedbackContext';
 import type { FeedbackStackParamList, FeedbackTabParamList } from '../feedback/navigation';
 import { FeedbackCallScreen } from '../feedback/screens/FeedbackCallScreen';
 import { FeedbackCallsScreen } from '../feedback/screens/FeedbackCallsScreen';
@@ -42,6 +42,8 @@ const tabLabel = (props: { focused: boolean; color: string; children: string }) 
 function FeedbackTabs() {
   const theme = useCrmTheme();
   const insets = useSafeAreaInsets();
+  // An Operations / Accounts team member works their department's tickets only.
+  const { deptOnly } = useFeedback();
 
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,
@@ -59,11 +61,11 @@ function FeedbackTabs() {
   };
 
   return (
-    <Tab.Navigator screenOptions={screenOptions}>
-      <Tab.Screen name="Home" component={FeedbackHomeScreen} options={{ tabBarIcon: homeIcon }} />
-      <Tab.Screen name="Calls" component={FeedbackCallsScreen} options={{ tabBarIcon: callsIcon }} />
+    <Tab.Navigator key={deptOnly ? 'dept' : 'all'} screenOptions={screenOptions}>
+      {!deptOnly && <Tab.Screen name="Home" component={FeedbackHomeScreen} options={{ tabBarIcon: homeIcon }} />}
+      {!deptOnly && <Tab.Screen name="Calls" component={FeedbackCallsScreen} options={{ tabBarIcon: callsIcon }} />}
       <Tab.Screen name="Tickets" component={FeedbackTicketsScreen} options={{ tabBarIcon: ticketsIcon }} />
-      <Tab.Screen name="Insights" component={FeedbackInsightsScreen} options={{ tabBarIcon: insightsIcon }} />
+      {!deptOnly && <Tab.Screen name="Insights" component={FeedbackInsightsScreen} options={{ tabBarIcon: insightsIcon }} />}
     </Tab.Navigator>
   );
 }

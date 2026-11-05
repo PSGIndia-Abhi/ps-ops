@@ -56,7 +56,7 @@ const factory = (t: CrmTheme) => ({
 function rank(r: CallRow): number {
   if (r.status === 'FORM_RECEIVED') return 0;
   if (r.next_call_at && isPast(r.next_call_at)) return 1;
-  if (r.status === 'NOT_ANSWERED') return 2;
+  if (r.status === 'NOT_ANSWERED' || r.status === 'WRONG_NUMBER') return 2;
   if (r.status === 'TO_CALL') return 3;
   return 4;
 }
@@ -91,7 +91,7 @@ export function FeedbackHomeScreen() {
       setData(calls);
       setOpenTickets(tickets.length);
       // Open tickets whose work is done: call the customer back to confirm (Other needs no visit).
-      setFollowUps(tickets.filter((t) => t.action === 'OTHER' || t.revisit?.status === 'COMPLETED').length);
+      setFollowUps(tickets.filter((t) => t.follow_up_due ?? (t.action === 'OTHER' || t.revisit?.status === 'COMPLETED')).length);
     } catch (err) {
       setError(errorText(err, 'Could not load the calls.'));
     } finally {

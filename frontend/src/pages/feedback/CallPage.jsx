@@ -23,6 +23,8 @@ import {
   openCustomerEmail,
   pendingTab,
   questionsFor,
+  modeBody,
+  modeCounts as countModes,
   prepareWhatsapp,
   raiseTicket,
   addCallContact,
@@ -60,7 +62,7 @@ const tenDigits = (v) => String(v || "").replace(/\D/g, "").slice(0, 10);
 export default function CallPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { can, userId } = useFeedbackAccess();
+  const { can, userId, departmentList } = useFeedbackAccess();
 
   const [call, setCall] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -155,8 +157,8 @@ export default function CallPage() {
   const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter(Boolean))], [call]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
   const modeCounts = useMemo(
-    () => ({ GENERAL: questionsFor(questions, "GENERAL", monthServices).length, SERVICE: questionsFor(questions, "SERVICE", monthServices).length, BOTH: questionsFor(questions, "BOTH", monthServices).length }),
-    [questions, monthServices],
+    () => countModes(questions, monthServices, departmentList),
+    [questions, monthServices, departmentList],
   );
 
   // answers to the asked questions as response rows with the master's flags (for the ticket)
@@ -268,7 +270,7 @@ export default function CallPage() {
       responses: chosen.map((r) => ({ question_id: r.question_id, option_id: r.option_id })),
       other_feedback: otherEnabled ? other.trim() || null : null,
       started_at: startedAt,
-      question_mode: qMode,
+      ...modeBody(qMode),
     };
   }
 
@@ -612,7 +614,7 @@ export default function CallPage() {
                   Spoke with
                   <input id="fb-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
-                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
+                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} departments={departmentList} />
                 <QuestionProgress questions={visibleQuestions} answers={answers} />
                 {visibleQuestions.map((q, n) => (
                   <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
@@ -691,7 +693,7 @@ export default function CallPage() {
                   <input id="fb-fu-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
               </div>
-              <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
+              <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} departments={departmentList} />
                 <QuestionProgress questions={visibleQuestions} answers={answers} />
               {visibleQuestions.map((q, n) => (
                 <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
@@ -940,6 +942,7 @@ export default function CallPage() {
 
       {modal === "ticket-new" && (
         <RaiseTicketModal
+          callId={id}
           title={`Raise a ticket · ${call.customer.name}`}
           visits={call.visits}
           suggested={suggestedPriority(bad)}
@@ -960,6 +963,7 @@ export default function CallPage() {
 
       {modal === "ticket-later" && latest && (
         <RaiseTicketModal
+          callId={id}
           title={`Raise a ticket · ${call.customer.name}`}
           visits={call.visits}
           suggested={suggestedPriority(latest.responses)}

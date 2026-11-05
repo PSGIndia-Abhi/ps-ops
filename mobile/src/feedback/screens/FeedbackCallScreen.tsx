@@ -25,7 +25,7 @@ import {
   updateContact,
 } from '../api';
 import { useFeedback } from '../FeedbackContext';
-import { CALL_OUTCOMES, CALL_STATUS, PRIORITY, TICKET_STATUS, chosenAnswers, formatDateTime, questionsFor, type QuestionMode, monthLabel, nowStamp, suggestedPriority } from '../format';
+import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, formatDateTime, modeBody, modeCounts, questionsFor, type QuestionMode, monthLabel, nowStamp, suggestedPriority } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
@@ -83,7 +83,7 @@ export function FeedbackCallScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
   const { callId } = useRoute<RouteProp<FeedbackStackParamList, 'FeedbackCall'>>().params;
   const { styles, theme } = useCrmStyles(factory);
-  const { userId, can, questions, otherEnabled } = useFeedback();
+  const { userId, can, questions, otherEnabled, departmentList } = useFeedback();
 
   const [call, setCall] = useState<Call | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,14 +135,7 @@ export function FeedbackCallScreen() {
   // The questions asked: general, for the month's services, or both. Optional ones can be skipped.
   const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter((x): x is string => !!x))], [call]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
-  const modeCounts = useMemo(
-    () => ({
-      GENERAL: questionsFor(questions, 'GENERAL', monthServices).length,
-      SERVICE: questionsFor(questions, 'SERVICE', monthServices).length,
-      BOTH: questionsFor(questions, 'BOTH', monthServices).length,
-    }),
-    [questions, monthServices],
-  );
+  const counts = useMemo(() => modeCounts(questions, monthServices, departmentList), [questions, monthServices, departmentList]);
   const chosen = useMemo(() => chosenAnswers(asked, answers), [asked, answers]);
   const bad = chosen.filter((r) => r.is_bad);
   const missing = asked.filter((q) => q.is_required && !answers[q.id]);
@@ -206,7 +199,7 @@ export function FeedbackCallScreen() {
       responses: chosen.map((r) => ({ question_id: r.question_id, option_id: r.option_id })),
       other_feedback: otherEnabled ? other.trim() || null : null,
       started_at: startedAt,
-      question_mode: qMode,
+      ...modeBody(qMode),
     };
   }
 
@@ -375,7 +368,7 @@ export function FeedbackCallScreen() {
   return (
     <View style={styles.screen}>
       <HeroHeader eyebrow={`Feedback call · ${monthLabel(call.month)}`} title={call.site.name} subtitle={call.customer.name} onBack={() => navigation.goBack()}>
-        <HeroPill label={CALL_STATUS[call.display_status || call.status]?.label || call.status} tone={CALL_STATUS[call.display_status || call.status]?.tone || 'neutral'} />
+        <HeroPill label={callStatusMeta(call.display_status || call.status, call.result).label} tone={callStatusMeta(call.display_status || call.status, call.result).tone} />
         <HeroPill label={`${call.visits.length} service${call.visits.length === 1 ? '' : 's'}`} tone="info" />
         {call.calls_summary.total > 0 && <HeroPill label={`${call.calls_summary.total} call${call.calls_summary.total === 1 ? '' : 's'} made`} tone="accent" />}
       </HeroHeader>
@@ -454,7 +447,8 @@ export function FeedbackCallScreen() {
                 questions={asked}
                 mode={qMode}
                 onMode={setQMode}
-                counts={modeCounts}
+                counts={counts}
+              departments={departmentList}
                 onSkip={skip}
                 answers={answers}
                 onAnswer={answer}
@@ -500,7 +494,8 @@ export function FeedbackCallScreen() {
               questions={asked}
               mode={qMode}
               onMode={setQMode}
-              counts={modeCounts}
+              counts={counts}
+              departments={departmentList}
               onSkip={skip}
               answers={answers}
               onAnswer={answer}
@@ -572,6 +567,7 @@ export function FeedbackCallScreen() {
       {sheet === 'ticket' && (
         <RaiseTicketSheet
           visible
+          callId={call.id}
           visits={call.visits}
           suggested={suggestedPriority(formReceived && latest ? latest.responses : bad)}
           defaultSummary={(formReceived ? latest?.other_feedback : other.trim()) || ''}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiAlertCircle, FiCheckCircle, FiDownload, FiLayers, FiSearch } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, getPeople, isPast, listTickets, monthLabel } from "./feedbackApi";
+import { OPERATIONS, PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, getPeople, isPast, listTickets, monthLabel } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { Card, Empty, ErrorBox, Loading, PageHead, PriorityChip, Segmented, TicketStatusChip, Tiles } from "./ui";
 
@@ -10,12 +10,13 @@ const PAGE_SIZE = 25;
 
 export default function TicketList() {
   const navigate = useNavigate();
-  const { isDesk } = useFeedbackAccess();
+  const { isDesk, departmentList, deptOnly } = useFeedbackAccess();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") || "ALL";
   const priority = params.get("priority") || "";
   const owner = params.get("owner") || "";
   const month = params.get("month") || "";
+  const department = params.get("department") || "";
   const page = Number(params.get("page")) || 1;
   const q = params.get("q") || "";
   const [search, setSearch] = useState(q);
@@ -53,7 +54,7 @@ export default function TicketList() {
       .catch(() => {});
   }, []);
 
-  const filters = { status: status === "ALL" ? "" : status, priority, owner_user_id: owner, month, q };
+  const filters = { status: status === "ALL" ? "" : status, priority, owner_user_id: owner, month, q, department };
   const filterKey = JSON.stringify(filters);
 
   const load = useCallback(() => {
@@ -129,6 +130,16 @@ export default function TicketList() {
               </option>
             ))}
           </select>
+          {!deptOnly && departmentList.length > 0 && (
+            <select className="fb-select" value={department} onChange={(e) => setParam({ department: e.target.value })} aria-label="Department">
+              <option value="">Department: all</option>
+              {departmentList.map((d) => (
+                <option key={d.kind} value={d.kind}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          )}
           {isDesk && (
             <select className="fb-select" value={owner} onChange={(e) => setParam({ owner: e.target.value })} aria-label="Owner">
               <option value="">Owner: all</option>
@@ -143,13 +154,13 @@ export default function TicketList() {
             Month
             <input type="month" className="fb-input" style={{ width: 160 }} value={month} onChange={(e) => setParam({ month: e.target.value })} aria-label="Month" />
           </label>
-          {(priority || owner || month || q) && (
+          {(priority || owner || month || q || department) && (
             <button
               type="button"
               className="fb-btn fb-btn-sm fb-btn-link"
               onClick={() => {
                 setSearch("");
-                setParam({ priority: "", owner: "", month: "", q: "" });
+                setParam({ priority: "", owner: "", month: "", q: "", department: "" });
               }}
             >
               Clear filters
@@ -168,6 +179,7 @@ export default function TicketList() {
                 <tr>
                   <th>Ticket</th>
                   <th>Customer · Site</th>
+                  <th>Departments</th>
                   <th>Priority</th>
                   <th>Next step</th>
                   <th>Owner</th>
@@ -191,9 +203,19 @@ export default function TicketList() {
                         </div>
                       </td>
                       <td>
+                        <span className="fb-dept-chips">
+                          {(t.parts?.length ? t.parts : [{ kind: OPERATIONS, label: "Operations" }]).map((p) => (
+                            <span key={p.kind} className={`fb-dept-chip ${p.kind !== OPERATIONS ? "is-accounts" : ""} ${p.kind !== OPERATIONS && p.status === "DONE" ? "is-done" : ""}`}>
+                              {p.label || p.kind}
+                              {p.kind !== OPERATIONS && p.status === "DONE" ? " ✓" : ""}
+                            </span>
+                          ))}
+                        </span>
+                      </td>
+                      <td>
                         <PriorityChip priority={t.priority} />
                       </td>
-                      <td style={{ maxWidth: 220 }}>{actionText(t)}</td>
+                      <td style={{ maxWidth: 220 }}>{t.parts?.length && !t.parts.some((p) => p.kind === OPERATIONS) ? t.parts.map((p) => `${p.label}${p.status === "DONE" ? " ✓" : ""}`).join(", ") : actionText(t)}</td>
                       <td>{t.action_owner?.name || <span className="fb-muted">—</span>}</td>
                       <td className="fb-small" style={{ whiteSpace: "nowrap" }}>
                         {t.action_due_at ? <span className={late ? "fb-danger-text" : ""}>{formatDay(t.action_due_at)}{late ? " · overdue" : ""}</span> : <span className="fb-muted">—</span>}

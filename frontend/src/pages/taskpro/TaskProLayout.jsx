@@ -315,6 +315,20 @@ function TaskProShell() {
               </button>
               {userOpen && (
                 <div className="tp-popover tp-user-pop">
+                  {/* Switch app: people with Customer Feedback (e.g. the Operations / Accounts team). */}
+                  {hasFeedback && (
+                    <button
+                      type="button"
+                      className="tp-pop-row"
+                      onClick={() => {
+                        setUserOpen(false);
+                        navigate(FEEDBACK_HOME);
+                      }}
+                    >
+                      <FiMessageSquare />
+                      <span>Switch to Customer Feedback</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="tp-pop-row"

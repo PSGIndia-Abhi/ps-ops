@@ -598,6 +598,7 @@ button.fb-tile:hover { transform: translateY(-3px); box-shadow: 0 16px 28px -12p
 .fb-qtype { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
 .fb-qtype-general { background: #e0f2fe; color: #0369a1; }
 .fb-qtype-service { background: #ede9fe; color: #6d28d9; }
+.fb-qtype-department { background: #fef3c7; color: #92400e; }
 .fb-qflag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: #f1f5f9; color: #64748b; }
 .fb-qflag.is-on { background: #f0fdf4; color: #15803d; }
 .fb-qflag.is-warn { background: #fef3c7; color: #92400e; }
@@ -682,3 +683,38 @@ button.fb-tile:hover { transform: translateY(-3px); box-shadow: 0 16px 28px -12p
 .fb-opt.is-on { background: #16a34a; border-color: #16a34a; color: #fff; box-shadow: 0 6px 14px rgba(22, 163, 74, .25); }
 .fb-opt.is-on.is-bad { background: #dc2626; border-color: #dc2626; box-shadow: 0 6px 14px rgba(220, 38, 38, .25); }
 .fb-opt.is-on .fb-opt-icon { color: #fff; }
+
+/* ---- departments on the raise-ticket form ---- */
+.fb-dept-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 6px; }
+.fb-dept-opt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; cursor: pointer; text-align: left; font: inherit; transition: border-color .15s, background .15s, box-shadow .15s; }
+.fb-dept-opt:hover { border-color: #93c5fd; }
+.fb-dept-opt.is-on { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+.fb-dept-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #e0e7ff; color: #3730a3; font-size: 17px; flex-shrink: 0; }
+.fb-dept-opt.is-on .fb-dept-icon { background: #2563eb; color: #fff; }
+.fb-dept-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fb-dept-text b { font-size: 14px; color: #0f172a; }
+.fb-dept-text small { font-size: 12px; color: #64748b; font-weight: 400; }
+.fb-dept-check { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid #cbd5e1; display: grid; place-items: center; color: #fff; flex-shrink: 0; }
+.fb-dept-opt.is-on .fb-dept-check { background: #2563eb; border-color: #2563eb; }
+.fb-inv-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; padding: 2px; }
+.fb-inv-opt { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; }
+.fb-inv-opt.is-on { border-color: #2563eb; background: #eff6ff; }
+@media (max-width: 560px) { .fb-inv-opt { grid-template-columns: auto 1fr auto; } .fb-inv-opt > :nth-child(3), .fb-inv-opt > :nth-child(5) { display: none; } }
+/* ---- department parts on a ticket ---- */
+.fb-dept-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.fb-dept-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #eef2ff; color: #3730a3; }
+.fb-dept-chip.is-accounts { background: #fef3c7; color: #92400e; }
+.fb-dept-chip.is-done { background: #dcfce7; color: #166534; }
+.fb-part-done { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; }
+
+/* Masters › Questions › Department: the departments (from the user hierarchy) and their filter */
+.fb-dept-bar { margin-bottom: 16px; }
+.fb-dept-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.fb-dept-tag { display: inline-flex; align-items: center; gap: 4px; border: 1.5px solid #e2e8f0; border-radius: 999px; background: #fff; font: inherit; font-size: 14px; color: #334155; transition: border-color .15s, background .15s; }
+button.fb-dept-tag { padding: 6px 14px; cursor: pointer; gap: 8px; }
+.fb-dept-tag.is-on { border-color: #0284c7; background: #f0f9ff; color: #075985; }
+.fb-dept-tag-main { display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; font-weight: 600; }
+.fb-dept-tag.is-on .fb-qtab-count { background: #dbeafe; color: #1d4ed8; }
+.fb-dept-tag-inv { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-left: 1px solid #e2e8f0; font-size: 12px; color: #64748b; cursor: pointer; }
+.fb-dept-tag-x { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-right: 4px; border: 0; border-radius: 999px; background: none; color: #94a3b8; cursor: pointer; }
+.fb-dept-tag-x:hover { background: #fee2e2; color: #b91c1c; }

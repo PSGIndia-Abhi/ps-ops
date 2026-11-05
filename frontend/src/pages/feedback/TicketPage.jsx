@@ -5,6 +5,12 @@ import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
   ACTIONS,
+  OPERATIONS,
+  otherParts,
+  hasOpsPart,
+  markPartDone,
+  rupees,
+  formatDay,
   TICKET_ACTIONS,
   problemNote,
   PRIORITIES,
@@ -103,10 +109,16 @@ function ServicePicker({ picked, onChange }) {
  * questions ("Open the call"): all answers good closes the ticket (only this closes one); a bad
  * answer keeps the same ticket open and a new re-visit is booked on it. Lists the calls made so far.
  */
-function FollowUpCard({ ticket }) {
+function FollowUpCard({ ticket, deptOnly }) {
   const done = ticket.history.filter((h) => h.event === "FOLLOWUP_CALL");
   const open = ticket.status === "ACTION_PENDING";
   const ready = followUpReady(ticket);
+  const ops = hasOpsPart(ticket);
+  const opsWaiting = ops && ticket.action !== "OTHER" && ticket.revisit?.status !== "COMPLETED";
+  const waitingFor = [
+    opsWaiting ? (ticket.revisit ? "the technician to complete the re-visit" : "the re-visit to be booked and completed") : null,
+    ...otherParts(ticket).filter((p) => p.status !== "DONE").map((p) => `${p.label} to finish their part`),
+  ].filter(Boolean);
   if (!open && !done.length) return null;
 
   return (
@@ -133,12 +145,10 @@ function FollowUpCard({ ticket }) {
           <div className="fb-row" style={{ justifyContent: "space-between" }}>
             <span className="fb-small fb-muted" style={{ maxWidth: 440 }}>
               {ready
-                ? "The work is done. Call the customer and ask the feedback questions again. If they are satisfied the ticket closes; if not, it stays open for another re-visit."
-                : ticket.revisit
-                  ? "Opens when the technician completes the re-visit. Then call the customer and ask the feedback questions again."
-                  : "Book the re-visit first. This opens when the technician completes it."}
+                ? "The work is done. Call the customer and ask the feedback questions again. If they are satisfied the ticket closes; if not, it stays open."
+                : `Waiting for ${waitingFor.join(" and ") || "the work"}. Then the collector calls the customer and asks the feedback questions again.`}
             </span>
-            {ready ? (
+            {deptOnly ? null : ready ? (
               <Link className="fb-btn fb-btn-primary" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
                 Open the call
               </Link>
@@ -157,8 +167,9 @@ function FollowUpCard({ ticket }) {
 export default function TicketPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { can, userId } = useFeedbackAccess();
+  const { can, userId, departments, deptOnly } = useFeedbackAccess();
   const canManage = can("FEEDBACK_MANAGE");
+  const [partNotes, setPartNotes] = useState({});
 
   const [ticket, setTicket] = useState(null);
   const [form, setForm] = useState(null);
@@ -204,6 +215,10 @@ export default function TicketPage() {
   if (!ticket || !form) return error ? <ErrorBox error={error} onRetry={load} /> : <Loading />;
 
   const open = ticket.status === "ACTION_PENDING";
+  const ops = hasOpsPart(ticket);
+  // Each other department's team (or a desk manager) finishes its own part.
+  const others = otherParts(ticket);
+  const canFinish = (p) => open && p.status !== "DONE" && (canManage || departments.includes(p.kind));
   const editable = canManage && open;
   const late = open && ticket.action_due_at && isPast(ticket.action_due_at);
   const canMessage = canManage || ticket.raised_by?.id === userId;
@@ -259,6 +274,21 @@ export default function TicketPage() {
   }
 
   // A ticket closes only on the follow-up call (the customer confirms); a desk manager can reopen it.
+  async function finishPart(p) {
+    setSaving(true);
+    setError("");
+    try {
+      await markPartDone(ticket.id, p.kind, (partNotes[p.kind] || "").trim());
+      setPartNotes((n) => ({ ...n, [p.kind]: "" }));
+      setNotice(`${p.label} part marked done. The collector can call the customer back once all the work is done.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function reopen() {
     setSaving(true);
     setError("");
@@ -318,6 +348,16 @@ export default function TicketPage() {
           <>
             <TicketStatusChip status={ticket.status} />
             <PriorityChip priority={ticket.priority} />
+            {(ticket.parts || []).length > 0 && (
+              <span className="fb-dept-chips">
+                {ticket.parts.map((p) => (
+                  <span key={p.kind} className={`fb-dept-chip ${p.kind !== OPERATIONS ? "is-accounts" : ""} ${p.status === "DONE" && p.kind !== OPERATIONS ? "is-done" : ""}`}>
+                    {p.label || p.kind}
+                    {p.kind !== OPERATIONS && p.status === "DONE" ? " ✓" : ""}
+                  </span>
+                ))}
+              </span>
+            )}
           </>
         }
         sub={
@@ -328,9 +368,11 @@ export default function TicketPage() {
         }
         actions={
           <>
-            <Link className="fb-btn" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
-              Open the call
-            </Link>
+            {!deptOnly && (
+              <Link className="fb-btn" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
+                Open the call
+              </Link>
+            )}
             {canMessage && !open && (
               <button type="button" className="fb-btn" onClick={() => setModal("reopen")}>
                 Reopen
@@ -411,6 +453,69 @@ export default function TicketPage() {
             </div>
           </Card>
 
+          {others.map((p) => (
+            <Card key={p.kind} title={`${p.label}${p.with_invoices ? " · invoice issue" : ""}`} aside={<PriorityChip priority={p.priority || ticket.priority} />}>
+              <div className="fb-stack" style={{ gap: 12 }}>
+                <div style={{ whiteSpace: "pre-line" }}>{p.issue_summary || <span className="fb-muted">No details written.</span>}</div>
+                {p.invoices.length > 0 && (
+                  <div className="fb-table-wrap">
+                    <table className="fb-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Due</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.invoices.map((i) => (
+                          <tr key={i.id}>
+                            <td className="fb-strong">{i.number}</td>
+                            <td>{formatDay(i.date)}</td>
+                            <td>{rupees(i.amount)}</td>
+                            <td className={i.pending > 0 ? "fb-danger-text" : "fb-muted"}>{i.pending > 0 ? rupees(i.pending) : "Paid"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {p.status === "DONE" ? (
+                  <div className="fb-part-done">
+                    <FiCheck aria-hidden="true" style={{ color: "#16a34a", marginTop: 2 }} />
+                    <span>
+                      <span className="fb-strong">Done</span> · {p.done_note}
+                      <span className="fb-small fb-muted"> · {[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(" · ")}</span>
+                    </span>
+                  </div>
+                ) : canFinish(p) ? (
+                  <div className="fb-stack" style={{ gap: 8 }}>
+                    <label className="fb-field" htmlFor={`fb-t-part-${p.kind}`}>
+                      What was done? <span className="fb-req">*</span>
+                      <input
+                        id={`fb-t-part-${p.kind}`}
+                        className="fb-input"
+                        maxLength={500}
+                        placeholder={p.with_invoices ? "e.g. Invoice copy sent by email" : "e.g. Spoke to the customer and sorted it out"}
+                        value={partNotes[p.kind] || ""}
+                        onChange={(e) => setPartNotes((n) => ({ ...n, [p.kind]: e.target.value }))}
+                      />
+                    </label>
+                    <div>
+                      <button type="button" className="fb-btn fb-btn-primary" disabled={saving || !(partNotes[p.kind] || "").trim()} onClick={() => finishPart(p)}>
+                        <FiCheck aria-hidden="true" /> {saving ? "Saving…" : `Mark ${p.label} done`}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="fb-small fb-muted">{open ? `Waiting for ${p.label}.` : "Closed."}</div>
+                )}
+              </div>
+            </Card>
+          ))}
+
+          {ops && (
           <Card title="Action" aside={editable ? null : open ? "Only the desk managers can change this" : "Reopen the ticket to change it"}>
             {editable ? (
               <div className="fb-stack" style={{ gap: 14 }}>
@@ -515,13 +620,15 @@ export default function TicketPage() {
               </dl>
             )}
           </Card>
+          )}
 
-          <FollowUpCard ticket={ticket} />
+          <FollowUpCard ticket={ticket} deptOnly={deptOnly} />
         </div>
 
         <div className="fb-stack">
           <CustomerCard customer={ticket.customer} site={ticket.site} contacts={ticket.contacts} feedback={ticket.feedback} />
 
+          {!deptOnly && (
           <Card title="Email the customer" aside="Optional">
             <div className="fb-stack" style={{ gap: 8 }}>
               <button
@@ -550,6 +657,7 @@ export default function TicketPage() {
               </button>
             </div>
           </Card>
+          )}
 
           {/* Open: "Ticket raised", and "Re-visit booked" once a visit is linked. Closed: "Issue resolved". */}
           {canMessage && (

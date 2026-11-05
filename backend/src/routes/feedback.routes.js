@@ -9,6 +9,7 @@ const {
   listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
   myFeedbackAccess, feedbackPeople, feedbackCustomers, siteDetails, revisitOptions,
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
+  listDepartments, departmentSetup, saveDepartments, myDepartmentKinds, markPartDone, callInvoices,
 } = require("../services/feedback.service");
 const { buildCustomerReport, exportCustomerReport, exportTickets } = require("../services/feedbackReport.service");
 
@@ -21,6 +22,8 @@ function sendFile(res, file) {
 
 const ANY_FEEDBACK = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 const DESK = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
+// Also a member of a feedback department (Operations / Accounts team): their tickets only.
+const ANY_OR_DEPT = [...ANY_FEEDBACK, "FEEDBACK_DEPT"];
 
 function requireAny(req, permissions) {
   if (!hasAnyPerm(req, permissions)) throw new HttpError(403, "Forbidden: insufficient permissions");
@@ -34,12 +37,24 @@ function requireAny(req, permissions) {
 
 router.use(auth);
 
+// The feedback departments the user belongs to (req.feedbackDepts, e.g. ["ACCOUNTS"]). A member gets
+// FEEDBACK_DEPT for this request: the routes marked ANY_OR_DEPT, limited to their department.
+router.use(async (req, res, next) => {
+  try {
+    req.feedbackDepts = await myDepartmentKinds(req.user.id);
+    if (req.feedbackDepts.length) req.user = { ...req.user, permissions: [...(req.user.permissions || []), "FEEDBACK_DEPT"] };
+    next();
+  } catch (err) {
+    sendError(res, err, "Failed to load your departments");
+  }
+});
+
 /* ------------------------------------------------------------ lookups for the website */
 
 // My feedback permissions - which screens and buttons to show (the routes still check).
 router.get("/me", async (req, res) => {
   try {
-    requireAny(req, ANY_FEEDBACK);
+    requireAny(req, ANY_OR_DEPT);
     res.json(myFeedbackAccess(req));
   } catch (err) {
     sendError(res, err, "Failed to load your feedback access");
@@ -49,7 +64,7 @@ router.get("/me", async (req, res) => {
 // The counts on the Feedback Desk sidebar: { open_tickets, forms_received, callbacks_due }.
 router.get("/badges", async (req, res) => {
   try {
-    requireAny(req, ANY_FEEDBACK);
+    requireAny(req, ANY_OR_DEPT);
     res.json(await feedbackBadges(req));
   } catch (err) {
     sendError(res, err, "Failed to load the counts");
@@ -295,7 +310,7 @@ router.post("/calls/:id/done", async (req, res) => {
 //        company_id site_id month from to q page page_size
 router.get("/tickets", async (req, res) => {
   try {
-    requireAny(req, ANY_FEEDBACK);
+    requireAny(req, ANY_OR_DEPT);
     res.json(await listTickets(req));
   } catch (err) {
     sendError(res, err, "Failed to load the feedback tickets");
@@ -316,10 +331,54 @@ router.get("/tickets/export", async (req, res) => {
 // history. :id is the ticket id or its number (FB-0142).
 router.get("/tickets/:id", async (req, res) => {
   try {
-    requireAny(req, ANY_FEEDBACK);
+    requireAny(req, ANY_OR_DEPT);
     res.json(await getTicket(req, req.params.id));
   } catch (err) {
     sendError(res, err, "Failed to load the feedback ticket");
+  }
+});
+
+// The Accounts team finishes its part of a ticket. Body: { note }.
+router.post("/tickets/:id/parts/:kind/done", async (req, res) => {
+  try {
+    requireAny(req, ANY_OR_DEPT);
+    res.json(await markPartDone(req, req.params.id, req.params.kind, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to finish the department's part");
+  }
+});
+
+// The customer's invoices - for an Accounts issue when raising a ticket.
+router.get("/calls/:id/invoices", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    res.json({ invoices: await callInvoices(req, req.params.id) });
+  } catch (err) {
+    sendError(res, err, "Failed to load the invoices");
+  }
+});
+
+/* ------------------------------------------------------------ departments */
+
+// The departments a ticket can go to (active ones); ?all=1 for Masters (with every org department).
+router.get("/departments", async (req, res) => {
+  try {
+    requireAny(req, ANY_OR_DEPT);
+    if (req.query.all) {
+      requireAny(req, ["FEEDBACK_ADMIN"]);
+      return res.json(await departmentSetup());
+    }
+    res.json({ departments: await listDepartments() });
+  } catch (err) {
+    sendError(res, err, "Failed to load the departments");
+  }
+});
+
+router.put("/departments", requirePermission("FEEDBACK_ADMIN"), async (req, res) => {
+  try {
+    res.json(await saveDepartments(req.body, req.user.id));
+  } catch (err) {
+    sendError(res, err, "Failed to save the departments");
   }
 });
 

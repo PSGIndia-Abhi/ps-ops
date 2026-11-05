@@ -25,7 +25,9 @@ const { pool } = require("../../db");
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
 // A monthly call (feedback_requests) and a ticket (feedback_tickets) have separate statuses.
-const REQUEST_STATUSES = ["TO_CALL", "NOT_ANSWERED", "FORM_SENT", "FORM_RECEIVED", "DONE"];
+// WRONG_NUMBER = the last try reached a wrong number. A DONE call's result: GOOD, ISSUE or
+// NO_RESPONSE (closed by itself: calls missed and the form link expired unused).
+const REQUEST_STATUSES = ["TO_CALL", "NOT_ANSWERED", "WRONG_NUMBER", "FORM_SENT", "FORM_RECEIVED", "DONE"];
 const TICKET_STATUSES = ["ACTION_PENDING", "CLOSED"];
 // The call list also shows TICKET_OPEN: a done call whose ticket is not closed yet.
 const LIST_STATUSES = [...REQUEST_STATUSES, "TICKET_OPEN"];
@@ -87,21 +89,29 @@ function jsonList(value) {
   return [];
 }
 
-const QUESTION_TYPES = ["GENERAL", "SERVICE"];
-// How a feedback asks its questions: the general ones, the ones for the site's services, or both.
-const QUESTION_MODES = ["GENERAL", "SERVICE", "BOTH"];
+const QUESTION_TYPES = ["GENERAL", "SERVICE", "DEPARTMENT"];
+// How a feedback asks its questions: the general ones, the ones for the site's services, both, or
+// the questions of one department (DEPARTMENT + which one).
+const QUESTION_MODES = ["GENERAL", "SERVICE", "BOTH", "DEPARTMENT"];
+// Departments (feedback_departments): any department of the user hierarchy the admin adds, by a key.
+// OPERATIONS keeps the service flow (the visit, a re-visit in Jobs); every other department gets an
+// issue + priority (+ the customer's invoices when with_invoices) and marks its part done.
+const OPERATIONS = "OPERATIONS";
 
 /**
  * The questions a feedback asks: GENERAL questions (mode GENERAL / BOTH) and SERVICE questions for a
  * service the site had in the month (mode SERVICE / BOTH). services = the month's service names.
  */
-function questionsFor(questions, mode, services) {
+function questionsFor(questions, mode, services, department = null) {
   const had = new Set((services || []).map((x) => String(x).trim().toLowerCase()));
-  return questions.filter((q) =>
-    q.question_type === "SERVICE"
+  return questions.filter((q) => {
+    // DEPARTMENT questions are asked only when that department's questions are chosen.
+    if (q.question_type === "DEPARTMENT") return mode === "DEPARTMENT" && (q.departments || []).includes(department);
+    if (mode === "DEPARTMENT") return false;
+    return q.question_type === "SERVICE"
       ? mode !== "GENERAL" && q.services.some((x) => had.has(x.trim().toLowerCase()))
-      : mode !== "SERVICE",
-  );
+      : mode !== "SERVICE";
+  });
 }
 
 // The services a site had in a call's month (each once) - what its SERVICE questions are about.
@@ -120,7 +130,7 @@ async function servicesOfMonth(conn, siteId, month) {
 async function listQuestions(executor = pool, { includeInactive = false } = {}) {
   const activeOnly = includeInactive ? "" : "WHERE is_active = 1";
   const [questions] = await executor.query(
-    `SELECT id, question_text, question_type, services, sort_order, is_required, show_on_form, is_active
+    `SELECT id, question_text, question_type, services, departments, sort_order, is_required, show_on_form, is_active
      FROM feedback_questions ${activeOnly}
      ORDER BY is_active DESC, sort_order, id`
   );
@@ -146,6 +156,7 @@ async function listQuestions(executor = pool, { includeInactive = false } = {}) 
     question_text: q.question_text,
     question_type: q.question_type || "GENERAL",
     services: q.question_type === "SERVICE" ? jsonList(q.services) : [],
+    departments: q.question_type === "DEPARTMENT" ? jsonList(q.departments) : [],
     sort_order: q.sort_order,
     is_required: Boolean(q.is_required),
     show_on_form: Boolean(q.show_on_form),
@@ -171,7 +182,7 @@ function idOrNull(value) {
 
 // Checks the whole list sent by Masters -> Feedback questions and returns it cleaned.
 // The order of the array is the order shown (sort_order is taken from it).
-function cleanQuestionList(body) {
+function cleanQuestionList(body, knownDepts = new Set()) {
   const list = body?.questions;
   if (!Array.isArray(list) || list.length === 0) throw new HttpError(400, "Send the list of questions");
   if (list.length > 50) throw new HttpError(400, "Too many questions (max 50)");
@@ -237,7 +248,14 @@ function cleanQuestionList(body) {
     }
 
     const type = typeof q.question_type === "string" ? q.question_type.toUpperCase() : "GENERAL";
-    if (!QUESTION_TYPES.includes(type)) throw new HttpError(400, `Question ${no}: choose General or Service`);
+    if (!QUESTION_TYPES.includes(type)) throw new HttpError(400, `Question ${no}: choose General, Service or Department`);
+    let departments = null;
+    if (type === "DEPARTMENT") {
+      const list = Array.isArray(q.departments) ? [...new Set(q.departments.map((x) => String(x || "").trim().toUpperCase()).filter(Boolean))] : [];
+      if (!list.length) throw new HttpError(400, `Question ${no} is for departments: pick the departments it is asked for`);
+      if (list.some((x) => !knownDepts.has(x))) throw new HttpError(400, `Question ${no}: unknown department`);
+      departments = list;
+    }
     let services = null;
     if (type === "SERVICE") {
       const list = Array.isArray(q.services) ? [...new Set(q.services.map((x) => String(x || "").trim()).filter(Boolean))] : [];
@@ -251,6 +269,7 @@ function cleanQuestionList(body) {
       question_text: text,
       question_type: type,
       services,
+      departments,
       sort_order: no,
       is_required: flag(q.is_required, true),
       show_on_form: flag(q.show_on_form, true),
@@ -267,7 +286,7 @@ function cleanQuestionList(body) {
 // updated. Nothing is deleted: a question missing from the list, or an answer missing from
 // its question, is switched off - feedback already given keeps its own copy of the wording.
 async function saveQuestions(body, userId) {
-  const questions = cleanQuestionList(body);
+  const questions = cleanQuestionList(body, new Set((await listDepartments(pool, { all: true })).map((d) => d.kind)));
 
   return inTransaction(async (conn) => {
     const [existingQuestions] = await conn.query("SELECT id FROM feedback_questions FOR UPDATE");
@@ -283,17 +302,17 @@ async function saveQuestions(body, userId) {
       if (questionId === null) {
         const [result] = await conn.query(
           `INSERT INTO feedback_questions
-             (question_text, question_type, services, sort_order, is_required, show_on_form, is_active, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, userId]
+             (question_text, question_type, services, departments, sort_order, is_required, show_on_form, is_active, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.departments ? JSON.stringify(q.departments) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, userId]
         );
         questionId = result.insertId;
       } else {
         await conn.query(
           `UPDATE feedback_questions
-           SET question_text = ?, question_type = ?, services = ?, sort_order = ?, is_required = ?, show_on_form = ?, is_active = ?, updated_by = ?
+           SET question_text = ?, question_type = ?, services = ?, departments = ?, sort_order = ?, is_required = ?, show_on_form = ?, is_active = ?, updated_by = ?
            WHERE id = ?`,
-          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, questionId]
+          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.departments ? JSON.stringify(q.departments) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, questionId]
         );
       }
       keptQuestionIds.push(questionId);
@@ -541,6 +560,110 @@ async function saveSettings(body, userId) {
   return getSettings();
 }
 
+/* ------------------------------------------------------------ departments */
+
+// The departments tickets go to (Masters > Questions > Department). all = also the removed ones.
+async function listDepartments(executor = pool, { all = false } = {}) {
+  const [rows] = await executor.query(
+    `SELECT d.kind, d.org_unit_id, u.name, d.is_active, d.with_invoices
+     FROM feedback_departments d JOIN org_units u ON u.id = d.org_unit_id
+     ${all ? "" : "WHERE d.is_active = 1 AND u.is_active = 1"}
+     ORDER BY d.sort_order, u.name`
+  );
+  return rows.map((d) => ({
+    kind: d.kind, label: d.name, name: d.name, org_unit_id: d.org_unit_id,
+    is_active: Boolean(d.is_active), with_invoices: Boolean(d.with_invoices), is_operations: d.kind === OPERATIONS,
+  }));
+}
+
+// For the admin: the departments and the departments of the user hierarchy that can be added.
+async function departmentSetup() {
+  const [units] = await pool.query(
+    `SELECT id, name FROM org_units WHERE is_active = 1 AND (unit_type IS NULL OR unit_type <> 'Organization') ORDER BY sort_order, name`
+  );
+  return { departments: await listDepartments(pool, { all: true }), org_units: units };
+}
+
+// A key for a new department, from its name ("Quality Team" -> QUALITY_TEAM), unique.
+async function newDepartmentKey(conn, name) {
+  const base = String(name || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30) || "DEPT";
+  const [rows] = await conn.query("SELECT kind FROM feedback_departments");
+  const used = new Set(rows.map((r) => r.kind));
+  let key = base;
+  for (let n = 2; used.has(key); n += 1) key = `${base}_${n}`;
+  return key;
+}
+
+// PUT /departments - Body: { departments: [{ kind?, org_unit_id, is_active, with_invoices? }] }.
+// A row without kind adds that department (or brings back one removed before). is_active false =
+// removed: it gets no new tickets and its people lose the Feedback app; its old tickets stay.
+async function saveDepartments(body, userId) {
+  const list = body?.departments;
+  if (!Array.isArray(list) || !list.length) throw new HttpError(400, "Send the departments");
+  const seenUnits = new Set();
+  const clean = list.map((d) => {
+    const kind = d?.kind ? String(d.kind).trim().toUpperCase() : null;
+    const unit = String(d?.org_unit_id || "").trim();
+    if (!unit) throw new HttpError(400, "Choose the department");
+    if (seenUnits.has(unit)) throw new HttpError(400, "That department is already in the list");
+    seenUnits.add(unit);
+    return { kind, unit, active: flag(d.is_active, true), invoices: d.with_invoices === undefined ? null : flag(d.with_invoices, false) };
+  });
+  await inTransaction(async (conn) => {
+    const [existing] = await conn.query("SELECT kind, org_unit_id FROM feedback_departments FOR UPDATE");
+    const byKind = new Map(existing.map((e) => [e.kind, e]));
+    const byUnit = new Map(existing.map((e) => [e.org_unit_id, e]));
+    const [[{ maxSort }]] = await conn.query("SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM feedback_departments");
+    let sort = Number(maxSort);
+    for (const d of clean) {
+      const [[u]] = await conn.query("SELECT id, name FROM org_units WHERE id = ? AND is_active = 1", [d.unit]);
+      if (!u) throw new HttpError(400, "That department was not found in the user hierarchy");
+      let kind = d.kind;
+      if (kind && !byKind.has(kind)) throw new HttpError(400, "Unknown department");
+      if (!kind) kind = byUnit.get(d.unit)?.kind || null; // added again: the same key as before
+      if (kind) {
+        const holder = byUnit.get(d.unit);
+        if (holder && holder.kind !== kind) throw new HttpError(400, `${u.name} is already in the list`);
+        await conn.query(
+          `UPDATE feedback_departments SET org_unit_id = ?, is_active = ?, with_invoices = COALESCE(?, with_invoices), updated_by = ? WHERE kind = ?`,
+          [d.unit, d.active, d.invoices, userId, kind]
+        );
+      } else {
+        kind = await newDepartmentKey(conn, u.name);
+        sort += 1;
+        await conn.query(
+          "INSERT INTO feedback_departments (kind, org_unit_id, is_active, with_invoices, sort_order, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
+          [kind, d.unit, d.active, d.invoices ?? 0, sort, userId]
+        );
+        byKind.set(kind, { kind, org_unit_id: d.unit });
+        byUnit.set(d.unit, { kind, org_unit_id: d.unit });
+      }
+    }
+  });
+  return departmentSetup();
+}
+
+// The name of a department (for messages), by key.
+async function departmentName(executor, kind) {
+  const [[d]] = await executor.query(
+    "SELECT u.name FROM feedback_departments d JOIN org_units u ON u.id = d.org_unit_id WHERE d.kind = ?", [kind]
+  );
+  return d?.name || kind;
+}
+
+// The department kinds a user works in (active feedback departments they belong to).
+async function myDepartmentKinds(userId) {
+  const [rows] = await pool.query(
+    `SELECT DISTINCT d.kind FROM feedback_departments d
+     JOIN org_units u ON u.id = d.org_unit_id AND u.is_active = 1
+     JOIN user_org_units x ON x.org_unit_id = d.org_unit_id AND x.user_id = ?
+       AND x.effective_from <= CURDATE() AND (x.effective_to IS NULL OR x.effective_to >= CURDATE())
+     WHERE d.is_active = 1`,
+    [userId]
+  );
+  return rows.map((r) => r.kind);
+}
+
 /* ------------------------------------------------------------ shared helpers */
 
 function ticketNumber(seq) {
@@ -642,7 +765,7 @@ const SERVICE_VISITS_IN_PERIOD = `
 const CALL_ORDER = `CASE
     WHEN x.status = 'FORM_RECEIVED' THEN 0
     WHEN x.status <> 'DONE' AND x.next_call_at IS NOT NULL AND x.next_call_at <= NOW() THEN 1
-    WHEN x.status = 'NOT_ANSWERED' THEN 2
+    WHEN x.status IN ('NOT_ANSWERED', 'WRONG_NUMBER') THEN 2
     WHEN x.status = 'TO_CALL' THEN 3
     WHEN x.status = 'FORM_SENT' THEN 4
     ELSE 5
@@ -918,8 +1041,10 @@ async function getCall(req, id) {
   );
   // follow_up_due: the work is done, call the customer back (recordFollowUp) on this page.
   // has_revisit: a re-visit is linked (the "re-visit booked" WhatsApp can be sent).
+  const callParts = await loadParts(pool, ticketRows.map((t) => t.id));
   const tickets = ticketRows.map(({ revisit_visit_id: visitId, revisit_status: status, ...t }) => ({
-    ...t, has_revisit: Boolean(visitId), follow_up_due: followUpDue({ ...t, revisit_visit_id: visitId }, status),
+    ...t, has_revisit: Boolean(visitId), parts: callParts.get(t.id) || [],
+    follow_up_due: followUpDue({ ...t, revisit_visit_id: visitId }, status, callParts.get(t.id)),
   }));
   const [history] = await pool.query(
     `SELECT h.*, u.name AS changed_by_name
@@ -1095,7 +1220,8 @@ async function bumpCall(conn, requestId, fields) {
 }
 
 // POST /calls/:id/attempts - B4. Body: { contact_id? | phone + contact_name?, outcome, call_back_at? }
-// A missed call (anything but ANSWERED) moves TO_CALL / NOT_ANSWERED to NOT_ANSWERED.
+// A missed call (anything but ANSWERED) moves TO_CALL / NOT_ANSWERED / WRONG_NUMBER to NOT_ANSWERED,
+// or to WRONG_NUMBER when the number was wrong.
 // call_back_at = the customer asked to be called at that time. Returns what the app needs next.
 async function recordCallAttempt(req, requestId, body) {
   const outcome = typeof body?.outcome === "string" ? body.outcome.trim().toUpperCase() : "";
@@ -1126,7 +1252,9 @@ async function recordCallAttempt(req, requestId, body) {
     );
 
     const missed = outcome !== "ANSWERED";
-    const newStatus = missed && ["TO_CALL", "NOT_ANSWERED"].includes(r.status) ? "NOT_ANSWERED" : r.status;
+    const newStatus = missed && ["TO_CALL", "NOT_ANSWERED", "WRONG_NUMBER"].includes(r.status)
+      ? (outcome === "WRONG_NUMBER" ? "WRONG_NUMBER" : "NOT_ANSWERED")
+      : r.status;
     const fields = { status: newStatus };
     if (callBackAt) fields.next_call_at = callBackAt;
     else if (outcome === "ANSWERED") fields.next_call_at = null;
@@ -1150,7 +1278,7 @@ async function recordCallAttempt(req, requestId, body) {
       contact_saved: savedContact,
       missed_calls: Number(missedCalls),
       next_call_at: fields.next_call_at === undefined ? r.next_call_at : fields.next_call_at,
-      offer_form_link: missed && Number(missedCalls) >= settings.offer_link_after_missed_calls && newStatus === "NOT_ANSWERED",
+      offer_form_link: missed && Number(missedCalls) >= settings.offer_link_after_missed_calls && ["NOT_ANSWERED", "WRONG_NUMBER"].includes(newStatus),
     };
   });
 }
@@ -1162,14 +1290,26 @@ async function recordCallAttempt(req, requestId, body) {
 /** The question mode a feedback was taken with (BOTH when not sent). */
 function questionMode(value) {
   const m = typeof value === "string" ? value.trim().toUpperCase() : "BOTH";
-  if (!QUESTION_MODES.includes(m)) throw new HttpError(400, "Choose General, Service-based or Both questions");
+  if (!QUESTION_MODES.includes(m)) throw new HttpError(400, "Choose General, Service-based, Both or Department questions");
   return m;
+}
+
+// Which questions a call asked: body.question_mode (+ body.question_department for DEPARTMENT).
+async function questionScope(conn, r, body) {
+  const mode = questionMode(body?.question_mode);
+  let department = null;
+  if (mode === "DEPARTMENT") {
+    department = typeof body?.question_department === "string" ? body.question_department.trim().toUpperCase() : "";
+    const known = (await listDepartments(conn, { all: true })).map((d) => d.kind);
+    if (!known.includes(department)) throw new HttpError(400, "Choose the department whose questions were asked");
+  }
+  return { mode, department, services: await servicesOfMonth(conn, r.site_id, r.month) };
 }
 
 async function cleanResponses(conn, responses, { forForm = false, scope = null } = {}) {
   if (!Array.isArray(responses) || responses.length === 0) throw new HttpError(400, "Answer at least one question");
   const questions = (await listQuestions(conn)).filter((q) => !forForm || q.show_on_form);
-  const asked = scope ? questionsFor(questions, scope.mode, scope.services) : questions;
+  const asked = scope ? questionsFor(questions, scope.mode, scope.services, scope.department) : questions;
   const byId = new Map(questions.map((q) => [q.id, q]));
   const seen = new Set();
   const rows = responses.map((a) => {
@@ -1222,15 +1362,50 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   if (existing) {
     throw new HttpError(409, `This call already has ticket ${existing.ticket_number} - ${existing.status === "CLOSED" ? "reopen it" : "work on it"} instead of raising another`);
   }
-  const action = typeof input.action === "string" ? input.action.trim().toUpperCase() : "";
+  // departments: which teams get the ticket (one or more); left out = Operations, as before.
+  const kinds = Array.isArray(input.departments) && input.departments.length
+    ? [...new Set(input.departments.map((x) => String(x || "").trim().toUpperCase()))]
+    : [OPERATIONS];
+  const active = new Map((await listDepartments(conn)).map((d) => [d.kind, d]));
+  for (const k of kinds) {
+    if (active.has(k) || (k === OPERATIONS && !active.size)) continue;
+    throw new HttpError(400, `${await departmentName(conn, k)} doesn't take feedback tickets now - pick another department`);
+  }
+  const forOps = kinds.includes(OPERATIONS);
+  // Older apps sent the Accounts part as input.accounts.
+  const partInput = { ...(input.accounts ? { ACCOUNTS: input.accounts } : {}), ...(input.parts && typeof input.parts === "object" ? input.parts : {}) };
+
+  // Each other department's part: the issue for that team, its priority and (when the department
+  // works with invoices) the customer's invoice(s).
+  const others = [];
+  for (const kind of kinds.filter((k) => k !== OPERATIONS)) {
+    const dept = active.get(kind);
+    const a = partInput[kind] && typeof partInput[kind] === "object" ? partInput[kind] : {};
+    const summary = optionalText(a.issue_summary, `${dept.name} issue`, 500);
+    if (!summary) throw new HttpError(400, `Describe the issue for ${dept.name}`);
+    const p = typeof a.priority === "string" && a.priority ? a.priority.trim().toUpperCase() : suggested || "MEDIUM";
+    if (!PRIORITIES.includes(p)) throw new HttpError(400, `Choose the ${dept.name} priority: LOW, MEDIUM or HIGH`);
+    const ids = dept.with_invoices && Array.isArray(a.invoice_ids) ? [...new Set(a.invoice_ids.map(String).filter(Boolean))] : [];
+    if (ids.length > 20) throw new HttpError(400, "Pick at most 20 invoices");
+    if (ids.length) {
+      const [found] = await conn.query("SELECT id FROM invoices WHERE id IN (?) AND customer_id = ?", [ids, r.company_id]);
+      if (found.length !== ids.length) throw new HttpError(400, "An invoice is not one of this customer's invoices");
+    }
+    others.push({ kind, name: dept.name, summary, priority: p, invoiceIds: ids });
+  }
+
+  // Operations keeps the existing fields. A ticket without Operations stores action OTHER (no visit).
+  const action = forOps ? (typeof input.action === "string" ? input.action.trim().toUpperCase() : "") : "OTHER";
   if (!ACTIONS.includes(action)) throw new HttpError(400, `Choose the action: ${ACTIONS.join(", ")}`);
-  const priority = typeof input.priority === "string" && input.priority ? input.priority.trim().toUpperCase() : suggested;
-  if (!PRIORITIES.includes(priority)) throw new HttpError(400, "Choose the priority: LOW, MEDIUM or HIGH");
-  const issueSummary = optionalText(input.issue_summary, "issue summary", 500);
-  const actionNote = optionalText(input.action_note, "note", 2000);
-  if (action === "OTHER" && !actionNote) throw new HttpError(400, "Describe what will be done for Other");
-  const dueAt = optionalDateTime(input.action_due_at, "Resolve-by time");
-  const ownerId = optionalUserId(input.action_owner_user_id, "action owner");
+  const opsPriority = forOps ? (typeof input.priority === "string" && input.priority ? input.priority.trim().toUpperCase() : suggested) : null;
+  if (forOps && !PRIORITIES.includes(opsPriority)) throw new HttpError(400, "Choose the priority: LOW, MEDIUM or HIGH");
+  // The ticket's priority is the highest of its parts.
+  const priority = [opsPriority, ...others.map((o) => o.priority)].filter(Boolean).reduce((a, b) => (PRIORITY_RANK[b] > PRIORITY_RANK[a] ? b : a));
+  const issueSummary = forOps ? optionalText(input.issue_summary, "issue summary", 500) : others.map((o) => o.summary).join(" · ").slice(0, 500);
+  const actionNote = forOps ? optionalText(input.action_note, "note", 2000) : null;
+  if (forOps && action === "OTHER" && !actionNote) throw new HttpError(400, "Describe what will be done for Other");
+  const dueAt = forOps ? optionalDateTime(input.action_due_at, "Resolve-by time") : null;
+  const ownerId = forOps ? optionalUserId(input.action_owner_user_id, "action owner") : null;
   if (ownerId) {
     const [[owner]] = await conn.query("SELECT id, is_active FROM users WHERE id = ?", [ownerId]);
     if (!owner) throw new HttpError(400, "Action owner not found");
@@ -1239,7 +1414,7 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
 
   // The visit the issue is about must be one of that site's completed visits in that month.
   let visit = null;
-  if (input.visit_id) {
+  if (forOps && input.visit_id) {
     const { start, next } = monthRange(r.month);
     [[visit]] = await conn.query(
       `SELECT v.id, v.job_id, COALESCE(NULLIF(j.sub_service, ''), j.service_type) AS service,
@@ -1250,7 +1425,8 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
     if (!visit) throw new HttpError(400, "That visit is not one of this site's services in that month");
   }
 
-  const closedNow = action === "RESOLVED_ON_CALL";
+  // "Resolved on call" closes at once - unless another department still has work on it.
+  const closedNow = action === "RESOLVED_ON_CALL" && !others.length;
   const id = crypto.randomUUID();
   await conn.query(
     `INSERT INTO feedback_tickets
@@ -1268,11 +1444,25 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   const [[{ seq }]] = await conn.query("SELECT seq FROM feedback_tickets WHERE id = ?", [id]);
   const number = ticketNumber(seq);
   await conn.query("UPDATE feedback_tickets SET ticket_number = ? WHERE id = ?", [number, id]);
+  if (forOps) {
+    await conn.query(
+      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, priority) VALUES (?, ?, 'OPERATIONS', ?, ?)",
+      [crypto.randomUUID(), id, issueSummary, opsPriority]
+    );
+  }
+  for (const o of others) {
+    await conn.query(
+      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, priority, invoice_ids) VALUES (?, ?, ?, ?, ?, ?)",
+      [crypto.randomUUID(), id, o.kind, o.summary, o.priority, o.invoiceIds.length ? JSON.stringify(o.invoiceIds) : null]
+    );
+  }
 
-  const actionLabel = action === "OTHER" ? `Other: ${actionNote}` : ACTION_LABELS[action];
+  const parts = [];
+  if (forOps) parts.push(`Operations: ${action === "OTHER" ? `Other: ${actionNote}` : ACTION_LABELS[action]}`);
+  for (const o of others) parts.push(`${o.name}: ${o.summary}`);
   await addHistory(conn, {
     requestId: r.id, ticketId: id, event: "TICKET_RAISED", to: closedNow ? "CLOSED" : "ACTION_PENDING",
-    note: `${number} · ${priority} · ${actionLabel}${issueSummary ? ` - ${issueSummary}` : ""}`, userId: req.user.id,
+    note: `${number} · ${priority} · ${parts.join(" · ")}${forOps && issueSummary ? ` - ${issueSummary}` : ""}`.slice(0, 1000), userId: req.user.id,
   });
   return { id, ticket_number: number, status: closedNow ? "CLOSED" : "ACTION_PENDING", priority, action, action_owner_user_id: ownerId };
 }
@@ -1301,9 +1491,7 @@ async function saveCallFeedback(req, requestId, body) {
     const settings = await getSettings(conn);
     const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
     const startedAt = optionalDateTime(body?.started_at, "Start time");
-    const rows = await cleanResponses(conn, body?.responses, {
-      scope: { mode: questionMode(body?.question_mode), services: await servicesOfMonth(conn, r.site_id, r.month) },
-    });
+    const rows = await cleanResponses(conn, body?.responses, { scope: await questionScope(conn, r, body) });
     const suggested = highestPriority(rows);
     const hasBad = rows.some((x) => x.is_bad);
 
@@ -1410,6 +1598,58 @@ const TICKET_SELECT = `
   LEFT JOIN users xb ON xb.id = t.closed_by
   ${REVISIT_JOINS}`;
 
+// The parts of the tickets (by ticket id), with the invoices a part lists.
+async function loadParts(executor, ticketIds) {
+  const byTicket = new Map(ticketIds.map((id) => [id, []]));
+  if (!ticketIds.length) return byTicket;
+  const [rows] = await executor.query(
+    `SELECT p.*, u.name AS done_by_name, ou.name AS dept_name, d.with_invoices
+     FROM feedback_ticket_parts p
+     LEFT JOIN users u ON u.id = p.done_by
+     LEFT JOIN feedback_departments d ON d.kind = p.kind
+     LEFT JOIN org_units ou ON ou.id = d.org_unit_id
+     WHERE p.ticket_id IN (?) ORDER BY p.kind <> 'OPERATIONS', d.sort_order, p.kind`,
+    [ticketIds]
+  );
+  const invoiceIds = [...new Set(rows.flatMap((p) => jsonList(p.invoice_ids)))];
+  const invoices = new Map();
+  if (invoiceIds.length) {
+    const [inv] = await executor.query(
+      `SELECT id, invoice_number, DATE_FORMAT(invoice_date, '%Y-%m-%d') AS invoice_date, invoice_amount, pending_amount, status
+       FROM invoices WHERE id IN (?)`,
+      [invoiceIds]
+    );
+    for (const i of inv) {
+      invoices.set(i.id, { id: i.id, number: i.invoice_number, date: i.invoice_date, amount: Number(i.invoice_amount), pending: Number(i.pending_amount), status: i.status });
+    }
+  }
+  for (const p of rows) {
+    byTicket.get(p.ticket_id)?.push({
+      id: p.id,
+      kind: p.kind,
+      label: p.dept_name || p.kind,
+      is_operations: p.kind === OPERATIONS,
+      with_invoices: Boolean(p.with_invoices),
+      issue_summary: p.issue_summary,
+      priority: p.priority,
+      invoices: jsonList(p.invoice_ids).map((i) => invoices.get(i)).filter(Boolean),
+      status: p.status,
+      done_by: person(p.done_by, p.done_by_name),
+      done_at: p.done_at,
+      done_note: p.done_note,
+    });
+  }
+  return byTicket;
+}
+
+// The parts a user sees: a desk user and the collector see every part; a department member only
+// their own department's.
+function visibleParts(req, t, parts) {
+  if (isDesk(req) || Number(t.raised_by) === Number(req.user.id) || hasPerm(req, "FEEDBACK_COLLECT")) return parts;
+  const mine = new Set(req.feedbackDepts || []);
+  return parts.filter((p) => mine.has(p.kind));
+}
+
 function ticketRow(t) {
   return {
     id: t.id,
@@ -1451,7 +1691,23 @@ async function listTickets(req) {
   const where = [];
   const params = [];
 
-  if (!isDesk(req)) { where.push("t.raised_by = ?"); params.push(req.user.id); }
+  if (!isDesk(req)) {
+    // A collector: the tickets they raised. A department member: tickets with a part for their department.
+    const scope = [];
+    if (hasPerm(req, "FEEDBACK_COLLECT") || !(req.feedbackDepts || []).length) { scope.push("t.raised_by = ?"); params.push(req.user.id); }
+    if ((req.feedbackDepts || []).length) {
+      scope.push("EXISTS (SELECT 1 FROM feedback_ticket_parts vp WHERE vp.ticket_id = t.id AND vp.kind IN (?))");
+      params.push(req.feedbackDepts);
+    }
+    where.push(`(${scope.join(" OR ")})`);
+  }
+  // department: tickets that went to that department (its key, e.g. OPERATIONS).
+  if (query.department) {
+    const kind = String(query.department).trim().toUpperCase();
+    if (!/^[A-Z0-9_]{1,40}$/.test(kind)) throw new HttpError(400, "Unknown department");
+    where.push("EXISTS (SELECT 1 FROM feedback_ticket_parts dp WHERE dp.ticket_id = t.id AND dp.kind = ?)");
+    params.push(kind);
+  }
   const priorities = csvOf(query.priority, PRIORITIES, "priority");
   if (priorities.length) { where.push("t.priority IN (?)"); params.push(priorities); }
   for (const [key, column, label] of [["owner_user_id", "t.action_owner_user_id", "action owner"], ["raised_by", "t.raised_by", "user"]]) {
@@ -1488,7 +1744,12 @@ async function listTickets(req) {
      LIMIT ? OFFSET ?`,
     [...listParams, pageSize, offset]
   );
-  return { tickets: rows.map(ticketRow), total: Number(total), page, page_size: pageSize, status_counts: statusCounts };
+  const parts = await loadParts(pool, rows.map((t) => t.id));
+  const tickets = rows.map((t) => {
+    const all = parts.get(t.id) || [];
+    return { ...ticketRow(t), parts: visibleParts(req, t, all), follow_up_due: followUpDue(t, t.revisit_status, all) };
+  });
+  return { tickets, total: Number(total), page, page_size: pageSize, status_counts: statusCounts };
 }
 
 // GET /tickets/:id (id or FB-0142) - the ticket, the feedback that raised it, its WhatsApp
@@ -1496,7 +1757,10 @@ async function listTickets(req) {
 async function getTicket(req, id) {
   const [[row]] = await pool.query(`${TICKET_SELECT} WHERE t.id = ? OR t.ticket_number = ?`, [id, id]);
   if (!row) throw new HttpError(404, "Feedback ticket not found");
-  if (!isDesk(req) && Number(row.raised_by) !== Number(req.user.id)) throw new HttpError(404, "Feedback ticket not found");
+  const allParts = (await loadParts(pool, [row.id])).get(row.id) || [];
+  const mineKinds = new Set(req.feedbackDepts || []);
+  const canSee = isDesk(req) || Number(row.raised_by) === Number(req.user.id) || allParts.some((p) => mineKinds.has(p.kind));
+  if (!canSee) throw new HttpError(404, "Feedback ticket not found");
 
   let submission = null;
   if (row.submission_id) {
@@ -1528,6 +1792,8 @@ async function getTicket(req, id) {
   );
   return {
     ...ticketRow(row),
+    parts: visibleParts(req, row, allParts),
+    follow_up_due: followUpDue(row, row.revisit_status, allParts),
     feedback: submission,
     contacts: contacts.map((c) => ({ ...c, is_primary: Boolean(c.is_primary) })),
     whatsapp_messages: messages.map((m) => ({
@@ -1940,9 +2206,15 @@ async function updateTicket(req, id, body) {
 
 // The follow-up call is due: the ticket is open and the technician completed its re-visit. Only
 // "Other" (no technician visit) can be followed up at any time. revisitStatus = the re-visit's status.
-function followUpDue(t, revisitStatus) {
+function followUpDue(t, revisitStatus, parts = null) {
   if (t.status !== "ACTION_PENDING") return false;
-  return t.action === "OTHER" || (Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
+  // Every part must be done: Operations when its re-visit is completed (or no visit is needed),
+  // any other department when its team marked it done. No parts loaded = an Operations ticket.
+  const list = parts || [];
+  const hasOps = !list.length || list.some((p) => p.kind === OPERATIONS);
+  const opsDone = !hasOps || t.action === "OTHER" || (Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
+  const othersDone = list.filter((p) => p.kind !== OPERATIONS).every((p) => p.status === "DONE");
+  return opsDone && othersDone;
 }
 
 // POST /tickets/:id/follow-up - the call back to the customer after the work, on the ticket's call
@@ -1964,7 +2236,11 @@ async function recordFollowUp(req, id, body) {
       [id, id]
     );
     if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is already closed`);
-    if (!followUpDue(t, t.revisit_status)) throw new HttpError(400, "Call the customer back once the re-visit is completed");
+    const ticketParts = (await loadParts(conn, [t.id])).get(t.id) || [];
+    if (!followUpDue(t, t.revisit_status, ticketParts)) {
+      throw new HttpError(400, "Call the customer back once every department has finished its work (re-visit completed, other departments marked done)");
+    }
+    const hasOpsPart = !ticketParts.length || ticketParts.some((p) => p.kind === OPERATIONS);
 
     const contact = await siteContact(conn, r.site_id, body?.contact_id);
     const spokeWith = optionalText(body?.spoke_with_name, "name", 150) || contact?.name || null;
@@ -1972,9 +2248,7 @@ async function recordFollowUp(req, id, body) {
     const settings = await getSettings(conn);
     const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
     const startedAt = optionalDateTime(body?.started_at, "Start time");
-    const rows = await cleanResponses(conn, body?.responses, {
-      scope: { mode: questionMode(body?.question_mode), services: await servicesOfMonth(conn, r.site_id, r.month) },
-    });
+    const rows = await cleanResponses(conn, body?.responses, { scope: await questionScope(conn, r, body) });
     const bad = rows.filter((x) => x.is_bad);
 
     const submission = await saveSubmission(conn, {
@@ -1998,6 +2272,10 @@ async function recordFollowUp(req, id, body) {
         "UPDATE feedback_tickets SET submission_id = ?, revisit_visit_id = NULL, row_version = row_version + 1 WHERE id = ?",
         [submission.id, t.id]
       );
+      // A ticket without Operations goes back to its departments.
+      if (!hasOpsPart) {
+        await conn.query("UPDATE feedback_ticket_parts SET status = 'PENDING', done_by = NULL, done_at = NULL, done_note = NULL WHERE ticket_id = ? AND kind <> 'OPERATIONS'", [t.id]);
+      }
     }
     const unlinked = !resolved && !closeAnyway && t.revisit_job_code ? ` · re-visit Job ${t.revisit_job_code} didn't fix it` : "";
     await addHistory(conn, {
@@ -2050,9 +2328,47 @@ async function reopenTicket(req, id, body) {
               row_version = row_version + 1 WHERE id = ?`,
       [action, t.id]
     );
+    // The other departments have their work to do again too.
+    await conn.query("UPDATE feedback_ticket_parts SET status = 'PENDING', done_by = NULL, done_at = NULL, done_note = NULL WHERE ticket_id = ? AND kind <> 'OPERATIONS'", [t.id]);
     await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "REOPENED", from: "CLOSED", to: "ACTION_PENDING", note, userId: req.user.id });
     return t.id;
   });
+}
+
+// POST /tickets/:id/parts/:kind/done - Body: { note } (what was done, e.g. "Invoice sent").
+// A department's team (or a desk manager) finishes its part of an open ticket. Operations' part is
+// done by its re-visit, so every department but Operations is marked here.
+async function markPartDone(req, id, kindValue, body) {
+  const kind = String(kindValue || "").trim().toUpperCase();
+  if (kind === OPERATIONS) throw new HttpError(400, "The Operations part is done when its re-visit is completed");
+  const name = await departmentName(pool, kind);
+  if (!hasPerm(req, "FEEDBACK_MANAGE") && !(req.feedbackDepts || []).includes(kind)) throw new HttpError(403, `Only ${name} can finish this part`);
+  const note = optionalText(body?.note, "note", 500);
+  if (!note) throw new HttpError(400, "Say what was done (e.g. invoice sent)");
+  return inTransaction(async (conn) => {
+    const [[t]] = await conn.query("SELECT id, request_id, ticket_number, status FROM feedback_tickets WHERE id = ? OR ticket_number = ? FOR UPDATE", [id, id]);
+    if (!t) throw new HttpError(404, "Feedback ticket not found");
+    if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is closed`);
+    const [[p]] = await conn.query("SELECT id, status FROM feedback_ticket_parts WHERE ticket_id = ? AND kind = ? FOR UPDATE", [t.id, kind]);
+    if (!p) throw new HttpError(404, `${t.ticket_number} has no ${name} part`);
+    if (p.status === "DONE") throw new HttpError(409, `The ${name} part is already done`);
+    await conn.query("UPDATE feedback_ticket_parts SET status = 'DONE', done_by = ?, done_at = NOW(), done_note = ? WHERE id = ?", [req.user.id, note, p.id]);
+    await conn.query("UPDATE feedback_tickets SET row_version = row_version + 1 WHERE id = ?", [t.id]);
+    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "PART_DONE", note: `${name} done - ${note}`, userId: req.user.id });
+    return { ticket_id: t.id, ticket_number: t.ticket_number };
+  });
+}
+
+// GET /calls/:id/invoices - the customer's invoices, newest first, for an Accounts issue.
+async function callInvoices(req, requestId) {
+  const [[r]] = await pool.query("SELECT id, company_id FROM feedback_requests WHERE id = ?", [requestId]);
+  if (!r) throw new HttpError(404, "Feedback call not found");
+  const [rows] = await pool.query(
+    `SELECT id, invoice_number, DATE_FORMAT(invoice_date, '%Y-%m-%d') AS invoice_date, invoice_amount, pending_amount, status
+     FROM invoices WHERE customer_id = ? AND status <> 'CANCELLED' ORDER BY invoice_date DESC, created_at DESC LIMIT 100`,
+    [r.company_id]
+  );
+  return rows.map((i) => ({ id: i.id, number: i.invoice_number, date: i.invoice_date, amount: Number(i.invoice_amount), pending: Number(i.pending_amount), status: i.status }));
 }
 
 // PATCH /calls/:id/collector - Body: { collector_user_id } - the desk gives a monthly call to another
@@ -2093,9 +2409,14 @@ async function feedbackBadges(req) {
      FROM feedback_requests ${desk ? "" : "WHERE collector_user_id = ?"}`,
     desk ? [] : [req.user.id]
   );
+  // A department member counts the open tickets of their department.
+  const depts = !desk && !hasPerm(req, "FEEDBACK_COLLECT") ? req.feedbackDepts || [] : [];
   const [[tickets]] = await pool.query(
-    `SELECT COUNT(*) AS n FROM feedback_tickets WHERE status = 'ACTION_PENDING' ${desk ? "" : "AND raised_by = ?"}`,
-    desk ? [] : [req.user.id]
+    depts.length
+      ? `SELECT COUNT(*) AS n FROM feedback_tickets t WHERE t.status = 'ACTION_PENDING'
+         AND EXISTS (SELECT 1 FROM feedback_ticket_parts p WHERE p.ticket_id = t.id AND p.kind IN (?))`
+      : `SELECT COUNT(*) AS n FROM feedback_tickets WHERE status = 'ACTION_PENDING' ${desk ? "" : "AND raised_by = ?"}`,
+    depts.length ? [depts] : desk ? [] : [req.user.id]
   );
   return { forms_received: Number(calls.forms), callbacks_due: Number(calls.callbacks), open_tickets: Number(tickets.n) };
 }
@@ -2104,9 +2425,13 @@ async function feedbackBadges(req) {
 
 // GET /me - the signed-in user's feedback permissions (admin holds all of them), so the screens
 // know what to show. The routes still check every action.
+// FEEDBACK_DEPT: a member of a feedback department (not a role permission - worked out per request
+// from the departments). Such a user sees only their department's tickets.
 const FEEDBACK_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 function myFeedbackAccess(req) {
-  return { user_id: Number(req.user.id), role: req.user.role, permissions: FEEDBACK_PERMISSIONS.filter((p) => hasPerm(req, p)) };
+  const permissions = FEEDBACK_PERMISSIONS.filter((p) => hasPerm(req, p));
+  if ((req.feedbackDepts || []).length) permissions.push("FEEDBACK_DEPT");
+  return { user_id: Number(req.user.id), role: req.user.role, permissions, departments: req.feedbackDepts || [] };
 }
 
 // Active users whose role holds one of the permissions (admin counts as holding all).
@@ -2315,6 +2640,12 @@ module.exports = {
   listEmailTemplates,
   saveEmailTemplates,
   feedbackBadges,
+  listDepartments,
+  departmentSetup,
+  saveDepartments,
+  myDepartmentKinds,
+  markPartDone,
+  callInvoices,
   monthLabel,
   dayLabel,
   csvOf,

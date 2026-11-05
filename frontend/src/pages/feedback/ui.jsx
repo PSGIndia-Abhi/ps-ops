@@ -63,6 +63,7 @@ export function PriorityChip({ priority }) {
 export function ResultChip({ result }) {
   if (result === "GOOD") return <Chip tone="ok">Good</Chip>;
   if (result === "ISSUE") return <Chip tone="danger">Issue</Chip>;
+  if (result === "NO_RESPONSE") return <Chip tone="muted">Not responded</Chip>;
   return null;
 }
 
@@ -586,13 +587,18 @@ export function Steps({ steps, small, label }) {
  * Which questions to ask: General, Service-based (the questions for the month's services) or Both,
  * with how many questions each gives. counts: { GENERAL, SERVICE, BOTH }.
  */
-export function QuestionModePicker({ value, onChange, counts }) {
+export function QuestionModePicker({ value, onChange, counts, departments = [] }) {
+  // Departments with questions are extra choices ("DEPT:ACCOUNTS").
+  const deptModes = departments
+    .filter((d) => counts[`DEPT:${d.kind}`])
+    .map((d) => [`DEPT:${d.kind}`, d.name || d.label, "Questions for this department"]);
   return (
     <div className="fb-qmode" role="radiogroup" aria-label="Which questions to ask">
       {[
         ["GENERAL", "General", "Questions for every customer"],
         ["SERVICE", "Service-based", "For this month's services"],
         ["BOTH", "Both", "General and service questions"],
+        ...deptModes,
       ].map(([mode, label, hint]) => (
         <button key={mode} type="button" role="radio" aria-checked={value === mode} className={value === mode ? "is-on" : ""} disabled={!counts[mode]} onClick={() => onChange(mode)}>
           <span>

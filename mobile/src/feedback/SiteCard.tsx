@@ -5,7 +5,7 @@ import { initialsOf } from '../crm/format';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { StatusBadge, toneColors } from '../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../theme';
-import { CALL_STATUS, formatDateTime, formatDay, isPast } from './format';
+import { callStatusMeta, formatDateTime, formatDay, isPast } from './format';
 import type { CallRow } from './types';
 
 const factory = (t: CrmTheme) => ({
@@ -50,7 +50,7 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
   const someoneElse = !!row.collector && row.collector.id !== myId;
   const callBack = row.next_call_at && row.status !== 'DONE';
   const late = !!callBack && isPast(row.next_call_at);
-  const meta = CALL_STATUS[row.status] || { label: row.status, tone: 'neutral' as const };
+  const meta = callStatusMeta(row.status, row.result);
   const tint = toneColors(theme, meta.tone);
   const accent = meta.tone === 'neutral' ? theme.primary : tint.fg;
   const chips = serviceChips(row.services);
