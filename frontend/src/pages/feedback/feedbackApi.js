@@ -46,7 +46,11 @@ export const listCalls = (params) => feedbackRequest(`/calls${query(params)}`);
 export const takeCall = (siteId, month) => feedbackRequest("/calls", send("POST", { site_id: siteId, month }));
 export const getCall = (id) => feedbackRequest(`/calls/${id}`);
 export const getSiteDetails = (siteId, month) => feedbackRequest(`/sites/${encodeURIComponent(siteId)}/details${query({ month })}`);
-export const recordAttempt = (id, body) => feedbackRequest(`/calls/${id}/attempts`, send("POST", body));
+/** Saves a new number to the call's site contacts: { name, phone } -> the contact. */
+export const addCallContact = (id, body) => feedbackRequest(`/calls/${id}/contacts`, send("POST", body));
+/** Corrects a contact of the call's site: { name, phone, role, email }. */
+export const updateCallContact = (id, contactId, body) => feedbackRequest(`/calls/${id}/contacts/${contactId}`, send("PATCH", body));
+export const recordAttempt =(id, body) => feedbackRequest(`/calls/${id}/attempts`, send("POST", body));
 export const saveCallFeedback = (id, body) => feedbackRequest(`/calls/${id}/feedback`, send("POST", body));
 export const raiseTicket = (id, body) => feedbackRequest(`/calls/${id}/tickets`, send("POST", body));
 export const finishCall = (id, note) => feedbackRequest(`/calls/${id}/done`, send("POST", note ? { note } : {}));
@@ -60,7 +64,11 @@ export const getTicket = (id) => feedbackRequest(`/tickets/${encodeURIComponent(
 export const updateTicket = (id, body) => feedbackRequest(`/tickets/${id}`, send("PATCH", body));
 export const closeTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/close`, send("POST", { row_version: rowVersion, close_note: note }));
 export const reopenTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/reopen`, send("POST", { row_version: rowVersion, note }));
+/** Deletes a ticket raised by mistake (desk managers and whoever raised it). */
+export const deleteTicket = (id, note) => feedbackRequest(`/tickets/${id}`, send("DELETE", note ? { note } : {}));
 export const getRevisitOptions = (id) => feedbackRequest(`/tickets/${id}/revisit-options`);
+/** The call back after the work, with the call's questions: all good closes the ticket, a bad answer keeps it open. */
+export const recordFollowUp = (id, body) => feedbackRequest(`/tickets/${id}/follow-up`, send("POST", body));
 
 /* ---- customer report ---- */
 export const getCustomerReport = (companyId, params) => feedbackRequest(`/customers/${encodeURIComponent(companyId)}/report${query(params)}`);
@@ -112,7 +120,9 @@ export const CALL_STATUS = {
   NOT_ANSWERED: { label: "Not answered", tone: "warn" },
   FORM_SENT: { label: "Form sent", tone: "info" },
   FORM_RECEIVED: { label: "Form received", tone: "violet" },
-  DONE: { label: "Done", tone: "ok" },
+  DONE: { label: "Completed", tone: "ok" },
+  // A done call whose ticket is still open (the list's and the call's display status).
+  TICKET_OPEN: { label: "Ticket open", tone: "danger" },
 };
 // A service visit's status (job_visits.status). Cancelled visits never reach the Feedback Desk.
 export const VISIT_STATUS = {
@@ -135,13 +145,13 @@ export const PRIORITIES = ["HIGH", "MEDIUM", "LOW"];
 export const ACTIONS = {
   RESOLVED_ON_CALL: { label: "Resolved on the call", hint: "You sorted it out on the phone. The ticket closes immediately." },
   SCHEDULE_REVISIT: { label: "Book a re-visit", hint: "A technician goes back. The visit is booked on the ticket." },
-  // Older tickets only (no longer offered on a ticket).
-  ESCALATE_OPERATIONS: { label: "Escalate to operations", hint: "Needs a manager to look into it." },
+  // Older tickets only (no longer offered): they are worked as "Book a re-visit".
+  ESCALATE_OPERATIONS: { label: "Book a re-visit", hint: "A technician goes back. The visit is booked on the ticket." },
   OTHER: { label: "Other", hint: "Something else - type what will be done." },
 };
 
 // Actions offered now. On a ticket, "Book a re-visit" needs the visit booked from the ticket page.
-export const RAISE_ACTIONS = ["RESOLVED_ON_CALL", "ESCALATE_OPERATIONS", "OTHER"];
+export const RAISE_ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "OTHER"];
 export const TICKET_ACTIONS = ["SCHEDULE_REVISIT", "OTHER"];
 
 /** "Visits: 1 Nov · Job 2026-871 · Mosquito Fogging; …" (older tickets) as "Services: Mosquito Fogging, …". */
@@ -267,13 +277,16 @@ const HISTORY = {
   WHATSAPP_SENT: ["WhatsApp message", "info"],
   CLOSED: ["Ticket closed", "ok"],
   REOPENED: ["Ticket reopened", "warn"],
+  FOLLOWUP_CALL: ["Follow-up call", "ok"],
+  TICKET_DELETED: ["Ticket deleted", "muted"],
+  CONTACT_ADDED: ["Contact added", "muted"],
   PRIORITY_SET: ["Priority changed", "muted"],
   ACTION_SET: ["Next step changed", "muted"],
   OWNER_CHANGED: ["Owner changed", "muted"],
   UPDATED: ["Ticket updated", "muted"],
 };
 
-const TEMPLATE_NAMES = { FEEDBACK_SUMMARY: "Feedback summary", REVISIT_BOOKED: "Re-visit booked", FORM_LINK: "Form link", THANK_YOU: "Thank-you message" };
+const TEMPLATE_NAMES = { FEEDBACK_SUMMARY: "Feedback summary", REVISIT_BOOKED: "Re-visit booked", TICKET_RAISED: "Ticket raised", ISSUE_RESOLVED: "Issue resolved", FORM_LINK: "Form link", THANK_YOU: "Thank-you message" };
 
 /** 919845012345 -> +91 98450 12345 (Indian mobiles), anything else as it is. */
 function prettyPhone(digits) {
@@ -304,10 +317,11 @@ export function historyItems(history) {
     const answered = h.event === "CALL_ATTEMPT" && /^Answered/.test(h.note || "");
     return {
       key: h.id,
+      event: h.event,
       title: label,
       detail: historyNote(h.event, h.note),
       sub: [formatDateTime(h.created_at), h.changed_by?.name].filter(Boolean).join(" · "),
-      tone: answered ? "ok" : tone,
+      tone: answered ? "ok" : h.event === "FOLLOWUP_CALL" && h.to_status !== "CLOSED" ? "danger" : tone,
     };
   });
 }
@@ -384,12 +398,14 @@ export function callStages(info, tickets = []) {
         { key: "reached", label: "Customer reached", state: "todo" },
         { key: "feedback", label: "Feedback received", state: "todo" },
         { key: "ticket", label: "Ticket", sub: "Only if there's an issue", state: "todo" },
-        { key: "done", label: "Done", state: "todo" },
+        { key: "done", label: "Completed", state: "todo" },
       ],
       false,
     );
   }
-  const finished = info.status === "DONE";
+  // A call with a ticket still open is not completed yet: it completes when the ticket is closed.
+  const ticketOpen = tickets.some((t) => t.status === "ACTION_PENDING");
+  const finished = info.status === "DONE" && !ticketOpen;
   const reached = info.answered_at || info.feedback_at;
   const firstTicket = tickets[0];
   const steps = [
@@ -403,9 +419,9 @@ export function callStages(info, tickets = []) {
       ? { key: "feedback", label: "Feedback received", sub: info.status === "FORM_RECEIVED" ? "By form · review it" : formatDay(info.feedback_at), state: info.status === "FORM_RECEIVED" ? "current" : "done" }
       : { key: "feedback", label: "Feedback received", sub: finished ? "None" : undefined, state: finished ? "skipped" : "todo" },
     firstTicket
-      ? { key: "ticket", label: "Ticket raised", sub: tickets.map((t) => t.ticket_number).join(", "), state: "done" }
+      ? { key: "ticket", label: ticketOpen ? "Ticket open" : "Ticket closed", sub: tickets.map((t) => t.ticket_number).join(", "), state: ticketOpen ? "current" : "done" }
       : { key: "ticket", label: "Ticket", sub: finished ? "Not needed" : "Only if there's an issue", state: finished ? "skipped" : "todo" },
-    { key: "done", label: "Done", sub: finished ? formatDay(info.done_at) : undefined, state: finished ? "done" : "todo" },
+    { key: "done", label: "Completed", sub: finished ? formatDay(info.done_at) : ticketOpen ? "When the ticket is closed" : undefined, state: finished ? "done" : "todo" },
   ];
   // While waiting for the collector's review of a form, nothing after it is current.
   if (steps.some((s) => s.state === "current")) return steps;
@@ -427,9 +443,24 @@ export function callStagesFromCall(call) {
   );
 }
 
+/** The latest follow-up call on a ticket (history is newest first), or null. */
+export function lastFollowUp(t) {
+  return (t.history || []).find((h) => h.event === "FOLLOWUP_CALL") || null;
+}
+
+/**
+ * The follow-up call can be made: the ticket is open and the technician completed its re-visit.
+ * Only "Other" (no technician visit) can be followed up at any time.
+ */
+export function followUpReady(t) {
+  if (t.status !== "ACTION_PENDING") return false;
+  return t.action === "OTHER" || t.revisit?.status === "COMPLETED";
+}
+
 /**
  * A ticket's stages: Raised -> Manager / Coordinator (owner) -> Technician (the re-visit booked in
- * Jobs) -> Work done (that visit completed) -> Closed (by the manager / coordinator).
+ * Jobs) -> Work done (that visit completed) -> Customer confirmed (the follow-up call) -> Closed.
+ * Only the customer confirming on the follow-up call closes a ticket.
  */
 export function ticketStages(t) {
   const closed = t.status === "CLOSED";
@@ -459,9 +490,20 @@ export function ticketStages(t) {
       : { key: "owner", label: "Manager / Coordinator", sub: owner ? owner.name : "All notified", state: "done" },
     { key: "tech", ...tech },
     { key: "work", ...work },
-    { key: "closed", label: "Closed", sub: closed ? formatDay(t.closed_at) : work.state === "done" ? "Ready to close" : undefined, state: closed ? "done" : "todo" },
+    { key: "confirmed", ...confirmedStep(t, closed, onCall) },
+    { key: "closed", label: "Closed", sub: closed ? formatDay(t.closed_at) : "When the customer confirms", state: closed ? "done" : "todo" },
   ];
   return markCurrent(steps, closed);
+}
+
+/** The "Customer confirmed" stage: the follow-up call after the work. */
+function confirmedStep(t, closed, onCall) {
+  const label = "Customer confirmed";
+  if (onCall) return { label, sub: "On the first call", state: closed ? "done" : "todo" };
+  if (closed) return { label, sub: formatDay(t.closed_at), state: "done" };
+  const last = lastFollowUp(t);
+  if (last && !t.revisit) return { label, sub: `Not resolved ${formatDay(last.created_at)} · book again`, state: "todo", late: true };
+  return { label, sub: followUpReady(t) ? "Call the customer back" : "After the work", state: "todo" };
 }
 
 /* ---- customer emails (Masters › Email templates; opened in Gmail, the collector edits and sends) ---- */
@@ -522,4 +564,14 @@ export function openCustomerEmail(template, info, contacts) {
   const contact = (contacts || []).find((c) => c.email && EMAIL_RE.test(c.email.trim()));
   const { subject, body } = fillEmail(template, emailValues({ ...info, name: contact?.name || info.name }));
   window.open(gmailComposeUrl(contact ? contact.email.trim() : "", subject, body), "_blank", "noopener");
+}
+
+/* ---- which questions a feedback asks ---- */
+// General, Service-based (the questions for the services the site had that month) or Both.
+/** The questions a feedback asks for a mode and the month's services (as the server checks them). */
+export function questionsFor(questions, mode, services) {
+  const had = new Set((services || []).map((x) => String(x).trim().toLowerCase()));
+  return questions.filter((q) =>
+    q.question_type === "SERVICE" ? mode !== "GENERAL" && (q.services || []).some((x) => had.has(x.trim().toLowerCase())) : mode !== "SERVICE",
+  );
 }

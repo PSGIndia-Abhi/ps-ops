@@ -109,6 +109,7 @@ const APPS: { kind: AppKind; name: string }[] = [
   { kind: 'tasks', name: 'Task Management' },
   { kind: 'sales', name: 'Sales' },
   { kind: 'reminders', name: 'Payment Reminders' },
+  { kind: 'feedback', name: 'Customer Feedback' },
 ];
 
 /** Soft tile colour and icon colour per app. */
@@ -117,6 +118,7 @@ function appTint(kind: AppKind, t: CrmTheme): { bg: string; fg: string } {
   if (kind === 'reminders') return { bg: t.warningBg, fg: t.warningText };
   if (kind === 'leads') return { bg: t.successBg, fg: t.successText };
   if (kind === 'residential') return { bg: t.accentBg, fg: t.accent };
+  if (kind === 'feedback') return { bg: t.infoBg, fg: t.info };
   return { bg: t.primarySoftBg, fg: t.primary };
 }
 
@@ -125,6 +127,7 @@ function AppIcon({ kind, color }: { kind: AppKind; color: string }) {
   if (kind === 'reminders') return <BellIcon size={22} color={color} />;
   if (kind === 'leads') return <PhoneIcon size={22} color={color} />;
   if (kind === 'residential') return <HomeIcon size={22} color={color} />;
+  if (kind === 'feedback') return <StarIcon size={22} color={color} />;
   return <ClipboardListIcon size={22} color={color} />;
 }
 

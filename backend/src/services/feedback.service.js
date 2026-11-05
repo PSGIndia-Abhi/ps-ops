@@ -27,6 +27,8 @@ const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
 // A monthly call (feedback_requests) and a ticket (feedback_tickets) have separate statuses.
 const REQUEST_STATUSES = ["TO_CALL", "NOT_ANSWERED", "FORM_SENT", "FORM_RECEIVED", "DONE"];
 const TICKET_STATUSES = ["ACTION_PENDING", "CLOSED"];
+// The call list also shows TICKET_OPEN: a done call whose ticket is not closed yet.
+const LIST_STATUSES = [...REQUEST_STATUSES, "TICKET_OPEN"];
 // OTHER = something else, described in action_note (required for it).
 const ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "ESCALATE_OPERATIONS", "OTHER"];
 const DESK_PERMISSIONS = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
@@ -71,10 +73,54 @@ function hasAnyPerm(req, permissions) {
 
 // The questions with their answers, in order. Without includeInactive: only active
 // questions and active answers - what the app and the customer form ask.
+// A JSON column read back as a list of strings (mysql2 may give it parsed or as text).
+function jsonList(value) {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const v = JSON.parse(value);
+      return Array.isArray(v) ? v.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+const QUESTION_TYPES = ["GENERAL", "SERVICE"];
+// How a feedback asks its questions: the general ones, the ones for the site's services, or both.
+const QUESTION_MODES = ["GENERAL", "SERVICE", "BOTH"];
+
+/**
+ * The questions a feedback asks: GENERAL questions (mode GENERAL / BOTH) and SERVICE questions for a
+ * service the site had in the month (mode SERVICE / BOTH). services = the month's service names.
+ */
+function questionsFor(questions, mode, services) {
+  const had = new Set((services || []).map((x) => String(x).trim().toLowerCase()));
+  return questions.filter((q) =>
+    q.question_type === "SERVICE"
+      ? mode !== "GENERAL" && q.services.some((x) => had.has(x.trim().toLowerCase()))
+      : mode !== "SERVICE",
+  );
+}
+
+// The services a site had in a call's month (each once) - what its SERVICE questions are about.
+async function servicesOfMonth(conn, siteId, month) {
+  const { start, next } = monthRange(month);
+  const [rows] = await conn.query(
+    `SELECT DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) AS service
+     FROM job_visits v JOIN jobs j ON j.id = v.job_id
+     WHERE j.company_id = ? AND COALESCE(v.status, '') <> 'CANCELED'
+       AND COALESCE(v.completed_at, v.scheduled_date) >= ? AND COALESCE(v.completed_at, v.scheduled_date) < ?`,
+    [siteId, start, next]
+  );
+  return rows.map((r) => r.service).filter(Boolean);
+}
+
 async function listQuestions(executor = pool, { includeInactive = false } = {}) {
   const activeOnly = includeInactive ? "" : "WHERE is_active = 1";
   const [questions] = await executor.query(
-    `SELECT id, question_text, sort_order, is_required, show_on_form, is_active
+    `SELECT id, question_text, question_type, services, sort_order, is_required, show_on_form, is_active
      FROM feedback_questions ${activeOnly}
      ORDER BY is_active DESC, sort_order, id`
   );
@@ -98,6 +144,8 @@ async function listQuestions(executor = pool, { includeInactive = false } = {}) 
   return questions.map((q) => ({
     id: q.id,
     question_text: q.question_text,
+    question_type: q.question_type || "GENERAL",
+    services: q.question_type === "SERVICE" ? jsonList(q.services) : [],
     sort_order: q.sort_order,
     is_required: Boolean(q.is_required),
     show_on_form: Boolean(q.show_on_form),
@@ -188,9 +236,21 @@ function cleanQuestionList(body) {
       throw new HttpError(400, `Question ${no} needs at least 2 answers that are switched on`);
     }
 
+    const type = typeof q.question_type === "string" ? q.question_type.toUpperCase() : "GENERAL";
+    if (!QUESTION_TYPES.includes(type)) throw new HttpError(400, `Question ${no}: choose General or Service`);
+    let services = null;
+    if (type === "SERVICE") {
+      const list = Array.isArray(q.services) ? [...new Set(q.services.map((x) => String(x || "").trim()).filter(Boolean))] : [];
+      if (!list.length) throw new HttpError(400, `Question ${no} is service-based: pick the services it is asked for`);
+      if (list.length > 60 || list.some((x) => x.length > 100)) throw new HttpError(400, `Question ${no}: too many or too long service names`);
+      services = list;
+    }
+
     return {
       id,
       question_text: text,
+      question_type: type,
+      services,
       sort_order: no,
       is_required: flag(q.is_required, true),
       show_on_form: flag(q.show_on_form, true),
@@ -223,17 +283,17 @@ async function saveQuestions(body, userId) {
       if (questionId === null) {
         const [result] = await conn.query(
           `INSERT INTO feedback_questions
-             (question_text, sort_order, is_required, show_on_form, is_active, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [q.question_text, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, userId]
+             (question_text, question_type, services, sort_order, is_required, show_on_form, is_active, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, userId]
         );
         questionId = result.insertId;
       } else {
         await conn.query(
           `UPDATE feedback_questions
-           SET question_text = ?, sort_order = ?, is_required = ?, show_on_form = ?, is_active = ?, updated_by = ?
+           SET question_text = ?, question_type = ?, services = ?, sort_order = ?, is_required = ?, show_on_form = ?, is_active = ?, updated_by = ?
            WHERE id = ?`,
-          [q.question_text, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, questionId]
+          [q.question_text, q.question_type, q.services ? JSON.stringify(q.services) : null, q.sort_order, q.is_required, q.show_on_form, q.is_active, userId, questionId]
         );
       }
       keptQuestionIds.push(questionId);
@@ -637,7 +697,10 @@ async function callList(req) {
            COUNT(DISTINCT v.id) AS visit_count,
            DATE_FORMAT(MAX(COALESCE(v.completed_at, v.scheduled_date)), '%Y-%m-%d') AS last_visit_date,
            GROUP_CONCAT(DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) SEPARATOR ', ') AS services,
-           r.id AS request_id, COALESCE(r.status, 'TO_CALL') AS status, r.result,
+           r.id AS request_id,
+           -- A done call whose ticket is still open shows as TICKET_OPEN until the ticket is closed.
+           CASE WHEN r.status = 'DONE' AND EXISTS (SELECT 1 FROM feedback_tickets ot WHERE ot.request_id = r.id AND ot.status = 'ACTION_PENDING')
+                THEN 'TICKET_OPEN' ELSE COALESCE(r.status, 'TO_CALL') END AS status, r.result,
            r.collector_user_id, cu.name AS collector_name, r.next_call_at, r.updated_at AS last_activity_at
     ${SERVICE_VISITS_IN_PERIOD.replace(
       "WHERE COALESCE(v.status",
@@ -654,11 +717,11 @@ async function callList(req) {
     `SELECT x.status, COUNT(*) AS n FROM (${inner}) x ${baseWhere} GROUP BY x.status`,
     [...innerParams, ...outerParams]
   );
-  const statusCounts = Object.fromEntries(REQUEST_STATUSES.map((s) => [s, 0]));
+  const statusCounts = Object.fromEntries(LIST_STATUSES.map((s) => [s, 0]));
   for (const r of countRows) statusCounts[r.status] = Number(r.n);
 
-  const statuses = csvOf(query.status, [...REQUEST_STATUSES, "OPEN"], "status");
-  const wanted = [...new Set(statuses.flatMap((s) => (s === "OPEN" ? REQUEST_STATUSES.filter((x) => x !== "DONE") : [s])))];
+  const statuses = csvOf(query.status, [...LIST_STATUSES, "OPEN"], "status");
+  const wanted = [...new Set(statuses.flatMap((s) => (s === "OPEN" ? LIST_STATUSES.filter((x) => x !== "DONE") : [s])))];
   const listWhere = [...outer];
   const listParams = [...outerParams];
   if (wanted.length) { listWhere.push("x.status IN (?)"); listParams.push(wanted); }
@@ -848,11 +911,16 @@ async function getCall(req, id) {
      WHERE m.request_id = ? ORDER BY m.opened_at DESC`,
     [id]
   );
-  const [tickets] = await pool.query(
-    `SELECT id, ticket_number, status, priority, action, issue_summary, created_at
-     FROM feedback_tickets WHERE request_id = ? ORDER BY seq`,
+  const [ticketRows] = await pool.query(
+    `SELECT t.id, t.ticket_number, t.status, t.priority, t.action, t.issue_summary, t.created_at, t.revisit_visit_id, rv.status AS revisit_status
+     FROM feedback_tickets t LEFT JOIN job_visits rv ON rv.id = t.revisit_visit_id WHERE t.request_id = ? ORDER BY t.seq`,
     [id]
   );
+  // follow_up_due: the work is done, call the customer back (recordFollowUp) on this page.
+  // has_revisit: a re-visit is linked (the "re-visit booked" WhatsApp can be sent).
+  const tickets = ticketRows.map(({ revisit_visit_id: visitId, revisit_status: status, ...t }) => ({
+    ...t, has_revisit: Boolean(visitId), follow_up_due: followUpDue({ ...t, revisit_visit_id: visitId }, status),
+  }));
   const [history] = await pool.query(
     `SELECT h.*, u.name AS changed_by_name
      FROM feedback_history h LEFT JOIN users u ON u.id = h.changed_by
@@ -865,6 +933,8 @@ async function getCall(req, id) {
     id: r.id,
     month: r.month,
     status: r.status,
+    // DONE with a ticket still open shows as TICKET_OPEN until the ticket is closed.
+    display_status: r.status === "DONE" && tickets.some((t) => t.status === "ACTION_PENDING") ? "TICKET_OPEN" : r.status,
     result: r.result,
     customer: { id: r.company_id, name: r.company_name },
     site: { id: r.site_id, name: r.site_name, city: r.site_city, address: r.site_address },
@@ -938,6 +1008,77 @@ async function lockCallForWork(conn, req, requestId, { openDone = false } = {}) 
 }
 
 // A site contact of the call's site (contacts.company_id holds the site id).
+// A number typed on a call, kept as a contact of that site (contacts.company_id = the site, the
+// site's branch; role = position). A site contact with the same number (digits compared) is reused.
+// A 10-digit mobile number ("+91 98450 12345" and "919845012345" give "9845012345").
+function tenDigitPhone(phone) {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (!/^\d{10}$/.test(digits)) throw new HttpError(400, "Enter a 10-digit phone number");
+  return digits;
+}
+
+function checkedEmail(email) {
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Enter a valid email address");
+  return email;
+}
+
+async function saveSiteContact(conn, siteId, name, phone, { role = null, email = null } = {}) {
+  const digits = tenDigitPhone(phone);
+  checkedEmail(email);
+  const [rows] = await conn.query("SELECT id, name, phone FROM contacts WHERE company_id = ? AND COALESCE(is_active, 1) = 1", [siteId]);
+  const same = rows.find((c) => String(c.phone).replace(/\D/g, "").slice(-10) === digits);
+  if (same) return { ...same, created: false };
+  const [[site]] = await conn.query("SELECT branch_id FROM sites WHERE id = ?", [siteId]);
+  const id = crypto.randomUUID();
+  await conn.query(
+    `INSERT INTO contacts (id, company_id, name, phone, email, role, is_primary, is_verified, branch_id, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 1)`,
+    [id, siteId, name, digits, email, role, site?.branch_id ?? null]
+  );
+  return { id, name, phone: digits, created: true };
+}
+
+// PATCH /calls/:id/contacts/:contactId - Body: { name, phone, role?, email? }. Corrects a contact of
+// the call's site (a wrong number or name). Whoever works the call, or a desk manager.
+async function updateCallContact(req, requestId, contactId, body) {
+  return inTransaction(async (conn) => {
+    const r = await lockCallForWork(conn, req, requestId, { openDone: true });
+    const [[c]] = await conn.query("SELECT id, name, phone FROM contacts WHERE id = ? AND company_id = ?", [String(contactId), r.site_id]);
+    if (!c) throw new HttpError(404, "That contact does not belong to this site");
+    const name = optionalText(body?.name, "contact name", 150);
+    if (!name) throw new HttpError(400, "Enter the contact's name");
+    const phone = tenDigitPhone(body?.phone);
+    const role = optionalText(body?.role, "position", 100);
+    const email = checkedEmail(optionalText(body?.email, "email", 150));
+    const [rows] = await conn.query("SELECT id, name, phone FROM contacts WHERE company_id = ? AND id <> ? AND COALESCE(is_active, 1) = 1", [r.site_id, c.id]);
+    const dup = rows.find((x) => String(x.phone).replace(/\D/g, "").slice(-10) === phone);
+    if (dup) throw new HttpError(409, `${dup.name} at this site already has that number`);
+    await conn.query("UPDATE contacts SET name = ?, phone = ?, role = ?, email = ? WHERE id = ?", [name, phone, role, email, c.id]);
+    await addHistory(conn, { requestId: r.id, event: "CONTACT_UPDATED", note: `${c.name} updated - ${name}, ${phone}`, userId: req.user.id });
+    return { id: c.id, name, phone, role, email };
+  });
+}
+
+// POST /calls/:id/contacts - Body: { name, phone, role?, email? }. Saves a new number to the call's site contacts
+// (or finds the site's contact that has it). Whoever works the call, or a desk manager.
+async function addCallContact(req, requestId, body) {
+  return inTransaction(async (conn) => {
+    const r = await lockCallForWork(conn, req, requestId, { openDone: true });
+    const name = optionalText(body?.name, "contact name", 150);
+    if (!name) throw new HttpError(400, "Enter the name of the person at this number");
+    const phone = optionalText(body?.phone, "phone number", 20);
+    if (!phone) throw new HttpError(400, "Enter the phone number");
+    const c = await saveSiteContact(conn, r.site_id, name, phone, {
+      role: optionalText(body?.role, "position", 100),
+      email: optionalText(body?.email, "email", 150),
+    });
+    if (c.created) await addHistory(conn, { requestId: r.id, event: "CONTACT_ADDED", note: `${c.name}, ${c.phone} saved to the site's contacts`, userId: req.user.id });
+    return { id: c.id, name: c.name, phone: c.phone, created: c.created };
+  });
+}
+
 async function siteContact(conn, siteId, contactId) {
   if (contactId === undefined || contactId === null || contactId === "") return null;
   const [[c]] = await conn.query("SELECT id, name, phone FROM contacts WHERE id = ? AND company_id = ?", [String(contactId), siteId]);
@@ -963,10 +1104,20 @@ async function recordCallAttempt(req, requestId, body) {
 
   return inTransaction(async (conn) => {
     const r = await lockCallForWork(conn, req, requestId);
-    const contact = await siteContact(conn, r.site_id, body?.contact_id);
-    const phone = contact ? contact.phone : optionalText(body?.phone, "phone number", 20);
-    if (!phone) throw new HttpError(400, "Choose the contact you called, or enter the phone number");
-    const contactName = contact ? contact.name : optionalText(body?.contact_name, "contact name", 150);
+    let contact = await siteContact(conn, r.site_id, body?.contact_id);
+    let savedContact = false;
+    if (!contact) {
+      // Another number: it is kept as a contact of this site (each site has its own numbers), or
+      // matched to the site's contact that already has it.
+      const typed = optionalText(body?.phone, "phone number", 20);
+      if (!typed) throw new HttpError(400, "Choose the contact you called, or enter the phone number");
+      const name = optionalText(body?.contact_name, "contact name", 150);
+      if (!name) throw new HttpError(400, "Enter the name of the person at this number");
+      contact = await saveSiteContact(conn, r.site_id, name, typed);
+      savedContact = contact.created;
+    }
+    const phone = contact.phone;
+    const contactName = contact.name;
 
     await conn.query(
       `INSERT INTO feedback_call_attempts (request_id, contact_id, contact_name, phone, outcome, called_by_user_id, called_at)
@@ -984,7 +1135,7 @@ async function recordCallAttempt(req, requestId, body) {
     const label = { ANSWERED: "Answered", NO_ANSWER: "No answer", BUSY: "Busy", WRONG_NUMBER: "Wrong number" }[outcome];
     await addHistory(conn, {
       requestId, event: "CALL_ATTEMPT", from: r.status, to: newStatus,
-      note: `${label} - ${contactName ? `${contactName}, ` : ""}${phone}${callBackAt ? ` - call back ${callBackAt.slice(0, 16)}` : ""}`,
+      note: `${label} - ${contactName ? `${contactName}, ` : ""}${phone}${callBackAt ? ` - call back ${callBackAt.slice(0, 16)}` : ""}${savedContact ? " - saved to the site's contacts" : ""}`,
       userId: req.user.id,
     });
 
@@ -995,6 +1146,8 @@ async function recordCallAttempt(req, requestId, body) {
     const settings = await getSettings(conn);
     return {
       status: newStatus,
+      contact_id: contact.id,
+      contact_saved: savedContact,
       missed_calls: Number(missedCalls),
       next_call_at: fields.next_call_at === undefined ? r.next_call_at : fields.next_call_at,
       offer_form_link: missed && Number(missedCalls) >= settings.offer_link_after_missed_calls && newStatus === "NOT_ANSWERED",
@@ -1004,9 +1157,19 @@ async function recordCallAttempt(req, requestId, body) {
 
 // Checks the answers against the active questions of the master and returns rows to store,
 // with the answer text copied. Every active required question must be answered once.
-async function cleanResponses(conn, responses, { forForm = false } = {}) {
-  if (!Array.isArray(responses) || responses.length === 0) throw new HttpError(400, "Send the answers");
+// scope = { mode: GENERAL | SERVICE | BOTH, services: the month's services }: the questions asked.
+// A required question must be answered only when it is asked; any other one can be skipped.
+/** The question mode a feedback was taken with (BOTH when not sent). */
+function questionMode(value) {
+  const m = typeof value === "string" ? value.trim().toUpperCase() : "BOTH";
+  if (!QUESTION_MODES.includes(m)) throw new HttpError(400, "Choose General, Service-based or Both questions");
+  return m;
+}
+
+async function cleanResponses(conn, responses, { forForm = false, scope = null } = {}) {
+  if (!Array.isArray(responses) || responses.length === 0) throw new HttpError(400, "Answer at least one question");
   const questions = (await listQuestions(conn)).filter((q) => !forForm || q.show_on_form);
+  const asked = scope ? questionsFor(questions, scope.mode, scope.services) : questions;
   const byId = new Map(questions.map((q) => [q.id, q]));
   const seen = new Set();
   const rows = responses.map((a) => {
@@ -1021,7 +1184,7 @@ async function cleanResponses(conn, responses, { forForm = false } = {}) {
       is_bad: o.is_bad, suggested_priority: o.is_bad ? o.suggested_priority : null,
     };
   });
-  const missing = questions.find((q) => q.is_required && !seen.has(q.id));
+  const missing = asked.find((q) => q.is_required && !seen.has(q.id));
   if (missing) throw new HttpError(400, `Answer "${missing.question_text}"`);
   return rows;
 }
@@ -1052,8 +1215,13 @@ async function saveSubmission(conn, { requestId, source, formLinkId = null, cont
 // Raises one ticket from a monthly call. input: { priority?, action, issue_summary?, visit_id?,
 // action_owner_user_id?, action_due_at?, action_note? }. suggested = priority suggested by the
 // answers (used when priority is left out). RESOLVED_ON_CALL closes the ticket at once.
+// One ticket per call: a new problem later goes on the same ticket (reopened when closed).
 async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   if (!input || typeof input !== "object") throw new HttpError(400, "Send the ticket details");
+  const [[existing]] = await conn.query("SELECT ticket_number, status FROM feedback_tickets WHERE request_id = ? ORDER BY seq LIMIT 1", [r.id]);
+  if (existing) {
+    throw new HttpError(409, `This call already has ticket ${existing.ticket_number} - ${existing.status === "CLOSED" ? "reopen it" : "work on it"} instead of raising another`);
+  }
   const action = typeof input.action === "string" ? input.action.trim().toUpperCase() : "";
   if (!ACTIONS.includes(action)) throw new HttpError(400, `Choose the action: ${ACTIONS.join(", ")}`);
   const priority = typeof input.priority === "string" && input.priority ? input.priority.trim().toUpperCase() : suggested;
@@ -1133,7 +1301,9 @@ async function saveCallFeedback(req, requestId, body) {
     const settings = await getSettings(conn);
     const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
     const startedAt = optionalDateTime(body?.started_at, "Start time");
-    const rows = await cleanResponses(conn, body?.responses);
+    const rows = await cleanResponses(conn, body?.responses, {
+      scope: { mode: questionMode(body?.question_mode), services: await servicesOfMonth(conn, r.site_id, r.month) },
+    });
     const suggested = highestPriority(rows);
     const hasBad = rows.some((x) => x.is_bad);
 
@@ -1474,7 +1644,7 @@ const RECIPIENT_TYPES = ["CUSTOMER", "OPERATIONS", "TECHNICIAN", "OTHER"];
 const NO_TICKET_TEMPLATES = ["THANK_YOU"];
 
 // POST /calls/:id/whatsapp - fills a template and returns the wa.me link the app opens.
-// Body: { template_code: FEEDBACK_SUMMARY | REVISIT_BOOKED, recipient_type, ticket_id,
+// Body: { template_code: FEEDBACK_SUMMARY | REVISIT_BOOKED | ISSUE_RESOLVED | THANK_YOU, recipient_type, ticket_id,
 //         contact_id? (customer) | user_id? (staff) | phone? }
 // The technician defaults to the ticket's technician. Recorded as OPENED: whether Send was tapped
 // in WhatsApp is not known. The form link has its own endpoint (it needs a new link).
@@ -1493,6 +1663,10 @@ async function sendWhatsapp(req, requestId, body) {
     const needsTicket = !NO_TICKET_TEMPLATES.includes(code);
     if (needsTicket && !body?.ticket_id) throw new HttpError(400, "Choose the ticket the message is about");
     const { values, ticket } = await templateValues(conn, r, needsTicket ? String(body.ticket_id) : null, req.user.id);
+    // Only true messages: "re-visit booked" once a visit is linked, "issue resolved" once closed.
+    if (code === "REVISIT_BOOKED" && !ticket.revisit_visit_id) throw new HttpError(400, `Book the re-visit on ${ticket.ticket_number} first`);
+    if (code === "ISSUE_RESOLVED" && ticket.status !== "CLOSED") throw new HttpError(400, `${ticket.ticket_number} isn't closed yet`);
+    if (code === "TICKET_RAISED" && ticket.status === "CLOSED") throw new HttpError(400, `${ticket.ticket_number} is already closed`);
 
     let phone = null;
     let recipientUserId = null;
@@ -1529,8 +1703,10 @@ async function sendWhatsapp(req, requestId, body) {
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 
 function formUrl(token) {
-  const base = String(process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  let base = String(process.env.FRONTEND_URL || "").trim().replace(/\/+$/, "");
   if (!base) throw new Error("FRONTEND_URL is not set - the feedback form link can't be made");
+  // A full https:// address, so WhatsApp shows the link as one the customer can tap.
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
   return `${base}/feedback/${token}`;
 }
 
@@ -1607,11 +1783,14 @@ async function getPublicForm(token) {
     "SELECT co.name AS customer, s.name AS site FROM companies co JOIN sites s ON s.id = ? WHERE co.id = ?",
     [link.site_id, link.company_id]
   );
-  const questions = (await listQuestions()).filter((q) => q.show_on_form);
+  const questions = questionsFor((await listQuestions()).filter((q) => q.show_on_form), "BOTH", await servicesOfMonth(pool, link.site_id, link.month));
   const settings = await getSettings();
+  // The contact the link was sent to: the form starts with their name (they can change it).
+  const [[contact]] = link.contact_id ? await pool.query("SELECT name FROM contacts WHERE id = ?", [link.contact_id]) : [[null]];
   return {
     customer: names?.customer || null,
     site: names?.site || null,
+    contact_name: contact?.name || null,
     month: link.month,
     month_label: monthLabel(link.month),
     other_text_enabled: settings.other_text_enabled,
@@ -1630,7 +1809,11 @@ async function submitPublicForm(token, body) {
     const link = await formLinkByToken(conn, token, { lock: true });
     const [[r]] = await conn.query("SELECT id, status, collector_user_id FROM feedback_requests WHERE id = ? FOR UPDATE", [link.request_id]);
     const settings = await getSettings(conn);
-    const rows = await cleanResponses(conn, body?.responses, { forForm: true });
+    const [[formCall]] = await conn.query("SELECT site_id, DATE_FORMAT(period_month, '%Y-%m') AS month FROM feedback_requests WHERE id = ?", [link.request_id]);
+    const rows = await cleanResponses(conn, body?.responses, {
+      forForm: true,
+      scope: { mode: "BOTH", services: await servicesOfMonth(conn, formCall.site_id, formCall.month) },
+    });
     let name = optionalText(body?.name, "name", 150);
     if (!name && link.contact_id) {
       const [[c]] = await conn.query("SELECT name FROM contacts WHERE id = ?", [link.contact_id]);
@@ -1755,32 +1938,115 @@ async function updateTicket(req, id, body) {
   return out.t.id;
 }
 
-// POST /tickets/:id/close - Body: { row_version, close_note? }
+// The follow-up call is due: the ticket is open and the technician completed its re-visit. Only
+// "Other" (no technician visit) can be followed up at any time. revisitStatus = the re-visit's status.
+function followUpDue(t, revisitStatus) {
+  if (t.status !== "ACTION_PENDING") return false;
+  return t.action === "OTHER" || (Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
+}
+
+// POST /tickets/:id/follow-up - the call back to the customer after the work, on the ticket's call
+// page with the same questions. Body as saving call feedback: { contact_id?, spoke_with_name,
+// responses: [{ question_id, option_id }], other_feedback?, started_at?, close_anyway? }.
+// All answers good = the customer is satisfied: the ticket closes (only this closes a ticket).
+// A bad answer = the same ticket stays open with these answers as its problem, and the re-visit is
+// unlinked so another one is booked on it - unless close_anyway, which closes it all the same.
+// Whoever works the call, or a desk manager.
+async function recordFollowUp(req, id, body) {
+  const [[found]] = await pool.query("SELECT request_id FROM feedback_tickets WHERE id = ? OR ticket_number = ?", [id, id]);
+  if (!found) throw new HttpError(404, "Feedback ticket not found");
+  return inTransaction(async (conn) => {
+    const r = await lockCallForWork(conn, req, found.request_id, { openDone: true });
+    const [[t]] = await conn.query(
+      `SELECT t.*, rv.status AS revisit_status, rj.code AS revisit_job_code
+       FROM feedback_tickets t LEFT JOIN job_visits rv ON rv.id = t.revisit_visit_id LEFT JOIN jobs rj ON rj.id = rv.job_id
+       WHERE t.id = ? OR t.ticket_number = ? FOR UPDATE`,
+      [id, id]
+    );
+    if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is already closed`);
+    if (!followUpDue(t, t.revisit_status)) throw new HttpError(400, "Call the customer back once the re-visit is completed");
+
+    const contact = await siteContact(conn, r.site_id, body?.contact_id);
+    const spokeWith = optionalText(body?.spoke_with_name, "name", 150) || contact?.name || null;
+    if (!spokeWith) throw new HttpError(400, "Choose who gave the feedback");
+    const settings = await getSettings(conn);
+    const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
+    const startedAt = optionalDateTime(body?.started_at, "Start time");
+    const rows = await cleanResponses(conn, body?.responses, {
+      scope: { mode: questionMode(body?.question_mode), services: await servicesOfMonth(conn, r.site_id, r.month) },
+    });
+    const bad = rows.filter((x) => x.is_bad);
+
+    const submission = await saveSubmission(conn, {
+      requestId: r.id, source: "CALL", contactId: contact?.id ?? null, spokeWith, collectedBy: req.user.id, otherFeedback, startedAt, rows,
+    });
+    await bumpCall(conn, r.id, { latest_submission_id: submission.id });
+
+    const resolved = bad.length === 0;
+    // close_anyway: the answers still show an issue but the ticket is closed (e.g. after several re-visits).
+    const closeAnyway = !resolved && body?.close_anyway === true;
+    if (resolved || closeAnyway) {
+      const closeNote = resolved
+        ? `Customer confirmed it is resolved on the follow-up call with ${spokeWith}`
+        : `Closed on the follow-up call with ${spokeWith}, although ${bad.length} answer(s) still show an issue`;
+      await conn.query(
+        `UPDATE feedback_tickets SET status = 'CLOSED', closed_by = ?, closed_at = NOW(), close_note = ?, submission_id = ?, row_version = row_version + 1 WHERE id = ?`,
+        [req.user.id, closeNote.slice(0, 500), resolved ? t.submission_id : submission.id, t.id]
+      );
+    } else {
+      await conn.query(
+        "UPDATE feedback_tickets SET submission_id = ?, revisit_visit_id = NULL, row_version = row_version + 1 WHERE id = ?",
+        [submission.id, t.id]
+      );
+    }
+    const unlinked = !resolved && !closeAnyway && t.revisit_job_code ? ` · re-visit Job ${t.revisit_job_code} didn't fix it` : "";
+    await addHistory(conn, {
+      requestId: r.id, ticketId: t.id, event: "FOLLOWUP_CALL", from: "ACTION_PENDING", to: resolved || closeAnyway ? "CLOSED" : "ACTION_PENDING",
+      note: `${resolved ? "Resolved" : closeAnyway ? "Closed with issues" : "Not resolved"} · ${spokeWith}${resolved ? " - all answers good" : ` - ${bad.length} answer(s) show an issue`}${unlinked}`,
+      userId: req.user.id,
+    });
+    return { ticket_id: t.id, ticket_number: t.ticket_number, resolved, closed: resolved || closeAnyway };
+  });
+}
+
+// POST /tickets/:id/close - Body: { row_version, close_note? }. A ticket closes only when the
+// customer confirms on the follow-up call (recordFollowUp), so this refuses.
 async function closeTicket(req, id, body) {
   return inTransaction(async (conn) => {
     const t = await lockTicket(conn, id, body?.row_version);
     if (t.status === "CLOSED") throw new HttpError(409, "The ticket is already closed");
-    const note = optionalText(body?.close_note, "closing note", 500);
-    await conn.query(
-      `UPDATE feedback_tickets SET status = 'CLOSED', closed_by = ?, closed_at = NOW(), close_note = ?, row_version = row_version + 1 WHERE id = ?`,
-      [req.user.id, note, t.id]
-    );
-    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "CLOSED", from: "ACTION_PENDING", to: "CLOSED", note: note || "Closed", userId: req.user.id });
-    return t.id;
+    throw new HttpError(400, "Call the customer back: the ticket closes when they confirm the issue is resolved");
   });
 }
 
 // POST /tickets/:id/reopen - Body: { row_version, note } (why it is reopened).
+// DELETE /tickets/:id - Body: { note? } (why). For a ticket raised by mistake: desk managers and
+// whoever raised it. The ticket's own history goes with it; the call's history keeps a line saying
+// it was deleted, and WhatsApp messages sent for it stay on the call.
+async function deleteTicket(req, id, body) {
+  return inTransaction(async (conn) => {
+    const [[t]] = await conn.query("SELECT id, request_id, ticket_number, raised_by FROM feedback_tickets WHERE id = ? OR ticket_number = ? FOR UPDATE", [id, id]);
+    if (!t || (!hasPerm(req, "FEEDBACK_MANAGE") && Number(t.raised_by) !== Number(req.user.id))) throw new HttpError(404, "Feedback ticket not found");
+    const note = optionalText(body?.note, "note", 400);
+    await conn.query("DELETE FROM feedback_tickets WHERE id = ?", [t.id]);
+    await addHistory(conn, { requestId: t.request_id, event: "TICKET_DELETED", note: `${t.ticket_number} deleted${note ? ` - ${note}` : ""}`, userId: req.user.id });
+    return { request_id: t.request_id, ticket_number: t.ticket_number };
+  });
+}
+
 async function reopenTicket(req, id, body) {
   return inTransaction(async (conn) => {
     const t = await lockTicket(conn, id, body?.row_version);
+    // Desk managers, and whoever raised it (the customer has the problem again on their call).
+    if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(t.raised_by) !== Number(req.user.id)) throw new HttpError(404, "Feedback ticket not found");
     if (t.status !== "CLOSED") throw new HttpError(409, "The ticket is not closed");
     const note = optionalText(body?.note, "note", 500);
     if (!note) throw new HttpError(400, "Say why the ticket is reopened");
-    // Reopened as a follow-up: "resolved on call" no longer fits, so it goes to Operations.
-    const action = t.action === "RESOLVED_ON_CALL" ? "ESCALATE_OPERATIONS" : t.action;
+    // The problem is back, so the earlier re-visit no longer counts: it is unlinked and a new one is
+    // booked on the same ticket. "Resolved on call" no longer fits, so it becomes "Book a re-visit".
+    const action = t.action === "RESOLVED_ON_CALL" ? "SCHEDULE_REVISIT" : t.action;
     await conn.query(
-      `UPDATE feedback_tickets SET status = 'ACTION_PENDING', action = ?, closed_by = NULL, closed_at = NULL, close_note = NULL,
+      `UPDATE feedback_tickets SET status = 'ACTION_PENDING', action = ?, revisit_visit_id = NULL, closed_by = NULL, closed_at = NULL, close_note = NULL,
               row_version = row_version + 1 WHERE id = ?`,
       [action, t.id]
     );
@@ -2035,6 +2301,10 @@ module.exports = {
   submitPublicForm,
   updateTicket,
   closeTicket,
+  recordFollowUp,
+  deleteTicket,
+  addCallContact,
+  updateCallContact,
   reopenTicket,
   reassignCall,
   myFeedbackAccess,

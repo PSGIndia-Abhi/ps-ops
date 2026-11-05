@@ -15,7 +15,7 @@ export default function RaiseTicketModal({ title, visits, suggested, defaultSumm
   const [form, setForm] = useState({
     issue_summary: defaultSummary || "",
     priority: suggested || "MEDIUM",
-    action: "ESCALATE_OPERATIONS",
+    action: "SCHEDULE_REVISIT", // the visit itself is booked on the ticket page
     due: "",
     action_note: "",
   });
@@ -99,8 +99,8 @@ export default function RaiseTicketModal({ title, visits, suggested, defaultSumm
     >
       <ErrorBox error={error} />
       <label className="fb-field" htmlFor="fb-rt-summary">
-        What is the problem?
-        <textarea id="fb-rt-summary" className="fb-textarea" rows={3} maxLength={500} value={form.issue_summary} onChange={set("issue_summary")} />
+        What is the problem? (in the customer's words)
+        <textarea id="fb-rt-summary" className="fb-textarea" rows={3} maxLength={500} placeholder="The bad answers are attached to the ticket already" value={form.issue_summary} onChange={set("issue_summary")} />
       </label>
 
       <div className="fb-form-grid">

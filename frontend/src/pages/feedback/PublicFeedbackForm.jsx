@@ -1,45 +1,47 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { FiCheck, FiClock, FiFrown, FiLock, FiMapPin, FiMeh, FiSmile } from "react-icons/fi";
+import { FiArrowRight, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiEdit2, FiLock, FiMapPin, FiMessageSquare, FiMinusCircle, FiPhoneCall, FiUser, FiXCircle } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import { getPublicForm, submitPublicForm } from "./feedbackApi";
 import "./feedback.css";
 
-// A face for common answer words, so the form reads at a glance. Labels come from Masters ›
-// Questions, so anything not recognised simply has no icon.
+// The tone of common answer words: good (green), so-so (amber) or bad (red), each with an icon.
+// Labels come from Masters › Questions, so anything not recognised is shown in the brand blue.
 const GOOD = ["yes", "good", "very good", "excellent", "satisfied", "very satisfied", "on time", "definitely"];
 const OK = ["partly", "maybe", "average", "okay", "ok", "somewhat", "not sure", "neutral"];
 const BAD = ["no", "poor", "bad", "very poor", "not satisfied", "late", "never"];
-function faceFor(label) {
+function toneOf(label) {
   const l = String(label || "").trim().toLowerCase();
-  if (GOOD.includes(l)) return { Icon: FiSmile, tone: "good" };
-  if (OK.includes(l)) return { Icon: FiMeh, tone: "ok" };
-  if (BAD.includes(l)) return { Icon: FiFrown, tone: "bad" };
-  return null;
+  if (GOOD.includes(l)) return { tone: "good", Icon: FiCheckCircle };
+  if (OK.includes(l)) return { tone: "ok", Icon: FiMinusCircle };
+  if (BAD.includes(l)) return { tone: "bad", Icon: FiXCircle };
+  return { tone: "plain", Icon: FiCheckCircle };
 }
 
-function Header({ form }) {
+function Hero({ form, small }) {
   return (
-    <div className="fb-public-hero">
-      <div className="fb-public-logo">
+    <header className={`fb-pf-hero ${small ? "is-small" : ""}`}>
+      <span className="fb-pf-logo">
         <img src={logo} alt="BestServe" />
-      </div>
+      </span>
       {form && (
         <>
-          <p className="fb-public-hello">Hello{form.customer ? `, ${form.customer}` : ""}</p>
+          <p className="fb-pf-eyebrow">Customer feedback</p>
           <h1>How was our service?</h1>
-          <p className="fb-public-lead">Your answers take less than a minute and help us serve you better.</p>
-          <div className="fb-public-chips">
+          <p className="fb-pf-lead">Dear {form.customer || "Customer"}, your feedback helps us keep improving. It takes about a minute.</p>
+          <div className="fb-pf-tags">
             {form.site && (
               <span>
                 <FiMapPin aria-hidden="true" /> {form.site}
               </span>
             )}
-            <span>Services in {form.month_label}</span>
+            <span>
+              <FiCalendar aria-hidden="true" /> {form.month_label}
+            </span>
           </div>
         </>
       )}
-    </div>
+    </header>
   );
 }
 
@@ -59,7 +61,11 @@ export default function PublicFeedbackForm() {
 
   useEffect(() => {
     getPublicForm(token)
-      .then(setForm)
+      .then((f) => {
+        setForm(f);
+        // starts as the name of the person the link was sent to; they can change it
+        setName((v) => v || f.contact_name || "");
+      })
       .catch((err) => setClosed(err.status === 404 || err.status === 410 ? err.message : "We couldn't open the form. Please check your internet connection and open the link again."));
   }, [token]);
 
@@ -103,79 +109,108 @@ export default function PublicFeedbackForm() {
 
   if (done || closed) {
     return (
-      <div className="fb-public">
-        <div className="fb-public-card">
-          <Header form={null} />
-          <div className="fb-public-done">
+      <div className="fb-pf">
+        <div className="fb-pf-card">
+          <Hero form={null} small />
+          <div className="fb-pf-done">
             {done ? (
               <>
-                <div className="fb-public-icon is-ok">
+                <span className="fb-pf-done-icon is-ok">
                   <FiCheck />
+                </span>
+                <h2>Thank you{name.trim() ? `, ${name.trim()}` : ""}!</h2>
+                <p>Your feedback has been received by the BestServe team.</p>
+                <div className="fb-pf-next">
+                  <b>What happens next</b>
+                  <div>
+                    <span className="fb-pf-next-icon">
+                      <FiMessageSquare aria-hidden="true" />
+                    </span>
+                    <span>Our service team reviews your answers.</span>
+                  </div>
+                  <div>
+                    <span className="fb-pf-next-icon">
+                      <FiPhoneCall aria-hidden="true" />
+                    </span>
+                    <span>If you reported a problem, we will call you to put it right.</span>
+                  </div>
                 </div>
-                <h1>Thank you{name.trim() ? `, ${name.trim()}` : ""}!</h1>
-                <p>Your feedback has reached the BestServe team.</p>
-                <p className="fb-muted">If you told us about a problem, our team will contact you soon to put it right.</p>
               </>
             ) : (
               <>
-                <div className="fb-public-icon is-off">
+                <span className="fb-pf-done-icon is-off">
                   <FiClock />
-                </div>
-                <h1>This link can't be used</h1>
+                </span>
+                <h2>This link is no longer available</h2>
                 <p>{closed}</p>
-                <p className="fb-muted">If you still want to share feedback, please reply to our WhatsApp message.</p>
+                <p className="fb-pf-soft">To share feedback, please reply to our WhatsApp message.</p>
               </>
             )}
           </div>
-          <p className="fb-public-foot">BestServe Customer Care</p>
+          <p className="fb-pf-foot">BestServe Customer Care</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fb-public">
-      <div className="fb-public-card">
-        <Header form={form} />
+    <div className="fb-pf">
+      <div className="fb-pf-card">
+        <Hero form={form} />
 
         {!form ? (
-          <div className="fb-state">Opening the form…</div>
+          <div className="fb-pf-loading">Loading the form…</div>
         ) : (
-          <form className="fb-public-body" onSubmit={send} noValidate>
-            <div className="fb-public-progress" aria-live="polite">
-              <div className="fb-public-progress-text">
-                <span>
-                  {answered} of {total} answered
-                </span>
-                {answered === total && total > 0 && <span className="fb-public-ready">All done</span>}
+          <form className="fb-pf-body" onSubmit={send} noValidate>
+            {/* stays at the top while scrolling */}
+            <div className="fb-pf-progress" aria-live="polite">
+              <div className="fb-pf-progress-top">
+                <b>{answered === total && total > 0 ? "All questions answered" : `${answered} of ${total} answered`}</b>
+                <span>{total ? Math.round((answered / total) * 100) : 0}%</span>
               </div>
-              <div className="fb-public-progress-bar">
-                <span style={{ width: `${total ? (answered / total) * 100 : 0}%` }} />
+              <div className="fb-pf-steps" aria-hidden="true">
+                {form.questions.map((q) => (
+                  <i key={q.id} className={answers[q.id] ? "is-done" : ""} />
+                ))}
               </div>
             </div>
 
+            <div className="fb-pf-q fb-pf-who">
+              <label className="fb-pf-field">
+                <span>
+                  <FiUser aria-hidden="true" /> Your name
+                </span>
+                <span className="fb-pf-input-icon">
+                  <input maxLength={150} placeholder="Enter your name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+                  <FiEdit2 aria-hidden="true" />
+                </span>
+                <small className="fb-pf-hint">You can change it if someone else is filling in the form.</small>
+              </label>
+            </div>
+
             {form.questions.map((q, n) => (
-              <fieldset key={q.id} id={`fb-pq-${q.id}`} className={`fb-public-qcard ${answers[q.id] ? "is-done" : ""} ${missingId === q.id ? "is-missing" : ""}`}>
-                <legend className="fb-public-q-t">
-                  <span className="fb-public-qno">{answers[q.id] ? <FiCheck aria-hidden="true" /> : n + 1}</span>
+              <fieldset key={q.id} id={`fb-pq-${q.id}`} className={`fb-pf-q ${answers[q.id] ? "is-done" : ""} ${missingId === q.id ? "is-missing" : ""}`}>
+                <legend className="fb-pf-q-t">
+                  <span className="fb-pf-qno">{answers[q.id] ? <FiCheck aria-hidden="true" /> : n + 1}</span>
                   <span>
-                    {q.question_text} {q.is_required && <span className="fb-req" aria-label="required">*</span>}
+                    {q.question_text}
+                    {q.is_required ? (
+                      <span className="fb-pf-req" aria-label="required">
+                        {" "}
+                        *
+                      </span>
+                    ) : (
+                      <span className="fb-pf-optional">Optional</span>
+                    )}
                   </span>
                 </legend>
-                <div className={`fb-public-opts ${q.options.length <= 3 ? "is-row" : ""}`}>
+                <div className="fb-pf-opts" role="radiogroup" aria-label={q.question_text}>
                   {q.options.map((o) => {
-                    const face = faceFor(o.label);
+                    const { tone, Icon } = toneOf(o.label);
                     const on = answers[q.id] === o.id;
                     return (
-                      <button
-                        key={o.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={on}
-                        className={`fb-public-opt ${on ? "is-on" : ""} ${face ? `is-${face.tone}` : ""}`}
-                        onClick={() => pick(q.id, o.id)}
-                      >
-                        {face && <face.Icon className="fb-public-face" aria-hidden="true" />}
+                      <button key={o.id} type="button" role="radio" aria-checked={on} className={`fb-pf-opt is-${tone} ${on ? "is-on" : ""}`} onClick={() => pick(q.id, o.id)}>
+                        <Icon className="fb-pf-opt-icon" aria-hidden="true" />
                         <span>{o.label}</span>
                       </button>
                     );
@@ -184,38 +219,41 @@ export default function PublicFeedbackForm() {
               </fieldset>
             ))}
 
-            {form.other_text_enabled && (
-              <label className="fb-public-qcard fb-public-extra">
-                <span className="fb-public-q-t">
-                  <span>
-                    Anything else you'd like to tell us? <span className="fb-muted fb-small">(optional)</span>
-                  </span>
+            <div className="fb-pf-q fb-pf-extra">
+              <div className="fb-pf-extra-head">
+                <span className="fb-pf-extra-icon" aria-hidden="true">
+                  <FiMessageSquare />
                 </span>
-                <textarea className="fb-textarea" rows={3} maxLength={2000} placeholder="Type here…" value={other} onChange={(e) => setOther(e.target.value)} />
-              </label>
-            )}
-            <label className="fb-public-qcard fb-public-extra">
-              <span className="fb-public-q-t">
                 <span>
-                  Your name <span className="fb-muted fb-small">(optional)</span>
+                  <b>Anything else?</b>
+                  <small>Additional comments - optional</small>
                 </span>
-              </span>
-              <input className="fb-input" maxLength={150} placeholder="So we know who to thank" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
-            </label>
+              </div>
+              {form.other_text_enabled && (
+                <label className="fb-pf-field">
+                  <textarea rows={3} maxLength={2000} placeholder="Tell us more about your experience" value={other} onChange={(e) => setOther(e.target.value)} />
+                </label>
+              )}
+            </div>
 
-            <p className="fb-public-privacy">
-              <FiLock aria-hidden="true" /> Your answers go only to the BestServe service team.
-            </p>
-
-            <div className="fb-public-submitbar">
+            <div className="fb-pf-submitbar">
               {error && (
-                <div className="fb-alert fb-alert-danger" role="alert">
-                  <span>{error}</span>
+                <div className="fb-pf-error" role="alert">
+                  {error}
                 </div>
               )}
-              <button type="submit" className="fb-btn fb-btn-primary fb-public-submit" disabled={sending}>
-                {sending ? "Sending…" : "Send feedback"}
+              <button type="submit" className="fb-pf-submit" disabled={sending}>
+                {sending ? (
+                  "Submitting…"
+                ) : (
+                  <>
+                    Submit feedback <FiArrowRight aria-hidden="true" />
+                  </>
+                )}
               </button>
+              <p className="fb-pf-privacy">
+                <FiLock aria-hidden="true" /> Your responses are shared only with the BestServe service team.
+              </p>
             </div>
           </form>
         )}

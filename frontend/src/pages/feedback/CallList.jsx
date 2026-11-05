@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { formatDate, formatDateTime, formatDay, isPast, listCalls, monthLabel, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
+import { formatDate, formatDay, isPast, listCalls, monthLabel, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
 import { CallStatusChip, Card, Empty, ErrorBox, Loading, PageHead, ResultChip, Segmented, Switch, Tiles } from "./ui";
 
 // The Feedback Desk home (Dashboard): every site with a service (assigned visit up to today), one row per site and
 // month, newest month first. Picking a month shows only that month.
+// Filtered by status; TICKET_OPEN = feedback taken but its ticket is not closed yet.
 const FILTERS = [
-  { value: "OPEN", label: "Open" },
+  { value: "ALL", label: "All" },
   { value: "TO_CALL", label: "To call" },
   { value: "NOT_ANSWERED", label: "Not answered" },
   { value: "FORM_SENT", label: "Form sent" },
   { value: "FORM_RECEIVED", label: "Form received" },
-  { value: "DONE", label: "Done" },
-  { value: "ALL", label: "All" },
+  { value: "TICKET_OPEN", label: "Ticket open" },
+  { value: "DONE", label: "Completed" },
 ];
 const PAGE_SIZE = 50;
 
@@ -74,21 +75,6 @@ function PeriodFilter({ mode, month, from, to, onChange }) {
   );
 }
 
-function NextStep({ row }) {
-  if (row.status === "FORM_RECEIVED") return <span className="fb-strong" style={{ color: "#5b21b6" }}>Customer sent the form · review it</span>;
-  if (row.status === "DONE") return <span className="fb-muted">—</span>;
-  if (row.next_call_at) {
-    return isPast(row.next_call_at) ? (
-      <span className="fb-danger-text">Call back due · {formatDateTime(row.next_call_at)}</span>
-    ) : (
-      <span>Call back · {formatDateTime(row.next_call_at)}</span>
-    );
-  }
-  if (row.status === "FORM_SENT") return <span>Waiting for the customer's form</span>;
-  if (row.status === "NOT_ANSWERED") return <span>Try again</span>;
-  return <span className="fb-muted">—</span>;
-}
-
 export default function CallList() {
   const navigate = useNavigate();
   const { can, userId } = useFeedbackAccess();
@@ -99,7 +85,7 @@ export default function CallList() {
   const to = params.get("to") || "";
   const mode = from || to ? "range" : month ? "month" : "all";
   const periodText = mode === "month" ? monthLabel(month) : mode === "range" ? (from && from === to ? formatDate(from) : `${from ? formatDate(from) : "the start"} – ${to ? formatDate(to) : "today"}`) : "";
-  const status = params.get("status") || "OPEN";
+  const status = params.get("status") || "ALL";
   const mine = params.get("mine") === "1";
   const page = Number(params.get("page")) || 1;
   const [search, setSearch] = useState(params.get("q") || "");
@@ -176,28 +162,19 @@ export default function CallList() {
 
   return (
     <>
-      <PageHead
-        crumb="Feedback Desk › Dashboard"
-        title="Dashboard"
-        sub={
-          mode === "all"
-            ? "All customers with a service, newest month first. Each site is called once per month. Click a row to see the customer's details."
-            : mode === "month"
-              ? `Customers with a service in ${periodText}. Each site is called once for the month. Click a row to see the customer's details.`
-              : `Customers with a service from ${periodText}. Each row is that site's call for the month. Click a row to see the customer's details.`
-        }
-      />
+      <PageHead title="Dashboard" />
 
       <PeriodFilter mode={mode} month={month} from={from} to={to} onChange={setParam} />
 
       <Tiles
         items={[
-          { label: mode === "month" ? "Sites this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} done · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
+          { label: mode === "month" ? "Sites this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
           tile("TO_CALL", "To call", "muted", FiPhoneCall),
           tile("NOT_ANSWERED", "Not answered", "warn", FiPhoneMissed, dueNow ? `${dueNow} call-back due now` : undefined),
           tile("FORM_SENT", "Form sent", "info", FiSend),
           tile("FORM_RECEIVED", "Form received", "violet", FiInbox, counts.FORM_RECEIVED ? "Needs your review" : undefined),
-          tile("DONE", "Done", "ok", FiCheckCircle),
+          tile("TICKET_OPEN", "Ticket open", "danger", FiAlertTriangle, counts.TICKET_OPEN ? "Waiting for the ticket" : undefined),
+          tile("DONE", "Completed", "ok", FiCheckCircle),
         ]}
       />
 
@@ -207,7 +184,7 @@ export default function CallList() {
         <div className="fb-filters">
           <Segmented
             label="Status"
-            options={FILTERS.map((f) => (f.value === "OPEN" ? { ...f, label: `Open (${openCount})` } : f))}
+            options={FILTERS}
             value={status}
             onChange={(v) => setParam({ status: v })}
           />
@@ -236,13 +213,12 @@ export default function CallList() {
               <thead>
                 <tr>
                   {mode !== "month" && <th>Month</th>}
-                  <th>Customer · Site</th>
+                  <th>Site · Customer</th>
                   <th>Visits</th>
                   <th>Last visit</th>
                   <th>Services</th>
                   <th>Status</th>
                   <th>Collector</th>
-                  <th>Next step</th>
                   <th aria-label="Action" />
                 </tr>
               </thead>
@@ -253,12 +229,13 @@ export default function CallList() {
                   return (
                     <tr key={`${row.site.id}|${row.month}`} className="is-link" onClick={() => setDetails({ siteId: row.site.id, month: row.month })} title="Show the customer's details">
                       {mode !== "month" && <td style={{ whiteSpace: "nowrap" }} className="fb-strong">{monthLabel(row.month)}</td>}
+                      {/* One row per site: a customer with several sites has a row for each. */}
                       <td>
-                        <div className="fb-strong">{row.customer.name}</div>
-                        <div className="fb-small fb-muted">
+                        <div className="fb-strong">
                           {row.site.name}
-                          {row.site.city ? ` · ${row.site.city}` : ""}
+                          {row.site.city ? <span className="fb-muted" style={{ fontWeight: 400 }}> · {row.site.city}</span> : null}
                         </div>
+                        <div className="fb-small fb-muted">{row.customer.name}</div>
                       </td>
                       <td className="fb-num">{row.visit_count}</td>
                       <td style={{ whiteSpace: "nowrap" }}>{formatDay(row.last_visit_date)}</td>
@@ -272,9 +249,6 @@ export default function CallList() {
                         </div>
                       </td>
                       <td>{row.collector?.name || <span className="fb-muted">—</span>}</td>
-                      <td className="fb-small">
-                        <NextStep row={row} />
-                      </td>
                       <td className="fb-right" onClick={(e) => e.stopPropagation()}>
                         {row.request_id ? (
                           <button

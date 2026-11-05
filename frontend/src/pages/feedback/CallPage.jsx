@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { FiAlertTriangle, FiCheck, FiMail, FiPhone } from "react-icons/fi";
+import { FiCheck, FiEdit2, FiMail } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -22,19 +22,22 @@ import {
   getEmailTemplates,
   openCustomerEmail,
   pendingTab,
+  questionsFor,
   prepareWhatsapp,
   raiseTicket,
+  addCallContact,
+  updateCallContact,
   recordAttempt,
+  recordFollowUp,
   saveCallFeedback,
   sendFormLink,
   suggestedPriority,
-  telLink,
 } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import useMe from "../../hooks/useMe";
 import RaiseTicketModal from "./RaiseTicketModal";
 import { problemNote } from "./feedbackApi";
-import { AnswerButtons, CallStatusChip, Card, Chip, ErrorBox, Loading, Modal, PageHead, PriorityChip, ResultChip, Segmented, Steps, TicketStatusChip, Timeline } from "./ui";
+import { AnswerButtons, CallButton, CallStatusChip, Card, Chip, CustomerCard, ErrorBox, FeedbackRound, Loading, Modal, PageHead, PriorityChip, QuestionModePicker, QuestionProgress, ResultChip, Segmented, Steps, TicketStatusChip, Timeline, Toast } from "./ui";
 
 const OTHER = "other";
 
@@ -45,40 +48,14 @@ function nowStamp() {
 }
 
 /** "Q? Answer; Q? Answer" + the customer's own words - the default ticket text. */
+// The default "What is the problem?" text: the customer's own words. The bad answers are kept with
+// the ticket's feedback and shown as a table, so they aren't repeated in the text.
 function issueText(responses, other) {
-  const bad = responses.filter((r) => r.is_bad).map((r) => `${r.question} ${r.answer}`);
-  return [...bad, other ? `"${other}"` : null].filter(Boolean).join("; ").slice(0, 500);
+  return (other || "").slice(0, 500);
 }
 
-function SubmissionAnswers({ submission }) {
-  return (
-    <div className="fb-stack" style={{ gap: 10 }}>
-      <div className="fb-table-wrap" style={{ border: "1px solid #eef0f3", borderRadius: 10 }}>
-        <table className="fb-table">
-          <tbody>
-            {submission.responses.map((r) => (
-              <tr key={r.question_id}>
-                <td style={{ width: "58%" }}>{r.question}</td>
-                <td>
-                  <div className="fb-row" style={{ gap: 6 }}>
-                    <Chip tone={r.is_bad ? "danger" : "ok"}>{r.answer}</Chip>
-                    {r.is_bad && <PriorityChip priority={r.suggested_priority} />}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {submission.other_feedback && (
-              <tr>
-                <td>Other feedback</td>
-                <td>“{submission.other_feedback}”</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+/** The digits of a phone number, at most 10 (the field takes a 10-digit mobile number). */
+const tenDigits = (v) => String(v || "").replace(/\D/g, "").slice(0, 10);
 
 export default function CallPage() {
   const { id } = useParams();
@@ -91,16 +68,23 @@ export default function CallPage() {
   const [people, setPeople] = useState({ owners: [], collectors: [] });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(null);
+  const clearNotice = useCallback(() => setNotice(null), []);
+  const [editing, setEditing] = useState(null); // { id, name, phone, role, email } - a contact being corrected
 
   // call result
   const [contactKey, setContactKey] = useState("");
   const [otherPhone, setOtherPhone] = useState("");
   const [otherName, setOtherName] = useState("");
+  const [otherRole, setOtherRole] = useState(""); // position, saved as contacts.role
+  const [otherEmail, setOtherEmail] = useState("");
   const [outcome, setOutcome] = useState(null); // null = show the last saved result
   const [savingAttempt, setSavingAttempt] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
 
   // feedback
   const [answers, setAnswers] = useState({});
+  // Which questions to ask: GENERAL, SERVICE (for the month's services) or BOTH.
+  const [qMode, setQMode] = useState("BOTH");
   const [spokeWith, setSpokeWith] = useState("");
   const [other, setOther] = useState("");
   const [startedAt, setStartedAt] = useState(null);
@@ -112,6 +96,7 @@ export default function CallPage() {
   const { user } = useMe();
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [visitFilter, setVisitFilter] = useState("");
+  const [ticketWaContact, setTicketWaContact] = useState(""); // "" = the default contact
 
   const load = useCallback(() => {
     return getCall(id)
@@ -139,6 +124,10 @@ export default function CallPage() {
   }, [load]);
 
   const contact = call?.contacts.find((c) => c.id === contactKey) || null;
+  // "Spoke with" starts as the picked contact's name; it can be edited.
+  useEffect(() => {
+    if (contact?.name) setSpokeWith(contact.name);
+  }, [contact?.id, contact?.name]);
   // The last saved call result stays selected; Save is on only after it is changed (or a new person is called).
   const savedAttempt = call?.call_attempts?.[0] || null;
   const shownOutcome = outcome ?? savedAttempt?.outcome ?? "ANSWERED";
@@ -150,20 +139,40 @@ export default function CallPage() {
   const canWork = Boolean(call) && call.status !== "DONE" && (mine || can("FEEDBACK_MANAGE"));
   const canRaiseLater = Boolean(call?.submissions?.length) && (mine || can("FEEDBACK_MANAGE"));
   const latest = call?.submissions?.find((s) => s.is_latest) || call?.submissions?.[0] || null;
+  const firstTicket = call?.tickets?.[0] || null; // a call has one ticket
+  // Several contacts can be marked primary; only the first is shown as Primary.
+  const primaryId = call?.contacts?.find((c) => c.is_primary)?.id;
+  // The ticket's work is done: call the customer back with the same questions (closes it when all good).
+  const followUpTicket = call?.tickets?.find((t) => t.follow_up_due) || null;
+  const canFollowUp = Boolean(followUpTicket) && (mine || can("FEEDBACK_MANAGE"));
+  // Feedback given after the ticket was raised = the follow-up calls (oldest first); before = the first call.
+  const ticketAt = firstTicket ? new Date(firstTicket.created_at).getTime() : Infinity;
+  const bySubmitted = [...(call?.submissions || [])].sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
+  const followUpSubs = bySubmitted.filter((s) => new Date(s.submitted_at).getTime() > ticketAt);
+  const firstFeedback = bySubmitted.filter((s) => new Date(s.submitted_at).getTime() <= ticketAt).pop() || null;
 
-  // answers as response rows with the master's flags, for the warning and the ticket text
+  // The services the site had this month, and the questions asked for the picked mode.
+  const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter(Boolean))], [call]);
+  const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
+  const modeCounts = useMemo(
+    () => ({ GENERAL: questionsFor(questions, "GENERAL", monthServices).length, SERVICE: questionsFor(questions, "SERVICE", monthServices).length, BOTH: questionsFor(questions, "BOTH", monthServices).length }),
+    [questions, monthServices],
+  );
+
+  // answers to the asked questions as response rows with the master's flags (for the ticket)
   const chosen = useMemo(
     () =>
-      questions
+      asked
         .filter((q) => answers[q.id])
         .map((q) => {
           const o = q.options.find((x) => x.id === answers[q.id]);
           return { question_id: q.id, option_id: o.id, question: q.question_text, answer: o.label, is_bad: o.is_bad, suggested_priority: o.is_bad ? o.suggested_priority : null };
         }),
-    [questions, answers],
+    [asked, answers],
   );
   const bad = chosen.filter((r) => r.is_bad);
-  const missing = questions.filter((q) => q.is_required && !answers[q.id]);
+  // Required questions must be answered; the others can be skipped.
+  const missing = asked.filter((q) => q.is_required && !answers[q.id]);
   const who = spokeWith.trim() || contact?.name || otherName.trim();
 
   function flash(text, tone = "ok") {
@@ -178,7 +187,53 @@ export default function CallPage() {
   function phoneTarget() {
     if (contact) return { contact_id: contact.id };
     if (!otherPhone.trim()) throw new Error("Enter the phone number you called");
-    return { phone: otherPhone.trim(), contact_name: otherName.trim() || undefined };
+    if (!otherName.trim()) throw new Error("Enter the name of the person at this number");
+    return { phone: otherPhone.trim(), contact_name: otherName.trim() };
+  }
+
+  // Another number -> one of the site's contacts, then picked for this call.
+  async function saveContact() {
+    setSavingContact(true);
+    setError("");
+    try {
+      const c = await addCallContact(id, {
+        name: otherName.trim(),
+        phone: otherPhone.trim(),
+        role: otherRole.trim() || null,
+        email: otherEmail.trim() || null,
+      });
+      await load();
+      setContactKey(c.id);
+      setOtherPhone("");
+      setOtherName("");
+      setOtherRole("");
+      setOtherEmail("");
+      flash(c.created ? `${c.name} saved to ${call.site.name}'s contacts.` : `This number is already saved as ${c.name}. Picked it.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  async function saveEdit() {
+    setSavingContact(true);
+    setError("");
+    try {
+      const c = await updateCallContact(id, editing.id, {
+        name: editing.name.trim(),
+        phone: editing.phone,
+        role: editing.role.trim() || null,
+        email: editing.email.trim() || null,
+      });
+      setEditing(null);
+      await load();
+      flash(`${c.name} updated.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingContact(false);
+    }
   }
 
   async function saveAttempt() {
@@ -187,6 +242,10 @@ export default function CallPage() {
     try {
       const res = await recordAttempt(id, { ...phoneTarget(), outcome: shownOutcome });
       setOutcome(null);
+      // Another number is now one of the site's contacts: pick it.
+      if (res.contact_id) setContactKey(res.contact_id);
+      setOtherPhone("");
+      setOtherName("");
       if (shownOutcome === "ANSWERED") flash("Call saved. Fill in the customer's answers below.");
       else if (res.offer_form_link) flash("Call saved. The customer didn't answer. You can send the feedback form on WhatsApp.", "warn");
       else flash(res.next_call_at ? `Call saved. Call back ${formatDateTime(res.next_call_at)}.` : "Call saved.");
@@ -201,12 +260,15 @@ export default function CallPage() {
   function feedbackBody() {
     if (!who) throw new Error("Choose or type who gave the feedback");
     if (missing.length) throw new Error(`Answer "${missing[0].question_text}"`);
+    if (!chosen.length) throw new Error("Answer at least one question");
     return {
-      ...(contact ? { contact_id: contact.id } : {}),
+      // Linked to the contact while the name is theirs; an edited name is someone else at the site.
+      ...(contact && spokeWith.trim() === contact.name ? { contact_id: contact.id } : {}),
       spoke_with_name: who,
       responses: chosen.map((r) => ({ question_id: r.question_id, option_id: r.option_id })),
       other_feedback: otherEnabled ? other.trim() || null : null,
       started_at: startedAt,
+      question_mode: qMode,
     };
   }
 
@@ -223,6 +285,32 @@ export default function CallPage() {
     } catch (err) {
       setError(err.message);
       setModal(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // closeAnyway: bad answers, but close the ticket all the same (e.g. after several re-visits).
+  async function saveFollowUp(closeAnyway = false) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await recordFollowUp(followUpTicket.id, { ...feedbackBody(), close_anyway: closeAnyway });
+      flash(
+        res.resolved
+          ? `The customer is satisfied. ${res.ticket_number} is closed.`
+          : res.closed
+            ? `${res.ticket_number} is closed, with the answers saved.`
+            : `Not resolved yet. ${res.ticket_number} stays open: book another re-visit on it.`,
+        res.closed ? "ok" : "warn",
+      );
+      setAnswers({});
+      setOther("");
+      setSpokeWith("");
+      setStartedAt(null);
+      await load();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -293,7 +381,7 @@ export default function CallPage() {
 
   const formReceived = call.status === "FORM_RECEIVED";
   const showCalling = canWork && !formReceived;
-  const visibleQuestions = questions;
+  const visibleQuestions = asked;
   // The thank-you goes to whoever gave the feedback, else the first contact with a phone.
   const thankYouContact =
     call.contacts.find((c) => c.id === latest?.contact_id && c.phone?.trim()) || call.contacts.find((c) => c.phone?.trim()) || null;
@@ -310,6 +398,28 @@ export default function CallPage() {
       setError(err.message);
     }
   }
+  // A ticket's WhatsApp to the customer: "Re-visit booked" while it is open with a visit booked,
+  // "Issue resolved" once it is closed. Goes to the contact picked in the card.
+  const waContacts = call.contacts.filter((c) => c.phone?.trim());
+  const waTo = waContacts.find((c) => c.id === ticketWaContact) || thankYouContact;
+  const ticketMessages = call.tickets.flatMap((t) =>
+    t.status === "CLOSED"
+      ? [{ t, code: "ISSUE_RESOLVED", label: "Issue resolved" }]
+      : [{ t, code: "TICKET_RAISED", label: "Ticket raised" }, ...(t.has_revisit ? [{ t, code: "REVISIT_BOOKED", label: "Re-visit booked" }] : [])],
+  );
+  async function sendTicketWhatsapp(ticketId, code, label) {
+    const tab = pendingTab();
+    setError("");
+    try {
+      const res = await prepareWhatsapp(id, { template_code: code, recipient_type: "CUSTOMER", ticket_id: ticketId, contact_id: waTo.id });
+      tab.go(res.wa_me_url);
+      flash(`WhatsApp "${label}" opened for ${waTo.name}. Press Send there.`);
+      load();
+    } catch (err) {
+      tab.cancel();
+      setError(err.message);
+    }
+  }
   const visitCounts = {};
   for (const v of call.visits) visitCounts[v.status] = (visitCounts[v.status] || 0) + 1;
   const shownVisits = visitFilter ? call.visits.filter((v) => v.status === visitFilter) : call.visits;
@@ -318,16 +428,11 @@ export default function CallPage() {
   return (
     <>
       <PageHead
-        crumb={
-          <>
-            <Link to={FEEDBACK_HOME}>Dashboard</Link> › <Link to={`${FEEDBACK_HOME}?month=${call.month}`}>{monthLabel(call.month)}</Link>
-          </>
-        }
         title={call.customer.name}
         back={FEEDBACK_HOME}
         after={
           <>
-            <CallStatusChip status={call.status} />
+            <CallStatusChip status={call.display_status || call.status} />
             <ResultChip result={call.result} />
           </>
         }
@@ -357,15 +462,7 @@ export default function CallPage() {
         <Steps steps={callStagesFromCall(call)} label="Feedback call progress" />
       </div>
 
-      {notice && (
-        <div className={`fb-alert fb-alert-${notice.tone}`} role="status" style={{ marginBottom: 16 }}>
-          <FiCheck aria-hidden="true" />
-          <span>{notice.text}</span>
-          <button type="button" className="fb-btn fb-btn-sm fb-btn-link" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
+      <Toast notice={notice} onClose={clearNotice} />
       {error && (
         <div style={{ marginBottom: 16 }}>
           <ErrorBox error={error} />
@@ -385,41 +482,29 @@ export default function CallPage() {
                 title="Customer sent the feedback form"
                 aside={`${formatDateTime(latest.submitted_at)}${latest.spoke_with_name ? ` · filled by ${latest.spoke_with_name}` : ""}`}
               >
-                <SubmissionAnswers submission={latest} />
-                {latest.has_issue ? (
-                  <div className="fb-alert fb-alert-danger" style={{ marginTop: 14 }}>
-                    <FiAlertTriangle aria-hidden="true" />
-                    <span>
-                      <b>
-                        {latest.responses.filter((r) => r.is_bad).length} bad answer{latest.responses.filter((r) => r.is_bad).length === 1 ? "" : "s"}.
-                      </b>{" "}
-                      Suggested priority: <b>{PRIORITY[suggestedPriority(latest.responses)]?.label || "—"}</b>. Check with the customer if needed, then raise a ticket.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="fb-alert fb-alert-ok" style={{ marginTop: 14 }}>
-                    <span>All answers are good.</span>
-                  </div>
-                )}
+                <FeedbackRound label="The customer's form" status={latest.has_issue ? { text: "Issue", tone: "danger" } : { text: "All good", tone: "ok" }} submission={latest} />
               </Card>
               {canWork && (
                 <Card title="Your decision">
-                  <div className="fb-row" style={{ justifyContent: "space-between" }}>
-                    <div className="fb-small fb-muted" style={{ maxWidth: 420 }}>
-                      Nothing is raised automatically. Raise a ticket for a real problem, or mark the call done if there is no issue.
-                    </div>
+                  <div className="fb-row" style={{ justifyContent: "flex-end" }}>
                     <div className="fb-row">
                       {contact?.phone && (
-                        <a className="fb-btn" href={telLink(contact.phone)}>
-                          <FiPhone /> Call {contact.name}
-                        </a>
+                        <CallButton name={contact.name} phone={contact.phone}>
+                          Call {contact.name}
+                        </CallButton>
                       )}
                       <button type="button" className="fb-btn fb-btn-ok" disabled={saving} onClick={() => finish()}>
                         No issue · Done
                       </button>
-                      <button type="button" className="fb-btn fb-btn-danger" onClick={() => setModal("ticket-later")}>
-                        Raise ticket
-                      </button>
+                      {firstTicket ? (
+                        <Link className="fb-btn fb-btn-danger" to={`${FEEDBACK_HOME}/tickets/${firstTicket.id}${firstTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
+                          {firstTicket.status === "CLOSED" ? `Reopen ${firstTicket.ticket_number}` : `Open ${firstTicket.ticket_number}`}
+                        </Link>
+                      ) : (
+                        <button type="button" className="fb-btn fb-btn-danger" onClick={() => setModal("ticket-later")}>
+                          Raise ticket
+                        </button>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -434,44 +519,80 @@ export default function CallPage() {
                 aside={call.calls_summary.total ? `${call.calls_summary.total} call${call.calls_summary.total === 1 ? "" : "s"} so far · ${call.calls_summary.missed} not answered` : "No calls yet"}
               >
                 <div className="fb-stack" style={{ gap: 10 }}>
-                  {call.contacts.map((c) => (
-                    <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
-                      <label className="fb-contact-pick">
-                        <input type="radio" name="fb-contact" checked={contactKey === c.id} onChange={() => setContactKey(c.id)} />
-                        <span>
-                          <span className="fb-strong">{c.name}</span>
-                          <br />
-                          <span className="fb-small fb-muted">
-                            {[c.role, c.phone?.trim() || "No phone number", c.is_primary ? "Primary" : null].filter(Boolean).join(" · ")}
+                  {call.contacts.map((c) =>
+                    editing?.id === c.id ? (
+                      <div key={c.id} className="fb-contact is-on">
+                        <div className="fb-stack" style={{ flex: "1 1 100%", gap: 10 }}>
+                          <div className="fb-form-grid">
+                            <input className="fb-input" inputMode="numeric" placeholder="10-digit phone *" maxLength={10} value={editing.phone} onChange={(e) => setEditing((x) => ({ ...x, phone: tenDigits(e.target.value) }))} aria-label="Phone number" />
+                            <input className="fb-input" placeholder="Name *" maxLength={150} value={editing.name} onChange={(e) => setEditing((x) => ({ ...x, name: e.target.value }))} aria-label="Name" />
+                            <input className="fb-input" placeholder="Position (optional)" maxLength={100} value={editing.role} onChange={(e) => setEditing((x) => ({ ...x, role: e.target.value }))} aria-label="Position" />
+                            <input className="fb-input" type="email" placeholder="Email (optional)" maxLength={150} value={editing.email} onChange={(e) => setEditing((x) => ({ ...x, email: e.target.value }))} aria-label="Email" />
+                          </div>
+                          {editing.phone && editing.phone.length !== 10 && <span className="fb-danger-text fb-small">Enter a 10-digit phone number.</span>}
+                          <div className="fb-row" style={{ justifyContent: "flex-end" }}>
+                            <button type="button" className="fb-btn" onClick={() => setEditing(null)} disabled={savingContact}>
+                              Cancel
+                            </button>
+                            <button type="button" className="fb-btn fb-btn-primary" onClick={saveEdit} disabled={savingContact || editing.phone.length !== 10 || !editing.name.trim()}>
+                              {savingContact ? "Saving…" : "Save changes"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
+                        <label className="fb-contact-pick">
+                          <input type="radio" name="fb-contact" checked={contactKey === c.id} onChange={() => setContactKey(c.id)} />
+                          <span>
+                            <span className="fb-strong">{c.name}</span>
+                            <br />
+                            <span className="fb-small fb-muted">
+                              {[c.role, c.phone?.trim() || "No phone number", c.email, c.id === primaryId ? "Primary" : null].filter(Boolean).join(" · ")}
+                            </span>
                           </span>
-                        </span>
-                      </label>
-                      {c.phone?.trim() && (
-                        <a className="fb-btn fb-btn-primary" href={telLink(c.phone)} onClick={() => setContactKey(c.id)}>
-                          <FiPhone /> Call {c.phone.trim()}
-                        </a>
-                      )}
-                    </div>
-                  ))}
+                        </label>
+                        <button
+                          type="button"
+                          className="fb-icon-btn"
+                          title="Edit contact"
+                          aria-label={`Edit ${c.name}`}
+                          onClick={() => setEditing({ id: c.id, name: c.name || "", phone: tenDigits(String(c.phone || "").replace(/^\+?91(?=\d{10}$)/, "")), role: c.role || "", email: c.email || "" })}
+                        >
+                          <FiEdit2 />
+                        </button>
+                        {c.phone?.trim() && <CallButton className="fb-btn fb-btn-primary" name={c.name} phone={c.phone} onClick={() => setContactKey(c.id)} />}
+                      </div>
+                    ),
+                  )}
                   <div className={`fb-contact ${contactKey === OTHER ? "is-on" : ""}`}>
                     <label className="fb-contact-pick" style={{ flex: "0 0 auto" }}>
                       <input type="radio" name="fb-contact" checked={contactKey === OTHER} onChange={() => setContactKey(OTHER)} />
                       <span className="fb-strong">Another number</span>
                     </label>
                     {contactKey === OTHER && (
-                      <div className="fb-row" style={{ flex: 1 }}>
-                        <input className="fb-input fb-grow" placeholder="Phone number" value={otherPhone} onChange={(e) => setOtherPhone(e.target.value)} aria-label="Phone number" />
-                        <input className="fb-input fb-grow" placeholder="Name (optional)" value={otherName} onChange={(e) => setOtherName(e.target.value)} aria-label="Name" />
+                      <div className="fb-stack" style={{ flex: "1 1 100%", gap: 10 }}>
+                        <div className="fb-form-grid">
+                          <input className="fb-input" inputMode="numeric" placeholder="10-digit phone *" maxLength={10} value={otherPhone} onChange={(e) => setOtherPhone(tenDigits(e.target.value))} aria-label="Phone number" />
+                          <input className="fb-input" placeholder="Name *" value={otherName} onChange={(e) => setOtherName(e.target.value)} aria-label="Name" />
+                          <input className="fb-input" placeholder="Position (optional)" maxLength={100} value={otherRole} onChange={(e) => setOtherRole(e.target.value)} aria-label="Position" />
+                          <input className="fb-input" type="email" placeholder="Email (optional)" maxLength={150} value={otherEmail} onChange={(e) => setOtherEmail(e.target.value)} aria-label="Email" />
+                        </div>
+                        {otherPhone && otherPhone.length !== 10 && <span className="fb-danger-text fb-small">Enter a 10-digit phone number.</span>}
+                        <div className="fb-row" style={{ justifyContent: "flex-end" }}>
+                          <button type="button" className="fb-btn fb-btn-primary" onClick={saveContact} disabled={savingContact || otherPhone.length !== 10 || !otherName.trim()}>
+                            {savingContact ? "Saving…" : "Save contact"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
-                  {!call.contacts.length && <div className="fb-small fb-muted">This site has no contacts saved. Add them in Site Contacts, or type the number above.</div>}
 
                   <div className="fb-field" style={{ marginTop: 6 }}>
                     What happened on this call?
                     <div className="fb-row">
                       <Segmented label="Call result" options={CALL_OUTCOMES} value={shownOutcome} onChange={setOutcome} />
-                      <button type="button" className="fb-btn fb-btn-dark" onClick={saveAttempt} disabled={savingAttempt || !attemptChanged}>
+                      <button type="button" className="fb-btn fb-btn-ok" onClick={saveAttempt} disabled={savingAttempt || !attemptChanged}>
                         {savingAttempt ? "Saving…" : "Save call result"}
                       </button>
                     </div>
@@ -486,15 +607,26 @@ export default function CallPage() {
                 </div>
               </Card>
 
-              <Card title="2 · Feedback from the call" aside="Questions come from Masters › Questions">
+              <Card title="2 · Feedback from the call">
                 <label className="fb-field" htmlFor="fb-spoke" style={{ paddingBottom: 12, borderBottom: "1px solid #f1f2f4" }}>
                   Spoke with
-                  <input id="fb-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder={contact?.name || otherName || "Name of the person"} value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
+                  <input id="fb-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
+                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
+                <QuestionProgress questions={visibleQuestions} answers={answers} />
                 {visibleQuestions.map((q, n) => (
-                  <div key={q.id} className="fb-q">
+                  <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
                     <div className="fb-q-t">
-                      {n + 1}. {q.question_text} {q.is_required && <span className="fb-req">*</span>}
+                      <span className="fb-q-no">{answers[q.id] ? <FiCheck aria-hidden="true" /> : n + 1}</span>
+                      <span className="fb-q-text">
+                        {q.question_text} {q.is_required ? <span className="fb-req">*</span> : <span className="fb-q-optional">Optional</span>}
+                      </span>
+                      {q.question_type === "SERVICE" && <span className="fb-q-tag">Service</span>}
+                      {!q.is_required && answers[q.id] && (
+                        <button type="button" className="fb-q-skip" onClick={() => setAnswers((a) => ({ ...a, [q.id]: undefined }))}>
+                          Skip
+                        </button>
+                      )}
                     </div>
                     <AnswerButtons question={q} value={answers[q.id]} onChange={(optionId) => pickAnswer(q.id, optionId)} />
                   </div>
@@ -505,17 +637,6 @@ export default function CallPage() {
                       Other feedback <span className="fb-muted fb-small">(optional)</span>
                     </label>
                     <textarea id="fb-other" className="fb-textarea" rows={2} maxLength={2000} value={other} onChange={(e) => setOther(e.target.value)} />
-                  </div>
-                )}
-                {bad.length > 0 && (
-                  <div className="fb-alert fb-alert-danger" style={{ margin: "6px 0 14px" }}>
-                    <FiAlertTriangle aria-hidden="true" />
-                    <span>
-                      <b>
-                        {bad.length} bad answer{bad.length === 1 ? "" : "s"}
-                      </b>{" "}
-                      ({bad.map((b) => `${b.question} ${b.answer}`).join("; ")}). This looks like an issue. Suggested priority: <b>{PRIORITY[suggestedPriority(bad)]?.label}</b>.
-                    </span>
                   </div>
                 )}
                 <div className="fb-row" style={{ justifyContent: "flex-end" }}>
@@ -538,10 +659,7 @@ export default function CallPage() {
               </Card>
 
               <Card title="Can't get feedback this month?">
-                <div className="fb-row" style={{ justifyContent: "space-between" }}>
-                  <span className="fb-small fb-muted" style={{ maxWidth: 460 }}>
-                    If the customer can't be reached even after the form link, close the call with a note saying why.
-                  </span>
+                <div className="fb-row" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="fb-btn" onClick={() => setModal("finish")}>
                     Finish without feedback
                   </button>
@@ -550,24 +668,98 @@ export default function CallPage() {
             </>
           )}
 
-          {call.status === "DONE" && (
-            <Card title="Result" aside={call.done_at ? `Done ${formatDateTime(call.done_at)}${call.done_by ? ` · ${call.done_by.name}` : ""}` : null}>
-              {latest ? (
-                <>
-                  <div className="fb-small fb-muted" style={{ marginBottom: 10 }}>
-                    {latest.source === "FORM" ? "From the customer's form" : "From the call"}
-                    {latest.spoke_with_name ? ` · ${latest.spoke_with_name}` : ""} · {formatDateTime(latest.submitted_at)}
+          {call.status === "DONE" && canFollowUp && (
+            <Card title={`Follow-up call · ${followUpTicket.ticket_number}`}>
+              <div className="fb-stack" style={{ gap: 10, paddingBottom: 12, borderBottom: "1px solid #f1f2f4" }}>
+                {call.contacts.map((c) => (
+                  <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
+                    <label className="fb-contact-pick">
+                      <input type="radio" name="fb-fu-contact" checked={contactKey === c.id} onChange={() => setContactKey(c.id)} />
+                      <span>
+                        <span className="fb-strong">{c.name}</span>
+                        <br />
+                        <span className="fb-small fb-muted">{[c.role, c.phone?.trim() || "No phone number"].filter(Boolean).join(" · ")}</span>
+                      </span>
+                    </label>
+                    {c.phone?.trim() && (
+                      <CallButton className="fb-btn fb-btn-primary" name={c.name} phone={c.phone} onClick={() => setContactKey(c.id)} />
+                    )}
                   </div>
-                  <SubmissionAnswers submission={latest} />
-                </>
+                ))}
+                <label className="fb-field" htmlFor="fb-fu-spoke">
+                  Spoke with
+                  <input id="fb-fu-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
+                </label>
+              </div>
+              <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
+                <QuestionProgress questions={visibleQuestions} answers={answers} />
+              {visibleQuestions.map((q, n) => (
+                <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
+                  <div className="fb-q-t">
+                    <span className="fb-q-no">{answers[q.id] ? <FiCheck aria-hidden="true" /> : n + 1}</span>
+                      <span className="fb-q-text">
+                        {q.question_text} {q.is_required ? <span className="fb-req">*</span> : <span className="fb-q-optional">Optional</span>}
+                      </span>
+                    {q.question_type === "SERVICE" && <span className="fb-q-tag">Service</span>}
+                    {!q.is_required && answers[q.id] && (
+                      <button type="button" className="fb-q-skip" onClick={() => setAnswers((a) => ({ ...a, [q.id]: undefined }))}>
+                        Skip
+                      </button>
+                    )}
+                  </div>
+                  <AnswerButtons question={q} value={answers[q.id]} onChange={(optionId) => pickAnswer(q.id, optionId)} />
+                </div>
+              ))}
+              {otherEnabled && (
+                <div className="fb-q">
+                  <label className="fb-q-t" htmlFor="fb-fu-other" style={{ display: "block" }}>
+                    Other feedback <span className="fb-muted fb-small">(optional)</span>
+                  </label>
+                  <textarea id="fb-fu-other" className="fb-textarea" rows={2} maxLength={2000} value={other} onChange={(e) => setOther(e.target.value)} />
+                </div>
+              )}
+              <div className="fb-row" style={{ justifyContent: "flex-end" }}>
+                {missing.length > 0 && chosen.length > 0 && <span className="fb-small fb-muted">{missing.length} question{missing.length === 1 ? "" : "s"} left</span>}
+                {bad.length > 0 && (
+                  <button type="button" className="fb-btn" disabled={saving || !chosen.length} onClick={() => saveFollowUp(true)}>
+                    Close the ticket
+                  </button>
+                )}
+                <button type="button" className={`fb-btn ${bad.length ? "fb-btn-danger" : "fb-btn-ok"}`} disabled={saving || !chosen.length} onClick={() => saveFollowUp()}>
+                  {saving ? "Saving…" : bad.length ? `Save · ${followUpTicket.ticket_number} stays open` : `Save · satisfied, close ${followUpTicket.ticket_number}`}
+                </button>
+              </div>
+            </Card>
+          )}
+
+          {call.status === "DONE" && (
+            <Card title="Result" aside={call.done_at ? `${formatDateTime(call.done_at)}${call.done_by ? ` · ${call.done_by.name}` : ""}` : null}>
+              {firstFeedback ? (
+                <div className="fb-rounds">
+                  <FeedbackRound
+                    label="First feedback"
+                    status={firstFeedback.has_issue ? { text: firstTicket ? `Issue · ${firstTicket.ticket_number}` : "Issue", tone: "danger" } : { text: "All good", tone: "ok" }}
+                    submission={firstFeedback}
+                  />
+                  {followUpSubs.map((s, n) => (
+                    <FeedbackRound key={s.id} label={`Follow-up call ${n + 1}`} status={s.has_issue ? { text: "Not resolved", tone: "danger" } : { text: "Resolved", tone: "ok" }} submission={s} />
+                  ))}
+                </div>
               ) : (
                 <div className="fb-muted">No feedback was received this month.</div>
               )}
               {canRaiseLater && (
                 <div className="fb-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-                  <button type="button" className="fb-btn" onClick={() => setModal("ticket-later")}>
-                    Raise another ticket
-                  </button>
+                  {/* One ticket per call: a new problem goes on the same ticket. */}
+                  {firstTicket ? (
+                    <Link className="fb-btn" to={`${FEEDBACK_HOME}/tickets/${firstTicket.id}${firstTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
+                      {firstTicket.status === "CLOSED" ? `Reopen ${firstTicket.ticket_number}` : `Open ${firstTicket.ticket_number}`}
+                    </Link>
+                  ) : (
+                    <button type="button" className="fb-btn" onClick={() => setModal("ticket-later")}>
+                      Raise ticket
+                    </button>
+                  )}
                 </div>
               )}
             </Card>
@@ -579,6 +771,8 @@ export default function CallPage() {
         </div>
 
         <div className="fb-stack">
+          {latest && <CustomerCard customer={call.customer} site={call.site} contacts={call.contacts} feedback={latest} />}
+
           <Card title={`Services in ${monthLabel(call.month).split(" ")[0]}`} aside={`${visitCounts.COMPLETED || 0} of ${call.visits.length} completed`} bodyClass="is-flush">
             {call.visits.length > 0 && (
               <div className="fb-visit-filter" role="group" aria-label="Show services">
@@ -620,11 +814,9 @@ export default function CallPage() {
           {showCalling && (
             <Card title="WhatsApp">
               <div className="fb-stack" style={{ gap: 10 }}>
-                <div className="fb-small fb-muted">Opens WhatsApp with the message ready. You press Send there.</div>
                 <button type="button" className="fb-btn fb-btn-wa" onClick={sendLink} disabled={!contact?.phone}>
                   <FaWhatsapp /> Send feedback form link{contact ? ` to ${contact.name}` : ""}
                 </button>
-                <div className="fb-small fb-muted">Use this when the customer can't talk now. A new link replaces any older one.</div>
               </div>
             </Card>
           )}
@@ -635,9 +827,32 @@ export default function CallPage() {
                 <button type="button" className="fb-btn fb-btn-wa" onClick={sendThankYou} disabled={!thankYouContact}>
                   <FaWhatsapp /> Thank-you WhatsApp{thankYouContact ? ` to ${thankYouContact.name}` : ""}
                 </button>
-                <div className="fb-small fb-muted">
-                  {thankYouContact ? "Thanks them for choosing BestServe. Text from Masters › WhatsApp templates." : "No contact with a phone number for this site."}
-                </div>
+                {!thankYouContact && <div className="fb-small fb-muted">No contact with a phone number for this site.</div>}
+              </div>
+            </Card>
+          )}
+
+          {ticketMessages.length > 0 && (mine || can("FEEDBACK_MANAGE")) && (
+            <Card title="WhatsApp the customer" aside="Optional">
+              <div className="fb-stack" style={{ gap: 8 }}>
+                {waContacts.length > 0 ? (
+                  <>
+                    <select className="fb-select" value={waTo?.id || ""} onChange={(e) => setTicketWaContact(e.target.value)} aria-label="Send to">
+                      {waContacts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} · {c.phone.trim()}
+                        </option>
+                      ))}
+                    </select>
+                    {ticketMessages.map(({ t, code, label }) => (
+                      <button key={`${t.id}-${code}`} type="button" className="fb-btn fb-btn-wa" onClick={() => sendTicketWhatsapp(t.id, code, label)}>
+                        <FaWhatsapp /> {t.ticket_number} · {label}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <div className="fb-small fb-muted">No contact with a phone number for this site.</div>
+                )}
               </div>
             </Card>
           )}
@@ -673,7 +888,6 @@ export default function CallPage() {
                     <FiMail /> {t.ticket_number} · {t.status === "CLOSED" ? "Issue resolved email" : "Issue received email"}
                   </button>
                 ))}
-                <div className="fb-small fb-muted">Your choice. Opens Gmail with the email written; check it, edit if needed, and press Send.</div>
               </div>
             </Card>
           )}

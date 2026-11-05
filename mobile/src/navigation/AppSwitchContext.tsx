@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 
-export type AppKind = 'tasks' | 'sales' | 'leads' | 'reminders' | 'residential';
+export type AppKind = 'tasks' | 'sales' | 'leads' | 'reminders' | 'residential' | 'feedback';
 
 /**
  * Some Task Management roles (Managing Director, Personal Assistant) also work in the Sales app,

@@ -6,15 +6,12 @@ import UserMenu from "../../components/UserMenu";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
 import { getMyAccess } from "./feedbackApi";
 import { FeedbackContext } from "./feedbackContext";
-import BookVisitButton from "./BookVisitButton";
 import { ErrorBox, Loading } from "./ui";
 import "./feedback.css";
 
 // Customer Feedback desk. Same shell classes as the admin panel; the sidebar shows only the
 // screens the user's FEEDBACK_* permissions allow (from GET /api/feedback/me).
 const DESK = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
-// "Book a visit" is for admin and the Operations Manager, never the feedback collector.
-const BOOKING_ROLES = ["admin", "branch_admin", "Operations Manager"];
 const NAV = [
   { path: FEEDBACK_HOME, label: "Dashboard", exact: true, match: [`${FEEDBACK_HOME}/calls`] },
   { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets" },
@@ -91,7 +88,6 @@ export default function FeedbackLayout() {
         </button>
 
         <div className="header-right">
-          {BOOKING_ROLES.includes(role) && <BookVisitButton />}
           <UserMenu user={user} onLogout={logout} actions={back ? [{ label: back.label, onClick: () => navigate(back.path) }] : []} />
         </div>
       </header>

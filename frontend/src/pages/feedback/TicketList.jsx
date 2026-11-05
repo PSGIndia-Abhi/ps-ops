@@ -12,7 +12,7 @@ export default function TicketList() {
   const navigate = useNavigate();
   const { isDesk } = useFeedbackAccess();
   const [params, setParams] = useSearchParams();
-  const status = params.get("status") || "OPEN";
+  const status = params.get("status") || "ALL";
   const priority = params.get("priority") || "";
   const owner = params.get("owner") || "";
   const month = params.get("month") || "";
@@ -87,9 +87,7 @@ export default function TicketList() {
   return (
     <>
       <PageHead
-        crumb="Feedback Desk › Tickets"
         title="Feedback tickets"
-        sub={isDesk ? "Raised only when a customer reports a problem." : "Tickets you raised."}
         actions={
           <button type="button" className="fb-btn" onClick={download} disabled={exporting}>
             <FiDownload /> {exporting ? "Preparing…" : "Export Excel"}
@@ -112,9 +110,9 @@ export default function TicketList() {
           <Segmented
             label="Status"
             options={[
+              { value: "ALL", label: "All" },
               { value: "OPEN", label: "Open" },
               { value: "CLOSED", label: "Closed" },
-              { value: "ALL", label: "All" },
             ]}
             value={status}
             onChange={(v) => setParam({ status: v })}

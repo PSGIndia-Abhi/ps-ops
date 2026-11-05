@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { FiMapPin, FiPhone, FiX } from "react-icons/fi";
-import { callStages, formatDateTime, formatDay, getSiteDetails, monthLabel, telLink, ticketStages } from "./feedbackApi";
-import { CallStatusChip, ErrorBox, Loading, PriorityChip, ResultChip, Steps, TicketStatusChip, VisitStatusChip } from "./ui";
+import { FiMapPin, FiX } from "react-icons/fi";
+import { callStages, formatDateTime, formatDay, getSiteDetails, monthLabel, ticketStages } from "./feedbackApi";
+import { CallButton, CallStatusChip, ErrorBox, Loading, PriorityChip, ResultChip, Steps, TicketStatusChip, VisitStatusChip } from "./ui";
 
 function weekday(value) {
   const d = new Date(`${value}T00:00:00`);
@@ -141,12 +141,12 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
                       <div key={c.id} className="fb-row" style={{ justifyContent: "space-between" }}>
                         <span>
                           <span className="fb-strong">{c.name}</span>
-                          <span className="fb-small fb-muted">{[c.role, c.is_primary ? "Primary" : null].filter(Boolean).map((x) => ` · ${x}`).join("")}</span>
+                          <span className="fb-small fb-muted">{[c.role, c.id === d.contacts.find((x) => x.is_primary)?.id ? "Primary" : null].filter(Boolean).map((x) => ` · ${x}`).join("")}</span>
                         </span>
                         {c.phone?.trim() ? (
-                          <a className="fb-btn fb-btn-sm" href={telLink(c.phone)}>
-                            <FiPhone /> {c.phone.trim()}
-                          </a>
+                          <CallButton className="fb-btn fb-btn-sm" name={c.name} phone={c.phone}>
+                            {c.phone.trim()}
+                          </CallButton>
                         ) : (
                           <span className="fb-small fb-muted">No phone</span>
                         )}

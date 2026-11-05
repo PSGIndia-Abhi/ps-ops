@@ -6,7 +6,7 @@ const {
   HttpError, sendError, inTransaction, hasPerm, hasAnyPerm,
   listQuestions, saveQuestions, listTemplates, saveTemplates, getSettings, saveSettings,
   callList, openCall, getCall, recordCallAttempt, saveCallFeedback, raiseTicketFromCall, finishCall,
-  listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, reopenTicket, reassignCall,
+  listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
   myFeedbackAccess, feedbackPeople, feedbackCustomers, siteDetails, revisitOptions,
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
 } = require("../services/feedback.service");
@@ -233,6 +233,26 @@ router.post("/calls/:id/attempts", async (req, res) => {
   }
 });
 
+// Saves a new number to the call's site contacts. Body: { name, phone }
+router.post("/calls/:id/contacts", async (req, res) => {
+  try {
+    requireAny(req, ["FEEDBACK_COLLECT", "FEEDBACK_MANAGE"]);
+    res.status(201).json(await addCallContact(req, req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to save the contact");
+  }
+});
+
+// Corrects a contact of the call's site. Body: { name, phone, role?, email? }
+router.patch("/calls/:id/contacts/:contactId", async (req, res) => {
+  try {
+    requireAny(req, ["FEEDBACK_COLLECT", "FEEDBACK_MANAGE"]);
+    res.json(await updateCallContact(req, req.params.id, req.params.contactId, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to update the contact");
+  }
+});
+
 // B5 - save the feedback from a call (always saved, good or not) and raise the ticket when there
 // is an issue. Body: { contact_id? | spoke_with_name, responses: [{ question_id, option_id }],
 // other_feedback?, started_at?, ticket?: { priority?, action, issue_summary?, visit_id?,
@@ -334,9 +354,31 @@ router.post("/tickets/:id/close", requirePermission("FEEDBACK_MANAGE"), async (r
   }
 });
 
-// Body: { row_version, note }
-router.post("/tickets/:id/reopen", requirePermission("FEEDBACK_MANAGE"), async (req, res) => {
+// The call back after the work, with the same questions as the call. Body as POST /calls/:id/feedback.
+// Whoever works the call, or a desk manager (checked in the service).
+router.post("/tickets/:id/follow-up", async (req, res) => {
   try {
+    requireAny(req, ANY_FEEDBACK);
+    res.json(await recordFollowUp(req, req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to save the follow-up call");
+  }
+});
+
+// A ticket raised by mistake. Body: { note? }. Desk managers and whoever raised it (checked in the service).
+router.delete("/tickets/:id", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    res.json(await deleteTicket(req, req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to delete the ticket");
+  }
+});
+
+// Body: { row_version, note }. Desk managers and whoever raised the ticket (checked in the service).
+router.post("/tickets/:id/reopen", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
     const id = await reopenTicket(req, req.params.id, req.body);
     res.json(await getTicket(req, id));
   } catch (err) {

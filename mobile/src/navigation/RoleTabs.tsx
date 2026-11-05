@@ -9,6 +9,8 @@ import { AppSwitchSheet } from './AppSwitchSheet';
 import { CrmNavigator } from './CrmNavigator';
 import { LeadsNavigator } from './LeadsNavigator';
 import { RemindersNavigator } from './RemindersNavigator';
+import { FeedbackNavigator } from './FeedbackNavigator';
+import { getMyAccess } from '../feedback/api';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
@@ -53,7 +55,21 @@ export function RoleTabs() {
   const residentialToo = leadPersona === 'sales' || leadPersona === 'sales_manager';
   const accountant = isAccountantRole(rawRole);
   const taskRole = isTaskRole(rawRole);
-  const apps = useMemo<AppKind[]>(
+  // Customer Feedback: the feedback collector opens there and can switch to Task Management; anyone else whose role has a
+  // FEEDBACK_* permission (the backend says - GET /api/feedback/me) can switch to it as well.
+  const feedbackCollector = (rawRole || '').toLowerCase().trim() === 'feedback_collector';
+  const [feedbackAccess, setFeedbackAccess] = useState(false);
+  useEffect(() => {
+    if (!rawRole || feedbackCollector) return undefined;
+    let alive = true;
+    getMyAccess()
+      .then((perms) => alive && setFeedbackAccess(perms.length > 0))
+      .catch(() => alive && setFeedbackAccess(false));
+    return () => {
+      alive = false;
+    };
+  }, [rawRole, feedbackCollector]);
+  const baseApps = useMemo<AppKind[]>(
     () =>
       salesSwitch
         ? ['tasks', 'leads', 'residential']
@@ -67,6 +83,10 @@ export function RoleTabs() {
         ? ['tasks']
         : [],
     [salesSwitch, leadRole, residentialToo, accountant, taskRole],
+  );
+  const apps = useMemo<AppKind[]>(
+    () => (feedbackCollector ? ['feedback', 'tasks'] : feedbackAccess && baseApps.length ? [...baseApps, 'feedback'] : baseApps),
+    [feedbackCollector, feedbackAccess, baseApps],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);
@@ -119,6 +139,8 @@ export function RoleTabs() {
           <CrmNavigator />
         ) : current === 'reminders' ? (
           <RemindersNavigator />
+        ) : current === 'feedback' ? (
+          <FeedbackNavigator />
         ) : (
           <TaskNavigator />
         )}

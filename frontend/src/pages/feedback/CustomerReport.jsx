@@ -157,9 +157,7 @@ export default function CustomerReport() {
   return (
     <>
       <PageHead
-        crumb="Feedback Desk › Customer report"
         title={customer?.name || report?.customer?.name || "Customer report"}
-        sub={report ? `${complaintsOnly ? "Complaints report" : "Consolidated feedback"} · ${report.period_label} · ${site ? customer?.sites.find((s) => s.id === site)?.name || "one site" : "all sites"}` : "Pick a customer to see the feedback from all their sites."}
         actions={
           company && (
             <>

@@ -638,6 +638,35 @@ export default function CreateBookingModal({
             {!isClient && (
               <section className="bgm-section">
                 <SectionHead step={nextStep()} title="Requested by" done={stepDone.contact} />
+                {/* Booked from a feedback ticket: the site's contacts, all listed to pick from. */}
+                {siteId ? (
+                  <div className="bgm-search-results" role="listbox" style={{ position: "static", boxShadow: "none", maxHeight: 260 }}>
+                    {loadingContacts ? (
+                      <div className="bgm-search-empty">Loading contacts…</div>
+                    ) : filteredContacts.length === 0 ? (
+                      <div className="bgm-search-empty">No contacts saved for this site</div>
+                    ) : (
+                      filteredContacts.map(c => {
+                        const on = String(form.contactId) === String(c.id);
+                        const phoneLabel = c.phone || c.contact_phone || "";
+                        return (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={on}
+                            key={c.id}
+                            className="bgm-search-item"
+                            style={on ? { background: "#eff6ff", boxShadow: "inset 3px 0 0 #2563eb" } : undefined}
+                            onClick={() => setForm(prev => ({ ...prev, contactId: c.id }))}
+                          >
+                            <span className="bgm-contact-name">{c.name}{on ? " ✓" : ""}</span>
+                            <span className="bgm-contact-sub">{[phoneLabel, c.role, c.email].filter(Boolean).join(" · ")}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : (
                 <div ref={contactDropdownRef} className="bgm-search">
                   <div className="bg-field">
                     <input
@@ -686,6 +715,7 @@ export default function CreateBookingModal({
                     </div>
                   )}
                 </div>
+                )}
 
                 {selectedContact && (
                   <div className="bgm-flat-strip">

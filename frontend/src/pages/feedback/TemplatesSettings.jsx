@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FaWhatsapp } from "react-icons/fa";
 import { FiMail } from "react-icons/fi";
 import { EMAIL_PLACEHOLDERS, emailValues, fillEmail, getEmailTemplates, getSettings, getTemplates, saveEmailTemplates, saveSettings, saveTemplates } from "./feedbackApi";
-import { Card, ErrorBox, Loading, PageHead, Segmented, Switch } from "./ui";
+import { Card, ErrorBox, Loading, PageHead, Segmented, Switch, Toast } from "./ui";
 
 // Masters › WhatsApp templates, Email templates and the module settings. Template codes are
 // fixed; only the text, who it is for and on/off change.
@@ -39,7 +39,9 @@ const EMAIL_SAMPLE = emailValues({
 
 const WA_NOTES = {
   FORM_LINK: "To the customer from the call screen · must contain {link}",
-  REVISIT_BOOKED: "To the customer from a ticket",
+  REVISIT_BOOKED: "To the customer once a ticket's re-visit is booked",
+  TICKET_RAISED: "To the customer once a ticket is raised for their complaint",
+  ISSUE_RESOLVED: "To the customer once a ticket is closed",
   FEEDBACK_SUMMARY: "To the owner or technician from a ticket",
   THANK_YOU: "To the customer from the call screen when there is no issue",
 };
@@ -67,6 +69,7 @@ export default function TemplatesSettings() {
   const [emailPreview, setEmailPreview] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const clearNotice = useCallback(() => setNotice(""), []);
   const [saving, setSaving] = useState(false);
   const areas = useRef({});
   const lastField = useRef({}); // per email template: "subject" or "body", where Insert puts the placeholder
@@ -167,9 +170,7 @@ export default function TemplatesSettings() {
   return (
     <>
       <PageHead
-        crumb="Masters › Templates & settings"
         title="Templates & settings"
-        sub="The WhatsApp messages and emails sent to customers and staff, and the rules for calls and form links."
         actions={
           <>
             {dirty && (
@@ -192,11 +193,7 @@ export default function TemplatesSettings() {
           </>
         }
       />
-      {notice && (
-        <div className="fb-alert fb-alert-ok" role="status" style={{ marginBottom: 16 }}>
-          <span>{notice}</span>
-        </div>
-      )}
+      <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
       {error && (
         <div style={{ marginBottom: 16 }}>
           <ErrorBox error={error} />

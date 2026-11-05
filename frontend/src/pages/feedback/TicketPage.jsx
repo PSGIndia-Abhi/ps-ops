@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { FiCheck, FiChevronDown, FiMail } from "react-icons/fi";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { FiCheck, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -9,8 +9,8 @@ import {
   problemNote,
   PRIORITIES,
   PRIORITY,
-  closeTicket,
   endOfDay,
+  followUpReady,
   formatDate,
   formatDateTime,
   getRevisitOptions,
@@ -24,6 +24,7 @@ import {
   pendingTab,
   prepareWhatsapp,
   reopenTicket,
+  deleteTicket,
   ticketStages,
   toLocalInput,
   updateTicket,
@@ -32,7 +33,7 @@ import useMe from "../../hooks/useMe";
 import { useFeedbackAccess } from "./feedbackContext";
 import BookVisitButton from "./BookVisitButton";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
-import { Card, Chip, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, TicketStatusChip, Timeline } from "./ui";
+import { Card, Chip, CustomerCard, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, SubmissionAnswers, TicketStatusChip, Timeline, Toast } from "./ui";
 
 const SERVICES = [...pestServices, ...deepCleaningServices];
 
@@ -40,7 +41,8 @@ function formFrom(t) {
   return {
     issue_summary: t.issue_summary || "",
     priority: t.priority,
-    action: t.action === "RESOLVED_ON_CALL" ? "ESCALATE_OPERATIONS" : t.action,
+    // Older next steps are worked as "Book a re-visit" (saved as that once the visit is booked).
+    action: t.action === "OTHER" ? "OTHER" : "SCHEDULE_REVISIT",
     due: t.action_due_at ? toLocalInput(t.action_due_at).slice(0, 10) : "",
     note: t.action_note || "",
   };
@@ -95,8 +97,66 @@ function ServicePicker({ picked, onChange }) {
   );
 }
 
+/**
+/**
+ * The call back to the customer after the work. It is done on the ticket's call page with the same
+ * questions ("Open the call"): all answers good closes the ticket (only this closes one); a bad
+ * answer keeps the same ticket open and a new re-visit is booked on it. Lists the calls made so far.
+ */
+function FollowUpCard({ ticket }) {
+  const done = ticket.history.filter((h) => h.event === "FOLLOWUP_CALL");
+  const open = ticket.status === "ACTION_PENDING";
+  const ready = followUpReady(ticket);
+  if (!open && !done.length) return null;
+
+  return (
+    <Card title="Follow-up call" aside={open ? "Closes the ticket when the customer is satisfied" : null}>
+      <div className="fb-stack" style={{ gap: 14 }}>
+        {done.length > 0 && (
+          <div className="fb-stack" style={{ gap: 8 }}>
+            {done.map((h) => (
+              <div key={h.id} className="fb-row" style={{ gap: 8, alignItems: "baseline" }}>
+                {(h.note || "").startsWith("Closed with issues") ? (
+                  <Chip tone="warn">Closed with issues</Chip>
+                ) : (
+                  <Chip tone={h.to_status === "CLOSED" ? "ok" : "danger"}>{h.to_status === "CLOSED" ? "Resolved" : "Not resolved"}</Chip>
+                )}
+                <span className="fb-small">
+                  {(h.note || "").replace(/^(Not resolved|Resolved|Closed with issues)( · )?/, "") || "—"}
+                  <span className="fb-muted"> · {[formatDateTime(h.created_at), h.changed_by?.name].filter(Boolean).join(" · ")}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {open && (
+          <div className="fb-row" style={{ justifyContent: "space-between" }}>
+            <span className="fb-small fb-muted" style={{ maxWidth: 440 }}>
+              {ready
+                ? "The work is done. Call the customer and ask the feedback questions again. If they are satisfied the ticket closes; if not, it stays open for another re-visit."
+                : ticket.revisit
+                  ? "Opens when the technician completes the re-visit. Then call the customer and ask the feedback questions again."
+                  : "Book the re-visit first. This opens when the technician completes it."}
+            </span>
+            {ready ? (
+              <Link className="fb-btn fb-btn-primary" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
+                Open the call
+              </Link>
+            ) : (
+              <button type="button" className="fb-btn fb-btn-primary" disabled title="Opens when the technician completes the re-visit">
+                Open the call
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export default function TicketPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { can, userId } = useFeedbackAccess();
   const canManage = can("FEEDBACK_MANAGE");
 
@@ -106,8 +166,11 @@ export default function TicketPage() {
   const [revisitError, setRevisitError] = useState(""); // shown under the Book a visit button
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const clearNotice = useCallback(() => setNotice(""), []);
   const [saving, setSaving] = useState(false);
-  const [modal, setModal] = useState(null); // "close" | "reopen"
+  // "reopen"; ?reopen=1 (from the call page: the customer has the problem again) opens it at once.
+  const [searchParams] = useSearchParams();
+  const [modal, setModal] = useState(searchParams.get("reopen") === "1" ? "reopen" : null); // "reopen" | "delete"
   const [modalNote, setModalNote] = useState("");
   const [waContact, setWaContact] = useState("");
   const { user } = useMe();
@@ -195,13 +258,13 @@ export default function TicketPage() {
     }
   }
 
-  async function closeOrReopen() {
+  // A ticket closes only on the follow-up call (the customer confirms); a desk manager can reopen it.
+  async function reopen() {
     setSaving(true);
     setError("");
     try {
-      const t = modal === "close" ? await closeTicket(ticket.id, ticket.row_version, modalNote.trim() || null) : await reopenTicket(ticket.id, ticket.row_version, modalNote.trim());
-      show(t);
-      setNotice(modal === "close" ? "Ticket closed." : "Ticket reopened.");
+      show(await reopenTicket(ticket.id, ticket.row_version, modalNote.trim()));
+      setNotice("Ticket reopened.");
       setModal(null);
       setModalNote("");
     } catch (err) {
@@ -209,6 +272,20 @@ export default function TicketPage() {
       setModal(null);
       if (err.status === 409) load();
     } finally {
+      setSaving(false);
+    }
+  }
+
+  // A ticket raised by mistake: delete it and go back to its call.
+  async function remove() {
+    setSaving(true);
+    setError("");
+    try {
+      await deleteTicket(ticket.id, modalNote.trim() || null);
+      navigate(`${FEEDBACK_HOME}/calls/${ticket.request_id}`);
+    } catch (err) {
+      setError(err.message);
+      setModal(null);
       setSaving(false);
     }
   }
@@ -229,15 +306,12 @@ export default function TicketPage() {
 
   const fb = ticket.feedback;
   const note = problemNote(ticket.issue_summary, fb?.responses || []);
+  // Text written on the ticket beyond the answers and the customer's words (shown in the table).
+  const extraNote = note && note.replace(/^["“]|["”]$/g, "").trim() !== (fb?.other_feedback || "").trim() ? note : "";
 
   return (
     <>
       <PageHead
-        crumb={
-          <>
-            <Link to={`${FEEDBACK_HOME}/tickets`}>Tickets</Link> › {ticket.ticket_number}
-          </>
-        }
         title={ticket.ticket_number}
         back={`${FEEDBACK_HOME}/tickets`}
         after={
@@ -246,20 +320,25 @@ export default function TicketPage() {
             <PriorityChip priority={ticket.priority} />
           </>
         }
-        sub={`${ticket.customer.name} · ${ticket.site.name}${ticket.site.city ? `, ${ticket.site.city}` : ""} · ${monthLabel(ticket.month)} · raised by ${ticket.raised_by?.name || "—"} on ${formatDate(ticket.created_at)}`}
+        sub={
+          <>
+            {ticket.customer.name} · <span className="fb-site-name">{ticket.site.name}</span>
+            {ticket.site.city ? `, ${ticket.site.city}` : ""} · {monthLabel(ticket.month)} · raised by {ticket.raised_by?.name || "—"} on {formatDate(ticket.created_at)}
+          </>
+        }
         actions={
           <>
             <Link className="fb-btn" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
               Open the call
             </Link>
-            {canManage && open && (
-              <button type="button" className="fb-btn fb-btn-ok" onClick={() => setModal("close")}>
-                <FiCheck /> Close ticket
-              </button>
-            )}
-            {canManage && !open && (
+            {canMessage && !open && (
               <button type="button" className="fb-btn" onClick={() => setModal("reopen")}>
                 Reopen
+              </button>
+            )}
+            {canMessage && (
+              <button type="button" className="fb-btn fb-btn-danger-outline" onClick={() => setModal("delete")}>
+                <FiTrash2 aria-hidden="true" /> Delete
               </button>
             )}
           </>
@@ -270,15 +349,7 @@ export default function TicketPage() {
         <Steps steps={ticketStages(ticket)} label="Ticket progress" />
       </div>
 
-      {notice && (
-        <div className="fb-alert fb-alert-ok" role="status" style={{ marginBottom: 16 }}>
-          <FiCheck aria-hidden="true" />
-          <span>{notice}</span>
-          <button type="button" className="fb-btn fb-btn-sm fb-btn-link" onClick={() => setNotice("")}>
-            Dismiss
-          </button>
-        </div>
-      )}
+      <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
       {error && (
         <div style={{ marginBottom: 16 }}>
           <ErrorBox error={error} />
@@ -288,39 +359,55 @@ export default function TicketPage() {
       <div className="fb-grid-side">
         <div className="fb-stack">
           <Card title="Problem">
-            <div className="fb-stack" style={{ gap: 12 }}>
-              {note && <div style={{ fontSize: 15, whiteSpace: "pre-line" }}>{note}</div>}
-              {fb && fb.responses.some((r) => r.is_bad) && (
-                <div className="fb-row" style={{ gap: 6 }}>
-                  {fb.responses
-                    .filter((r) => r.is_bad)
-                    .map((r) => (
-                      <Chip key={r.question_id} tone="danger">
-                        {r.question} · {r.answer}
-                      </Chip>
-                    ))}
+            <div className="fb-stack" style={{ gap: 14 }}>
+              {/* The service, technician and feedback as small tiles with icons. */}
+              <div className="fb-facts">
+                <div className="fb-fact">
+                  <span className="fb-fact-icon is-blue" aria-hidden="true">
+                    <FiTool />
+                  </span>
+                  <span>
+                    <small>Service</small>
+                    <b>{ticket.service_label || "Not linked to one visit"}</b>
+                  </span>
                 </div>
-              )}
-              {!note && !fb?.responses.some((r) => r.is_bad) && <div className="fb-muted">No summary written.</div>}
-              <dl className="fb-kv">
-                <dt>Service</dt>
-                <dd>{ticket.service_label || "Not linked to one visit"}</dd>
-                <dt>Technician</dt>
-                <dd>{ticket.technician?.name || "—"}</dd>
-                <dt>Feedback from</dt>
-                <dd>{fb ? `${fb.source === "FORM" ? "Customer form" : "Call"}${fb.spoke_with_name ? ` · ${fb.spoke_with_name}` : ""} · ${formatDateTime(fb.submitted_at)}` : "—"}</dd>
+                <div className="fb-fact">
+                  <span className="fb-fact-icon is-violet" aria-hidden="true">
+                    <FiUser />
+                  </span>
+                  <span>
+                    <small>Technician</small>
+                    <b>{ticket.technician?.name || "—"}</b>
+                  </span>
+                </div>
+                <div className="fb-fact">
+                  <span className="fb-fact-icon is-green" aria-hidden="true">
+                    {fb?.source === "FORM" ? <FiInbox /> : <FiPhoneCall />}
+                  </span>
+                  <span>
+                    <small>Feedback from</small>
+                    <b>{fb ? [fb.source === "FORM" ? "Customer form" : "Call", fb.spoke_with_name].filter(Boolean).join(" · ") : "—"}</b>
+                    {fb && <em>{formatDateTime(fb.submitted_at)}</em>}
+                  </span>
+                </div>
                 {!open && (
-                  <>
-                    <dt>Closed</dt>
-                    <dd>
-                      {formatDateTime(ticket.closed_at)}
-                      {ticket.closed_by ? ` · ${ticket.closed_by.name}` : ""}
-                      {ticket.close_note ? ` · “${ticket.close_note}”` : ""}
-                    </dd>
-                  </>
+                  <div className="fb-fact">
+                    <span className="fb-fact-icon is-green" aria-hidden="true">
+                      <FiCheck />
+                    </span>
+                    <span>
+                      <small>Closed</small>
+                      <b>{[formatDateTime(ticket.closed_at), ticket.closed_by?.name].filter(Boolean).join(" · ")}</b>
+                      {ticket.close_note && <em>“{ticket.close_note}”</em>}
+                    </span>
+                  </div>
                 )}
-              </dl>
-              {fb?.other_feedback && <div className="fb-muted">Customer said: “{fb.other_feedback}”</div>}
+              </div>
+              {fb && (fb.responses.some((r) => r.is_bad) || fb.other_feedback) && <div className="fb-section-label">What the customer reported</div>}
+              {/* The answers that show the issue, and the customer's own words. */}
+              {fb && (fb.responses.some((r) => r.is_bad) || fb.other_feedback) && <SubmissionAnswers submission={fb} onlyBad />}
+              {extraNote && <div style={{ whiteSpace: "pre-line" }}>{extraNote}</div>}
+              {!fb && !extraNote && <div className="fb-muted">No details written.</div>}
             </div>
           </Card>
 
@@ -341,7 +428,7 @@ export default function TicketPage() {
                   <label className="fb-field" htmlFor="fb-t-action">
                     Next step
                     <select id="fb-t-action" className="fb-select" value={form.action} onChange={set("action")}>
-                      {(TICKET_ACTIONS.includes(ticket.action) ? TICKET_ACTIONS : [ticket.action, ...TICKET_ACTIONS]).map((a) => (
+                      {TICKET_ACTIONS.map((a) => (
                         <option key={a} value={a}>
                           {ACTIONS[a].label}
                         </option>
@@ -385,10 +472,6 @@ export default function TicketPage() {
                     </div>
                   </div>
                 )}
-                <label className="fb-field" htmlFor="fb-t-summary">
-                  Problem summary
-                  <textarea id="fb-t-summary" className="fb-textarea" rows={2} maxLength={500} value={form.issue_summary} onChange={set("issue_summary")} />
-                </label>
                 {form.action !== "OTHER" && (
                   <label className="fb-field" htmlFor="fb-t-note">
                     Note
@@ -432,9 +515,13 @@ export default function TicketPage() {
               </dl>
             )}
           </Card>
+
+          <FollowUpCard ticket={ticket} />
         </div>
 
         <div className="fb-stack">
+          <CustomerCard customer={ticket.customer} site={ticket.site} contacts={ticket.contacts} feedback={ticket.feedback} />
+
           <Card title="Email the customer" aside="Optional">
             <div className="fb-stack" style={{ gap: 8 }}>
               <button
@@ -461,18 +548,16 @@ export default function TicketPage() {
               >
                 <FiMail /> {open ? "Issue received email" : "Issue resolved email"}
               </button>
-              <div className="fb-small fb-muted">
-                {open ? "Tell the customer their concern is registered." : "Tell the customer the concern is resolved."} Opens Gmail with the email written; edit it there if needed.
-              </div>
             </div>
           </Card>
 
+          {/* Open: "Ticket raised", and "Re-visit booked" once a visit is linked. Closed: "Issue resolved". */}
           {canMessage && (
             <Card title="WhatsApp the customer">
               <div className="fb-stack" style={{ gap: 10 }}>
                 {ticket.contacts.length > 0 ? (
-                  <div className="fb-row" style={{ gap: 8 }}>
-                    <select className="fb-select fb-grow" value={waContact} onChange={(e) => setWaContact(e.target.value)} aria-label="Customer contact">
+                  <div className="fb-stack" style={{ gap: 8 }}>
+                    <select className="fb-select" value={waContact} onChange={(e) => setWaContact(e.target.value)} aria-label="Customer contact">
                       {ticket.contacts.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}
@@ -480,19 +565,21 @@ export default function TicketPage() {
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      className="fb-btn fb-btn-wa"
-                      disabled={!waContact}
-                      onClick={() => whatsapp({ template_code: "REVISIT_BOOKED", recipient_type: "CUSTOMER", contact_id: waContact }, "the customer")}
-                    >
-                      <FaWhatsapp /> Re-visit booked
-                    </button>
+                    {(open ? [["TICKET_RAISED", "Ticket raised"], ...(ticket.revisit ? [["REVISIT_BOOKED", "Re-visit booked"]] : [])] : [["ISSUE_RESOLVED", "Issue resolved"]]).map(([code, label]) => (
+                      <button
+                        key={code}
+                        type="button"
+                        className="fb-btn fb-btn-wa"
+                        disabled={!waContact}
+                        onClick={() => whatsapp({ template_code: code, recipient_type: "CUSTOMER", contact_id: waContact }, "the customer")}
+                      >
+                        <FaWhatsapp /> {label}
+                      </button>
+                    ))}
                   </div>
                 ) : (
                   <div className="fb-small fb-muted">This site has no customer contacts saved.</div>
                 )}
-                <div className="fb-small fb-muted">Tell the customer the re-visit is booked. The message text comes from Masters › Templates.</div>
               </div>
             </Card>
           )}
@@ -521,31 +608,53 @@ export default function TicketPage() {
         </div>
       </div>
 
-      {modal && (
+      {modal === "reopen" && !open && canMessage && (
         <Modal
-          title={modal === "close" ? `Close ${ticket.ticket_number}` : `Reopen ${ticket.ticket_number}`}
+          title={`Reopen ${ticket.ticket_number}`}
           onClose={() => setModal(null)}
           footer={
             <>
               <button type="button" className="fb-btn" onClick={() => setModal(null)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className={`fb-btn ${modal === "close" ? "fb-btn-ok" : "fb-btn-dark"}`}
-                onClick={closeOrReopen}
-                disabled={saving || (modal === "reopen" && !modalNote.trim())}
-              >
-                {saving ? "Saving…" : modal === "close" ? "Close ticket" : "Reopen ticket"}
+              <button type="button" className="fb-btn fb-btn-dark" onClick={reopen} disabled={saving || !modalNote.trim()}>
+                {saving ? "Saving…" : "Reopen ticket"}
               </button>
             </>
           }
         >
           <label className="fb-field" htmlFor="fb-t-modal-note">
-            {modal === "close" ? "What was done? (optional)" : "Why is it reopened?"}
+            Why is it reopened?
             <textarea id="fb-t-modal-note" className="fb-textarea" rows={3} maxLength={500} value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
           </label>
-          {modal === "reopen" && ticket.action === "RESOLVED_ON_CALL" && <div className="fb-small fb-muted">It was resolved on the call, so it reopens as "Escalate to operations".</div>}
+          <div className="fb-small fb-muted">
+            The same ticket opens again{ticket.action === "RESOLVED_ON_CALL" ? ' with the next step "Book a re-visit"' : ""}. Book a new re-visit on it; when that is done, call the customer back again.
+          </div>
+        </Modal>
+      )}
+
+      {modal === "delete" && canMessage && (
+        <Modal
+          title={`Delete ${ticket.ticket_number}?`}
+          onClose={() => setModal(null)}
+          footer={
+            <>
+              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+              <button type="button" className="fb-btn fb-btn-danger" onClick={remove} disabled={saving}>
+                <FiTrash2 aria-hidden="true" /> {saving ? "Deleting…" : "Delete ticket"}
+              </button>
+            </>
+          }
+        >
+          <div className="fb-alert fb-alert-danger">
+            <span>The ticket and its history are removed for good. The call and its feedback answers stay.</span>
+          </div>
+          <label className="fb-field" htmlFor="fb-t-del-note">
+            Why delete it? (optional)
+            <textarea id="fb-t-del-note" className="fb-textarea" rows={2} maxLength={400} value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
+          </label>
         </Modal>
       )}
     </>
