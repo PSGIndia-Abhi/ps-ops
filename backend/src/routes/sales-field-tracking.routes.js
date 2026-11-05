@@ -12,8 +12,8 @@ const { computeDay } = require("../utils/salesFieldTracking");
 //
 // Access: the executive works on their own data with CRM_VIEW_LEAD (every lead-working role has
 // it). Reading someone else's day needs MANAGE_LEADS and is limited to the people the manager may
-// see (resolveVisibleUserIds - the same rule as Team Visits). Home locations are set by the
-// executive's sales manager or admin, never by the executive.
+// see (resolveVisibleUserIds - the same rule as Team Visits). Petrol km is counted from where the
+// shift was started - there is no home location (see utils/salesFieldTracking.js).
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -65,19 +65,6 @@ async function assertCanSeeUser(req, userId) {
   if (visibleIds !== null && !visibleIds.includes(Number(userId))) throw new HttpError(404, "User not found");
 }
 
-// Home locations are set by admin (anyone) or a sales manager (their own team only) - never by the
-// executive themselves, since petrol km is counted from it.
-async function assertCanManageHome(req, userId) {
-  if (!isManager(req)) throw new HttpError(403, "Only a sales manager or admin can set a home location");
-  const id = parseId(userId);
-  if (!id) throw new HttpError(400, "Invalid user id");
-  if (id === Number(req.user.id) && req.user.role !== "admin") {
-    throw new HttpError(403, "You cannot set your own home location");
-  }
-  const visibleIds = await resolveVisibleUserIds(pool, req);
-  if (visibleIds !== null && !visibleIds.includes(id)) throw new HttpError(404, "User not found");
-}
-
 // mysql2 returns DATETIME as JS Dates that shift with the server timezone - read them as strings.
 const SHIFT_COLUMNS = `
   id, user_id,
@@ -97,7 +84,7 @@ async function loadShift(id) {
   return shift || null;
 }
 
-// Active sales executives the requester may see, with their home location (if set).
+// Active sales executives the requester may see.
 async function listExecutives(req) {
   const visibleIds = await resolveVisibleUserIds(pool, req);
   const where = ["u.is_active = 1", "r.name IN (?)"];
@@ -107,31 +94,19 @@ async function listExecutives(req) {
     params.push(visibleIds);
   }
   const [rows] = await pool.query(
-    `SELECT u.id, u.name, u.phone, h.latitude AS home_latitude, h.longitude AS home_longitude, h.address AS home_address,
-            DATE_FORMAT(h.updated_at, '%Y-%m-%d %H:%i:%s') AS home_updated_at
+    `SELECT u.id, u.name, u.phone
        FROM users u
        JOIN roles r ON r.id = u.role_id
-       LEFT JOIN sales_home_locations h ON h.user_id = u.id
       WHERE ${where.join(" AND ")}
       ORDER BY u.name ASC`,
     params
   );
-  return rows.map((row) => ({
-    id: Number(row.id),
-    name: row.name,
-    phone: row.phone,
-    home: row.home_latitude === null ? null : {
-      latitude: Number(row.home_latitude),
-      longitude: Number(row.home_longitude),
-      address: row.home_address,
-      updatedAt: row.home_updated_at,
-    },
-  }));
+  return rows.map((row) => ({ id: Number(row.id), name: row.name, phone: row.phone }));
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/field-tracking/executives -- sales executives (with home location) the manager/admin
-// may see. Used by the Home Locations tab and the Field Tracking employee picker.
+// GET /api/field-tracking/executives -- sales executives the manager/admin may see (the Field
+// Tracking employee picker).
 // ---------------------------------------------------------------------------
 router.get("/executives", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
@@ -139,48 +114,6 @@ router.get("/executives", auth, requirePermission("CRM_VIEW_LEAD"), async (req, 
     res.json({ executives: await listExecutives(req) });
   } catch (err) {
     sendError(res, err, "Failed to load sales executives");
-  }
-});
-
-// ---------------------------------------------------------------------------
-// PUT /api/field-tracking/home/:userId -- admin, or the executive's sales manager, sets their home location.
-// Body: { latitude, longitude, address? }
-// ---------------------------------------------------------------------------
-router.put("/home/:userId", auth, async (req, res) => {
-  try {
-    await assertCanManageHome(req, req.params.userId);
-    const userId = parseId(req.params.userId);
-    if (!userId) throw new HttpError(400, "Invalid user id");
-    const [[user]] = await pool.query("SELECT id FROM users WHERE id = ?", [userId]);
-    if (!user) throw new HttpError(404, "User not found");
-
-    const body = req.body || {};
-    const point = readPoint(body.latitude, body.longitude, true, "Home location");
-    const address = typeof body.address === "string" ? body.address.trim().slice(0, 255) || null : null;
-
-    await pool.query(
-      `INSERT INTO sales_home_locations (user_id, latitude, longitude, address, updated_by)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE latitude = VALUES(latitude), longitude = VALUES(longitude),
-                               address = VALUES(address), updated_by = VALUES(updated_by)`,
-      [userId, point.latitude, point.longitude, address, req.user.id]
-    );
-    res.json({ userId, home: { ...point, address } });
-  } catch (err) {
-    sendError(res, err, "Failed to save home location");
-  }
-});
-
-// DELETE /api/field-tracking/home/:userId -- admin, or the executive's sales manager, clears it.
-router.delete("/home/:userId", auth, async (req, res) => {
-  try {
-    await assertCanManageHome(req, req.params.userId);
-    const userId = parseId(req.params.userId);
-    if (!userId) throw new HttpError(400, "Invalid user id");
-    await pool.query("DELETE FROM sales_home_locations WHERE user_id = ?", [userId]);
-    res.json({ userId, home: null });
-  } catch (err) {
-    sendError(res, err, "Failed to remove home location");
   }
 });
 
@@ -311,8 +244,8 @@ router.post("/points", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/field-tracking/day/:userId?date=YYYY-MM-DD -- one executive's full day: home, shifts,
-// GPS points, client visits, stops, gaps, GPS km and the petrol route (home -> visits -> home).
+// GET /api/field-tracking/day/:userId?date=YYYY-MM-DD -- one executive's full day: shifts, GPS
+// points, client visits, stops, gaps, GPS km and the petrol legs (start -> clients -> return).
 // The executive may read their own day; managers read their team's.
 // ---------------------------------------------------------------------------
 router.get("/day/:userId", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
@@ -333,12 +266,16 @@ router.get("/day/:userId", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
 });
 
 // ---------------------------------------------------------------------------
-// PUT /api/field-tracking/day/:userId/route?date=YYYY-MM-DD -- save the road route and petrol km
-// of a CLOSED day, worked out by the manager's browser with Google's Routes API, so no later view
-// (any manager, any computer) asks Google again, and the day keeps one fixed petrol km.
-// Body: { fingerprint, petrolKm (number | null), roadPath (Google encoded polyline | null) }
+// PUT /api/field-tracking/day/:userId/route?date=YYYY-MM-DD -- the direct road km of each petrol
+// leg and the road route line, measured once by the manager's browser with Google's Routes API.
+// Body: { fingerprint,
+//         legRoadMeters: one entry per shift (as petrol.waypoints): the road metres of each of its
+//                        legs, or null for a shift with no visit | null,
+//         roadPath: the route line - a JSON list of Google encoded polylines, one per shift | null }
+// The server works the petrol out from them (utils/salesFieldTracking.js) and returns the day's
+// petrol. A CLOSED day is also saved, so no later view (any manager, any computer) asks Google
+// again and the day keeps one fixed petrol km; a day still running is only worked out, not saved.
 // The fingerprint must be the one GET /day returned: if points or punches arrived since, 409.
-// A day already saved with the same fingerprint is not overwritten (the first result stays).
 // ---------------------------------------------------------------------------
 const MAX_ROAD_PATH_CHARS = 400000;
 
@@ -354,11 +291,14 @@ router.put("/day/:userId/route", auth, requirePermission("CRM_VIEW_LEAD"), async
     const body = req.body || {};
     const fingerprint = typeof body.fingerprint === "string" ? body.fingerprint : "";
     if (!/^[0-9a-f]{40}$/.test(fingerprint)) throw new HttpError(400, "fingerprint is required");
-    let petrolKm = null;
-    if (body.petrolKm !== null && body.petrolKm !== undefined) {
-      petrolKm = Number(body.petrolKm);
-      if (!Number.isFinite(petrolKm) || petrolKm < 0 || petrolKm > 5000) throw new HttpError(400, "petrolKm must be between 0 and 5000");
-      petrolKm = Math.round(petrolKm * 100) / 100;
+    let legRoadMeters = null;
+    if (body.legRoadMeters !== null && body.legRoadMeters !== undefined) {
+      const bad = (m) => !Number.isFinite(Number(m)) || Number(m) < 0 || Number(m) > 2000000;
+      const badGroup = (g) => g !== null && (!Array.isArray(g) || g.some(bad));
+      if (!Array.isArray(body.legRoadMeters) || body.legRoadMeters.some(badGroup)) {
+        throw new HttpError(400, "legRoadMeters must be a list (one per shift) of distances in metres");
+      }
+      legRoadMeters = body.legRoadMeters.map((g) => (g === null ? null : g.map((m) => Math.round(Number(m)))));
     }
     let roadPath = null;
     if (body.roadPath !== null && body.roadPath !== undefined) {
@@ -370,21 +310,39 @@ router.put("/day/:userId/route", auth, requirePermission("CRM_VIEW_LEAD"), async
 
     const [[user]] = await pool.query("SELECT id, name FROM users WHERE id = ?", [userId]);
     if (!user) throw new HttpError(404, "User not found");
-    const day = await computeDay(pool, { id: Number(user.id), name: user.name }, date);
-    if (!day.shifts.length) throw new HttpError(409, "No field day on this date");
-    if (!day.closed) throw new HttpError(409, "The day is still running - its route is saved once every shift has ended");
-    if (day.fingerprint !== fingerprint) throw new HttpError(409, "The day has changed since it was opened - reload the page");
-    if (day.savedRoute) return res.json({ saved: false, route: day.savedRoute });
+    const who = { id: Number(user.id), name: user.name };
+    const before = await computeDay(pool, who, date);
+    if (!before.shifts.length) throw new HttpError(409, "No field day on this date");
+    if (before.fingerprint !== fingerprint) throw new HttpError(409, "The day has changed since it was opened - reload the page");
+    // one group per shift, each as long as that shift's legs
+    const expected = (before.petrol.waypoints || []).map((g) => (g ? g.length - 1 : null));
+    if (legRoadMeters && (legRoadMeters.length !== expected.length || legRoadMeters.some((g, i) => (g === null ? null : g.length) !== expected[i]))) {
+      throw new HttpError(400, "The leg distances do not match the day's trips - reload the page");
+    }
+    // Already worked out and saved: the petrol stays. Only a road line Google could not draw before
+    // is filled in later (the map otherwise keeps the plain GPS track).
+    if (before.closed && before.savedRoute && !before.petrol.waypoints) {
+      if (roadPath && !before.savedRoute.roadPath) {
+        await pool.query("UPDATE sales_field_day_routes SET road_path = ? WHERE user_id = ? AND work_date = ? AND fingerprint = ?", [
+          roadPath, userId, date, fingerprint,
+        ]);
+        return res.json({ saved: true, petrol: before.petrol });
+      }
+      return res.json({ saved: false, petrol: before.petrol });
+    }
+
+    const day = await computeDay(pool, who, date, legRoadMeters);
+    if (!day.closed) return res.json({ saved: false, petrol: day.petrol });
 
     await pool.query(
-      `INSERT INTO sales_field_day_routes (user_id, work_date, fingerprint, petrol_km, road_path, computed_by)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE fingerprint = VALUES(fingerprint), petrol_km = VALUES(petrol_km),
+      `INSERT INTO sales_field_day_routes (user_id, work_date, fingerprint, petrol_km, leg_road_m, road_path, computed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE fingerprint = VALUES(fingerprint), petrol_km = VALUES(petrol_km), leg_road_m = VALUES(leg_road_m),
                                road_path = VALUES(road_path), computed_by = VALUES(computed_by),
                                computed_at = CURRENT_TIMESTAMP`,
-      [userId, date, fingerprint, petrolKm, roadPath, req.user.id]
+      [userId, date, fingerprint, day.petrol.km, legRoadMeters ? JSON.stringify(legRoadMeters) : null, roadPath, req.user.id]
     );
-    res.status(201).json({ saved: true, route: { petrolKm, roadPath } });
+    res.status(201).json({ saved: true, petrol: day.petrol });
   } catch (err) {
     sendError(res, err, "Failed to save the day's route");
   }
@@ -392,7 +350,7 @@ router.put("/day/:userId/route", auth, requirePermission("CRM_VIEW_LEAD"), async
 
 // ---------------------------------------------------------------------------
 // GET /api/field-tracking/team?date=YYYY-MM-DD -- every executive the manager may see, with that
-// day's summary (shift times, visits, GPS km, petrol route availability). Click-through goes to
+// day's summary (shift times, visits, GPS km, petrol km). Click-through goes to
 // /day/:userId.
 // ---------------------------------------------------------------------------
 router.get("/team", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
@@ -407,7 +365,6 @@ router.get("/team", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) =
       const day = await computeDay(pool, exec, date);
       team.push({
         user: { id: exec.id, name: exec.name },
-        hasHome: Boolean(exec.home),
         shiftCount: day.shifts.length,
         status: day.shifts.some((s) => s.status === "ACTIVE") ? "ACTIVE" : day.shifts.length ? "ENDED" : "NOT_STARTED",
         ...day.summary,

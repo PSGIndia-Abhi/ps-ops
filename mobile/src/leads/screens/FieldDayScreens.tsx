@@ -24,9 +24,9 @@ import type { Coords, PipelineLead, PipelineStage } from '../types';
 import { errorMessage, LeadRow, MeetingRow, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 /**
- * Sales Executive field day: Start Shift (from wherever they are - petrol is always counted from
- * the registered home, on the manager's side), punch in / out at clients, unplanned visits, End
- * Shift. The manager reviews the day on the web (Lead Management -> Field Tracking).
+ * Sales Executive field day: Start Shift (from wherever they are - petrol is counted from that
+ * start point, on the manager's side), punch in / out at clients, unplanned visits, End Shift.
+ * The manager reviews the day on the web (Lead Management -> Field Tracking).
  */
 
 type Nav = NativeStackNavigationProp<LeadStackParamList>;

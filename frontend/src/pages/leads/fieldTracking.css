@@ -35,9 +35,9 @@
 .ft-who { display: inline-flex; align-items: center; gap: 12px; }
 .ft-cell { display: grid; gap: 2px; line-height: 1.25; }
 .ft-cell small { font-size: 12px; color: var(--lm-muted); }
-.ft-team th, .ft-team td, .ft-homes th, .ft-homes td { padding-top: 16px; padding-bottom: 16px; }
-.ft-team th:first-child, .ft-team td:first-child, .ft-homes th:first-child, .ft-homes td:first-child { padding-left: 24px; }
-.ft-team th:last-child, .ft-team td:last-child, .ft-homes th:last-child, .ft-homes td:last-child { padding-right: 24px; }
+.ft-team th, .ft-team td { padding-top: 16px; padding-bottom: 16px; }
+.ft-team th:first-child, .ft-team td:first-child { padding-left: 24px; }
+.ft-team th:last-child, .ft-team td:last-child { padding-right: 24px; }
 .ft-team th { padding-top: 12px; padding-bottom: 12px; }
 .ft-team td.ft-go { width: 40px; color: var(--lm-muted); font-size: 18px; text-align: right; }
 .ft-team tbody tr:hover td.ft-go { color: var(--lm-primary); }
@@ -76,7 +76,6 @@
 .ft-map-legend .muted { margin-left: auto; color: var(--lm-muted); }
 .ft-key { display: inline-block; }
 .ft-key.line { width: 22px; height: 5px; border-radius: 3px; background: #1f2937; box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--lm-line); }
-.ft-key.home { width: 12px; height: 12px; border-radius: 3px; background: #111827; }
 .ft-key.visit { width: 12px; height: 12px; border-radius: 50%; background: var(--lm-primary); }
 
 .ft-side {
@@ -91,28 +90,39 @@
 .ft-side .lm-empty { padding: 18px 20px 22px; }
 
 /* ---------- map markers (ride-app style: a label card above a dot) */
-.ft-pin { display: flex; flex-direction: column; align-items: center; gap: 6px; transform: translateY(6px); cursor: pointer; }
-.ft-pin-label {
-  display: inline-flex; align-items: center; gap: 6px; max-width: 210px; padding: 5px 7px 5px 9px;
-  background: #fff; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; box-shadow: 0 4px 12px rgba(15, 23, 42, .16);
-  font-size: 11.5px; line-height: 1.3; color: #111827; white-space: nowrap;
-}
-.ft-pin-label > span { overflow: hidden; text-overflow: ellipsis; }
-.ft-pin-label > span:first-child { font-weight: 700; }
-.ft-pin-label svg { flex: none; color: #6b7280; font-size: 13px; }
-/* Two-line labels: name on top, times under it; the chevron sits on the right, centred. */
-.ft-pin.two .ft-pin-label { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
-.ft-pin.two .ft-pin-label > span + span { grid-column: 1; color: #4b5563; font-weight: 500; }
-.ft-pin.two .ft-pin-label svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.ft-pin { position: relative; display: grid; place-items: center; cursor: pointer; transform: translateY(16px); }
+/* the round icon pin: white ring + soft shadow so it stands out on the route line */
 .ft-pin-dot {
-  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-  background: #111827; color: #fff; border: 3px solid #fff; box-shadow: 0 3px 10px rgba(15, 23, 42, .35);
-  font-size: 11px; font-weight: 800;
+  position: relative; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  background: #16a34a; color: #fff; border: 3px solid #fff; box-shadow: 0 3px 10px rgba(15, 23, 42, .35);
+  font-size: 15px; transition: transform .15s;
 }
-.ft-pin-home .ft-pin-dot, .ft-pin-end .ft-pin-dot { border-radius: 6px; }
-.ft-pin-home .ft-pin-dot svg { font-size: 11px; }
-.ft-pin-visit .ft-pin-dot { width: 26px; height: 26px; background: var(--lm-primary); }
+.ft-pin-end .ft-pin-dot { background: #111827; }
+.ft-pin.aside { transform: translate(-30px, 16px); }
+.ft-pin-visit .ft-pin-dot { background: var(--lm-primary); }
 .ft-pin-visit.unplanned .ft-pin-dot { background: var(--lm-violet, #7c3aed); }
+.ft-pin.tinted .ft-pin-dot { background: var(--pin); }
+.ft-pin-badge {
+  position: absolute; top: -8px; right: -10px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  display: grid; place-items: center; background: #fff; color: #111827; font-size: 10.5px; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .3);
+}
+.ft-pin:hover .ft-pin-dot { transform: scale(1.12); }
+/* selected (from the list or a click): bigger, with a pulse ring */
+.ft-pin.on .ft-pin-dot { transform: scale(1.25); }
+.ft-pin.on .ft-pin-dot::after {
+  content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 3px solid currentColor; color: var(--pin, var(--lm-primary));
+  opacity: .6; animation: ft-pulse 1.4s ease-out infinite;
+}
+@keyframes ft-pulse { from { transform: scale(.7); opacity: .7; } to { transform: scale(1.5); opacity: 0; } }
+/* name and time on hover only */
+.ft-pin-tip {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); display: none; flex-direction: column;
+  padding: 5px 9px; border-radius: 8px; background: #111827; color: #fff; font-size: 11.5px; line-height: 1.35; white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .25); pointer-events: none;
+}
+.ft-pin-tip > span:first-child { font-weight: 700; }
+.ft-pin:hover .ft-pin-tip { display: flex; }
 
 /* ---------- info window */
 .ft-iw-title { font-size: 14px; color: #111827; }
@@ -161,29 +171,18 @@ ol.ft-log.ft-log { list-style: none; margin: 0; padding: 2px 20px 8px; display: 
 .ft-log-text { display: grid; gap: 2px; min-width: 0; padding-top: 2px; }
 .ft-log-text strong { font-size: 13px; line-height: 1.35; color: var(--lm-text); }
 .ft-log-text small { font-size: 12px; line-height: 1.35; color: var(--lm-muted); }
-p.ft-home-line.ft-home-line {
-  display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 12px 20px 14px;
-  border-top: 1px solid var(--lm-line); background: var(--lm-bg); font-size: 12px; line-height: 1.45; color: var(--lm-muted);
-}
-.ft-home-line svg { flex: none; margin-top: 2px; color: var(--lm-success); }
-.ft-home-line span { flex: 1; min-width: 0; }
-.ft-home-line a { flex: none; color: var(--lm-primary); font-weight: 600; }
-
-/* ---------- home locations */
-.ft-banner {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 12px 16px;
-  border-radius: 12px; background: var(--lm-warn-soft); color: var(--lm-text); font-size: 13.5px;
-}
-.ft-banner svg { flex: none; color: var(--lm-warn); font-size: 18px; }
-.ft-homes tbody tr { cursor: default; }
-.ft-homes tbody tr:hover { box-shadow: none; }
-.ft-home-cell { display: inline-flex; align-items: center; gap: 8px; max-width: 460px; font-size: 13.5px; }
-.ft-home-cell > svg { flex: none; color: var(--lm-success); }
-.ft-home-cell > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ft-home-cell a { flex: none; color: var(--lm-muted); display: inline-grid; }
-.ft-home-cell a:hover { color: var(--lm-primary); }
-.ft-actions { white-space: nowrap; text-align: right; width: 1%; }
-.ft-actions .lm-btn + .lm-btn { margin-left: 6px; }
+/* ---------- petrol breakdown */
+.ft-legs-card { margin-bottom: 16px; }
+.ft-legs th, .ft-legs td { padding-top: 12px; padding-bottom: 12px; }
+.ft-legs th:first-child, .ft-legs td:first-child { padding-left: 24px; }
+.ft-legs th:last-child, .ft-legs td:last-child { padding-right: 24px; }
+.ft-legs tbody tr { cursor: default; }
+.ft-legs tbody tr:hover { box-shadow: none; }
+.ft-legs .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ft-legs td.muted { color: var(--lm-muted); }
+.ft-legs .ft-leg-return td { background: var(--lm-bg); }
+.ft-legs tfoot td { border-top: 2px solid var(--lm-line); font-size: 14px; }
+.ft-legs-flag { color: var(--lm-warn); font-weight: 600; }
 
 .ft-preview { margin-top: 14px; border-radius: 14px; overflow: hidden; border: 1px solid var(--lm-border); }
 .ft-preview-map { width: 100%; height: 300px; }
@@ -209,3 +208,17 @@ p.ft-coords.ft-coords { margin: 8px 0 0; font-size: 12px; color: var(--lm-muted)
   .ft-map-legend .muted { margin-left: 0; }
   .ft-log li { grid-template-columns: 58px 26px minmax(0, 1fr); gap: 8px; }
 }
+
+/* ---------- more than one shift in a day */
+.ft-pin.tinted .ft-pin-dot { background: var(--pin); }
+.ft-key.break { width: 22px; height: 0; border-top: 3px dashed #9ca3af; }
+.ft-break-label {
+  display: inline-block; padding: 3px 8px; border-radius: 999px; background: #fff; color: #4b5563;
+  font-size: 11.5px; font-weight: 600; box-shadow: 0 1px 4px rgba(15, 23, 42, .18); white-space: nowrap;
+}
+.ft-legs .ft-shift-row td { padding-top: 10px; padding-bottom: 10px; background: var(--lm-bg); cursor: pointer; }
+.ft-legs .ft-shift-row:hover td { background: #eef4ff; }
+.ft-shift-head { display: inline-flex; align-items: center; gap: 8px; }
+.ft-shift-head i { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.ft-shift-head small { color: var(--lm-muted); font-size: 12.5px; }
+.ft-day-tabs { margin-bottom: 14px; }

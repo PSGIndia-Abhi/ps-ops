@@ -1,16 +1,17 @@
 // Field Tracking (sales manager / admin): a sales executive's field day, reviewed after it ends.
 //   Team day       - every executive on a date: status, shift, visits, distance. Click one for:
 //   Executive day  - the day on a map (route drawn along the roads, like a ride app), the
-//                    summary (petrol km, GPS km, time on duty), every client visit with its
-//                    punch-in / punch-out times and time spent, and the day's log.
-//   Home locations - the sales manager (their team) or admin (everyone) sets each executive's
-//                    home - the start and end point of petrol km.
+//                    summary (petrol km, GPS km, time on duty), the petrol breakdown leg by leg,
+//                    every client visit with its punch-in / punch-out times and the day's log.
+// Petrol km is counted from where the shift was started (no home location): each leg pays its GPS
+// km, capped at the direct road km + 25%; the server applies the rules (utils/salesFieldTracking.js)
+// and this page only measures the direct road km with Google, once per day.
 // Data: backend/src/routes/sales-field-tracking.routes.js (GET /api/field-tracking/...).
 // The map is this page's own (not components/maps/WebMap, which the technician map uses).
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
-import { AdvancedMarker, InfoWindow, Map as GoogleMap, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
+import { AdvancedMarker, APILoadingStatus, InfoWindow, Map as GoogleMap, useApiLoadingStatus, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import {
   FiActivity,
   FiAlertTriangle,
@@ -20,26 +21,29 @@ import {
   FiChevronRight,
   FiClock,
   FiExternalLink,
-  FiHome,
+  FiFlag,
   FiMapPin,
   FiNavigation,
   FiTruck,
+  FiUser,
   FiUsers,
 } from "react-icons/fi";
-import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
+import { LuBuilding2 } from "react-icons/lu";
 import { LEADS_HOME } from "./access";
-import { clearFieldHome, fieldDay, fieldExecutives, fieldTeam, saveFieldRoute, setFieldHome } from "./leadsApi";
+import { fieldDay, fieldExecutives, fieldTeam, saveFieldRoute } from "./leadsApi";
 import { timeLabel } from "./format";
-import { mapLink } from "./places";
-import { Avatar, Badge, Button, Card, Empty, Kpi, Modal, SkeletonRows, Tabs } from "./ui";
+import { Avatar, Badge, Card, Empty, Kpi, SkeletonRows, Tabs } from "./ui";
 import { useViewer } from "./viewer";
-import { useToast } from "./hooks";
 import "./fieldTracking.css";
 
 /** A punch / start / end within this distance of where it should be is "at the place". */
 const NEAR_M = 300;
-/** Home, shift start and shift end closer than this share one marker. */
+/** Shift start and shift end closer than this share one marker. */
 const SAME_PLACE_M = 80;
+/** Route colour per shift on a day with more than one (a single-shift day keeps the dark line). */
+const SHIFT_COLORS = ["#2563eb", "#0d9488", "#ea580c", "#db2777"];
+const shiftColor = (n) => SHIFT_COLORS[(n - 1) % SHIFT_COLORS.length];
+const SINGLE_LINE = "#1F2937";
 const DEFAULT_CENTER = { lat: 12.9716, lng: 77.5946 }; // Bengaluru, when the day has no point at all
 const MAP_ID = import.meta.env.VITE_GOOGLE_MAP_ID;
 
@@ -138,8 +142,23 @@ const savedDays = new Set();
 const petrolCache = new globalThis.Map();
 const roadPathCache = new globalThis.Map();
 const MAX_WAYPOINTS = 23;
+/** A Google request that has not answered by then is treated as failed (shown, not waited on forever). */
+const GOOGLE_TIMEOUT_MS = 20000;
+const withTimeout = (promise) =>
+  Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("Google did not answer")), GOOGLE_TIMEOUT_MS))]);
+/** Trips all shorter than this need no road route - the straight distance is the distance. */
+const SAME_SPOT_M = 50;
 
-/** Road route through points: Routes API (new Maps projects) first, then the Directions service. */
+/** Google Maps refused to load (key not allowed on this address, billing, network) - nothing will route. */
+function useMapsFailed() {
+  const status = useApiLoadingStatus();
+  return status === APILoadingStatus.FAILED || status === APILoadingStatus.AUTH_FAILURE;
+}
+
+/**
+ * Road route through points: Routes API (new Maps projects) first, then the Directions service.
+ * want: "path" (the line along the roads) or "legs" (the road metres between each pair of points).
+ */
 async function routeThrough(routesLib, points, want) {
   const origin = points[0];
   const destination = points[points.length - 1];
@@ -151,11 +170,11 @@ async function routeThrough(routesLib, points, want) {
         destination,
         intermediates: middle.map((p) => ({ location: p, ...(want === "path" ? { via: true } : {}) })),
         travelMode: "DRIVING",
-        fields: want === "path" ? ["path"] : ["distanceMeters"],
+        fields: want === "path" ? ["path"] : ["legs"],
       });
       const r = routes?.[0];
       if (want === "path" && r?.path?.length > 1) return r.path.map(literal);
-      if (want === "meters" && r?.distanceMeters) return r.distanceMeters;
+      if (want === "legs" && r?.legs?.length === points.length - 1) return r.legs.map((leg) => leg.distanceMeters || 0);
     } catch {
       // fall through to the Directions service
     }
@@ -163,45 +182,53 @@ async function routeThrough(routesLib, points, want) {
   const result = await new routesLib.DirectionsService().route({
     origin,
     destination,
-    waypoints: middle.map((p) => ({ location: p, stopover: want === "meters" })),
+    waypoints: middle.map((p) => ({ location: p, stopover: want === "legs" })),
     travelMode: "DRIVING",
   });
   const r = result.routes[0];
-  return want === "path" ? r.overview_path.map(literal) : r.legs.reduce((s, leg) => s + (leg.distance?.value || 0), 0);
+  return want === "path" ? r.overview_path.map(literal) : r.legs.map((leg) => leg.distance?.value || 0);
 }
 
-/** Petrol km: home -> each client (punch order) -> home, by road. Straight line when road routing is unavailable. */
-function usePetrolKm(cacheKey, route) {
+/**
+ * The direct road metres of each petrol leg, per shift: for every group [start -> client 1, ...,
+ * last client -> start] one list of metres (null for a shift with no visit). Asked from Google once
+ * per day (session cache). null while loading; failed when Google could not route (nothing is saved
+ * then, so the next view tries again).
+ */
+function useLegRoadMeters(cacheKey, waypoints) {
   const routesLib = useMapsLibrary("routes");
-  const [state, setState] = useState({ key: null, km: null, source: null });
-  const points = useMemo(() => (route || []).map(toLatLng), [route]);
-  const straightKm = useMemo(() => {
-    let m = 0;
-    for (let i = 1; i < points.length; i += 1) m += haversineM(points[i - 1], points[i]);
-    return m / 1000;
-  }, [points]);
-  const tooMany = points.length - 2 > MAX_WAYPOINTS;
+  const mapsFailed = useMapsFailed();
+  const [state, setState] = useState({ key: null, meters: null, failed: false });
+  const groups = useMemo(() => (waypoints || []).map((g) => (g ? g.map(toLatLng) : null)), [waypoints]);
+  const any = groups.some((g) => g && g.length >= 2);
+  const tooMany = groups.some((g) => g && g.length - 2 > MAX_WAYPOINTS);
 
   useEffect(() => {
-    if (points.length < 2 || tooMany || petrolCache.has(cacheKey) || !routesLib) return undefined;
+    if (!any || tooMany || petrolCache.has(cacheKey) || !routesLib) return undefined;
     let alive = true;
     const done = (value) => {
       petrolCache.set(cacheKey, value);
       if (alive) setState({ key: cacheKey, ...value });
     };
-    routeThrough(routesLib, points, "meters")
-      .then((m) => done({ km: m / 1000, source: "road" }))
-      .catch(() => done({ km: straightKm, source: "straight" }));
+    // Every trip of a group within a few metres (a client next door, or a phone that never moved):
+    // nothing to route - Google is not asked, the straight distance is used.
+    const measure = (points) => {
+      const straight = points.slice(1).map((p, i) => Math.round(haversineM(points.at(i), p)));
+      return straight.every((m) => m < SAME_SPOT_M) ? Promise.resolve(straight) : routeThrough(routesLib, points, "legs");
+    };
+    withTimeout(Promise.all(groups.map((g) => (g ? measure(g) : Promise.resolve(null)))))
+      .then((meters) => done({ meters, failed: false }))
+      .catch(() => done({ meters: null, failed: true }));
     return () => {
       alive = false;
     };
-  }, [cacheKey, points, routesLib, straightKm, tooMany]);
+  }, [cacheKey, groups, any, routesLib, tooMany]);
 
-  if (points.length < 2) return { km: null, source: null, loading: false };
-  if (tooMany) return { km: straightKm, source: "straight", loading: false };
+  if (!any) return { meters: null, loading: false, failed: false };
+  if (tooMany || mapsFailed) return { meters: null, loading: false, failed: true };
   const cached = petrolCache.get(cacheKey) || (state.key === cacheKey ? state : null);
-  if (!cached) return { km: null, source: null, loading: true };
-  return { km: cached.km, source: cached.source, loading: false };
+  if (!cached) return { meters: null, loading: true, failed: false };
+  return { meters: cached.meters, loading: false, failed: cached.failed };
 }
 
 /**
@@ -324,70 +351,122 @@ async function snappedRoadPath(routesLib, gps) {
  * points are routed in chunks of 25 (origin + 23 waypoints + destination); if that fails too, the
  * plain GPS line. `keep`: client punch points the line must never be cut away from.
  */
-function useRoadPath(cacheKey, gpsPath, keep) {
+/** One GPS track drawn along the roads (snapped, else routed in chunks); throws when Google cannot. */
+async function roadLine(routesLib, gpsPath, keep) {
+  const points = thin(gpsPath);
+  // a shift that never moved (every fix within a few metres) has no route to draw - Google refuses
+  // a route from a spot to the same spot
+  if (points.length < 2 || points.every((q) => haversineM(points[0], q) < SAME_SPOT_M)) return gpsPath;
+  const chunks = [];
+  for (let i = 0; i < points.length - 1; i += MAX_WAYPOINTS + 1) chunks.push(points.slice(i, i + MAX_WAYPOINTS + 2));
+  let line = null;
+  try {
+    line = await withTimeout(snappedRoadPath(routesLib, gpsPath));
+  } catch {
+    line = null; // Roads API unavailable - use the waypoint route below
+  }
+  if (!line) line = (await withTimeout(Promise.all(chunks.map((c) => routeThrough(routesLib, c, "path"))))).flat();
+  return removeSpurs(line, keep);
+}
+
+/**
+ * The route line of each shift (`gpsPaths`: one GPS track per shift), drawn along the roads. Shifts
+ * are drawn separately - never joined across the off-duty break between them. Falls back to the
+ * plain GPS tracks when Google cannot draw them.
+ */
+function useRoadPaths(cacheKey, gpsPaths, keep) {
   const routesLib = useMapsLibrary("routes");
-  const [state, setState] = useState({ key: null, path: null });
-  const points = useMemo(() => thin(gpsPath), [gpsPath]);
+  const mapsFailed = useMapsFailed();
+  const [state, setState] = useState({ key: null, paths: null });
+  const moving = gpsPaths.some((g) => thin(g).length >= 2);
 
   useEffect(() => {
-    if (points.length < 2 || roadPathCache.has(cacheKey) || !routesLib) return undefined;
+    if (!moving || roadPathCache.has(cacheKey) || !routesLib) return undefined;
     let alive = true;
     (async () => {
-      const chunks = [];
-      for (let i = 0; i < points.length - 1; i += MAX_WAYPOINTS + 1) chunks.push(points.slice(i, i + MAX_WAYPOINTS + 2));
-      try {
-        let line = null;
-        try {
-          line = await snappedRoadPath(routesLib, gpsPath);
-        } catch {
-          line = null; // Roads API unavailable - use the waypoint route below
-        }
-        if (!line) line = (await Promise.all(chunks.map((c) => routeThrough(routesLib, c, "path")))).flat();
-        const value = { path: removeSpurs(line, keep), road: true };
-        roadPathCache.set(cacheKey, value);
-        if (alive) setState({ key: cacheKey, ...value });
-      } catch {
-        const value = { path: gpsPath, road: false };
-        roadPathCache.set(cacheKey, value);
-        if (alive) setState({ key: cacheKey, ...value });
-      }
+      // each shift on its own: one Google cannot draw keeps its GPS track, the others still get theirs
+      const lines = await Promise.all(
+        gpsPaths.map((g) =>
+          roadLine(routesLib, g, keep)
+            .then((path) => ({ path, ok: true }))
+            .catch(() => ({ path: g, ok: false })),
+        ),
+      );
+      // saved (as the day's road line) only when every shift was drawn - otherwise the next view tries again
+      const value = { paths: lines.map((l) => l.path), road: lines.every((l) => l.ok) };
+      roadPathCache.set(cacheKey, value);
+      if (alive) setState({ key: cacheKey, ...value });
     })();
     return () => {
       alive = false;
     };
-  }, [cacheKey, points, routesLib, gpsPath, keep]);
+  }, [cacheKey, moving, routesLib, gpsPaths, keep]);
 
-  if (points.length < 2) return { path: gpsPath, road: false, loading: false };
+  if (!moving || mapsFailed) return { paths: gpsPaths, road: false, loading: false };
   const cached = roadPathCache.get(cacheKey) || (state.key === cacheKey ? state : null);
-  return cached ? { path: cached.path, road: cached.road, loading: false } : { path: gpsPath, road: false, loading: true };
+  return cached ? { paths: cached.paths, road: cached.road, loading: false } : { paths: gpsPaths, road: false, loading: true };
+}
+
+/** A saved road line: a JSON list of encoded polylines (one per shift), or one polyline (older saves). */
+function decodeRoadPaths(text) {
+  if (!text) return null;
+  try {
+    if (text.startsWith("[")) return JSON.parse(text).map((t) => (t ? decodePolyline(t) : []));
+  } catch {
+    return null;
+  }
+  return [decodePolyline(text)];
 }
 
 // ---------------------------------------------------------------------------- map
-/** The route: a dark line with a white casing, like a ride app. Fits the map to the day once. */
-function RouteLine({ path, fitTo, fitKey }) {
+/** One route line with a white casing, like a ride app. */
+function RouteLine({ path, color = SINGLE_LINE }) {
   const map = useMap();
   useEffect(() => {
     if (!map || !path || path.length < 2) return undefined;
     const casing = new window.google.maps.Polyline({ path, strokeColor: "#FFFFFF", strokeOpacity: 1, strokeWeight: 9, zIndex: 1 });
-    const line = new window.google.maps.Polyline({ path, strokeColor: "#1F2937", strokeOpacity: 1, strokeWeight: 5, zIndex: 2 });
+    const line = new window.google.maps.Polyline({ path, strokeColor: color, strokeOpacity: 1, strokeWeight: 5, zIndex: 2 });
     casing.setMap(map);
     line.setMap(map);
     return () => {
       casing.setMap(null);
       line.setMap(null);
     };
-  }, [map, path]);
+  }, [map, path, color]);
+  return null;
+}
+
+/** The off-duty move between two shifts: a thin grey dashed line - shown, not counted. */
+function BreakLine({ from, to }) {
+  const map = useMap();
   useEffect(() => {
-    if (!map || !fitTo?.length) return;
-    if (fitTo.length === 1) {
-      map.setCenter(fitTo[0]);
+    if (!map) return undefined;
+    const line = new window.google.maps.Polyline({
+      path: [from, to],
+      strokeOpacity: 0,
+      zIndex: 0,
+      icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 0.9, strokeColor: "#9ca3af", scale: 3 }, offset: "0", repeat: "14px" }],
+    });
+    line.setMap(map);
+    return () => line.setMap(null);
+  }, [map, from, to]);
+  return null;
+}
+
+/** Fits the map to `points` whenever `fitKey` changes (a new day opened, or a shift picked). */
+function FitTo({ points, fitKey }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !points?.length) return;
+    if (points.length === 1) {
+      map.setCenter(points[0]);
       map.setZoom(15);
       return;
     }
     const bounds = new window.google.maps.LatLngBounds();
-    fitTo.forEach((p) => bounds.extend(p));
+    points.forEach((p) => bounds.extend(p));
     map.fitBounds(bounds, 70);
-    // Only when a new day is opened, not on every re-render.
+    // Only when the key changes, not on every re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, fitKey]);
   return null;
@@ -402,29 +481,42 @@ function PanTo({ point }) {
   return null;
 }
 
-function PlaceMarker({ place, onClick }) {
+const PIN_ICONS = { start: FiUser, end: FiFlag, visit: LuBuilding2 };
+
+/**
+ * A small round icon pin - no card on the map, so the route stays visible: the person where a shift
+ * started, a building at each client (with its visit number), a flag where a shift ended. The name
+ * and time show on hover; a click opens the details. The selected pin grows and pulses.
+ */
+function PlaceMarker({ place, on, onClick }) {
+  const Icon = PIN_ICONS[place.kind] || FiUser;
   return (
-    <AdvancedMarker position={place.point} onClick={onClick} zIndex={place.kind === "visit" ? 30 : 20} title={place.title}>
-      <div className={`ft-pin ft-pin-${place.kind}${place.lines.length > 1 ? " two" : ""}${place.unplanned ? " unplanned" : ""}`}>
-        <span className="ft-pin-label">
+    <AdvancedMarker position={place.point} onClick={onClick} zIndex={on ? 50 : place.kind === "visit" ? 30 : 20} title={place.lines.join(" · ")}>
+      <div
+        className={`ft-pin ft-pin-${place.kind}${place.unplanned ? " unplanned" : ""}${place.color ? " tinted" : ""}${place.aside ? " aside" : ""}${on ? " on" : ""}`}
+        style={place.color ? { "--pin": place.color } : undefined}
+      >
+        <span className="ft-pin-tip">
           {place.lines.map((l, i) => (
             <span key={i}>{l}</span>
           ))}
-          <FiChevronRight />
         </span>
-        <span className="ft-pin-dot">{place.badge}</span>
+        <span className="ft-pin-dot">
+          <Icon />
+          {!!place.badge && <span className="ft-pin-badge">{place.badge}</span>}
+        </span>
       </div>
     </AdvancedMarker>
   );
 }
 
-/** Home / start / end merged into one marker when they are at the same place. */
+/** Shift start / end merged into one marker when they are at the same place ("S1 / S2" with more shifts). */
 function endPlaces(day) {
   const raw = [];
-  if (day.home) raw.push({ id: "home", what: "Home", point: toLatLng(day.home) });
+  const tag = (i) => (day.shifts.length > 1 ? `S${i + 1} ` : "");
   day.shifts.forEach((s, i) => {
-    if (s.start) raw.push({ id: `start-${i}`, what: `Start ${timeLabel(s.startedAt)}`, point: toLatLng(s.start), shift: s, role: "start" });
-    if (s.end) raw.push({ id: `end-${i}`, what: `End ${timeLabel(s.endedAt)}`, point: toLatLng(s.end), shift: s, role: "end" });
+    if (s.start) raw.push({ id: `start-${i}`, what: `${tag(i)}Start ${timeLabel(s.startedAt)}`, point: toLatLng(s.start), shift: s, n: i + 1, role: "start" });
+    if (s.end) raw.push({ id: `end-${i}`, what: `${tag(i)}End ${timeLabel(s.endedAt)}`, point: toLatLng(s.end), shift: s, n: i + 1, role: "end" });
   });
   const groups = [];
   raw.forEach((r) => {
@@ -433,25 +525,39 @@ function endPlaces(day) {
     else groups.push({ point: r.point, items: [r] });
   });
   return groups.map((g, i) => {
-    const hasHome = g.items.some((x) => x.id === "home");
     const hasEnd = g.items.some((x) => x.role === "end");
     const hasStart = g.items.some((x) => x.role === "start");
-    // "Home" on top, the shift times under it; a place without home shows its times on one line.
-    const times = g.items.filter((x) => x.id !== "home").map((x) => x.what).join(" · ");
     return {
       id: `place-${i}`,
-      kind: hasHome ? "home" : hasEnd && !hasStart ? "end" : "start",
+      kind: hasEnd && !hasStart ? "end" : "start",
       point: g.point,
-      badge: hasHome ? <FiHome /> : null,
-      title: hasHome ? "Home" : hasStart ? "Shift start" : "Shift end",
-      lines: hasHome && times ? ["Home", times] : [hasHome ? "Home" : times],
+      // several starts / ends at one spot: how many; a lone one on a multi-shift day: its shift
+      badge: g.items.length > 1 ? String(g.items.length) : day.shifts.length > 1 ? `S${g.items[0].n}` : null,
+      title: hasStart ? "Shift start" : "Shift end",
+      lines: [g.items.map((x) => x.what).join(" · ")],
       items: g.items,
     };
   });
 }
 
-function FieldMap({ day, roadPath, selected, onSelect, mapKey }) {
+/** Where each shift ended and the next one started, when they are apart (the off-duty move). */
+function breaks(day, paths) {
+  const out = [];
+  for (let i = 1; i < day.shifts.length; i += 1) {
+    const prev = day.shifts.at(i - 1);
+    const from = toLatLng(prev.end) || paths.at(i - 1)?.at(-1) || toLatLng(prev.start);
+    const to = toLatLng(day.shifts.at(i).start);
+    if (from && to && haversineM(from, to) > SAME_PLACE_M) {
+      out.push({ id: `break-${i}`, from, to, mid: { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2 } });
+    }
+  }
+  return out;
+}
+
+function FieldMap({ day, roadPaths, selected, onSelect, mapKey, focus }) {
+  const multi = day.shifts.length > 1;
   const places = useMemo(() => endPlaces(day), [day]);
+  const gaps = useMemo(() => (multi ? breaks(day, roadPaths) : []), [multi, day, roadPaths]);
   const visits = useMemo(
     () =>
       day.visits
@@ -465,11 +571,16 @@ function FieldMap({ day, roadPath, selected, onSelect, mapKey }) {
           title: v.company,
           lines: [v.company, `${timeLabel(v.checkInAt)}${v.checkOutAt ? ` · ${spentText(v.checkInAt, v.checkOutAt)}` : " · on site"}`],
           unplanned: v.unplanned,
+          // more than one shift: each visit in its shift's colour
+          color: multi ? shiftColor(v.shift) : null,
           visit: v,
         })),
-    [day],
+    [day, multi],
   );
-  const fitTo = useMemo(() => [...roadPath, ...places.map((p) => p.point), ...visits.map((v) => v.point)], [roadPath, places, visits]);
+  const fitTo = useMemo(
+    () => [...roadPaths.flat(), ...places.map((p) => p.point), ...visits.map((v) => v.point)],
+    [roadPaths, places, visits],
+  );
   const chosen = [...places, ...visits].find((p) => p.id === selected) || null;
   const center = fitTo[0] || DEFAULT_CENTER;
 
@@ -484,43 +595,49 @@ function FieldMap({ day, roadPath, selected, onSelect, mapKey }) {
       fullscreenControl
       className="ft-map-canvas"
     >
-      <RouteLine path={roadPath} fitTo={fitTo} fitKey={mapKey} />
+      {roadPaths.map((path, i) => (
+        <RouteLine key={i} path={path} color={multi ? shiftColor(i + 1) : SINGLE_LINE} />
+      ))}
+      {gaps.map((g) => (
+        <BreakLine key={g.id} from={g.from} to={g.to} />
+      ))}
+      {gaps.map((g) => (
+        <AdvancedMarker key={`${g.id}-label`} position={g.mid} zIndex={10}>
+          <span className="ft-break-label">Break · not counted</span>
+        </AdvancedMarker>
+      ))}
+      <FitTo points={focus ? focus.points : fitTo} fitKey={focus ? `${mapKey}|${focus.key}` : mapKey} />
       <PanTo point={chosen?.point} />
       {places.map((p) => (
-        <PlaceMarker key={p.id} place={p} onClick={() => onSelect(p.id)} />
+        // a start / end at a client's spot is set a little aside, so neither pin hides the other
+        <PlaceMarker
+          key={p.id}
+          place={{ ...p, aside: visits.some((v) => haversineM(v.point, p.point) <= SAME_PLACE_M) }}
+          on={p.id === selected}
+          onClick={() => onSelect(p.id)}
+        />
       ))}
       {visits.map((p) => (
-        <PlaceMarker key={p.id} place={p} onClick={() => onSelect(p.id)} />
+        <PlaceMarker key={p.id} place={p} on={p.id === selected} onClick={() => onSelect(p.id)} />
       ))}
       {chosen && (
-        <InfoWindow position={chosen.point} pixelOffset={[0, chosen.lines.length > 1 ? -82 : -66]} onCloseClick={() => onSelect(null)} headerContent={<strong className="ft-iw-title">{chosen.title}</strong>}>
-          {chosen.visit ? <VisitDetails v={chosen.visit} compact /> : <PlaceDetails place={chosen} day={day} />}
+        <InfoWindow position={chosen.point} pixelOffset={[0, -40]} onCloseClick={() => onSelect(null)} headerContent={<strong className="ft-iw-title">{chosen.title}</strong>}>
+          {chosen.visit ? <VisitDetails v={chosen.visit} compact /> : <PlaceDetails place={chosen} />}
         </InfoWindow>
       )}
     </GoogleMap>
   );
 }
 
-function PlaceDetails({ place, day }) {
+function PlaceDetails({ place }) {
   return (
     <div className="ft-iw">
       {place.items.map((x) => (
         <div key={x.id} className="ft-iw-row">
-          <span>{x.id === "home" ? "Home" : x.role === "start" ? "Shift start" : "Shift end"}</span>
-          <strong>{x.id === "home" ? day.home?.address || "Registered home" : timeLabel(x.role === "start" ? x.shift.startedAt : x.shift.endedAt)}</strong>
+          <span>{x.role === "start" ? "Shift start" : "Shift end"}</span>
+          <strong>{timeLabel(x.role === "start" ? x.shift.startedAt : x.shift.endedAt)}</strong>
         </div>
       ))}
-      {place.items
-        .filter((x) => x.shift)
-        .map((x) => {
-          const m = x.role === "start" ? x.shift.startFromHomeM : x.shift.endFromHomeM;
-          return m === null ? null : (
-            <div key={`${x.id}-home`} className="ft-iw-row">
-              <span>{x.role === "start" ? "Start" : "End"} from home</span>
-              <Check meters={m} />
-            </div>
-          );
-        })}
     </div>
   );
 }
@@ -614,7 +731,8 @@ function TeamDay({ date, onOpen }) {
   const started = rows.filter((r) => r.status !== "NOT_STARTED").length;
   const km = rows.reduce((s, r) => s + (r.gpsKm || 0), 0);
   const visits = rows.reduce((s, r) => s + (r.visitCount || 0), 0);
-  const noHome = rows.filter((r) => !r.hasHome).length;
+  const petrolKm = rows.reduce((s, r) => s + (r.petrolKm || 0), 0);
+  const flagged = rows.reduce((s, r) => s + (r.flaggedLegCount || 0), 0);
 
   return (
     <>
@@ -622,7 +740,7 @@ function TeamDay({ date, onOpen }) {
         <Kpi index={0} label="On the field" value={started} icon={<FiUsers />} tone="info" foot={`of ${rows.length} sales executive${rows.length === 1 ? "" : "s"}`} />
         <Kpi index={1} label="Client visits" value={visits} icon={<FiMapPin />} tone="violet" foot="Punched in today" />
         <Kpi index={2} label="Distance" value={km} format={(n) => `${n.toFixed(1)} km`} icon={<FiNavigation />} tone="teal" foot="GPS, all executives" />
-        <Kpi index={3} label="Home not set" value={noHome} icon={<FiHome />} tone={noHome ? "danger" : "success"} foot="Needed for petrol km" />
+        <Kpi index={3} label="Petrol km" value={petrolKm} format={(n) => `${n.toFixed(1)} km`} icon={<FiTruck />} tone={flagged ? "danger" : "success"} foot={flagged ? `${flagged} trip${flagged === 1 ? "" : "s"} to check` : "Paid km, all executives"} />
       </div>
 
       <Card flush index={1} title="Sales executives" sub="Select a person to see their route and visits">
@@ -643,7 +761,7 @@ function TeamDay({ date, onOpen }) {
                   <th>Visits</th>
                   <th>Distance</th>
                   <th>Petrol km</th>
-                  <th>Home</th>
+                  <th>Check</th>
                   <th aria-label="Open" />
                 </tr>
               </thead>
@@ -682,12 +800,22 @@ function TeamDay({ date, onOpen }) {
                       {r.petrolKm !== null && r.petrolKm !== undefined ? (
                         <strong>{kmText(r.petrolKm)}</strong>
                       ) : (
-                        <span className="muted" title="Worked out the first time the day is opened after it ends">
-                          {r.status === "ACTIVE" ? "After the day ends" : r.status === "ENDED" ? "Open to work out" : "-"}
+                        <span className="muted" title="Worked out the first time the day is opened">
+                          {r.status === "ACTIVE" ? "After the day ends" : r.status === "ENDED" && r.visitCount ? "Open to work out" : "-"}
                         </span>
                       )}
                     </td>
-                    <td>{r.hasHome ? <Badge tone="success">Set</Badge> : <Badge tone="danger">Not set</Badge>}</td>
+                    <td>
+                      {r.flaggedLegCount > 0 ? (
+                        <Badge tone="warn">
+                          {r.flaggedLegCount} trip{r.flaggedLegCount === 1 ? "" : "s"}
+                        </Badge>
+                      ) : r.petrolKm !== null && r.petrolKm !== undefined ? (
+                        <Badge tone="success">OK</Badge>
+                      ) : (
+                        <span className="muted">-</span>
+                      )}
+                    </td>
                     <td className="ft-go">
                       <FiChevronRight />
                     </td>
@@ -719,50 +847,68 @@ function ExecutiveDay({ userId, date }) {
   const day = result.key === key ? result.day : null;
   // The line is drawn from the accurate fixes only (GPS drift pulls a route off the road); if a
   // poor-signal day has too few of those, all valid points are used.
-  const gpsPath = useMemo(() => {
+  // One GPS track per shift - never joined across the break between shifts.
+  const gpsPaths = useMemo(() => {
     if (!day) return [];
-    const valid = day.points.filter((p) => p.valid);
-    const accurate = valid.filter((p) => p.accuracy === null || p.accuracy <= LINE_ACCURACY_M);
-    return (accurate.length >= 2 ? accurate : valid).map(toLatLng);
+    return day.shifts.map((s) => {
+      const valid = day.points.filter((p) => p.valid && p.shiftId === s.id);
+      const accurate = valid.filter((p) => p.accuracy === null || p.accuracy <= LINE_ACCURACY_M);
+      return (accurate.length >= 2 ? accurate : valid).map(toLatLng);
+    });
   }, [day]);
+  const [focus, setFocus] = useState(null);
+  const [view, setView] = useState("map");
+  // a break line is drawn only where a shift ended and the next started in different places
+  const hasBreak = useMemo(() => (day ? breaks(day, []).length > 0 : false), [day]);
   const clientPoints = useMemo(() => (day ? day.visits.map((v) => toLatLng(v.checkIn || v.leadLocation)).filter(Boolean) : []), [day]);
 
-  // A closed day whose route was already worked out is read from the server - no Google request.
-  // Otherwise Google is asked once here and, for a closed day, the result is saved for everyone.
+  // A closed day already worked out is read from the server - no Google request. Otherwise Google is
+  // asked here for the direct road km of each petrol leg; the server applies the petrol rules and,
+  // for a closed day, saves the result for everyone.
   const saved = day?.savedRoute || null;
-  const savedPath = useMemo(() => (saved?.roadPath ? decodePolyline(saved.roadPath) : null), [saved]);
-  const livePetrol = usePetrolKm(key, saved ? null : day?.petrolRoute);
-  const liveRoad = useRoadPath(key, saved ? NO_POINTS : gpsPath, clientPoints);
-  const petrol = saved ? { km: saved.petrolKm, source: saved.petrolKm === null ? null : "road", loading: false } : livePetrol;
-  const road = saved ? { path: savedPath || gpsPath, road: !!savedPath, loading: false } : liveRoad;
+  const savedPaths = useMemo(() => decodeRoadPaths(saved?.roadPath), [saved]);
+  const waypoints = day?.petrol?.waypoints || null;
+  const legRoad = useLegRoadMeters(key, waypoints);
+  // a saved road line is reused; a day saved without one (Google could not draw it) tries again
+  const liveRoad = useRoadPaths(key, savedPaths ? NO_POINTS : gpsPaths, clientPoints);
+  const road = savedPaths
+    ? { paths: savedPaths && savedPaths.length === gpsPaths.length ? savedPaths : gpsPaths, road: !!savedPaths, loading: false }
+    : liveRoad;
+  const [worked, setWorked] = useState({ key: null, petrol: null });
+  const petrol = (worked.key === key && worked.petrol) || day?.petrol || null;
 
   useEffect(() => {
-    if (!day || saved || !day.closed || savedDays.has(key) || livePetrol.loading || liveRoad.loading) return;
-    // Only a real road result is kept: if Google could not route (straight-line fallback), nothing
-    // is saved and the next view tries again - a straight line must never become the fixed figure.
-    const petrolReady = !day.petrolRoute || livePetrol.source === "road";
-    const roadReady = gpsPath.length < 2 || liveRoad.road;
-    if (!petrolReady || !roadReady) return;
+    if (!day || savedDays.has(key)) return;
+    const needLegs = !!waypoints;
+    const needPath = day.closed && !savedPaths;
+    if (!needLegs && !needPath) return;
+    if (needLegs && (legRoad.loading || !legRoad.meters)) return;
+    // Petrol never waits on the map line: once the line is worked out (or there is none - the
+    // phone did not move, or Google could not draw it) the day is sent; without a road line the map
+    // keeps the GPS track.
+    if (needPath && liveRoad.loading) return;
     savedDays.add(key);
     saveFieldRoute(userId, date, {
       fingerprint: day.fingerprint,
-      petrolKm: day.petrolRoute ? Math.round(livePetrol.km * 100) / 100 : null,
-      roadPath: gpsPath.length >= 2 ? encodePolyline(liveRoad.path) : null,
-    }).catch(() => savedDays.delete(key));
-  }, [day, saved, key, userId, date, gpsPath, livePetrol, liveRoad]);
+      legRoadMeters: needLegs ? legRoad.meters : null,
+      roadPath: needPath && liveRoad.road ? JSON.stringify(liveRoad.paths.map((p) => (p.length >= 2 ? encodePolyline(p) : null))) : null,
+    })
+      .then((r) => setWorked({ key, petrol: r.petrol }))
+      .catch(() => savedDays.delete(key));
+  }, [day, savedPaths, key, userId, date, waypoints, legRoad, liveRoad]);
 
   const log = useMemo(() => {
     if (!day) return [];
     const events = [];
     day.shifts.forEach((s) => {
-      events.push({ at: s.startedAt, icon: <FiActivity />, tone: "info", text: "Shift started", sub: s.startFromHomeM !== null ? `${metersText(s.startFromHomeM)} from home` : "" });
+      events.push({ at: s.startedAt, icon: <FiActivity />, tone: "info", text: "Shift started", sub: "" });
       if (s.endedAt) {
         events.push({
           at: s.endedAt,
           icon: <FiCheckCircle />,
           tone: "success",
           text: s.status === "AUTO_ENDED" ? "Shift closed by the system" : "Shift ended",
-          sub: s.status === "AUTO_ENDED" ? "End Shift was not pressed" : s.endFromHomeM !== null ? `${metersText(s.endFromHomeM)} from home` : "",
+          sub: s.status === "AUTO_ENDED" ? "End Shift was not pressed" : "",
         });
       }
     });
@@ -810,17 +956,18 @@ function ExecutiveDay({ userId, date }) {
 
   const s = day.summary;
   const open = day.shifts.some((x) => x.status === "ACTIVE");
-  const petrolFoot = saved && petrol.km !== null
-    ? "By road · final for the day"
-    : !day.home
-    ? "Set the home location first"
-    : petrol.loading
+  const working = !!waypoints && petrol?.km === null && !legRoad.failed;
+  const petrolFoot = !petrol || petrol.legs.length === 0
+    ? "No client visit"
+    : working
       ? "Working out the road distance..."
-      : petrol.km === null
-        ? "No client visit"
-        : petrol.source === "straight"
-          ? "Straight line - road route unavailable"
-          : "Home → clients → home, by road";
+      : legRoad.failed && petrol.km === null
+        ? "Google Maps did not load - road distance unavailable"
+        : open
+          ? "So far · the return counts after End Shift"
+          : petrol.final
+            ? "Start → clients → return · final for the day"
+            : "Start → clients → return";
 
   return (
     <>
@@ -830,7 +977,7 @@ function ExecutiveDay({ userId, date }) {
             <FiTruck />
           </span>
           <span className="ft-stat-label">Petrol km</span>
-          <strong>{petrol.loading ? "..." : petrol.km === null ? "-" : `${petrol.km.toFixed(1)} km`}</strong>
+          <strong>{working ? "..." : petrol?.km === null || petrol?.km === undefined ? "-" : `${petrol.km.toFixed(1)} km`}</strong>
           <small>{petrolFoot}</small>
         </div>
         <div className="ft-stat">
@@ -869,16 +1016,58 @@ function ExecutiveDay({ userId, date }) {
         </div>
       </div>
 
+      <div className="ft-day-tabs">
+        <Tabs
+          tabs={[
+            { key: "map", label: "Map & visits", count: day.visits.length },
+            { key: "petrol", label: "Petrol breakdown", count: petrol?.legs.length || 0 },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+      </div>
+
+      {view === "petrol" &&
+        (petrol && petrol.legs.length > 0 ? (
+          <PetrolLegs
+            petrol={petrol}
+            working={working}
+            failed={legRoad.failed}
+            onShift={(n) => {
+              // show that shift on the map
+              setFocus({ key: `${n}-${Date.now()}`, points: (road.paths.at(n - 1) || []).concat(day.visits.filter((v) => v.shift === n).map((v) => toLatLng(v.checkIn || v.leadLocation)).filter(Boolean)) });
+              setView("map");
+            }}
+          />
+        ) : (
+          <Card>
+            <Empty title="No petrol for this day" text="Petrol is counted for trips to clients - there was no client visit." icon={<FiTruck />} />
+          </Card>
+        ))}
+
+      {view === "map" && (
       <div className="ft-day">
         <section className="ft-map">
-          <FieldMap day={day} roadPath={road.path} selected={selected} onSelect={setSelected} mapKey={key} />
+          <FieldMap day={day} roadPaths={road.paths} selected={selected} onSelect={setSelected} mapKey={key} focus={focus} />
           <div className="ft-map-legend">
-            <span>
-              <i className="ft-key line" /> {road.loading ? "Drawing the route..." : road.road ? "Route along roads" : "GPS track"}
-            </span>
-            <span>
-              <i className="ft-key home" /> Home
-            </span>
+            {day.shifts.length > 1 ? (
+              <>
+                {day.shifts.map((sh, i) => (
+                  <span key={sh.id}>
+                    <i className="ft-key line" style={{ background: shiftColor(i + 1) }} /> Shift {i + 1} ({timeLabel(sh.startedAt)} - {sh.endedAt ? timeLabel(sh.endedAt) : "now"})
+                  </span>
+                ))}
+                {hasBreak && (
+                  <span>
+                    <i className="ft-key break" /> Break · not counted
+                  </span>
+                )}
+              </>
+            ) : (
+              <span>
+                <i className="ft-key line" /> {road.loading ? "Drawing the route..." : road.road ? "Route along roads" : "GPS track"}
+              </span>
+            )}
             <span>
               <i className="ft-key visit" /> Client visit
             </span>
@@ -951,227 +1140,120 @@ function ExecutiveDay({ userId, date }) {
             </ol>
           </section>
           </div>
-          {day.home && (
-            <p className="ft-home-line">
-              <FiHome />
-              <span>
-                <strong>Home</strong> · {day.home.address || "Location set"}
-              </span>
-              <a href={mapLink({ lat: day.home.latitude, lng: day.home.longitude })} target="_blank" rel="noreferrer">
-                Map
-              </a>
-            </p>
-          )}
         </aside>
       </div>
+      )}
     </>
   );
 }
 
-// ---------------------------------------------------------------------------- Home locations
-function HomeEditor({ row, onClose, onSaved }) {
-  const toast = useToast();
-  const [text, setText] = useState(row.home?.address || "");
-  const [picked, setPicked] = useState(row.home ? { address: row.home.address, latitude: row.home.latitude, longitude: row.home.longitude } : null);
-  const [busy, setBusy] = useState(false);
-  const changed = picked && (!row.home || picked.latitude !== row.home.latitude || picked.longitude !== row.home.longitude);
+// ---------------------------------------------------------------------------- Petrol breakdown
+const LEG_STATUS = {
+  OK: { tone: "success", label: "OK", note: "Paid as travelled" },
+  CAPPED: { tone: "warn", label: "Over the limit", note: "Paid up to the limit only" },
+  NO_GPS: { tone: "warn", label: "No GPS", note: "Paid the direct road distance" },
+  PENDING: { tone: "neutral", label: "Working out", note: "" },
+  OPEN: { tone: "info", label: "After End Shift", note: "Counted when the shift ends" },
+};
+const NOT_MEASURED = { tone: "warn", label: "Not measured", note: "Google Maps did not load" };
+const legKm = (n) => (n === null || n === undefined ? "-" : `${n.toFixed(1)} km`);
 
-  const save = async (close) => {
-    if (!picked) return toast("Search the address and pick it from the list.", true);
-    setBusy(true);
-    try {
-      await setFieldHome(row.id, picked);
-      toast(`Home location saved for ${row.name}`);
-      onSaved();
-      close();
-    } catch (err) {
-      toast(err.message || "Could not save the home location.", true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+/**
+ * Petrol leg by leg: what the GPS shows was travelled, the direct road km between the two places,
+ * the most that is paid (road km + allowance) and what is paid. Worked out on the server.
+ */
+function PetrolLegs({ petrol, working, failed, onShift }) {
+  const multi = (petrol.shifts || []).length > 1;
+  const flagged = petrol.legs.filter((l) => l.status === "CAPPED" || l.status === "NO_GPS").length;
   return (
-    <Modal
-      title={`${row.home ? "Change" : "Set"} home location`}
-      sub={`${row.name} · petrol km is counted from and back to this place`}
-      onClose={onClose}
-      footer={(close) => (
-        <div className="ft-modal-foot">
-          <Button variant="ghost" onClick={close} disabled={busy}>
-            Cancel
-          </Button>
-          <Button busy={busy} onClick={() => save(close)} disabled={!changed}>
-            Save home location
-          </Button>
-        </div>
-      )}
+    <Card
+      flush
+      title="Petrol breakdown"
+      sub={`Each trip pays what the GPS shows, up to the direct road distance + ${petrol.allowancePercent}%. After the last client, only up to the way back to the start point.`}
+      className="ft-legs-card"
     >
-      <label className="lm-field wide">
-        <span className="lm-label">
-          Home address <i>*</i>
-        </span>
-        <PlacesSearchInput
-          value={text}
-          onInput={(v) => {
-            setText(v);
-            setPicked(null);
-          }}
-          onSelect={(place) => {
-            setText(place.address);
-            if (place.latitude !== null) setPicked({ address: place.address, latitude: place.latitude, longitude: place.longitude });
-          }}
-          inputProps={{ className: "lm-input", placeholder: "Search area, street or landmark...", autoFocus: true }}
-        />
-        <span className="lm-hint">Type at least 3 letters and pick the address from the list.</span>
-      </label>
-      <div className="ft-preview">
-        {picked ? (
-          <GoogleMap
-            key={`${picked.latitude},${picked.longitude}`}
-            mapId={MAP_ID}
-            defaultCenter={{ lat: picked.latitude, lng: picked.longitude }}
-            defaultZoom={15}
-            gestureHandling="cooperative"
-            disableDefaultUI
-            zoomControl
-            className="ft-preview-map"
-          >
-            <AdvancedMarker position={{ lat: picked.latitude, lng: picked.longitude }}>
-              <div className="ft-pin ft-pin-home">
-                <span className="ft-pin-dot">
-                  <FiHome />
-                </span>
-              </div>
-            </AdvancedMarker>
-          </GoogleMap>
-        ) : (
-          <div className="ft-preview-empty">
-            <FiMapPin />
-            <span>The chosen place shows here</span>
-          </div>
-        )}
-      </div>
-      {picked && (
-        <p className="ft-coords">
-          {picked.latitude.toFixed(6)}, {picked.longitude.toFixed(6)}
-        </p>
-      )}
-    </Modal>
-  );
-}
-
-function HomeLocations() {
-  const toast = useToast();
-  const [rows, setRows] = useState(null);
-  const [error, setError] = useState("");
-  const [editing, setEditing] = useState(null);
-  const [busy, setBusy] = useState(null);
-
-  const load = () =>
-    fieldExecutives()
-      .then((list) => {
-        setRows(list);
-        setError("");
-      })
-      .catch((err) => setError(err.message || "Could not load the sales executives."));
-  useEffect(() => {
-    load();
-  }, []);
-
-  const remove = async (row) => {
-    if (!window.confirm(`Remove ${row.name}'s home location? Petrol km cannot be worked out without it.`)) return;
-    setBusy(row.id);
-    try {
-      await clearFieldHome(row.id);
-      toast("Home location removed");
-      await load();
-    } catch (err) {
-      toast(err.message || "Could not remove the home location.", true);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const missing = rows ? rows.filter((r) => !r.home).length : 0;
-  return (
-    <>
-      {rows && missing > 0 && (
-        <div className="ft-banner">
-          <FiAlertTriangle />
-          <span>
-            <strong>
-              {missing} sales executive{missing > 1 ? "s have" : " has"} no home location.
-            </strong>{" "}
-            Petrol km cannot be worked out for them until it is set.
-          </span>
-        </div>
-      )}
-      <Card flush title="Home locations" sub="Where each sales executive starts and ends the day - the base point of petrol km">
-        {error ? (
-          <Empty title="Could not load the sales executives" text={error} icon={<FiHome />} />
-        ) : !rows ? (
-          <SkeletonRows rows={4} />
-        ) : rows.length === 0 ? (
-          <Empty title="No sales executives" text="People with the Sales Executive role in your team appear here." icon={<FiUsers />} />
-        ) : (
-          <div className="lm-table-wrap">
-            <table className="lm-table ft-homes">
-              <thead>
-                <tr>
-                  <th>Sales executive</th>
-                  <th>Home location</th>
-                  <th>Last updated</th>
-                  <th aria-label="Actions" />
+      <div className="lm-table-wrap">
+        <table className="lm-table ft-legs">
+          <thead>
+            <tr>
+              <th>Trip</th>
+              <th className="num">GPS travelled</th>
+              <th className="num">Direct road</th>
+              <th className="num">Limit</th>
+              <th className="num">Paid</th>
+              <th>Check</th>
+            </tr>
+          </thead>
+          <tbody>
+            {petrol.legs.map((l, i) => {
+              const sh = multi && (i === 0 || petrol.legs.at(i - 1).shift !== l.shift) ? petrol.shifts.at(l.shift - 1) : null;
+              const head = sh && (
+                <tr key={`shift-${l.shift}`} className="ft-shift-row" onClick={() => onShift?.(l.shift)} title="Show this shift on the map">
+                  <td colSpan={6}>
+                    <span className="ft-shift-head">
+                      <i style={{ background: shiftColor(l.shift) }} />
+                      <strong>Shift {l.shift}</strong>
+                      <small>
+                        {timeLabel(sh.startedAt)} - {sh.endedAt ? timeLabel(sh.endedAt) : "now"} · {sh.km === null ? "working out" : legKm(sh.km)} · show on map
+                      </small>
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr key={row.id} style={{ "--i": i }}>
-                    <td>
-                      <span className="ft-who">
-                        <Avatar name={row.name} size={34} />
-                        <span className="ft-cell">
-                          <strong>{row.name}</strong>
-                          {!!row.phone && <small>{row.phone}</small>}
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      {row.home ? (
-                        <span className="ft-home-cell">
-                          <FiHome />
-                          <span>{row.home.address || `${row.home.latitude.toFixed(5)}, ${row.home.longitude.toFixed(5)}`}</span>
-                          <a href={mapLink({ lat: row.home.latitude, lng: row.home.longitude })} target="_blank" rel="noreferrer" aria-label="Open in Google Maps">
-                            <FiExternalLink />
-                          </a>
-                        </span>
-                      ) : (
-                        <Badge tone="danger">Not set</Badge>
-                      )}
-                    </td>
-                    <td className="muted">
-                      {row.home?.updatedAt ? new Date(row.home.updatedAt.replace(" ", "T")).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
-                    </td>
-                    <td className="ft-actions">
-                      <Button size="sm" variant={row.home ? "ghost" : "primary"} onClick={() => setEditing(row)} disabled={busy === row.id}>
-                        {row.home ? "Change" : "Set home"}
-                      </Button>
-                      {row.home && (
-                        <Button size="sm" variant="danger" onClick={() => remove(row)} busy={busy === row.id}>
-                          Remove
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      {editing && <HomeEditor row={editing} onClose={() => setEditing(null)} onSaved={load} />}
-    </>
+              );
+              // Google could not be reached: the trip is not measured (nothing is saved; the next view tries again).
+              const st = l.status === "PENDING" && failed ? NOT_MEASURED : LEG_STATUS[l.status] || LEG_STATUS.PENDING;
+              return (
+                <Fragment key={i}>
+                {head}
+                <tr className={l.kind === "RETURN" ? "ft-leg-return" : undefined}>
+                  <td>
+                    <span className="ft-cell">
+                      <strong>
+                        {l.kind === "RETURN" ? "Return: " : ""}
+                        {l.from} → {l.to}
+                      </strong>
+                      <small>
+                        {l.fromAt ? timeLabel(l.fromAt) : ""}
+                        {l.toAt ? ` - ${timeLabel(l.toAt)}` : ""}
+                        {l.kind === "RETURN" ? " · limit = way back to the shift's start point" : ""}
+                      </small>
+                    </span>
+                  </td>
+                  <td className="num">{l.status === "OPEN" ? "-" : legKm(l.gpsKm)}</td>
+                  <td className="num">{working && l.roadKm === null ? "..." : legKm(l.roadKm)}</td>
+                  <td className="num muted">{legKm(l.maxKm)}</td>
+                  <td className="num">
+                    <strong>{legKm(l.paidKm)}</strong>
+                  </td>
+                  <td>
+                    <span className="ft-cell">
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                      {!!st.note && st !== LEG_STATUS.OK && <small>{st.note}</small>}
+                    </span>
+                  </td>
+                </tr>
+                </Fragment>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>
+                <strong>Petrol for the day</strong>
+                {flagged > 0 && <small className="ft-legs-flag"> · {flagged} trip{flagged === 1 ? "" : "s"} to check</small>}
+              </td>
+              <td className="num">{legKm(petrol.legs.reduce((s, l) => s + (l.gpsKm || 0), 0))}</td>
+              <td className="num" />
+              <td className="num" />
+              <td className="num">
+                <strong>{legKm(petrol.km)}</strong>
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </Card>
   );
 }
 
@@ -1180,7 +1262,6 @@ export default function FieldTracking() {
   const { persona } = useViewer();
   const [params, setParams] = useSearchParams();
   const today = dayKey(new Date());
-  const tab = params.get("tab") === "homes" ? "homes" : "day";
   const date = params.get("date") || today;
   const userId = params.get("user");
   const [names, setNames] = useState({});
@@ -1195,11 +1276,10 @@ export default function FieldTracking() {
 
   if (persona !== "sales_manager") return <Navigate to={LEADS_HOME} replace />;
 
-  // The view lives in the URL (?tab=homes / ?date= / ?user=) so Back and a shared link both work.
+  // The view lives in the URL (?date= / ?user=) so Back and a shared link both work.
   const update = (next) => {
-    const merged = { tab, date, user: userId, ...next };
+    const merged = { date, user: userId, ...next };
     const query = {};
-    if (merged.tab === "homes") query.tab = "homes";
     if (merged.date && merged.date !== today) query.date = merged.date;
     if (merged.user) query.user = merged.user;
     setParams(query);
@@ -1210,7 +1290,7 @@ export default function FieldTracking() {
     <>
       <div className="lm-head ft-head">
         <div>
-          {userId && tab === "day" ? (
+          {userId ? (
             <>
               <button type="button" className="ft-crumb" onClick={() => update({ user: null })}>
                 <FiChevronLeft /> All sales executives
@@ -1226,23 +1306,10 @@ export default function FieldTracking() {
             </>
           )}
         </div>
-        {tab === "day" && <DayPicker date={date} onChange={(d) => update({ date: d })} />}
+        <DayPicker date={date} onChange={(d) => update({ date: d })} />
       </div>
 
-      {!userId && (
-        <div className="ft-tabs">
-          <Tabs
-            tabs={[
-              { key: "day", label: "Team day" },
-              { key: "homes", label: "Home locations" },
-            ]}
-            value={tab}
-            onChange={(t) => update({ tab: t, user: null })}
-          />
-        </div>
-      )}
-
-      {tab === "homes" ? <HomeLocations /> : userId ? <ExecutiveDay userId={userId} date={date} /> : <TeamDay date={date} onOpen={(id) => update({ user: String(id) })} />}
+      {userId ? <ExecutiveDay userId={userId} date={date} /> : <TeamDay date={date} onOpen={(id) => update({ user: String(id) })} />}
     </>
   );
 }

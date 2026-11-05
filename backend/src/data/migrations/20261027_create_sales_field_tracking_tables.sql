@@ -3,28 +3,15 @@
 -- A sales executive starts a field day (shift) in the Android app, punches in/out at clients
 -- (crm_lead_meetings check-in/out, unchanged), and ends the day. While the shift is open the app
 -- records GPS points in the background and uploads them in batches. The sales manager reviews the
--- day afterwards on the web: route map, punches vs. lead locations, and petrol km
--- (home -> each client -> home, always counted from the registered home location).
+-- day afterwards on the web: route map, punches vs. lead locations, and petrol km (counted from
+-- where the shift was started - start -> each client -> return; see utils/salesFieldTracking.js).
 --
--- sales_home_locations: one row per executive, set by admin. The base point for petrol km.
 -- sales_field_shifts:   one row per started field day (an executive may end and start again).
 -- sales_field_points:   background GPS points. client_point_id is generated on the phone so a
 --                       batch that is uploaded twice (retry after a network drop) is stored once.
 --
 -- Separate from technician_shifts / technician_location_history on purpose: technician tracking
 -- is untouched. New tables only - no existing table is changed. Safe to re-run.
-
-CREATE TABLE IF NOT EXISTS `sales_home_locations` (
-  `user_id`    BIGINT        NOT NULL,
-  `latitude`   DECIMAL(10,7) NOT NULL,
-  `longitude`  DECIMAL(10,7) NOT NULL,
-  `address`    VARCHAR(255)  NULL,
-  `updated_by` BIGINT        NULL,
-  `created_at` TIMESTAMP     NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP     NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`user_id`),
-  CONSTRAINT `fk_shl_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `sales_field_shifts` (
   `id`              CHAR(36)      NOT NULL,
