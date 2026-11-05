@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import { AlertTriangleIcon, BriefcaseIcon, ClockIcon, PhoneIcon } from '../../components/icons';
 import { Toast, type ToastMessage } from '../../components/Toast';
@@ -7,9 +7,9 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { radii, spacing, typography } from '../../theme';
-import { errorText, getTicket, markPartDone } from '../api';
+import { closeTicket, errorText, getTicket, markActionDone, markPartDone } from '../api';
 import { useFeedback } from '../FeedbackContext';
-import { ACTIONS, OPERATIONS, PRIORITY, TICKET_STATUS, formatDateTime, formatDay, monthLabel, rupees } from '../format';
+import { ACTIONS, OPERATIONS, PRIORITY, TICKET_STATUS, formatDateTime, formatDay, isAssignedAction, monthLabel, rupees } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
@@ -47,8 +47,9 @@ export function FeedbackTicketScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const { can, myDepartments, deptOnly } = useFeedback();
+  const { can, myDepartments, deptOnly, userId } = useFeedback();
   const [partNotes, setPartNotes] = useState<Record<string, string>>({});
+  const [actionNote, setActionNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -85,13 +86,21 @@ export function FeedbackTicketScreen() {
   const hasOps = !parts.length || parts.some((p) => p.kind === OPERATIONS);
   // The other departments' parts, each finished by its own team.
   const others = parts.filter((p) => p.kind !== OPERATIONS);
-  const opsDone = !hasOps || ticket.action === 'OTHER' || visit?.status === 'COMPLETED';
+  // Site audit / Supervisor visit / Sales: done when the assigned person marks it done.
+  const assigned = isAssignedAction(ticket.action);
+  const opsDone = !hasOps || ticket.action === 'OTHER' || (assigned ? !!ticket.action_done : visit?.status === 'COMPLETED');
+  const canFinishAction = open && assigned && !ticket.action_done && (can('FEEDBACK_MANAGE') || ticket.action_owner?.id === userId);
   const ready = open && (ticket.follow_up_due ?? opsDone);
   const canFinish = (p: TicketPart) => open && p.status !== 'DONE' && (can('FEEDBACK_MANAGE') || myDepartments.includes(p.kind));
   const followUps = (ticket.history || []).filter((h) => h.event === 'FOLLOWUP_CALL');
   const steps: [string, boolean][] = [
     [`Raised ${formatDay(ticket.created_at)}`, true],
-    ...(hasOps
+    ...(hasOps && assigned
+      ? ([
+          [`${ACTIONS[ticket.action].who}: ${ticket.action_owner?.name || 'not assigned'}`, !!ticket.action_owner],
+          [ticket.action_done ? `${ACTIONS[ticket.action].label} done ${formatDay(ticket.action_done.at)}` : `${ACTIONS[ticket.action].label} to be done`, !!ticket.action_done || !open],
+        ] as [string, boolean][])
+      : hasOps
       ? ([
           [visit ? `Re-visit booked · Job ${visit.job_code}${visit.technicians ? ` · ${visit.technicians}` : ''}` : ticket.action === 'OTHER' ? 'No technician visit (Other)' : 'Re-visit to be booked', !!visit || ticket.action === 'OTHER'],
           [visit?.status === 'COMPLETED' ? `Work done ${formatDay(visit.completed_at || visit.date)}` : 'Work done', visit?.status === 'COMPLETED' || ticket.action === 'OTHER'],
@@ -100,7 +109,52 @@ export function FeedbackTicketScreen() {
     ...others.map((p) => [p.status === 'DONE' ? `${p.label} done · ${p.done_note || ''}` : `With ${p.label}`, p.status === 'DONE' || !open] as [string, boolean]),
     [open ? 'Customer confirms on the follow-up call' : `Closed ${formatDay(ticket.closed_at)}`, !open],
   ];
-  const waitingFor = [!opsDone ? (visit ? 'the re-visit to be completed' : 'the re-visit to be booked and completed') : null, ...others.filter((p) => p.status !== 'DONE').map((p) => p.label)].filter(Boolean);
+  const waitingFor = [
+    !opsDone
+      ? assigned
+        ? `${ticket.action_owner?.name || 'the assigned person'} to finish the ${ACTIONS[ticket.action].label.toLowerCase()}`
+        : visit
+          ? 'the re-visit to be completed'
+          : 'the re-visit to be booked and completed'
+      : null, ...others.filter((p) => p.status !== 'DONE').map((p) => p.label)].filter(Boolean);
+
+  // The action is taken (every team finished): close without the follow-up call.
+  const canClose = can('FEEDBACK_MANAGE') || ticket.raised_by?.id === userId;
+  function askClose() {
+    Alert.alert(`Close ${ticket!.ticket_number}?`, 'Every team has finished its work. The ticket closes without the follow-up call; it can be reopened later.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Close the ticket',
+        onPress: async () => {
+          setSaving(true);
+          try {
+            const fresh = await getTicket(ticket!.id);
+            await closeTicket(ticket!.id, fresh.row_version ?? 0, null);
+            setToast({ message: `${ticket!.ticket_number} is closed.`, variant: 'success' });
+            await load();
+          } catch (err) {
+            setToast({ message: errorText(err), variant: 'error' });
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
+  }
+
+  async function finishAction() {
+    setSaving(true);
+    try {
+      await markActionDone(ticket!.id, actionNote.trim());
+      setActionNote('');
+      setToast({ message: `${ACTIONS[ticket!.action].label} marked done.`, variant: 'success' });
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function finishPart(p: TicketPart) {
     setSaving(true);
@@ -155,7 +209,13 @@ export function FeedbackTicketScreen() {
 
         {others.map((p) => (
           <Panel key={p.kind} title={`${p.label}${p.with_invoices ? ' · invoice issue' : ''}`} icon={<BriefcaseIcon size={17} color={theme.warningText} />}>
-            <Text style={styles.v}>{p.issue_summary || 'No details written.'}</Text>
+            {(p.issues || []).map((i) => (
+              <Text key={i.id} style={styles.v}>
+                • <Text style={{ fontWeight: '700' }}>{i.name}</Text>
+                {i.text ? ` - ${i.text}` : ''}
+              </Text>
+            ))}
+            {(!!p.issue_summary || !(p.issues || []).length) && <Text style={styles.v}>{p.issue_summary || 'No details written.'}</Text>}
             {!!p.priority && (
               <View style={[styles.kv, { marginTop: spacing.xs }]}>
                 <Text style={styles.k}>Priority</Text>
@@ -211,8 +271,40 @@ export function FeedbackTicketScreen() {
             <Text style={styles.k}>Next step</Text>
             <Text style={styles.v}>{ACTIONS[ticket.action]?.label || ticket.action}{ticket.action === 'OTHER' && ticket.action_note ? `: ${ticket.action_note}` : ''}</Text>
           </View>
+          {assigned && (
+            <View style={styles.kv}>
+              <Text style={styles.k}>Assigned to</Text>
+              <Text style={styles.v}>{ticket.action_owner?.name || '—'}</Text>
+            </View>
+          )}
           {!!ticket.feedback && <AnswersList submission={ticket.feedback} onlyBad />}
         </Panel>
+        )}
+
+        {hasOps && assigned && (
+          <Panel title={ACTIONS[ticket.action].label} icon={<BriefcaseIcon size={17} color={theme.primary} />}>
+            {ticket.action_done ? (
+              <View style={styles.done}>
+                <Text style={styles.doneText}>✓ Done · {ticket.action_done.note}</Text>
+                <Text style={styles.small}>{[formatDateTime(ticket.action_done.at), ticket.action_done.by?.name].filter(Boolean).join(' · ')}</Text>
+              </View>
+            ) : canFinishAction ? (
+              <>
+                {!!ticket.action_note && <Text style={styles.small}>Note: {ticket.action_note}</Text>}
+                <TextInput
+                  style={styles.noteInput}
+                  value={actionNote}
+                  onChangeText={setActionNote}
+                  maxLength={500}
+                  placeholder={`What was done in the ${ACTIONS[ticket.action].label.toLowerCase()}?`}
+                  placeholderTextColor={theme.textMuted}
+                />
+                <PrimaryButton label={`Mark ${ACTIONS[ticket.action].label.toLowerCase()} done`} onPress={finishAction} loading={saving} disabled={!actionNote.trim()} style={{ marginTop: spacing.xs }} />
+              </>
+            ) : (
+              <Text style={styles.small}>{open ? `Waiting for ${ticket.action_owner?.name || 'the assigned person'}.` : 'Closed.'}</Text>
+            )}
+          </Panel>
         )}
 
         <Panel title="Follow-up call" icon={<PhoneIcon size={17} color={theme.primary} />}>
@@ -225,9 +317,14 @@ export function FeedbackTicketScreen() {
           {open ? (
             <>
               <Text style={styles.small}>
-                {ready ? 'The work is done. Call the customer and ask the questions again: if they are satisfied the ticket closes.' : `Waiting for ${waitingFor.join(' and ') || 'the work'}. Then the customer is called back.`}
+                {ready
+                  ? 'The action is taken. Call the customer and ask the questions again (satisfied: the ticket closes), or close the ticket without the call.'
+                  : `Waiting for ${waitingFor.join(' and ') || 'the work'}. Then the customer is called back.`}
               </Text>
               {!deptOnly && <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ marginTop: spacing.sm }} />}
+              {!deptOnly && ready && canClose && (
+                <PrimaryButton label="Close the ticket" variant="secondary" onPress={askClose} loading={saving} style={{ marginTop: spacing.xs }} />
+              )}
             </>
           ) : (
             <Text style={styles.small}>{ticket.close_note || 'Closed.'}</Text>

@@ -18,6 +18,7 @@ import {
   giveCall,
   historyItems,
   monthLabel,
+  periodText,
   emailTemplateFor,
   getEmailTemplates,
   openCustomerEmail,
@@ -31,11 +32,14 @@ import {
   updateCallContact,
   recordAttempt,
   recordFollowUp,
+  closeTicket,
+  getTicket,
   saveCallFeedback,
   sendFormLink,
   suggestedPriority,
 } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
+import { WrongNumberRequest } from "./NumberRequests";
 import useMe from "../../hooks/useMe";
 import RaiseTicketModal from "./RaiseTicketModal";
 import { problemNote } from "./feedbackApi";
@@ -62,7 +66,7 @@ const tenDigits = (v) => String(v || "").replace(/\D/g, "").slice(0, 10);
 export default function CallPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { can, userId, departmentList } = useFeedbackAccess();
+  const { can, userId } = useFeedbackAccess();
 
   const [call, setCall] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -94,6 +98,7 @@ export default function CallPage() {
 
   const [modal, setModal] = useState(null); // "ticket-new" | "ticket-later" | "no-ticket" | "finish" | "give"
   const [finishNote, setFinishNote] = useState("");
+  const [closeNote, setCloseNote] = useState(""); // closing the ticket without the follow-up call
   const [giveTo, setGiveTo] = useState("");
   const { user } = useMe();
   const [emailTemplates, setEmailTemplates] = useState([]);
@@ -104,7 +109,9 @@ export default function CallPage() {
     return getCall(id)
       .then((c) => {
         setCall(c);
-        setContactKey((k) => k || (c.contacts[0] ? c.contacts[0].id : OTHER));
+        // A right number just added by the service coordinator is the one to call next.
+        const fresh = freshNumberRequest(c);
+        setContactKey((k) => (fresh?.right?.contact_id && c.contacts.some((x) => x.id === fresh.right.contact_id) ? fresh.right.contact_id : k || (c.contacts[0] ? c.contacts[0].id : OTHER)));
       })
       .catch((err) => setError(err.message));
   }, [id]);
@@ -144,6 +151,17 @@ export default function CallPage() {
   const firstTicket = call?.tickets?.[0] || null; // a call has one ticket
   // Several contacts can be marked primary; only the first is shown as Primary.
   const primaryId = call?.contacts?.find((c) => c.is_primary)?.id;
+  // The right number from the service coordinator (not called yet): under the wrong one, marked New.
+  const freshRequest = call ? freshNumberRequest(call) : null;
+  const newContactId = freshRequest?.right?.contact_id || null;
+  const contactsShown = (() => {
+    const list = call?.contacts || [];
+    const added = list.find((c) => c.id === newContactId);
+    if (!added) return list;
+    const rest = list.filter((c) => c.id !== newContactId);
+    const at = rest.findIndex((c) => c.id === freshRequest.wrong?.contact_id);
+    return at < 0 ? [...rest, added] : [...rest.slice(0, at + 1), added, ...rest.slice(at + 1)];
+  })();
   // The ticket's work is done: call the customer back with the same questions (closes it when all good).
   const followUpTicket = call?.tickets?.find((t) => t.follow_up_due) || null;
   const canFollowUp = Boolean(followUpTicket) && (mine || can("FEEDBACK_MANAGE"));
@@ -157,8 +175,8 @@ export default function CallPage() {
   const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter(Boolean))], [call]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
   const modeCounts = useMemo(
-    () => countModes(questions, monthServices, departmentList),
-    [questions, monthServices, departmentList],
+    () => countModes(questions, monthServices, []),
+    [questions, monthServices],
   );
 
   // answers to the asked questions as response rows with the master's flags (for the ticket)
@@ -252,8 +270,10 @@ export default function CallPage() {
       else if (res.offer_form_link) flash("Call saved. The customer didn't answer. You can send the feedback form on WhatsApp.", "warn");
       else flash(res.next_call_at ? `Call saved. Call back ${formatDateTime(res.next_call_at)}.` : "Call saved.");
       await load();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     } finally {
       setSavingAttempt(false);
     }
@@ -287,6 +307,24 @@ export default function CallPage() {
     } catch (err) {
       setError(err.message);
       setModal(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // The action is taken (every team finished): close the ticket without calling the customer back.
+  async function closeWithoutCall() {
+    setSaving(true);
+    setError("");
+    try {
+      const t = await getTicket(followUpTicket.id);
+      await closeTicket(followUpTicket.id, t.row_version, closeNote.trim() || null);
+      flash(`${followUpTicket.ticket_number} is closed.`, "ok");
+      setModal(null);
+      setCloseNote("");
+      await load();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -441,7 +479,8 @@ export default function CallPage() {
         sub={
           <>
             Site: {call.site.name}
-            {call.site.city ? `, ${call.site.city}` : ""} · {call.visits.length} service{call.visits.length === 1 ? "" : "s"} in {monthLabel(call.month)}
+            {call.site.city ? `, ${call.site.city}` : ""} · {call.visits.length} service{call.visits.length === 1 ? "" : "s"} {call.period_start ? periodText(call.period_start, call.period_end) : `in ${monthLabel(call.month)}`}
+            {call.due_date && ` · due ${formatDay(call.due_date)}`}
             {call.collector && (
               <>
                 {" "}
@@ -521,7 +560,7 @@ export default function CallPage() {
                 aside={call.calls_summary.total ? `${call.calls_summary.total} call${call.calls_summary.total === 1 ? "" : "s"} so far · ${call.calls_summary.missed} not answered` : "No calls yet"}
               >
                 <div className="fb-stack" style={{ gap: 10 }}>
-                  {call.contacts.map((c) =>
+                  {contactsShown.map((c) =>
                     editing?.id === c.id ? (
                       <div key={c.id} className="fb-contact is-on">
                         <div className="fb-stack" style={{ flex: "1 1 100%", gap: 10 }}>
@@ -543,11 +582,16 @@ export default function CallPage() {
                         </div>
                       </div>
                     ) : (
-                      <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
+                      <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""} ${c.id === newContactId ? "is-new" : ""}`}>
                         <label className="fb-contact-pick">
                           <input type="radio" name="fb-contact" checked={contactKey === c.id} onChange={() => setContactKey(c.id)} />
                           <span>
                             <span className="fb-strong">{c.name}</span>
+                            {c.id === newContactId && (
+                              <span className="fb-new-tag" title={`Right number from ${freshRequest.resolved_by?.name || "the service coordinator"}`}>
+                                New
+                              </span>
+                            )}
                             <br />
                             <span className="fb-small fb-muted">
                               {[c.role, c.phone?.trim() || "No phone number", c.email, c.id === primaryId ? "Primary" : null].filter(Boolean).join(" · ")}
@@ -605,6 +649,19 @@ export default function CallPage() {
                         {attemptChanged ? " · not saved yet: press Save call result" : ". Change the result to save a new one."}
                       </span>
                     )}
+                    {/* Wrong number: ask the service coordinator for the right one (Requests). */}
+                    <WrongNumberRequest
+                      call={call}
+                      canWork={canWork}
+                      wrongPicked={shownOutcome === "WRONG_NUMBER"}
+                      unsaved={attemptChanged}
+                      saveResult={saveAttempt}
+                      lastCallAt={savedAttempt?.called_at}
+                      onChanged={(text) => {
+                        flash(text, "ok");
+                        load();
+                      }}
+                    />
                   </div>
                 </div>
               </Card>
@@ -614,7 +671,7 @@ export default function CallPage() {
                   Spoke with
                   <input id="fb-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
-                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} departments={departmentList} />
+                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
                 <QuestionProgress questions={visibleQuestions} answers={answers} />
                 {visibleQuestions.map((q, n) => (
                   <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
@@ -660,7 +717,7 @@ export default function CallPage() {
                 </div>
               </Card>
 
-              <Card title="Can't get feedback this month?">
+              <Card title="Can't get feedback?">
                 <div className="fb-row" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="fb-btn" onClick={() => setModal("finish")}>
                     Finish without feedback
@@ -672,6 +729,15 @@ export default function CallPage() {
 
           {call.status === "DONE" && canFollowUp && (
             <Card title={`Follow-up call · ${followUpTicket.ticket_number}`}>
+              {/* The action is taken: call the customer to confirm - or close the ticket without the call. */}
+              <div className="fb-close-bar">
+                <span className="fb-small">
+                  <b>The action is taken.</b> Call the customer to confirm it is resolved, or close the ticket without the call.
+                </span>
+                <button type="button" className="fb-btn fb-btn-sm" onClick={() => setModal("close-ticket")} disabled={saving}>
+                  <FiCheck aria-hidden="true" /> Close the ticket
+                </button>
+              </div>
               <div className="fb-stack" style={{ gap: 10, paddingBottom: 12, borderBottom: "1px solid #f1f2f4" }}>
                 {call.contacts.map((c) => (
                   <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
@@ -693,7 +759,7 @@ export default function CallPage() {
                   <input id="fb-fu-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
               </div>
-              <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} departments={departmentList} />
+              <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
                 <QuestionProgress questions={visibleQuestions} answers={answers} />
               {visibleQuestions.map((q, n) => (
                 <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
@@ -748,7 +814,7 @@ export default function CallPage() {
                   ))}
                 </div>
               ) : (
-                <div className="fb-muted">No feedback was received this month.</div>
+                <div className="fb-muted">No feedback was received on this call.</div>
               )}
               {canRaiseLater && (
                 <div className="fb-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
@@ -775,7 +841,7 @@ export default function CallPage() {
         <div className="fb-stack">
           {latest && <CustomerCard customer={call.customer} site={call.site} contacts={call.contacts} feedback={latest} />}
 
-          <Card title={`Services in ${monthLabel(call.month).split(" ")[0]}`} aside={`${visitCounts.COMPLETED || 0} of ${call.visits.length} completed`} bodyClass="is-flush">
+          <Card title={call.period_start ? `Services ${periodText(call.period_start, call.period_end)}` : `Services in ${monthLabel(call.month).split(" ")[0]}`} aside={`${visitCounts.COMPLETED || 0} of ${call.visits.length} completed`} bodyClass="is-flush">
             {call.visits.length > 0 && (
               <div className="fb-visit-filter" role="group" aria-label="Show services">
                 <button type="button" className={visitFilter === "" ? "is-on" : ""} onClick={() => setVisitFilter("")} aria-pressed={visitFilter === ""}>
@@ -1022,6 +1088,33 @@ export default function CallPage() {
         </Modal>
       )}
 
+      {modal === "close-ticket" && followUpTicket && (
+        <Modal
+          title={`Close ${followUpTicket.ticket_number}?`}
+          onClose={() => setModal(null)}
+          footer={
+            <>
+              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+              <button type="button" className="fb-btn fb-btn-ok" disabled={saving} onClick={closeWithoutCall}>
+                {saving ? "Closing…" : "Close the ticket"}
+              </button>
+            </>
+          }
+        >
+          <div className="fb-stack" style={{ gap: 12 }}>
+            <p className="fb-small fb-muted" style={{ margin: 0 }}>
+              Every team has finished its work. The ticket closes without the follow-up call; you can reopen it later if needed.
+            </p>
+            <label className="fb-field" htmlFor="fb-close-note">
+              Note (optional)
+              <textarea id="fb-close-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer said on WhatsApp it is sorted" value={closeNote} onChange={(e) => setCloseNote(e.target.value)} />
+            </label>
+          </div>
+        </Modal>
+      )}
+
       {modal === "give" && (
         <Modal
           title="Give the call to another collector"
@@ -1058,4 +1151,12 @@ export default function CallPage() {
       )}
     </>
   );
+}
+
+/** The right number the service coordinator added that hasn't been called yet (or null). */
+function freshNumberRequest(call) {
+  const done = (call.number_requests || []).find((q) => q.status === "DONE");
+  if (!done?.right) return null;
+  const lastCall = call.call_attempts?.[0]?.called_at;
+  return !lastCall || new Date(lastCall) < new Date(done.resolved_at) ? done : null;
 }

@@ -87,7 +87,7 @@ export function FeedbackHomeScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [calls, tickets] = await Promise.all([listCalls({ month, status: 'OPEN' }), listTickets('OPEN')]);
+      const [calls, tickets] = await Promise.all([listCalls({ due: 'today', status: 'OPEN' }), listTickets('OPEN')]);
       setData(calls);
       setOpenTickets(tickets.length);
       // Open tickets whose work is done: call the customer back to confirm (Other needs no visit).
@@ -97,7 +97,7 @@ export function FeedbackHomeScreen() {
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -108,11 +108,10 @@ export function FeedbackHomeScreen() {
   const openCalls = (status: string) => navigation.navigate('FeedbackTabs', { screen: 'Calls', params: { status, at: Date.now() } });
 
   async function take(row: CallRow) {
-    const key = `${row.site.id}|${row.month}`;
-    setBusy(key);
+    setBusy(row.request_id);
     setError(null);
     try {
-      const call = await takeCall(row.site.id, row.month);
+      const call = await takeCall(row.request_id);
       navigation.navigate('FeedbackCall', { callId: call.id });
     } catch (err) {
       setError(errorText(err, 'Could not take the call.'));
@@ -161,7 +160,7 @@ export function FeedbackHomeScreen() {
               )}
             </Pressable>
           </View>
-          <Text style={styles.monthNote}>{monthLabel(month)} · one call per site</Text>
+          <Text style={styles.monthNote}>Calls due today · {monthLabel(month)}</Text>
         </View>
 
         <View style={styles.tiles}>
@@ -201,11 +200,11 @@ export function FeedbackHomeScreen() {
           ) : attention.length ? (
             attention.map((row) => (
               <SiteCard
-                key={`${row.site.id}|${row.month}`}
+                key={row.request_id}
                 row={row}
                 myId={myId}
-                busy={busy === `${row.site.id}|${row.month}`}
-                onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id! })}
+                busy={busy === row.request_id}
+                onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id })}
                 onTake={() => take(row)}
               />
             ))

@@ -7,10 +7,10 @@ import { PrimaryButton } from '../crm/ui/PrimaryButton';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { Sheet } from '../tasks/ui/sheets';
 import { radii, spacing, typography } from '../theme';
-import { errorText, getCallInvoices } from './api';
+import { errorText, getAssignablePeople, getCallInvoices, getIssueTypes } from './api';
 import { useFeedback } from './FeedbackContext';
 import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHint, formatDay, rupees } from './format';
-import type { DepartmentKind, Invoice, NewTicket, Priority, TicketAction, Visit } from './types';
+import type { AssignablePerson, DepartmentKind, Invoice, IssueType, NewTicket, Priority, TicketAction, Visit } from './types';
 import { Chips, RadioCard } from './ui';
 
 const factory = (t: CrmTheme) => ({
@@ -36,6 +36,12 @@ const factory = (t: CrmTheme) => ({
   invNo: { ...typography.bodyMedium, color: t.textPrimary },
   invAmt: { ...typography.captionMedium, color: t.textSecondary, textAlign: 'right' as const },
   buttons: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.md },
+  inputShort: { minHeight: 44 },
+  issueRow: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs },
+  issueChip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 7, borderRadius: radii.pill, borderWidth: 1.5, borderColor: t.border, backgroundColor: t.surface },
+  issueChipOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  issueChipText: { ...typography.captionMedium, color: t.textSecondary },
+  issueChipTextOn: { color: t.primary, fontWeight: '700' as const },
 });
 
 /**
@@ -72,6 +78,15 @@ export function RaiseTicketSheet({
   const [picked, setPicked] = useState<string[]>(services.length === 1 ? services : []);
   const [priority, setPriority] = useState<Priority>(suggested);
   const [action, setAction] = useState<TicketAction>('SCHEDULE_REVISIT');
+  // Site audit / Supervisor visit / Sales: the person it is assigned to.
+  const [owner, setOwner] = useState('');
+  const [people, setPeople] = useState<{ supervisors: AssignablePerson[]; sales: AssignablePerson[] }>({ supervisors: [], sales: [] });
+  useEffect(() => {
+    getAssignablePeople()
+      .then(setPeople)
+      .catch(() => {});
+  }, []);
+  const assignMeta = ACTIONS[action].assign ? ACTIONS[action] : null;
   const [note, setNote] = useState('');
   // Each other ticked department's part: { issue_summary, priority, invoice_ids }.
   type Part = { issue_summary: string; priority: Priority; invoice_ids: string[] };
@@ -95,6 +110,50 @@ export function RaiseTicketSheet({
 
   const toggle = (s: string) => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
   const toggleDept = (k: DepartmentKind) => setDepts((d) => (d.includes(k) ? d.filter((x) => x !== k) : [...d, k]));
+  // Each department's issues (Feedback Desk > Issues). ticked: { [kind]: { [issueId]: text } }.
+  const [issueTypes, setIssueTypes] = useState<IssueType[]>([]);
+  useEffect(() => {
+    getIssueTypes()
+      .then(setIssueTypes)
+      .catch(() => setIssueTypes([]));
+  }, []);
+  const typesOf = (k: DepartmentKind) => issueTypes.filter((t) => t.department === k);
+  const [ticked, setTicked] = useState<Record<string, Record<number, string>>>({});
+  const tickedOf = (k: DepartmentKind) => ticked[k] || {};
+  const isTicked = (k: DepartmentKind, id: number) => Object.prototype.hasOwnProperty.call(tickedOf(k), id);
+  const toggleIssue = (k: DepartmentKind, id: number) =>
+    setTicked((t) => {
+      const mine = { ...(t[k] || {}) };
+      if (Object.prototype.hasOwnProperty.call(mine, id)) delete mine[id];
+      else mine[id] = '';
+      return { ...t, [k]: mine };
+    });
+  const issuesBody = (k: DepartmentKind) => typesOf(k).filter((t) => isTicked(k, t.id)).map((t) => ({ id: t.id, text: null }));
+  // Operations: the services list shows when "Services" is ticked (or Operations has no such issue).
+  const opsServiceType = typesOf(OPERATIONS).find((t) => t.is_service);
+  const showServices = !opsServiceType || isTicked(OPERATIONS, opsServiceType.id);
+
+  // A department's issues as chips; one Details box below covers them all.
+  const issuePicker = (k: DepartmentKind) => {
+    const types = typesOf(k);
+    if (!types.length) return null;
+    return (
+      <>
+        <Text style={styles.label}>What are the issues? * (one or more)</Text>
+        <View style={styles.issueRow}>
+          {types.map((t) => {
+            const on = isTicked(k, t.id);
+            return (
+              <Pressable key={t.id} onPress={() => toggleIssue(k, t.id)} style={[styles.issueChip, on && styles.issueChipOn]} accessibilityRole="checkbox" accessibilityState={{ checked: on }}>
+                {on && <CheckIcon size={13} color={theme.primary} />}
+                <Text style={[styles.issueChipText, on && styles.issueChipTextOn]}>{t.name}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </>
+    );
+  };
   const toggleInvoice = (k: DepartmentKind, id: string) => {
     const ids = partOf(k).invoice_ids;
     setPart(k, { invoice_ids: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] });
@@ -109,12 +168,21 @@ export function RaiseTicketSheet({
       setError('Type what will be done for Other');
       return;
     }
-    const missing = others.find((d) => !partOf(d.kind).issue_summary.trim());
+    if (forOps && assignMeta && !owner) {
+      setError(`Choose the ${(assignMeta.who || 'person').toLowerCase()} for the ${assignMeta.label.toLowerCase()}`);
+      return;
+    }
+    const noIssue = departments.filter((d) => depts.includes(d.kind)).find((d) => typesOf(d.kind).length && !issuesBody(d.kind).length);
+    if (noIssue) {
+      setError(`Tick at least one issue for ${noIssue.name}`);
+      return;
+    }
+    const missing = others.find((d) => !typesOf(d.kind).length && !partOf(d.kind).issue_summary.trim());
     if (missing) {
       setError(`Describe the issue for ${missing.name}`);
       return;
     }
-    const chosen = services.filter((s) => picked.includes(s));
+    const chosen = showServices ? services.filter((s) => picked.includes(s)) : [];
     const servicesLine = chosen.length > 1 ? `Services: ${chosen.join(', ')}` : '';
     setSaving(true);
     setError(null);
@@ -127,16 +195,16 @@ export function RaiseTicketSheet({
         action,
         action_due_at: null,
         action_note: forOps ? note.trim() || null : null,
-        ...(others.length
-          ? {
-              parts: Object.fromEntries(
-                others.map((d) => {
-                  const p = partOf(d.kind);
-                  return [d.kind, { issue_summary: p.issue_summary.trim(), priority: p.priority, invoice_ids: d.with_invoices ? p.invoice_ids : [] }];
-                }),
-              ),
-            }
-          : {}),
+        ...(forOps && assignMeta ? { action_owner_user_id: Number(owner) } : {}),
+        parts: {
+          ...Object.fromEntries(
+            others.map((d) => {
+              const p = partOf(d.kind);
+              return [d.kind, { issue_summary: p.issue_summary.trim(), issues: issuesBody(d.kind), priority: p.priority, invoice_ids: d.with_invoices ? p.invoice_ids : [] }];
+            }),
+          ),
+          ...(forOps ? { [OPERATIONS]: { issues: issuesBody(OPERATIONS) } } : {}),
+        },
       });
     } catch (err) {
       setError(errorText(err, 'Could not raise the ticket.'));
@@ -176,11 +244,10 @@ export function RaiseTicketSheet({
         {forOps && (
           <>
             {departments.length > 1 && section(departments.find((d) => d.kind === OPERATIONS)?.name || 'Operations')}
-            <Text style={styles.label}>What is the problem? (in the customer's words)</Text>
-            <TextInput style={styles.input} value={summary} onChangeText={setSummary} multiline maxLength={500} placeholder="The bad answers are attached already" placeholderTextColor={theme.textMuted} />
+            {issuePicker(OPERATIONS)}
 
-            <Text style={styles.label}>Which services?</Text>
-            {services.length ? (
+            {showServices && <Text style={styles.label}>Which services?</Text>}
+            {!showServices ? null : services.length ? (
               <View style={styles.box}>
                 {services.map((s) => {
                   const on = picked.includes(s);
@@ -196,6 +263,9 @@ export function RaiseTicketSheet({
               <Text style={styles.hint}>No services this month.</Text>
             )}
 
+            <Text style={styles.label}>{typesOf(OPERATIONS).length ? "Details (in the customer's words)" : "What is the problem? (in the customer's words)"}</Text>
+            <TextInput style={styles.input} value={summary} onChangeText={setSummary} multiline maxLength={500} placeholder="The bad answers are attached already" placeholderTextColor={theme.textMuted} />
+
             <Text style={styles.label}>Priority</Text>
             <Chips
               options={PRIORITIES.map((p) => ({ value: p, label: `${PRIORITY[p].label}${p === suggested ? ' (suggested)' : ''}` }))}
@@ -207,6 +277,16 @@ export function RaiseTicketSheet({
             {RAISE_ACTIONS.map((a) => (
               <RadioCard key={a} title={ACTIONS[a].label} hint={ACTIONS[a].hint} on={action === a} onPress={() => setAction(a)} />
             ))}
+            {assignMeta && (
+              <>
+                <Text style={styles.label}>Assign to ({(assignMeta.who || '').toLowerCase()}) *</Text>
+                {(people[assignMeta.assign!] || []).length ? (
+                  <Chips options={people[assignMeta.assign!].map((u) => ({ value: String(u.id), label: u.name }))} value={owner} onChange={setOwner} />
+                ) : (
+                  <Text style={styles.label}>No {assignMeta.assign === 'sales' ? 'salespeople' : 'supervisors'} found.</Text>
+                )}
+              </>
+            )}
             {action === 'OTHER' && (
               <>
                 <Text style={styles.label}>What will be done? *</Text>
@@ -221,7 +301,10 @@ export function RaiseTicketSheet({
           return (
             <View key={d.kind}>
               {section(d.name)}
-              <Text style={styles.label}>{d.with_invoices ? 'What is the invoice issue? *' : `What should ${d.name} look into? *`}</Text>
+              {issuePicker(d.kind)}
+              <Text style={styles.label}>
+                {typesOf(d.kind).length ? 'Details (optional)' : d.with_invoices ? 'What is the invoice issue? *' : `What should ${d.name} look into? *`}
+              </Text>
               <TextInput
                 style={styles.input}
                 value={p.issue_summary}

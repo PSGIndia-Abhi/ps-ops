@@ -56,7 +56,7 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
   const chips = serviceChips(row.services);
 
   return (
-    <Pressable onPress={row.request_id ? onOpen : undefined} style={({ pressed }) => [styles.card, pressed && row.request_id ? styles.pressed : null]}>
+    <Pressable onPress={row.collector ? onOpen : undefined} style={({ pressed }) => [styles.card, pressed && row.collector ? styles.pressed : null]}>
       <View style={[styles.strip, { backgroundColor: accent }]} />
       <View style={styles.body}>
         <View style={styles.top}>
@@ -88,6 +88,14 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
         )}
 
         <View style={styles.facts}>
+          {!!row.due_date && (
+            <View style={styles.fact}>
+              <CalendarIcon size={14} color={row.overdue ? theme.dangerText : theme.textMuted} />
+              <Text style={[styles.factText, row.overdue && { color: theme.dangerText, fontWeight: '700' }]}>
+                {row.overdue ? `Overdue · due ${formatDay(row.due_date)}` : `Due ${formatDay(row.due_date)}`}
+              </Text>
+            </View>
+          )}
           <View style={styles.fact}>
             <CalendarIcon size={14} color={theme.textMuted} />
             <Text style={styles.factText}>Last visit {formatDay(row.last_visit_date)}</Text>
@@ -104,7 +112,7 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
           <Text style={[styles.footText, late && styles.footLate]} numberOfLines={1}>
             {callBack ? `Call back ${formatDateTime(row.next_call_at)}` : row.collector ? (someoneElse ? `Taken by ${row.collector.name}` : 'Your call') : 'Not taken yet'}
           </Text>
-          {row.request_id ? (
+          {row.collector ? (
             <View style={[styles.btn, row.status === 'FORM_RECEIVED' && styles.btnSolid]}>
               <Text style={[styles.btnText, row.status === 'FORM_RECEIVED' && styles.btnTextSolid]}>
                 {row.status === 'FORM_RECEIVED' ? 'Review form' : row.status === 'DONE' || someoneElse ? 'View' : 'Open'}

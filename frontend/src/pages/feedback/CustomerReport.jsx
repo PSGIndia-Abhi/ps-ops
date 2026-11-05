@@ -242,7 +242,7 @@ export default function CustomerReport() {
                 <Tiles
                   items={[
                     { label: "Complaints", value: t.complaints, tone: "danger", icon: FiAlertTriangle, share: t.feedback_received ? t.complaints / t.feedback_received : 0, sub: `out of ${t.feedback_received} feedback` },
-                    { label: "Tickets", value: t.tickets, tone: "warn", icon: FiTag, sub: `High ${t.tickets_by_priority.HIGH} · Medium ${t.tickets_by_priority.MEDIUM} · Low ${t.tickets_by_priority.LOW}` },
+                    { label: "Tickets", value: t.tickets, tone: "warn", icon: FiTag, sub: `Very high ${t.tickets_by_priority.VERY_HIGH || 0} · High ${t.tickets_by_priority.HIGH} · Medium ${t.tickets_by_priority.MEDIUM} · Low ${t.tickets_by_priority.LOW}` },
                     { label: "Tickets closed", value: t.tickets_closed, tone: "ok", icon: FiCheckCircle, share: t.tickets ? t.tickets_closed / t.tickets : 0, sub: `${t.tickets_open} still open` },
                     { label: "Sites with complaints", value: complaintSites.length, tone: "dark", icon: FiMapPin, sub: `of ${report.sites.length} site${report.sites.length === 1 ? "" : "s"} served` },
                   ]}

@@ -14,6 +14,7 @@ import { Sheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
 import {
   addContact,
+  cancelNumberRequest,
   errorText,
   finishCall,
   getCall,
@@ -22,10 +23,11 @@ import {
   recordFollowUp,
   saveFeedback,
   sendFormLink,
+  sendNumberRequest,
   updateContact,
 } from '../api';
 import { useFeedback } from '../FeedbackContext';
-import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, formatDateTime, modeBody, modeCounts, questionsFor, type QuestionMode, monthLabel, nowStamp, suggestedPriority } from '../format';
+import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, formatDateTime, formatDay, modeBody, modeCounts, questionsFor, type QuestionMode, monthLabel, nowStamp, periodText, suggestedPriority } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
@@ -46,6 +48,13 @@ const factory = (t: CrmTheme) => ({
   dotOn: { borderWidth: 6, borderColor: t.primary },
   name: { ...typography.bodyMedium, color: t.textPrimary },
   small: { ...typography.caption, color: t.textMuted },
+  contactNew: { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' },
+  nameRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  newTag: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, overflow: 'hidden' as const, backgroundColor: '#16A34A', color: '#FFFFFF', fontSize: 10, fontWeight: '800' as const },
+  nrWait: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A' },
+  nrWaitText: { ...typography.caption, color: '#92400E' },
+  nrAsk: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
+  nrAskText: { ...typography.caption, color: '#991B1B' },
   callBtn: { width: 88, minHeight: 40, borderRadius: radii.md, backgroundColor: t.primary, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6 },
   callText: { ...typography.captionMedium, color: t.textOnPrimary },
   input: { minHeight: 46, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, paddingHorizontal: spacing.sm, color: t.textPrimary, backgroundColor: t.surface, marginBottom: spacing.xs, ...typography.body },
@@ -83,12 +92,13 @@ export function FeedbackCallScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
   const { callId } = useRoute<RouteProp<FeedbackStackParamList, 'FeedbackCall'>>().params;
   const { styles, theme } = useCrmStyles(factory);
-  const { userId, can, questions, otherEnabled, departmentList } = useFeedback();
+  const { userId, can, questions, otherEnabled } = useFeedback();
 
   const [call, setCall] = useState<Call | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [requestNote, setRequestNote] = useState('');
   const setNotice = (message: string) => setToast({ message, variant: 'success' });
   const [saving, setSaving] = useState(false);
 
@@ -117,7 +127,9 @@ export function FeedbackCallScreen() {
     try {
       const c = await getCall(callId);
       setCall(c);
-      setContactKey((k) => k || c.contacts[0]?.id || OTHER);
+      // A right number just added by the service coordinator is the one to call next.
+      const added = freshAddedContact(c);
+      setContactKey((k) => added || k || c.contacts[0]?.id || OTHER);
       setError(null);
     } catch (err) {
       setError(errorText(err, 'Could not load the call.'));
@@ -135,7 +147,7 @@ export function FeedbackCallScreen() {
   // The questions asked: general, for the month's services, or both. Optional ones can be skipped.
   const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter((x): x is string => !!x))], [call]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
-  const counts = useMemo(() => modeCounts(questions, monthServices, departmentList), [questions, monthServices, departmentList]);
+  const counts = useMemo(() => modeCounts(questions, monthServices, []), [questions, monthServices]);
   const chosen = useMemo(() => chosenAnswers(asked, answers), [asked, answers]);
   const bad = chosen.filter((r) => r.is_bad);
   const missing = asked.filter((q) => q.is_required && !answers[q.id]);
@@ -151,6 +163,56 @@ export function FeedbackCallScreen() {
 
   const mine = call.collector?.id === userId;
   const canWork = call.status !== 'DONE' && (mine || can('FEEDBACK_MANAGE'));
+  // A wrong number: ask the service coordinator for the right one (web: Feedback Desk > Requests).
+  const numberRequests = call.number_requests || [];
+  const openRequest = numberRequests.find((q) => q.status === 'OPEN');
+  const lastDone = numberRequests.find((q) => q.status === 'DONE');
+  // Shown under the call result when Wrong number is picked; the right number, once added and not called yet.
+  const lastCallAt = call.call_attempts[0]?.called_at;
+  const freshNumber = !openRequest && !!lastDone && (!lastCallAt || new Date(lastCallAt) < new Date(lastDone.resolved_at || 0));
+  // Not again right after the coordinator added the number - only after that one is wrong too.
+  const canAskNumber = canWork && outcome === 'WRONG_NUMBER' && !openRequest && (call.status === 'WRONG_NUMBER' || !freshNumber);
+  // The right number from the coordinator (not called yet): under the wrong one, marked New.
+  const newContactId = freshNumber ? lastDone?.right?.contact_id ?? null : null;
+  const primaryId = call.contacts.find((x) => x.is_primary)?.id;
+  const contactsShown = (() => {
+    const added = call.contacts.find((c) => c.id === newContactId);
+    if (!added) return call.contacts;
+    const rest = call.contacts.filter((c) => c.id !== newContactId);
+    const at = rest.findIndex((c) => c.id === lastDone?.wrong.contact_id);
+    return at < 0 ? [...rest, added] : [...rest.slice(0, at + 1), added, ...rest.slice(at + 1)];
+  })();
+  async function askNumber() {
+    setSaving(true);
+    try {
+      // The wrong number is saved first when it isn't the saved result yet.
+      if (call!.status !== 'WRONG_NUMBER') {
+        if (!contact) throw new Error('Pick the contact you called');
+        await recordAttempt(call!.id, { contact_id: contact.id, outcome: 'WRONG_NUMBER' });
+      }
+      await sendNumberRequest(call!.id, requestNote.trim() || null);
+      setRequestNote('');
+      setNotice('Wrong number saved and the request sent to the service coordinator.');
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function cancelAsk() {
+    if (!openRequest) return;
+    setSaving(true);
+    try {
+      await cancelNumberRequest(openRequest.id);
+      setNotice('Request cancelled.');
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
   const formReceived = call.status === 'FORM_RECEIVED';
   const contact = call.contacts.find((c) => c.id === contactKey) || null;
   const latest = call.submissions.find((s) => s.is_latest) || call.submissions[0] || null;
@@ -325,7 +387,7 @@ export function FeedbackCallScreen() {
 
   const contactsList = (
     <>
-      {call.contacts.map((c, i) =>
+      {contactsShown.map((c) =>
         editId === c.id ? (
           <View key={c.id} style={styles.editBox}>
             <Text style={[styles.name, { marginBottom: spacing.xs }]}>Edit contact</Text>
@@ -340,12 +402,15 @@ export function FeedbackCallScreen() {
             </View>
           </View>
         ) : (
-        <Pressable key={c.id} onPress={() => setContactKey(c.id)} style={[styles.contact, contactKey === c.id && styles.contactOn]}>
+        <Pressable key={c.id} onPress={() => setContactKey(c.id)} style={[styles.contact, contactKey === c.id && styles.contactOn, c.id === newContactId && styles.contactNew]}>
           <View style={[styles.dot, contactKey === c.id && styles.dotOn]} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{c.name}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{c.name}</Text>
+              {c.id === newContactId && <Text style={styles.newTag}>NEW</Text>}
+            </View>
             <Text style={styles.small}>
-              {[c.role, c.phone?.trim() || 'No phone number', c.is_primary && call.contacts.findIndex((x) => x.is_primary) === i ? 'Primary' : null].filter(Boolean).join(' · ')}
+              {[c.role, c.phone?.trim() || 'No phone number', c.id === primaryId ? 'Primary' : null].filter(Boolean).join(' · ')}
             </Text>
           </View>
           {!!c.phone?.trim() && (
@@ -367,7 +432,7 @@ export function FeedbackCallScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader eyebrow={`Feedback call · ${monthLabel(call.month)}`} title={call.site.name} subtitle={call.customer.name} onBack={() => navigation.goBack()}>
+      <HeroHeader eyebrow={call.due_date ? `Feedback call · due ${formatDay(call.due_date)}${call.period_start ? ` · services ${periodText(call.period_start, call.period_end)}` : ''}` : `Feedback call · ${monthLabel(call.month)}`} title={call.site.name} subtitle={call.customer.name} onBack={() => navigation.goBack()}>
         <HeroPill label={callStatusMeta(call.display_status || call.status, call.result).label} tone={callStatusMeta(call.display_status || call.status, call.result).tone} />
         <HeroPill label={`${call.visits.length} service${call.visits.length === 1 ? '' : 's'}`} tone="info" />
         {call.calls_summary.total > 0 && <HeroPill label={`${call.calls_summary.total} call${call.calls_summary.total === 1 ? '' : 's'} made`} tone="accent" />}
@@ -424,6 +489,27 @@ export function FeedbackCallScreen() {
                     ))}
                   </View>
                   <PrimaryButton label="Save call result" onPress={saveAttempt} loading={saving} style={{ marginTop: spacing.sm }} />
+                  {/* Wrong number: ask the service coordinator for the right one (web: Feedback Desk > Requests). */}
+                  {openRequest ? (
+                    <View style={styles.nrWait}>
+                      <Text style={styles.nrWaitText}>
+                        Request sent - waiting for the service coordinator (wrong: {[openRequest.wrong.name, openRequest.wrong.phone].filter(Boolean).join(' · ') || 'not recorded'}, {formatDateTime(openRequest.requested_at)}).
+                      </Text>
+                      <PrimaryButton label="Cancel request" variant="secondary" onPress={cancelAsk} loading={saving} style={{ marginTop: spacing.xs }} />
+                    </View>
+                  ) : canAskNumber ? (
+                    <View style={styles.nrAsk}>
+                      <Text style={styles.nrAskText}>Ask the service coordinator for the right number. The call comes back to you when they add it.</Text>
+                      <TextInput style={styles.input} placeholder="Note (optional)" placeholderTextColor={theme.textMuted} value={requestNote} onChangeText={setRequestNote} maxLength={500} />
+                      <PrimaryButton label={call.status === 'WRONG_NUMBER' ? 'Send request' : 'Save & send request'} onPress={askNumber} loading={saving} style={{ marginTop: spacing.xs }} />
+                    </View>
+                  ) : null}
+                  {freshNumber && (
+                    <Text style={[styles.small, { marginTop: spacing.xs, color: theme.success }]}>
+                      ✓ Right number from {lastDone!.resolved_by?.name || 'the coordinator'}: {lastDone!.right?.name} · {lastDone!.right?.phone}
+                      {lastDone!.resolve_note ? ` · "${lastDone!.resolve_note}"` : ''}. It is added above, marked NEW - call it now.
+                    </Text>
+                  )}
                   {call.calls_summary.total > 0 && (
                     <Text style={[styles.small, { marginTop: spacing.xs }]}>
                       {call.calls_summary.total} call{call.calls_summary.total === 1 ? '' : 's'} so far · {call.calls_summary.missed} not answered
@@ -448,7 +534,6 @@ export function FeedbackCallScreen() {
                 mode={qMode}
                 onMode={setQMode}
                 counts={counts}
-              departments={departmentList}
                 onSkip={skip}
                 answers={answers}
                 onAnswer={answer}
@@ -495,7 +580,6 @@ export function FeedbackCallScreen() {
               mode={qMode}
               onMode={setQMode}
               counts={counts}
-              departments={departmentList}
               onSkip={skip}
               answers={answers}
               onAnswer={answer}
@@ -586,4 +670,13 @@ export function FeedbackCallScreen() {
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </View>
   );
+}
+
+/** The contact the service coordinator just added as the right number (not called yet), or null. */
+function freshAddedContact(c: Call): string | null {
+  const done = (c.number_requests || []).find((q) => q.status === 'DONE');
+  const id = done?.right?.contact_id;
+  if (!id || !c.contacts.some((x) => x.id === id)) return null;
+  const lastCall = c.call_attempts[0]?.called_at;
+  return !lastCall || new Date(lastCall) < new Date(done.resolved_at || 0) ? id : null;
 }

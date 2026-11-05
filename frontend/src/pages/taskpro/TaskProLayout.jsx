@@ -25,7 +25,7 @@ import {
 } from "react-icons/fi";
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import { FEEDBACK_HOME } from "../feedback/access";
-import useHasFeedbackAccess from "../feedback/useHasFeedbackAccess";
+import { useFeedbackPermissions, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -89,9 +89,14 @@ function NewTaskButton() {
 }
 
 function TaskProShell() {
-  const hasFeedback = useHasFeedbackAccess();
+  // Customer Feedback: desk users get a link to the Feedback Desk; those who only work tickets (a
+  // department's team such as Accounts, an assigned supervisor / salesperson) get "Tickets" here.
+  const { permissions: feedbackPerms, ticketsOnly } = useFeedbackPermissions();
+  const hasFeedback = feedbackPerms.length > 0 && !ticketsOnly;
   const navigate = useNavigate();
   const location = useLocation();
+  // Open tickets waiting for them: the number on "Tickets" (reloaded on each page change).
+  const ticketCount = useFeedbackTicketCount(ticketsOnly, location.pathname);
   const viewer = useViewer();
   const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
@@ -211,6 +216,18 @@ function TaskProShell() {
                   {item.badge && ready && counts[item.badge] > 0 && <span className="tp-nav-badge">{counts[item.badge]}</span>}
                 </NavLink>
               ),
+            )}
+            {ticketsOnly && (
+              <NavLink
+                to={`${TASKPRO_HOME}/tickets`}
+                className={({ isActive }) => `tp-nav-item ${isActive ? "active" : ""}`}
+                onClick={() => setDrawer(false)}
+                title={collapsed ? "Tickets" : undefined}
+              >
+                <FiMessageSquare className="tp-nav-icon" />
+                <span className="tp-nav-label">Tickets</span>
+                {ticketCount > 0 && <span className="tp-nav-badge">{ticketCount}</span>}
+              </NavLink>
             )}
           </nav>
 

@@ -17,6 +17,7 @@ import { CrmNewLeadScreen } from '../crm/screens/CrmNewLeadScreen';
 import { CrmNewCommercialLeadScreen } from '../crm/screens/CrmNewCommercialLeadScreen';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
+import { FeedbackTicketsTab, ticketsTabIcon, useTicketsTab } from '../feedback/FeedbackTicketsTab';
 import type { LeadRootStackParamList, LeadTabParamList } from '../leads/navigation';
 import { LEAD_STACK_SCREENS } from '../leads/screens';
 import { LeadListScreen } from '../leads/screens/LeadBrowseScreens';
@@ -95,6 +96,7 @@ function LeadTabs() {
     tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
   };
 
+  const tickets = useTicketsTab();
   return (
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={LeadHomeScreen} options={{ tabBarIcon: homeIcon }} />
@@ -116,6 +118,9 @@ function LeadTabs() {
       {/* Follow-ups live here, not in Task Management: their own (and their reminders), or for the
           sales manager the whole team's. */}
       <Tab.Screen name="Tasks" component={LeadFollowUpsScreen} options={{ title: 'Follow-ups', tabBarIcon: tasksIcon }} />
+      {tickets.show && (
+        <Tab.Screen name="FeedbackTickets" component={FeedbackTicketsTab} options={{ title: 'Tickets', tabBarIcon: ticketsTabIcon, tabBarBadge: tickets.count || undefined }} />
+      )}
       <Tab.Screen name="More" component={CrmMoreScreen} options={{ tabBarIcon: moreIcon }} />
     </Tab.Navigator>
   );

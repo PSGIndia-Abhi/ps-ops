@@ -1,5 +1,5 @@
 import { httpClient } from '../api/httpClient';
-import type { Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, NewTicket, Question, Ticket } from './types';
+import type { AssignablePerson, Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, IssueType, NewTicket, Question, Ticket } from './types';
 
 /**
  * Customer Feedback data access - the same /api/feedback endpoints the web Feedback Desk uses
@@ -8,7 +8,9 @@ import type { Call, CallList, CallOutcome, Contact, Department, DepartmentKind, 
 
 /** The signed-in user's FEEDBACK_* permissions ([] = no access to this app). */
 export async function getMyAccess(): Promise<string[]> {
-  return (await getMyAccessFull()).permissions;
+  // FEEDBACK_ISSUES (service coordinators: departments and issues) is managed on the website only.
+  // FEEDBACK_SCHEDULE (call schedules) too.
+  return (await getMyAccessFull()).permissions.filter((p) => p !== 'FEEDBACK_ISSUES' && p !== 'FEEDBACK_SCHEDULE');
 }
 
 /**
@@ -20,7 +22,19 @@ export async function getMyAccessFull(): Promise<{ permissions: string[]; depart
   return { permissions: data.permissions || [], departments: data.departments || [] };
 }
 
+/** The open tickets waiting for this user (their department's part, or the step assigned to them). */
+export async function getOpenTicketCount(): Promise<number> {
+  const { data } = await httpClient.get<{ open_tickets?: number }>('/api/feedback/badges');
+  return Number(data.open_tickets) || 0;
+}
+
 /** The departments a ticket can go to (switched on in Masters). */
+/** Each department's issues, ticked when raising a ticket. */
+export async function getIssueTypes(): Promise<IssueType[]> {
+  const { data } = await httpClient.get<{ issue_types: IssueType[] }>('/api/feedback/issue-types');
+  return data.issue_types || [];
+}
+
 export async function getDepartments(): Promise<Department[]> {
   const { data } = await httpClient.get<{ departments: Department[] }>('/api/feedback/departments');
   return data.departments || [];
@@ -33,16 +47,42 @@ export async function getCallInvoices(callId: string): Promise<Invoice[]> {
 }
 
 /** The Accounts team finishes its part of a ticket (note = what was done). */
+/** Who a Site audit / Supervisor visit / Sales step can be assigned to. */
+export async function getAssignablePeople(): Promise<{ supervisors: AssignablePerson[]; sales: AssignablePerson[] }> {
+  const { data } = await httpClient.get<{ supervisors?: AssignablePerson[]; sales?: AssignablePerson[] }>('/api/feedback/people');
+  return { supervisors: data.supervisors || [], sales: data.sales || [] };
+}
+
+/** After a wrong number: ask the service coordinator for the right one. */
+export async function sendNumberRequest(callId: string, note: string | null): Promise<void> {
+  await httpClient.post(`/api/feedback/calls/${callId}/number-request`, { note });
+}
+
+export async function cancelNumberRequest(id: string): Promise<void> {
+  await httpClient.post(`/api/feedback/number-requests/${id}/cancel`, {});
+}
+
+/** Closes the ticket without the follow-up call, once every team has finished its work. */
+export async function closeTicket(ticketId: string, rowVersion: number, note: string | null): Promise<void> {
+  await httpClient.post(`/api/feedback/tickets/${ticketId}/close`, { row_version: rowVersion, close_note: note });
+}
+
+/** The assigned supervisor / salesperson marks the Site audit, Supervisor visit or Sales step done. */
+export async function markActionDone(ticketId: string, note: string): Promise<void> {
+  await httpClient.post(`/api/feedback/tickets/${ticketId}/action-done`, { note });
+}
+
 export async function markPartDone(ticketId: string, kind: DepartmentKind, note: string): Promise<void> {
   await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/done`, { note });
 }
 
-/** month = one month's calls; from / to (2026-11-01) = sites with services between those dates instead. */
-export async function listCalls(params: { month?: string; from?: string; to?: string; status?: string; q?: string; mine?: boolean }): Promise<CallList> {
+/** due = 'today' (due today + overdue, the default) or 'all'; month = one month's calls; from / to = due dates between. */
+export async function listCalls(params: { month?: string; from?: string; to?: string; due?: string; status?: string; q?: string; mine?: boolean }): Promise<CallList> {
   const range = !!(params.from || params.to);
   const { data } = await httpClient.get<CallList>('/api/feedback/calls', {
     params: {
       month: range ? undefined : params.month,
+      due: range || params.month ? undefined : params.due,
       from: params.from || undefined,
       to: params.to || undefined,
       status: params.status || undefined,
@@ -54,9 +94,9 @@ export async function listCalls(params: { month?: string; from?: string; to?: st
   return data;
 }
 
-/** Takes the month's call for a site (creates it, or opens the one that exists). */
-export async function takeCall(siteId: string, month: string): Promise<{ id: string }> {
-  const { data } = await httpClient.post<{ id: string }>('/api/feedback/calls', { site_id: siteId, month });
+/** Takes a call from the list (Masters > Call schedule made it). */
+export async function takeCall(requestId: string): Promise<{ id: string }> {
+  const { data } = await httpClient.post<{ id: string }>('/api/feedback/calls', { request_id: requestId });
   return data;
 }
 

@@ -2,6 +2,7 @@
    nothing here touches the rest of the website. */
 
 .fb-shell,
+.fb-embed,
 .fb-public {
   --fb-text: #1f2937;
   --fb-strong: #111827;
@@ -101,6 +102,7 @@
 .fb-chip.fb-tone-violet { background: #ede9fe; color: #5b21b6; }
 .fb-chip.fb-tone-ok { background: #dcfce7; color: #166534; }
 .fb-chip.fb-tone-danger { background: #fee2e2; color: #b91c1c; }
+.fb-chip.fb-tone-critical { background: #b91c1c; color: #fff; }
 .fb-chip.fb-tone-orange { background: #ffedd5; color: #c2410c; }
 .fb-chip.fb-tone-indigo { background: #e0e7ff; color: #3730a3; }
 
@@ -195,6 +197,14 @@ button.fb-tile:hover { border-color: #cbd5e1; }
 .fb-radio.is-on { border-color: var(--fb-primary); background: #f0f9ff; }
 .fb-radio-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #9ca3af; flex: none; margin-top: 2px; }
 .fb-radio.is-on .fb-radio-dot { border: 5px solid var(--fb-primary); }
+/* Ticket › Action: priority, next step, due date (and who it's assigned to) on one row */
+.fb-action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 14px; }
+.fb-action-grid.has-owner { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.4fr); }
+.fb-action-grid .fb-field { margin: 0; }
+@media (max-width: 900px) { .fb-action-grid, .fb-action-grid.has-owner { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .fb-action-grid, .fb-action-grid.has-owner { grid-template-columns: 1fr; } }
+.fb-radio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.fb-assigned-step { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--fb-line); }
 
 /* ---- switch ---- */
 .fb-switch { width: 38px; height: 22px; border-radius: 999px; background: #d1d5db; position: relative; flex: none; border: 0; cursor: pointer; padding: 0; }
@@ -718,3 +728,134 @@ button.fb-dept-tag { padding: 6px 14px; cursor: pointer; gap: 8px; }
 .fb-dept-tag-inv { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-left: 1px solid #e2e8f0; font-size: 12px; color: #64748b; cursor: pointer; }
 .fb-dept-tag-x { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-right: 4px; border: 0; border-radius: 999px; background: none; color: #94a3b8; cursor: pointer; }
 .fb-dept-tag-x:hover { background: #fee2e2; color: #b91c1c; }
+
+/* Feedback Desk › Issues: compact rows, two or three per line */
+.fb-issue-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.fb-issue-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid var(--fb-line); border-radius: 10px; background: #fff; }
+.fb-issue-row .fb-input { flex: 1; min-width: 0; height: 34px; padding: 4px 10px; font-size: 14px; border-color: transparent; background: #f8fafc; }
+.fb-issue-row .fb-input:focus { border-color: #93c5fd; background: #fff; }
+.fb-issue-row.is-off { opacity: .55; }
+.fb-issue-move { display: flex; flex-direction: column; }
+.fb-issue-move button { border: 0; background: none; color: #94a3b8; cursor: pointer; padding: 0 2px; line-height: 1; font-size: 13px; }
+.fb-issue-move button:disabled { opacity: .3; cursor: default; }
+.fb-issue-tag { flex: none; padding: 2px 8px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 600; white-space: nowrap; }
+/* Raise ticket: the issues of a department, each ticked one with its text box */
+.fb-issue-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.fb-issue-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1.5px solid #e2e8f0; border-radius: 999px; background: #fff; font: inherit; font-size: 14px; cursor: pointer; color: #334155; }
+.fb-issue-chip.is-on { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+.fb-issue-texts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
+.fb-issue-text { display: flex; flex-direction: column; gap: 4px; }
+.fb-issue-text > span { font-size: 13px; font-weight: 600; color: #334155; }
+.fb-part-issues { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+/* Raise ticket: each department in its own framed section */
+.fb-rt-sec { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px 16px; border: 1px solid var(--fb-line); border-radius: 14px; background: #fbfdff; }
+.fb-rt-sec .fb-field { margin: 0; }
+.fb-rt-sec-head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--fb-line); }
+.fb-rt-sec-head > span:last-child { display: flex; flex-direction: column; }
+.fb-rt-sec-head b { font-size: 15px; color: #0f172a; }
+.fb-rt-sec-head small { font-size: 12px; color: var(--fb-muted); }
+.fb-rt-sec-head .fb-dept-icon { width: 34px; height: 34px; }
+.fb-rt-row { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 12px; align-items: start; }
+.fb-rt-prio-only { max-width: 260px; }
+@media (max-width: 640px) { .fb-rt-row { grid-template-columns: 1fr; } }
+
+/* Masters › Call schedule */
+.fb-sched-form { display: flex; flex-direction: column; gap: 22px; }
+.fb-sched-sec { display: flex; flex-direction: column; gap: 10px; }
+.fb-sched-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; font-weight: 700; color: #0f172a; }
+.fb-sched-label small { font-size: 12px; font-weight: 400; color: var(--fb-muted); }
+.fb-sched-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.fb-sched-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fb-sched-grid .fb-field { margin: 0; }
+.fb-sched-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fb-sched-mode { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--fb-line); border-radius: 10px; background: #fff; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.fb-sched-mode > svg { flex: none; width: 30px; height: 30px; padding: 7px; border-radius: 8px; background: #f1f5f9; color: #64748b; }
+.fb-sched-mode span { display: flex; flex-direction: column; min-width: 0; }
+.fb-sched-mode b { font-size: 14px; }
+.fb-sched-mode small { font-size: 12px; color: var(--fb-muted); }
+.fb-sched-mode.is-on { border-color: var(--fb-primary); background: #f0f9ff; }
+.fb-sched-mode.is-on > svg { background: var(--fb-primary); color: #fff; }
+.fb-sched-panel { padding: 12px 14px; border-radius: 10px; background: #f8fafc; border: 1px solid var(--fb-soft-line, #eef0f3); }
+.fb-sched-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+.fb-sched-presets { display: inline-flex; gap: 6px; margin-left: auto; }
+.fb-input.fb-input-num { width: 72px; height: 34px; text-align: center; }
+.fb-mini-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-mini-chip { padding: 4px 11px; border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; font: inherit; font-size: 13px; color: #334155; cursor: pointer; }
+.fb-mini-chip:hover { border-color: #cbd5e1; }
+.fb-mini-chip.is-on { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+.fb-month-pick { display: flex; gap: 18px; flex-wrap: wrap; align-items: stretch; }
+.fb-month-cal { flex: none; border: 1px solid var(--fb-line); border-radius: 12px; background: #fff; overflow: hidden; }
+.fb-month-cal-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--fb-primary); color: #fff; font-size: 13px; font-weight: 700; }
+.fb-month-cal-grid { display: grid; grid-template-columns: repeat(7, 36px); gap: 4px; padding: 10px; }
+.fb-month-day { width: 36px; height: 34px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 13px; cursor: pointer; color: #334155; }
+.fb-month-day:hover { background: #f1f5f9; }
+.fb-month-day.is-on { background: var(--fb-primary); color: #fff; font-weight: 700; }
+.fb-month-side { flex: 1 1 200px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fb-month-picked { font-size: 15px; font-weight: 700; color: #0f172a; }
+.fb-sched-preview { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 10px; background: #f0f9ff; color: #075985; font-size: 14px; }
+.fb-sched-preview svg { flex: none; margin-top: 3px; }
+.fb-row-off td { opacity: .55; }
+/* one field for customers and sites: tags + search, with a ticked list below */
+.fb-tp { position: relative; }
+.fb-tp-field { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 42px; padding: 5px 34px 5px 10px; border: 1px solid #d1d5db; border-radius: 10px; background: #fff; cursor: text; position: relative; }
+.fb-tp.is-open .fb-tp-field { border-color: var(--fb-primary); outline: 2px solid #bae6fd; }
+.fb-tp-field input { flex: 1 1 140px; min-width: 120px; border: 0; outline: 0; font: inherit; font-size: 14px; padding: 4px 0; background: transparent; }
+.fb-tp-caret { position: absolute; right: 12px; top: 13px; }
+.fb-tp-tag { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 10px; border-radius: 999px; background: #eff6ff; color: #1e3a8a; font-size: 13px; }
+.fb-tp-tag b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fb-tp-tag small { color: #64748b; white-space: nowrap; }
+.fb-tp-tag button { display: inline-flex; border: 0; background: #dbeafe; color: #1e40af; border-radius: 50%; width: 20px; height: 20px; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.fb-tp-menu { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); max-height: 300px; overflow: auto; background: #fff; border: 1px solid var(--fb-line); border-radius: 10px; box-shadow: 0 12px 32px rgba(15, 23, 42, .14); padding: 4px; }
+.fb-tp-group + .fb-tp-group { border-top: 1px solid #f1f5f9; margin-top: 2px; padding-top: 2px; }
+.fb-tp-opt { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 14px; text-align: left; cursor: pointer; color: inherit; }
+.fb-tp-opt:hover:not(:disabled) { background: #f8fafc; }
+.fb-tp-opt.is-site { padding-left: 34px; font-size: 13px; }
+.fb-tp-opt.is-customer .fb-tp-name { font-weight: 600; }
+.fb-tp-opt:disabled { cursor: default; opacity: .6; }
+.fb-tp-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1.5px solid #cbd5e1; border-radius: 4px; font-size: 12px; color: #fff; }
+.fb-tp-opt.is-on .fb-tp-box { background: var(--fb-primary); border-color: var(--fb-primary); }
+.fb-tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-tp-meta { flex: none; font-size: 12px; color: var(--fb-muted); }
+.fb-tp-empty { padding: 10px; font-size: 13px; color: var(--fb-muted); }
+@media (max-width: 720px) { .fb-sched-grid, .fb-sched-grid.is-3, .fb-sched-modes { grid-template-columns: 1fr; } .fb-sched-presets { margin-left: 0; } }
+
+/* Tickets inside another panel (Task Management › Tickets) */
+.fb-embed { color: var(--fb-text); }
+
+/* Follow-up: the action is taken - close the ticket without the call */
+.fb-close-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+
+/* Requests: the right number for a wrong number */
+.fb-nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.nav-btn:has(.fb-nav-count) { display: flex; align-items: center; gap: 8px; }
+.fb-nr-wrong { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: #fef2f2; color: #991b1b; font-size: 14px; }
+.fb-nr-wrong svg { flex: none; margin-top: 3px; }
+.fb-nr-wrong span { display: flex; flex-direction: column; gap: 2px; }
+.fb-nr-wrong small { color: #7f1d1d; opacity: .8; font-size: 12px; }
+.fb-nr-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.fb-nr-state.is-waiting { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.fb-nr-state.is-done { justify-content: flex-start; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+.fb-nr-inline { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.fb-nr-inline:empty { display: none; }
+.fb-nr-ask { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+
+/* Call list: due date and status, soft and readable */
+.fb-due-late { display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 12px; font-weight: 600; color: #dc2626; }
+.fb-due-late::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(220, 38, 38, .15); }
+.fb-status-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fb-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; line-height: 1.3; }
+.fb-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.fb-pill-ok { background: #ecfdf5; color: #047857; }
+.fb-pill-danger { background: #fef2f2; color: #b91c1c; }
+.fb-pill-warn { background: #fffbeb; color: #b45309; }
+.fb-pill-info { background: #eff6ff; color: #1d4ed8; }
+.fb-pill-violet { background: #f5f3ff; color: #6d28d9; }
+.fb-pill-muted { background: #f1f5f9; color: #475569; }
+.fb-result-line { font-size: 12px; font-weight: 500; padding-left: 2px; }
+.fb-result-ok { color: #059669; }
+.fb-result-danger { color: #dc2626; }
+.fb-result-muted { color: #64748b; }
+/* The right number from the service coordinator, on the call */
+.fb-contact.is-new { border-color: #86efac; background: #f0fdf4; }
+.fb-new-tag { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: #16a34a; color: #fff; font-size: 11px; font-weight: 700; vertical-align: 2px; letter-spacing: .02em; }

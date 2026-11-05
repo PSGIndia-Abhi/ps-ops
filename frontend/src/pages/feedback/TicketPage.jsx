@@ -9,6 +9,9 @@ import {
   otherParts,
   hasOpsPart,
   markPartDone,
+  markActionDone,
+  isAssignedAction,
+  getPeople,
   rupees,
   formatDay,
   TICKET_ACTIONS,
@@ -30,6 +33,7 @@ import {
   pendingTab,
   prepareWhatsapp,
   reopenTicket,
+  closeTicket,
   deleteTicket,
   ticketStages,
   toLocalInput,
@@ -48,7 +52,9 @@ function formFrom(t) {
     issue_summary: t.issue_summary || "",
     priority: t.priority,
     // Older next steps are worked as "Book a re-visit" (saved as that once the visit is booked).
-    action: t.action === "OTHER" ? "OTHER" : "SCHEDULE_REVISIT",
+    action: t.action === "OTHER" || isAssignedAction(t.action) ? t.action : "SCHEDULE_REVISIT",
+    // Site audit / Supervisor visit / Sales: who it is assigned to.
+    owner: isAssignedAction(t.action) && t.action_owner ? String(t.action_owner.id) : "",
     due: t.action_due_at ? toLocalInput(t.action_due_at).slice(0, 10) : "",
     note: t.action_note || "",
   };
@@ -109,14 +115,21 @@ function ServicePicker({ picked, onChange }) {
  * questions ("Open the call"): all answers good closes the ticket (only this closes one); a bad
  * answer keeps the same ticket open and a new re-visit is booked on it. Lists the calls made so far.
  */
-function FollowUpCard({ ticket, deptOnly }) {
+function FollowUpCard({ ticket, deptOnly, canClose, onClose }) {
   const done = ticket.history.filter((h) => h.event === "FOLLOWUP_CALL");
   const open = ticket.status === "ACTION_PENDING";
   const ready = followUpReady(ticket);
   const ops = hasOpsPart(ticket);
-  const opsWaiting = ops && ticket.action !== "OTHER" && ticket.revisit?.status !== "COMPLETED";
+  const assigned = isAssignedAction(ticket.action);
+  const opsWaiting = ops && ticket.action !== "OTHER" && (assigned ? !ticket.action_done : ticket.revisit?.status !== "COMPLETED");
   const waitingFor = [
-    opsWaiting ? (ticket.revisit ? "the technician to complete the re-visit" : "the re-visit to be booked and completed") : null,
+    opsWaiting
+      ? assigned
+        ? `${ticket.action_owner?.name || "the assigned person"} to finish the ${ACTIONS[ticket.action].label.toLowerCase()}`
+        : ticket.revisit
+          ? "the technician to complete the re-visit"
+          : "the re-visit to be booked and completed"
+      : null,
     ...otherParts(ticket).filter((p) => p.status !== "DONE").map((p) => `${p.label} to finish their part`),
   ].filter(Boolean);
   if (!open && !done.length) return null;
@@ -145,13 +158,20 @@ function FollowUpCard({ ticket, deptOnly }) {
           <div className="fb-row" style={{ justifyContent: "space-between" }}>
             <span className="fb-small fb-muted" style={{ maxWidth: 440 }}>
               {ready
-                ? "The work is done. Call the customer and ask the feedback questions again. If they are satisfied the ticket closes; if not, it stays open."
+                ? "The action is taken. Call the customer and ask the feedback questions again (satisfied: the ticket closes), or close the ticket without the call."
                 : `Waiting for ${waitingFor.join(" and ") || "the work"}. Then the collector calls the customer and asks the feedback questions again.`}
             </span>
             {deptOnly ? null : ready ? (
-              <Link className="fb-btn fb-btn-primary" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
-                Open the call
-              </Link>
+              <span className="fb-row" style={{ gap: 8 }}>
+                {canClose && (
+                  <button type="button" className="fb-btn" onClick={onClose} title="Close without the follow-up call">
+                    <FiCheck aria-hidden="true" /> Close the ticket
+                  </button>
+                )}
+                <Link className="fb-btn fb-btn-primary" to={`${FEEDBACK_HOME}/calls/${ticket.request_id}`}>
+                  Open the call
+                </Link>
+              </span>
             ) : (
               <button type="button" className="fb-btn fb-btn-primary" disabled title="Opens when the technician completes the re-visit">
                 Open the call
@@ -167,9 +187,11 @@ function FollowUpCard({ ticket, deptOnly }) {
 export default function TicketPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { can, userId, departments, deptOnly } = useFeedbackAccess();
+  const { can, userId, departments, deptOnly, ticketsBase } = useFeedbackAccess();
   const canManage = can("FEEDBACK_MANAGE");
   const [partNotes, setPartNotes] = useState({});
+  const [actionDoneNote, setActionDoneNote] = useState("");
+  const [people, setPeople] = useState({ supervisors: [], sales: [] }); // who a step can be assigned to
 
   const [ticket, setTicket] = useState(null);
   const [form, setForm] = useState(null);
@@ -198,6 +220,13 @@ export default function TicketPage() {
       .then(show)
       .catch((err) => setError(err.message));
   }, [id, show]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    getPeople()
+      .then((p) => setPeople({ supervisors: p.supervisors || [], sales: p.sales || [] }))
+      .catch(() => {});
+  }, [canManage]);
 
   useEffect(() => {
     load();
@@ -230,6 +259,7 @@ export default function TicketPage() {
     if (form.issue_summary.trim() !== before.issue_summary.trim()) body.issue_summary = form.issue_summary.trim() || null;
     if (form.priority !== ticket.priority) body.priority = form.priority;
     if (form.action !== before.action) body.action = form.action;
+    if (isAssignedAction(form.action) && (form.owner !== before.owner || form.action !== before.action)) body.action_owner_user_id = form.owner ? Number(form.owner) : null;
     if (form.due !== before.due) body.action_due_at = endOfDay(form.due);
     if (form.note.trim() !== before.note.trim()) body.action_note = form.note.trim() || null;
     return body;
@@ -237,6 +267,12 @@ export default function TicketPage() {
   const dirty = Object.keys(changes()).length > 0;
   // "Book a re-visit" needs the visit booked (booking it links it and saves the step).
   const revisitMissing = form.action === "SCHEDULE_REVISIT" && !ticket.revisit_visit_id;
+  // Site audit / Supervisor visit / Sales need the person chosen.
+  const assignMeta = ACTIONS[form.action]?.assign ? ACTIONS[form.action] : null;
+  const ownerMissing = Boolean(assignMeta) && !form.owner;
+  // The saved step's assigned person (or a desk manager) marks it done.
+  const savedAssigned = isAssignedAction(ticket.action);
+  const canFinishAction = open && savedAssigned && !ticket.action_done && (canManage || ticket.action_owner?.id === userId);
 
   // A visit was just booked from this ticket: link its first visit at the ticket's site as the
   // re-visit. Unsaved edits in the form stay as they are.
@@ -273,6 +309,21 @@ export default function TicketPage() {
     }
   }
 
+  async function finishAction() {
+    setSaving(true);
+    setError("");
+    try {
+      await markActionDone(ticket.id, actionDoneNote.trim());
+      setActionDoneNote("");
+      setNotice(`${ACTIONS[ticket.action].label} marked done. The collector can call the customer back once all the work is done.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // A ticket closes only on the follow-up call (the customer confirms); a desk manager can reopen it.
   async function finishPart(p) {
     setSaving(true);
@@ -284,6 +335,24 @@ export default function TicketPage() {
       await load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // The action is taken: close without the follow-up call (modalNote = optional note).
+  async function closeIt() {
+    setSaving(true);
+    setError("");
+    try {
+      show(await closeTicket(ticket.id, ticket.row_version, modalNote.trim() || null));
+      setNotice(`${ticket.ticket_number} is closed.`);
+      setModal(null);
+      setModalNote("");
+    } catch (err) {
+      setError(err.message);
+      setModal(null);
+      if (err.status === 409) load();
     } finally {
       setSaving(false);
     }
@@ -343,7 +412,7 @@ export default function TicketPage() {
     <>
       <PageHead
         title={ticket.ticket_number}
-        back={`${FEEDBACK_HOME}/tickets`}
+        back={ticketsBase}
         after={
           <>
             <TicketStatusChip status={ticket.status} />
@@ -456,7 +525,17 @@ export default function TicketPage() {
           {others.map((p) => (
             <Card key={p.kind} title={`${p.label}${p.with_invoices ? " · invoice issue" : ""}`} aside={<PriorityChip priority={p.priority || ticket.priority} />}>
               <div className="fb-stack" style={{ gap: 12 }}>
-                <div style={{ whiteSpace: "pre-line" }}>{p.issue_summary || <span className="fb-muted">No details written.</span>}</div>
+                {(p.issues || []).length > 0 && (
+                  <ul className="fb-part-issues">
+                    {p.issues.map((i) => (
+                      <li key={i.id}>
+                        <span className="fb-strong">{i.name}</span>
+                        {i.text ? ` - ${i.text}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(p.issue_summary || !(p.issues || []).length) && <div style={{ whiteSpace: "pre-line" }}>{p.issue_summary || <span className="fb-muted">No details written.</span>}</div>}
                 {p.invoices.length > 0 && (
                   <div className="fb-table-wrap">
                     <table className="fb-table">
@@ -519,7 +598,7 @@ export default function TicketPage() {
           <Card title="Action" aside={editable ? null : open ? "Only the desk managers can change this" : "Reopen the ticket to change it"}>
             {editable ? (
               <div className="fb-stack" style={{ gap: 14 }}>
-                <div className="fb-form-grid">
+                <div className={`fb-action-grid ${assignMeta ? "has-owner" : ""}`}>
                   <label className="fb-field" htmlFor="fb-t-priority">
                     Priority
                     <select id="fb-t-priority" className="fb-select" value={form.priority} onChange={set("priority")}>
@@ -544,7 +623,24 @@ export default function TicketPage() {
                     Due by {late && <span className="fb-danger-text">· overdue</span>}
                     <input id="fb-t-due" type="date" className="fb-input" value={form.due} onChange={set("due")} />
                   </label>
+                {assignMeta && (
+                  <label className="fb-field" htmlFor="fb-t-owner">
+                    <span>
+                      Assign to ({assignMeta.who.toLowerCase()}) <span className="fb-req">*</span>
+                    </span>
+                    <select id="fb-t-owner" className="fb-select" value={form.owner} onChange={set("owner")}>
+                      <option value="">Choose the {assignMeta.who.toLowerCase()}</option>
+                      {(people[assignMeta.assign] || []).map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                          {u.role ? ` · ${u.role}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 </div>
+                {assignMeta && <div className="fb-small fb-muted" style={{ marginTop: -6 }}>The {assignMeta.who.toLowerCase()} sees this ticket in their Feedback tickets and marks it done; then the customer is called back.</div>}
                 {form.action === "OTHER" && (
                   <label className="fb-field" htmlFor="fb-t-note">
                     <span>
@@ -590,7 +686,8 @@ export default function TicketPage() {
                     </button>
                   )}
                   {revisitMissing && dirty && <span className="fb-small fb-muted">Book the re-visit above to save.</span>}
-                  <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving || !dirty || revisitMissing}>
+                  {ownerMissing && dirty && <span className="fb-small fb-muted">Choose the {assignMeta.who.toLowerCase()} to save.</span>}
+                  <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving || !dirty || revisitMissing || ownerMissing}>
                     {saving ? "Saving…" : "Save changes"}
                   </button>
                 </div>
@@ -615,14 +712,60 @@ export default function TicketPage() {
                   {ticket.action_due_at ? formatDate(ticket.action_due_at) : "No date set"}
                   {late && <span className="fb-danger-text"> · overdue</span>}
                 </dd>
-                <dt>Technician re-visit</dt>
-                <dd>{ticket.revisit ? revisitText(ticket.revisit) : "Not booked yet"}</dd>
+                {savedAssigned ? (
+                  <>
+                    <dt>Assigned to</dt>
+                    <dd>{ticket.action_owner?.name || "Not assigned"}</dd>
+                  </>
+                ) : (
+                  <>
+                    <dt>Technician re-visit</dt>
+                    <dd>{ticket.revisit ? revisitText(ticket.revisit) : "Not booked yet"}</dd>
+                  </>
+                )}
               </dl>
+            )}
+            {/* Site audit / Supervisor visit / Sales: the assigned person marks it done. */}
+            {savedAssigned && (
+              <div className="fb-assigned-step">
+                {ticket.action_done ? (
+                  <div className="fb-part-done">
+                    <FiCheck aria-hidden="true" style={{ color: "#16a34a", marginTop: 2 }} />
+                    <span>
+                      <span className="fb-strong">{ACTIONS[ticket.action].label} done</span> · {ticket.action_done.note}
+                      <span className="fb-small fb-muted"> · {[formatDateTime(ticket.action_done.at), ticket.action_done.by?.name].filter(Boolean).join(" · ")}</span>
+                    </span>
+                  </div>
+                ) : canFinishAction ? (
+                  <div className="fb-stack" style={{ gap: 8 }}>
+                    <label className="fb-field" htmlFor="fb-t-action-done">
+                      <span>
+                        What was done in the {ACTIONS[ticket.action].label.toLowerCase()}? <span className="fb-req">*</span>
+                      </span>
+                      <input
+                        id="fb-t-action-done"
+                        className="fb-input"
+                        maxLength={500}
+                        placeholder={ticket.action === "SALES" ? "e.g. Met the customer and explained the plan" : "e.g. Checked the site, drains cleaned"}
+                        value={actionDoneNote}
+                        onChange={(e) => setActionDoneNote(e.target.value)}
+                      />
+                    </label>
+                    <div>
+                      <button type="button" className="fb-btn fb-btn-primary" disabled={saving || !actionDoneNote.trim()} onClick={finishAction}>
+                        <FiCheck aria-hidden="true" /> {saving ? "Saving…" : `Mark ${ACTIONS[ticket.action].label.toLowerCase()} done`}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="fb-small fb-muted">{open ? `Waiting for ${ticket.action_owner?.name || "the assigned person"} to mark it done.` : "Closed."}</div>
+                )}
+              </div>
             )}
           </Card>
           )}
 
-          <FollowUpCard ticket={ticket} deptOnly={deptOnly} />
+          <FollowUpCard ticket={ticket} deptOnly={deptOnly} canClose={canMessage} onClose={() => setModal("close")} />
         </div>
 
         <div className="fb-stack">
@@ -737,6 +880,31 @@ export default function TicketPage() {
           </label>
           <div className="fb-small fb-muted">
             The same ticket opens again{ticket.action === "RESOLVED_ON_CALL" ? ' with the next step "Book a re-visit"' : ""}. Book a new re-visit on it; when that is done, call the customer back again.
+          </div>
+        </Modal>
+      )}
+
+      {modal === "close" && open && canMessage && (
+        <Modal
+          title={`Close ${ticket.ticket_number}?`}
+          onClose={() => setModal(null)}
+          footer={
+            <>
+              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
+                Cancel
+              </button>
+              <button type="button" className="fb-btn fb-btn-ok" onClick={closeIt} disabled={saving}>
+                {saving ? "Closing…" : "Close the ticket"}
+              </button>
+            </>
+          }
+        >
+          <div className="fb-stack" style={{ gap: 12 }}>
+            <div className="fb-small fb-muted">Every team has finished its work. The ticket closes without the follow-up call; you can reopen it later if needed.</div>
+            <label className="fb-field" htmlFor="fb-t-close-note">
+              Note (optional)
+              <textarea id="fb-t-close-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer said on WhatsApp it is sorted" value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
+            </label>
           </div>
         </Modal>
       )}

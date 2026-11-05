@@ -4,7 +4,7 @@ import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
-import { getDepartments, getMyAccess } from "./feedbackApi";
+import { getBadges, getDepartments, getMyAccess } from "./feedbackApi";
 import { FeedbackContext } from "./feedbackContext";
 import { ErrorBox, Loading } from "./ui";
 import "./feedback.css";
@@ -16,10 +16,16 @@ const DESK = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 const WORKERS = ["FEEDBACK_COLLECT", ...DESK];
 const NAV = [
   { path: FEEDBACK_HOME, label: "Dashboard", exact: true, match: [`${FEEDBACK_HOME}/calls`], needs: WORKERS },
-  { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets" },
+  // FEEDBACK_ASSIGNED: a supervisor / salesperson with a ticket's next step assigned to them.
+  { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets", needs: [...WORKERS, "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"] },
+  // Wrong numbers: collectors ask, service coordinators (and desk managers) add the right number.
+  { path: `${FEEDBACK_HOME}/requests`, label: "Requests", needs: [...WORKERS, "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"], badge: "open_requests" },
   { path: `${FEEDBACK_HOME}/report`, label: "Customer report", needs: DESK },
-  { group: "MASTERS", needs: ["FEEDBACK_ADMIN"] },
+  { group: "MASTERS", needs: ["FEEDBACK_ADMIN", "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"] },
+  // Which customers / sites get calls, and how often: admin, service coordinators, operations managers.
+  { path: `${FEEDBACK_HOME}/schedule`, label: "Call schedule", needs: ["FEEDBACK_ADMIN", "FEEDBACK_SCHEDULE"] },
   { path: `${FEEDBACK_HOME}/questions`, label: "Questions", needs: ["FEEDBACK_ADMIN"] },
+  { path: `${FEEDBACK_HOME}/issues`, label: "Issues", needs: ["FEEDBACK_ADMIN", "FEEDBACK_ISSUES"] },
   { path: `${FEEDBACK_HOME}/settings`, label: "Templates & settings", needs: ["FEEDBACK_ADMIN"] },
 ];
 
@@ -52,12 +58,26 @@ export default function FeedbackLayout() {
       .catch(() => {});
   }, []);
   useEffect(loadDepartments, [loadDepartments]);
-
-  // A department member opens straight on their tickets.
-  const deptOnly = Boolean(access) && !WORKERS.some((p) => (access.permissions || []).includes(p));
+  // The numbers on the menu (Requests waiting), reloaded on each page and every minute.
+  const [badges, setBadges] = useState({});
+  const loadBadges = useCallback(() => {
+    getBadges()
+      .then(setBadges)
+      .catch(() => {});
+  }, []);
   useEffect(() => {
-    if (deptOnly && location.pathname === FEEDBACK_HOME) navigate(`${FEEDBACK_HOME}/tickets`, { replace: true });
-  }, [deptOnly, location.pathname, navigate]);
+    if (!access) return undefined;
+    loadBadges();
+    const timer = setInterval(loadBadges, 60000);
+    return () => clearInterval(timer);
+  }, [access, loadBadges, location.pathname]);
+
+  // A department member opens straight on their tickets; a service coordinator (Issues only) on Issues.
+  const deptOnly = Boolean(access) && !WORKERS.some((p) => (access.permissions || []).includes(p));
+  const issuesOnly = deptOnly && !["FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"].some((p) => (access.permissions || []).includes(p));
+  useEffect(() => {
+    if (deptOnly && location.pathname === FEEDBACK_HOME) navigate(`${FEEDBACK_HOME}/${issuesOnly ? "issues" : "tickets"}`, { replace: true });
+  }, [deptOnly, issuesOnly, location.pathname, navigate]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -77,9 +97,12 @@ export default function FeedbackLayout() {
       departments: access?.departments || [],
       departmentList,
       reloadDepartments: loadDepartments,
+      reloadBadges: loadBadges,
       deptOnly: !WORKERS.some((p) => permissions.includes(p)),
+      // Where the ticket pages link to (Task Management shows them under its own path).
+      ticketsBase: `${FEEDBACK_HOME}/tickets`,
     };
-  }, [access, role, departmentList, loadDepartments]);
+  }, [access, role, departmentList, loadDepartments, loadBadges]);
 
   const nav = NAV.filter((item) => !item.needs || item.needs.some((p) => context.permissions.includes(p)));
 
@@ -135,6 +158,7 @@ export default function FeedbackLayout() {
                       onClick={() => navigate(item.path)}
                     >
                       <span>{item.label}</span>
+                      {item.badge && badges[item.badge] > 0 && <span className="fb-nav-count">{badges[item.badge]}</span>}
                     </button>
                   ),
                 )}

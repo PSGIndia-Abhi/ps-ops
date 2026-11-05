@@ -98,6 +98,10 @@ import FeedbackTicketList from "./pages/feedback/TicketList";
 import FeedbackTicketPage from "./pages/feedback/TicketPage";
 import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
 import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
+import FeedbackIssues from "./pages/feedback/IssuesMaster";
+import FeedbackTicketsShell from "./pages/feedback/FeedbackTicketsShell";
+import FeedbackRequests from "./pages/feedback/NumberRequests";
+import FeedbackSchedule from "./pages/feedback/ScheduleMaster";
 import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
 import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
 import FeedbackGate from "./pages/feedback/FeedbackGate";
@@ -373,6 +377,15 @@ const router = createBrowserRouter([
       { path: "reports", element: <TaskProReports /> },
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
+      // Customer Feedback tickets for a department's team (e.g. Accounts) and assigned people.
+      {
+        path: "tickets",
+        element: <FeedbackTicketsShell base={`${TASKPRO_HOME}/tickets`} />,
+        children: [
+          { index: true, element: <FeedbackTicketList /> },
+          { path: ":id", element: <FeedbackTicketPage /> },
+        ],
+      },
     ],
   },
 
@@ -393,6 +406,9 @@ const router = createBrowserRouter([
       { path: "tickets/:id", element: <FeedbackTicketPage /> },
       { path: "report", element: <FeedbackCustomerReport /> },
       { path: "questions", element: <FeedbackQuestions /> },
+      { path: "issues", element: <FeedbackIssues /> },
+          { path: "schedule", element: <FeedbackSchedule /> },
+      { path: "requests", element: <FeedbackRequests /> },
       { path: "settings", element: <FeedbackTemplatesSettings /> },
     ],
   },

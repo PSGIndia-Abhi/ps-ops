@@ -9,8 +9,11 @@ const {
   listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
   myFeedbackAccess, feedbackPeople, feedbackCustomers, siteDetails, revisitOptions,
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
-  listDepartments, departmentSetup, saveDepartments, myDepartmentKinds, markPartDone, callInvoices,
+  listDepartments, departmentSetup, saveDepartments, myDepartmentKinds, markPartDone, callInvoices, listIssueTypes, saveIssueTypes,
+  markActionDone, hasAssignedTickets,
 } = require("../services/feedback.service");
+const numberRequests = require("../services/feedbackNumberRequest.service");
+const { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, ensureDueCalls } = require("../services/feedbackSchedule.service");
 const { buildCustomerReport, exportCustomerReport, exportTickets } = require("../services/feedbackReport.service");
 
 function sendFile(res, file) {
@@ -23,7 +26,12 @@ function sendFile(res, file) {
 const ANY_FEEDBACK = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 const DESK = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 // Also a member of a feedback department (Operations / Accounts team): their tickets only.
-const ANY_OR_DEPT = [...ANY_FEEDBACK, "FEEDBACK_DEPT"];
+// FEEDBACK_ASSIGNED: a supervisor / salesperson with a ticket's next step assigned to them: those tickets only.
+const ANY_OR_DEPT = [...ANY_FEEDBACK, "FEEDBACK_DEPT", "FEEDBACK_ISSUES", "FEEDBACK_ASSIGNED", "FEEDBACK_SCHEDULE"];
+// Call schedules (Masters > Call schedule): admin, service coordinators and operations managers.
+const SCHEDULERS = ["FEEDBACK_ADMIN", "FEEDBACK_SCHEDULE"];
+// Departments and their issue types (Feedback Desk > Issues): admin and the service coordinators.
+const ISSUE_EDITORS = ["FEEDBACK_ADMIN", "FEEDBACK_ISSUES"];
 
 function requireAny(req, permissions) {
   if (!hasAnyPerm(req, permissions)) throw new HttpError(403, "Forbidden: insufficient permissions");
@@ -42,7 +50,9 @@ router.use(auth);
 router.use(async (req, res, next) => {
   try {
     req.feedbackDepts = await myDepartmentKinds(req.user.id);
-    if (req.feedbackDepts.length) req.user = { ...req.user, permissions: [...(req.user.permissions || []), "FEEDBACK_DEPT"] };
+    req.feedbackAssigned = await hasAssignedTickets(req.user.id);
+    const extra = [...(req.feedbackDepts.length ? ["FEEDBACK_DEPT"] : []), ...(req.feedbackAssigned ? ["FEEDBACK_ASSIGNED"] : [])];
+    if (extra.length) req.user = { ...req.user, permissions: [...(req.user.permissions || []), ...extra] };
     next();
   } catch (err) {
     sendError(res, err, "Failed to load your departments");
@@ -65,7 +75,8 @@ router.get("/me", async (req, res) => {
 router.get("/badges", async (req, res) => {
   try {
     requireAny(req, ANY_OR_DEPT);
-    res.json(await feedbackBadges(req));
+    // open_requests: requests for the right number waiting (a coordinator: to do; a collector: theirs).
+    res.json({ ...(await feedbackBadges(req)), open_requests: await numberRequests.openNumberRequestCount(req) });
   } catch (err) {
     sendError(res, err, "Failed to load the counts");
   }
@@ -96,7 +107,7 @@ router.get("/customers", async (req, res) => {
 router.get("/sites/:siteId/details", async (req, res) => {
   try {
     requireAny(req, ANY_FEEDBACK);
-    res.json(await siteDetails(req.params.siteId, req.query.month));
+    res.json(await siteDetails(req.params.siteId, req.query.month, req.query.request_id));
   } catch (err) {
     sendError(res, err, "Failed to load the site details");
   }
@@ -199,22 +210,23 @@ router.put("/settings", requirePermission("FEEDBACK_ADMIN"), async (req, res) =>
   }
 });
 
-/* ------------------------------------------------------------ monthly calls */
+/* ------------------------------------------------------------ calls */
 
-// The collector's call list for a month: every customer site with a completed visit in it,
-// one row each. Query: month=2026-10 (default this month), status=OPEN|TO_CALL,...,
-// q, company_id, mine=1, page, page_size. A collector sees sites nobody has taken yet plus
-// their own; the desk sees all.
+// The call list: the calls the call schedules made. Query: due=today (default: due today and
+// overdue) | all, month, from / to (due dates), status=OPEN|TO_CALL,..., q, company_id, mine=1,
+// page, page_size. A collector sees calls nobody has taken yet plus their own; the desk sees all.
 router.get("/calls", async (req, res) => {
   try {
     requireAny(req, ANY_FEEDBACK);
+    // Calls the schedules made since the last look (at most every few minutes).
+    await ensureDueCalls();
     res.json(await callList(req));
   } catch (err) {
     sendError(res, err, "Failed to load the call list");
   }
 });
 
-// Start (or continue) the call for a site and month. Body: { site_id, month }.
+// Take (or continue) a call. Body: { request_id } (older apps: { site_id, month }).
 // The collector takes the call if nobody has it; returns the call with everything on it.
 router.post("/calls", async (req, res) => {
   try {
@@ -348,6 +360,116 @@ router.post("/tickets/:id/parts/:kind/done", async (req, res) => {
   }
 });
 
+// The assigned supervisor / salesperson (or a desk manager) marks the Site audit, Supervisor visit or
+// Sales step done. Body: { note }.
+router.post("/tickets/:id/action-done", async (req, res) => {
+  try {
+    requireAny(req, ANY_OR_DEPT);
+    res.json(await markActionDone(req, req.params.id, req.body));
+  } catch (err) {
+    sendError(res, err, "Failed to mark the step done");
+  }
+});
+
+/* ------------------------------------------------------------ requests for the right number */
+
+// The Requests tab: a coordinator sees every request, a collector theirs. Query: status=OPEN|DONE|CANCELLED.
+router.get("/number-requests", async (req, res) => {
+  try {
+    requireAny(req, [...ANY_FEEDBACK, ...numberRequests.HANDLERS]);
+    res.json(await numberRequests.listNumberRequests(req));
+  } catch (err) {
+    sendError(res, err, "Failed to load the requests");
+  }
+});
+
+// After a wrong number, the collector asks for the right one. Body: { contact_id?, note? }
+router.post("/calls/:id/number-request", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    await numberRequests.sendNumberRequest(req, req.params.id, req.body);
+    res.status(201).json(await getCall(req, req.params.id));
+  } catch (err) {
+    sendError(res, err, "Failed to send the request");
+  }
+});
+
+// The coordinator saves the right number. Body: { name, phone, replace?, note? }
+router.post("/number-requests/:id/resolve", async (req, res) => {
+  try {
+    requireAny(req, numberRequests.HANDLERS);
+    await numberRequests.resolveNumberRequest(req, req.params.id, req.body);
+    res.json(await numberRequests.listNumberRequests(req));
+  } catch (err) {
+    sendError(res, err, "Failed to save the number");
+  }
+});
+
+// The collector who sent it cancels it.
+router.post("/number-requests/:id/cancel", async (req, res) => {
+  try {
+    requireAny(req, [...ANY_FEEDBACK, ...numberRequests.HANDLERS]);
+    await numberRequests.cancelNumberRequest(req, req.params.id);
+    res.json(await numberRequests.listNumberRequests(req));
+  } catch (err) {
+    sendError(res, err, "Failed to cancel the request");
+  }
+});
+
+/* ------------------------------------------------------------ call schedules */
+
+// Every schedule, and the customers / sites / services for the form.
+router.get("/schedules", async (req, res) => {
+  try {
+    requireAny(req, SCHEDULERS);
+    res.json({ schedules: await listSchedules() });
+  } catch (err) {
+    sendError(res, err, "Failed to load the call schedules");
+  }
+});
+
+router.get("/schedules/options", async (req, res) => {
+  try {
+    requireAny(req, SCHEDULERS);
+    res.json(await scheduleOptions());
+  } catch (err) {
+    sendError(res, err, "Failed to load the customers");
+  }
+});
+
+// Body: { targets: [{ company_id, site_id? (none = all its sites) }] (one schedule each; PUT: one),
+// mode (EVERY_N_DAYS | MONTH_DAYS | AFTER_EACH_SERVICE), month_days? ([1, 15]),
+// every_days?, first_services?, then_every_days?, service_types?, start_date, end_date?, note?, is_active? }
+router.post("/schedules", async (req, res) => {
+  try {
+    requireAny(req, SCHEDULERS);
+    await saveSchedule(req, null, req.body);
+    res.status(201).json({ schedules: await listSchedules() });
+  } catch (err) {
+    sendError(res, err, "Failed to save the schedule");
+  }
+});
+
+router.put("/schedules/:id", async (req, res) => {
+  try {
+    requireAny(req, SCHEDULERS);
+    await saveSchedule(req, req.params.id, req.body);
+    res.json({ schedules: await listSchedules() });
+  } catch (err) {
+    sendError(res, err, "Failed to save the schedule");
+  }
+});
+
+router.delete("/schedules/:id", async (req, res) => {
+  try {
+    requireAny(req, SCHEDULERS);
+    await deleteSchedule(req.params.id);
+    res.json({ schedules: await listSchedules() });
+  } catch (err) {
+    sendError(res, err, "Failed to delete the schedule");
+  }
+});
+
 // The customer's invoices - for an Accounts issue when raising a ticket.
 router.get("/calls/:id/invoices", async (req, res) => {
   try {
@@ -365,7 +487,7 @@ router.get("/departments", async (req, res) => {
   try {
     requireAny(req, ANY_OR_DEPT);
     if (req.query.all) {
-      requireAny(req, ["FEEDBACK_ADMIN"]);
+      requireAny(req, ISSUE_EDITORS);
       return res.json(await departmentSetup());
     }
     res.json({ departments: await listDepartments() });
@@ -374,11 +496,33 @@ router.get("/departments", async (req, res) => {
   }
 });
 
-router.put("/departments", requirePermission("FEEDBACK_ADMIN"), async (req, res) => {
+router.put("/departments", async (req, res) => {
   try {
+    requireAny(req, ISSUE_EDITORS);
     res.json(await saveDepartments(req.body, req.user.id));
   } catch (err) {
     sendError(res, err, "Failed to save the departments");
+  }
+});
+
+// Each department's issue types (active ones, for raising a ticket); ?all=1 with the switched-off ones.
+router.get("/issue-types", async (req, res) => {
+  try {
+    requireAny(req, ANY_OR_DEPT);
+    if (req.query.all) requireAny(req, ISSUE_EDITORS);
+    res.json({ issue_types: await listIssueTypes(undefined, { all: Boolean(req.query.all) }) });
+  } catch (err) {
+    sendError(res, err, "Failed to load the issues");
+  }
+});
+
+// PUT /issue-types - one department's issues: { department, types: [{ id?, name, is_active }] }.
+router.put("/issue-types", async (req, res) => {
+  try {
+    requireAny(req, ISSUE_EDITORS);
+    res.json(await saveIssueTypes(req.body, req.user.id));
+  } catch (err) {
+    sendError(res, err, "Failed to save the issues");
   }
 });
 
@@ -404,8 +548,11 @@ router.patch("/tickets/:id", requirePermission("FEEDBACK_MANAGE"), async (req, r
 });
 
 // Body: { row_version, close_note? }
-router.post("/tickets/:id/close", requirePermission("FEEDBACK_MANAGE"), async (req, res) => {
+// Close the ticket without the follow-up call, once every team has finished its work.
+// The call's collector, whoever raised it, or a desk manager (checked in the service).
+router.post("/tickets/:id/close", async (req, res) => {
   try {
+    requireAny(req, ANY_FEEDBACK);
     const id = await closeTicket(req, req.params.id, req.body);
     res.json(await getTicket(req, id));
   } catch (err) {

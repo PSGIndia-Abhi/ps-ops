@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { FiBriefcase, FiCheck, FiChevronDown, FiChevronUp, FiEdit2, FiFileText, FiGrid, FiLayers, FiMinus, FiPlus, FiSearch, FiTool, FiX } from "react-icons/fi";
+import { FiBriefcase, FiChevronDown, FiChevronUp, FiEdit2, FiGrid, FiLayers, FiMinus, FiPlus, FiSearch, FiTool, FiX } from "react-icons/fi";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
-import { OPERATIONS, PRIORITIES, PRIORITY, departmentHint, departmentName, getDepartmentSetup, getQuestions, saveDepartments, saveQuestions } from "./feedbackApi";
+import { PRIORITIES, PRIORITY, departmentName, getQuestions, saveQuestions } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { Card, ErrorBox, Loading, PageHead, Segmented, Switch, Toast } from "./ui";
 
@@ -55,27 +55,8 @@ export default function QuestionsMaster() {
   const [editing, setEditing] = useState(null);
   const [showOff, setShowOff] = useState(false);
   const [typeFilter, setTypeFilter] = useState("ALL");
-  // Department tab: the departments (from the user hierarchy) and which one's questions are shown.
-  const { reloadDepartments } = useFeedbackAccess();
-  const [deptSetup, setDeptSetup] = useState(null);
-  const [deptFilter, setDeptFilter] = useState("");
-  const loadDepartments = useCallback(() => {
-    getDepartmentSetup()
-      .then(setDeptSetup)
-      .catch((err) => setError(err.message));
-  }, []);
-  useEffect(loadDepartments, [loadDepartments]);
-  const activeDepts = (deptSetup?.departments || []).filter((d) => d.is_active);
-  async function changeDepartments(rows, message) {
-    setError("");
-    try {
-      setDeptSetup(await saveDepartments(rows));
-      reloadDepartments();
-      setNotice(message);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+  // Older "Department" questions (no longer asked) still show under All with their departments.
+  const { departmentList } = useFeedbackAccess();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const clearNotice = useCallback(() => setNotice(""), []);
@@ -99,10 +80,7 @@ export default function QuestionsMaster() {
   const active = list.filter((q) => q.is_active);
   const offCount = list.length - active.length;
   const countOf = (type) => active.filter((q) => q.question_type === type).length;
-  const shown = (showOff ? list : active).filter(
-    (q) => (typeFilter === "ALL" || q.question_type === typeFilter) && (typeFilter !== "DEPARTMENT" || !deptFilter || q.departments.includes(deptFilter)),
-  );
-  const deptCount = (kind) => active.filter((q) => q.question_type === "DEPARTMENT" && q.departments.includes(kind)).length;
+  const shown = (showOff ? list : active).filter((q) => typeFilter === "ALL" || q.question_type === typeFilter);
   const current = list.find((q) => q.key === editing) || null;
 
   const updateQuestion = (key, changes) => setList((l) => l.map((q) => (q.key === key ? { ...q, ...changes } : q)));
@@ -131,11 +109,10 @@ export default function QuestionsMaster() {
         key,
         id: null,
         question_text: "",
-        question_type: ["SERVICE", "DEPARTMENT"].includes(typeFilter) ? typeFilter : "GENERAL",
+        question_type: typeFilter === "SERVICE" ? "SERVICE" : "GENERAL",
         services: [],
-        departments: typeFilter === "DEPARTMENT" && deptFilter ? [deptFilter] : [],
-        // department questions are asked on the call only
-        show_on_form: typeFilter !== "DEPARTMENT",
+        departments: [],
+        show_on_form: true,
         is_active: true,
         is_required: true,
         options: [
@@ -220,7 +197,6 @@ export default function QuestionsMaster() {
           ["ALL", "All questions", active.length, FiLayers],
           ["GENERAL", "General", countOf("GENERAL"), FiGrid],
           ["SERVICE", "Service-based", countOf("SERVICE"), FiTool],
-          ["DEPARTMENT", "Department", countOf("DEPARTMENT"), FiBriefcase],
         ].map(([value, label, count, icon]) => ({ value, label, count, Icon: icon })).map((t) => (
           <button key={t.value} type="button" className={`fb-qtab ${typeFilter === t.value ? "is-on" : ""}`} onClick={() => setTypeFilter(t.value)} aria-pressed={typeFilter === t.value}>
             <span className="fb-qtab-icon" aria-hidden="true">
@@ -237,23 +213,11 @@ export default function QuestionsMaster() {
         )}
       </div>
 
-      {typeFilter === "DEPARTMENT" && (
-        <DepartmentsBar
-          setup={deptSetup}
-          filter={deptFilter}
-          onFilter={setDeptFilter}
-          count={deptCount}
-          onChange={changeDepartments}
-        />
-      )}
-
       <div className="fb-grid-side" style={{ gridTemplateColumns: current ? "minmax(0,1fr) 460px" : "minmax(0,1fr)" }}>
         <div className="fb-qlist">
           {shown.length === 0 && (
             <div className="fb-qempty">
-              {typeFilter === "DEPARTMENT" && deptFilter
-                ? `No questions for ${departmentName(deptSetup?.departments, deptFilter)} yet.`
-                : `No ${typeFilter === "ALL" ? "" : `${TYPE_LABEL[typeFilter].toLowerCase()} `}questions yet.`}
+              No {typeFilter === "ALL" ? "" : `${TYPE_LABEL[typeFilter].toLowerCase()} `}questions yet.
               <button type="button" className="fb-btn fb-btn-sm" onClick={addQuestion}>
                 <FiPlus /> Add question
               </button>
@@ -296,7 +260,7 @@ export default function QuestionsMaster() {
                 </div>
                 {q.question_type === "DEPARTMENT" && (
                   <div className="fb-qcard-services">
-                    {q.departments.length ? q.departments.map((d) => <span key={d}>{departmentName(deptSetup?.departments, d)}</span>) : <span className="is-warn">Pick the departments</span>}
+                    {q.departments.length ? q.departments.map((d) => <span key={d}>{departmentName(departmentList, d)}</span>) : <span className="is-warn">Pick the departments</span>}
                   </div>
                 )}
                 {q.question_type === "SERVICE" && (
@@ -342,7 +306,6 @@ export default function QuestionsMaster() {
                   options={[
                     { value: "GENERAL", label: "General" },
                     { value: "SERVICE", label: "Service-based" },
-                    { value: "DEPARTMENT", label: "Department" },
                   ]}
                   value={current.question_type}
                   onChange={(v) => updateQuestion(current.key, { question_type: v })}
@@ -353,7 +316,9 @@ export default function QuestionsMaster() {
                 <ServicePicker picked={current.services} onChange={(services) => updateQuestion(current.key, { services })} />
               )}
               {current.question_type === "DEPARTMENT" && (
-                <DepartmentPicker list={activeDepts} picked={current.departments} onChange={(departments) => updateQuestion(current.key, { departments })} />
+                <div className="fb-alert fb-alert-warn">
+                  <span>Department questions are no longer asked on calls. Make it General or Service-based, or switch it off.</span>
+                </div>
               )}
 
               <div>
@@ -418,129 +383,6 @@ export default function QuestionsMaster() {
         )}
       </div>
     </>
-  );
-}
-
-const deptIcon = (d) => (d.kind === OPERATIONS ? FiTool : d.with_invoices ? FiFileText : FiBriefcase);
-
-/**
- * The Department tab's top: the departments that take feedback tickets - picked from the user
- * hierarchy (Admin › Departments) - and a filter for their questions. Adding or removing one is
- * saved at once. A removed department gets no new tickets; its old tickets and questions stay.
- * onChange(rows, message) saves the departments (PUT /departments).
- */
-function DepartmentsBar({ setup, filter, onFilter, count, onChange }) {
-  const [adding, setAdding] = useState("");
-  const [busy, setBusy] = useState(false);
-  if (!setup) return <Loading />;
-  const active = setup.departments.filter((d) => d.is_active);
-  const used = new Set(active.map((d) => d.org_unit_id));
-  const free = setup.org_units.filter((u) => !used.has(u.id));
-  const rowOf = (d, patch = {}) => ({ kind: d.kind, org_unit_id: d.org_unit_id, is_active: d.is_active, with_invoices: d.with_invoices, ...patch });
-
-  async function run(rows, message) {
-    setBusy(true);
-    await onChange(rows, message);
-    setBusy(false);
-  }
-  async function add() {
-    const unit = setup.org_units.find((u) => u.id === adding);
-    if (!unit) return;
-    const before = setup.departments.find((d) => d.org_unit_id === unit.id);
-    await run([before ? rowOf(before, { is_active: true }) : { org_unit_id: unit.id, is_active: true, with_invoices: false }], `${unit.name} added. Now add its questions.`);
-    setAdding("");
-  }
-  async function remove(d) {
-    if (!window.confirm(`Remove ${d.name}? It gets no new tickets and its people lose Customer Feedback. Old tickets and questions stay.`)) return;
-    if (filter === d.kind) onFilter("");
-    await run([rowOf(d, { is_active: false })], `${d.name} removed.`);
-  }
-
-  return (
-    <Card title="Departments" aside="From the user hierarchy · who gets feedback tickets" className="fb-dept-bar">
-      <div className="fb-stack" style={{ gap: 14 }}>
-        <div className="fb-dept-tags" role="group" aria-label="Show the questions of">
-          <button type="button" className={`fb-dept-tag ${!filter ? "is-on" : ""}`} aria-pressed={!filter} onClick={() => onFilter("")}>
-            <FiLayers aria-hidden="true" /> All departments
-          </button>
-          {active.map((d) => {
-            const Icon = deptIcon(d);
-            return (
-              <span key={d.kind} className={`fb-dept-tag ${filter === d.kind ? "is-on" : ""}`}>
-                <button type="button" className="fb-dept-tag-main" aria-pressed={filter === d.kind} onClick={() => onFilter(d.kind)} title={departmentHint(d)}>
-                  <Icon aria-hidden="true" /> {d.name} <span className="fb-qtab-count">{count(d.kind)}</span>
-                </button>
-                {d.kind !== OPERATIONS && (
-                  <label className="fb-dept-tag-inv" title="This department can pick the customer's invoices on a ticket">
-                    <input type="checkbox" checked={d.with_invoices} disabled={busy} onChange={(e) => run([rowOf(d, { with_invoices: e.target.checked })], `${d.name}: invoices ${e.target.checked ? "on" : "off"}.`)} />
-                    Invoices
-                  </label>
-                )}
-                {d.kind !== OPERATIONS && (
-                  <button type="button" className="fb-dept-tag-x" aria-label={`Remove ${d.name}`} title="Remove" disabled={busy} onClick={() => remove(d)}>
-                    <FiX />
-                  </button>
-                )}
-              </span>
-            );
-          })}
-        </div>
-        <div className="fb-row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <select className="fb-select" style={{ maxWidth: 280 }} value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="Department to add">
-            <option value="">Add a department…</option>
-            {free.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="fb-btn" onClick={add} disabled={!adding || busy}>
-            <FiPlus /> Add department
-          </button>
-          <span className="fb-small fb-muted">People in these departments get Customer Feedback next to Task Management and see only their department's tickets.</span>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-/**
- * The departments a Department question is asked for. On a call the collector picks the department
- * (next to General / Service-based / Both) and its questions are asked; never on the WhatsApp form.
- */
-function DepartmentPicker({ list, picked, onChange }) {
-  const toggle = (kind) => onChange(picked.includes(kind) ? picked.filter((x) => x !== kind) : [...picked, kind]);
-  return (
-    <div className="fb-field">
-      <span>
-        Asked for these departments <span className="fb-req">*</span>
-      </span>
-      {list.length ? (
-        <div className="fb-dept-pick">
-          {list.map((d) => {
-            const on = picked.includes(d.kind);
-            const Icon = deptIcon(d);
-            return (
-              <button key={d.kind} type="button" className={`fb-dept-opt ${on ? "is-on" : ""}`} aria-pressed={on} onClick={() => toggle(d.kind)}>
-                <span className="fb-dept-icon" aria-hidden="true">
-                  <Icon />
-                </span>
-                <span className="fb-dept-text">
-                  <b>{d.name}</b>
-                  <small>{departmentHint(d)}</small>
-                </span>
-                <span className="fb-dept-check" aria-hidden="true">
-                  {on && <FiCheck />}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <span className="fb-field-hint">Add a department first (Department tab, at the top).</span>
-      )}
-      <span className="fb-field-hint">Asked on the call when the collector picks this department. Not on the WhatsApp form.</span>
-    </div>
   );
 }
 

@@ -128,6 +128,8 @@ const factory = (t: CrmTheme) => ({
   ansBody: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.xs, marginLeft: 34, padding: spacing.xs, paddingHorizontal: spacing.sm, borderRadius: radii.md, backgroundColor: t.surfaceAlt },
   ansLabel: { ...typography.caption, color: t.textMuted },
   flip: { transform: [{ rotate: '180deg' }] },
+  // The down arrow that opens a feedback round's answers.
+  roundArrow: { width: 30, height: 30, borderRadius: 15, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.primarySoftBg },
 });
 
 export function useFeedbackStyles() {
@@ -361,7 +363,8 @@ const periodFactory = (t: CrmTheme) => ({
  * Month wise / Date wise, inline (no card of its own): month wise picks a month on a month
  * calendar, date wise picks From and To on a day calendar (To is never before From).
  */
-export function PeriodPicker({ value, onChange }: { value: Period; onChange: (p: Period) => void }) {
+/** withDue: also "Due today" and "All" (the call list). */
+export function PeriodPicker({ value, onChange, withDue = false }: { value: Period; onChange: (p: Period) => void; withDue?: boolean }) {
   const { styles, theme } = useCrmStyles(periodFactory);
   const [picking, setPicking] = useState<'month' | 'from' | 'to' | null>(null);
   const field = (key: 'month' | 'from' | 'to', label: string, text: string, chevron = false) => (
@@ -382,13 +385,19 @@ export function PeriodPicker({ value, onChange }: { value: Period; onChange: (p:
     <View style={styles.wrap}>
       <Chips
         options={[
-          { value: 'month', label: 'Month wise' },
-          { value: 'range', label: 'Date wise' },
+          ...(withDue
+            ? [
+                { value: 'today' as const, label: 'Due today' },
+                { value: 'all' as const, label: 'All' },
+              ]
+            : []),
+          { value: 'month' as const, label: 'Month wise' },
+          { value: 'range' as const, label: 'Date wise' },
         ]}
         value={value.mode}
         onChange={(mode) => onChange({ ...value, mode })}
       />
-      {value.mode === 'month' ? (
+      {value.mode === 'today' || value.mode === 'all' ? null : value.mode === 'month' ? (
         <View style={styles.row}>{field('month', 'Month', monthLabel(value.month), true)}</View>
       ) : (
         <View style={styles.row}>
@@ -449,17 +458,30 @@ export function AnswersList({ submission, onlyBad = false }: { submission: Submi
   );
 }
 
-/** One round of feedback (the first call or a follow-up): title, result badge, how many answers were good, the answers. */
+/**
+ * One round of feedback (the first call or a follow-up): title, result badge and how many answers were
+ * good; the down arrow opens the answers (folded at first, so a call with several rounds stays short).
+ */
 export function FeedbackRound({ title, submission, meta }: { title: string; submission: Submission; meta: string }) {
-  const { styles } = useCrmStyles(factory);
+  const { styles, theme } = useCrmStyles(factory);
+  const [open, setOpen] = useState(false);
   const good = submission.responses.filter((r) => !r.is_bad).length;
   const total = submission.responses.length;
   const pct = total ? Math.round((good / total) * 100) : 0;
   return (
     <View style={styles.round}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${title}. ${open ? 'Hide' : 'Show'} the answers`}
+      >
       <View style={styles.roundHead}>
         <Text style={styles.roundTitle}>{title}</Text>
         <StatusBadge label={submission.has_issue ? 'Issue' : 'Good'} tone={submission.has_issue ? 'danger' : 'success'} dot={false} />
+        <View style={[styles.roundArrow, open && styles.flip]}>
+          <ChevronDownIcon size={18} color={theme.primary} />
+        </View>
       </View>
       <Text style={styles.roundMeta}>{meta}</Text>
       {total > 0 && (
@@ -472,10 +494,12 @@ export function FeedbackRound({ title, submission, meta }: { title: string; subm
           </View>
         </View>
       )}
-      {submission.responses.map((r) => (
-        <AnswerRow key={r.question_id} response={r} />
-      ))}
-      {!!submission.other_feedback && (
+      </Pressable>
+      {open &&
+        submission.responses.map((r) => (
+          <AnswerRow key={r.question_id} response={r} />
+        ))}
+      {open && !!submission.other_feedback && (
         <View style={styles.quote}>
           <Text style={styles.quoteLabel}>Customer said</Text>
           <Text style={styles.quoteText}>“{submission.other_feedback}”</Text>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiAlertCircle, FiCheckCircle, FiDownload, FiLayers, FiSearch } from "react-icons/fi";
-import { FEEDBACK_HOME } from "./access";
 import { OPERATIONS, PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, getPeople, isPast, listTickets, monthLabel } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { Card, Empty, ErrorBox, Loading, PageHead, PriorityChip, Segmented, TicketStatusChip, Tiles } from "./ui";
@@ -10,7 +9,7 @@ const PAGE_SIZE = 25;
 
 export default function TicketList() {
   const navigate = useNavigate();
-  const { isDesk, departmentList, deptOnly } = useFeedbackAccess();
+  const { isDesk, departmentList, deptOnly, ticketsBase } = useFeedbackAccess();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") || "ALL";
   const priority = params.get("priority") || "";
@@ -50,7 +49,11 @@ export default function TicketList() {
 
   useEffect(() => {
     getPeople()
-      .then((p) => setOwners(p.owners))
+      .then((p) => {
+        // Owners: desk users, and the supervisors / salespeople steps are assigned to.
+        const all = new Map([...p.owners, ...(p.supervisors || []), ...(p.sales || [])].map((u) => [u.id, u]));
+        setOwners([...all.values()].sort((a, b) => a.name.localeCompare(b.name)));
+      })
       .catch(() => {});
   }, []);
 
@@ -191,7 +194,7 @@ export default function TicketList() {
                 {rows.map((t) => {
                   const late = t.status === "ACTION_PENDING" && t.action_due_at && isPast(t.action_due_at);
                   return (
-                    <tr key={t.id} className="is-link" onClick={() => navigate(`${FEEDBACK_HOME}/tickets/${t.id}`)}>
+                    <tr key={t.id} className="is-link" onClick={() => navigate(`${ticketsBase}/${t.id}`)}>
                       <td>
                         <span className="fb-link">{t.ticket_number}</span>
                         <div className="fb-small fb-muted">{formatDay(t.created_at)}</div>

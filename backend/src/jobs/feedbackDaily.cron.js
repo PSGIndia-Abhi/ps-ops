@@ -9,6 +9,7 @@ const { pool } = require("../../db");
 // History says why. (No notifications: call-backs that are due show as a count on the sidebar.)
 
 let running = false;
+let lastSchedule = 0;
 
 async function missedCallsNeeded() {
   const [[row]] = await pool.query("SELECT setting_value FROM feedback_settings WHERE setting_key = 'offer_link_after_missed_calls'");
@@ -55,6 +56,13 @@ async function runFeedbackJobs() {
   try {
     const { expired, closed } = await expireFormLinks();
     if (expired) console.log(`Feedback jobs: ${expired} form link call(s) expired, ${closed} closed as not responded`);
+    // The calls the schedules make (Masters > Call schedule), every 15 minutes.
+    if (Date.now() - lastSchedule > 15 * 60000) {
+      lastSchedule = Date.now();
+      // Required here, not at the top: the schedule service needs the feedback service loaded first.
+      const added = await require("../services/feedbackSchedule.service").generateDueCalls();
+      if (added) console.log(`Feedback jobs: ${added} scheduled call(s) added`);
+    }
   } catch (err) {
     console.error("Feedback cron failed:", err);
   } finally {

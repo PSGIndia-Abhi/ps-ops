@@ -18,21 +18,28 @@ export const TICKET_STATUS: Record<TicketStatus, { label: string; tone: Tone }> 
 };
 
 export const PRIORITY: Record<Priority, { label: string; tone: Tone }> = {
+  VERY_HIGH: { label: 'Very high', tone: 'danger' },
   HIGH: { label: 'High', tone: 'danger' },
   MEDIUM: { label: 'Medium', tone: 'warning' },
   LOW: { label: 'Low', tone: 'info' },
 };
-export const PRIORITIES: Priority[] = ['HIGH', 'MEDIUM', 'LOW'];
+export const PRIORITIES: Priority[] = ['VERY_HIGH', 'HIGH', 'MEDIUM', 'LOW'];
 
-export const ACTIONS: Record<TicketAction, { label: string; hint: string }> = {
+/** assign: who the step is assigned to (GET /people's list); that person marks it done. */
+export const ACTIONS: Record<TicketAction, { label: string; hint: string; assign?: 'supervisors' | 'sales'; who?: string }> = {
   RESOLVED_ON_CALL: { label: 'Resolved on the call', hint: 'You sorted it out on the phone. The ticket closes now.' },
   SCHEDULE_REVISIT: { label: 'Book a re-visit', hint: 'A technician goes back. The visit is booked on the ticket.' },
+  SITE_AUDIT: { label: 'Site audit', hint: 'A supervisor audits the site.', assign: 'supervisors', who: 'Supervisor' },
+  SUPERVISOR_VISIT: { label: 'Supervisor visit', hint: 'A supervisor visits the customer.', assign: 'supervisors', who: 'Supervisor' },
+  SALES: { label: 'Sales', hint: 'A salesperson takes it up with the customer.', assign: 'sales', who: 'Salesperson' },
   // Older tickets only: worked as "Book a re-visit".
   ESCALATE_OPERATIONS: { label: 'Book a re-visit', hint: 'A technician goes back.' },
   OTHER: { label: 'Other', hint: 'Something else - type what will be done.' },
 };
 /** The next steps offered when raising a ticket. */
-export const RAISE_ACTIONS: TicketAction[] = ['RESOLVED_ON_CALL', 'SCHEDULE_REVISIT', 'OTHER'];
+export const RAISE_ACTIONS: TicketAction[] = ['RESOLVED_ON_CALL', 'SCHEDULE_REVISIT', 'SITE_AUDIT', 'SUPERVISOR_VISIT', 'SALES', 'OTHER'];
+/** Site audit, Supervisor visit and Sales are done by one assigned person. */
+export const isAssignedAction = (a: TicketAction) => Boolean(ACTIONS[a]?.assign);
 
 export const CALL_OUTCOMES: { value: CallOutcome; label: string }[] = [
   { value: 'ANSWERED', label: 'Answered' },
@@ -99,9 +106,10 @@ export function isPast(value: string | null | undefined): boolean {
   return !!d && d.getTime() <= Date.now();
 }
 
-/* ---- the period a list covers: one month, or From - To dates ---- */
+/* ---- the period a list covers: due today, all, one month, or From - To dates ---- */
 export interface Period {
-  mode: 'month' | 'range';
+  /** today / all: the call list only (calls due today + overdue, or every call). */
+  mode: 'today' | 'all' | 'month' | 'range';
   month: string;
   from: string;
   to: string;
@@ -113,14 +121,21 @@ export function todayIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** This month; for dates, the 1st of this month to today. */
-export function defaultPeriod(): Period {
-  return { mode: 'month', month: thisMonth(), from: `${thisMonth()}-01`, to: todayIso() };
+/** This month (or mode, e.g. 'today' for the call list); for dates, the 1st of this month to today. */
+export function defaultPeriod(mode: Period['mode'] = 'month'): Period {
+  return { mode, month: thisMonth(), from: `${thisMonth()}-01`, to: todayIso() };
 }
 
 /** The call list's query for a period. */
-export function periodQuery(p: Period): { month?: string; from?: string; to?: string } {
+export function periodQuery(p: Period): { month?: string; from?: string; to?: string; due?: string } {
+  if (p.mode === 'today' || p.mode === 'all') return { due: p.mode };
   return p.mode === 'month' ? { month: p.month } : { from: p.from, to: p.to };
+}
+
+/** "29 Oct – 4 Nov": the services a call asks about. */
+export function periodText(start?: string, end?: string): string {
+  if (!start || !end) return '';
+  return start === end ? formatDay(start) : `${formatDay(start)} – ${formatDay(end)}`;
 }
 
 /** "2026-11-03" -> "3 Nov 2026" */
@@ -130,6 +145,8 @@ export function longDay(iso: string): string {
 
 /** "November 2026" or "1 Nov 2026 – 3 Nov 2026". */
 export function periodLabel(p: Period): string {
+  if (p.mode === 'today') return 'Due today';
+  if (p.mode === 'all') return 'All calls';
   return p.mode === 'month' ? monthLabel(p.month) : `${longDay(p.from)} – ${longDay(p.to)}`;
 }
 
@@ -255,6 +272,6 @@ export function rupees(n: number): string {
 
 /** The highest priority the bad answers suggest. */
 export function suggestedPriority(rows: Response[]): Priority {
-  const rank: Record<Priority, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+  const rank: Record<Priority, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
   return rows.reduce<Priority | null>((best, r) => (r.suggested_priority && (!best || rank[r.suggested_priority] > rank[best]) ? r.suggested_priority : best), null) ?? 'MEDIUM';
 }

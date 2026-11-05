@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiPhoneOff, FiSearch, FiSend } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { formatDate, formatDay, isPast, listCalls, monthLabel, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
+import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, monthLabel, periodText, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
-import { CallStatusChip, Card, Empty, ErrorBox, Loading, PageHead, ResultChip, Segmented, Switch, Tiles } from "./ui";
+import { Card, Empty, ErrorBox, Loading, PageHead, Segmented, Switch, Tiles } from "./ui";
 
-// The Feedback Desk home (Dashboard): every site with a service (assigned visit up to today), one row per site and
-// month, newest month first. Picking a month shows only that month.
+// The Feedback Desk home (Dashboard): the calls the call schedules made (Masters › Call schedule), one
+// row per call. By default the calls due today (and earlier ones not done yet - overdue); All, a
+// month or a date range (due dates) show the others.
 // Filtered by status; TICKET_OPEN = feedback taken but its ticket is not closed yet.
 const FILTERS = [
   { value: "ALL", label: "All" },
@@ -27,7 +28,7 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Period filter: All, By month (one month, with arrows) or Date range (from - to). */
+/** Period filter: Due today, All, By month (one month, with arrows) or Date range (from - to), by due date. */
 function PeriodFilter({ mode, month, from, to, onChange }) {
   const today = todayIso();
   return (
@@ -35,15 +36,17 @@ function PeriodFilter({ mode, month, from, to, onChange }) {
       <Segmented
         label="Period"
         options={[
+          { value: "today", label: "Due today" },
           { value: "all", label: "All" },
           { value: "month", label: "By month" },
           { value: "range", label: "Date range" },
         ]}
         value={mode}
         onChange={(m) => {
-          if (m === "all") onChange({ month: "", from: "", to: "" });
-          if (m === "month") onChange({ month: month || thisMonth(), from: "", to: "" });
-          if (m === "range") onChange({ month: "", from: from || `${thisMonth()}-01`, to: to || today });
+          if (m === "today") onChange({ due: "", month: "", from: "", to: "" });
+          if (m === "all") onChange({ due: "all", month: "", from: "", to: "" });
+          if (m === "month") onChange({ due: "", month: month || thisMonth(), from: "", to: "" });
+          if (m === "range") onChange({ due: "", month: "", from: from || `${thisMonth()}-01`, to: to || today });
         }}
       />
       {mode === "month" && (
@@ -84,8 +87,8 @@ export default function CallList() {
   const month = params.get("month") || "";
   const from = params.get("from") || "";
   const to = params.get("to") || "";
-  const mode = from || to ? "range" : month ? "month" : "all";
-  const periodText = mode === "month" ? monthLabel(month) : mode === "range" ? (from && from === to ? formatDate(from) : `${from ? formatDate(from) : "the start"} – ${to ? formatDate(to) : "today"}`) : "";
+  const mode = from || to ? "range" : month ? "month" : params.get("due") === "all" ? "all" : "today";
+  const periodLabel = mode === "month" ? monthLabel(month) : mode === "range" ? (from && from === to ? formatDate(from) : `${from ? formatDate(from) : "the start"} – ${to ? formatDate(to) : "today"}`) : "";
   const status = params.get("status") || "ALL";
   const mine = params.get("mine") === "1";
   const page = Number(params.get("page")) || 1;
@@ -94,7 +97,7 @@ export default function CallList() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [busySite, setBusySite] = useState(null);
-  const [details, setDetails] = useState(null); // { siteId, month } for the details pop-up
+  const [details, setDetails] = useState(null); // { siteId, month, requestId } for the details pop-up
 
   const setParam = useCallback(
     (changes) => {
@@ -121,7 +124,7 @@ export default function CallList() {
 
   const q = params.get("q") || "";
   const load = useCallback(() => {
-    const period = mode === "range" ? { from, to } : { month: mode === "month" ? month : "all" };
+    const period = mode === "range" ? { from, to } : mode === "month" ? { month } : { due: mode };
     listCalls({ ...period, status: status === "ALL" ? "" : status, q, mine: mine ? "1" : "", page, page_size: PAGE_SIZE })
       .then((d) => {
         setData(d);
@@ -132,11 +135,11 @@ export default function CallList() {
 
   useEffect(load, [load]);
 
-  async function start(siteId, callMonth) {
-    setBusySite(`${siteId}|${callMonth}`);
+  async function start(requestId) {
+    setBusySite(requestId);
     setError("");
     try {
-      const call = await takeCall(siteId, callMonth);
+      const call = await takeCall(requestId);
       navigate(`${FEEDBACK_HOME}/calls/${call.id}`);
     } catch (err) {
       setError(err.message);
@@ -169,10 +172,9 @@ export default function CallList() {
 
       <Tiles
         items={[
-          { label: mode === "month" ? "Sites this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
+          { label: mode === "today" ? "Calls due today" : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
           tile("TO_CALL", "To call", "muted", FiPhoneCall),
           tile("NOT_ANSWERED", "Not answered", "warn", FiPhoneMissed, dueNow ? `${dueNow} call-back due now` : undefined),
-          tile("WRONG_NUMBER", "Wrong number", "danger", FiPhoneOff, counts.WRONG_NUMBER ? "Find the right number" : undefined),
           tile("FORM_SENT", "Form sent", "info", FiSend),
           tile("FORM_RECEIVED", "Form received", "violet", FiInbox, counts.FORM_RECEIVED ? "Needs your review" : undefined),
           tile("TICKET_OPEN", "Ticket open", "danger", FiAlertTriangle, counts.TICKET_OPEN ? "Waiting for the ticket" : undefined),
@@ -206,15 +208,23 @@ export default function CallList() {
           error ? null : <Loading />
         ) : !data?.sites?.length ? (
           <Empty
-            title={totalSites ? "No calls match these filters" : mode === "all" ? "No services yet" : `No services in ${periodText}`}
-            text={totalSites ? "Try another status or clear the search." : mode === "all" ? "Customers appear here once a service is assigned to them." : "Pick another period, or All."}
+            title={totalSites ? "No calls match these filters" : mode === "today" ? "No calls due today" : mode === "all" ? "No calls yet" : `No calls due in ${periodLabel}`}
+            text={
+              totalSites
+                ? "Try another status or clear the search."
+                : mode === "today"
+                  ? "Calls come from Masters › Call schedule. Pick All to see every call."
+                  : mode === "all"
+                    ? "Calls appear on their due date, for the customers and sites set in Masters › Call schedule."
+                    : "Pick another period, or All."
+            }
           />
         ) : (
           <div className="fb-table-wrap">
             <table className="fb-table">
               <thead>
                 <tr>
-                  {mode !== "month" && <th>Month</th>}
+                  <th>Due</th>
                   <th>Site · Customer</th>
                   <th>Visits</th>
                   <th>Last visit</th>
@@ -226,11 +236,18 @@ export default function CallList() {
               </thead>
               <tbody>
                 {data.sites.map((row) => {
-                  const open = row.request_id ? () => navigate(`${FEEDBACK_HOME}/calls/${row.request_id}`) : null;
+                  const open = () => navigate(`${FEEDBACK_HOME}/calls/${row.request_id}`);
                   const takenBySomeoneElse = row.collector && row.collector.id !== userId;
                   return (
-                    <tr key={`${row.site.id}|${row.month}`} className="is-link" onClick={() => setDetails({ siteId: row.site.id, month: row.month })} title="Show the customer's details">
-                      {mode !== "month" && <td style={{ whiteSpace: "nowrap" }} className="fb-strong">{monthLabel(row.month)}</td>}
+                    <tr key={row.request_id} className="is-link" onClick={() => setDetails({ siteId: row.site.id, month: row.month, requestId: row.request_id })} title="Show the customer's details">
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <div className="fb-strong">{formatDay(row.due_date)}</div>
+                        {row.overdue ? (
+                          <span className="fb-due-late">{lateText(row.due_date)}</span>
+                        ) : (
+                          <div className="fb-small fb-muted">{periodText(row.period_start, row.period_end)}</div>
+                        )}
+                      </td>
                       {/* One row per site: a customer with several sites has a row for each. */}
                       <td>
                         <div className="fb-strong">
@@ -245,14 +262,11 @@ export default function CallList() {
                         {row.services || "—"}
                       </td>
                       <td>
-                        <div className="fb-row" style={{ gap: 6 }}>
-                          <CallStatusChip status={row.status} />
-                          <ResultChip result={row.result} />
-                        </div>
+                        <StatusCell status={row.status} result={row.result} />
                       </td>
                       <td>{row.collector?.name || <span className="fb-muted">—</span>}</td>
                       <td className="fb-right" onClick={(e) => e.stopPropagation()}>
-                        {row.request_id ? (
+                        {row.collector || !canCollect ? (
                           <button
                             type="button"
                             className={`fb-btn fb-btn-sm ${row.status === "FORM_RECEIVED" ? "fb-btn-dark" : row.next_call_at && isPast(row.next_call_at) && row.status !== "DONE" ? "fb-btn-primary" : ""}`}
@@ -260,12 +274,10 @@ export default function CallList() {
                           >
                             {row.status === "FORM_RECEIVED" ? "Review form" : row.status === "DONE" ? "View" : takenBySomeoneElse ? "View" : "Open"}
                           </button>
-                        ) : canCollect ? (
-                          <button type="button" className="fb-btn fb-btn-sm fb-btn-primary" disabled={busySite === `${row.site.id}|${row.month}`} onClick={() => start(row.site.id, row.month)}>
-                            {busySite === `${row.site.id}|${row.month}` ? "Taking…" : "Take call"}
-                          </button>
                         ) : (
-                          <span className="fb-small fb-muted">Not taken yet</span>
+                          <button type="button" className="fb-btn fb-btn-sm fb-btn-primary" disabled={busySite === row.request_id} onClick={() => start(row.request_id)}>
+                            {busySite === row.request_id ? "Taking…" : "Take call"}
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -296,16 +308,37 @@ export default function CallList() {
         <SiteDetailsPanel
           siteId={details.siteId}
           month={details.month}
+          requestId={details.requestId}
           canCollect={canCollect}
           userId={userId}
-          busy={busySite === `${details.siteId}|${details.month}`}
-          onTake={(siteId) => start(siteId, details.month)}
+          busy={Boolean(busySite) && busySite === details.requestId}
+          onTake={(requestId) => start(requestId)}
           onOpenCall={(callId) => navigate(`${FEEDBACK_HOME}/calls/${callId}`)}
           onOpenTicket={(ticketId) => navigate(`${FEEDBACK_HOME}/tickets/${ticketId}`)}
-          onSiteChange={(siteId) => setDetails((d) => ({ ...d, siteId }))}
+          onSiteChange={(siteId) => setDetails((d) => ({ ...d, siteId, requestId: null }))}
           onClose={() => setDetails(null)}
         />
       )}
     </>
+  );
+}
+
+/** "Overdue · 4 days" for a call not done by its due date. */
+function lateText(due) {
+  const days = Math.floor((Date.now() - new Date(`${due}T00:00:00`).getTime()) / 86400000);
+  return days >= 1 ? `Overdue · ${days} day${days === 1 ? "" : "s"}` : "Overdue";
+}
+
+const RESULT_TEXT = { GOOD: { text: "All good", tone: "ok" }, ISSUE: { text: "Issue reported", tone: "danger" }, NO_RESPONSE: { text: "Not responded", tone: "muted" } };
+
+/** The call's status as one soft pill with a dot, and its result as a small line under it. */
+function StatusCell({ status, result }) {
+  const s = CALL_STATUS[status] || { label: status, tone: "muted" };
+  const r = RESULT_TEXT[result];
+  return (
+    <div className="fb-status-cell">
+      <span className={`fb-pill fb-pill-${s.tone}`}>{s.label}</span>
+      {r && <span className={`fb-result-line fb-result-${r.tone}`}>{r.text}</span>}
+    </div>
   );
 }

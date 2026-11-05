@@ -9,6 +9,7 @@ import { errorText, listTickets } from '../api';
 import { OPERATIONS, PRIORITY, TICKET_STATUS, formatDay } from '../format';
 import { useFeedback } from '../FeedbackContext';
 import type { FeedbackStackParamList } from '../navigation';
+import { useTicketsTab } from '../ticketsTabContext';
 import type { DepartmentKind, Ticket } from '../types';
 import { HeroHeader, HeroPill } from '../Hero';
 import { Chips } from '../ui';
@@ -63,6 +64,8 @@ function nextStep(t: Ticket): { text: string; tone: 'ok' | 'wait' | 'todo' } {
 /** The tickets this user raised (a desk user sees every ticket), open first. */
 export function FeedbackTicketsScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
+  // The Tickets tab's badge (in another app's tabs) is brought up to date when the list shows.
+  const { refresh: refreshBadge } = useTicketsTab();
   const { styles, theme } = useCrmStyles(factory);
   const [status, setStatus] = useState<'OPEN' | 'CLOSED' | ''>('OPEN');
   const { departmentList, deptOnly } = useFeedback();
@@ -86,7 +89,8 @@ export function FeedbackTicketsScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      refreshBadge();
+    }, [load, refreshBadge]),
   );
 
   return (

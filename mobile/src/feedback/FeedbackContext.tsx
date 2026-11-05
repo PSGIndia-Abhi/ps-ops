@@ -63,7 +63,8 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       emailTemplates,
       departmentList,
       myDepartments,
-      deptOnly: permissions.length > 0 && permissions.every((p) => p === 'FEEDBACK_DEPT'),
+      // Team members and assigned supervisors / salespeople: their tickets only.
+      deptOnly: permissions.length > 0 && permissions.every((p) => ['FEEDBACK_DEPT', 'FEEDBACK_ISSUES', 'FEEDBACK_ASSIGNED', 'FEEDBACK_SCHEDULE'].includes(p)),
       reloadQuestions: () => setTick((n) => n + 1),
     }),
     [userId, permissions, questions, otherEnabled, emailTemplates, departmentList, myDepartments],

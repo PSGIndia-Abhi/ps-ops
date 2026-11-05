@@ -13,6 +13,7 @@ import { CalendarIcon, ChartIcon, HomeIcon, PlusIcon } from '../components/icons
 import { useReminders } from '../reminders-engine/useReminders';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
+import { FeedbackTicketsTab, ticketsTabIcon, useTicketsTab } from '../feedback/FeedbackTicketsTab';
 import { radii, shadows } from '../theme';
 import type { TaskStackParamList, TaskTabParamList } from '../tasks/navigation';
 import { TasksProvider, useTasks } from '../tasks/TasksContext';
@@ -113,6 +114,7 @@ function TaskTabs() {
     tabBarLabel: tabLabel,
   };
 
+  const tickets = useTicketsTab();
   return (
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen name="Home" component={TaskHomeScreen} options={{ tabBarIcon: homeIcon }} />
@@ -142,6 +144,9 @@ function TaskTabs() {
       />
       <Tab.Screen name="Schedule" component={TaskScheduleScreen} options={{ title: 'Calendar', tabBarIcon: calendarIcon }} />
       <Tab.Screen name="Insights" component={TaskInsightsScreen} options={{ tabBarIcon: insightsIcon }} />
+      {tickets.show && (
+        <Tab.Screen name="FeedbackTickets" component={FeedbackTicketsTab} options={{ title: 'Tickets', tabBarIcon: ticketsTabIcon, tabBarBadge: tickets.count || undefined }} />
+      )}
     </Tab.Navigator>
   );
 }

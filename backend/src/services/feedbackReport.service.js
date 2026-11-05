@@ -316,13 +316,13 @@ function reportTables(data) {
   const lines = complaintsOnly
     ? [
         `Period: ${data.period_label}${data.filters.site_id ? ` · one site` : ""} · complaints only`,
-        `Complaints: ${t.complaints} out of ${t.feedback_received} feedback · Tickets: ${t.tickets} (${t.tickets_open} open, ${t.tickets_closed} closed) · High ${t.tickets_by_priority.HIGH}, Medium ${t.tickets_by_priority.MEDIUM}, Low ${t.tickets_by_priority.LOW}`,
+        `Complaints: ${t.complaints} out of ${t.feedback_received} feedback · Tickets: ${t.tickets} (${t.tickets_open} open, ${t.tickets_closed} closed) · Very high ${t.tickets_by_priority.VERY_HIGH || 0}, High ${t.tickets_by_priority.HIGH}, Medium ${t.tickets_by_priority.MEDIUM}, Low ${t.tickets_by_priority.LOW}`,
       ]
     : [
         `Period: ${data.period_label}${data.filters.site_id ? ` · one site` : ""}`,
         `Overall satisfaction: ${t.satisfaction === null ? "no answers yet" : `${t.satisfaction}% of ${t.answers_total} answers good`}`,
         `Sites served: ${t.sites_served} · Services: ${t.services} · Calls done: ${t.calls_done} of ${t.calls_to_make} · Feedback received: ${t.feedback_received} (${t.by_call} on call, ${t.by_form} by form) · Not reached: ${t.not_reached}`,
-        `Complaints: ${t.complaints} · Tickets: ${t.tickets} (${t.tickets_open} open, ${t.tickets_closed} closed) · High ${t.tickets_by_priority.HIGH}, Medium ${t.tickets_by_priority.MEDIUM}, Low ${t.tickets_by_priority.LOW}`,
+        `Complaints: ${t.complaints} · Tickets: ${t.tickets} (${t.tickets_open} open, ${t.tickets_closed} closed) · Very high ${t.tickets_by_priority.VERY_HIGH || 0}, High ${t.tickets_by_priority.HIGH}, Medium ${t.tickets_by_priority.MEDIUM}, Low ${t.tickets_by_priority.LOW}`,
       ];
   const pct = (v) => (v === null || v === undefined ? "-" : `${v}%`);
   const lowFill = (v) => (v !== null && v !== undefined && v < 70 ? "FDECEC" : null);
@@ -575,7 +575,7 @@ async function exportTickets(req) {
         { header: "Month", width: 9, value: (r) => r.month },
         { header: "Customer", width: 26, value: (r) => r.customer },
         { header: "Site", width: 22, value: (r) => r.site },
-        { header: "Priority", width: 9, value: (r) => PRIORITY_LABELS[r.priority], fill: (r) => (r.priority === "HIGH" ? "FDECEC" : null) },
+        { header: "Priority", width: 9, value: (r) => PRIORITY_LABELS[r.priority], fill: (r) => (r.priority === "VERY_HIGH" ? "F8C9C9" : r.priority === "HIGH" ? "FDECEC" : null) },
         { header: "Status", width: 14, value: (r) => STATUS_LABELS[r.status] },
         { header: "Action", width: 22, value: (r) => ACTION_LABELS[r.action] },
         { header: "Owner", width: 18, value: (r) => r.owner || "" },

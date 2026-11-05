@@ -23,7 +23,7 @@ const { pool } = require("../../db");
 // (their foreign keys point at sites). The customer is sites.company_id -> companies.
 // ---------------------------------------------------------------------------
 
-const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];
+const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"];
 // A monthly call (feedback_requests) and a ticket (feedback_tickets) have separate statuses.
 // WRONG_NUMBER = the last try reached a wrong number. A DONE call's result: GOOD, ISSUE or
 // NO_RESPONSE (closed by itself: calls missed and the form link expired unused).
@@ -32,7 +32,16 @@ const TICKET_STATUSES = ["ACTION_PENDING", "CLOSED"];
 // The call list also shows TICKET_OPEN: a done call whose ticket is not closed yet.
 const LIST_STATUSES = [...REQUEST_STATUSES, "TICKET_OPEN"];
 // OTHER = something else, described in action_note (required for it).
-const ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "ESCALATE_OPERATIONS", "OTHER"];
+// SITE_AUDIT / SUPERVISOR_VISIT / SALES: done by one assigned person (see ASSIGNED_ACTIONS).
+const ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "SITE_AUDIT", "SUPERVISOR_VISIT", "SALES", "ESCALATE_OPERATIONS", "OTHER"];
+// Next steps done by one person, stored in action_owner_user_id: who can be assigned (by role name,
+// so a new supervisor or salesperson shows up by itself). They see the ticket and mark the step done.
+const ASSIGNEE_GROUPS = {
+  SUPERVISOR: { label: "supervisor", roleSql: "LOWER(r.name) LIKE '%supervisor%'" },
+  SALES: { label: "salesperson", roleSql: "LOWER(r.name) LIKE '%sales%'" },
+};
+const ASSIGNED_ACTIONS = { SITE_AUDIT: "SUPERVISOR", SUPERVISOR_VISIT: "SUPERVISOR", SALES: "SALES" };
+const isAssignedAction = (a) => Object.prototype.hasOwnProperty.call(ASSIGNED_ACTIONS, a);
 const DESK_PERMISSIONS = ["FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
 
 class HttpError extends Error {
@@ -114,9 +123,9 @@ function questionsFor(questions, mode, services, department = null) {
   });
 }
 
-// The services a site had in a call's month (each once) - what its SERVICE questions are about.
-async function servicesOfMonth(conn, siteId, month) {
-  const { start, next } = monthRange(month);
+// The services a site had in a call's period (each once) - what its SERVICE questions are about.
+// start / next: the call's window_start / window_end (CALL_WINDOW).
+async function servicesOfCall(conn, siteId, start, next) {
   const [rows] = await conn.query(
     `SELECT DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) AS service
      FROM job_visits v JOIN jobs j ON j.id = v.job_id
@@ -643,6 +652,87 @@ async function saveDepartments(body, userId) {
   return departmentSetup();
 }
 
+/* ------------------------------------------------------------ issue types */
+
+// Each department's issue types (Feedback Desk > Issues). all = also the switched-off ones.
+async function listIssueTypes(executor = pool, { all = false } = {}) {
+  const [rows] = await executor.query(
+    `SELECT id, department_kind, name, is_service, is_active, sort_order FROM feedback_issue_types
+     ${all ? "" : "WHERE is_active = 1"} ORDER BY department_kind, sort_order, id`
+  );
+  return rows.map((t) => ({
+    id: t.id, department: t.department_kind, name: t.name, is_service: Boolean(t.is_service), is_active: Boolean(t.is_active),
+  }));
+}
+
+// PUT /issue-types - Body: { department, types: [{ id?, name, is_active }] } - one department's issues,
+// in display order. A row without id is new. Nothing is deleted: an issue is switched off instead.
+async function saveIssueTypes(body, userId) {
+  const kind = String(body?.department || "").trim().toUpperCase();
+  const list = body?.types;
+  if (!Array.isArray(list)) throw new HttpError(400, "Send the issues");
+  if (list.length > 50) throw new HttpError(400, "At most 50 issues per department");
+  const seen = new Set();
+  const clean = list.map((t, i) => {
+    const name = typeof t?.name === "string" ? t.name.trim() : "";
+    if (!name) throw new HttpError(400, `Issue ${i + 1}: type its name`);
+    if (name.length > 100) throw new HttpError(400, `Issue ${i + 1}: the name is too long (max 100 characters)`);
+    const key = name.toLowerCase();
+    if (seen.has(key)) throw new HttpError(400, `"${name}" is in the list twice`);
+    seen.add(key);
+    const id = t?.id === undefined || t?.id === null || t?.id === "" ? null : Number(t.id);
+    if (id !== null && !Number.isInteger(id)) throw new HttpError(400, `Issue ${i + 1}: invalid id`);
+    return { id, name, active: flag(t.is_active, true), sort: i + 1 };
+  });
+  await inTransaction(async (conn) => {
+    const [[d]] = await conn.query("SELECT kind FROM feedback_departments WHERE kind = ?", [kind]);
+    if (!d) throw new HttpError(400, "Unknown department");
+    const [existing] = await conn.query("SELECT id FROM feedback_issue_types WHERE department_kind = ? FOR UPDATE", [kind]);
+    const mine = new Set(existing.map((e) => e.id));
+    // Names move between rows freely: park the names first so the unique key doesn't refuse a swap.
+    await conn.query("UPDATE feedback_issue_types SET name = CONCAT('~', id) WHERE department_kind = ?", [kind]);
+    for (const t of clean) {
+      if (t.id !== null) {
+        if (!mine.has(t.id)) throw new HttpError(400, "An issue does not belong to this department");
+        await conn.query("UPDATE feedback_issue_types SET name = ?, is_active = ?, sort_order = ?, updated_by = ? WHERE id = ?", [t.name, t.active, t.sort, userId, t.id]);
+        mine.delete(t.id);
+      } else {
+        await conn.query(
+          "INSERT INTO feedback_issue_types (department_kind, name, is_active, sort_order, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
+          [kind, t.name, t.active, t.sort, userId, userId]
+        );
+      }
+    }
+    if (mine.size) throw new HttpError(400, "Send every issue of the department (switch one off instead of leaving it out)");
+  });
+  return { issue_types: await listIssueTypes(pool, { all: true }) };
+}
+
+// The issues ticked for one department's part: input [{ id, text }] -> [{ id, name, text, is_service }].
+// When the department has issues, at least one must be ticked.
+async function pickedIssues(conn, dept, input) {
+  const [types] = await conn.query("SELECT id, name, is_service FROM feedback_issue_types WHERE department_kind = ? AND is_active = 1", [dept.kind]);
+  const byId = new Map(types.map((t) => [t.id, t]));
+  const list = Array.isArray(input) ? input : [];
+  const seen = new Set();
+  const picked = [];
+  for (const x of list) {
+    const t = byId.get(Number(x?.id));
+    if (!t) throw new HttpError(400, `${dept.name}: that issue is not in its list`);
+    if (seen.has(t.id)) continue;
+    seen.add(t.id);
+    const text = optionalText(x?.text, `${t.name} details`, 500);
+    picked.push({ id: t.id, name: t.name, text: t.is_service ? null : text, is_service: Boolean(t.is_service) });
+  }
+  if (types.length && !picked.length) throw new HttpError(400, `Tick at least one issue for ${dept.name}`);
+  return picked;
+}
+
+// Issues as lines: "Grooming: came without uniform". The Services issue is described by the services.
+function issueLines(issues) {
+  return issues.filter((i) => !i.is_service || i.text).map((i) => (i.text ? `${i.name}: ${i.text}` : i.name));
+}
+
 // The name of a department (for messages), by key.
 async function departmentName(executor, kind) {
   const [[d]] = await executor.query(
@@ -743,7 +833,13 @@ const deskUserSql = (column) => `EXISTS (
             SELECT 1 FROM role_permissions drp JOIN permissions dp ON dp.id = drp.permission_id
             WHERE drp.role_id = du.role_id AND dp.name IN (${DESK_PERMISSIONS.map((p) => `'${p}'`).join(", ")}))))`;
 
-/* ------------------------------------------------------------ monthly calls */
+/* ------------------------------------------------------------ calls */
+
+// A call's own dates (feedback_requests): due_date = the day it is to be made (by its schedule);
+// it asks about the services from period_start, before period_end. period_month = due_date's month.
+const CALL_WINDOW = `DATE_FORMAT(r.due_date, '%Y-%m-%d') AS due_on,
+         DATE_FORMAT(r.period_start, '%Y-%m-%d') AS window_start, DATE_FORMAT(r.period_end, '%Y-%m-%d') AS window_end`;
+const lastDayOf = (windowEnd) => new Date(Date.parse(`${windowEnd}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
 
 // The services the feedback is about: every visit assigned to the customer (any status except
 // cancelled) dated from the period start, before the period end and up to today - future
@@ -771,33 +867,37 @@ const CALL_ORDER = `CASE
     ELSE 5
   END`;
 
-// The period the call list covers: a date range (from / to), every month, or one month.
+// The calls the list shows, by due date: due=today (the default: due today, and earlier ones not
+// done yet - overdue), a date range (from / to), a month, or all.
 function callListPeriod(query) {
   const from = optionalDate(query.from, "From date");
   const to = optionalDate(query.to, "To date");
   if (from || to) {
     if (from && to && from > to) throw new HttpError(400, "The From date must be on or before the To date");
-    let next = "2100-01-01";
-    if (to) {
-      const d = new Date(`${to}T00:00:00Z`);
-      d.setUTCDate(d.getUTCDate() + 1);
-      next = d.toISOString().slice(0, 10);
-    }
-    return { month: "range", start: from || "2000-01-01", next };
+    return { month: "range", sql: "r.due_date >= ? AND r.due_date <= ?", params: [from || "2000-01-01", to || "2100-01-01"] };
   }
-  if (query.month === "all") return { month: "all", start: "2000-01-01", next: "2100-01-01" };
-  return monthRange(query.month);
+  if (query.month === "all" || query.due === "all") return { month: "all", sql: "1 = 1", params: [] };
+  if (query.month) {
+    const { month, start } = monthRange(query.month);
+    return { month, sql: "r.period_month = ?", params: [start] };
+  }
+  return { month: "today", sql: "(r.due_date = CURDATE() OR (r.due_date < CURDATE() AND r.status <> 'DONE'))", params: [] };
 }
 
-// GET /calls: every site that had a completed visit in the month, one row per site and month,
-// with its call status (TO_CALL until someone works on it). A collector without a desk
-// permission sees sites nobody has taken yet, their own, and calls taken by desk users.
-// Query: month (2026-10; "all" = every month, newest first; none = this month), or from / to
-//        (2026-09-01 .. 2026-09-15: services completed between those dates, rows still per month),
+// The services of a call's period, for its row: count, last date and names.
+const CALL_VISITS = (what) => `(SELECT ${what}
+     FROM job_visits v JOIN jobs j ON j.id = v.job_id
+     WHERE j.company_id = r.site_id AND ${SERVICE_VISIT}
+       AND COALESCE(v.completed_at, v.scheduled_date) >= r.period_start AND COALESCE(v.completed_at, v.scheduled_date) < r.period_end)`;
+
+// GET /calls: the feedback calls (made by the call schedules), one row per call, with its status.
+// A collector without a desk permission sees calls nobody has taken yet, their own, and calls taken
+// by desk users.
+// Query: due=today (default: due today + overdue) | all, or month (2026-10), or from / to (due dates),
 //        status (comma list, OPEN = not DONE), q (customer / site), company_id, mine=1, page, page_size.
 async function callList(req) {
   const query = req.query || {};
-  const { month, start, next } = callListPeriod(query);
+  const period = callListPeriod(query);
 
   const outer = [];
   const outerParams = [];
@@ -814,37 +914,34 @@ async function callList(req) {
   if (q) { outer.push("(x.company_name LIKE ? OR x.site_name LIKE ?)"); outerParams.push(likeOf(q), likeOf(q)); }
 
   const inner = `
-    SELECT DATE_FORMAT(COALESCE(v.completed_at, v.scheduled_date), '%Y-%m') AS call_month,
+    SELECT r.id AS request_id, DATE_FORMAT(r.period_month, '%Y-%m') AS call_month, ${CALL_WINDOW},
+           r.due_date, (r.due_date < CURDATE() AND r.status <> 'DONE') AS overdue,
            s.id AS site_id, s.name AS site_name, s.city AS site_city,
            co.id AS company_id, co.name AS company_name,
-           COUNT(DISTINCT v.id) AS visit_count,
-           DATE_FORMAT(MAX(COALESCE(v.completed_at, v.scheduled_date)), '%Y-%m-%d') AS last_visit_date,
-           GROUP_CONCAT(DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) SEPARATOR ', ') AS services,
-           r.id AS request_id,
+           ${CALL_VISITS("COUNT(DISTINCT v.id)")} AS visit_count,
+           ${CALL_VISITS("DATE_FORMAT(MAX(COALESCE(v.completed_at, v.scheduled_date)), '%Y-%m-%d')")} AS last_visit_date,
+           ${CALL_VISITS("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) SEPARATOR ', ')")} AS services,
            -- A done call whose ticket is still open shows as TICKET_OPEN until the ticket is closed.
            CASE WHEN r.status = 'DONE' AND EXISTS (SELECT 1 FROM feedback_tickets ot WHERE ot.request_id = r.id AND ot.status = 'ACTION_PENDING')
-                THEN 'TICKET_OPEN' ELSE COALESCE(r.status, 'TO_CALL') END AS status, r.result,
+                THEN 'TICKET_OPEN' ELSE r.status END AS status, r.result,
            r.collector_user_id, cu.name AS collector_name, r.next_call_at, r.updated_at AS last_activity_at
-    ${SERVICE_VISITS_IN_PERIOD.replace(
-      "WHERE COALESCE(v.status",
-      `LEFT JOIN feedback_requests r ON r.site_id = s.id
-             AND r.period_month = DATE_FORMAT(COALESCE(v.completed_at, v.scheduled_date), '%Y-%m-01')
-       LEFT JOIN users cu ON cu.id = r.collector_user_id
-       WHERE COALESCE(v.status`
-    )}
-    GROUP BY call_month, s.id, co.id, r.id, cu.id`;
-  const innerParams = [start, next];
+    FROM feedback_requests r
+    JOIN sites s ON s.id = r.site_id
+    JOIN companies co ON co.id = r.company_id
+    LEFT JOIN users cu ON cu.id = r.collector_user_id
+    WHERE ${period.sql}`;
+  const innerParams = period.params;
   const baseWhere = outer.length ? `WHERE ${outer.join(" AND ")}` : "";
 
   const [countRows] = await pool.query(
     `SELECT x.status, COUNT(*) AS n FROM (${inner}) x ${baseWhere} GROUP BY x.status`,
     [...innerParams, ...outerParams]
   );
-  const statusCounts = Object.fromEntries(LIST_STATUSES.map((s) => [s, 0]));
+  const statusCounts = Object.fromEntries(LIST_STATUSES.map((st) => [st, 0]));
   for (const r of countRows) statusCounts[r.status] = Number(r.n);
 
   const statuses = csvOf(query.status, [...LIST_STATUSES, "OPEN"], "status");
-  const wanted = [...new Set(statuses.flatMap((s) => (s === "OPEN" ? LIST_STATUSES.filter((x) => x !== "DONE") : [s])))];
+  const wanted = [...new Set(statuses.flatMap((st) => (st === "OPEN" ? LIST_STATUSES.filter((x) => x !== "DONE") : [st])))];
   const listWhere = [...outer];
   const listParams = [...outerParams];
   if (wanted.length) { listWhere.push("x.status IN (?)"); listParams.push(wanted); }
@@ -852,15 +949,15 @@ async function callList(req) {
 
   const { page, pageSize, offset } = pageOf(query, 50, 200);
   const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM (${inner}) x ${whereSql}`, [...innerParams, ...listParams]);
+  // Today: what to do first (forms back, call-backs due...), oldest due first. Otherwise newest first.
+  const order = period.month === "today" ? `${CALL_ORDER}, x.due_date, x.company_name, x.site_name` : `x.due_date DESC, ${CALL_ORDER}, x.company_name, x.site_name`;
   const [rows] = await pool.query(
-    `SELECT x.* FROM (${inner}) x ${whereSql}
-     ORDER BY x.call_month DESC, ${CALL_ORDER}, x.company_name, x.site_name
-     LIMIT ? OFFSET ?`,
+    `SELECT x.* FROM (${inner}) x ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     [...innerParams, ...listParams, pageSize, offset]
   );
 
   return {
-    month,
+    month: period.month,
     total: Number(total),
     page,
     page_size: pageSize,
@@ -868,11 +965,15 @@ async function callList(req) {
     sites: rows.map((r) => ({
       month: r.call_month,
       request_id: r.request_id,
+      due_date: r.due_on,
+      period_start: r.window_start,
+      period_end: lastDayOf(r.window_end),
+      overdue: Boolean(Number(r.overdue)),
       status: r.status,
       result: r.result,
       customer: { id: r.company_id, name: r.company_name },
       site: { id: r.site_id, name: r.site_name, city: r.site_city },
-      visit_count: Number(r.visit_count),
+      visit_count: Number(r.visit_count || 0),
       last_visit_date: r.last_visit_date,
       services: r.services,
       collector: person(r.collector_user_id, r.collector_name),
@@ -882,47 +983,32 @@ async function callList(req) {
   };
 }
 
-// POST /calls { site_id, month }: the collector starts working on a site for a month.
-// Creates the monthly call if it doesn't exist and gives it to this collector if nobody has
-// it. Someone else's call can only be taken over by a desk manager (FEEDBACK_MANAGE).
+// POST /calls { request_id } - the collector takes a call the schedules made (older apps send
+// { site_id, month }: that site's latest call in the month). It is given to this collector if
+// nobody has it; someone else's call can only be taken over by a desk manager (FEEDBACK_MANAGE).
 // Returns the request id.
 async function openCall(conn, req, body) {
-  const siteId = typeof body?.site_id === "string" ? body.site_id.trim() : "";
-  if (!siteId) throw new HttpError(400, "Choose the site");
-  const { start, next } = monthRange(body?.month);
-
-  const [[site]] = await conn.query("SELECT id, company_id FROM sites WHERE id = ?", [siteId]);
-  if (!site) throw new HttpError(400, "Site not found");
-  const [[{ visits }]] = await conn.query(
-    `SELECT COUNT(*) AS visits ${SERVICE_VISITS_IN_PERIOD} AND s.id = ?`,
-    [start, next, siteId]
-  );
-  if (!Number(visits)) throw new HttpError(400, "This site had no service in that month");
+  let request;
+  if (body?.request_id) {
+    [[request]] = await conn.query(
+      `SELECT r.id, r.collector_user_id, u.name AS collector_name
+       FROM feedback_requests r LEFT JOIN users u ON u.id = r.collector_user_id WHERE r.id = ? FOR UPDATE`,
+      [String(body.request_id)]
+    );
+  } else {
+    const siteId = typeof body?.site_id === "string" ? body.site_id.trim() : "";
+    if (!siteId) throw new HttpError(400, "Choose the call");
+    const { start } = monthRange(body?.month);
+    [[request]] = await conn.query(
+      `SELECT r.id, r.collector_user_id, u.name AS collector_name
+       FROM feedback_requests r LEFT JOIN users u ON u.id = r.collector_user_id
+       WHERE r.site_id = ? AND r.period_month = ? ORDER BY r.due_date DESC LIMIT 1 FOR UPDATE`,
+      [siteId, start]
+    );
+  }
+  if (!request) throw new HttpError(404, "This call is not on the list - its schedule hasn't made it");
 
   const userId = req.user.id;
-  let [[request]] = await conn.query(
-    `SELECT r.id, r.collector_user_id, u.name AS collector_name
-     FROM feedback_requests r LEFT JOIN users u ON u.id = r.collector_user_id
-     WHERE r.site_id = ? AND r.period_month = ? FOR UPDATE`,
-    [siteId, start]
-  );
-
-  if (!request) {
-    const id = crypto.randomUUID();
-    try {
-      await conn.query(
-        `INSERT INTO feedback_requests (id, period_month, company_id, site_id, collector_user_id, status, created_by)
-         VALUES (?, ?, ?, ?, ?, 'TO_CALL', ?)`,
-        [id, start, site.company_id, siteId, userId, userId]
-      );
-    } catch (err) {
-      if (err?.code !== "ER_DUP_ENTRY") throw err;
-      throw new HttpError(409, "Someone else has just started this call - refresh the list");
-    }
-    await addHistory(conn, { requestId: id, event: "OPENED", to: "TO_CALL", note: "Call taken by the collector", userId });
-    return id;
-  }
-
   if (!request.collector_user_id) {
     await conn.query("UPDATE feedback_requests SET collector_user_id = ?, row_version = row_version + 1 WHERE id = ?", [userId, request.id]);
     await addHistory(conn, { requestId: request.id, event: "ASSIGNED", note: "Call taken by the collector", userId });
@@ -973,7 +1059,7 @@ function historyRow(h) {
 // visits, calls made, answers, form links, WhatsApp messages, tickets raised and history.
 async function getCall(req, id) {
   const [[r]] = await pool.query(
-    `SELECT r.*, DATE_FORMAT(r.period_month, '%Y-%m') AS month,
+    `SELECT r.*, DATE_FORMAT(r.period_month, '%Y-%m') AS month, ${CALL_WINDOW},
             co.name AS company_name, s.name AS site_name, s.city AS site_city, s.address AS site_address,
             cu.name AS collector_name, db.name AS done_by_name
      FROM feedback_requests r
@@ -990,7 +1076,7 @@ async function getCall(req, id) {
     if (!r.collector_user_id || !Number(taken.by_desk)) throw new HttpError(404, "Feedback call not found");
   }
 
-  const { start, next } = monthRange(r.month);
+  const [start, next] = [r.window_start, r.window_end];
   const [contacts] = await pool.query(
     `SELECT id, name, phone, email, role, is_primary FROM contacts
      WHERE company_id = ? AND COALESCE(is_active, 1) = 1
@@ -1035,7 +1121,7 @@ async function getCall(req, id) {
     [id]
   );
   const [ticketRows] = await pool.query(
-    `SELECT t.id, t.ticket_number, t.status, t.priority, t.action, t.issue_summary, t.created_at, t.revisit_visit_id, rv.status AS revisit_status
+    `SELECT t.id, t.ticket_number, t.status, t.priority, t.action, t.issue_summary, t.created_at, t.revisit_visit_id, t.action_done_at, rv.status AS revisit_status
      FROM feedback_tickets t LEFT JOIN job_visits rv ON rv.id = t.revisit_visit_id WHERE t.request_id = ? ORDER BY t.seq`,
     [id]
   );
@@ -1057,6 +1143,10 @@ async function getCall(req, id) {
   return {
     id: r.id,
     month: r.month,
+    // The call's due date and the services it asks about (period_start .. period_end, both days in).
+    due_date: r.due_on,
+    period_start: r.window_start,
+    period_end: lastDayOf(r.window_end),
     status: r.status,
     // DONE with a ticket still open shows as TICKET_OPEN until the ticket is closed.
     display_status: r.status === "DONE" && tickets.some((t) => t.status === "ACTION_PENDING") ? "TICKET_OPEN" : r.status,
@@ -1091,13 +1181,15 @@ async function getCall(req, id) {
     })),
     tickets,
     history: history.map(historyRow),
+    // Requests for the right number (Feedback Desk > Requests), newest first.
+    number_requests: await require("./feedbackNumberRequest.service").callNumberRequests(r.id),
   };
 }
 
 /* ------------------------------------------------------------ calls and feedback */
 
 const CALL_OUTCOMES = ["ANSWERED", "NO_ANSWER", "BUSY", "WRONG_NUMBER"];
-const PRIORITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+const PRIORITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
 
 // "2026-10-30 15:30" or "2026-10-30T15:30[:00]" -> "2026-10-30 15:30:00" (IST wall-clock, as stored).
 function optionalDateTime(value, label) {
@@ -1119,7 +1211,7 @@ function optionalText(value, label, max) {
 // a desk manager (FEEDBACK_MANAGE). openDone = also allowed when the call is DONE.
 async function lockCallForWork(conn, req, requestId, { openDone = false } = {}) {
   const [[r]] = await conn.query(
-    `SELECT r.*, DATE_FORMAT(r.period_month, '%Y-%m') AS month FROM feedback_requests r WHERE r.id = ? FOR UPDATE`,
+    `SELECT r.*, DATE_FORMAT(r.period_month, '%Y-%m') AS month, ${CALL_WINDOW} FROM feedback_requests r WHERE r.id = ? FOR UPDATE`,
     [requestId]
   );
   if (!r) throw new HttpError(404, "Feedback call not found");
@@ -1267,6 +1359,17 @@ async function recordCallAttempt(req, requestId, body) {
       userId: req.user.id,
     });
 
+    // Answered: the number works, so a request for the right number is no longer needed.
+    if (outcome === "ANSWERED") {
+      const [cancelled] = await conn.query(
+        "UPDATE feedback_number_requests SET status = 'CANCELLED', resolved_by = ?, resolved_at = NOW(), resolve_note = 'The customer answered' WHERE request_id = ? AND status = 'OPEN'",
+        [req.user.id, requestId]
+      );
+      if (cancelled.affectedRows) {
+        await addHistory(conn, { requestId, event: "NUMBER_REQUEST_CANCELLED", note: "Request for the right number cancelled - the customer answered", userId: req.user.id });
+      }
+    }
+
     const [[{ missedCalls }]] = await conn.query(
       "SELECT COUNT(*) AS missedCalls FROM feedback_call_attempts WHERE request_id = ? AND outcome <> 'ANSWERED'",
       [requestId]
@@ -1303,7 +1406,7 @@ async function questionScope(conn, r, body) {
     const known = (await listDepartments(conn, { all: true })).map((d) => d.kind);
     if (!known.includes(department)) throw new HttpError(400, "Choose the department whose questions were asked");
   }
-  return { mode, department, services: await servicesOfMonth(conn, r.site_id, r.month) };
+  return { mode, department, services: await servicesOfCall(conn, r.site_id, r.window_start, r.window_end) };
 }
 
 async function cleanResponses(conn, responses, { forForm = false, scope = null } = {}) {
@@ -1381,32 +1484,41 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   for (const kind of kinds.filter((k) => k !== OPERATIONS)) {
     const dept = active.get(kind);
     const a = partInput[kind] && typeof partInput[kind] === "object" ? partInput[kind] : {};
-    const summary = optionalText(a.issue_summary, `${dept.name} issue`, 500);
-    if (!summary) throw new HttpError(400, `Describe the issue for ${dept.name}`);
+    const issues = await pickedIssues(conn, dept, a.issues);
+    const details = optionalText(a.issue_summary, `${dept.name} details`, 500);
+    const summary = [...issueLines(issues), details].filter(Boolean).join("\n").slice(0, 500);
+    if (!summary) throw new HttpError(400, `Tick an issue or describe it for ${dept.name}`);
     const p = typeof a.priority === "string" && a.priority ? a.priority.trim().toUpperCase() : suggested || "MEDIUM";
-    if (!PRIORITIES.includes(p)) throw new HttpError(400, `Choose the ${dept.name} priority: LOW, MEDIUM or HIGH`);
+    if (!PRIORITIES.includes(p)) throw new HttpError(400, `Choose the ${dept.name} priority: Very high, High, Medium or Low`);
     const ids = dept.with_invoices && Array.isArray(a.invoice_ids) ? [...new Set(a.invoice_ids.map(String).filter(Boolean))] : [];
     if (ids.length > 20) throw new HttpError(400, "Pick at most 20 invoices");
     if (ids.length) {
       const [found] = await conn.query("SELECT id FROM invoices WHERE id IN (?) AND customer_id = ?", [ids, r.company_id]);
       if (found.length !== ids.length) throw new HttpError(400, "An invoice is not one of this customer's invoices");
     }
-    others.push({ kind, name: dept.name, summary, priority: p, invoiceIds: ids });
+    others.push({ kind, name: dept.name, summary, details, issues, priority: p, invoiceIds: ids });
   }
 
   // Operations keeps the existing fields. A ticket without Operations stores action OTHER (no visit).
   const action = forOps ? (typeof input.action === "string" ? input.action.trim().toUpperCase() : "") : "OTHER";
   if (!ACTIONS.includes(action)) throw new HttpError(400, `Choose the action: ${ACTIONS.join(", ")}`);
   const opsPriority = forOps ? (typeof input.priority === "string" && input.priority ? input.priority.trim().toUpperCase() : suggested) : null;
-  if (forOps && !PRIORITIES.includes(opsPriority)) throw new HttpError(400, "Choose the priority: LOW, MEDIUM or HIGH");
+  if (forOps && !PRIORITIES.includes(opsPriority)) throw new HttpError(400, "Choose the priority: Very high, High, Medium or Low");
   // The ticket's priority is the highest of its parts.
   const priority = [opsPriority, ...others.map((o) => o.priority)].filter(Boolean).reduce((a, b) => (PRIORITY_RANK[b] > PRIORITY_RANK[a] ? b : a));
-  const issueSummary = forOps ? optionalText(input.issue_summary, "issue summary", 500) : others.map((o) => o.summary).join(" · ").slice(0, 500);
+  // Operations' issues (Services, Technicians, Grooming...): ticked on its part; the typed ones are
+  // added to the ticket's problem text.
+  const opsIssues = forOps && active.get(OPERATIONS) ? await pickedIssues(conn, active.get(OPERATIONS), partInput[OPERATIONS]?.issues) : [];
+  const issueSummary = forOps
+    ? [optionalText(input.issue_summary, "issue summary", 2000), ...issueLines(opsIssues)].filter(Boolean).join("\n").slice(0, 500) || null
+    : others.map((o) => o.summary).join(" · ").slice(0, 500);
   const actionNote = forOps ? optionalText(input.action_note, "note", 2000) : null;
   if (forOps && action === "OTHER" && !actionNote) throw new HttpError(400, "Describe what will be done for Other");
   const dueAt = forOps ? optionalDateTime(input.action_due_at, "Resolve-by time") : null;
   const ownerId = forOps ? optionalUserId(input.action_owner_user_id, "action owner") : null;
-  if (ownerId) {
+  if (isAssignedAction(action)) {
+    await checkAssignee(conn, action, ownerId);
+  } else if (ownerId) {
     const [[owner]] = await conn.query("SELECT id, is_active FROM users WHERE id = ?", [ownerId]);
     if (!owner) throw new HttpError(400, "Action owner not found");
     if (!owner.is_active) throw new HttpError(400, "The action owner's account is not active");
@@ -1415,14 +1527,14 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   // The visit the issue is about must be one of that site's completed visits in that month.
   let visit = null;
   if (forOps && input.visit_id) {
-    const { start, next } = monthRange(r.month);
+    const [start, next] = [r.window_start, r.window_end];
     [[visit]] = await conn.query(
       `SELECT v.id, v.job_id, COALESCE(NULLIF(j.sub_service, ''), j.service_type) AS service,
               (SELECT vt.technician_id FROM visit_technicians vt WHERE vt.visit_id = v.id ORDER BY vt.created_at, vt.id LIMIT 1) AS technician_id
        ${SERVICE_VISITS_IN_PERIOD} AND s.id = ? AND v.id = ?`,
       [start, next, r.site_id, String(input.visit_id)]
     );
-    if (!visit) throw new HttpError(400, "That visit is not one of this site's services in that month");
+    if (!visit) throw new HttpError(400, "That visit is not one of the services this call is about");
   }
 
   // "Resolved on call" closes at once - unless another department still has work on it.
@@ -1446,19 +1558,19 @@ async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   await conn.query("UPDATE feedback_tickets SET ticket_number = ? WHERE id = ?", [number, id]);
   if (forOps) {
     await conn.query(
-      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, priority) VALUES (?, ?, 'OPERATIONS', ?, ?)",
-      [crypto.randomUUID(), id, issueSummary, opsPriority]
+      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, issues, priority) VALUES (?, ?, 'OPERATIONS', ?, ?, ?)",
+      [crypto.randomUUID(), id, issueSummary, opsIssues.length ? JSON.stringify(opsIssues) : null, opsPriority]
     );
   }
   for (const o of others) {
     await conn.query(
-      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, priority, invoice_ids) VALUES (?, ?, ?, ?, ?, ?)",
-      [crypto.randomUUID(), id, o.kind, o.summary, o.priority, o.invoiceIds.length ? JSON.stringify(o.invoiceIds) : null]
+      "INSERT INTO feedback_ticket_parts (id, ticket_id, kind, issue_summary, issues, priority, invoice_ids) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [crypto.randomUUID(), id, o.kind, o.issues.length ? o.details : o.summary, o.issues.length ? JSON.stringify(o.issues) : null, o.priority, o.invoiceIds.length ? JSON.stringify(o.invoiceIds) : null]
     );
   }
 
   const parts = [];
-  if (forOps) parts.push(`Operations: ${action === "OTHER" ? `Other: ${actionNote}` : ACTION_LABELS[action]}`);
+  if (forOps) parts.push(`Operations: ${action === "OTHER" ? `Other: ${actionNote}` : ACTION_LABELS[action]}${isAssignedAction(action) ? ` (${await userName(conn, ownerId)})` : ""}`);
   for (const o of others) parts.push(`${o.name}: ${o.summary}`);
   await addHistory(conn, {
     requestId: r.id, ticketId: id, event: "TICKET_RAISED", to: closedNow ? "CLOSED" : "ACTION_PENDING",
@@ -1582,6 +1694,7 @@ const TICKET_SELECT = `
   SELECT t.id, t.ticket_number, t.request_id, t.submission_id, DATE_FORMAT(t.period_month, '%Y-%m') AS month,
          t.status, t.suggested_priority, t.priority, t.action, t.issue_summary,
          t.action_due_at, t.action_note, t.close_note, t.closed_at, t.row_version, t.created_at, t.updated_at,
+         t.action_done_by, db.name AS action_done_by_name, t.action_done_at, t.action_done_note,
          t.visit_id, t.job_id, t.service_label, t.revisit_visit_id,
          t.company_id, co.name AS company_name,
          t.site_id, s.name AS site_name, s.city AS site_city,
@@ -1594,9 +1707,19 @@ const TICKET_SELECT = `
   JOIN sites s ON s.id = t.site_id
   LEFT JOIN users tu ON tu.id = t.technician_user_id
   LEFT JOIN users ou ON ou.id = t.action_owner_user_id
+  LEFT JOIN users db ON db.id = t.action_done_by
   LEFT JOIN users rb ON rb.id = t.raised_by
   LEFT JOIN users xb ON xb.id = t.closed_by
   ${REVISIT_JOINS}`;
+
+// A part's ticked issues (JSON column; mysql2 gives an array or a string).
+function partIssues(value) {
+  let v = value;
+  if (typeof v === "string") {
+    try { v = JSON.parse(v); } catch { v = null; }
+  }
+  return Array.isArray(v) ? v.map((i) => ({ id: i.id, name: String(i.name || ""), text: i.text || null, is_service: Boolean(i.is_service) })) : [];
+}
 
 // The parts of the tickets (by ticket id), with the invoices a part lists.
 async function loadParts(executor, ticketIds) {
@@ -1630,6 +1753,7 @@ async function loadParts(executor, ticketIds) {
       label: p.dept_name || p.kind,
       is_operations: p.kind === OPERATIONS,
       with_invoices: Boolean(p.with_invoices),
+      issues: partIssues(p.issues),
       issue_summary: p.issue_summary,
       priority: p.priority,
       invoices: jsonList(p.invoice_ids).map((i) => invoices.get(i)).filter(Boolean),
@@ -1647,6 +1771,7 @@ async function loadParts(executor, ticketIds) {
 function visibleParts(req, t, parts) {
   if (isDesk(req) || Number(t.raised_by) === Number(req.user.id) || hasPerm(req, "FEEDBACK_COLLECT")) return parts;
   const mine = new Set(req.feedbackDepts || []);
+  if (isAssigneeOf(req, t)) mine.add(OPERATIONS);
   return parts.filter((p) => mine.has(p.kind));
 }
 
@@ -1664,6 +1789,8 @@ function ticketRow(t) {
     action_owner: person(t.action_owner_user_id, t.action_owner_name),
     action_due_at: t.action_due_at,
     action_note: t.action_note,
+    // SITE_AUDIT / SUPERVISOR_VISIT / SALES: the assigned person (action_owner) marked it done.
+    action_done: t.action_done_at ? { by: person(t.action_done_by, t.action_done_by_name), at: t.action_done_at, note: t.action_done_note } : null,
     customer: { id: t.company_id, name: t.company_name },
     site: { id: t.site_id, name: t.site_name, city: t.site_city },
     visit_id: t.visit_id,
@@ -1695,6 +1822,8 @@ async function listTickets(req) {
     // A collector: the tickets they raised. A department member: tickets with a part for their department.
     const scope = [];
     if (hasPerm(req, "FEEDBACK_COLLECT") || !(req.feedbackDepts || []).length) { scope.push("t.raised_by = ?"); params.push(req.user.id); }
+    // A supervisor / salesperson: the tickets whose next step is assigned to them.
+    if (req.feedbackAssigned) { scope.push("(t.action_owner_user_id = ? AND t.action IN (?))"); params.push(req.user.id, Object.keys(ASSIGNED_ACTIONS)); }
     if ((req.feedbackDepts || []).length) {
       scope.push("EXISTS (SELECT 1 FROM feedback_ticket_parts vp WHERE vp.ticket_id = t.id AND vp.kind IN (?))");
       params.push(req.feedbackDepts);
@@ -1740,7 +1869,7 @@ async function listTickets(req) {
   const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total ${fromJoins} ${whereSql}`, listParams);
   const [rows] = await pool.query(
     `${TICKET_SELECT} ${whereSql}
-     ORDER BY FIELD(t.priority, 'HIGH', 'MEDIUM', 'LOW'), t.created_at DESC
+     ORDER BY FIELD(t.priority, 'VERY_HIGH', 'HIGH', 'MEDIUM', 'LOW'), t.created_at DESC
      LIMIT ? OFFSET ?`,
     [...listParams, pageSize, offset]
   );
@@ -1759,7 +1888,7 @@ async function getTicket(req, id) {
   if (!row) throw new HttpError(404, "Feedback ticket not found");
   const allParts = (await loadParts(pool, [row.id])).get(row.id) || [];
   const mineKinds = new Set(req.feedbackDepts || []);
-  const canSee = isDesk(req) || Number(row.raised_by) === Number(req.user.id) || allParts.some((p) => mineKinds.has(p.kind));
+  const canSee = isDesk(req) || Number(row.raised_by) === Number(req.user.id) || allParts.some((p) => mineKinds.has(p.kind)) || isAssigneeOf(req, row);
   if (!canSee) throw new HttpError(404, "Feedback ticket not found");
 
   let submission = null;
@@ -1807,8 +1936,11 @@ async function getTicket(req, id) {
 /* ------------------------------------------------------------ labels */
 
 // No bell / phone notifications: the Feedback Desk sidebar shows counts instead (GET /badges).
-const ACTION_LABELS = { RESOLVED_ON_CALL: "Resolved on call", SCHEDULE_REVISIT: "Book a re-visit", ESCALATE_OPERATIONS: "Escalate to Operations", OTHER: "Other" };
-const PRIORITY_LABELS = { LOW: "Low", MEDIUM: "Medium", HIGH: "High" };
+const ACTION_LABELS = {
+  RESOLVED_ON_CALL: "Resolved on call", SCHEDULE_REVISIT: "Book a re-visit", SITE_AUDIT: "Site audit", SUPERVISOR_VISIT: "Supervisor visit",
+  SALES: "Sales", ESCALATE_OPERATIONS: "Escalate to Operations", OTHER: "Other",
+};
+const PRIORITY_LABELS = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", VERY_HIGH: "Very high" };
 
 /* ------------------------------------------------------------ WhatsApp click-to-send (B6) */
 
@@ -2027,7 +2159,7 @@ async function formLinkByToken(executor, token, { lock = false } = {}) {
   if (typeof token !== "string" || token.length < 20 || token.length > 100) throw new HttpError(404, "This feedback link is not valid");
   const [[link]] = await executor.query(
     `SELECT l.*, (l.expires_at < NOW()) AS expired, r.status AS call_status, r.site_id, r.company_id,
-            DATE_FORMAT(r.period_month, '%Y-%m') AS month
+            DATE_FORMAT(r.period_month, '%Y-%m') AS month, ${CALL_WINDOW}
      FROM feedback_form_links l JOIN feedback_requests r ON r.id = l.request_id
      WHERE l.token_hash = ? ${lock ? "FOR UPDATE" : ""}`,
     [hashToken(token)]
@@ -2049,7 +2181,7 @@ async function getPublicForm(token) {
     "SELECT co.name AS customer, s.name AS site FROM companies co JOIN sites s ON s.id = ? WHERE co.id = ?",
     [link.site_id, link.company_id]
   );
-  const questions = questionsFor((await listQuestions()).filter((q) => q.show_on_form), "BOTH", await servicesOfMonth(pool, link.site_id, link.month));
+  const questions = questionsFor((await listQuestions()).filter((q) => q.show_on_form), "BOTH", await servicesOfCall(pool, link.site_id, link.window_start, link.window_end));
   const settings = await getSettings();
   // The contact the link was sent to: the form starts with their name (they can change it).
   const [[contact]] = link.contact_id ? await pool.query("SELECT name FROM contacts WHERE id = ?", [link.contact_id]) : [[null]];
@@ -2075,10 +2207,9 @@ async function submitPublicForm(token, body) {
     const link = await formLinkByToken(conn, token, { lock: true });
     const [[r]] = await conn.query("SELECT id, status, collector_user_id FROM feedback_requests WHERE id = ? FOR UPDATE", [link.request_id]);
     const settings = await getSettings(conn);
-    const [[formCall]] = await conn.query("SELECT site_id, DATE_FORMAT(period_month, '%Y-%m') AS month FROM feedback_requests WHERE id = ?", [link.request_id]);
     const rows = await cleanResponses(conn, body?.responses, {
       forForm: true,
-      scope: { mode: "BOTH", services: await servicesOfMonth(conn, formCall.site_id, formCall.month) },
+      scope: { mode: "BOTH", services: await servicesOfCall(conn, link.site_id, link.window_start, link.window_end) },
     });
     let name = optionalText(body?.name, "name", 150);
     if (!name && link.contact_id) {
@@ -2127,8 +2258,9 @@ async function lockTicket(conn, id, rowVersion) {
   return t;
 }
 
-// PATCH /tickets/:id - Body: { row_version, priority?, action? (SCHEDULE_REVISIT | ESCALATE_OPERATIONS | OTHER),
-// action_owner_user_id? (null clears), action_due_at? (null clears), action_note?, issue_summary?,
+// PATCH /tickets/:id - Body: { row_version, priority?, action? (SCHEDULE_REVISIT | SITE_AUDIT |
+// SUPERVISOR_VISIT | SALES | ESCALATE_OPERATIONS | OTHER), action_owner_user_id? (null clears; the
+// supervisor / salesperson for SITE_AUDIT, SUPERVISOR_VISIT and SALES), action_due_at? (null clears), action_note?, issue_summary?,
 // revisit_visit_id? (a visit of this site, e.g. the re-visit booked in Jobs; null clears) }
 // Only an open ticket can be changed (reopen a closed one first). Each change goes to History.
 async function updateTicket(req, id, body) {
@@ -2141,12 +2273,12 @@ async function updateTicket(req, id, body) {
 
     if (has("priority")) {
       const p = String(body.priority || "").toUpperCase();
-      if (!PRIORITIES.includes(p)) throw new HttpError(400, "Choose the priority: LOW, MEDIUM or HIGH");
+      if (!PRIORITIES.includes(p)) throw new HttpError(400, "Choose the priority: Very high, High, Medium or Low");
       if (p !== t.priority) { set.priority = p; events.push(["PRIORITY_SET", `Priority ${PRIORITY_LABELS[t.priority]} -> ${PRIORITY_LABELS[p]}`]); }
     }
     if (has("action")) {
       const a = String(body.action || "").toUpperCase();
-      if (!["SCHEDULE_REVISIT", "ESCALATE_OPERATIONS", "OTHER"].includes(a)) throw new HttpError(400, "Choose the action: SCHEDULE_REVISIT, ESCALATE_OPERATIONS or OTHER (close the ticket when it is resolved)");
+      if (!ACTIONS.includes(a) || a === "RESOLVED_ON_CALL") throw new HttpError(400, "Choose the next step: Book a re-visit, Site audit, Supervisor visit, Sales or Other");
       if (a !== t.action) { set.action = a; events.push(["ACTION_SET", `Action ${ACTION_LABELS[t.action]} -> ${ACTION_LABELS[a]}`]); }
     }
     let newOwner = null;
@@ -2156,7 +2288,7 @@ async function updateTicket(req, id, body) {
         const [[u]] = await conn.query("SELECT id, name, is_active FROM users WHERE id = ?", [ownerId]);
         if (!u) throw new HttpError(400, "Action owner not found");
         if (!u.is_active) throw new HttpError(400, "The action owner's account is not active");
-        if (Number(ownerId) !== Number(t.action_owner_user_id)) { set.action_owner_user_id = ownerId; newOwner = ownerId; events.push(["OWNER_CHANGED", `Owner: ${u.name}`]); }
+        if (Number(ownerId) !== Number(t.action_owner_user_id)) { set.action_owner_user_id = ownerId; newOwner = ownerId; events.push(["OWNER_CHANGED", `Assigned to ${u.name}`]); }
       } else if (t.action_owner_user_id) {
         set.action_owner_user_id = null;
         events.push(["OWNER_CHANGED", "Owner removed"]);
@@ -2184,8 +2316,23 @@ async function updateTicket(req, id, body) {
       }
       set.revisit_visit_id = visitId;
     }
+    // Leaving an assigned step (Site audit, Supervisor visit, Sales) takes the person off it.
+    const nextAction = set.action ?? t.action;
+    if (set.action && isAssignedAction(t.action) && !isAssignedAction(nextAction) && !has("action_owner_user_id") && t.action_owner_user_id) {
+      set.action_owner_user_id = null;
+    }
     if (!Object.keys(set).length) throw new HttpError(400, "Nothing to change");
     const finalAction = set.action ?? t.action;
+    if (isAssignedAction(finalAction)) {
+      const finalOwner = "action_owner_user_id" in set ? set.action_owner_user_id : t.action_owner_user_id;
+      await checkAssignee(conn, finalAction, finalOwner);
+    }
+    // A new step or a new person: the step is to be done again.
+    if ((set.action || "action_owner_user_id" in set) && t.action_done_at) {
+      set.action_done_by = null;
+      set.action_done_at = null;
+      set.action_done_note = null;
+    }
     const finalNote = has("action_note") ? set.action_note : t.action_note;
     if (finalAction === "OTHER" && !finalNote) throw new HttpError(400, "Describe what will be done for Other (in the note)");
     // Choosing "Book a re-visit" (or removing its visit) needs the re-visit visit linked.
@@ -2212,7 +2359,7 @@ function followUpDue(t, revisitStatus, parts = null) {
   // any other department when its team marked it done. No parts loaded = an Operations ticket.
   const list = parts || [];
   const hasOps = !list.length || list.some((p) => p.kind === OPERATIONS);
-  const opsDone = !hasOps || t.action === "OTHER" || (Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
+  const opsDone = !hasOps || t.action === "OTHER" || (isAssignedAction(t.action) ? Boolean(t.action_done_at) : Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
   const othersDone = list.filter((p) => p.kind !== OPERATIONS).every((p) => p.status === "DONE");
   return opsDone && othersDone;
 }
@@ -2238,7 +2385,7 @@ async function recordFollowUp(req, id, body) {
     if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is already closed`);
     const ticketParts = (await loadParts(conn, [t.id])).get(t.id) || [];
     if (!followUpDue(t, t.revisit_status, ticketParts)) {
-      throw new HttpError(400, "Call the customer back once every department has finished its work (re-visit completed, other departments marked done)");
+      throw new HttpError(400, "Call the customer back once every department has finished its work (re-visit completed or the assigned step marked done, other departments marked done)");
     }
     const hasOpsPart = !ticketParts.length || ticketParts.some((p) => p.kind === OPERATIONS);
 
@@ -2269,7 +2416,7 @@ async function recordFollowUp(req, id, body) {
       );
     } else {
       await conn.query(
-        "UPDATE feedback_tickets SET submission_id = ?, revisit_visit_id = NULL, row_version = row_version + 1 WHERE id = ?",
+        "UPDATE feedback_tickets SET submission_id = ?, revisit_visit_id = NULL, action_done_by = NULL, action_done_at = NULL, action_done_note = NULL, row_version = row_version + 1 WHERE id = ?",
         [submission.id, t.id]
       );
       // A ticket without Operations goes back to its departments.
@@ -2287,13 +2434,32 @@ async function recordFollowUp(req, id, body) {
   });
 }
 
-// POST /tickets/:id/close - Body: { row_version, close_note? }. A ticket closes only when the
-// customer confirms on the follow-up call (recordFollowUp), so this refuses.
+// POST /tickets/:id/close - Body: { row_version, close_note? }. Closes the ticket without the
+// follow-up call, once the action is taken: every team has finished its work (re-visit completed or
+// the assigned step marked done, other departments marked done - as followUpDue). Whoever works the
+// call, whoever raised the ticket, or a desk manager.
 async function closeTicket(req, id, body) {
   return inTransaction(async (conn) => {
     const t = await lockTicket(conn, id, body?.row_version);
     if (t.status === "CLOSED") throw new HttpError(409, "The ticket is already closed");
-    throw new HttpError(400, "Call the customer back: the ticket closes when they confirm the issue is resolved");
+    const [[r]] = await conn.query("SELECT collector_user_id FROM feedback_requests WHERE id = ?", [t.request_id]);
+    const me = Number(req.user.id);
+    if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(r?.collector_user_id) !== me && Number(t.raised_by) !== me) {
+      throw new HttpError(403, "Only the collector of this call or a desk manager can close the ticket");
+    }
+    const [[rv]] = t.revisit_visit_id ? await conn.query("SELECT status FROM job_visits WHERE id = ?", [t.revisit_visit_id]) : [[null]];
+    const parts = (await loadParts(conn, [t.id])).get(t.id) || [];
+    if (!followUpDue(t, rv?.status || null, parts)) {
+      throw new HttpError(400, "Close it once the action is taken - every team must finish its work first");
+    }
+    const note = optionalText(body?.close_note, "note", 400);
+    const closeNote = `Closed after the action was taken, without a follow-up call${note ? ` - ${note}` : ""}`.slice(0, 500);
+    await conn.query(
+      "UPDATE feedback_tickets SET status = 'CLOSED', closed_by = ?, closed_at = NOW(), close_note = ?, row_version = row_version + 1 WHERE id = ?",
+      [req.user.id, closeNote, t.id]
+    );
+    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "CLOSED", from: "ACTION_PENDING", to: "CLOSED", note: closeNote, userId: req.user.id });
+    return t.id;
   });
 }
 
@@ -2325,6 +2491,7 @@ async function reopenTicket(req, id, body) {
     const action = t.action === "RESOLVED_ON_CALL" ? "SCHEDULE_REVISIT" : t.action;
     await conn.query(
       `UPDATE feedback_tickets SET status = 'ACTION_PENDING', action = ?, revisit_visit_id = NULL, closed_by = NULL, closed_at = NULL, close_note = NULL,
+              action_done_by = NULL, action_done_at = NULL, action_done_note = NULL,
               row_version = row_version + 1 WHERE id = ?`,
       [action, t.id]
     );
@@ -2357,6 +2524,80 @@ async function markPartDone(req, id, kindValue, body) {
     await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "PART_DONE", note: `${name} done - ${note}`, userId: req.user.id });
     return { ticket_id: t.id, ticket_number: t.ticket_number };
   });
+}
+
+// POST /tickets/:id/action-done - Body: { note } (what was done). The supervisor / salesperson a
+// Site audit, Supervisor visit or Sales step is assigned to (or a desk manager) finishes it; then the
+// customer is called back.
+async function markActionDone(req, id, body) {
+  const note = optionalText(body?.note, "note", 500);
+  if (!note) throw new HttpError(400, "Say what was done");
+  return inTransaction(async (conn) => {
+    const [[t]] = await conn.query(
+      "SELECT id, request_id, ticket_number, status, action, action_owner_user_id, action_done_at FROM feedback_tickets WHERE id = ? OR ticket_number = ? FOR UPDATE",
+      [id, id]
+    );
+    if (!t) throw new HttpError(404, "Feedback ticket not found");
+    if (!isAssignedAction(t.action)) throw new HttpError(400, "This ticket's next step is not assigned to a person");
+    if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(t.action_owner_user_id) !== Number(req.user.id)) {
+      throw new HttpError(403, `Only the person the ${ACTION_LABELS[t.action].toLowerCase()} is assigned to can mark it done`);
+    }
+    if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is closed`);
+    if (t.action_done_at) throw new HttpError(409, `The ${ACTION_LABELS[t.action].toLowerCase()} is already done`);
+    await conn.query(
+      "UPDATE feedback_tickets SET action_done_by = ?, action_done_at = NOW(), action_done_note = ?, row_version = row_version + 1 WHERE id = ?",
+      [req.user.id, note, t.id]
+    );
+    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "ACTION_DONE", note: `${ACTION_LABELS[t.action]} done - ${note}`, userId: req.user.id });
+    return { ticket_id: t.id, ticket_number: t.ticket_number };
+  });
+}
+
+// The assigned person must be an active user of the right group (supervisor / salesperson).
+async function checkAssignee(executor, action, userId) {
+  const group = ASSIGNEE_GROUPS[ASSIGNED_ACTIONS[action]];
+  if (!userId) throw new HttpError(400, `Choose the ${group.label} for the ${ACTION_LABELS[action].toLowerCase()}`);
+  const [[u]] = await executor.query(
+    `SELECT u.id, u.name, u.is_active, ${group.roleSql} AS fits FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`,
+    [userId]
+  );
+  if (!u) throw new HttpError(400, `That ${group.label} was not found`);
+  if (!u.is_active) throw new HttpError(400, `${u.name}'s account is not active`);
+  if (!Number(u.fits)) throw new HttpError(400, `${u.name} is not a ${group.label}`);
+  return u;
+}
+
+async function userName(executor, userId) {
+  const [[u]] = await executor.query("SELECT name FROM users WHERE id = ?", [userId]);
+  return u?.name || "—";
+}
+
+// The ticket's next step is assigned to this user (Site audit, Supervisor visit, Sales).
+function isAssigneeOf(req, t) {
+  return isAssignedAction(t.action) && Number(t.action_owner_user_id) === Number(req.user.id);
+}
+
+// Whether the user can have (or had) a next step assigned to them: gives them their tickets on the
+// Feedback Desk and in the app (FEEDBACK_ASSIGNED, worked out per request like FEEDBACK_DEPT).
+// Supervisors and salespeople (by role, as for the "assign to" lists) always have it, so their
+// Tickets tab is there before the first ticket comes.
+async function hasAssignedTickets(userId) {
+  const roleFits = Object.values(ASSIGNEE_GROUPS).map((g) => g.roleSql).join(" OR ");
+  const [[row]] = await pool.query(
+    `SELECT EXISTS (SELECT 1 FROM feedback_tickets WHERE action_owner_user_id = ? AND action IN (?))
+            OR EXISTS (SELECT 1 FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1 AND (${roleFits})) AS yes`,
+    [userId, Object.keys(ASSIGNED_ACTIONS), userId]
+  );
+  return Boolean(Number(row.yes));
+}
+
+// Active users of a group (supervisors / salespeople), for the "assign to" dropdown.
+async function assignablePeople(group) {
+  const [rows] = await pool.query(
+    `SELECT u.id, u.name, u.phone, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id
+     WHERE u.is_active = 1 AND ${ASSIGNEE_GROUPS[group].roleSql} ORDER BY u.name`
+  );
+  return rows.map((u) => ({ id: Number(u.id), name: u.name, role: u.role, phone: u.phone }));
 }
 
 // GET /calls/:id/invoices - the customer's invoices, newest first, for an Accounts issue.
@@ -2410,14 +2651,23 @@ async function feedbackBadges(req) {
     desk ? [] : [req.user.id]
   );
   // A department member counts the open tickets of their department.
-  const depts = !desk && !hasPerm(req, "FEEDBACK_COLLECT") ? req.feedbackDepts || [] : [];
-  const [[tickets]] = await pool.query(
-    depts.length
-      ? `SELECT COUNT(*) AS n FROM feedback_tickets t WHERE t.status = 'ACTION_PENDING'
-         AND EXISTS (SELECT 1 FROM feedback_ticket_parts p WHERE p.ticket_id = t.id AND p.kind IN (?))`
-      : `SELECT COUNT(*) AS n FROM feedback_tickets WHERE status = 'ACTION_PENDING' ${desk ? "" : "AND raised_by = ?"}`,
-    depts.length ? [depts] : desk ? [] : [req.user.id]
-  );
+  // A supervisor / salesperson counts the open tickets whose step is assigned to them and not done yet.
+  const team = !desk && !hasPerm(req, "FEEDBACK_COLLECT");
+  const depts = team ? req.feedbackDepts || [] : [];
+  const assigned = team && req.feedbackAssigned;
+  let tickets;
+  if (depts.length || assigned) {
+    const mine = [];
+    const params = [];
+    if (depts.length) { mine.push("EXISTS (SELECT 1 FROM feedback_ticket_parts p WHERE p.ticket_id = t.id AND p.kind IN (?) AND p.status <> 'DONE')"); params.push(depts); }
+    if (assigned) { mine.push("(t.action_owner_user_id = ? AND t.action IN (?) AND t.action_done_at IS NULL)"); params.push(req.user.id, Object.keys(ASSIGNED_ACTIONS)); }
+    [[tickets]] = await pool.query(`SELECT COUNT(*) AS n FROM feedback_tickets t WHERE t.status = 'ACTION_PENDING' AND (${mine.join(" OR ")})`, params);
+  } else {
+    [[tickets]] = await pool.query(
+      `SELECT COUNT(*) AS n FROM feedback_tickets WHERE status = 'ACTION_PENDING' ${desk ? "" : "AND raised_by = ?"}`,
+      desk ? [] : [req.user.id]
+    );
+  }
   return { forms_received: Number(calls.forms), callbacks_due: Number(calls.callbacks), open_tickets: Number(tickets.n) };
 }
 
@@ -2427,10 +2677,11 @@ async function feedbackBadges(req) {
 // know what to show. The routes still check every action.
 // FEEDBACK_DEPT: a member of a feedback department (not a role permission - worked out per request
 // from the departments). Such a user sees only their department's tickets.
-const FEEDBACK_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN"];
+const FEEDBACK_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN", "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"];
 function myFeedbackAccess(req) {
   const permissions = FEEDBACK_PERMISSIONS.filter((p) => hasPerm(req, p));
   if ((req.feedbackDepts || []).length) permissions.push("FEEDBACK_DEPT");
+  if (req.feedbackAssigned) permissions.push("FEEDBACK_ASSIGNED");
   return { user_id: Number(req.user.id), role: req.user.role, permissions, departments: req.feedbackDepts || [] };
 }
 
@@ -2451,11 +2702,14 @@ async function usersWithAnyPermission(permissions) {
 
 // GET /people - ticket owners (desk users) and collectors (FEEDBACK_COLLECT) for the dropdowns.
 async function feedbackPeople() {
-  const [owners, collectors] = await Promise.all([
+  const [owners, collectors, supervisors, sales] = await Promise.all([
     usersWithAnyPermission(DESK_PERMISSIONS),
     usersWithAnyPermission(["FEEDBACK_COLLECT"]),
+    assignablePeople("SUPERVISOR"),
+    assignablePeople("SALES"),
   ]);
-  return { owners, collectors: collectors.filter((u) => u.role !== "admin") };
+  // supervisors / sales: who a Site audit, Supervisor visit or Sales step can be assigned to.
+  return { owners, collectors: collectors.filter((u) => u.role !== "admin"), supervisors, sales };
 }
 
 // GET /customers - customers with at least one service (see SERVICE_VISIT), with those sites, for the
@@ -2482,8 +2736,14 @@ async function feedbackCustomers() {
 // GET /sites/:siteId/details?month=2026-09 - what the call list's details panel shows for one site:
 // the customer, the site with its contacts, the site's completed visits in the month, this month's
 // call (if someone has taken it) and the customer's other sites served that month.
-async function siteDetails(siteId, monthValue) {
-  const { month, start, next } = monthRange(monthValue);
+async function siteDetails(siteId, monthValue, requestId = null) {
+  let { month, start, next } = monthRange(monthValue);
+  // A call from the list: its own period instead of the month.
+  let callId = null;
+  if (requestId) {
+    const [[r]] = await pool.query(`SELECT r.id, DATE_FORMAT(r.period_month, '%Y-%m') AS month, ${CALL_WINDOW} FROM feedback_requests r WHERE r.id = ? AND r.site_id = ?`, [String(requestId), String(siteId)]);
+    if (r) ({ month, window_start: start, window_end: next, id: callId } = r);
+  }
   const [[site]] = await pool.query(
     `SELECT s.id, s.name, s.city, s.address, co.id AS company_id, co.name AS company_name
      FROM sites s JOIN companies co ON co.id = s.company_id WHERE s.id = ?`,
@@ -2515,8 +2775,8 @@ async function siteDetails(siteId, monthValue) {
             (SELECT MIN(l.created_at) FROM feedback_form_links l WHERE l.request_id = r.id) AS form_sent_at,
             (SELECT MIN(sb.submitted_at) FROM feedback_submissions sb WHERE sb.request_id = r.id) AS feedback_at
      FROM feedback_requests r LEFT JOIN users u ON u.id = r.collector_user_id
-     WHERE r.site_id = ? AND r.period_month = ?`,
-    [site.id, start]
+     WHERE ${callId ? "r.id = ?" : "r.site_id = ? AND r.period_month = ? ORDER BY r.due_date DESC LIMIT 1"}`,
+    callId ? [callId] : [site.id, start]
   );
   const [tickets] = call
     ? await pool.query(
@@ -2541,6 +2801,8 @@ async function siteDetails(siteId, monthValue) {
 
   return {
     month,
+    // A call from the list: the services it asks about (both days in).
+    period: callId ? { start, end: lastDayOf(next) } : null,
     customer: { id: site.company_id, name: site.company_name },
     site: { id: site.id, name: site.name, city: site.city, address: site.address },
     contacts: contacts.map((c) => ({ ...c, is_primary: Boolean(c.is_primary) })),
@@ -2593,6 +2855,8 @@ async function revisitOptions(req, id) {
 }
 
 module.exports = {
+  listIssueTypes,
+  saveIssueTypes,
   PRIORITIES,
   REQUEST_STATUSES,
   TICKET_STATUSES,
@@ -2645,6 +2909,11 @@ module.exports = {
   saveDepartments,
   myDepartmentKinds,
   markPartDone,
+  markActionDone,
+  hasAssignedTickets,
+  saveSiteContact,
+  tenDigitPhone,
+  ASSIGNED_ACTIONS,
   callInvoices,
   monthLabel,
   dayLabel,

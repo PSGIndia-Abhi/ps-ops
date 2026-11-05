@@ -37,7 +37,7 @@ export function FeedbackCallsScreen() {
   const { user } = useAuth();
   const myId = Number(user?.id);
 
-  const [period, setPeriod] = useState<Period>(defaultPeriod());
+  const [period, setPeriod] = useState<Period>(defaultPeriod('today'));
   const [status, setStatus] = useState(route.params?.status ?? '');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
@@ -78,11 +78,10 @@ export function FeedbackCallsScreen() {
   );
 
   async function take(row: CallRow) {
-    const key = `${row.site.id}|${row.month}`;
-    setBusy(key);
+    setBusy(row.request_id);
     setError(null);
     try {
-      const call = await takeCall(row.site.id, row.month);
+      const call = await takeCall(row.request_id);
       navigation.navigate('FeedbackCall', { callId: call.id });
     } catch (err) {
       setError(errorText(err, 'Could not take the call.'));
@@ -97,12 +96,12 @@ export function FeedbackCallsScreen() {
     <View>
       <View style={styles.sectionRow}>
         <View>
-          <Text style={styles.sectionTitle}>Sites to call</Text>
+          <Text style={styles.sectionTitle}>Calls</Text>
           <View style={styles.underline} />
         </View>
         <Text style={styles.sectionCount}>{data ? `${data.total} · ${shown}` : ''}</Text>
       </View>
-      <PeriodPicker value={period} onChange={setPeriod} />
+      <PeriodPicker value={period} onChange={setPeriod} withDue />
       <View style={styles.gap} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <Chips options={CALL_FILTERS} value={status} onChange={setStatus} />
@@ -117,20 +116,20 @@ export function FeedbackCallsScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader eyebrow="Customer Feedback" title="Calls" subtitle={`${periodLabel(period)} · one call per site`}>
-        <HeroPill label={data ? `${data.total} site${data.total === 1 ? '' : 's'}` : 'Loading…'} tone="info" />
+      <HeroHeader eyebrow="Customer Feedback" title="Calls" subtitle={periodLabel(period)}>
+        <HeroPill label={data ? `${data.total} call${data.total === 1 ? '' : 's'}` : 'Loading…'} tone="info" />
         {!!data && <HeroPill label={`${Number(data.status_counts.TO_CALL || 0)} to call`} tone="warning" />}
         {!!data && <HeroPill label={`${Number(data.status_counts.DONE || 0)} completed`} tone="success" />}
       </HeroHeader>
       <FlatList
         data={data?.sites || []}
-        keyExtractor={(r) => `${r.site.id}|${r.month}`}
+        keyExtractor={(r) => r.request_id}
         renderItem={({ item: row }) => (
           <SiteCard
             row={row}
             myId={myId}
-            busy={busy === `${row.site.id}|${row.month}`}
-            onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id! })}
+            busy={busy === row.request_id}
+            onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id })}
             onTake={() => take(row)}
           />
         )}

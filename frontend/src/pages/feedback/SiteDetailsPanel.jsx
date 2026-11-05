@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FiMapPin, FiX } from "react-icons/fi";
-import { callStages, formatDateTime, formatDay, getSiteDetails, monthLabel, ticketStages } from "./feedbackApi";
+import { callStages, formatDateTime, formatDay, getSiteDetails, monthLabel, periodText, ticketStages } from "./feedbackApi";
 import { CallButton, CallStatusChip, ErrorBox, Loading, PriorityChip, ResultChip, Steps, TicketStatusChip, VisitStatusChip } from "./ui";
 
 function weekday(value) {
@@ -12,14 +12,15 @@ function weekday(value) {
  * The call list's details panel for one site: the customer, the site and its contacts, every
  * service assigned there in the month (with its status), and the customer's other sites served that month.
  */
-export default function SiteDetailsPanel({ siteId, month, canCollect, userId, busy, onTake, onOpenCall, onOpenTicket, onSiteChange, onClose }) {
-  const wanted = `${siteId}|${month}`;
+export default function SiteDetailsPanel({ siteId, month, requestId, canCollect, userId, busy, onTake, onOpenCall, onOpenTicket, onSiteChange, onClose }) {
+  // requestId: the call picked in the list - its own period; another site: that month.
+  const wanted = `${siteId}|${month}|${requestId || ""}`;
   const [loaded, setLoaded] = useState({ key: null, data: null, error: "" });
 
   useEffect(() => {
     let live = true;
-    const [site, m] = wanted.split("|");
-    getSiteDetails(site, m)
+    const [site, m, rid] = wanted.split("|");
+    getSiteDetails(site, m, rid || undefined)
       .then((data) => live && setLoaded({ key: wanted, data, error: "" }))
       .catch((err) => live && setLoaded({ key: wanted, data: null, error: err.message }));
     return () => {
@@ -36,6 +37,8 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
   const ready = loaded.key === wanted;
   const d = ready ? loaded.data : null;
   const call = d?.call;
+  // "29 Oct – 4 Nov" for a call's own period, else the month.
+  const when = d?.period ? periodText(d.period.start, d.period.end) : d ? monthLabel(d.month) : "";
 
   // "General Pest Control ... × 3" - how many times each service was done this month
   const serviceCounts = {};
@@ -78,7 +81,7 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
           ) : (
             <>
               <section>
-                <div className="fb-section-t">Feedback progress · {monthLabel(d.month)}</div>
+                <div className="fb-section-t">Feedback progress · {when}</div>
                 <div className="fb-progress-card" style={{ marginBottom: 0 }}>
                   <Steps steps={callStages(call, d.tickets)} label="Feedback call progress" />
                 </div>
@@ -160,7 +163,7 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
 
               <section>
                 <div className="fb-section-t">
-                  Services in {monthLabel(d.month)} · {d.visits.length}
+                  Services {d.period ? "" : "in "}{when} · {d.visits.length}
                   {d.visits.length > 0 && ` (${d.visits.filter((v) => v.status === "COMPLETED").length} completed)`}
                 </div>
                 {Object.keys(serviceCounts).length > 1 && (
@@ -195,7 +198,7 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
                     ))}
                   </div>
                 ) : (
-                  <div className="fb-small fb-muted">No services at this site in {monthLabel(d.month)}.</div>
+                  <div className="fb-small fb-muted">No services at this site in {when}.</div>
                 )}
               </section>
 
@@ -229,15 +232,16 @@ export default function SiteDetailsPanel({ siteId, month, canCollect, userId, bu
             Close
           </button>
           {d &&
-            (call ? (
+            call &&
+            (call.collector || !canCollect ? (
               <button type="button" className="fb-btn fb-btn-primary" onClick={() => onOpenCall(call.id)}>
                 {call.status === "DONE" || (call.collector && call.collector.id !== userId) ? "View the call" : "Open the call"}
               </button>
-            ) : canCollect ? (
-              <button type="button" className="fb-btn fb-btn-primary" disabled={busy} onClick={() => onTake(d.site.id)}>
+            ) : (
+              <button type="button" className="fb-btn fb-btn-primary" disabled={busy} onClick={() => onTake(call.id)}>
                 {busy ? "Taking…" : "Take call"}
               </button>
-            ) : null)}
+            ))}
         </div>
       </aside>
     </div>

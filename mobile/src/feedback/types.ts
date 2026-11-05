@@ -6,9 +6,16 @@
 /** TICKET_OPEN: a done call whose ticket is not closed yet (as the list and the call show it). */
 export type CallStatus = 'TO_CALL' | 'NOT_ANSWERED' | 'WRONG_NUMBER' | 'FORM_SENT' | 'FORM_RECEIVED' | 'DONE' | 'TICKET_OPEN';
 export type CallOutcome = 'ANSWERED' | 'NO_ANSWER' | 'BUSY' | 'WRONG_NUMBER';
-export type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
+export type Priority = 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
 export type TicketStatus = 'ACTION_PENDING' | 'CLOSED';
-export type TicketAction = 'RESOLVED_ON_CALL' | 'SCHEDULE_REVISIT' | 'ESCALATE_OPERATIONS' | 'OTHER';
+export type TicketAction = 'RESOLVED_ON_CALL' | 'SCHEDULE_REVISIT' | 'SITE_AUDIT' | 'SUPERVISOR_VISIT' | 'SALES' | 'ESCALATE_OPERATIONS' | 'OTHER';
+
+/** Someone a Site audit / Supervisor visit / Sales step can be assigned to (GET /people). */
+export interface AssignablePerson {
+  id: number;
+  name: string;
+  role: string | null;
+}
 
 export interface Person {
   id: number;
@@ -16,9 +23,16 @@ export interface Person {
 }
 
 /** One row of the call list: a site with services in the month (one call per site per month). */
+/** One call on the list (made by Masters > Call schedule on its due date). */
 export interface CallRow {
   month: string;
-  request_id: string | null;
+  request_id: string;
+  /** The day it is due, and the services it asks about (period_start .. period_end). */
+  due_date?: string;
+  period_start?: string;
+  period_end?: string;
+  /** Due before today and not done yet. */
+  overdue?: boolean;
   status: CallStatus;
   result: string | null;
   customer: { id: string; name: string };
@@ -94,6 +108,22 @@ export interface Department {
   is_operations?: boolean;
 }
 
+/** One issue of a department (Feedback Desk > Issues). is_service = Operations' "Services": picks the month's services. */
+export interface IssueType {
+  id: number;
+  department: DepartmentKind;
+  name: string;
+  is_service: boolean;
+}
+
+/** An issue ticked on a ticket part, with its typed details. */
+export interface PickedIssue {
+  id: number;
+  name: string;
+  text: string | null;
+  is_service: boolean;
+}
+
 export interface Invoice {
   id: string;
   number: string;
@@ -109,6 +139,7 @@ export interface TicketPart {
   kind: DepartmentKind;
   label: string;
   with_invoices?: boolean;
+  issues?: PickedIssue[];
   issue_summary: string | null;
   priority: Priority | null;
   invoices: Invoice[];
@@ -145,6 +176,9 @@ export interface HistoryItem {
 export interface Call {
   id: string;
   month: string;
+  due_date?: string;
+  period_start?: string;
+  period_end?: string;
   status: CallStatus;
   /** DONE while a ticket is open shows as TICKET_OPEN. */
   display_status?: CallStatus;
@@ -161,6 +195,20 @@ export interface Call {
   submissions: Submission[];
   tickets: CallTicket[];
   history: HistoryItem[];
+  /** Requests to the service coordinator for the right number (after a wrong number), newest first. */
+  number_requests?: NumberRequest[];
+}
+
+export interface NumberRequest {
+  id: string;
+  status: 'OPEN' | 'DONE' | 'CANCELLED';
+  wrong: { contact_id: string | null; name: string | null; phone: string | null };
+  note: string | null;
+  requested_at: string;
+  resolved_by: Person | null;
+  resolved_at: string | null;
+  right: { contact_id: string | null; name: string; phone: string } | null;
+  resolve_note: string | null;
 }
 
 export interface QuestionOption {
@@ -200,6 +248,9 @@ export interface Ticket {
   priority: Priority;
   action: TicketAction;
   action_note: string | null;
+  /** Site audit / Supervisor visit / Sales: the person it is assigned to, and when they marked it done. */
+  action_owner?: Person | null;
+  action_done?: { by: Person | null; at: string; note: string | null } | null;
   issue_summary: string | null;
   customer: { id: string; name: string };
   site: { id: string; name: string; city: string | null };
@@ -207,6 +258,8 @@ export interface Ticket {
   technician: Person | null;
   revisit: Revisit | null;
   raised_by: Person | null;
+  /** Changes with every save (closing needs the latest). */
+  row_version?: number;
   closed_at: string | null;
   close_note: string | null;
   created_at: string;
@@ -244,11 +297,13 @@ export interface NewTicket {
   /** The departments it goes to; left out = Operations. */
   departments?: DepartmentKind[];
   /** Each other department's part, by key. */
-  parts?: Record<string, { issue_summary: string; priority: Priority; invoice_ids: string[] }>;
+  parts?: Record<string, { issue_summary?: string; priority?: Priority; invoice_ids?: string[]; issues: { id: number; text: string | null }[] }>;
   issue_summary: string | null;
   visit_id: string | null;
   priority: Priority;
   action: TicketAction;
   action_due_at: string | null;
   action_note: string | null;
+  /** Site audit / Supervisor visit / Sales: the supervisor / salesperson. */
+  action_owner_user_id?: number;
 }

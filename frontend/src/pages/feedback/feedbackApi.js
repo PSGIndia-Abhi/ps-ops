@@ -43,9 +43,23 @@ export const saveSettings = (settings) => feedbackRequest("/settings", send("PUT
 
 /* ---- monthly calls ---- */
 export const listCalls = (params) => feedbackRequest(`/calls${query(params)}`);
-export const takeCall = (siteId, month) => feedbackRequest("/calls", send("POST", { site_id: siteId, month }));
+/** Take a call from the list (its id). */
+export const takeCall = (requestId) => feedbackRequest("/calls", send("POST", { request_id: requestId }));
 export const getCall = (id) => feedbackRequest(`/calls/${id}`);
-export const getSiteDetails = (siteId, month) => feedbackRequest(`/sites/${encodeURIComponent(siteId)}/details${query({ month })}`);
+export const getSiteDetails = (siteId, month, requestId) => feedbackRequest(`/sites/${encodeURIComponent(siteId)}/details${query({ month, request_id: requestId })}`);
+/* ---- requests for the right number (Requests) ---- */
+export const getBadges = () => feedbackRequest("/badges");
+export const listNumberRequests = (status) => feedbackRequest(`/number-requests${query({ status })}`);
+export const sendNumberRequest = (callId, body) => feedbackRequest(`/calls/${callId}/number-request`, send("POST", body));
+export const resolveNumberRequest = (id, body) => feedbackRequest(`/number-requests/${id}/resolve`, send("POST", body));
+export const cancelNumberRequest = (id) => feedbackRequest(`/number-requests/${id}/cancel`, send("POST", {}));
+/* ---- call schedules (Masters › Call schedule) ---- */
+export const getSchedules = () => feedbackRequest("/schedules");
+export const getScheduleOptions = () => feedbackRequest("/schedules/options");
+export const saveSchedule = (id, body) => feedbackRequest(id ? `/schedules/${id}` : "/schedules", send(id ? "PUT" : "POST", body));
+export const deleteSchedule = (id) => feedbackRequest(`/schedules/${id}`, send("DELETE"));
+/** "29 Oct – 4 Nov": the services a call asks about. */
+export const periodText = (start, end) => (start && end ? (start === end ? formatDay(start) : `${formatDay(start)} – ${formatDay(end)}`) : "");
 /** Saves a new number to the call's site contacts: { name, phone } -> the contact. */
 export const addCallContact = (id, body) => feedbackRequest(`/calls/${id}/contacts`, send("POST", body));
 /** Corrects a contact of the call's site: { name, phone, role, email }. */
@@ -69,10 +83,15 @@ export const deleteTicket = (id, note) => feedbackRequest(`/tickets/${id}`, send
 export const getRevisitOptions = (id) => feedbackRequest(`/tickets/${id}/revisit-options`);
 /** The call back after the work, with the call's questions: all good closes the ticket, a bad answer keeps it open. */
 export const markPartDone = (id, kind, note) => feedbackRequest(`/tickets/${id}/parts/${kind}/done`, send("POST", { note }));
+/** The assigned supervisor / salesperson marks the Site audit, Supervisor visit or Sales step done. */
+export const markActionDone = (id, note) => feedbackRequest(`/tickets/${id}/action-done`, send("POST", { note }));
 export const getCallInvoices = (id) => feedbackRequest(`/calls/${id}/invoices`);
 export const getDepartments = () => feedbackRequest("/departments");
 export const getDepartmentSetup = () => feedbackRequest("/departments?all=1");
 export const saveDepartments = (departments) => feedbackRequest("/departments", send("PUT", { departments }));
+/** Each department's issue types (all = with the switched-off ones). */
+export const getIssueTypes = (all) => feedbackRequest(`/issue-types${all ? "?all=1" : ""}`);
+export const saveIssueTypes = (department, types) => feedbackRequest("/issue-types", send("PUT", { department, types }));
 export const recordFollowUp = (id, body) => feedbackRequest(`/tickets/${id}/follow-up`, send("POST", body));
 
 /* ---- customer report ---- */
@@ -143,22 +162,29 @@ export const TICKET_STATUS = {
   CLOSED: { label: "Closed", tone: "ok" },
 };
 export const PRIORITY = {
+  VERY_HIGH: { label: "Very high", tone: "critical" },
   HIGH: { label: "High", tone: "danger" },
   MEDIUM: { label: "Medium", tone: "orange" },
   LOW: { label: "Low", tone: "indigo" },
 };
-export const PRIORITIES = ["HIGH", "MEDIUM", "LOW"];
+export const PRIORITIES = ["VERY_HIGH", "HIGH", "MEDIUM", "LOW"];
 export const ACTIONS = {
   RESOLVED_ON_CALL: { label: "Resolved on the call", hint: "You sorted it out on the phone. The ticket closes immediately." },
   SCHEDULE_REVISIT: { label: "Book a re-visit", hint: "A technician goes back. The visit is booked on the ticket." },
+  // assign: who it is assigned to (GET /people's list); that person sees the ticket and marks it done.
+  SITE_AUDIT: { label: "Site audit", hint: "A supervisor audits the site.", assign: "supervisors", who: "Supervisor" },
+  SUPERVISOR_VISIT: { label: "Supervisor visit", hint: "A supervisor visits the customer.", assign: "supervisors", who: "Supervisor" },
+  SALES: { label: "Sales", hint: "A salesperson takes it up with the customer.", assign: "sales", who: "Salesperson" },
   // Older tickets only (no longer offered): they are worked as "Book a re-visit".
   ESCALATE_OPERATIONS: { label: "Book a re-visit", hint: "A technician goes back. The visit is booked on the ticket." },
   OTHER: { label: "Other", hint: "Something else - type what will be done." },
 };
 
 // Actions offered now. On a ticket, "Book a re-visit" needs the visit booked from the ticket page.
-export const RAISE_ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "OTHER"];
-export const TICKET_ACTIONS = ["SCHEDULE_REVISIT", "OTHER"];
+export const RAISE_ACTIONS = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "SITE_AUDIT", "SUPERVISOR_VISIT", "SALES", "OTHER"];
+export const TICKET_ACTIONS = ["SCHEDULE_REVISIT", "SITE_AUDIT", "SUPERVISOR_VISIT", "SALES", "OTHER"];
+/** Site audit, Supervisor visit and Sales are done by one assigned person. */
+export const isAssignedAction = (action) => Boolean(ACTIONS[action]?.assign);
 
 /** "Visits: 1 Nov · Job 2026-871 · Mosquito Fogging; …" (older tickets) as "Services: Mosquito Fogging, …". */
 function servicesLine(line) {
@@ -265,7 +291,7 @@ export function endOfDay(dateValue) {
 
 /** The highest priority suggested by the bad answers, or null. */
 export function suggestedPriority(answers) {
-  const rank = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+  const rank = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
   return answers.reduce((best, a) => (a?.suggested_priority && (!best || rank[a.suggested_priority] > rank[best]) ? a.suggested_priority : best), null);
 }
 
@@ -462,7 +488,7 @@ export function followUpReady(t) {
   if (t.status !== "ACTION_PENDING") return false;
   // The server says when every department has finished (re-visit completed, the others marked done).
   if (typeof t.follow_up_due === "boolean") return t.follow_up_due;
-  return t.action === "OTHER" || t.revisit?.status === "COMPLETED";
+  return t.action === "OTHER" || (isAssignedAction(t.action) ? Boolean(t.action_done) : t.revisit?.status === "COMPLETED");
 }
 
 /* ---- departments a ticket goes to ---- */
@@ -522,6 +548,7 @@ function opsStages(t) {
   const due = t.action_due_at && !closed ? `due ${formatDay(t.action_due_at)}${isPast(t.action_due_at) ? " · overdue" : ""}` : null;
   const onCall = t.action === "RESOLVED_ON_CALL";
 
+  if (isAssignedAction(t.action)) return assignedStages(t, closed, due);
   let tech;
   let work;
   if (onCall) {
@@ -549,13 +576,29 @@ function opsStages(t) {
   return steps;
 }
 
+/** Site audit / Supervisor visit / Sales: Raised -> the assigned person -> done -> confirmed -> closed. */
+function assignedStages(t, closed, due) {
+  const a = ACTIONS[t.action];
+  const done = t.action_done;
+  return [
+    { key: "raised", label: "Raised", sub: formatDay(t.created_at), state: "done" },
+    { key: "owner", label: a.who, sub: t.action_owner?.name || "Not assigned", state: t.action_owner ? "done" : "todo" },
+    done
+      ? { key: "work", label: `${a.label} done`, sub: [done.note, formatDay(done.at)].filter(Boolean).join(" · "), state: "done" }
+      : { key: "work", label: `${a.label} done`, sub: closed ? "Closed" : due || "To be done", state: closed ? "skipped" : "todo" },
+    { key: "confirmed", ...confirmedStep(t, closed, false) },
+    { key: "closed", label: "Closed", sub: closed ? formatDay(t.closed_at) : "When the customer confirms", state: closed ? "done" : "todo" },
+  ];
+}
+
 /** The "Customer confirmed" stage: the follow-up call after the work. */
 function confirmedStep(t, closed, onCall) {
   const label = "Customer confirmed";
   if (onCall) return { label, sub: "On the first call", state: closed ? "done" : "todo" };
   if (closed) return { label, sub: formatDay(t.closed_at), state: "done" };
   const last = lastFollowUp(t);
-  if (last && !t.revisit) return { label, sub: `Not resolved ${formatDay(last.created_at)} · book again`, state: "todo", late: true };
+  if (last && isAssignedAction(t.action) && !t.action_done) return { label, sub: `Not resolved ${formatDay(last.created_at)} · to be done again`, state: "todo", late: true };
+  if (last && !t.revisit && !isAssignedAction(t.action)) return { label, sub: `Not resolved ${formatDay(last.created_at)} · book again`, state: "todo", late: true };
   return { label, sub: followUpReady(t) ? "Call the customer back" : "After the work", state: "todo" };
 }
 
