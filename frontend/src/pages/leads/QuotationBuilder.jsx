@@ -832,7 +832,11 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
             </>
           )}
         >
-          The PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>.
+          {lead.stage === "WON" ? (
+            <>The PDF is saved on the lead. It stays a <b>customer</b>.</>
+          ) : (
+            <>The PDF is saved on the lead, and the lead moves to <b>Quotation Sent</b>.</>
+          )}
           {editing && (
             <>
               {" "}

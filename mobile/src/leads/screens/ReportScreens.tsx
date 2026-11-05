@@ -7,7 +7,6 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
-import { ChevronDownIcon } from '../../crm/ui/crmIcons';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { DateSheet, Sheet } from '../../tasks/ui/sheets';
 import type { Tone } from '../../crm/ui/StatusBadge';
@@ -232,7 +231,7 @@ const METRICS: { key: api.PerformanceMetric; label: string; tone: Tone }[][] = [
 export function PerformanceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const params = useRoute<RouteProp<LeadStackParamList, 'LeadPerformance'>>().params;
-  const { styles, theme } = useCrmStyles(factory);
+  const { styles } = useCrmStyles(factory);
   const [range, setRange] = useState<Range>('month');
   // Picked dates (the date filter), used when range is 'custom'.
   const [custom, setCustom] = useState<DateRange>(() => quickRanges()[1].range);
@@ -281,6 +280,10 @@ export function PerformanceScreen() {
     refreshTyped();
   };
   const periodLabel = range === 'lifetime' ? 'All time' : from === to ? fmtDateShort(from) : `${fmtDateShort(from)} - ${fmtDateShort(to)}`;
+  // The same dates, short enough for the top bar: "Nov 1 - Nov 5" (the year only when it is not this year).
+  const thisYear = todayStr().slice(0, 4);
+  const shortDate = (d: string) => (d.slice(0, 4) === thisYear ? fmtDateShort(d).replace(/,?\s*\d{4}$/, '') : fmtDateShort(d));
+  const barLabel = range === 'lifetime' ? 'All time' : from === to ? shortDate(from) : `${shortDate(from)} - ${shortDate(to)}`;
   const period = target ? periodFigures(range, target, history ?? null, converted ?? null, { from, to }) : undefined;
   // A tile opens the records behind its number, for the same person and period.
   const openTile = (metric: api.PerformanceMetric, label: string) =>
@@ -288,19 +291,15 @@ export function PerformanceScreen() {
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
-      <TopBar title={params?.name ?? 'My performance'} subtitle="Sales performance" onBack={() => navigation.goBack()} />
+      {/* The dates sit on the right of the top bar; tapping them opens the date filter. */}
+      <TopBar
+        title={params?.name ?? 'My performance'}
+        subtitle="Sales performance"
+        onBack={() => navigation.goBack()}
+        action={{ label: barLabel, onPress: () => setFiltering(true), icon: <CalendarIcon size={15} color="#fff" /> }}
+      />
       <CrmScreen edges={[]} transparent refreshing={refreshing} onRefresh={refresh} contentStyle={styles.body}>
         <SegmentedControl options={RANGES} value={range} onChange={setRange} />
-        <Pressable
-          onPress={() => setFiltering(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Dates: ${periodLabel}. Change dates`}
-          style={({ pressed }) => [styles.datePill, range === 'custom' && styles.datePillOn, pressed && styles.pressed]}
-        >
-          <CalendarIcon size={15} color={range === 'custom' ? theme.primary : theme.textMuted} />
-          <Text style={[styles.datePillText, range === 'custom' && styles.datePillTextOn]}>{periodLabel}</Text>
-          <ChevronDownIcon size={15} color={range === 'custom' ? theme.primary : theme.textMuted} />
-        </Pressable>
         {!!target && (
           <TargetCard
             target={target}
@@ -455,6 +454,15 @@ export function TeamScreen() {
       api.teamVisits(todayStr()).catch(() => [] as api.TeamVisit[]),
     ]);
     const byId = new Map(targets.map((t) => [t.userId, t]));
+    // Someone whose target this viewer sets but who works no leads of their own - the Personal
+    // Assistant, whose target only the Managing Director sets - is on the team list too.
+    const listed = new Set(team.map((p) => Number(p.id)));
+    for (const t of targets) {
+      if (t.canSet && t.userId !== myIdNum && !listed.has(t.userId)) {
+        team.push({ id: t.userId, name: t.name, role: t.role });
+        listed.add(t.userId);
+      }
+    }
     const todays = visits.filter((v) => v.status !== 'CANCELLED');
     const people = team.map((p) => ({
       ...p,

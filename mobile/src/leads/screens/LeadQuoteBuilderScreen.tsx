@@ -20,6 +20,7 @@ import * as quote from '../quotation';
 import { PriceTableEditor, priceTableForSave, priceTableFromContent, priceTableTotal, type PriceTable } from '../PriceTableEditor';
 import { QuotationPdfDialog, SendQuotationDialog } from '../QuotationDialogs';
 import type { Billing, MasterPlan, MasterService, QuoteMaster, SavedQuotationContent, TreatmentRow } from '../quotation';
+import { isConvertedStage } from '../stage';
 import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, useLoad } from '../ui';
 
 /**
@@ -95,6 +96,7 @@ export function LeadQuoteBuilderScreen() {
       title={title}
       start={start}
       from={fromId ? { id: fromId, editing } : null}
+      customerLead={isConvertedStage(data.lead.stage)}
       theme={theme}
     />
   );
@@ -230,6 +232,7 @@ function Builder({
   title,
   start,
   from,
+  customerLead,
   theme,
 }: {
   leadId: string;
@@ -240,6 +243,8 @@ function Builder({
   start: Start;
   /** The saved quotation it was opened from; `editing` saves a replacement for it. */
   from: { id: string; editing: boolean } | null;
+  /** The lead is already a customer: saving does not move it back to "Quotation sent". */
+  customerLead: boolean;
   theme: CrmTheme;
 }) {
   const navigation = useNavigation<Nav>();
@@ -821,6 +826,7 @@ function Builder({
         <SendQuotationDialog
           name={askSend.customer.name}
           replacing={!!from?.editing}
+          customer={customerLead}
           onCancel={() => setAskSend(null)}
           onSend={() => {
             const content = askSend;

@@ -38,7 +38,7 @@ export type QuotationContent = {
   services: { name: string; plan: string; billing: Billing; price: number | null; rows: TreatmentRow[] }[];
   pricing: { mode: 'PER_SERVICE' } | { mode: 'PACKAGE'; amount: number; billing: Billing; planLabel: string; description: string };
   /** Optional price table in the client's format (headings first, total row last). */
-  priceTable: { rows: string[][]; title?: string } | null;
+  priceTable: { rows: string[][]; title?: string; widths?: number[] | null } | null;
   /** The price is for one outlet. */
   perOutlet: boolean;
   /** One-time or AMC - on older quotations only (it is asked at Convert to customer now). */
@@ -78,7 +78,7 @@ export async function getQuoteMaster(): Promise<QuoteMaster> {
 
 /** What a saved quotation was made from (GET .../content) - to open it again for Edit / Duplicate. */
 export type SavedQuotationContent = Partial<Omit<QuotationContent, 'priceTable'>> & {
-  priceTable?: { title?: string; header: string[]; body?: string[][]; totalLabel?: string; total?: number } | null;
+  priceTable?: { title?: string; header: string[]; body?: string[][]; totalLabel?: string; total?: number; widths?: number[] | null } | null;
   totals?: { discount?: number };
 };
 
@@ -185,6 +185,21 @@ export async function openPdf(path: string): Promise<void> {
 const { FileSharer } = NativeModules as {
   FileSharer?: { share(path: string, mimeType: string, title: string, message: string | null): Promise<boolean> };
 };
+
+/** A Word document's file type (the quotation's Word copy is a .doc). */
+export const WORD_MIME = 'application/msword';
+
+/** Opens any file in an app that can show it (Word / WPS for a .doc). */
+export async function openFile(path: string, mimeType: string, noAppMessage: string): Promise<void> {
+  const opened = await ReactNativeBlobUtil.android.actionViewIntent(path, mimeType);
+  if (opened === false) throw new ApiError(noAppMessage);
+}
+
+/** Shares any file through the phone's share sheet. */
+export async function shareFile(path: string, mimeType: string, title: string, message?: string): Promise<void> {
+  if (!FileSharer) throw new ApiError('Sharing needs the latest version of the app.');
+  await FileSharer.share(path, mimeType, title, message || null);
+}
 
 /** Shares a PDF through the phone's share sheet (WhatsApp, Gmail, Bluetooth...), with a short message. */
 export async function sharePdf(path: string, message?: string): Promise<void> {

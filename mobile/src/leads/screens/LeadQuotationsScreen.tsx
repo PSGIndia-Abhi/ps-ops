@@ -9,9 +9,10 @@ import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm
 import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import { savedQuotationPdf } from '../quotation';
+import { getQuotationContent, savedQuotationPdf } from '../quotation';
+import { quotationWordFile } from '../quotationWord';
 import { QuotationPdfDialog } from '../QuotationDialogs';
-import { actionLabel, isTerminal } from '../stage';
+import { actionLabel, isConvertedStage, isTerminal } from '../stage';
 import type { Quotation } from '../types';
 import { useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -34,8 +35,10 @@ export function LeadQuotationsScreen() {
   const lead = data?.lead;
   const list = data?.quotations ?? [];
   const latestId = list.find((x) => x.status !== 'CANCELLED')?.id;
-  // A saved quotation can be opened again to edit or duplicate while the lead is still open.
-  const reopenable = (q: Quotation) => !!lead && !isTerminal(lead.stage) && q.status !== 'CANCELLED' && q.hasContent;
+  // A saved quotation can be opened again to edit or duplicate while the lead is still open - and on a
+  // customer by the heads of sales (sales manager, MD, PA), as the server allows.
+  const leadOpen = !!lead && (!isTerminal(lead.stage) || (isConvertedStage(lead.stage) && persona === 'sales_manager'));
+  const reopenable = (q: Quotation) => leadOpen && q.status !== 'CANCELLED' && q.hasContent;
   const reopen = (q: Quotation, mode: 'edit' | 'duplicate') => {
     setPdfFor(null);
     if (lead) navigation.navigate('LeadQuoteBuild', { leadId: lead.id, name: lead.companyName, fromId: q.id, mode });
@@ -126,6 +129,18 @@ export function LeadQuotationsScreen() {
           // saves a replacement - for whoever sent it or a sales manager, as on the web.
           onEdit={reopenable(pdfFor) && (pdfFor.createdBy === myId || persona === 'sales_manager') ? () => reopen(pdfFor, 'edit') : undefined}
           onDuplicate={reopenable(pdfFor) ? () => reopen(pdfFor, 'duplicate') : undefined}
+          // The same quotation as an editable Word file - only for those made with Create quotation.
+          getWordFile={
+            pdfFor.hasContent
+              ? async () =>
+                  quotationWordFile(await getQuotationContent(leadId, pdfFor.id), {
+                    number: pdfFor.number,
+                    sentAt: pdfFor.sentAt,
+                    leadNumber: lead.leadNumber,
+                    fileName: pdfFor.fileName,
+                  })
+              : undefined
+          }
         />
       )}
     </LeadScreen>

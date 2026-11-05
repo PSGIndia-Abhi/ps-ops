@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
-  uuid, isValidDate, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  uuid, isValidDate, logLeadHistory, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
   INDUSTRY_TYPES, resolveLeadServices,
 } = require("../utils/crmLeadManagement");
@@ -158,8 +158,12 @@ router.get("/lead-loss-reasons", auth, async (req, res) => {
 router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
-    if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot edit this lead");
-    if (lead.lead_status === "converted") throw new HttpError(400, "A converted lead cannot be edited");
+    if (isConvertedLead(lead)) {
+      // Once it is a customer, only the heads of sales can still change its details.
+      if (!isLeadHead(req)) throw new HttpError(400, "A converted lead can only be edited by a sales manager, the Managing Director or the Personal Assistant");
+    } else if (!canManageLead(req, lead)) {
+      throw new HttpError(403, "You cannot edit this lead");
+    }
 
     const body = req.body || {};
     if (!Number.isInteger(Number(body.row_version))) throw new HttpError(400, "row_version is required");

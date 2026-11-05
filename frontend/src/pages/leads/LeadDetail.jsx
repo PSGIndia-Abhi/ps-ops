@@ -42,8 +42,9 @@ import {
   ScheduleMeetingModal,
   VisitModal,
 } from "./dialogs";
-import { fetchQuotationPdf, getConversion, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
+import { fetchQuotationPdf, getConversion, getQuotationContent, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
 import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
+import { downloadQuotationWord } from "./quotationWord";
 import { AgreementsTab } from "./Agreements";
 import { ShareFallback } from "./ShareQuotation";
 import { shareFile } from "./shareFile";
@@ -154,13 +155,14 @@ function Journey({ lead, timeline, showWho }) {
  * A standing quotation made with Create Quotation can be duplicated (a new one from its details)
  * or edited (a new one that replaces it - the old one stays, marked Cancelled).
  */
-function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, refreshKey }) {
+function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, canEdit = canCancel, onCancel, refreshKey }) {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [opening, setOpening] = useState(null);
   const [viewing, setViewing] = useState(null); // { url, fileName } of the PDF on screen
   const [sharing, setSharing] = useState(null); // quotation id being fetched to share
+  const [wording, setWording] = useState(null); // quotation id whose Word file is being made
   const [fallback, setFallback] = useState(null); // { file, text } when the browser cannot share files
 
   // The lead's history grows with every upload or cancellation, which is what brings the change in.
@@ -189,6 +191,19 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
       toast(err.message || "Could not share the quotation.", true);
     } finally {
       setSharing(null);
+    }
+  }
+
+  // The quotation as an editable Word file, made from its saved details (same layout as the PDF).
+  async function word(q) {
+    setWording(q.id);
+    try {
+      const content = await getQuotationContent(lead.id, q.id);
+      await downloadQuotationWord(content, { number: q.number, sentAt: q.sentAt, leadNumber: lead.number, fileName: q.fileName });
+    } catch (err) {
+      toast(err.message || "Could not make the Word file.", true);
+    } finally {
+      setWording(null);
     }
   }
 
@@ -251,6 +266,12 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                         <Button size="sm" variant="ghost" icon={<FiFileText />} busy={opening === q.id} onClick={() => open(q)}>
                           View PDF
                         </Button>
+                        {/* Only quotations made with Create Quotation have the details a Word file is made from. */}
+                        {q.hasContent && (
+                          <Button size="sm" variant="ghost" icon={<FiFileText />} busy={wording === q.id} onClick={() => word(q)}>
+                            Download Word
+                          </Button>
+                        )}
                         {q.status !== "CANCELLED" && (
                           <Button size="sm" icon={<FiShare2 />} busy={sharing === q.id} onClick={() => share(q)}>
                             Share
@@ -260,7 +281,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, onCancel, r
                     ) : (
                       <span className="muted">No PDF</span>
                     )}
-                    {q.status !== "CANCELLED" && q.hasContent && canAdd && canCancel?.(q) && (
+                    {q.status !== "CANCELLED" && q.hasContent && canAdd && canEdit?.(q) && (
                       <Button size="sm" variant="ghost" icon={<FiEdit2 />} onClick={() => onReopen(q, "edit")}>
                         Edit
                       </Button>
@@ -607,6 +628,10 @@ export default function LeadDetail() {
   const myOpenMeeting = leadMeetings.find((m) => m.status !== "COMPLETED" && (viewer.canPick || String(m.salesId) === myId));
   const canConvert = viewer.canPick || !!me?.canConvert;
   const seesAgreements = viewer.canPick || !!me?.canManage;
+  // The heads of sales (sales manager, Managing Director, Personal Assistant, admin) can still quote for
+  // and edit a lead after it became a customer; the server checks the same.
+  const isHead = persona === "sales_manager" || viewer.canPick;
+  const headOnCustomer = isHead && lead.stage === "WON";
 
   // The provider sees only the lead's details: its activity would tell them its status.
   const events = provider ? [] : timeline;
@@ -765,6 +790,15 @@ export default function LeadDetail() {
         </div>
       )}
 
+      {/* A customer's details stay editable for the heads of sales. */}
+      {!provider && headOnCustomer && (
+        <div className="lm-head-actions" style={{ margin: "18px 0 0" }}>
+          <Button variant="ghost" icon={<FiEdit2 />} onClick={() => setDialog("edit")}>
+            Edit Details
+          </Button>
+        </div>
+      )}
+
       <Card flush index={1} className="lm-detail">
         {!provider && <Tabs tabs={tabs} value={tab} onChange={setTab} />}
         {/* `key` replays the panel entrance when the tab changes. */}
@@ -811,11 +845,13 @@ export default function LeadDetail() {
           {tab === "quotations" && (
             <QuotationsTab
               lead={lead}
-              canAdd={canSell && !closed}
+              canAdd={(canSell && !closed) || headOnCustomer}
               onBuild={() => setDialog({ buildQuote: {} })}
               onReopen={(q, mode) => setDialog({ buildQuote: { from: q, mode } })}
               // The server's rule: whoever sent it, a lead manager or admin, while the lead is open.
               canCancel={(q) => !closed && (q.createdBy === myId || viewer.canPick || !!me?.canManage)}
+              // Editing makes a revised quotation; on a customer only the heads of sales can.
+              canEdit={(q) => headOnCustomer || (!closed && (q.createdBy === myId || viewer.canPick || !!me?.canManage))}
               onCancel={(q) => setDialog({ cancelQuote: q })}
               refreshKey={timeline.length}
             />

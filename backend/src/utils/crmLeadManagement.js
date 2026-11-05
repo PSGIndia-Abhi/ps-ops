@@ -38,6 +38,17 @@ function hasPerm(req, permission) {
   return req.user.role === "admin" || Boolean(req.user.permissions?.includes(permission));
 }
 
+// The heads of sales: admin, a lead manager (MANAGE_LEADS), the sales manager, the Managing Director
+// and their Personal Assistant. Only they may still quote for, and edit, a lead once it is a customer.
+const LEAD_HEAD_ROLES = ["sales_manager", "Managing Director", "Personal Assistant"];
+function isLeadHead(req) {
+  return LEAD_HEAD_ROLES.includes(req.user.role) || hasPerm(req, "MANAGE_LEADS");
+}
+// A lead that became a customer (WON is the older name of the same stage).
+function isConvertedLead(lead) {
+  return ["WON", "CONVERTED"].includes(lead.pipeline_stage) || lead.lead_status === "converted";
+}
+
 // Which user ids' leads the requester may see: own always; + team with
 // VIEW_TEAM_LEADS/MANAGE_LEADS; or null (no filter) with VIEW_ALL_LEADS/admin.
 // "Own" covers all three relationships a commercial lead can have to a user:
@@ -268,7 +279,7 @@ async function resolveLeadServices(executor, list) {
 
 module.exports = {
   INDUSTRY_TYPES, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
-  uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead,
+  uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
 };

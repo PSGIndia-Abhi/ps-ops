@@ -5,7 +5,7 @@ import { GlossyBadge } from '../components/GlossyBadge';
 import { CheckCircleIcon, CloseIcon, DocumentIcon, ExternalLinkIcon, SendIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { radii, spacing, typography } from '../theme';
-import { openPdf, saveToDownloads, sharePdf } from './quotation';
+import { openFile, openPdf, saveToDownloads, shareFile, sharePdf, WORD_MIME } from './quotation';
 import { errorMessage } from './ui';
 
 // The quotation dialogs, in the app's own design instead of the plain Android alert: a card that
@@ -16,12 +16,15 @@ import { errorMessage } from './ui';
 export function SendQuotationDialog({
   name,
   replacing = false,
+  customer = false,
   onCancel,
   onSend,
 }: {
   name: string;
   /** An edit: the quotation it came from is marked Cancelled - replaced. */
   replacing?: boolean;
+  /** The lead is already a customer: it stays one. */
+  customer?: boolean;
   onCancel: () => void;
   onSend: () => void;
 }) {
@@ -34,6 +37,8 @@ export function SendQuotationDialog({
       <Text style={styles.message}>
         {replacing
           ? 'A new quotation is saved on the lead. The current one stays in the list, marked "Cancelled - replaced".'
+          : customer
+          ? 'The quotation is saved on the lead. It stays a customer.'
           : 'The quotation is saved on the lead and the lead moves to "Quotation sent".'}
       </Text>
       <View style={styles.row}>
@@ -66,6 +71,7 @@ export function QuotationPdfDialog({
   onClose,
   onEdit,
   onDuplicate,
+  getWordFile,
   title = 'Quotation PDF',
   shareMessage,
 }: {
@@ -84,9 +90,11 @@ export function QuotationPdfDialog({
   onEdit?: () => void;
   /** Open it in the builder to save a new quotation from its details. */
   onDuplicate?: () => void;
+  /** Makes the same quotation as an editable Word file and returns its path (only when it can be made). */
+  getWordFile?: () => Promise<string>;
 }) {
   const { styles, theme } = useCrmStyles(factory);
-  const [busy, setBusy] = useState<'' | 'share' | 'open' | 'save'>('');
+  const [busy, setBusy] = useState<'' | 'share' | 'open' | 'save' | 'wordShare' | 'wordOpen'>('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [downloaded, setDownloaded] = useState(false);
 
@@ -112,6 +120,21 @@ export function QuotationPdfDialog({
     } catch (err) {
       const fallback = kind === 'share' ? 'Could not share the PDF. Try again.' : kind === 'open' ? 'Could not open the PDF. Try again.' : 'Could not save the PDF. Try again.';
       setResult({ ok: false, text: errorMessage(err, fallback) });
+    }
+    setBusy('');
+  }
+
+  // The quotation as a Word file: shared (WhatsApp, Gmail...) or opened in Word / WPS to edit.
+  async function word(kind: 'wordShare' | 'wordOpen') {
+    if (busy || !getWordFile) return;
+    setBusy(kind);
+    setResult(null);
+    try {
+      const file = await getWordFile();
+      if (kind === 'wordShare') await shareFile(file, WORD_MIME, 'Share quotation', shareMessage ?? (name ? `Quotation for ${name} - Bestserve Pest Management Pvt. Ltd.` : undefined));
+      else await openFile(file, WORD_MIME, 'No app on this phone can open Word files. Install Word or WPS Office, or use Share Word.');
+    } catch (err) {
+      setResult({ ok: false, text: errorMessage(err, 'Could not make the Word file. Try again.') });
     }
     setBusy('');
   }
@@ -144,6 +167,20 @@ export function QuotationPdfDialog({
           onPress={() => run('save')}
         />
       </View>
+
+      {/* The same quotation as a Word file, to edit in Word / WPS. */}
+      {!!getWordFile && (
+        <View style={styles.pair}>
+          <Pressable onPress={() => word('wordShare')} disabled={!!busy} style={({ pressed }) => [styles.mini, pressed && styles.pressed]} accessibilityRole="button">
+            {busy === 'wordShare' ? <ActivityIndicator size="small" color={theme.accentText} /> : <DocumentIcon size={16} color={theme.accentText} />}
+            <Text style={styles.miniText}>Share Word</Text>
+          </Pressable>
+          <Pressable onPress={() => word('wordOpen')} disabled={!!busy} style={({ pressed }) => [styles.mini, pressed && styles.pressed]} accessibilityRole="button">
+            {busy === 'wordOpen' ? <ActivityIndicator size="small" color={theme.accentText} /> : <ExternalLinkIcon size={16} color={theme.accentText} />}
+            <Text style={styles.miniText}>Open Word</Text>
+          </Pressable>
+        </View>
+      )}
 
       {(!!onEdit || !!onDuplicate) && (
         <View style={styles.pair}>

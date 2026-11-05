@@ -121,8 +121,10 @@ export function LeadDetailScreen() {
   // Details can be changed (another number, address...) until the lead becomes a customer - by the
   // sales manager or whoever added it or holds it. The server checks the same.
   const converted = lead.leadStatus === 'converted' || ['WON', 'CONVERTED'].includes(pipeline.stage);
-  const canEdit =
-    !converted && (manager || [pipeline.createdById, pipeline.salesEmployeeId, pipeline.telecallerId].some((id) => !!id && String(id) === myId));
+  // Once it is a customer, only the heads of sales (sales manager, MD, PA) can still change it.
+  const canEdit = converted
+    ? manager
+    : manager || [pipeline.createdById, pipeline.salesEmployeeId, pipeline.telecallerId].some((id) => !!id && String(id) === myId);
   const edit = () => {
     // The edit form reads the lead from the CRM list: put this copy there first.
     replaceLead(lead);

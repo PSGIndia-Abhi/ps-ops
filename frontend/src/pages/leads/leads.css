@@ -1174,6 +1174,17 @@
   .lm-ptable-wrap input { width: 100%; padding: 11px 12px; border: 0; background: transparent; font: inherit; color: inherit; outline: none; }
   .lm-ptable-wrap input:focus { background: rgba(37, 99, 235, .06); box-shadow: inset 0 0 0 2px var(--lm-primary); }
   .lm-ptable-wrap td.num input { text-align: right; }
+  /* Column widths set by dragging the grip between two headings (the PDF uses the same widths). */
+  .lm-ptable-wrap table.fixed { table-layout: fixed; min-width: 520px; }
+  .lm-ptable-wrap table.fixed td { min-width: 0; }
+  .lm-ptable-wrap tr.head td { position: relative; }
+  .lm-ptable-grip { position: absolute; top: 0; right: -5px; z-index: 2; width: 10px; height: 100%; cursor: col-resize; touch-action: none; }
+  .lm-ptable-grip::after { content: ""; position: absolute; top: 20%; bottom: 20%; left: 4px; width: 2px; border-radius: 2px; background: #94a3b8; }
+  .lm-ptable-grip:hover::after { background: var(--lm-primary); }
+  /* A cell that takes several lines (points 1. 2. ...): grows with its text. */
+  .lm-ptable-wrap td { vertical-align: top; }
+  .lm-ptable-wrap textarea { display: block; width: 100%; min-height: 42px; padding: 11px 12px; border: 0; background: transparent; font: inherit; line-height: 1.45; color: inherit; outline: none; resize: none; overflow: hidden; }
+  .lm-ptable-wrap textarea:focus { background: rgba(37, 99, 235, .06); box-shadow: inset 0 0 0 2px var(--lm-primary); }
   .lm-ptable-wrap tr.head td { background: #e4e9f1; }
   .lm-ptable-wrap tr.head input { font-weight: 700; }
   .lm-ptable-wrap tr.total td { background: #e8eef7; }

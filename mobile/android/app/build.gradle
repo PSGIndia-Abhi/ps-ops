@@ -114,8 +114,8 @@ android {
         applicationId "com.bestserve.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 26
-        versionName "1.25"
+        versionCode 28
+        versionName "1.27"
     }
     signingConfigs {
         debug {

@@ -4,7 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
-  uuid, logLeadHistory, nextQuotationNumber, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  uuid, logLeadHistory, nextQuotationNumber, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
@@ -46,6 +46,9 @@ async function inTransaction(fn) {
 }
 
 const TERMINAL_STAGES = ["WON", "CONVERTED", "NOT_GENUINE", "LOST", "CANCELLED"];
+// A new quotation moves the lead to QUOTATION_SENT - except a lead that is already a customer, which stays one.
+const LEAD_TO_QUOTATION_SENT_SQL =
+  "UPDATE crm_leads SET pipeline_stage = IF(pipeline_stage IN ('WON', 'CONVERTED'), pipeline_stage, 'QUOTATION_SENT'), row_version = row_version + 1 WHERE id = ?";
 // Still with the telecaller (null = a lead from before pipeline stages existed).
 const UNVERIFIED_STAGES = [null, "NEW", "TO_CALL", "NEED_MORE_INFO"];
 
@@ -105,9 +108,16 @@ const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 async function precheckQuotationWrite(req, res, next) {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
-    if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot create a quotation for this lead");
-    if (TERMINAL_STAGES.includes(lead.pipeline_stage)) {
-      throw new HttpError(400, `Cannot create a quotation for a lead that is ${lead.pipeline_stage}`);
+    if (isConvertedLead(lead)) {
+      // A customer can still get a (revised) quotation, but only from the heads of sales.
+      if (!isLeadHead(req)) {
+        throw new HttpError(403, "Only a sales manager, the Managing Director or the Personal Assistant can create a quotation for a converted lead");
+      }
+    } else {
+      if (!canManageLead(req, lead)) throw new HttpError(403, "You cannot create a quotation for this lead");
+      if (TERMINAL_STAGES.includes(lead.pipeline_stage)) {
+        throw new HttpError(400, `Cannot create a quotation for a lead that is ${lead.pipeline_stage}`);
+      }
     }
     req.lead = lead;
     next();
@@ -156,7 +166,7 @@ async function createPdfQuotation(req, res) {
          VALUES (?, ?, ?, ?, 'SENT', ?, NOW(), ?)`,
         [quotationId, lead.id, quotationNumber, totalAmount, objectKey, req.user.id]
       );
-      await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
+      await conn.query(LEAD_TO_QUOTATION_SENT_SQL, [lead.id]);
       await logLeadHistory(conn, lead.id, "QUOTATION_SENT", {
         note: `${quotationNumber} for Rs. ${totalAmount} (PDF)${notes ? `: ${notes}` : ""}`.slice(0, 500),
         changedBy: req.user.id,
@@ -208,7 +218,7 @@ router.post("/leads/:id/quotations", auth, requirePermission("CRM_VIEW_LEAD"), p
           [uuid(), quotationId, item.description, item.quantity, item.unitPrice]
         );
       }
-      await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
+      await conn.query(LEAD_TO_QUOTATION_SENT_SQL, [lead.id]);
       await logLeadHistory(conn, lead.id, "QUOTATION_SENT", { note: `${quotationNumber} for Rs. ${totalAmount}`, changedBy: req.user.id });
     });
 
@@ -301,7 +311,7 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
       if (!old) throw new HttpError(404, "The quotation being edited was not found");
       if (old.status === "CANCELLED") throw new HttpError(400, "A cancelled quotation cannot be edited");
       const uploader = Number(old.created_by) === Number(req.user.id);
-      if (!uploader && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS")) {
+      if (!uploader && req.user.role !== "admin" && !hasPerm(req, "MANAGE_LEADS") && !(isConvertedLead(lead) && isLeadHead(req))) {
         throw new HttpError(403, "Only the person who sent this quotation or a sales manager can edit it");
       }
       replaces = old;
@@ -325,7 +335,7 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
         [quotationId, lead.id, number, total, objectKey, req.user.id]
       );
       await conn.query("INSERT INTO crm_lead_quotation_documents (quotation_id, content) VALUES (?, ?)", [quotationId, JSON.stringify(content)]);
-      await conn.query("UPDATE crm_leads SET pipeline_stage = 'QUOTATION_SENT', row_version = row_version + 1 WHERE id = ?", [lead.id]);
+      await conn.query(LEAD_TO_QUOTATION_SENT_SQL, [lead.id]);
       const per = { MONTHLY: " per month", YEARLY: " per year", ONE_TIME: "" }[content.totals.primaryBilling];
       await logLeadHistory(conn, lead.id, "QUOTATION_SENT", {
         note: `${number}${replaces ? ` (revised, replaces ${replaces.quotation_number})` : ""} for Rs. ${total}${per}${content.totals.discount ? ` (after Rs. ${content.totals.discount} discount)` : ""}: ${content.services.map((s) => s.name).join(", ")}`.slice(0, 500),

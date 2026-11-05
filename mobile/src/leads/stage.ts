@@ -25,6 +25,8 @@ export const STAGE_META: Record<PipelineStage, { label: string; tone: Tone }> = 
 
 const TERMINAL: PipelineStage[] = ['WON', 'CONVERTED', 'NOT_GENUINE', 'LOST', 'CANCELLED'];
 export const isTerminal = (stage: PipelineStage) => TERMINAL.includes(stage);
+/** The lead became a customer (WON is the older name of the same stage). */
+export const isConvertedStage = (stage: PipelineStage) => stage === 'WON' || stage === 'CONVERTED';
 
 /** The buckets the home tiles and the list filter use. */
 export type StageGroup = 'all' | 'new' | 'to_call' | 'qualified' | 'meeting' | 'quoted' | 'won' | 'closed';
@@ -88,6 +90,9 @@ export type LeadAction =
  *   (they hold no CONVERT_LEAD), nor before the lead is verified.
  */
 export function leadActions(lead: PipelineLead, persona: LeadPersona, myId: string): LeadAction[] {
+  // A customer can still get a (revised) quotation from the heads of sales - the sales manager, and the
+  // Managing Director / Personal Assistant who work leads as one. The server checks the same.
+  if (isConvertedStage(lead.stage)) return persona === 'sales_manager' ? ['quote'] : [];
   if (isTerminal(lead.stage)) return [];
   const canManage = persona === 'sales_manager' || isOwnLead(lead, myId);
   const actions: LeadAction[] = [];

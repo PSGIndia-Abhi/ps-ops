@@ -7,40 +7,45 @@ import { MONTHS_LONG } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import * as api from './api';
 import { Badge, Card, NameChip } from './QuotationDialogs';
-import { errorMessage } from './ui';
+import { ProgressRing } from './TeamReportParts';
+import { errorMessage, GradientFill } from './ui';
 
 const factory = (t: CrmTheme) => ({
-  card: { backgroundColor: t.surface, borderRadius: radii.lg, borderWidth: 1, borderColor: t.border, padding: spacing.md, marginBottom: spacing.md },
-  head: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.sm },
-  title: { ...typography.overline, color: t.textMuted },
-  set: { minHeight: 34, paddingHorizontal: spacing.md, borderRadius: radii.pill, borderWidth: 1, borderColor: t.primary, justifyContent: 'center' as const },
-  setText: { ...typography.captionMedium, color: t.primary },
-  row: { flexDirection: 'row' as const, gap: spacing.sm },
-  cell: { flex: 1 },
-  label: { ...typography.caption, color: t.textMuted },
-  value: { ...typography.title, color: t.textPrimary },
-  barTrack: { height: 10, borderRadius: 5, backgroundColor: t.surfaceAlt, overflow: 'hidden' as const, marginTop: spacing.sm },
-  barFill: { height: 10, borderRadius: 5 },
-  foot: { ...typography.caption, color: t.textMuted, marginTop: spacing.xs },
-  none: { ...typography.body, color: t.textSecondary },
+  wrap: { marginTop: spacing.sm, marginBottom: spacing.md },
+  // All / One-time / AMC inside the blue card: a darker track, the chosen one a white pill.
+  tabs: { flexDirection: 'row' as const, backgroundColor: 'rgba(10,30,90,0.28)', borderRadius: radii.pill, padding: 3, marginBottom: spacing.lg },
+  tab: { flex: 1, minHeight: 32, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
+  tabOn: { backgroundColor: '#fff' },
+  tabText: { ...typography.captionMedium, color: 'rgba(255,255,255,0.85)' },
+  tabTextOn: { color: '#1D4ED8', fontWeight: '700' as const },
+  // The card itself: blue like the Team report's top card (the colour is drawn by GradientFill).
+  // backgroundColor: Android needs one for the rounded corners and the shadow (the gradient sits over it).
+  card: { borderRadius: radii.xl, padding: spacing.lg, overflow: 'hidden' as const, backgroundColor: '#2563EB', ...t.raisedShadow },
+  head: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.md },
+  title: { ...typography.overline, color: 'rgba(255,255,255,0.8)', flexShrink: 1 },
+  set: { minHeight: 32, paddingHorizontal: spacing.md, borderRadius: radii.pill, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center' as const },
+  setText: { ...typography.captionMedium, color: '#fff' },
+  main: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.lg },
+  pct: { ...typography.title, color: '#fff' },
+  body: { flex: 1 },
+  amount: { ...typography.display, fontSize: 26, color: '#fff' },
+  sub: { ...typography.caption, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  stats: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, gap: 6, marginTop: spacing.sm },
+  stat: { ...typography.captionMedium, color: '#fff' },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.6)' },
+  note: { ...typography.caption, color: 'rgba(255,255,255,0.8)', marginTop: spacing.sm },
   history: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: t.border,
-    minHeight: 36,
+    gap: spacing.xs,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: 42,
+    borderRadius: radii.lg,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  historyText: { ...typography.bodyMedium, color: t.primary },
-  // All / One-time / AMC
-  tabs: { flexDirection: 'row' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 3, marginBottom: spacing.md },
-  tab: { flex: 1, minHeight: 34, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const },
-  tabOn: { backgroundColor: t.surface, ...t.cardShadow },
-  tabText: { ...typography.captionMedium, color: t.textMuted },
-  tabTextOn: { color: t.primary },
-  kindLoading: { marginVertical: spacing.md },
+  historyText: { ...typography.captionMedium, color: '#fff', flex: 1 },
+  kindLoading: { marginVertical: spacing.lg },
   // Set-target popup (a month's target; only shown on the Month filter), in the app's popup style
   dTitle: { ...typography.title, color: t.textPrimary, textAlign: 'center' as const },
   dSub: { ...typography.caption, color: t.textMuted, textAlign: 'center' as const, marginTop: spacing.xs },
@@ -124,7 +129,7 @@ export function TargetCard({
   onKindChange?: (kind: ContractKind) => void;
   kindFigures?: { achieved: number; converted: number } | null;
 }) {
-  const { styles, theme } = useCrmStyles(factory);
+  const { styles } = useCrmStyles(factory);
   const [editing, setEditing] = useState(false);
   const base = period
     ? { target: period.target, achieved: period.achieved, converted: period.converted }
@@ -132,78 +137,82 @@ export function TargetCard({
   const typed = kind !== 'ALL';
   const shown = typed ? { ...base, achieved: kindFigures?.achieved ?? 0, converted: kindFigures?.converted ?? 0 } : base;
   const kindWord = kind === 'AMC' ? 'AMC ' : kind === 'ONE_TIME' ? 'one-time ' : '';
-  const when = period?.when ?? 'this month';
   const pct = targetPercent(shown);
-  const fill = pct === null ? 0 : Math.min(100, pct);
-  const tone = pct === null ? theme.textMuted : pct >= 100 ? theme.success : pct >= 50 ? theme.primary : theme.warning;
+  const hasTarget = !!shown.target;
+  const toGo = hasTarget ? (shown.target as number) - shown.achieved : 0;
 
   return (
-    <View style={styles.card}>
-      <View style={styles.head}>
-        <Text style={styles.title}>TARGET · {period ? period.title : monthName(target.month).toUpperCase()}</Text>
-        {canSet && !period && (
-          <Pressable onPress={() => setEditing(true)} accessibilityRole="button" style={({ pressed }) => [styles.set, pressed && { opacity: 0.85 }]}>
-            <Text style={styles.setText}>{target.target ? 'Change target' : 'Set target'}</Text>
+    <View style={styles.wrap}>
+      <View style={styles.card}>
+        <GradientFill from="#3B82F6" to="#1D4ED8" />
+        <View style={styles.head}>
+          <Text style={styles.title} numberOfLines={1}>
+            TARGET · {period ? period.title : monthName(target.month).toUpperCase()}
+          </Text>
+          {canSet && !period && (
+            <Pressable onPress={() => setEditing(true)} accessibilityRole="button" hitSlop={6} style={({ pressed }) => [styles.set, pressed && { opacity: 0.8 }]}>
+              <Text style={styles.setText}>{target.target ? 'Change' : 'Set target'}</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* All / One-time / AMC: which conversions the card counts. */}
+        {!!onKindChange && (
+          <View style={styles.tabs} accessibilityRole="tablist">
+            {KINDS.map((k) => {
+              const on = k.value === kind;
+              return (
+                <Pressable
+                  key={k.value}
+                  onPress={() => onKindChange(k.value)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.tab, on && styles.tabOn]}
+                >
+                  <Text style={[styles.tabText, on && styles.tabTextOn]}>{k.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {typed && kindFigures === undefined ? (
+          <ActivityIndicator color="#fff" style={styles.kindLoading} />
+        ) : (
+          // Like the Team card: how far along in a ring, the amount achieved large, the target under it.
+          <View style={styles.main}>
+            <ProgressRing size={76} stroke={8} pct={pct ?? 0} color={pct !== null && pct >= 100 ? '#4ADE80' : '#fff'} track="rgba(255,255,255,0.25)">
+              <Text style={styles.pct}>{pct === null ? '-' : `${pct}%`}</Text>
+            </ProgressRing>
+            <View style={styles.body}>
+              <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit>
+                {formatINR(shown.achieved)}
+              </Text>
+              <Text style={styles.sub}>
+                {hasTarget ? `of ${formatINR(shown.target as number)} ${kindWord}target` : `${kindWord}converted · no target set${period ? '' : ' for this month'}`}
+              </Text>
+              <View style={styles.stats}>
+                <Text style={styles.stat}>{shown.converted} won</Text>
+                {hasTarget && (
+                  <>
+                    <View style={styles.dot} />
+                    <Text style={styles.stat}>{toGo > 0 ? `${formatINR(toGo)} to go` : 'Target reached'}</Text>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+        {!!period?.note && hasTarget && <Text style={styles.note}>{period.note}</Text>}
+
+        {!!onHistory && (
+          <Pressable onPress={onHistory} accessibilityRole="button" style={({ pressed }) => [styles.history, pressed && { opacity: 0.8 }]}>
+            <ChartIcon size={16} color="#fff" />
+            <Text style={styles.historyText}>View achievement history</Text>
+            <ChevronRightIcon size={16} color="#fff" />
           </Pressable>
         )}
       </View>
-      {!!onKindChange && (
-        <View style={styles.tabs} accessibilityRole="tablist">
-          {KINDS.map((k) => {
-            const on = k.value === kind;
-            return (
-              <Pressable
-                key={k.value}
-                onPress={() => onKindChange(k.value)}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: on }}
-                style={[styles.tab, on && styles.tabOn]}
-              >
-                <Text style={[styles.tabText, on && styles.tabTextOn]}>{k.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-      {typed && kindFigures === undefined ? (
-        <ActivityIndicator color={theme.primary} style={styles.kindLoading} />
-      ) : shown.target ? (
-        <>
-          <View style={styles.row}>
-            <View style={styles.cell}>
-              <Text style={styles.label}>Target</Text>
-              <Text style={styles.value}>{formatINR(shown.target)}</Text>
-            </View>
-            <View style={styles.cell}>
-              <Text style={styles.label}>Achieved</Text>
-              <Text style={[styles.value, { color: tone }]}>{formatINR(shown.achieved)}</Text>
-            </View>
-            <View style={styles.cell}>
-              <Text style={styles.label}>Done</Text>
-              <Text style={[styles.value, { color: tone }]}>{pct}%</Text>
-            </View>
-          </View>
-          <View style={styles.barTrack}>
-            <View style={[styles.barFill, { width: `${fill}%`, backgroundColor: tone }]} />
-          </View>
-          <Text style={styles.foot}>
-            {shown.converted} {kindWord}lead{shown.converted === 1 ? '' : 's'} converted {when}
-            {shown.achieved < shown.target ? ` · ${formatINR(shown.target - shown.achieved)} to go` : ' · target reached'}
-          </Text>
-          {!!period?.note && <Text style={styles.foot}>{period.note}</Text>}
-        </>
-      ) : (
-        <Text style={styles.none}>
-          No target set{period ? '' : ' for this month'}.
-          {shown.achieved > 0 ? ` Converted ${kindWord}${when}: ${formatINR(shown.achieved)}.` : ''}
-        </Text>
-      )}
-      {!!onHistory && (
-        <Pressable onPress={onHistory} accessibilityRole="button" style={({ pressed }) => [styles.history, pressed && { opacity: 0.7 }]}>
-          <Text style={styles.historyText}>View achievement history</Text>
-          <ChevronRightIcon size={16} color={theme.primary} />
-        </Pressable>
-      )}
       {editing && <SetTargetDialog target={target} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged?.(); }} />}
     </View>
   );

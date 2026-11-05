@@ -78,7 +78,14 @@ function priceTable(t) {
   if (cols < 2 || cols > 6) throw new QuotationInputError("The price table needs 2 to 6 columns");
   const clean = rows.map((r, i) => {
     if (!Array.isArray(r) || r.length !== cols) throw new QuotationInputError(`Price table row ${i + 1} has the wrong number of cells`);
-    return r.map((c) => text(c, `price table cell (row ${i + 1})`, 120));
+    // A cell can hold several lines (points like "1. ... / 2. ..."): tidy the line breaks, drop blank
+    // lines at the ends. Headings take up to 300 characters, the other cells up to 5000 (a row too
+    // tall for one page carries on to the next).
+    return r.map((c) => {
+      const lines = typeof c === "string" ? c.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/\s+$/, "")) : null;
+      const value = lines ? lines.join("\n").replace(/\n{3,}/g, "\n\n") : c;
+      return text(value, `price table cell (row ${i + 1})`, i === 0 ? 300 : 5000);
+    });
   });
   if (!clean[0].some(Boolean)) throw new QuotationInputError("Fill in the headings (first row) of the price table");
   const last = clean[clean.length - 1];
@@ -98,7 +105,21 @@ function priceTable(t) {
   if (total > 99999999) throw new QuotationInputError("The price table total is too large");
   // The heading printed above the table (older tables have none: the default).
   const title = text(t.title, "price table heading", 80) || "Price details";
-  return { title, header: clean[0], body, totalLabel: last[0] || "Total", total };
+  return { title, header: clean[0], body, totalLabel: last[0] || "Total", total, widths: columnWidths(t.widths, cols) };
+}
+
+/**
+ * The column widths the salesperson set by dragging (percent of the table, one per column), tidied to
+ * add up to 100 with every column at least 3%. null when none were set (or they do not fit the table):
+ * the PDF then sizes the columns from their text.
+ */
+function columnWidths(widths, cols) {
+  if (!Array.isArray(widths) || widths.length !== cols) return null;
+  const nums = widths.map(Number);
+  if (nums.some((w) => !Number.isFinite(w) || w <= 0)) return null;
+  const floor = nums.map((w) => Math.max(w, 3));
+  const sum = floor.reduce((a, w) => a + w, 0);
+  return floor.map((w) => Math.round((w / sum) * 1000) / 10);
 }
 
 /**
@@ -561,13 +582,8 @@ function draw(doc, q, meta) {
     const tx1 = L + 10;
     const tx2 = R - 10;
     const TW = tx2 - tx1;
-    const weights = t.header.map((_, k) => (k === 0 && cols > 2 ? 1.6 : 1));
-    const wsum = weights.reduce((a, w) => a + w, 0);
-    const cw = weights.map((w) => (w / wsum) * TW);
-    const cx = [];
-    cw.reduce((x, w) => (cx.push(x), x + w), tx1);
     const body = t.body.filter((cells) => cells.some((c) => String(c || "").trim()));
-    const rows = [
+    let rows = [
       { kind: "head", cells: t.header.map((h) => String(h || "").toUpperCase()) },
       ...body.map((cells) => ({ kind: "body", cells })),
       { kind: "total", cells: [t.totalLabel, ...Array(cols - 2).fill(""), rupees(t.total)] },
@@ -577,12 +593,143 @@ function draw(doc, q, meta) {
       body: { name: "SB", size: 9.4, spacing: 0 },
       total: { name: "XB", size: 10.5, spacing: 0 },
     };
+    const PAD = 18; // a cell's left + right padding
+    const SLACK = 3; // spare room so text measured to fit exactly is not wrapped by rounding
+
+    // A cell is one or more lines; a line starting "1." / "2)" is a numbered point, printed with its
+    // text indented after the number so a long point wraps neatly under its own text, as in Word.
+    // ("1.5 kg" is not a point: the number must not run on into another digit.)
+    const POINT_RE = /^(\d{1,3}[.)])(?!\d)\s*(.*)$/;
+    const isAmountCol = (c) => c === cols - 1;
+    const cellParts = (v, c) =>
+      String(v || "").split("\n").map((line) => {
+        const m = isAmountCol(c) ? null : POINT_RE.exec(line.trim());
+        return m ? { marker: m[1], text: m[2] } : { marker: "", text: line };
+      });
+    const markerW = (parts, st) => {
+      font(st.name, st.size);
+      const w = Math.max(0, ...parts.filter((p) => p.marker).map((p) => doc.widthOfString(p.marker, { characterSpacing: st.spacing })));
+      return w ? w + 4 : 0;
+    };
+
+    // Column widths from what is typed in them: each column gets at least its longest word, a short
+    // column (e.g. "Sl No" holding "1") stays narrow, and the spare width goes to the columns with
+    // the longest text.
+    const minW = Array(cols).fill(0); // longest single word (+ number indent)
+    const wantW = Array(cols).fill(0); // longest line, unwrapped
+    rows.forEach((r) => {
+      const st = style[r.kind];
+      r.cells.forEach((v, c) => {
+        const parts = cellParts(v, c);
+        const ind = markerW(parts, st);
+        font(st.name, st.size);
+        const opt = { characterSpacing: st.spacing };
+        for (const p of parts) {
+          const words = p.text.split(/\s+/).filter(Boolean);
+          // A heading stays on one line when it is short (e.g. "SL NO"); other text may wrap between words.
+          const longest = r.kind === "head" ? Math.min(doc.widthOfString(p.text, opt), 150) : Math.max(0, ...words.map((w) => doc.widthOfString(w, opt)));
+          minW[c] = Math.max(minW[c], longest + (p.marker ? ind : 0) + PAD + SLACK);
+          wantW[c] = Math.max(wantW[c], doc.widthOfString(p.text, opt) + (p.marker ? ind : 0) + PAD + SLACK);
+        }
+      });
+    });
+    const floor = minW.map((w) => Math.max(w, 44));
+    const want = wantW.map((w, c) => Math.max(w, floor[c]));
+    let cw;
+    const wantSum = want.reduce((a, w) => a + w, 0);
+    const floorSum = floor.reduce((a, w) => a + w, 0);
+    if (wantSum <= TW) {
+      // Everything fits on one line: spread the spare width in proportion to each column's text.
+      cw = want.map((w) => w + (TW - wantSum) * (w / wantSum));
+    } else if (floorSum <= TW) {
+      // Some text wraps: each column keeps its longest word; the rest goes to the columns that need it.
+      const need = want.map((w, c) => w - floor[c]);
+      const needSum = need.reduce((a, w) => a + w, 0) || 1;
+      cw = floor.map((w, c) => w + (TW - floorSum) * (need[c] / needSum));
+    } else {
+      cw = floor.map((w) => (w / floorSum) * TW); // very long words: scale down to fit
+    }
+    // Widths the salesperson set by dragging the columns in the editor are used exactly.
+    // Each column still gets at least its longest word (so "Total" or "SL NO" never breaks mid-word);
+    // the others give up that room in proportion to their size.
+    if (Array.isArray(t.widths) && t.widths.length === cols) {
+      const set = t.widths.map((w) => (w / 100) * TW);
+      const need = set.map((w, c) => Math.max(w, Math.min(minW[c], TW / cols)));
+      const extra = need.reduce((a, w) => a + w, 0) - TW;
+      const give = need.map((w, c) => (w > set[c] ? 0 : w - Math.min(minW[c], TW / cols)));
+      const giveSum = give.reduce((a, w) => a + w, 0) || 1;
+      cw = need.map((w, c) => w - Math.max(0, extra) * (give[c] / giveSum));
+    }
+    const cx = [];
+    cw.reduce((x, w) => (cx.push(x), x + w), tx1);
+
+    // Height of one cell, and drawing it, line by line with numbered points indented.
+    const cellHeight = (v, c, st) => {
+      const parts = cellParts(v, c);
+      const ind = markerW(parts, st);
+      font(st.name, st.size);
+      const opt = (w) => ({ width: w, lineGap: 1, characterSpacing: st.spacing });
+      return parts.reduce((h, p) => h + doc.heightOfString(p.text || " ", opt(cw[c] - PAD - (p.marker ? ind : 0))), 0);
+    };
+    const drawCell = (v, c, x, yy, st, color, align) => {
+      const parts = cellParts(v, c);
+      const ind = markerW(parts, st);
+      let ly = yy;
+      for (const p of parts) {
+        const w = cw[c] - PAD - (p.marker ? ind : 0);
+        const opt = { width: w, align, lineGap: 1, characterSpacing: st.spacing };
+        font(st.name, st.size, color);
+        if (p.marker) doc.text(p.marker, x, ly, { lineBreak: false, characterSpacing: st.spacing });
+        doc.text(p.text || " ", x + (p.marker ? ind : 0), ly, opt);
+        ly += doc.heightOfString(p.text || " ", opt);
+      }
+    };
     const heightOf = (r) => {
       const st = style[r.kind];
-      font(st.name, st.size);
-      const h = Math.max(...r.cells.map((v, k) => doc.heightOfString(v || " ", { width: cw[k] - 18, lineGap: 1, characterSpacing: st.spacing })));
+      const h = Math.max(...r.cells.map((v, k) => cellHeight(v, k, st)));
       return h + (r.kind === "head" ? 16 : 18);
     };
+
+    // A row too tall for one page is cut into pieces that each fit a page; its text carries on in the
+    // next piece (lines kept whole where possible, else split between words).
+    const pageRoom = BOTTOM - (47 + 30) - HEAD_H - heightOf(rows[0]) - 14 - 18 - 6;
+    const splitCell = (v, c, st) => {
+      const fits = (s) => cellHeight(s, c, st) <= pageRoom;
+      if (fits(v)) return [v];
+      const out = [];
+      let cur = "";
+      for (const line of String(v).split("\n")) {
+        const joined = cur ? `${cur}\n${line}` : line;
+        if (fits(joined)) {
+          cur = joined;
+          continue;
+        }
+        if (cur) out.push(cur);
+        cur = "";
+        if (fits(line)) {
+          cur = line;
+          continue;
+        }
+        let part = "";
+        for (const word of line.split(" ")) {
+          const next = part ? `${part} ${word}` : word;
+          if (!part || fits(next)) part = next;
+          else {
+            out.push(part);
+            part = word;
+          }
+        }
+        cur = part;
+      }
+      if (cur) out.push(cur);
+      return out.length ? out : [v];
+    };
+    rows = rows.flatMap((r) => {
+      if (r.kind !== "body" || heightOf(r) <= pageRoom) return [r];
+      const pieces = r.cells.map((v, c) => splitCell(v, c, style.body));
+      const n = Math.max(...pieces.map((p) => p.length));
+      return Array.from({ length: n }, (_, k) => ({ kind: "body", cells: pieces.map((p) => p[k] || "") }));
+    });
     const heights = rows.map(heightOf);
     const whole = heights.reduce((a, h) => a + h, 0);
     // Keep the heading band with at least the first rows; move the whole card on when it fits a page.
@@ -600,8 +747,14 @@ function draw(doc, q, meta) {
       let j = i;
       while (j < rows.length && y + headH + used + heights[j] + 14 <= BOTTOM) used += heights[j], seg.push(j++);
       if (j === i) {
-        newPage();
-        continue;
+        // Even on a fresh page it does not fit (should not happen after the split): draw it anyway
+        // rather than turning pages forever.
+        if (y > 90) {
+          newPage();
+          continue;
+        }
+        used += heights[j];
+        seg.push(j++);
       }
       const top = y;
       const segH = headH + used + 14;
@@ -641,12 +794,7 @@ function draw(doc, q, meta) {
         r.cells.forEach((v, c) => {
           const last = c === cols - 1;
           const color = r.kind === "total" && last ? C.navy : C.ink;
-          font(st.name, st.size, color).text(v || "", cx[c] + 9, ry + (r.kind === "head" ? 8 : 9), {
-            width: cw[c] - 18,
-            align: last && cols > 1 ? "right" : "left",
-            lineGap: 1,
-            characterSpacing: st.spacing,
-          });
+          drawCell(v, c, cx[c] + 9, ry + (r.kind === "head" ? 8 : 9), st, color, last && cols > 1 ? "right" : "left");
         });
         ry += heights[k];
       });
