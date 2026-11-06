@@ -8,7 +8,8 @@ import { radii, spacing, typography } from '../../theme';
 import { errorText, listCalls, listTickets } from '../api';
 import { CALL_STATUS, defaultPeriod, periodLabel, periodQuery, type Period } from '../format';
 import type { CallList, CallStatus, Ticket } from '../types';
-import { HeroHeader, HeroPill } from '../Hero';
+import { HeroHeader } from '../Hero';
+import { ChartIcon } from '../../components/icons';
 import { PeriodPicker } from '../ui';
 
 const STATUSES: CallStatus[] = ['TO_CALL', 'NOT_ANSWERED', 'WRONG_NUMBER', 'FORM_SENT', 'FORM_RECEIVED', 'TICKET_OPEN', 'DONE'];
@@ -81,10 +82,7 @@ export function FeedbackInsightsScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader eyebrow="Customer Feedback" title="Insights" subtitle={periodLabel(period)}>
-        {!!data && <HeroPill label={`${pct}% done`} tone="success" />}
-        {!!data && <HeroPill label={`${good} good · ${issue} issue`} tone="info" />}
-      </HeroHeader>
+      <HeroHeader icon={ChartIcon} title="Insights" subtitle={periodLabel(period)} />
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={loading && !!data} onRefresh={load} tintColor={theme.primary} colors={[theme.primary]} />}>
         <PeriodPicker value={period} onChange={setPeriod} />
         <CrmErrorBanner message={error} onRetry={load} />

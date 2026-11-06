@@ -11,3 +11,6 @@ export interface TicketsTab {
 }
 export const TicketsTabContext = createContext<TicketsTab>({ show: false, count: 0, refresh: () => {} });
 export const useTicketsTab = () => useContext(TicketsTabContext);
+
+/** Set when the tickets are opened as a page (from More): the list shows a back arrow that calls it. */
+export const TicketsBackContext = createContext<(() => void) | null>(null);

@@ -14,6 +14,7 @@ import { CrmScreen } from '../ui/CrmScreen';
 import { StatusBadge, toneColors, type Tone } from '../ui/StatusBadge';
 import { ClipboardListIcon } from '../ui/crmIcons';
 import { useAppSwitch, type AppKind } from '../../navigation/AppSwitchContext';
+import { useTicketsTab } from '../../feedback/ticketsTabContext';
 
 // The "More" tab of the sales apps (Commercial, Residential and CRM): who is signed in, in a
 // coloured header, then the options in sections - each with its own colour icon and a one-line
@@ -88,7 +89,7 @@ interface MenuRowProps {
   divider?: boolean;
 }
 
-function MenuRow({ icon: Icon, tone, label, hint, onPress, soon, divider }: MenuRowProps) {
+export function MenuRow({ icon: Icon, tone, label, hint, onPress, soon, divider }: MenuRowProps) {
   const { styles, theme } = useCrmStyles(factory);
   const { bg, fg } = toneColors(theme, soon ? 'neutral' : tone);
   return (
@@ -117,13 +118,19 @@ function MenuRow({ icon: Icon, tone, label, hint, onPress, soon, divider }: Menu
   );
 }
 
+/** A card of MenuRows. */
+export function MenuGroup({ children }: { children: React.ReactNode }) {
+  const { styles } = useCrmStyles(factory);
+  return <View style={styles.group}>{children}</View>;
+}
+
 export function CrmMoreScreen() {
   // The lead screens live on whichever stack hosts this screen (CRM or Lead Management).
   const leadNavigation = useNavigation<NavigationProp<LeadStackParamList>>();
   const { user, logout } = useAuth();
   const role = useUserRole();
   const rawRole = useRawRole();
-  const { styles, theme } = useCrmStyles(factory);
+  const { styles } = useCrmStyles(factory);
   const name = user?.name ?? 'Account';
   // A Managing Director / Personal Assistant in the Sales app keeps their own role name;
   // lead roles such as "sales_manager" read as "Sales Manager".
@@ -137,6 +144,7 @@ export function CrmMoreScreen() {
   const manager = leadPersonaForRole(rawRole) === 'sales_manager' && !residentialApp;
   const performance = !telecaller && !residentialApp;
   const openProfile = () => leadNavigation.navigate('LeadProfile');
+  const tickets = useTicketsTab();
 
   // The Work section, in order; dividers go between the rows that are shown.
   const work: Omit<MenuRowProps, 'divider'>[] = [];
@@ -157,6 +165,16 @@ export function CrmMoreScreen() {
       label: 'Team report & targets',
       hint: 'Leaderboard, targets and team visits',
       onPress: () => leadNavigation.navigate('LeadTeam'),
+    });
+  }
+  // Customer Feedback tickets for them (e.g. a Sales step assigned to a salesperson), with the waiting count.
+  if (tickets.show) {
+    work.push({
+      icon: ClipboardListIcon,
+      tone: 'danger',
+      label: 'Tickets',
+      hint: tickets.count ? `${tickets.count} waiting for you` : 'Customer feedback tickets for you',
+      onPress: () => leadNavigation.getParent()?.navigate('FeedbackTickets' as never),
     });
   }
   if (performance) {
@@ -234,16 +252,18 @@ export function CrmMoreScreen() {
         <MenuRow icon={SettingsIcon} tone="neutral" label="Settings" hint="Notifications, theme and more" soon divider />
       </View>
 
-      <Pressable
-        onPress={() => {
-          logout();
-        }}
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}
-      >
-        <LogoutIcon size={18} color={theme.dangerText} />
-        <Text style={styles.signOutText}>Sign out</Text>
-      </Pressable>
+      <SignOutButton onPress={logout} />
     </CrmScreen>
+  );
+}
+
+/** The red Sign out button at the bottom of a More screen. */
+export function SignOutButton({ onPress }: { onPress: () => void }) {
+  const { styles, theme } = useCrmStyles(factory);
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}>
+      <LogoutIcon size={18} color={theme.dangerText} />
+      <Text style={styles.signOutText}>Sign out</Text>
+    </Pressable>
   );
 }

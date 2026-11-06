@@ -211,6 +211,16 @@ export interface NumberRequest {
   resolve_note: string | null;
 }
 
+/** A request on the Requests tab: the request plus its call, site and customer. */
+export interface NumberRequestRow extends NumberRequest {
+  call_id: string;
+  call_status: CallStatus;
+  due_date: string | null;
+  customer: { id: string; name: string };
+  site: { id: string; name: string; city: string | null };
+  requested_by: Person | null;
+}
+
 export interface QuestionOption {
   id: number;
   label: string;

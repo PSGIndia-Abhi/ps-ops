@@ -6,6 +6,7 @@ import {
   type BottomTabNavigationOptions,
 } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { FeedbackTicketsPage } from '../feedback/FeedbackTicketsTab';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useReminders } from '../reminders-engine/useReminders';
@@ -147,6 +148,8 @@ export function CrmNavigator() {
         screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}
       >
         <Stack.Screen name="CrmTabs" component={CrmTabs} />
+        {/* Customer Feedback tickets (More > Tickets). */}
+        <Stack.Screen name="FeedbackTickets" component={FeedbackTicketsPage} />
         <Stack.Screen name="CrmNewLead" component={CrmNewLeadScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="CrmNewCommercialLead" component={CrmNewCommercialLeadScreen} options={{ animation: 'none' }} />
         <Stack.Screen name="CrmLeadDetail" component={CrmLeadDetailScreen} />

@@ -1,3 +1,4 @@
+import { ChevronLeftIcon } from '../../components/icons';
 import React, { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -136,7 +137,8 @@ function Ring({ percent }: { percent: number }) {
  * (for managers) each team member's workload. Worked out entirely from the
  * task list the app already loads; nothing new is fetched.
  */
-export function TaskInsightsScreen() {
+/** onBack: opened as a page (Task Management > More): a back arrow before the title. */
+export function TaskInsightsScreen({ onBack }: { onBack?: () => void } = {}) {
   const navigation = useNavigation<NavigationProp<TaskStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
   const { tasks, viewer, refreshing, refresh } = useTasks();
@@ -215,7 +217,14 @@ export function TaskInsightsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} colors={[theme.primary]} />}
       >
         <View style={styles.top}>
-          <Text style={styles.title}>Insights</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {!!onBack && (
+              <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
+                <ChevronLeftIcon size={24} color={theme.textPrimary} />
+              </Pressable>
+            )}
+            <Text style={styles.title}>Insights</Text>
+          </View>
           <View style={styles.seg}>
             {(['week', 'month'] as const).map((p) => (
               <Pressable key={p} onPress={() => setPeriod(p)} style={[styles.segBtn, period === p && styles.segOn]} accessibilityRole="button" accessibilityState={{ selected: period === p }}>

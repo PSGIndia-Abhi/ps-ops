@@ -7,6 +7,8 @@ export type FeedbackTabParamList = {
   Calls: { status?: string; at?: number } | undefined;
   /** The tickets this user raised. */
   Tickets: undefined;
+  /** Requests for the right number (after a wrong number) and the numbers the coordinator added. */
+  Requests: undefined;
   /** How the month (or dates) went: progress, every status, tickets. */
   Insights: undefined;
 };

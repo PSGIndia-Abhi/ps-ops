@@ -200,15 +200,10 @@ export function HomeBand({
     <View style={[styles.band, { paddingTop: topInset + spacing.md }]}>
       <BandBackground />
       <View style={styles.ident}>
-        <Pressable
-          onPress={onLogo}
-          disabled={!onLogo}
-          accessibilityRole={onLogo ? 'button' : undefined}
-          accessibilityLabel={onLogo ? 'Switch app' : undefined}
-          style={({ pressed }) => [styles.logo, pressed && styles.pressed]}
-        >
+        {/* The logo is only a picture; the avatar opens Switch app / Profile. */}
+        <View style={styles.logo}>
           <BrandMark size={38} />
-        </Pressable>
+        </View>
         <View style={styles.flex1}>
           <Text style={styles.hi}>Welcome back</Text>
           <Text style={styles.name} numberOfLines={1}>

@@ -266,8 +266,8 @@ export function TaskHomeScreen() {
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const { viewer, tasks, ready, refreshing, refresh, error, unreadCount } = useTasks();
-  // Managing Director / Personal Assistant also have the Sales app: for them the logo and the
-  // avatar open "Switch app" (with a link on to the profile). Everyone else: the profile, as before.
+  // People with another app (Sales, Customer Feedback...): the avatar opens "Switch app" (with a
+  // link on to the profile). Everyone else: the profile, as before. The logo opens nothing.
   const { canSwitch, openSwitcher } = useAppSwitch();
   const openProfile = () => navigation.navigate('Profile');
   const openSwitchSheet = () => openSwitcher(openProfile);
@@ -317,16 +317,10 @@ export function TaskHomeScreen() {
         <View style={[styles.band, { paddingTop: insets.top + spacing.md }]}>
           <BandBackground />
           <View style={styles.ident}>
-            <Pressable
-              onPress={canSwitch ? openSwitchSheet : undefined}
-              disabled={!canSwitch}
-              style={styles.logo}
-              accessibilityRole={canSwitch ? 'button' : undefined}
-              accessibilityLabel={canSwitch ? 'Switch app' : undefined}
-              testID="header-logo"
-            >
+            {/* The logo is only a picture; the avatar on the right opens Switch app / Profile. */}
+            <View style={styles.logo} testID="header-logo">
               <TaskBrandMark size={40} />
-            </Pressable>
+            </View>
             <View style={styles.flex1}>
               <Text style={styles.hi}>Welcome back</Text>
               <Text style={styles.name} numberOfLines={2}>

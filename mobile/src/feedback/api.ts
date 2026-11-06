@@ -1,5 +1,5 @@
 import { httpClient } from '../api/httpClient';
-import type { AssignablePerson, Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, IssueType, NewTicket, Question, Ticket } from './types';
+import type { AssignablePerson, NumberRequestRow, Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, IssueType, NewTicket, Question, Ticket } from './types';
 
 /**
  * Customer Feedback data access - the same /api/feedback endpoints the web Feedback Desk uses
@@ -56,6 +56,20 @@ export async function getAssignablePeople(): Promise<{ supervisors: AssignablePe
 /** After a wrong number: ask the service coordinator for the right one. */
 export async function sendNumberRequest(callId: string, note: string | null): Promise<void> {
   await httpClient.post(`/api/feedback/calls/${callId}/number-request`, { note });
+}
+
+/** The collector's requests for the right number (status OPEN | DONE, '' = all), and the counts. */
+export async function listNumberRequests(status: string): Promise<{ requests: NumberRequestRow[]; counts: { OPEN: number; DONE: number; ALL: number } }> {
+  const { data } = await httpClient.get<{ requests: NumberRequestRow[]; counts: { OPEN: number; DONE: number; ALL: number } }>('/api/feedback/number-requests', {
+    params: { status: status || undefined },
+  });
+  return { requests: data.requests || [], counts: data.counts || { OPEN: 0, DONE: 0, ALL: 0 } };
+}
+
+/** Requests waiting for the service coordinator (the number on the Requests tab). */
+export async function getOpenRequestCount(): Promise<number> {
+  const { data } = await httpClient.get<{ open_requests?: number }>('/api/feedback/badges');
+  return Number(data.open_requests) || 0;
 }
 
 export async function cancelNumberRequest(id: string): Promise<void> {

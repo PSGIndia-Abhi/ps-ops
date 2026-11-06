@@ -22,6 +22,11 @@ const factory = (t: CrmTheme) => ({
   kv: { flexDirection: 'row' as const, paddingVertical: 4, gap: spacing.sm },
   k: { ...typography.caption, color: t.textMuted, width: 110 },
   v: { ...typography.caption, color: t.textPrimary, flex: 1, fontWeight: '500' as const },
+  fuRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingVertical: 5 },
+  fuChip: { ...typography.caption, fontWeight: '700' as const, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, overflow: 'hidden' as const },
+  fuOk: { color: t.successText, backgroundColor: t.successBg },
+  fuBad: { color: t.dangerText, backgroundColor: t.dangerBg },
+  fuWarn: { color: t.warningText, backgroundColor: t.warningBg },
   small: { ...typography.caption, color: t.textMuted },
   step: { flexDirection: 'row' as const, gap: spacing.xs, alignItems: 'center' as const, paddingVertical: 4 },
   stepDot: { width: 10, height: 10, borderRadius: 5 },
@@ -308,18 +313,22 @@ export function FeedbackTicketScreen() {
         )}
 
         <Panel title="Follow-up call" icon={<PhoneIcon size={17} color={theme.primary} />}>
-          {followUps.map((h) => (
-            <Text key={h.id} style={[styles.small, { marginBottom: 4 }]}>
-              {h.to_status === 'CLOSED' ? '✓ ' : '✗ '}
-              {h.note} · {formatDateTime(h.created_at)}
-            </Text>
-          ))}
+          {followUps.map((h) => {
+            const closedWithIssues = (h.note || '').startsWith('Closed with issues');
+            const resolved = h.to_status === 'CLOSED' && !closedWithIssues;
+            return (
+              <View key={h.id} style={styles.fuRow}>
+                <Text style={[styles.fuChip, resolved ? styles.fuOk : closedWithIssues ? styles.fuWarn : styles.fuBad]}>
+                  {resolved ? 'Resolved' : closedWithIssues ? 'Closed' : 'Not resolved'}
+                </Text>
+                <Text style={styles.small}>{formatDateTime(h.created_at)}</Text>
+              </View>
+            );
+          })}
           {open ? (
             <>
-              <Text style={styles.small}>
-                {ready
-                  ? 'The action is taken. Call the customer and ask the questions again (satisfied: the ticket closes), or close the ticket without the call.'
-                  : `Waiting for ${waitingFor.join(' and ') || 'the work'}. Then the customer is called back.`}
+              <Text style={[styles.small, followUps.length > 0 && { marginTop: spacing.xs }]}>
+                {ready ? 'Ready to call the customer back.' : `Waiting for ${waitingFor.join(' and ') || 'the work'}.`}
               </Text>
               {!deptOnly && <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ marginTop: spacing.sm }} />}
               {!deptOnly && ready && canClose && (

@@ -9,10 +9,12 @@ import { radii, spacing, typography } from '../../theme';
 import { errorText, listCalls, takeCall } from '../api';
 import { CALL_FILTERS, defaultPeriod, periodLabel, periodQuery, type Period } from '../format';
 import type { FeedbackStackParamList, FeedbackTabParamList } from '../navigation';
-import { HeroHeader, HeroPill } from '../Hero';
+import { HeroHeader } from '../Hero';
 import { SiteCard } from '../SiteCard';
 import type { CallList, CallRow } from '../types';
 import { Chips, PeriodPicker } from '../ui';
+import { Dropdown } from '../Dropdown';
+import { PhoneIcon } from '../../components/icons';
 
 const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },
@@ -22,8 +24,12 @@ const factory = (t: CrmTheme) => ({
   underline: { width: 28, height: 3, borderRadius: 1.5, backgroundColor: t.crestRed, marginTop: spacing.xs },
   sectionCount: { ...typography.captionMedium, color: t.textMuted },
   gap: { height: spacing.sm },
-  search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, backgroundColor: t.surface, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, paddingHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md, minHeight: 46 },
+  search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, backgroundColor: t.surface, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, paddingHorizontal: spacing.md, minHeight: 46 },
   searchInput: { flex: 1, color: t.textPrimary, ...typography.body },
+  searchRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.md },
+  periodBox: { marginBottom: spacing.sm },
+  topRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.sm, marginBottom: spacing.md },
+  count: { ...typography.captionMedium, color: t.textMuted },
 });
 
 /**
@@ -94,21 +100,35 @@ export function FeedbackCallsScreen() {
 
   const header = (
     <View>
-      <View style={styles.sectionRow}>
-        <View>
-          <Text style={styles.sectionTitle}>Calls</Text>
-          <View style={styles.underline} />
-        </View>
-        <Text style={styles.sectionCount}>{data ? `${data.total} · ${shown}` : ''}</Text>
+      {/* Which calls: due today (the usual), all, a month or dates - a dropdown. */}
+      <View style={styles.topRow}>
+        <Dropdown
+          caption="Show"
+          value={period.mode}
+          options={[
+            { value: 'today', label: 'Due today' },
+            { value: 'all', label: 'All calls' },
+            { value: 'month', label: 'By month' },
+            { value: 'range', label: 'By dates' },
+          ]}
+          onChange={(mode) => setPeriod((p) => ({ ...p, mode }))}
+          highlight={period.mode !== 'today'}
+        />
+        <Text style={styles.count}>{data ? `${data.total} call${data.total === 1 ? '' : 's'}` : ''}</Text>
       </View>
-      <PeriodPicker value={period} onChange={setPeriod} withDue />
-      <View style={styles.gap} />
+      {(period.mode === 'month' || period.mode === 'range') && (
+        <View style={styles.periodBox}>
+          <PeriodPicker value={period} onChange={setPeriod} withDue hideModes />
+        </View>
+      )}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <Chips options={CALL_FILTERS} value={status} onChange={setStatus} />
       </ScrollView>
-      <View style={styles.search}>
-        <SearchIcon size={18} color={theme.textMuted} />
-        <TextInput style={styles.searchInput} placeholder="Search site or customer" placeholderTextColor={theme.textMuted} value={q} onChangeText={setQ} />
+      <View style={styles.searchRow}>
+        <View style={[styles.search, { flex: 1 }]}>
+          <SearchIcon size={18} color={theme.textMuted} />
+          <TextInput style={styles.searchInput} placeholder="Search site or customer" placeholderTextColor={theme.textMuted} value={q} onChangeText={setQ} />
+        </View>
       </View>
       <CrmErrorBanner message={error} onRetry={load} />
     </View>
@@ -116,11 +136,7 @@ export function FeedbackCallsScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader eyebrow="Customer Feedback" title="Calls" subtitle={periodLabel(period)}>
-        <HeroPill label={data ? `${data.total} call${data.total === 1 ? '' : 's'}` : 'Loading…'} tone="info" />
-        {!!data && <HeroPill label={`${Number(data.status_counts.TO_CALL || 0)} to call`} tone="warning" />}
-        {!!data && <HeroPill label={`${Number(data.status_counts.DONE || 0)} completed`} tone="success" />}
-      </HeroHeader>
+      <HeroHeader icon={PhoneIcon} title="Calls" subtitle={periodLabel(period)} />
       <FlatList
         data={data?.sites || []}
         keyExtractor={(r) => r.request_id}
