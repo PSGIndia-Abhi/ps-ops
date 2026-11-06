@@ -53,46 +53,46 @@ export function ProgressRing({ size, stroke, pct, color, track, children }: { si
 export function TeamSummary({
   month,
   achieved,
-  targetAchieved,
   target,
   converted,
   visitsToday,
   onVisits,
+  onPress,
 }: {
   month?: string;
   /** Everyone's converted amount this month. */
   achieved: number;
-  /** The part of it by people who have a target - what the team's target % is made of. */
-  targetAchieved: number;
   target: number;
   converted: number;
   visitsToday: number;
   onVisits: () => void;
+  /** The card itself: the whole team's performance (the same numbers, added up). */
+  onPress: () => void;
 }) {
   const { styles } = useCrmStyles(factory);
-  const pct = target > 0 ? Math.round((targetAchieved / target) * 100) : 0;
-  const others = achieved - targetAchieved; // converted by people without a target
+  // The same rule as the team's performance page: everything the team won against the team's target.
+  const pct = target > 0 ? Math.round((achieved / target) * 100) : 0;
   return (
-    <View style={styles.summary}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Team performance" style={({ pressed }) => [styles.summary, pressed && { opacity: 0.92 }]}>
       <GradientFill from="#3B82F6" to="#1D4ED8" />
-      <Text style={styles.summaryMonth}>{monthLabel(month).toUpperCase()} · TEAM</Text>
+      <View style={styles.summaryTop}>
+        <Text style={styles.summaryMonth}>{monthLabel(month).toUpperCase()} · TEAM</Text>
+        <View style={styles.summaryOpen}>
+          <Text style={styles.summaryOpenText}>Performance</Text>
+          <ChevronRightIcon size={14} color="#fff" />
+        </View>
+      </View>
       <View style={styles.summaryRow}>
         <ProgressRing size={84} stroke={9} pct={pct} color="#fff" track="rgba(255,255,255,0.25)">
           <Text style={styles.summaryPct}>{target > 0 ? `${pct}%` : '-'}</Text>
         </ProgressRing>
         <View style={styles.summaryBody}>
           <Text style={styles.summaryAmount} numberOfLines={1} adjustsFontSizeToFit>
-            {formatINR(target > 0 ? targetAchieved : achieved)}
+            {formatINR(achieved)}
           </Text>
           <Text style={styles.summarySub}>{target > 0 ? `of ${formatINR(target)} target` : 'converted - no team target set'}</Text>
           <View style={styles.summaryStats}>
             <Text style={styles.summaryStat}>{converted} won</Text>
-            {target > 0 && others > 0 && (
-              <>
-                <View style={styles.summaryDot} />
-                <Text style={styles.summaryStat}>{formatINR(achieved)} total</Text>
-              </>
-            )}
             <View style={styles.summaryDot} />
             <Text style={styles.summaryStat}>
               {visitsToday} visit{visitsToday === 1 ? '' : 's'} today
@@ -105,7 +105,7 @@ export function TeamSummary({
         <Text style={styles.summaryButtonText}>Team visits - who went where today</Text>
         <ChevronRightIcon size={16} color="#fff" />
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
@@ -181,7 +181,10 @@ export function TeamMemberRow({
 
 const factory = (t: CrmTheme) => ({
   summary: { borderRadius: radii.xl, padding: spacing.lg, marginBottom: spacing.lg, overflow: 'hidden' as const, ...t.raisedShadow },
-  summaryMonth: { ...typography.overline, color: 'rgba(255,255,255,0.8)', marginBottom: spacing.md },
+  summaryTop: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.md },
+  summaryMonth: { ...typography.overline, color: 'rgba(255,255,255,0.8)' },
+  summaryOpen: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: 'rgba(255,255,255,0.18)' },
+  summaryOpenText: { ...typography.caption, fontWeight: '700' as const, color: '#fff' },
   summaryRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.lg },
   summaryPct: { ...typography.title, color: '#fff' },
   summaryBody: { flex: 1 },

@@ -20,6 +20,7 @@ import { formatINR } from '../../crm/format';
 import { AchievementCard } from '../AchievementCard';
 import { TargetCard, targetPercent, type ContractKind, type PeriodFigures } from '../TargetCard';
 import { TeamMemberRow, TeamSummary } from '../TeamReportParts';
+import { teamHistory, teamItems, teamPerformance, teamTarget } from '../teamTotals';
 
 const factory = (t: CrmTheme) => ({
   body: { padding: spacing.lg, paddingBottom: spacing.xxl },
@@ -238,35 +239,44 @@ export function PerformanceScreen() {
   const [filtering, setFiltering] = useState(false);
   const { from, to } = rangeDates(range, todayStr(), custom);
   const employeeId = params?.employeeId;
+  // "All team" (from the Team report): everyone's numbers added up.
+  const team = params?.team;
   const { myIdNum, persona } = useMe();
   const manager = persona === 'sales_manager';
+  // The records behind a number: one person's, or the whole team's together.
+  const itemsFor = useCallback(
+    (metric: api.PerformanceMetric) => (team ? teamItems(metric, team, from, to) : api.performanceItems(metric, from, to, employeeId)),
+    [team, from, to, employeeId],
+  );
 
-  const loader = useCallback(() => api.performance(from, to, employeeId), [from, to, employeeId]);
+  const loader = useCallback(() => (team ? teamPerformance(team, from, to) : api.performance(from, to, employeeId)), [team, from, to, employeeId]);
   const { data, loading, refreshing, error, refresh: refreshReport, reload } = useLoad(loader, 'Could not load the performance report.');
   // This month's target for the person shown (a manager gets the team's list and picks them out).
   const targetLoader = useCallback(async () => {
     const list = await api.listTargets().catch(() => [] as api.SalesTarget[]);
+    if (team) return teamTarget(list, team);
     return list.find((t) => t.userId === (employeeId ?? myIdNum)) ?? null;
-  }, [employeeId, myIdNum]);
+  }, [team, employeeId, myIdNum]);
   const { data: target, refresh: refreshTarget, reload: reloadTarget } = useLoad(targetLoader, '');
   // Lifetime achieved and every monthly target set (the server keeps up to 24 months), for the Lifetime filter.
-  const historyLoader = useCallback(() => api.targetHistory(employeeId, 24).catch(() => null), [employeeId]);
+  const historyLoader = useCallback(
+    () => (team ? teamHistory(team, 24) : api.targetHistory(employeeId, 24)).catch(() => null),
+    [team, employeeId],
+  );
   const { data: history, refresh: refreshHistory, reload: reloadHistory } = useLoad(historyLoader, '');
   // Today / 7 days: what the leads converted in the period are worth (the same value the target counts).
   const convertedLoader = useCallback(
     () =>
-      range === 'today' || range === 'week' || range === 'custom'
-        ? api.performanceItems('leadsConverted', from, to, employeeId).catch(() => null)
-        : Promise.resolve(null),
-    [range, from, to, employeeId],
+      range === 'today' || range === 'week' || range === 'custom' ? itemsFor('leadsConverted').catch(() => null) : Promise.resolve(null),
+    [range, itemsFor],
   );
   const { data: converted, refresh: refreshConverted } = useLoad(convertedLoader, '');
   // All / One-time / AMC on the Target card: with a type picked, the leads converted in the period
   // (each carries its One-time / AMC) are added up for that type.
   const [kind, setKind] = useState<ContractKind>('ALL');
   const typedLoader = useCallback(
-    () => (kind === 'ALL' ? Promise.resolve(null) : api.performanceItems('leadsConverted', from, to, employeeId).catch(() => null)),
-    [kind, from, to, employeeId],
+    () => (kind === 'ALL' ? Promise.resolve(null) : itemsFor('leadsConverted').catch(() => null)),
+    [kind, itemsFor],
   );
   const { data: typedItems, loading: typedLoading, refresh: refreshTyped } = useLoad(typedLoader, '');
   const typedOnes = (typedItems ?? []).filter((i) => i.contractType === kind);
@@ -287,14 +297,14 @@ export function PerformanceScreen() {
   const period = target ? periodFigures(range, target, history ?? null, converted ?? null, { from, to }) : undefined;
   // A tile opens the records behind its number, for the same person and period.
   const openTile = (metric: api.PerformanceMetric, label: string) =>
-    navigation.navigate('LeadPerformanceItems', { metric, label, from, to, employeeId, name: params?.name ?? 'My performance', periodLabel });
+    navigation.navigate('LeadPerformanceItems', { metric, label, from, to, employeeId, team, name: params?.name ?? 'My performance', periodLabel });
 
   return (
     <LeadScreen edges={['top', 'bottom']}>
       {/* The dates sit on the right of the top bar; tapping them opens the date filter. */}
       <TopBar
         title={params?.name ?? 'My performance'}
-        subtitle="Sales performance"
+        subtitle={team ? `Team performance · ${team.length} ${team.length === 1 ? 'person' : 'people'}` : 'Sales performance'}
         onBack={() => navigation.goBack()}
         action={{ label: barLabel, onPress: () => setFiltering(true), icon: <CalendarIcon size={15} color="#fff" /> }}
       />
@@ -309,7 +319,7 @@ export function PerformanceScreen() {
               reloadTarget();
               reloadHistory();
             }}
-            onHistory={() => navigation.navigate('LeadAchievementHistory', { employeeId, name: params?.name ?? 'My achievement' })}
+            onHistory={() => navigation.navigate('LeadAchievementHistory', { employeeId, team, name: params?.name ?? 'My achievement' })}
             kind={kind}
             onKindChange={setKind}
             kindFigures={kindFigures}
@@ -411,7 +421,10 @@ export function AchievementHistoryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const params = useRoute<RouteProp<LeadStackParamList, 'LeadAchievementHistory'>>().params;
   const { styles } = useCrmStyles(factory);
-  const loader = useCallback(() => api.targetHistory(params?.employeeId), [params?.employeeId]);
+  const loader = useCallback(
+    () => (params?.team ? teamHistory(params.team, 6) : api.targetHistory(params?.employeeId)),
+    [params?.team, params?.employeeId],
+  );
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the achievement history.');
 
   return (
@@ -476,12 +489,12 @@ export function TeamScreen() {
       month: targets[0]?.month,
       target: people.reduce((s, p) => s + (p.target?.target ?? 0), 0),
       achieved: people.reduce((s, p) => s + (p.target?.achieved ?? 0), 0),
-      // Only the people who have a target count towards the team's target %.
-      targetAchieved: people.reduce((s, p) => s + (p.target?.target ? p.target.achieved : 0), 0),
       converted: people.reduce((s, p) => s + (p.target?.converted ?? 0), 0),
       visitsToday: todays.length,
     };
-    return { people, summary };
+    // "All team": the people on the leaderboard, their numbers added up.
+    const members = people.map((p) => ({ id: Number(p.id), name: p.name }));
+    return { people, summary, members };
   }, [myIdNum]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the team.');
   useFocusEffect(
@@ -508,7 +521,11 @@ export function TeamScreen() {
           <>
             <CrmErrorBanner message={error} onRetry={reload} />
             {data ? (
-              <TeamSummary {...data.summary} onVisits={openVisits} />
+              <TeamSummary
+                {...data.summary}
+                onVisits={openVisits}
+                onPress={() => navigation.navigate('LeadPerformance', { team: data.members, name: 'All team' })}
+              />
             ) : loading ? (
               <CrmSkeleton height={200} radius={radii.xl} style={styles.summarySkeleton} />
             ) : null}

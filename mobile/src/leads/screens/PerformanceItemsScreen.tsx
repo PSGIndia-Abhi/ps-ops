@@ -14,6 +14,7 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { STAGE_META } from '../stage';
+import { teamItems } from '../teamTotals';
 import type { PipelineStage } from '../types';
 import { StageBadge, useLoad, LeadScreen, LeadTopBar } from '../ui';
 
@@ -85,10 +86,14 @@ function whenText(iso: string, dayOnly: boolean): string {
  */
 export function PerformanceItemsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
-  const { metric, label, from, to, employeeId, name, periodLabel } = useRoute<RouteProp<LeadStackParamList, 'LeadPerformanceItems'>>().params;
+  const { metric, label, from, to, employeeId, team, name, periodLabel } = useRoute<RouteProp<LeadStackParamList, 'LeadPerformanceItems'>>().params;
   const { styles, theme } = useCrmStyles(factory);
 
-  const loader = useCallback(() => api.performanceItems(metric, from, to, employeeId), [metric, from, to, employeeId]);
+  // "All team": everyone's records together, each marked with whose it is.
+  const loader = useCallback(
+    (): Promise<(api.PerformanceItem & { by?: string })[]> => (team ? teamItems(metric, team, from, to) : api.performanceItems(metric, from, to, employeeId)),
+    [metric, from, to, employeeId, team],
+  );
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load the list.');
   const [query, setQuery] = useState('');
   const [stage, setStage] = useState<PipelineStage | null>(null);
@@ -106,7 +111,7 @@ export function PerformanceItemsScreen() {
       .filter(
         (i) =>
           !q ||
-          [i.company, i.contact, i.leadNumber ?? '', i.detail].some((v) => v.toLowerCase().includes(q)),
+          [i.company, i.contact, i.leadNumber ?? '', i.detail, i.by ?? ''].some((v) => v.toLowerCase().includes(q)),
       );
   }, [data, query, stage]);
   const narrowed = !!query.trim() || !!stage;
@@ -182,7 +187,7 @@ export function PerformanceItemsScreen() {
           const tone: Tone = item.stage ? STAGE_META[item.stage]?.tone ?? 'neutral' : 'neutral';
           // A follow-up is a planned day; everything else happened at a moment.
           const when = whenText(item.at, metric === 'followUpsDue');
-          const line = [item.detail, when].filter(Boolean).join('  ·  ');
+          const line = [item.by, item.detail, when].filter(Boolean).join('  ·  ');
           return (
             <Pressable
               onPress={() => navigation.navigate('LeadDetail', { leadId: item.leadId })}

@@ -63,16 +63,19 @@ export type LeadStackParamList = {
   /** The bell on Home: lead notifications, newest first. */
   LeadNotifications: undefined;
   /** No employeeId = the signed-in user's own numbers. */
-  LeadPerformance: { employeeId?: number; name?: string } | undefined;
+  /** `team`: "All team" on the Team report - everyone's numbers added up. */
+  LeadPerformance: { employeeId?: number; name?: string; team?: import('./teamTotals').TeamMember[] } | undefined;
   /** The records behind one number of a performance report (a tapped tile). */
   /** One person's achievement over time: lifetime, last month, month by month (no employeeId = mine). */
-  LeadAchievementHistory: { employeeId?: number; name?: string } | undefined;
+  LeadAchievementHistory: { employeeId?: number; name?: string; team?: import('./teamTotals').TeamMember[] } | undefined;
   LeadPerformanceItems: {
     metric: import('./api').PerformanceMetric;
     label: string;
     from: string;
     to: string;
     employeeId?: number;
+    /** "All team": everyone's records together. */
+    team?: import('./teamTotals').TeamMember[];
     /** Whose numbers - shown under the title. */
     name: string;
     periodLabel: string;
