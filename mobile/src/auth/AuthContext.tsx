@@ -10,6 +10,7 @@ import React, {
 import { authApi, ApiError, setUnauthorizedHandler } from '../api';
 import { unregisterFromPush } from '../reminders-engine/push';
 import { clearSession, loadSession, saveSession } from './tokenStorage';
+import { forgetUploadAuth } from '../leads/fieldTracking';
 import type { AuthSession, CurrentUser } from '../types/auth';
 
 type AuthStatus = 'bootstrapping' | 'signedOut' | 'signingIn' | 'signedIn';
@@ -43,6 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // While still signed in: stop this phone getting the account's pushes (short, best effort).
       await Promise.race([unregisterFromPush(), new Promise<void>((r) => setTimeout(() => r(), 3000))]);
       await clearSession();
+      // The field-tracking service must not keep uploading with this account's token.
+      await forgetUploadAuth();
     } finally {
       setUser(null);
       setSession(null);
