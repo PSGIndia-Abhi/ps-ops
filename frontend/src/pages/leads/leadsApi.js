@@ -644,6 +644,54 @@ export async function leadVisits(leadId) {
 }
 
 /** GET /team-visits?date= - one day's visits by the team (sales managers only). */
+// ---- Field Tracking (sales executive's field day) ---------------------------
+// backend/src/routes/sales-field-tracking.routes.js. Times come back as wall-clock
+// "YYYY-MM-DD HH:MM:SS" strings; `wall` turns them into values `new Date()` reads locally.
+
+/** Sales executives the manager / admin may see. */
+export async function fieldExecutives() {
+  const data = await request("/api/field-tracking/executives");
+  return data.executives || [];
+}
+
+/** One day for every executive the manager may see: shift status, visits, GPS km. */
+export async function fieldTeam(date) {
+  const data = await request(`/api/field-tracking/team?date=${encodeURIComponent(date)}`);
+  return (data.team || []).map((t) => ({ ...t, firstStart: wall(t.firstStart), lastEnd: wall(t.lastEnd) }));
+}
+
+/** A day's petrol legs with their times read as local wall-clock values. */
+const toPetrol = (p) => (p ? { ...p, legs: (p.legs || []).map((l) => ({ ...l, fromAt: wall(l.fromAt), toAt: wall(l.toAt) })) } : p);
+
+/**
+ * Send the direct road metres of each petrol leg (measured once with Google, in the order of
+ * petrol.waypoints) and the road route line. The server works the petrol out and returns it; a
+ * closed day is also saved, so no later view asks Google again. `fingerprint` is the one
+ * fieldDay() returned for that day.
+ */
+export async function saveFieldRoute(userId, date, { fingerprint, legRoadMeters, roadPath }) {
+  const data = await request(`/api/field-tracking/day/${userId}/route?date=${encodeURIComponent(date)}`, {
+    method: "PUT",
+    body: { fingerprint, legRoadMeters, roadPath },
+  });
+  return { ...data, petrol: toPetrol(data.petrol) };
+}
+
+/** One executive's full day: shifts, GPS points, visits, stops, gaps and the petrol legs. */
+export async function fieldDay(userId, date) {
+  const d = await request(`/api/field-tracking/day/${userId}?date=${encodeURIComponent(date)}`);
+  return {
+    ...d,
+    shifts: d.shifts.map((s) => ({ ...s, startedAt: wall(s.startedAt), endedAt: wall(s.endedAt) })),
+    points: d.points.map((p) => ({ ...p, capturedAt: wall(p.capturedAt) })),
+    visits: d.visits.map((v) => ({ ...v, scheduledAt: wall(v.scheduledAt), checkInAt: wall(v.checkInAt), checkOutAt: wall(v.checkOutAt) })),
+    stops: d.stops.map((s) => ({ ...s, from: wall(s.from), to: wall(s.to) })),
+    gaps: d.gaps.map((g) => ({ ...g, from: wall(g.from), to: wall(g.to) })),
+    petrol: toPetrol(d.petrol),
+    summary: { ...d.summary, firstStart: wall(d.summary.firstStart), lastEnd: wall(d.summary.lastEnd) },
+  };
+}
+
 export async function teamVisits(date) {
   const rows = await request(`/api/crm/team-visits?date=${encodeURIComponent(date)}`);
   return rows.map((row) => ({

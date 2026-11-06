@@ -77,6 +77,7 @@ import LeadsPerformance from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
 import QuoteMaster from "./pages/leads/QuoteMaster";
 import TeamVisits from "./pages/leads/TeamVisits";
+import FieldTracking from "./pages/leads/FieldTracking";
 import LeadReminders from "./pages/leads/Reminders";
 import { LEADS_HOME, LEADS_ROLES } from "./pages/leads/access";
 import StaffHome from "./pages/StaffHome";
@@ -334,6 +335,7 @@ const router = createBrowserRouter([
       { path: "submit", element: <SubmitLead /> },
       { path: "all", element: <LeadsList /> },
       { path: "team-visits", element: <TeamVisits /> },
+      { path: "field-tracking", element: <FieldTracking /> },
       { path: "reminders", element: <LeadReminders /> },
       { path: "follow-ups", element: <FollowUps /> },
       { path: "follow-ups/lead/:id", element: <LeadFollowUps /> },

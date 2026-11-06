@@ -61,6 +61,9 @@ const employeeFeedbackRoutes = require("./src/routes/employee-feedback.routes");
 const workTaskSeriesRoutes = require("./src/routes/work-task-series.routes");
 const auditsRoutes = require("./src/routes/audits.routes");
 const userActivityRoutes = require("./src/routes/user-activity.routes");
+const salesFieldTrackingRoutes = require("./src/routes/sales-field-tracking.routes");
+const { startSalesShiftAutoEndCron } = require("./src/jobs/salesShiftAutoEnd.cron");
+const { startSalesFieldAlertsCron } = require("./src/jobs/salesFieldAlerts.cron");
 const brigadeRoutes = require("./src/routes/brigade.routes");
 const feedbackRoutes = require("./src/routes/feedback.routes");
 const feedbackPublicRoutes = require("./src/routes/feedback.public.routes");
@@ -140,6 +143,8 @@ app.use("/api/public", crmPublicRoutes);
 app.use("/api/work-tasks", workTasksRoutes);
 app.use("/api/employee-feedback", employeeFeedbackRoutes);
 app.use("/api/work-task-series", workTaskSeriesRoutes);
+// Sales Executive Field Tracking (shift, background GPS, manager's day review).
+app.use("/api/field-tracking", salesFieldTrackingRoutes);
 // Site Audits (supervisor inspections + Option B report)
 app.use("/api/audits", auditsRoutes);
 // Admin User Activity report (logins + daily app usage, PDF/Excel export).
@@ -165,6 +170,8 @@ const PORT = process.env.PORT || 3000;
     startPaymentReminderCron();
     startLeadReminderCron();
     startTaskReminderCron();
+    startSalesShiftAutoEndCron();
+    startSalesFieldAlertsCron();
     startAuditQueueCron();
     startUserActivityCleanupCron();
     startFeedbackCron();

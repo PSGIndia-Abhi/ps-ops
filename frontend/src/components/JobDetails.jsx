@@ -20,6 +20,7 @@ function truncateText(value, maxLength = 110) {
   return `${text.slice(0, maxLength).trim()}...`;
 }
 
+
 function IconBadge({ name }) {
   const icons = {
     calendar: (
