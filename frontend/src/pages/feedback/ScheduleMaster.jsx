@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiPlus, FiRepeat, FiSearch, FiTool, FiTrash2, FiX } from "react-icons/fi";
+import { FiAlertCircle, FiCalendar, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
 import { deleteSchedule, formatDay, getScheduleOptions, getSchedules, saveSchedule } from "./feedbackApi";
 import { Card, Chip, Empty, ErrorBox, Loading, Modal, PageHead, Switch, Toast } from "./ui";
 
 // Feedback Desk › Masters › Call schedule (admin, service coordinators, operations managers): which
 // customers and sites get feedback calls, and how often. Sites without a schedule get no calls.
-//   Every few days      a call every 7 / 15 / 30... days (when the site had a service since the last call)
-//   Dates of the month  a call on the 1st (and 15th...) of every month (when the site had a service since)
+//   Every few days      a call every 7 / 15 / 30... days
+//   Dates of the month  a call on the 1st (and 15th...) of every month
 //   After each service  a call the day after each service - optionally only the first N services (a
 //                       new customer's first 3), then every N days or no more calls.
 // A site's own schedule wins over its customer's (all sites) schedule. Several customers and sites
@@ -60,6 +60,21 @@ function formOf(s) {
   };
 }
 
+const addDaysIso = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const daysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+
+// Scheduling an ended schedule again: the same rule for the same length of time, from the day after
+// it ended (or today, if that is later).
+function renewForm(s) {
+  const f = formOf(s);
+  const from = [addDaysIso(s.end_date, 1), todayIso()].sort().at(-1);
+  return { ...f, start_date: from, end_date: addDaysIso(from, Math.max(1, daysBetween(s.start_date, s.end_date))), is_active: true };
+}
+
 function bodyOf(f) {
   const after = f.mode === "AFTER_EACH_SERVICE";
   return {
@@ -69,7 +84,7 @@ function bodyOf(f) {
     month_days: f.mode === "MONTH_DAYS" ? f.month_days : null,
     first_services: after && f.limit_first ? Number(f.first_services) : null,
     then_every_days: after && f.limit_first && f.then === "every" ? Number(f.then_every_days) : null,
-    service_types: f.service_types,
+    service_types: [], // every service counts
     start_date: f.start_date,
     end_date: f.end_date || null,
     note: f.note.trim() || null,
@@ -80,8 +95,8 @@ function bodyOf(f) {
 /** The rule in words. */
 function previewText(f) {
   const only = f.service_types.length ? `, only for ${f.service_types.join(", ")}` : "";
-  if (f.mode === "EVERY_N_DAYS") return `A call every ${f.every_days || "?"} days, when the site had a service since the last call${only}.`;
-  if (f.mode === "MONTH_DAYS") return `A call on the ${listText([...f.month_days].sort((a, b) => a - b).map(ordinal))} of every month, when the site had a service since the last call${only}.`;
+  if (f.mode === "EVERY_N_DAYS") return `A call every ${f.every_days || "?"} days${only}.`;
+  if (f.mode === "MONTH_DAYS") return `A call on the ${listText([...f.month_days].sort((a, b) => a - b).map(ordinal))} of every month${only}.`;
   if (!f.limit_first) return `A call the day after each service${only}.`;
   const then = f.then === "every" ? `, then a call every ${f.then_every_days || "?"} days` : ", then no more calls";
   return `A call the day after each of the first ${f.first_services || "?"} services${then}${only}.`;
@@ -169,33 +184,31 @@ function TargetPicker({ customers, value, onChange, single }) {
         <FiChevronDown aria-hidden="true" className="fb-muted fb-tp-caret" />
       </div>
       {open && (
-        <div className="fb-tp-menu" role="listbox" aria-multiselectable={!single}>
+        <div className="fb-tp-menu" role="group" aria-label="Customers and sites">
           {!matches.length && <div className="fb-tp-empty">No customer or site matches “{q}”.</div>}
           {matches.map(({ c, sites }) => {
             const whole = wholeCustomer(c.id);
+            // A one-site customer is just its customer row.
+            const siteRows = c.sites.length > 1 ? sites : [];
             return (
               <div key={c.id} className="fb-tp-group">
-                <button type="button" className={`fb-tp-opt is-customer ${whole ? "is-on" : ""}`} onClick={() => toggle(c.id, null)} role="option" aria-selected={whole}>
-                  <span className="fb-tp-box">{whole && <FiCheck />}</span>
-                  <span className="fb-tp-name">{c.name}</span>
-                  <span className="fb-tp-meta">All {c.sites.length} site{c.sites.length === 1 ? "" : "s"}</span>
-                </button>
-                {sites.map((st) => {
+                <label className={`fb-tp-opt ${whole ? "is-on" : ""}`}>
+                  <input type={single ? "radio" : "checkbox"} checked={whole} onChange={() => toggle(c.id, null)} />
+                  <span className="fb-tp-text">
+                    <span className="fb-tp-name">{c.name}</span>
+                    <span className="fb-tp-meta">{c.sites.length > 1 ? `All ${c.sites.length} sites` : [c.sites[0]?.name, c.sites[0]?.city].filter(Boolean).join(" · ") || "All sites"}</span>
+                  </span>
+                </label>
+                {siteRows.map((st) => {
                   const on = whole || has(c.id, st.id);
                   return (
-                    <button
-                      key={st.id}
-                      type="button"
-                      className={`fb-tp-opt is-site ${on ? "is-on" : ""}`}
-                      disabled={whole}
-                      onClick={() => toggle(c.id, st.id)}
-                      role="option"
-                      aria-selected={on}
-                    >
-                      <span className="fb-tp-box">{on && <FiCheck />}</span>
-                      <span className="fb-tp-name">{st.name}</span>
-                      {st.city && <span className="fb-tp-meta">{st.city}</span>}
-                    </button>
+                    <label key={st.id} className={`fb-tp-opt ${on ? "is-on" : ""} ${whole ? "is-disabled" : ""}`}>
+                      <input type={single ? "radio" : "checkbox"} checked={on} disabled={whole} onChange={() => toggle(c.id, st.id)} />
+                      <span className="fb-tp-text">
+                        <span className="fb-tp-name">{c.name}</span>
+                        <span className="fb-tp-meta">{[st.name, st.city].filter(Boolean).join(" · ")}</span>
+                      </span>
+                    </label>
                   );
                 })}
               </div>
@@ -208,8 +221,8 @@ function TargetPicker({ customers, value, onChange, single }) {
   );
 }
 
-function ScheduleForm({ schedule, options, onSaved, onClose }) {
-  const [f, setF] = useState(() => formOf(schedule));
+function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
+  const [f, setF] = useState(() => (renew ? renewForm(schedule) : formOf(schedule)));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? (e.target.type === "checkbox" ? e.target.checked : e.target.value) : e }));
@@ -222,7 +235,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose }) {
     setError("");
     try {
       await saveSchedule(schedule?.id, bodyOf(f));
-      onSaved(schedule ? "Schedule saved." : `${f.targets.length > 1 ? `${f.targets.length} schedules` : "Schedule"} added. Calls due today are on the Dashboard.`);
+      onSaved(renew ? `Scheduled again from ${formatDay(f.start_date)}${f.end_date ? ` to ${formatDay(f.end_date)}` : ""}.` : schedule ? "Schedule saved." : `${f.targets.length > 1 ? `${f.targets.length} schedules` : "Schedule"} added. Calls due today are on the Dashboard.`);
     } catch (err) {
       setError(err.message);
       setSaving(false);
@@ -232,7 +245,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose }) {
   return (
     <Modal
       wide
-      title={schedule ? "Edit schedule" : "Add a schedule"}
+      title={renew ? "Schedule again" : schedule ? "Edit schedule" : "Add a schedule"}
       onClose={onClose}
       footer={
         <>
@@ -360,23 +373,6 @@ function ScheduleForm({ schedule, options, onSaved, onClose }) {
           </div>
         </section>
 
-        <section className="fb-sched-sec">
-          <div className="fb-sched-label">
-            Services that count
-            <small>Calls are only about these services.</small>
-          </div>
-          <div className="fb-mini-chips">
-            <button type="button" className={`fb-mini-chip ${!f.service_types.length ? "is-on" : ""}`} onClick={() => setF((x) => ({ ...x, service_types: [] }))}>
-              All services
-            </button>
-            {options.services.map((name) => (
-              <button key={name} type="button" className={`fb-mini-chip ${f.service_types.includes(name) ? "is-on" : ""}`} aria-pressed={f.service_types.includes(name)} onClick={() => toggleIn("service_types", name)}>
-                {name}
-              </button>
-            ))}
-          </div>
-        </section>
-
         <section className="fb-sched-sec fb-sched-grid is-3">
           <label className="fb-field" htmlFor="fb-sc-start">
             <span>
@@ -400,6 +396,118 @@ function ScheduleForm({ schedule, options, onSaved, onClose }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Schedules whose end date has passed (still switched on): a card asking to take action - schedule
+ * the calls again (the same rule, for the same length of time) or close the schedule. On the
+ * Dashboard and the Call schedule page. schedules = the list (else it loads it); onChanged after an action.
+ */
+export function EndedSchedules({ schedules: given, onChanged }) {
+  const [loaded, setLoaded] = useState(null);
+  const [options, setOptions] = useState(null);
+  const [renewing, setRenewing] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const clearNotice = useCallback(() => setNotice(""), []);
+  const reload = useCallback(() => {
+    if (given) return;
+    getSchedules()
+      .then((d) => setLoaded(d.schedules || []))
+      .catch(() => setLoaded([]));
+  }, [given]);
+  useEffect(reload, [reload]);
+
+  const ended = (given || loaded || []).filter((x) => x.ended);
+  if (!ended.length && !notice && !renewing) return null;
+
+  function done(text) {
+    setNotice(text);
+    reload();
+    onChanged?.();
+  }
+
+  async function startRenew(x) {
+    setError("");
+    try {
+      setOptions(options || (await getScheduleOptions()));
+      setRenewing(x);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function close(x) {
+    setBusy(x.id);
+    setError("");
+    try {
+      await saveSchedule(x.id, { ...bodyOf(formOf(x)), is_active: false });
+      done(`${x.customer.name}${x.site ? ` · ${x.site.name}` : ""}: schedule closed. No more calls.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <>
+      <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
+      {ended.length > 0 && (
+        <section className="fb-ended" aria-label="Schedules that have ended">
+          <div className="fb-ended-head">
+            <span className="fb-ended-icon">
+              <FiAlertCircle aria-hidden="true" />
+            </span>
+            <div>
+              <div className="fb-ended-title">
+                {ended.length === 1 ? "A call schedule has ended" : `${ended.length} call schedules have ended`} · take action
+              </div>
+              <div className="fb-ended-sub">No more feedback calls are made for these. Schedule the calls again, or close the schedule.</div>
+            </div>
+          </div>
+          <ErrorBox error={error} />
+          <div className="fb-ended-list">
+            {ended.map((x) => (
+              <div key={x.id} className="fb-ended-item">
+                <div className="fb-ended-who">
+                  <b>{x.customer.name}</b>
+                  <span>{x.site ? [x.site.name, x.site.city].filter(Boolean).join(" · ") : "All sites"}</span>
+                </div>
+                <div className="fb-ended-rule">
+                  <span>{x.text}</span>
+                  <span>
+                    {formatDay(x.start_date)} – {formatDay(x.end_date)} · {x.calls_made} call{x.calls_made === 1 ? "" : "s"} made
+                  </span>
+                </div>
+                <div className="fb-ended-actions">
+                  <button type="button" className="fb-btn fb-btn-sm fb-btn-primary" onClick={() => startRenew(x)} disabled={busy === x.id}>
+                    <FiRefreshCw aria-hidden="true" /> Schedule again
+                  </button>
+                  <button type="button" className="fb-btn fb-btn-sm" onClick={() => close(x)} disabled={busy === x.id}>
+                    <FiXCircle aria-hidden="true" /> {busy === x.id ? "Closing…" : "Close"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {renewing && options && (
+        <ScheduleForm
+          renew
+          schedule={renewing}
+          options={options}
+          onClose={() => setRenewing(null)}
+          onSaved={(text) => {
+            setRenewing(null);
+            done(text);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -466,6 +574,7 @@ export default function ScheduleMaster() {
       />
       <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
       <ErrorBox error={error} />
+      <EndedSchedules schedules={schedules} onChanged={load} />
 
       <Card bodyClass="is-flush">
         <div className="fb-filters">
@@ -509,6 +618,11 @@ export default function ScheduleMaster() {
                     <td className="fb-small" style={{ whiteSpace: "nowrap" }}>
                       {formatDay(s.start_date)}
                       {s.end_date ? ` – ${formatDay(s.end_date)}` : ""}
+                      {s.ended && (
+                        <div>
+                          <span className="fb-ended-chip">Ended · take action</span>
+                        </div>
+                      )}
                     </td>
                     <td className="fb-small">
                       {s.calls_made ? (

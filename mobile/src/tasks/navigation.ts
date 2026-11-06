@@ -2,8 +2,6 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { ListMode } from './format';
 
 export type TaskTabParamList = {
-  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
-  FeedbackTickets: undefined;
   Home: undefined;
   /** `q` pre-fills the search (e.g. a person's name from Insights' Team workload). */
   Tasks: { mode?: ListMode; q?: string; at?: number; teamScoped?: boolean; focused?: boolean; activeOnly?: boolean } | undefined;
@@ -11,10 +9,16 @@ export type TaskTabParamList = {
   NewTaskTab: undefined;
   Schedule: undefined;
   Insights: undefined;
+  /** Accountants and others with Customer Feedback tickets: Insights and Tickets in one place. */
+  More: undefined;
 };
 
 export type TaskStackParamList = {
   TaskTabs: NavigatorScreenParams<TaskTabParamList> | undefined;
+  /** Opened from More (when Insights is not a tab of its own). */
+  InsightsPage: undefined;
+  /** Customer Feedback tickets, opened from More. */
+  FeedbackTickets: undefined;
   TaskDetail: { taskId: string };
   /**
    * `editId` opens the form in edit mode; `date` pre-fills the due date (from Calendar);

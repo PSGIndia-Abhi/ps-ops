@@ -9,11 +9,12 @@ import {
 import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
-import { CalendarIcon, ChartIcon, HomeIcon, PlusIcon } from '../components/icons';
+import { CalendarIcon, ChartIcon, HomeIcon, MoreHorizontalIcon, PlusIcon } from '../components/icons';
 import { useReminders } from '../reminders-engine/useReminders';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
-import { FeedbackTicketsTab, ticketsTabIcon, useTicketsTab } from '../feedback/FeedbackTicketsTab';
+import { FeedbackTicketsPage, useTicketsTab } from '../feedback/FeedbackTicketsTab';
+import { TaskMoreScreen } from '../tasks/screens/TaskMoreScreen';
 import { radii, shadows } from '../theme';
 import { salesTabIcon } from './salesTabIcon';
 import type { TaskStackParamList, TaskTabParamList } from '../tasks/navigation';
@@ -43,6 +44,7 @@ const homeIcon = salesTabIcon(HomeIcon);
 const tasksIcon = salesTabIcon(ClipboardListIcon, 'accent');
 const calendarIcon = salesTabIcon(CalendarIcon, 'warning');
 const insightsIcon = salesTabIcon(ChartIcon, 'success');
+const moreIcon = salesTabIcon(MoreHorizontalIcon, 'info');
 
 /** Tab label with a small dot under the active one. */
 function TabLabel({ focused, color, children }: { focused: boolean; color: string; children: string }) {
@@ -145,9 +147,11 @@ function TaskTabs() {
         })}
       />
       <Tab.Screen name="Schedule" component={TaskScheduleScreen} options={{ title: 'Calendar', tabBarIcon: calendarIcon }} />
-      <Tab.Screen name="Insights" component={TaskInsightsScreen} options={{ tabBarIcon: insightsIcon }} />
-      {tickets.show && (
-        <Tab.Screen name="FeedbackTickets" component={FeedbackTicketsTab} options={{ title: 'Tickets', tabBarIcon: ticketsTabIcon, tabBarBadge: tickets.count || undefined }} />
+      {/* With Customer Feedback tickets (accountants...): Insights and Tickets share one More tab. */}
+      {tickets.show ? (
+        <Tab.Screen name="More" component={TaskMoreScreen} options={{ tabBarIcon: moreIcon, tabBarBadge: tickets.count || undefined }} />
+      ) : (
+        <Tab.Screen name="Insights" component={TaskInsightsScreen} options={{ tabBarIcon: insightsIcon }} />
       )}
     </Tab.Navigator>
   );
@@ -161,12 +165,19 @@ function TaskTabs() {
  * Profile (opened from Home's avatar) reaches the existing shared
  * Change password screen on the parent stack.
  */
+/** Insights as a page (from More), with a back arrow. */
+function InsightsPage({ navigation }: { navigation: { goBack: () => void } }) {
+  return <TaskInsightsScreen onBack={() => navigation.goBack()} />;
+}
+
 export function TaskNavigator() {
   const theme = useCrmTheme();
   return (
     <TasksProvider>
       <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
         <Stack.Screen name="TaskTabs" component={TaskTabs} />
+        <Stack.Screen name="InsightsPage" component={InsightsPage} />
+        <Stack.Screen name="FeedbackTickets" component={FeedbackTicketsPage} />
         <Stack.Screen name="TaskDetail" component={TaskDetailScreen} />
         <Stack.Screen name="NewTask" component={NewTaskScreen} options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="TaskCreated" component={TaskCreatedScreen} options={{ animation: 'fade', gestureEnabled: false }} />

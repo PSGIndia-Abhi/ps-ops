@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { FiCheck, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser } from "react-icons/fi";
+import { FiCheck, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser, FiPaperclip } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -9,6 +9,7 @@ import {
   otherParts,
   hasOpsPart,
   markPartDone,
+  openPartAttachment,
   markActionDone,
   isAssignedAction,
   getPeople,
@@ -32,7 +33,6 @@ import {
   openCustomerEmail,
   pendingTab,
   prepareWhatsapp,
-  reopenTicket,
   closeTicket,
   deleteTicket,
   ticketStages,
@@ -42,6 +42,8 @@ import {
 import useMe from "../../hooks/useMe";
 import { useFeedbackAccess } from "./feedbackContext";
 import BookVisitButton from "./BookVisitButton";
+import ReopenTicketModal from "./ReopenTicketModal";
+import PartFeedbackModal from "./PartFeedbackModal";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { Card, Chip, CustomerCard, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, SubmissionAnswers, TicketStatusChip, Timeline, Toast } from "./ui";
 
@@ -190,6 +192,7 @@ export default function TicketPage() {
   const { can, userId, departments, deptOnly, ticketsBase } = useFeedbackAccess();
   const canManage = can("FEEDBACK_MANAGE");
   const [partNotes, setPartNotes] = useState({});
+  const [partFiles, setPartFiles] = useState({}); // a file attached when a department marks its part done
   const [actionDoneNote, setActionDoneNote] = useState("");
   const [people, setPeople] = useState({ supervisors: [], sales: [] }); // who a step can be assigned to
 
@@ -205,6 +208,7 @@ export default function TicketPage() {
   const [searchParams] = useSearchParams();
   const [modal, setModal] = useState(searchParams.get("reopen") === "1" ? "reopen" : null); // "reopen" | "delete"
   const [modalNote, setModalNote] = useState("");
+  const [askPart, setAskPart] = useState(null); // a finished department part: its optional customer feedback
   const [waContact, setWaContact] = useState("");
   const { user } = useMe();
   const [emailTemplates, setEmailTemplates] = useState([]);
@@ -329,8 +333,11 @@ export default function TicketPage() {
     setSaving(true);
     setError("");
     try {
-      await markPartDone(ticket.id, p.kind, (partNotes[p.kind] || "").trim());
+      const file = partFiles[p.kind] || null;
+      if (file && file.size > 10 * 1024 * 1024) throw new Error("The file is too big - up to 10 MB");
+      await markPartDone(ticket.id, p.kind, (partNotes[p.kind] || "").trim(), file);
       setPartNotes((n) => ({ ...n, [p.kind]: "" }));
+      setPartFiles((f) => ({ ...f, [p.kind]: null }));
       setNotice(`${p.label} part marked done. The collector can call the customer back once all the work is done.`);
       await load();
     } catch (err) {
@@ -358,21 +365,11 @@ export default function TicketPage() {
     }
   }
 
-  async function reopen() {
-    setSaving(true);
-    setError("");
-    try {
-      show(await reopenTicket(ticket.id, ticket.row_version, modalNote.trim()));
-      setNotice("Ticket reopened.");
-      setModal(null);
-      setModalNote("");
-    } catch (err) {
-      setError(err.message);
-      setModal(null);
-      if (err.status === 409) load();
-    } finally {
-      setSaving(false);
-    }
+  // Reopened (with the customer's answers) in ReopenTicketModal.
+  function reopened(t) {
+    show(t);
+    setNotice("Ticket reopened with the customer's answers. Plan the next step on it.");
+    setModal(null);
   }
 
   // A ticket raised by mistake: delete it and go back to its call.
@@ -420,7 +417,7 @@ export default function TicketPage() {
             {(ticket.parts || []).length > 0 && (
               <span className="fb-dept-chips">
                 {ticket.parts.map((p) => (
-                  <span key={p.kind} className={`fb-dept-chip ${p.kind !== OPERATIONS ? "is-accounts" : ""} ${p.status === "DONE" && p.kind !== OPERATIONS ? "is-done" : ""}`}>
+                  <span key={p.kind} className={`fb-dept-chip ${p.kind === OPERATIONS ? "is-ops" : p.kind === "ACCOUNTS" ? "is-acc" : p.kind === "SALES" ? "is-sales" : "is-other"} ${p.status === "DONE" && p.kind !== OPERATIONS ? "is-done" : ""}`}>
                     {p.label || p.kind}
                     {p.kind !== OPERATIONS && p.status === "DONE" ? " ✓" : ""}
                   </span>
@@ -566,6 +563,11 @@ export default function TicketPage() {
                     <span>
                       <span className="fb-strong">Done</span> · {p.done_note}
                       <span className="fb-small fb-muted"> · {[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(" · ")}</span>
+                      {p.attachment && (
+                        <button type="button" className="fb-part-file" onClick={() => openPartAttachment(ticket.id, p.kind).catch((err) => setError(err.message))}>
+                          <FiPaperclip aria-hidden="true" /> {p.attachment.name}
+                        </button>
+                      )}
                     </span>
                   </div>
                 ) : canFinish(p) ? (
@@ -581,6 +583,29 @@ export default function TicketPage() {
                         onChange={(e) => setPartNotes((n) => ({ ...n, [p.kind]: e.target.value }))}
                       />
                     </label>
+                    <div className="fb-field">
+                      <span>
+                        Attach a file <span className="fb-small fb-muted">(optional, up to 10 MB)</span>
+                      </span>
+                      <label className={`fb-file-pick ${partFiles[p.kind] ? "has-file" : ""}`}>
+                        <FiPaperclip aria-hidden="true" />
+                        <span>{partFiles[p.kind] ? partFiles[p.kind].name : p.with_invoices ? "Choose a file, e.g. the invoice copy sent" : "Choose a file (photo, PDF, document)"}</span>
+                        <input type="file" onChange={(e) => setPartFiles((f) => ({ ...f, [p.kind]: e.target.files?.[0] || null }))} />
+                        {partFiles[p.kind] && (
+                          <button
+                            type="button"
+                            className="fb-file-x"
+                            aria-label="Remove the file"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setPartFiles((f) => ({ ...f, [p.kind]: null }));
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </label>
+                    </div>
                     <div>
                       <button type="button" className="fb-btn fb-btn-primary" disabled={saving || !(partNotes[p.kind] || "").trim()} onClick={() => finishPart(p)}>
                         <FiCheck aria-hidden="true" /> {saving ? "Saving…" : `Mark ${p.label} done`}
@@ -589,6 +614,35 @@ export default function TicketPage() {
                   </div>
                 ) : (
                   <div className="fb-small fb-muted">{open ? `Waiting for ${p.label}.` : "Closed."}</div>
+                )}
+                {/* Optional: once the department is done, ask the customer how it went. */}
+                {p.status === "DONE" && p.kind !== OPERATIONS && (
+                  p.customer_feedback ? (
+                    <div className={`fb-part-fb ${p.customer_feedback.has_issue ? "is-bad" : "is-good"}`}>
+                      <div className="fb-part-fb-head">
+                        <b>Customer feedback · {p.customer_feedback.has_issue ? "Not happy" : "All good"}</b>
+                        <span className="fb-small fb-muted">
+                          {[p.customer_feedback.spoke_with_name, formatDateTime(p.customer_feedback.submitted_at)].filter(Boolean).join(" · ")}
+                        </span>
+                        {canMessage && (
+                          <button type="button" className="fb-btn fb-btn-sm" onClick={() => setAskPart(p)}>
+                            Ask again
+                          </button>
+                        )}
+                      </div>
+                      <SubmissionAnswers submission={p.customer_feedback} />
+                    </div>
+                  ) : (
+                    canMessage && (
+                      <button type="button" className="fb-part-ask" onClick={() => setAskPart(p)}>
+                        <FiPhoneCall aria-hidden="true" />
+                        <span>
+                          <b>Call the customer about {p.label}</b>
+                          <small>Optional · ask how it went with {p.label}'s questions</small>
+                        </span>
+                      </button>
+                    )
+                  )
                 )}
               </div>
             </Card>
@@ -859,31 +913,19 @@ export default function TicketPage() {
         </div>
       </div>
 
-      {modal === "reopen" && !open && canMessage && (
-        <Modal
-          title={`Reopen ${ticket.ticket_number}`}
-          onClose={() => setModal(null)}
-          footer={
-            <>
-              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
-                Cancel
-              </button>
-              <button type="button" className="fb-btn fb-btn-dark" onClick={reopen} disabled={saving || !modalNote.trim()}>
-                {saving ? "Saving…" : "Reopen ticket"}
-              </button>
-            </>
-          }
-        >
-          <label className="fb-field" htmlFor="fb-t-modal-note">
-            Why is it reopened?
-            <textarea id="fb-t-modal-note" className="fb-textarea" rows={3} maxLength={500} value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
-          </label>
-          <div className="fb-small fb-muted">
-            The same ticket opens again{ticket.action === "RESOLVED_ON_CALL" ? ' with the next step "Book a re-visit"' : ""}. Book a new re-visit on it; when that is done, call the customer back again.
-          </div>
-        </Modal>
+      {askPart && (
+        <PartFeedbackModal
+          ticket={ticket}
+          part={askPart}
+          onClose={() => setAskPart(null)}
+          onDone={(t) => {
+            show(t);
+            setNotice(`${askPart.label} feedback saved.`);
+            setAskPart(null);
+          }}
+        />
       )}
-
+      {modal === "reopen" && !open && canMessage && <ReopenTicketModal ticket={ticket} onDone={reopened} onClose={() => setModal(null)} />}
       {modal === "close" && open && canMessage && (
         <Modal
           title={`Close ${ticket.ticket_number}?`}

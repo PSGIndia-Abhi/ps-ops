@@ -16,6 +16,7 @@ import { FeedbackTicketsScreen } from './screens/FeedbackTicketsScreen';
  * sees it on the ticket and calls the customer back. RoleTabs says whether to show it.
  */
 export { TicketsTabContext, useTicketsTab, type TicketsTab } from './ticketsTabContext';
+import { TicketsBackContext } from './ticketsTabContext';
 
 /** The permissions that only give tickets (anything else opens the full Customer Feedback app). */
 export const TICKETS_ONLY = ['FEEDBACK_DEPT', 'FEEDBACK_ASSIGNED'];
@@ -35,5 +36,14 @@ export function FeedbackTicketsTab() {
         <Stack.Screen name="Profile" component={FeedbackProfileScreen} />
       </Stack.Navigator>
     </FeedbackProvider>
+  );
+}
+
+/** The same tickets as a page pushed from More (sales, accountants): the list gets a back arrow. */
+export function FeedbackTicketsPage({ navigation }: { navigation: { goBack: () => void } }) {
+  return (
+    <TicketsBackContext.Provider value={() => navigation.goBack()}>
+      <FeedbackTicketsTab />
+    </TicketsBackContext.Provider>
   );
 }

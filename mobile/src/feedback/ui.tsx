@@ -209,16 +209,6 @@ export function QuestionForm({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modes}>
         <Chips options={questionModes(departments).filter((m) => counts[m.value] > 0).map((m) => ({ value: m.value, label: `${m.label} · ${counts[m.value]}` }))} value={mode} onChange={onMode} />
       </ScrollView>
-      {questions.length > 0 && (
-        <View style={styles.progress}>
-          <Text style={styles.progressText}>
-            {done} of {questions.length} answered
-          </Text>
-          <View style={styles.bar}>
-            <View style={[styles.barFill, { width: `${pct}%` }]} />
-          </View>
-        </View>
-      )}
       {questions.map((q, n) => {
         const answered = !!answers[q.id];
         return (
@@ -263,6 +253,16 @@ export function QuestionForm({
           </View>
         );
       })}
+      {questions.length > 0 && (
+        <View style={styles.progress}>
+          <Text style={styles.progressText}>
+            {done} of {questions.length} answered
+          </Text>
+          <View style={styles.bar}>
+            <View style={[styles.barFill, { width: `${pct}%` }]} />
+          </View>
+        </View>
+      )}
       {otherEnabled && (
         <View style={styles.qCard}>
           <Text style={[styles.qTitle, { marginBottom: spacing.xs }]}>Other feedback (optional)</Text>
@@ -363,8 +363,8 @@ const periodFactory = (t: CrmTheme) => ({
  * Month wise / Date wise, inline (no card of its own): month wise picks a month on a month
  * calendar, date wise picks From and To on a day calendar (To is never before From).
  */
-/** withDue: also "Due today" and "All" (the call list). */
-export function PeriodPicker({ value, onChange, withDue = false }: { value: Period; onChange: (p: Period) => void; withDue?: boolean }) {
+/** withDue: also "Due today" and "All" (the call list). hideModes: only the month / date fields (the mode is picked elsewhere). */
+export function PeriodPicker({ value, onChange, withDue = false, hideModes = false }: { value: Period; onChange: (p: Period) => void; withDue?: boolean; hideModes?: boolean }) {
   const { styles, theme } = useCrmStyles(periodFactory);
   const [picking, setPicking] = useState<'month' | 'from' | 'to' | null>(null);
   const field = (key: 'month' | 'from' | 'to', label: string, text: string, chevron = false) => (
@@ -383,7 +383,7 @@ export function PeriodPicker({ value, onChange, withDue = false }: { value: Peri
   );
   return (
     <View style={styles.wrap}>
-      <Chips
+      {!hideModes && <Chips
         options={[
           ...(withDue
             ? [
@@ -396,7 +396,7 @@ export function PeriodPicker({ value, onChange, withDue = false }: { value: Peri
         ]}
         value={value.mode}
         onChange={(mode) => onChange({ ...value, mode })}
-      />
+      />}
       {value.mode === 'today' || value.mode === 'all' ? null : value.mode === 'month' ? (
         <View style={styles.row}>{field('month', 'Month', monthLabel(value.month), true)}</View>
       ) : (

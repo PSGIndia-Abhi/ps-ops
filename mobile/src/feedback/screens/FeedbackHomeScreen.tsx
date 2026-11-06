@@ -8,10 +8,10 @@ import { AlertTriangleIcon, CheckCircleIcon, ChevronRightIcon, InboxIcon, PhoneI
 import { initialsOf } from '../../crm/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
-import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import { BandBackground, QuickAction, Tile } from '../../tasks/screens/TaskHomeScreen';
 import { TaskBrandMark } from '../../tasks/ui/TaskBrandMark';
 import { ClipboardIcon, SwapIcon } from '../../tasks/ui/taskIcons';
+import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import { radii, spacing, typography } from '../../theme';
 import { errorText, listCalls, listTickets, takeCall } from '../api';
 import { isPast, monthLabel, thisMonth } from '../format';
@@ -68,11 +68,11 @@ function rank(r: CallRow): number {
  */
 export function FeedbackHomeScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
+  const { canSwitch, openSwitcher } = useAppSwitch();
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const { user } = useAuth();
   const rawRole = useRawRole();
-  const { canSwitch, openSwitcher } = useAppSwitch();
   const myId = Number(user?.id);
   const month = thisMonth();
 
@@ -136,7 +136,6 @@ export function FeedbackHomeScreen() {
               <TaskBrandMark size={40} />
             </View>
             <View style={styles.flex1}>
-              <Text style={styles.hi}>Customer Feedback</Text>
               <Text style={styles.name} numberOfLines={1}>
                 {user?.name}
               </Text>
@@ -160,7 +159,6 @@ export function FeedbackHomeScreen() {
               )}
             </Pressable>
           </View>
-          <Text style={styles.monthNote}>Calls due today · {monthLabel(month)}</Text>
         </View>
 
         <View style={styles.tiles}>

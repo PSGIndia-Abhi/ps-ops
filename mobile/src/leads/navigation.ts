@@ -88,8 +88,6 @@ export type LeadStackParamList = {
 
 /** "NewLeadTab" is the raised centre action and never renders a screen (it opens LeadNew). */
 export type LeadTabParamList = {
-  /** Customer Feedback tickets (a department's team, assigned supervisors / salespeople). */
-  FeedbackTickets: undefined;
   Home: undefined;
   /** `at` changes on every navigation so re-opening with the same group still re-applies it. */
   Leads: { group?: StageGroup; at?: number } | undefined;
@@ -100,6 +98,8 @@ export type LeadTabParamList = {
 
 export type LeadRootStackParamList = {
   LeadTabs: NavigatorScreenParams<LeadTabParamList> | undefined;
+  /** Customer Feedback tickets for a salesperson, opened from More. */
+  FeedbackTickets: undefined;
   /** The residential lead's details and its edit form - the CRM's own screens. */
   CrmLeadDetail: { leadId: string };
   CrmNewLead: { editLeadId?: string } | undefined;

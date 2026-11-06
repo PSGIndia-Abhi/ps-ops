@@ -7,8 +7,8 @@ const { HttpError, inTransaction, addHistory, optionalDate } = require("./feedba
 //
 // A site gets feedback calls only when a schedule covers it: its own rule, else its customer's
 // rule (all the customer's sites). Sites without one get no calls.
-//   EVERY_N_DAYS        a call every N days from the start date - only when the site had a service
-//                       since the last call (the feedback is about a service).
+//   EVERY_N_DAYS        a call every N days from the start date (with or without a service since
+//                       the last call; the call page then shows the last earlier service).
 //   AFTER_EACH_SERVICE  a call the day after each service; first_services = only the customer's /
 //                       site's first N services from the start date (e.g. a new customer's first 3),
 //                       then a call every then_every_days days (or none when it is empty).
@@ -21,7 +21,7 @@ const { HttpError, inTransaction, addHistory, optionalDate } = require("./feedba
 // ---------------------------------------------------------------------------
 
 //   MONTH_DAYS          a call on given days of every month (month_days: [1] = the 1st, [1, 15]...; a
-//                       day past the month's end = its last day) - when the site had a service since
+//                       day past the month's end = its last day) - with or without a service since
 //                       the last call.
 const MODES = ["EVERY_N_DAYS", "MONTH_DAYS", "AFTER_EACH_SERVICE"];
 const DAY = 86400000;
@@ -71,6 +71,8 @@ function scheduleRow(r) {
     end_date: r.end_date,
     note: r.note,
     is_active: Boolean(r.is_active),
+    // Its end date has passed while it is still on: someone should schedule it again or close it.
+    ended: Boolean(r.is_active) && Boolean(r.end_date) && Boolean(r.ended),
     text: ruleText(r),
     calls_made: Number(r.calls_made || 0),
     last_due_date: r.last_due_date,
@@ -84,6 +86,7 @@ async function listSchedules() {
   const [rows] = await pool.query(
     `SELECT fs.*, DATE_FORMAT(fs.start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(fs.end_date, '%Y-%m-%d') AS end_date,
             co.name AS company_name, s.name AS site_name, s.city AS site_city, u.name AS updated_by_name,
+            (fs.end_date IS NOT NULL AND fs.end_date < CURDATE()) AS ended,
             (SELECT COUNT(*) FROM feedback_requests r WHERE r.schedule_id = fs.id) AS calls_made,
             (SELECT DATE_FORMAT(MAX(r.due_date), '%Y-%m-%d') FROM feedback_requests r WHERE r.schedule_id = fs.id) AS last_due_date
      FROM feedback_schedules fs
@@ -245,15 +248,15 @@ async function siteServices(siteId, from, rule) {
   return rows.filter((r) => !only.size || only.has(String(r.service || "").toLowerCase()));
 }
 
-// Every N days from `anchor`: the latest due date up to `until`, if the site had a service since
-// the last call. covered = where the last call's services stopped.
-function everyDaysCall(anchor, days, until, covered, services, ruleStart) {
+// Every N days from `anchor`: the latest due date up to `until` (a call is made whether or not the
+// site had a service; the call page shows the last earlier service when there was none).
+// covered = where the last call's period stopped.
+function everyDaysCall(anchor, days, until, covered, ruleStart) {
   const k = Math.floor(daysBetween(anchor, until) / days);
   if (k < 1) return null;
   const due = addDays(anchor, k * days);
   if (covered && due <= covered) return null;
   const start = maxDate(covered || addDays(due, -days), ruleStart);
-  if (!services.some((v) => v.d >= start && v.d < due)) return null;
   return { due, start };
 }
 
@@ -272,9 +275,9 @@ function lastMonthDay(days, from, notBefore) {
   return null;
 }
 
-// On days of the month: the latest such day up to `until`, if the site had a service since the
-// last call (or, for the first call, since the matching day before it).
-function monthDaysCall(days, until, covered, services, ruleStart) {
+// On days of the month: the latest such day up to `until` (with or without a service since the
+// last call). Its period: since the last call, or for the first call since the matching day before it.
+function monthDaysCall(days, until, covered, ruleStart) {
   if (!days.length) return null;
   const due = lastMonthDay(days, until, ruleStart);
   if (!due || (covered && due <= covered)) return null;
@@ -283,7 +286,6 @@ function monthDaysCall(days, until, covered, services, ruleStart) {
   // the calls begin, so a schedule starting on the 5th still calls on the 5th.
   const previous = lastMonthDay(days, addDays(due, -1), "2000-01-01") || addDays(due, -31);
   const start = covered && covered > previous ? covered : previous;
-  if (!services.some((v) => v.d >= start && v.d < due)) return null;
   return { due, start };
 }
 
@@ -300,11 +302,12 @@ async function dueCallFor(siteId, rule, today) {
   if (last && last.status !== "DONE") return null; // the last call isn't done yet
   const until = rule.end_date && rule.end_date < today ? rule.end_date : today;
   const covered = last?.covered || null;
-  // Dates of the month: the first call also covers the month before the start date.
-  const services = await siteServices(siteId, rule.mode === "MONTH_DAYS" ? addDays(rule.start_date, -31) : rule.start_date, rule);
 
-  if (rule.mode === "EVERY_N_DAYS") return everyDaysCall(rule.start_date, rule.every_days, until, covered, services, rule.start_date);
-  if (rule.mode === "MONTH_DAYS") return monthDaysCall(monthDaysOf(rule.month_days), until, covered, services, rule.start_date);
+  if (rule.mode === "EVERY_N_DAYS") return everyDaysCall(rule.start_date, rule.every_days, until, covered, rule.start_date);
+  if (rule.mode === "MONTH_DAYS") return monthDaysCall(monthDaysOf(rule.month_days), until, covered, rule.start_date);
+
+  // After each service: the site's services since the start date.
+  const services = await siteServices(siteId, rule.start_date, rule);
 
   // After each service: a call the day after it (one call covers the services since the last call).
   const counted = rule.first_services ? services.slice(0, rule.first_services) : services;
@@ -316,7 +319,7 @@ async function dueCallFor(siteId, rule, today) {
   // After the first N services: every N days from the day after the Nth service.
   if (rule.first_services && rule.then_every_days && services.length >= rule.first_services) {
     const anchor = addDays(services[rule.first_services - 1].d, 1);
-    return everyDaysCall(anchor, rule.then_every_days, until, covered, services, anchor);
+    return everyDaysCall(anchor, rule.then_every_days, until, covered, anchor);
   }
   return null;
 }

@@ -183,7 +183,7 @@ export function Empty({ title, text }) {
   );
 }
 
-export function Modal({ title, onClose, children, footer, wide }) {
+export function Modal({ title, onClose, children, footer, wide, className = "" }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
@@ -191,7 +191,7 @@ export function Modal({ title, onClose, children, footer, wide }) {
   }, [onClose]);
   return (
     <div className="fb-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`fb-modal ${wide ? "is-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`fb-modal ${wide ? "is-wide" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="fb-card-h">
           <h2>{title}</h2>
           <button type="button" className="fb-icon-btn" onClick={onClose} aria-label="Close">

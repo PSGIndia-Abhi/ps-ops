@@ -19,6 +19,8 @@ export type CrmTabParamList = {
 
 export type CrmStackParamList = {
   CrmTabs: NavigatorScreenParams<CrmTabParamList> | undefined;
+  /** Customer Feedback tickets, opened from More. */
+  FeedbackTickets: undefined;
   /** The residential lead form. With `editLeadId` it opens filled in, to change that lead. */
   CrmNewLead: { editLeadId?: string } | undefined;
   /** The commercial lead form (company, quote, photos - no payment). `editLeadId` as above. */

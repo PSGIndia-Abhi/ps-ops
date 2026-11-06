@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { FiCheck, FiEdit2, FiMail } from "react-icons/fi";
+import { FiCheck, FiChevronRight, FiEdit2, FiFilePlus, FiMail, FiMessageSquare } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -104,6 +104,8 @@ export default function CallPage() {
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [visitFilter, setVisitFilter] = useState("");
   const [ticketWaContact, setTicketWaContact] = useState(""); // "" = the default contact
+  // New feedback on a call already done (Raise new ticket › Take new feedback).
+  const [newRound, setNewRound] = useState(false);
 
   const load = useCallback(() => {
     return getCall(id)
@@ -140,6 +142,9 @@ export default function CallPage() {
   // The last saved call result stays selected; Save is on only after it is changed (or a new person is called).
   const savedAttempt = call?.call_attempts?.[0] || null;
   const shownOutcome = outcome ?? savedAttempt?.outcome ?? "ANSWERED";
+  // Wrong number: no feedback until the right number is called and answered (the service
+  // coordinator adds it from Requests, or the collector calls another number).
+  const wrongLock = savedAttempt?.outcome === "WRONG_NUMBER" || shownOutcome === "WRONG_NUMBER";
   const attemptChanged =
     !savedAttempt ||
     shownOutcome !== savedAttempt.outcome ||
@@ -148,7 +153,9 @@ export default function CallPage() {
   const canWork = Boolean(call) && call.status !== "DONE" && (mine || can("FEEDBACK_MANAGE"));
   const canRaiseLater = Boolean(call?.submissions?.length) && (mine || can("FEEDBACK_MANAGE"));
   const latest = call?.submissions?.find((s) => s.is_latest) || call?.submissions?.[0] || null;
-  const firstTicket = call?.tickets?.[0] || null; // a call has one ticket
+  const firstTicket = call?.tickets?.[0] || null; // the call's first ticket (a new complaint gets its own)
+  // The ticket to open from the call: the latest one still open, else the latest one.
+  const lastTicket = call?.tickets?.length ? [...call.tickets].reverse().find((t) => t.status !== "CLOSED") || call.tickets.at(-1) : null;
   // Several contacts can be marked primary; only the first is shown as Primary.
   const primaryId = call?.contacts?.find((c) => c.is_primary)?.id;
   // The right number from the service coordinator (not called yet): under the wrong one, marked New.
@@ -291,6 +298,7 @@ export default function CallPage() {
       other_feedback: otherEnabled ? other.trim() || null : null,
       started_at: startedAt,
       ...modeBody(qMode),
+      ...(newRound ? { new_round: true } : {}),
     };
   }
 
@@ -300,9 +308,10 @@ export default function CallPage() {
     try {
       const res = await saveCallFeedback(id, { ...feedbackBody(), ...extra });
       setModal(null);
-      flash(res.ticket ? `Feedback saved and ticket ${res.ticket.ticket_number} raised. The call is done.` : "Feedback saved. The call is done.");
+      flash(res.ticket ? `Feedback saved and ticket ${res.ticket.ticket_number} raised.${newRound ? "" : " The call is done."}` : newRound ? "New feedback saved." : "Feedback saved. The call is done.");
       setAnswers({});
       setOther("");
+      setNewRound(false);
       await load();
     } catch (err) {
       setError(err.message);
@@ -537,15 +546,14 @@ export default function CallPage() {
                       <button type="button" className="fb-btn fb-btn-ok" disabled={saving} onClick={() => finish()}>
                         No issue · Done
                       </button>
-                      {firstTicket ? (
-                        <Link className="fb-btn fb-btn-danger" to={`${FEEDBACK_HOME}/tickets/${firstTicket.id}${firstTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
-                          {firstTicket.status === "CLOSED" ? `Reopen ${firstTicket.ticket_number}` : `Open ${firstTicket.ticket_number}`}
+                      {lastTicket && (
+                        <Link className="fb-btn" to={`${FEEDBACK_HOME}/tickets/${lastTicket.id}${lastTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
+                          {lastTicket.status === "CLOSED" ? `Reopen ${lastTicket.ticket_number}` : `Open ${lastTicket.ticket_number}`}
                         </Link>
-                      ) : (
-                        <button type="button" className="fb-btn fb-btn-danger" onClick={() => setModal("ticket-later")}>
-                          Raise ticket
-                        </button>
                       )}
+                      <button type="button" className="fb-btn fb-btn-danger" onClick={() => setModal("ticket-later")}>
+                        {lastTicket ? "Raise new ticket" : "Raise ticket"}
+                      </button>
                     </div>
                   </div>
                 </Card>
@@ -667,12 +675,19 @@ export default function CallPage() {
               </Card>
 
               <Card title="2 · Feedback from the call">
+                {wrongLock && (
+                  <div className="fb-alert fb-alert-warn" style={{ marginBottom: 12 }}>
+                    <span>
+                      <b>Wrong number.</b> The questions open once you call the right number and save the result as Answered. Ask the service coordinator for the number (Send request above), or call another contact.
+                    </span>
+                  </div>
+                )}
+                <fieldset className="fb-lockable" disabled={wrongLock} aria-disabled={wrongLock}>
                 <label className="fb-field" htmlFor="fb-spoke" style={{ paddingBottom: 12, borderBottom: "1px solid #f1f2f4" }}>
                   Spoke with
                   <input id="fb-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
                 </label>
                 <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
-                <QuestionProgress questions={visibleQuestions} answers={answers} />
                 {visibleQuestions.map((q, n) => (
                   <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
                     <div className="fb-q-t">
@@ -690,6 +705,7 @@ export default function CallPage() {
                     <AnswerButtons question={q} value={answers[q.id]} onChange={(optionId) => pickAnswer(q.id, optionId)} />
                   </div>
                 ))}
+                <QuestionProgress questions={visibleQuestions} answers={answers} />
                 {otherEnabled && (
                   <div className="fb-q">
                     <label className="fb-q-t" htmlFor="fb-other" style={{ display: "block" }}>
@@ -715,6 +731,7 @@ export default function CallPage() {
                     </button>
                   )}
                 </div>
+                </fieldset>
               </Card>
 
               <Card title="Can't get feedback?">
@@ -760,7 +777,6 @@ export default function CallPage() {
                 </label>
               </div>
               <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
-                <QuestionProgress questions={visibleQuestions} answers={answers} />
               {visibleQuestions.map((q, n) => (
                 <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
                   <div className="fb-q-t">
@@ -778,6 +794,7 @@ export default function CallPage() {
                   <AnswerButtons question={q} value={answers[q.id]} onChange={(optionId) => pickAnswer(q.id, optionId)} />
                 </div>
               ))}
+              <QuestionProgress questions={visibleQuestions} answers={answers} />
               {otherEnabled && (
                 <div className="fb-q">
                   <label className="fb-q-t" htmlFor="fb-fu-other" style={{ display: "block" }}>
@@ -809,28 +826,107 @@ export default function CallPage() {
                     status={firstFeedback.has_issue ? { text: firstTicket ? `Issue · ${firstTicket.ticket_number}` : "Issue", tone: "danger" } : { text: "All good", tone: "ok" }}
                     submission={firstFeedback}
                   />
-                  {followUpSubs.map((s, n) => (
-                    <FeedbackRound key={s.id} label={`Follow-up call ${n + 1}`} status={s.has_issue ? { text: "Not resolved", tone: "danger" } : { text: "Resolved", tone: "ok" }} submission={s} />
-                  ))}
+                  {followUpSubs.map((s) => {
+                    // New feedback that raised another ticket (saved together) is a new complaint, not a follow-up.
+                    const raised = call.tickets.find((t) => t.id !== firstTicket?.id && Math.abs(new Date(t.created_at) - new Date(s.submitted_at)) < 5000);
+                    if (raised) return <FeedbackRound key={s.id} label="New complaint" status={{ text: `Ticket ${raised.ticket_number}`, tone: "danger" }} submission={s} />;
+                    // Answers only to one department's questions: the optional call after that department finished.
+                    const deptQs = (s.responses || []).map((r) => questions.find((q) => q.id === r.question_id));
+                    const dept = deptQs.length && deptQs.every((q) => q?.question_type === "DEPARTMENT") ? deptQs[0].departments?.[0] : null;
+                    if (dept) {
+                      const label = call.tickets.flatMap((t) => t.parts || []).find((p) => p.kind === dept)?.label || dept;
+                      return <FeedbackRound key={s.id} label={`${label} feedback`} status={s.has_issue ? { text: "Not happy", tone: "danger" } : { text: "All good", tone: "ok" }} submission={s} />;
+                    }
+                    const n = followUpSubs.filter((x) => new Date(x.submitted_at) <= new Date(s.submitted_at) && !call.tickets.some((t) => t.id !== firstTicket?.id && Math.abs(new Date(t.created_at) - new Date(x.submitted_at)) < 5000)).length;
+                    return <FeedbackRound key={s.id} label={`Follow-up call ${n}`} status={s.has_issue ? { text: "Not resolved", tone: "danger" } : { text: "Resolved", tone: "ok" }} submission={s} />;
+                  })}
                 </div>
               ) : (
                 <div className="fb-muted">No feedback was received on this call.</div>
               )}
               {canRaiseLater && (
                 <div className="fb-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-                  {/* One ticket per call: a new problem goes on the same ticket. */}
-                  {firstTicket ? (
-                    <Link className="fb-btn" to={`${FEEDBACK_HOME}/tickets/${firstTicket.id}${firstTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
-                      {firstTicket.status === "CLOSED" ? `Reopen ${firstTicket.ticket_number}` : `Open ${firstTicket.ticket_number}`}
+                  {/* The same problem again: reopen its ticket. A new complaint: a new ticket, even while another is open. */}
+                  {lastTicket && (
+                    <Link className="fb-btn" to={`${FEEDBACK_HOME}/tickets/${lastTicket.id}${lastTicket.status === "CLOSED" ? "?reopen=1" : ""}`}>
+                      {lastTicket.status === "CLOSED" ? `Reopen ${lastTicket.ticket_number}` : `Open ${lastTicket.ticket_number}`}
                     </Link>
-                  ) : (
-                    <button type="button" className="fb-btn" onClick={() => setModal("ticket-later")}>
-                      Raise ticket
-                    </button>
                   )}
+                  <button type="button" className="fb-btn fb-btn-danger" onClick={() => setModal(lastTicket ? "raise-choice" : "ticket-later")} disabled={newRound}>
+                    {lastTicket ? "Raise new ticket" : "Raise ticket"}
+                  </button>
                 </div>
               )}
             </Card>
+          )}
+
+          {call.status === "DONE" && newRound && canRaiseLater && (
+            <div id="fb-new-round">
+              <Card title="New feedback · new complaint" className="fb-newround">
+                <div className="fb-stack" style={{ gap: 10, paddingBottom: 12, borderBottom: "1px solid #f1f2f4" }}>
+                  {call.contacts.map((c) => (
+                    <div key={c.id} className={`fb-contact ${contactKey === c.id ? "is-on" : ""}`}>
+                      <label className="fb-contact-pick">
+                        <input type="radio" name="fb-nr-contact" checked={contactKey === c.id} onChange={() => setContactKey(c.id)} />
+                        <span>
+                          <span className="fb-strong">{c.name}</span>
+                          <br />
+                          <span className="fb-small fb-muted">{[c.role, c.phone?.trim() || "No phone number"].filter(Boolean).join(" · ")}</span>
+                        </span>
+                      </label>
+                      {c.phone?.trim() && <CallButton className="fb-btn fb-btn-primary" name={c.name} phone={c.phone} onClick={() => setContactKey(c.id)} />}
+                    </div>
+                  ))}
+                  <label className="fb-field" htmlFor="fb-nr-spoke">
+                    Spoke with
+                    <input id="fb-nr-spoke" className="fb-input" style={{ maxWidth: 360 }} placeholder="Name of the person" value={spokeWith} onChange={(e) => setSpokeWith(e.target.value)} />
+                  </label>
+                </div>
+                <QuestionModePicker value={qMode} onChange={setQMode} counts={modeCounts} />
+                {visibleQuestions.map((q, n) => (
+                  <div key={q.id} className={`fb-q ${answers[q.id] ? "is-answered" : ""} ${!q.is_required && !answers[q.id] ? "is-skipped" : ""}`}>
+                    <div className="fb-q-t">
+                      <span className="fb-q-no">{answers[q.id] ? <FiCheck aria-hidden="true" /> : n + 1}</span>
+                      <span className="fb-q-text">
+                        {q.question_text} {q.is_required ? <span className="fb-req">*</span> : <span className="fb-q-optional">Optional</span>}
+                      </span>
+                      {q.question_type === "SERVICE" && <span className="fb-q-tag">Service</span>}
+                    </div>
+                    <AnswerButtons question={q} value={answers[q.id]} onChange={(optionId) => pickAnswer(q.id, optionId)} />
+                  </div>
+                ))}
+                <QuestionProgress questions={visibleQuestions} answers={answers} />
+                {otherEnabled && (
+                  <div className="fb-q">
+                    <label className="fb-q-t" htmlFor="fb-nr-other" style={{ display: "block" }}>
+                      What is the new complaint? <span className="fb-muted fb-small">(optional)</span>
+                    </label>
+                    <textarea id="fb-nr-other" className="fb-textarea" rows={2} maxLength={2000} value={other} onChange={(e) => setOther(e.target.value)} />
+                  </div>
+                )}
+                <div className="fb-row" style={{ justifyContent: "flex-end" }}>
+                  {missing.length > 0 && chosen.length > 0 && <span className="fb-small fb-muted">{missing.length} question{missing.length === 1 ? "" : "s"} left</span>}
+                  <button
+                    type="button"
+                    className="fb-btn"
+                    disabled={saving}
+                    onClick={() => {
+                      setNewRound(false);
+                      setAnswers({});
+                      setOther("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="button" className="fb-btn" disabled={saving || !chosen.length} onClick={() => saveGood({ no_ticket: true })}>
+                    Save without a ticket
+                  </button>
+                  <button type="button" className="fb-btn fb-btn-danger" disabled={saving || !chosen.length} onClick={openTicketForNewFeedback}>
+                    Save & raise ticket
+                  </button>
+                </div>
+              </Card>
+            </div>
           )}
 
           <Card title="History" aside={`${call.history.length} event${call.history.length === 1 ? "" : "s"}`}>
@@ -858,6 +954,27 @@ export default function CallPage() {
                     {VISIT_STATUS[status]?.label || status} {n}
                   </button>
                 ))}
+              </div>
+            )}
+            {/* No service in this period: the site's last service before it, shown once. */}
+            {call.visits.length === 0 && (
+              <div className="fb-earlier">
+                <div className="fb-earlier-h">No service in this period</div>
+                {call.earlier_visit ? (
+                  <div className="fb-earlier-box">
+                    <span className="fb-earlier-label">Last service before</span>
+                    <b>{call.earlier_visit.service}</b>
+                    <span className="fb-small">
+                      {formatDay(call.earlier_visit.date)} · Job {call.earlier_visit.job_code}
+                      {call.earlier_visit.technicians ? ` · ${call.earlier_visit.technicians}` : ""}
+                    </span>
+                    <span className={`fb-visit-status fb-tone-${VISIT_STATUS[call.earlier_visit.status]?.tone || "muted"}`}>
+                      {VISIT_STATUS[call.earlier_visit.status]?.label || call.earlier_visit.status}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="fb-small fb-muted">This site has had no service yet.</div>
+                )}
               </div>
             )}
             <ul className="fb-visit-list">
@@ -1014,26 +1131,70 @@ export default function CallPage() {
           suggested={suggestedPriority(bad)}
           defaultSummary={issueText(bad, other.trim())}
           submitLabel="Save feedback & raise ticket"
-          note="The call is marked Done · Issue."
+          note={newRound ? "The call stays done, with result Issue." : "The call is marked Done · Issue."}
           onClose={() => setModal(null)}
           onSubmit={async (ticket) => {
             const res = await saveCallFeedback(id, { ...feedbackBody(), ticket });
             setModal(null);
             setAnswers({});
             setOther("");
-            flash(`Feedback saved and ticket ${res.ticket.ticket_number} raised. The call is done.`);
+            flash(`Feedback saved and ticket ${res.ticket.ticket_number} raised.${newRound ? "" : " The call is done."}`);
+            setNewRound(false);
             await load();
           }}
         />
       )}
 
+      {modal === "raise-choice" && (
+        <Modal title={`Raise a new ticket · ${call.customer.name}`} onClose={() => setModal(null)}>
+          <div className="fb-choice">
+            <button
+              type="button"
+              className="fb-choice-opt"
+              onClick={() => {
+                setModal(null);
+                setAnswers({});
+                setOther("");
+                setStartedAt(null);
+                setNewRound(true);
+                setTimeout(() => document.getElementById("fb-new-round")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+              }}
+            >
+              <span className="fb-choice-icon" aria-hidden="true">
+                <FiMessageSquare />
+              </span>
+              <span>
+                <b>Take new feedback & raise a ticket</b>
+                <small>Call the customer, ask the feedback questions again, then raise the ticket from their answers.</small>
+              </span>
+              <FiChevronRight className="fb-choice-go" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="fb-choice-opt is-red"
+              onClick={() => setModal("ticket-later")}
+            >
+              <span className="fb-choice-icon" aria-hidden="true">
+                <FiFilePlus />
+              </span>
+              <span>
+                <b>Raise a ticket without feedback</b>
+                <small>The customer told you the new problem already. Describe it and raise the ticket straight away.</small>
+              </span>
+              <FiChevronRight className="fb-choice-go" aria-hidden="true" />
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "ticket-later" && latest && (
         <RaiseTicketModal
           callId={id}
-          title={`Raise a ticket · ${call.customer.name}`}
+          title={`${lastTicket ? "Raise a new ticket" : "Raise a ticket"} · ${call.customer.name}`}
           visits={call.visits}
-          suggested={suggestedPriority(latest.responses)}
-          defaultSummary={issueText(latest.responses, latest.other_feedback)}
+          suggested={lastTicket ? null : suggestedPriority(latest.responses)}
+          // A new complaint on a call that already has a ticket starts with an empty description.
+          defaultSummary={lastTicket ? "" : issueText(latest.responses, latest.other_feedback)}
           note={call.status === "DONE" ? "The call stays done, with result Issue." : "The call is marked Done · Issue."}
           onClose={() => setModal(null)}
           onSubmit={async (ticket) => {

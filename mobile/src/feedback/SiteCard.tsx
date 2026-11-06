@@ -61,15 +61,15 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
       <View style={styles.body}>
         <View style={styles.top}>
           <View style={[styles.initial, { backgroundColor: tint.bg }]}>
-            <Text style={[styles.initialText, { color: accent }]}>{initialsOf(row.site.name)}</Text>
+            <Text style={[styles.initialText, { color: accent }]}>{initialsOf(row.customer.name)}</Text>
           </View>
           <View style={styles.flex1}>
             <Text style={styles.siteName} numberOfLines={1}>
-              {row.site.name}
-              {!!row.site.city && <Text style={styles.city}>  {row.site.city}</Text>}
+              {row.customer.name}
             </Text>
             <Text style={styles.cust} numberOfLines={1}>
-              {row.customer.name}
+              {row.site.name}
+              {row.site.city ? ` · ${row.site.city}` : ''}
             </Text>
           </View>
           <StatusBadge label={meta.label} tone={meta.tone} />
@@ -98,7 +98,9 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
           )}
           <View style={styles.fact}>
             <CalendarIcon size={14} color={theme.textMuted} />
-            <Text style={styles.factText}>Last visit {formatDay(row.last_visit_date)}</Text>
+            <Text style={styles.factText}>
+              {row.last_visit_date ? `Last visit ${formatDay(row.last_visit_date)}` : row.earlier_visit ? `Earlier visit ${formatDay(row.earlier_visit.date)}` : 'No service yet'}
+            </Text>
           </View>
           <View style={styles.fact}>
             <ClockIcon size={14} color={theme.textMuted} />

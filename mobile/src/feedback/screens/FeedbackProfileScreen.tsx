@@ -60,7 +60,7 @@ export function FeedbackProfileScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader eyebrow="Customer Feedback" title="Profile" subtitle={user?.name} onBack={() => navigation.goBack()} />
+      <HeroHeader title="Profile" subtitle={user?.name} onBack={() => navigation.goBack()} />
       <CrmScreen edges={[]}>
         <View style={styles.profile}>
           <Avatar name={user?.name} id={user?.id} size={56} />
