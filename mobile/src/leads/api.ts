@@ -46,6 +46,7 @@ function toLead(row: Row): PipelineLead {
     alternatePhone: str(row.alternate_phone),
     email: str(row.email),
     address: str(row.location),
+    industry: str(row.industry_type),
     source: idOrNull(row.lead_source),
     amount: Number(row.amount) || 0,
     notes: str(row.notes),

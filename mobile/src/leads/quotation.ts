@@ -183,8 +183,49 @@ export async function openPdf(path: string): Promise<void> {
 
 // Android's own share sheet for a file (android/.../filesharer/FileSharerModule.kt).
 const { FileSharer } = NativeModules as {
-  FileSharer?: { share(path: string, mimeType: string, title: string, message: string | null): Promise<boolean> };
+  FileSharer?: {
+    share(path: string, mimeType: string, title: string, message: string | null): Promise<boolean>;
+    email?(paths: string[], to: string | null, subject: string, body: string): Promise<boolean>;
+  };
 };
+
+// The company profile that goes with the proposal email. It is a public file on the website
+// (frontend/public/BestServe_Company_Profile.pdf), downloaded once and kept on the phone for a week,
+// so the 13 MB file is not inside the app.
+const PROFILE_URL = 'https://bestserve.co.in/BestServe_Company_Profile.pdf';
+const PROFILE_PATH = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/company-profile/BestServe_Company_Profile.pdf`;
+const PROFILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The company profile PDF on the phone (downloaded when missing or a week old); returns its path. */
+export async function companyProfilePdf(): Promise<string> {
+  const fs = ReactNativeBlobUtil.fs;
+  const stat = (await fs.exists(PROFILE_PATH)) ? await fs.stat(PROFILE_PATH).catch(() => null) : null;
+  if (stat && Number(stat.size) > 0 && Date.now() - Number(stat.lastModified) < PROFILE_MAX_AGE_MS) return PROFILE_PATH;
+  const part = `${PROFILE_PATH}.part`;
+  const res = await ReactNativeBlobUtil.config({ path: part, overwrite: true, timeout: 120000 }).fetch('GET', PROFILE_URL);
+  const info = res.info();
+  const type = String(info.headers['Content-Type'] ?? info.headers['content-type'] ?? '');
+  // A missing file comes back as the website's page, not a PDF.
+  if (info.status !== 200 || !type.includes('pdf')) {
+    await fs.unlink(part).catch(() => undefined);
+    if (stat) return PROFILE_PATH; // an older copy is better than none
+    throw new ApiError('Could not download the company profile.');
+  }
+  await fs.unlink(PROFILE_PATH).catch(() => undefined);
+  await fs.mv(part, PROFILE_PATH);
+  return PROFILE_PATH;
+}
+
+/** Opens an email app (Gmail...) with the files attached and the to / subject / body filled in. */
+export async function emailFiles(paths: string[], email: { to: string; subject: string; body: string }): Promise<void> {
+  if (!FileSharer?.email) throw new ApiError('Email needs the latest version of the app. Use Share instead.');
+  try {
+    await FileSharer.email(paths, email.to || null, email.subject, email.body);
+  } catch (err) {
+    const msg = (err as { message?: string })?.message;
+    throw new ApiError(msg || 'Could not open the email app.');
+  }
+}
 
 /** A Word document's file type (the quotation's Word copy is a .doc). */
 export const WORD_MIME = 'application/msword';

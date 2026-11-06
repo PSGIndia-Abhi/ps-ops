@@ -47,7 +47,9 @@ import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
 import { downloadQuotationWord } from "./quotationWord";
 import { AgreementsTab } from "./Agreements";
 import { ShareFallback } from "./ShareQuotation";
-import { shareFile } from "./shareFile";
+import { download, shareFile } from "./shareFile";
+import { downloadCompanyProfile, gmailCompose, proposalEmail } from "./proposalEmail";
+import useMe from "../../hooks/useMe";
 import { useToast } from "./hooks";
 import { dateTime, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
@@ -164,6 +166,10 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, canEdit = c
   const [sharing, setSharing] = useState(null); // quotation id being fetched to share
   const [wording, setWording] = useState(null); // quotation id whose Word file is being made
   const [fallback, setFallback] = useState(null); // { file, text } when the browser cannot share files
+  const [mailing, setMailing] = useState(null); // quotation id whose PDF is being fetched for the email
+  const { user: signedIn } = useMe();
+  // The default proposal email, signed by whoever is signed in.
+  const draft = () => proposalEmail(lead, signedIn);
 
   // The lead's history grows with every upload or cancellation, which is what brings the change in.
   useEffect(() => {
@@ -191,6 +197,26 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, canEdit = c
       toast(err.message || "Could not share the quotation.", true);
     } finally {
       setSharing(null);
+    }
+  }
+
+  // Email: Gmail opens with the proposal email written, and the quotation PDF and the company profile
+  // download to attach (a browser
+  // cannot attach a file to an email by itself). Gmail opens first, while the click still allows it.
+  async function email(q) {
+    window.open(gmailCompose(lead.email, draft()), "_blank", "noopener");
+    setMailing(q.id);
+    try {
+      const url = await fetchQuotationPdf(lead.id, q.id);
+      const blob = await (await fetch(url)).blob();
+      URL.revokeObjectURL(url);
+      download(new File([blob], q.fileName, { type: "application/pdf" }));
+      downloadCompanyProfile();
+      toast("The quotation and the company profile are downloaded - attach both to the email in Gmail.");
+    } catch (err) {
+      toast(err.message || "Could not download the quotation.", true);
+    } finally {
+      setMailing(null);
     }
   }
 
@@ -277,6 +303,11 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, canEdit = c
                             Share
                           </Button>
                         )}
+                        {q.status !== "CANCELLED" && (
+                          <Button size="sm" variant="ghost" icon={<FiMail />} busy={mailing === q.id} onClick={() => email(q)}>
+                            Email
+                          </Button>
+                        )}
                       </>
                     ) : (
                       <span className="muted">No PDF</span>
@@ -303,7 +334,7 @@ function QuotationsTab({ lead, canAdd, onBuild, onReopen, canCancel, canEdit = c
           </tbody>
         </table>
       </div>
-      {fallback && <ShareFallback file={fallback.file} text={fallback.text} phone={lead.phone} email={lead.email} onClose={() => setFallback(null)} />}
+      {fallback && <ShareFallback file={fallback.file} text={fallback.text} phone={lead.phone} email={lead.email} draft={draft()} onClose={() => setFallback(null)} />}
       {viewing && (
         <PreviewOverlay
           url={viewing.url}

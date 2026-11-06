@@ -4,11 +4,12 @@
 // attach a file to WhatsApp Web or an email by itself, so the PDF is downloaded to attach.
 
 import { FiDownload, FiMail, FiMessageCircle } from "react-icons/fi";
+import { downloadCompanyProfile } from "./proposalEmail";
 import { download, waNumber } from "./shareFile";
 import { Button, Modal, Note } from "./ui";
 
 /** For browsers without file sharing: WhatsApp / Email / Download, each with the PDF downloaded to attach. */
-export function ShareFallback({ file, text, phone, email, onClose }) {
+export function ShareFallback({ file, text, phone, email, draft, onClose }) {
   const whatsapp = () => {
     download(file);
     const to = waNumber(phone);
@@ -17,7 +18,11 @@ export function ShareFallback({ file, text, phone, email, onClose }) {
   };
   const mail = () => {
     download(file);
-    window.location.href = `mailto:${email || ""}?subject=${encodeURIComponent(text)}&body=${encodeURIComponent(`${text}\n\nPlease find the quotation attached.`)}`;
+    // The proposal email (greeting, company overview, signature) when there is one, with the profile.
+    if (draft) downloadCompanyProfile();
+    const subject = draft?.subject || text;
+    const body = draft?.body || `${text}\n\nPlease find the quotation attached.`;
+    window.location.href = `mailto:${email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     onClose();
   };
   return (

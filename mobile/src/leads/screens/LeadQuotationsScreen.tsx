@@ -7,7 +7,9 @@ import { formatINR, formatLeadWhen } from '../../crm/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { radii, spacing, typography } from '../../theme';
+import { useAuth } from '../../auth/AuthContext';
 import * as api from '../api';
+import { proposalEmail } from '../proposalEmail';
 import type { LeadStackParamList } from '../navigation';
 import { getQuotationContent, savedQuotationPdf } from '../quotation';
 import { quotationWordFile } from '../quotationWord';
@@ -24,6 +26,7 @@ export function LeadQuotationsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const { leadId, name } = useRoute<RouteProp<LeadStackParamList, 'LeadQuotations'>>().params;
   const { myId, persona } = useMe();
+  const { user } = useAuth();
   const { styles, theme } = useCrmStyles(factory);
   const loader = useCallback(async () => {
     const [lead, quotations] = await Promise.all([api.getLead(leadId), api.getQuotations(leadId)]);
@@ -122,6 +125,7 @@ export function LeadQuotationsScreen() {
       {pdfFor && lead && (
         <QuotationPdfDialog
           name={pdfFor.clientName || lead.companyName || ''}
+          email={proposalEmail(lead, user)}
           getFile={() => savedQuotationPdf(leadId, pdfFor.id, pdfFor.fileName)}
           onOpened={() => setPdfFor(null)}
           onClose={() => setPdfFor(null)}

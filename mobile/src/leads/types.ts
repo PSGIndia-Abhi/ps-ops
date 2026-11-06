@@ -30,6 +30,8 @@ export interface PipelineLead {
   alternatePhone: string;
   email: string;
   address: string;
+  /** Industry code ("restaurant", "hospital"...), '' when not set. */
+  industry?: string;
   source: string | null;
   /** Approximate quote. */
   amount: number;

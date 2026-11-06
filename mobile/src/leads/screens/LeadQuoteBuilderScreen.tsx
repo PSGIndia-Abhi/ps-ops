@@ -14,7 +14,9 @@ import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SegmentedControl } from '../../crm/ui/SegmentedControl';
 import { SelectField } from '../../crm/ui/SelectField';
 import { radii, spacing, typography } from '../../theme';
+import { useAuth } from '../../auth/AuthContext';
 import * as api from '../api';
+import { proposalEmail, type ProposalEmail } from '../proposalEmail';
 import type { LeadStackParamList } from '../navigation';
 import * as quote from '../quotation';
 import { PriceTableEditor, priceTableForSave, priceTableFromContent, priceTableTotal, type PriceTable } from '../PriceTableEditor';
@@ -48,6 +50,7 @@ export function LeadQuoteBuilderScreen() {
   const navigation = useNavigation<Nav>();
   const { leadId, name, fromId, mode } = useRoute<RouteProp<LeadStackParamList, 'LeadQuoteBuild'>>().params;
   const { styles, theme } = useCrmStyles(factory);
+  const { user } = useAuth();
   // Edit: saves a new quotation that replaces this one. Duplicate: a new one from its details.
   const editing = !!fromId && mode === 'edit';
   const title = editing ? 'Edit quotation' : fromId ? 'Duplicate quotation' : 'New quotation';
@@ -97,6 +100,7 @@ export function LeadQuoteBuilderScreen() {
       start={start}
       from={fromId ? { id: fromId, editing } : null}
       customerLead={isConvertedStage(data.lead.stage)}
+      email={proposalEmail(data.lead, user)}
       theme={theme}
     />
   );
@@ -233,6 +237,7 @@ function Builder({
   start,
   from,
   customerLead,
+  email,
   theme,
 }: {
   leadId: string;
@@ -245,6 +250,8 @@ function Builder({
   from: { id: string; editing: boolean } | null;
   /** The lead is already a customer: saving does not move it back to "Quotation sent". */
   customerLead: boolean;
+  /** The proposal email for the Email button once it is saved. */
+  email: ProposalEmail;
   theme: CrmTheme;
 }) {
   const navigation = useNavigation<Nav>();
@@ -840,6 +847,7 @@ function Builder({
         <QuotationPdfDialog
           saved
           name={sent.name}
+          email={email}
           getFile={() => quote.savedQuotationPdf(leadId, sent.id, sent.fileName)}
           onOpened={() => navigation.goBack()}
           onClose={() => navigation.goBack()}

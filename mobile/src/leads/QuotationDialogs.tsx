@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Modal, Pressable, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { GlossyBadge } from '../components/GlossyBadge';
-import { CheckCircleIcon, CloseIcon, DocumentIcon, ExternalLinkIcon, SendIcon } from '../components/icons';
+import { CheckCircleIcon, CloseIcon, DocumentIcon, EmailIcon, ExternalLinkIcon, SendIcon } from '../components/icons';
 import { useCrmStyles, type CrmTheme } from '../crm/theme';
 import { radii, spacing, typography } from '../theme';
-import { openFile, openPdf, saveToDownloads, shareFile, sharePdf, WORD_MIME } from './quotation';
+import type { ProposalEmail } from './proposalEmail';
+import { companyProfilePdf, emailFiles, openFile, openPdf, saveToDownloads, shareFile, sharePdf, WORD_MIME } from './quotation';
 import { errorMessage } from './ui';
 
 // The quotation dialogs, in the app's own design instead of the plain Android alert: a card that
@@ -74,6 +75,7 @@ export function QuotationPdfDialog({
   getWordFile,
   title = 'Quotation PDF',
   shareMessage,
+  email,
 }: {
   name: string;
   saved?: boolean;
@@ -81,6 +83,8 @@ export function QuotationPdfDialog({
   title?: string;
   /** The message sent with the PDF when it is shared (default: "Quotation for <name> - Bestserve..."). */
   shareMessage?: string;
+  /** The proposal email: when given, an Email button opens Gmail... with it written and the PDF attached. */
+  email?: ProposalEmail;
   /** Downloads the PDF to the phone and returns its path. */
   getFile: () => Promise<string>;
   /** After the PDF opened in the viewer. */
@@ -94,11 +98,11 @@ export function QuotationPdfDialog({
   getWordFile?: () => Promise<string>;
 }) {
   const { styles, theme } = useCrmStyles(factory);
-  const [busy, setBusy] = useState<'' | 'share' | 'open' | 'save' | 'wordShare' | 'wordOpen'>('');
+  const [busy, setBusy] = useState<'' | 'share' | 'email' | 'open' | 'save' | 'wordShare' | 'wordOpen'>('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [downloaded, setDownloaded] = useState(false);
 
-  async function run(kind: 'share' | 'open' | 'save') {
+  async function run(kind: 'share' | 'email' | 'open' | 'save') {
     if (busy) return;
     setBusy(kind);
     setResult(null);
@@ -106,6 +110,14 @@ export function QuotationPdfDialog({
       const file = await getFile();
       if (kind === 'share') {
         await sharePdf(file, shareMessage ?? (name ? `Quotation for ${name} - Bestserve Pest Management Pvt. Ltd.` : undefined));
+        setBusy('');
+        return;
+      }
+      if (kind === 'email' && email) {
+        // The company profile goes with the quotation; without it (no network...) the email still opens.
+        const profile = await companyProfilePdf().catch(() => null);
+        await emailFiles(profile ? [file, profile] : [file], email);
+        if (!profile) setResult({ ok: false, text: 'The company profile could not be downloaded - the email has the quotation only.' });
         setBusy('');
         return;
       }
@@ -118,7 +130,7 @@ export function QuotationPdfDialog({
       await saveToDownloads(file);
       setDownloaded(true);
     } catch (err) {
-      const fallback = kind === 'share' ? 'Could not share the PDF. Try again.' : kind === 'open' ? 'Could not open the PDF. Try again.' : 'Could not save the PDF. Try again.';
+      const fallback = kind === 'share' ? 'Could not share the PDF. Try again.' : kind === 'email' ? 'Could not open the email app. Try again.' : kind === 'open' ? 'Could not open the PDF. Try again.' : 'Could not save the PDF. Try again.';
       setResult({ ok: false, text: errorMessage(err, fallback) });
     }
     setBusy('');
@@ -157,6 +169,7 @@ export function QuotationPdfDialog({
 
       <View style={styles.actions}>
         <ActionButton color={theme.success} Icon={ShareIcon} label="Share" busy={busy === 'share'} disabled={!!busy} onPress={() => run('share')} />
+        {!!email && <ActionButton color="#DB4437" Icon={EmailIcon} label="Email" busy={busy === 'email'} disabled={!!busy} onPress={() => run('email')} />}
         <ActionButton color={theme.primary} Icon={ExternalLinkIcon} label="Open" busy={busy === 'open'} disabled={!!busy} onPress={() => run('open')} />
         <ActionButton
           color={downloaded ? theme.success : theme.warning}
@@ -370,7 +383,7 @@ const factory = (t: CrmTheme) => ({
   row: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.lg, marginBottom: spacing.xs, alignSelf: 'stretch' as const },
   grow: { flex: 1 },
   actions: { flexDirection: 'row' as const, justifyContent: 'space-around' as const, alignSelf: 'stretch' as const, marginTop: spacing.lg },
-  action: { alignItems: 'center' as const, gap: spacing.xs, minWidth: 72 },
+  action: { alignItems: 'center' as const, gap: spacing.xs, minWidth: 64 },
   actionText: { ...typography.captionMedium, color: t.textPrimary },
   pair: { flexDirection: 'row' as const, gap: spacing.sm, alignSelf: 'stretch' as const, marginTop: spacing.lg },
   mini: {
