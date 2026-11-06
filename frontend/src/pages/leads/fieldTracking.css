@@ -98,6 +98,7 @@
   font-size: 15px; transition: transform .15s;
 }
 .ft-pin-end .ft-pin-dot { background: #111827; }
+.ft-pin-alert .ft-pin-dot { background: #f59e0b; }
 .ft-pin.aside { transform: translate(-30px, 16px); }
 .ft-pin-visit .ft-pin-dot { background: var(--lm-primary); }
 .ft-pin-visit.unplanned .ft-pin-dot { background: var(--lm-violet, #7c3aed); }
@@ -168,6 +169,7 @@ ol.ft-log.ft-log { list-style: none; margin: 0; padding: 2px 20px 8px; display: 
 .ft-log .tone-danger .ft-log-icon { background: var(--lm-danger-soft); color: var(--lm-danger); }
 .ft-log .tone-neutral .ft-log-icon { background: var(--lm-bg); color: var(--lm-muted); }
 .ft-log .tone-violet .ft-log-icon { background: var(--lm-violet-soft); color: var(--lm-violet); }
+.ft-log .tone-warn .ft-log-icon { background: var(--lm-warn-soft, #fef3c7); color: var(--lm-warn, #b45309); }
 .ft-log-text { display: grid; gap: 2px; min-width: 0; padding-top: 2px; }
 .ft-log-text strong { font-size: 13px; line-height: 1.35; color: var(--lm-text); }
 .ft-log-text small { font-size: 12px; line-height: 1.35; color: var(--lm-muted); }

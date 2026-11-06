@@ -1,5 +1,11 @@
 package com.bestserve.mobile.fieldtracking
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -39,6 +45,23 @@ class FieldTrackingModule(private val reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       promise.reject("E_STOP", e.message ?: "Could not stop location tracking", e)
     }
+  }
+
+  /**
+   * The server address and the signed-in user's token, for the service's own uploads while the app is
+   * closed (FieldTrackingUploader). Handed over whenever tracking starts or resumes.
+   */
+  @ReactMethod
+  fun setUploadAuth(baseUrl: String, token: String, promise: Promise) {
+    FieldTrackingUploader.setAuth(reactContext, baseUrl, token)
+    promise.resolve(true)
+  }
+
+  /** Forget them (End Shift, logout): the service stops uploading. */
+  @ReactMethod
+  fun clearUploadAuth(promise: Promise) {
+    FieldTrackingUploader.clearAuth(reactContext)
+    promise.resolve(true)
   }
 
   /** { running, shiftId } - shiftId is the shift the service is (or was told to be) recording for. */
@@ -88,6 +111,46 @@ class FieldTrackingModule(private val reactContext: ReactApplicationContext) :
         promise.reject("E_REMOVE", e.message ?: "Could not clear saved locations", e)
       }
     }
+  }
+
+  /**
+   * True when Android lets BestServe run in the background without battery limits ("Unrestricted").
+   * With limits on, the phone may stop the tracking service to save battery and the day gets gaps.
+   */
+  @ReactMethod
+  fun batteryUnrestricted(promise: Promise) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+      promise.resolve(true)
+      return
+    }
+    val pm = reactContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    promise.resolve(pm?.isIgnoringBatteryOptimizations(reactContext.packageName) ?: true)
+  }
+
+  /**
+   * Asks Android to let BestServe run without battery limits (the system's own Allow / Deny dialog);
+   * if that dialog is not available on the phone, opens the app's settings page instead, where
+   * Battery -> Unrestricted is.
+   */
+  @ReactMethod
+  fun openBatterySettings(promise: Promise) {
+    val pkg = reactContext.packageName
+    val tries = listOf(
+      Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg")),
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg")),
+    )
+    for (intent in tries) {
+      try {
+        val activity = reactApplicationContext.currentActivity
+        if (activity != null) activity.startActivity(intent)
+        else reactContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        promise.resolve(true)
+        return
+      } catch (_: Exception) {
+        // try the next screen
+      }
+    }
+    promise.resolve(false)
   }
 
   @ReactMethod

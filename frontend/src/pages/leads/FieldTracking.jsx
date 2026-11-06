@@ -15,6 +15,7 @@ import { AdvancedMarker, APILoadingStatus, InfoWindow, Map as GoogleMap, useApiL
 import {
   FiActivity,
   FiAlertTriangle,
+  FiBell,
   FiCalendar,
   FiCheckCircle,
   FiChevronLeft,
@@ -481,7 +482,7 @@ function PanTo({ point }) {
   return null;
 }
 
-const PIN_ICONS = { start: FiUser, end: FiFlag, visit: LuBuilding2 };
+const PIN_ICONS = { start: FiUser, end: FiFlag, visit: LuBuilding2, alert: FiBell };
 
 /**
  * A small round icon pin - no card on the map, so the route stays visible: the person where a shift
@@ -557,6 +558,21 @@ function breaks(day, paths) {
 function FieldMap({ day, roadPaths, selected, onSelect, mapKey, focus }) {
   const multi = day.shifts.length > 1;
   const places = useMemo(() => endPlaces(day), [day]);
+  // "Stayed 30+ min at one place" alerts: an amber bell where they stopped.
+  const alerts = useMemo(
+    () =>
+      (day.alerts || [])
+        .filter((a) => a.location)
+        .map((a, i) => ({
+          id: `alert-${i}`,
+          kind: "alert",
+          point: toLatLng(a.location),
+          title: `Stayed ${minutesText(a.minutes)} at one place`,
+          lines: [`Stayed ${minutesText(a.minutes)}`, `from ${timeLabel(a.startedAt)} · alert sent`],
+          alert: a,
+        })),
+    [day]
+  );
   const gaps = useMemo(() => (multi ? breaks(day, roadPaths) : []), [multi, day, roadPaths]);
   const visits = useMemo(
     () =>
@@ -581,7 +597,7 @@ function FieldMap({ day, roadPaths, selected, onSelect, mapKey, focus }) {
     () => [...roadPaths.flat(), ...places.map((p) => p.point), ...visits.map((v) => v.point)],
     [roadPaths, places, visits],
   );
-  const chosen = [...places, ...visits].find((p) => p.id === selected) || null;
+  const chosen = [...places, ...visits, ...alerts].find((p) => p.id === selected) || null;
   const center = fitTo[0] || DEFAULT_CENTER;
 
   return (
@@ -620,12 +636,37 @@ function FieldMap({ day, roadPaths, selected, onSelect, mapKey, focus }) {
       {visits.map((p) => (
         <PlaceMarker key={p.id} place={p} on={p.id === selected} onClick={() => onSelect(p.id)} />
       ))}
+      {alerts.map((p) => (
+        <PlaceMarker key={p.id} place={p} on={p.id === selected} onClick={() => onSelect(p.id)} />
+      ))}
       {chosen && (
         <InfoWindow position={chosen.point} pixelOffset={[0, -40]} onCloseClick={() => onSelect(null)} headerContent={<strong className="ft-iw-title">{chosen.title}</strong>}>
-          {chosen.visit ? <VisitDetails v={chosen.visit} compact /> : <PlaceDetails place={chosen} />}
+          {chosen.visit ? <VisitDetails v={chosen.visit} compact /> : chosen.alert ? <AlertDetails a={chosen.alert} /> : <PlaceDetails place={chosen} />}
         </InfoWindow>
       )}
     </GoogleMap>
+  );
+}
+
+function AlertDetails({ a }) {
+  return (
+    <div className="ft-iw">
+      <div className="ft-iw-tags">
+        <Badge tone="warn">No client punch-in</Badge>
+      </div>
+      <div className="ft-iw-row">
+        <span>Arrived</span>
+        <strong>{timeLabel(a.startedAt)}</strong>
+      </div>
+      <div className="ft-iw-row">
+        <span>Still there after</span>
+        <strong>{minutesText(a.minutes)}</strong>
+      </div>
+      <div className="ft-iw-row">
+        <span>Alert sent</span>
+        <strong>{a.notifiedAt ? timeLabel(a.notifiedAt) : "-"}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -806,6 +847,13 @@ function TeamDay({ date, onOpen }) {
                       )}
                     </td>
                     <td>
+                      {r.longStopAlertCount > 0 && (
+                        <span title="Stayed 30+ min at one place with no client punch-in">
+                          <Badge tone="warn">
+                            <FiBell /> {r.longStopAlertCount} long stop{r.longStopAlertCount === 1 ? "" : "s"}
+                          </Badge>
+                        </span>
+                      )}{" "}
                       {r.flaggedLegCount > 0 ? (
                         <Badge tone="warn">
                           {r.flaggedLegCount} trip{r.flaggedLegCount === 1 ? "" : "s"}
@@ -931,6 +979,15 @@ function ExecutiveDay({ userId, date }) {
       }
     });
     day.stops.forEach((s) => events.push({ at: s.from, icon: <FiClock />, tone: "neutral", text: `Stopped for ${minutesText(s.minutes)}`, sub: `until ${timeLabel(s.to)}` }));
+    (day.alerts || []).forEach((a) =>
+      events.push({
+        at: a.startedAt,
+        icon: <FiBell />,
+        tone: "warn",
+        text: `Stayed ${minutesText(a.minutes)} at one place`,
+        sub: `No client punch-in · alert sent to the executive and managers${a.notifiedAt ? ` at ${timeLabel(a.notifiedAt)}` : ""}`,
+      })
+    );
     day.gaps.forEach((g) => events.push({ at: g.from, icon: <FiAlertTriangle />, tone: "danger", text: `No GPS for ${minutesText(g.minutes)}`, sub: "Phone off, location off or app closed" }));
     return events.filter((e) => e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
   }, [day]);
@@ -1019,8 +1076,8 @@ function ExecutiveDay({ userId, date }) {
       <div className="ft-day-tabs">
         <Tabs
           tabs={[
-            { key: "map", label: "Map & visits", count: day.visits.length },
-            { key: "petrol", label: "Petrol breakdown", count: petrol?.legs.length || 0 },
+            { key: "map", label: "Map & visits", count: day.visits.length || undefined },
+            { key: "petrol", label: "Petrol breakdown", count: petrol?.legs.length || undefined },
           ]}
           value={view}
           onChange={setView}
@@ -1041,7 +1098,7 @@ function ExecutiveDay({ userId, date }) {
           />
         ) : (
           <Card>
-            <Empty title="No petrol for this day" text="Petrol is counted for trips to clients - there was no client visit." icon={<FiTruck />} />
+            <Empty title="No petrol for this day" text="No shift with GPS points on this day." icon={<FiTruck />} />
           </Card>
         ))}
 
@@ -1154,6 +1211,7 @@ const LEG_STATUS = {
   NO_GPS: { tone: "warn", label: "No GPS", note: "Paid the direct road distance" },
   PENDING: { tone: "neutral", label: "Working out", note: "" },
   OPEN: { tone: "info", label: "After End Shift", note: "Counted when the shift ends" },
+  GPS_ONLY: { tone: "info", label: "No client visit", note: "Paid on GPS km" },
 };
 const NOT_MEASURED = { tone: "warn", label: "Not measured", note: "Google Maps did not load" };
 const legKm = (n) => (n === null || n === undefined ? "-" : `${n.toFixed(1)} km`);
@@ -1209,7 +1267,7 @@ function PetrolLegs({ petrol, working, failed, onShift }) {
                   <td>
                     <span className="ft-cell">
                       <strong>
-                        {l.kind === "RETURN" ? "Return: " : ""}
+                        {l.kind === "RETURN" ? "Return: " : l.kind === "SHIFT" ? "Whole shift: " : ""}
                         {l.from} → {l.to}
                       </strong>
                       <small>
@@ -1241,6 +1299,7 @@ function PetrolLegs({ petrol, working, failed, onShift }) {
               <td>
                 <strong>Petrol for the day</strong>
                 {flagged > 0 && <small className="ft-legs-flag"> · {flagged} trip{flagged === 1 ? "" : "s"} to check</small>}
+                {petrol.legs.length > 0 && petrol.legs.every((l) => l.status === "GPS_ONLY") && <small className="muted"> · No client visit · paid on GPS km</small>}
               </td>
               <td className="num">{legKm(petrol.legs.reduce((s, l) => s + (l.gpsKm || 0), 0))}</td>
               <td className="num" />

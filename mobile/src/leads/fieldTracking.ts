@@ -1,5 +1,7 @@
 import { AppState, NativeModules, Platform, type AppStateStatus } from 'react-native';
 import { httpClient } from '../api/httpClient';
+import { getToken } from '../auth/tokenStorage';
+import { API_BASE_URL } from '../config/env';
 
 /**
  * Background GPS for a sales executive's shift.
@@ -8,9 +10,10 @@ import { httpClient } from '../api/httpClient';
  * about every minute and keeps it in an on-phone queue, so a weak or missing network loses nothing.
  * This file starts / stops that service and uploads the queue in batches to
  * POST /api/field-tracking/points, deleting from the phone only what the server answered for.
- * The manager reviews the route after the day (web: Lead Management -> Field Tracking), so uploads
- * do not need to be instant - every few minutes while the app is running, when it comes back to
- * the front, and at End Shift.
+ * The service also uploads by itself every 3 minutes while the shift runs - app open, closed or
+ * swiped away - with the server address and token handed over here (handOverAuth), so the manager
+ * sees the route during the day (web: Lead Management -> Field Tracking). This file uploads too when
+ * the app is open; each point is stored once either way.
  */
 
 interface QueuedPoint {
@@ -34,6 +37,10 @@ const { FieldTracking } = NativeModules as {
     pending(limit: number): Promise<QueuedPoint[]>;
     remove(ids: number[]): Promise<boolean>;
     pendingCount(): Promise<number>;
+    batteryUnrestricted?(): Promise<boolean>;
+    setUploadAuth?(baseUrl: string, token: string): Promise<boolean>;
+    clearUploadAuth?(): Promise<boolean>;
+    openBatterySettings?(): Promise<boolean>;
   };
 };
 
@@ -108,11 +115,57 @@ export function flushPoints(): Promise<void> {
   return flushing;
 }
 
+/** Gives the service the server address and the signed-in token, for its own background uploads. */
+async function handOverAuth(): Promise<void> {
+  if (!FieldTracking!.setUploadAuth) return;
+  try {
+    const token = await getToken();
+    if (token) await FieldTracking!.setUploadAuth(API_BASE_URL, token);
+  } catch {
+    // the app still uploads while it is open
+  }
+}
+
+/** The service stops uploading (End Shift, logout). */
+export async function forgetUploadAuth(): Promise<void> {
+  if (!available() || !FieldTracking!.clearUploadAuth) return;
+  try {
+    await FieldTracking!.clearUploadAuth();
+  } catch {
+    // nothing to clear
+  }
+}
+
 /** Start recording for this shift (Start Shift). The app must be open - Android requires it. */
 export async function startTracking(shiftId: string): Promise<void> {
   if (!available()) return;
+  await handOverAuth();
   await FieldTracking!.start(shiftId, INTERVAL_MS);
   startUploadLoop();
+}
+
+/**
+ * Whether Android lets the app run in the background without battery limits. With limits (battery
+ * saver, Xiaomi / Oppo / Vivo / Samsung "optimised"), the phone can stop the tracking service and
+ * the day gets gaps. True where it cannot be checked, so nobody is asked for nothing.
+ */
+export async function backgroundAllowed(): Promise<boolean> {
+  if (!available() || !FieldTracking!.batteryUnrestricted) return true;
+  try {
+    return await FieldTracking!.batteryUnrestricted();
+  } catch {
+    return true;
+  }
+}
+
+/** Opens Android's "allow running without battery limits" dialog (or the app's settings page). */
+export async function openBatterySettings(): Promise<void> {
+  if (!available() || !FieldTracking!.openBatterySettings) return;
+  try {
+    await FieldTracking!.openBatterySettings();
+  } catch {
+    // nothing more to do - the executive can still change it in Settings
+  }
 }
 
 /**
@@ -122,6 +175,7 @@ export async function startTracking(shiftId: string): Promise<void> {
 export async function ensureTracking(shiftId: string): Promise<void> {
   if (!available()) return;
   try {
+    await handOverAuth();
     const status = await FieldTracking!.status();
     if (!status.running || status.shiftId !== shiftId) await FieldTracking!.start(shiftId, INTERVAL_MS);
     startUploadLoop();
@@ -139,6 +193,7 @@ export async function stopTracking(): Promise<void> {
   } finally {
     stopUploadLoop();
     await flushPoints();
+    await forgetUploadAuth();
   }
 }
 

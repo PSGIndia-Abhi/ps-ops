@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, Pressable, Text, View } from 'react-native';
+import { AppState, Animated, Easing, FlatList, Pressable, Text, View } from 'react-native';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { GlossyBadge } from '../../components/GlossyBadge';
-import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlusIcon } from '../../components/icons';
+import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlusIcon, ShieldIcon } from '../../components/icons';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { formatShiftClock } from '../../screens/technician/shiftTime';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -223,6 +223,9 @@ function useCurrentShift() {
   return { shift, setShift, loaded, error, reload };
 }
 
+/** The battery prompt is shown at most once per app run while a shift is open (see ShiftCard). */
+let askedBatteryThisRun = false;
+
 /**
  * Start / End Shift. Shown at the top of the sales executive's Home and on My Day.
  * `onChange` lets the host refresh its own numbers after a start or end.
@@ -249,6 +252,9 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
       onChange?.();
       try {
         await tracking.startTracking(started.id);
+        // The phone may stop background tracking to save battery: ask once to allow it. Once allowed
+        // it is never asked again.
+        if (!(await tracking.backgroundAllowed())) setAskBattery(true);
       } catch {
         setActionError('Shift started, but location tracking could not start. Keep location on and reopen the app.');
       }
@@ -276,6 +282,22 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
     }
   };
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [askBattery, setAskBattery] = useState(false);
+  // Already on duty (e.g. the app was updated or reopened mid-shift) with limits still on: ask once
+  // per app run as well, not only at Start shift.
+  useEffect(() => {
+    if (!shift || askedBatteryThisRun) return;
+    askedBatteryThisRun = true;
+    tracking.backgroundAllowed().then((ok) => !ok && setAskBattery(true));
+  }, [shift]);
+  // Back from Android's battery screen: close the prompt once it was allowed.
+  useEffect(() => {
+    if (!askBattery) return;
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active' && (await tracking.backgroundAllowed())) setAskBattery(false);
+    });
+    return () => sub.remove();
+  }, [askBattery]);
   const active = !!shift;
 
   // The running clock: ticks every second only while on duty and this screen is in view
@@ -373,6 +395,19 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
           </Pressable>
         )}
       </View>
+
+      <FieldDialog
+        visible={askBattery}
+        tone="warning"
+        icon={ShieldIcon}
+        title="Keep tracking on all day"
+        message="To save battery, your phone can stop BestServe in the background - then your route has gaps and those trips are flagged. Allow BestServe to run without battery limits (on Xiaomi, Oppo or Vivo phones also turn on Autostart)."
+        onClose={() => setAskBattery(false)}
+        actions={[
+          { label: 'Allow', variant: 'primary', onPress: () => tracking.openBatterySettings() },
+          { label: 'Not now', variant: 'secondary', onPress: () => setAskBattery(false) },
+        ]}
+      />
 
       <FieldDialog
         visible={confirmEnd}

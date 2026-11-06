@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -33,7 +35,9 @@ import com.google.android.gms.location.Priority
  * started from the app while it is open (the Start Shift tap, or reopening the app during a shift), so
  * the normal "while using the app" location permission is enough - no "Allow all the time".
  *
- * Every fix goes into FieldTrackingStore (phone-side queue); the JS side uploads them. The shift id
+ * Every fix goes into FieldTrackingStore (phone-side queue). The service uploads the queue itself every
+ * UPLOAD_EVERY_MS (FieldTrackingUploader), so the route reaches the server while the app is closed;
+ * the app also uploads when it is open (either way each point is stored once). The shift id
  * and interval are kept in SharedPreferences, so if Android kills and restarts the service
  * (START_STICKY) it carries on recording for the same shift.
  */
@@ -41,6 +45,16 @@ class FieldTrackingService : Service() {
 
   private lateinit var client: FusedLocationProviderClient
   private var shiftId: String? = null
+
+  // Background uploads, off the main thread: every UPLOAD_EVERY_MS while the shift runs.
+  private val uploadThread = HandlerThread("FieldTrackingUpload").apply { start() }
+  private val uploadHandler = Handler(uploadThread.looper)
+  private val uploadRound = object : Runnable {
+    override fun run() {
+      FieldTrackingUploader.flush(this@FieldTrackingService)
+      uploadHandler.postDelayed(this, UPLOAD_EVERY_MS)
+    }
+  }
 
   private val callback = object : LocationCallback() {
     override fun onLocationResult(result: LocationResult) {
@@ -88,6 +102,7 @@ class FieldTrackingService : Service() {
       // Android refuses a location service started while the app is in the background (e.g. a
       // system restart of this service on Android 14+). The app restarts it when next opened.
       Log.w(TAG, "Could not start location tracking in the foreground", e)
+      askToResume(this)
       stopSelf()
       return START_NOT_STICKY
     }
@@ -108,11 +123,18 @@ class FieldTrackingService : Service() {
         return START_NOT_STICKY
       }
     }
+    if (!running) {
+      uploadHandler.removeCallbacks(uploadRound)
+      uploadHandler.postDelayed(uploadRound, UPLOAD_EVERY_MS)
+    }
     running = true
+    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(RESUME_ID)
     return START_STICKY
   }
 
   override fun onDestroy() {
+    uploadHandler.removeCallbacks(uploadRound)
+    uploadThread.quitSafely()
     client.removeLocationUpdates(callback)
     running = false
     shiftId = null
@@ -157,10 +179,14 @@ class FieldTrackingService : Service() {
     private const val TAG = "FieldTracking"
     const val CHANNEL = "field_tracking"
     const val NOTIFICATION_ID = 4711
+    const val RESUME_CHANNEL = "field_tracking_resume"
+    const val RESUME_ID = 4712
     const val PREFS = "field_tracking"
     const val KEY_SHIFT = "shift_id"
     const val KEY_INTERVAL = "interval_ms"
     const val DEFAULT_INTERVAL_MS = 60_000L
+    /** How often the service uploads the queue while the shift runs (app open or closed). */
+    const val UPLOAD_EVERY_MS = 3 * 60_000L
 
     @Volatile var running = false
       private set
@@ -176,6 +202,39 @@ class FieldTrackingService : Service() {
     fun stop(context: Context) {
       context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
       context.stopService(Intent(context, FieldTrackingService::class.java))
+    }
+
+    /**
+     * Android would not let tracking restart on its own (e.g. right after the phone was switched on):
+     * a notification asks the executive to open the app, which resumes it at once.
+     */
+    fun askToResume(context: Context) {
+      if (currentShift(context) == null) return
+      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(RESUME_CHANNEL) == null) {
+        nm.createNotificationChannel(
+          NotificationChannel(RESUME_CHANNEL, "Shift tracking stopped", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Shown when your shift is still running but location tracking stopped"
+          },
+        )
+      }
+      val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+        PendingIntent.getActivity(context, 1, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      }
+      val notification = NotificationCompat.Builder(context, RESUME_CHANNEL)
+        .setSmallIcon(R.drawable.ic_stat_location)
+        .setContentTitle("Shift still running")
+        .setContentText("Location tracking stopped. Tap to resume tracking.")
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setAutoCancel(true)
+        .setContentIntent(open)
+        .build()
+      try {
+        nm.notify(RESUME_ID, notification)
+      } catch (e: SecurityException) {
+        Log.w(TAG, "Notifications not allowed", e)
+      }
     }
 
     fun currentShift(context: Context): String? =

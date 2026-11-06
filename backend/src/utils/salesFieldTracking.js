@@ -157,6 +157,25 @@ function legGps(points, from, to) {
   return { km: round2(meters / 1000), points: inside.length };
 }
 
+/** GPS km of one shift's valid points (jitter under MIN_HOP_M not counted). */
+function shiftGpsKm(points) {
+  let meters = 0;
+  let anchor = null;
+  for (const p of points) {
+    if (!p.valid) continue;
+    if (!anchor) {
+      anchor = p;
+      continue;
+    }
+    const hop = distanceMeters(anchor.latitude, anchor.longitude, p.latitude, p.longitude);
+    if (hop >= MIN_HOP_M) {
+      meters += hop;
+      anchor = p;
+    }
+  }
+  return round2(meters / 1000);
+}
+
 /**
  * The petrol legs of a day, and the places Google measures the direct road km between:
  *   waypoints = [start, client 1, ..., client N, start]
@@ -167,7 +186,18 @@ function petrolLegs({ start, visits, points, dayEnd, open }, roadMeters) {
   const stops = visits
     .map((v) => ({ v, place: v.checkIn || v.leadLocation }))
     .filter((s) => s.place);
-  if (!start || stops.length === 0) return { waypoints: null, legs: [], km: null, final: false };
+  if (!start) return { waypoints: null, legs: [], km: null, final: false };
+  // No client visit in this shift: work travel all the same (personal work = End Shift), so it is
+  // paid on the GPS km the shift recorded - no Google, no cap. The manager sees it marked as such.
+  if (stops.length === 0) {
+    const km = shiftGpsKm(points);
+    return {
+      waypoints: null,
+      legs: [{ kind: "SHIFT", from: "Shift start", to: open ? "Now" : "Shift end", fromAt: start.time, toAt: open ? null : dayEnd.time, gpsKm: km, roadKm: null, maxKm: null, paidKm: km, status: "GPS_ONLY" }],
+      km,
+      final: !open,
+    };
+  }
 
   const waypoints = [start.place, ...stops.map((s) => s.place), start.place];
   const roadKm = (i) => (roadMeters && Number.isFinite(roadMeters[i]) ? round2(roadMeters[i] / 1000) : null);
@@ -411,6 +441,27 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
     })),
   };
 
+  // "Stayed in one place for 30+ min" alerts sent while the shifts ran (jobs/salesFieldAlerts.cron.js).
+  let alerts = [];
+  if (shifts.length) {
+    const [alertRows] = await executor.query(
+      `SELECT shift_id, kind, DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at, minutes, latitude, longitude,
+              DATE_FORMAT(notified_at, '%Y-%m-%d %H:%i:%s') AS notified_at
+         FROM sales_field_alerts
+        WHERE shift_id IN (?)
+        ORDER BY started_at ASC`,
+      [shifts.map((s) => s.id)]
+    );
+    alerts = alertRows.map((a) => ({
+      kind: a.kind,
+      shift: shifts.findIndex((s) => s.id === a.shift_id) + 1,
+      startedAt: a.started_at,
+      minutes: Number(a.minutes),
+      notifiedAt: a.notified_at,
+      location: latLng(a.latitude, a.longitude),
+    }));
+  }
+
   const durationMin = shifts.reduce((sum, s) => sum + Math.max(0, ((s.endTs ?? nowTs) - s.startTs) / 60), 0);
 
   return {
@@ -421,6 +472,7 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
     visits: visits.map(({ checkInTs, checkOutTs, shiftIndex, ...rest }) => ({ ...rest, shift: shiftIndex + 1 })),
     stops: stopsOut,
     gaps: gapsOut,
+    alerts,
     // Petrol: the trips (GPS km / direct road km / paid km / status, each with its shift), a total
     // per shift and, while the road km are not worked out yet, the places to ask Google about - one
     // group per shift: [start, client 1, ..., client N, start], null for a shift with no visit.
@@ -448,6 +500,7 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
       visitCount: visits.length,
       unplannedVisitCount: visits.filter((v) => v.unplanned).length,
       gapCount: gapsOut.length,
+      longStopAlertCount: alerts.length,
       flaggedLegCount: petrol.legs.filter((l) => l.status === "CAPPED" || l.status === "NO_GPS").length,
     },
   };
