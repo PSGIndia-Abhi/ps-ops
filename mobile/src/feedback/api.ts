@@ -1,4 +1,7 @@
-import { httpClient } from '../api/httpClient';
+import ReactNativeBlobUtil from 'react-native-blob-util';
+import { httpClient, ApiError } from '../api/httpClient';
+import { getToken } from '../auth/tokenStorage';
+import { API_BASE_URL } from '../config/env';
 import type { AssignablePerson, NumberRequestRow, Call, CallList, CallOutcome, Contact, Department, DepartmentKind, EmailTemplate, FeedbackBody, Invoice, IssueType, NewTicket, Question, Ticket } from './types';
 
 /**
@@ -86,7 +89,52 @@ export async function markActionDone(ticketId: string, note: string): Promise<vo
   await httpClient.post(`/api/feedback/tickets/${ticketId}/action-done`, { note });
 }
 
-export async function markPartDone(ticketId: string, kind: DepartmentKind, note: string): Promise<void> {
+/** Reopens a closed ticket with the customer's answers (the problem is back). */
+export async function reopenTicket(ticketId: string, rowVersion: number, note: string | null, body: Partial<FeedbackBody>): Promise<Ticket> {
+  const { data } = await httpClient.post(`/api/feedback/tickets/${ticketId}/reopen`, { row_version: rowVersion, note, ...body });
+  return data;
+}
+
+/** Optional: the customer's answers about a finished department's part. */
+export async function recordPartFeedback(ticketId: string, kind: DepartmentKind, body: Partial<FeedbackBody>): Promise<Ticket> {
+  const { data } = await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/feedback`, body);
+  return data;
+}
+
+/** A file picked on the phone ({ uri, name, type }). */
+export interface PickedFile {
+  uri: string;
+  name: string;
+  type: string;
+  size?: number | null;
+}
+
+/** Opens a department's attached file: downloaded with the login token, then shown in a phone app. */
+export async function openPartAttachment(ticketId: string, kind: DepartmentKind, name: string, type: string): Promise<void> {
+  const token = await getToken();
+  const safe = (name || 'file').replace(/[^\w.\-]+/g, '_');
+  const target = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/${Date.now()}-${safe}`;
+  const res = await ReactNativeBlobUtil.config({ path: target, overwrite: true, timeout: 60000 }).fetch('GET', `${API_BASE_URL}/api/feedback/tickets/${ticketId}/parts/${kind}/attachment`, {
+    Authorization: token ? `Bearer ${token}` : '',
+  });
+  const status = res.info().status;
+  if (status < 200 || status >= 300) {
+    await ReactNativeBlobUtil.fs.unlink(target).catch(() => undefined);
+    throw new ApiError('Could not open the file.', status);
+  }
+  const opened = await ReactNativeBlobUtil.android.actionViewIntent(target, type || 'application/octet-stream');
+  if (opened === false) throw new ApiError('No app on this phone can open this file.');
+}
+
+export async function markPartDone(ticketId: string, kind: DepartmentKind, note: string, file?: PickedFile | null): Promise<void> {
+  if (file) {
+    const form = new FormData();
+    form.append('note', note);
+    // RN's FormData streams this {uri,name,type} shape from the uri.
+    form.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+    await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/done`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return;
+  }
   await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/done`, { note });
 }
 

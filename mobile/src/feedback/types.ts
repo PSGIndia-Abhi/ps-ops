@@ -40,6 +40,8 @@ export interface CallRow {
   visit_count: number;
   last_visit_date: string | null;
   services: string | null;
+  /** No service in the period: the last one before it. */
+  earlier_visit?: { date: string; service: string | null } | null;
   collector: Person | null;
   next_call_at: string | null;
 }
@@ -147,6 +149,10 @@ export interface TicketPart {
   done_by: Person | null;
   done_at: string | null;
   done_note: string | null;
+  /** Optional: the customer's answers about this department's finished work. */
+  customer_feedback?: Submission | null;
+  /** The file the department attached when it marked its part done. */
+  attachment?: { name: string; type: string | null } | null;
 }
 
 export interface CallTicket {
@@ -191,6 +197,8 @@ export interface Call {
   calls_summary: { total: number; missed: number };
   contacts: Contact[];
   visits: Visit[];
+  /** No service in the call's period: the site's last service before it. */
+  earlier_visit?: Visit | null;
   call_attempts: { id: number; contact_name: string | null; phone: string; outcome: CallOutcome; called_at: string }[];
   submissions: Submission[];
   tickets: CallTicket[];
@@ -301,6 +309,8 @@ export interface FeedbackBody {
   /** Which questions were asked: GENERAL, SERVICE, BOTH or DEPARTMENT (+ question_department). */
   question_mode?: string;
   question_department?: string;
+  /** New feedback on a call already done (a new complaint). */
+  new_round?: boolean;
 }
 
 export interface NewTicket {

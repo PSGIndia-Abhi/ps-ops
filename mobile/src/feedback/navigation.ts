@@ -17,7 +17,7 @@ export type FeedbackStackParamList = {
   FeedbackTabs: NavigatorScreenParams<FeedbackTabParamList> | undefined;
   /** A site's call for the month: call the customer, ask the questions, raise a ticket, follow up. */
   FeedbackCall: { callId: string };
-  FeedbackTicket: { ticketId: string };
+  FeedbackTicket: { ticketId: string; reopen?: boolean };
   /** Opened from the avatar on Home. */
   Profile: undefined;
 };

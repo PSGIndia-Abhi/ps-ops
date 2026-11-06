@@ -1,10 +1,24 @@
 import { createElement, useEffect, useRef, useState } from "react";
-import { FiBriefcase, FiCheck, FiChevronDown, FiFileText, FiTool } from "react-icons/fi";
+import { FiAlertTriangle, FiBriefcase, FiCheck, FiChevronDown, FiClipboard, FiFileText, FiMoreHorizontal, FiPhoneCall, FiTool, FiTrendingUp, FiUserCheck } from "react-icons/fi";
 import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHint, endOfDay, formatDay, getCallInvoices, getIssueTypes, getPeople, rupees } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { ErrorBox, Modal } from "./ui";
 
 const deptIcon = (d) => (d.kind === OPERATIONS ? FiTool : d.with_invoices ? FiFileText : FiBriefcase);
+// Each department card gets its own colour (in list order).
+const DEPT_TONES = ["blue", "amber", "violet", "teal", "rose"];
+// Raising a ticket offers these next steps; Site audit, Supervisor visit and Sales are set later on
+// the ticket's action card (service coordinators and operations managers).
+const RAISE_NOW = ["RESOLVED_ON_CALL", "SCHEDULE_REVISIT", "OTHER"];
+// The next steps as coloured cards with an icon.
+const ACTION_LOOK = {
+  RESOLVED_ON_CALL: { icon: FiPhoneCall, tone: "green" },
+  SCHEDULE_REVISIT: { icon: FiTool, tone: "blue" },
+  SITE_AUDIT: { icon: FiClipboard, tone: "violet" },
+  SUPERVISOR_VISIT: { icon: FiUserCheck, tone: "teal" },
+  SALES: { icon: FiTrendingUp, tone: "amber" },
+  OTHER: { icon: FiMoreHorizontal, tone: "slate" },
+};
 
 /**
  * Raise a ticket for a problem the customer reported. A new ticket reaches every operations
@@ -172,6 +186,8 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
 
   return (
     <Modal
+      wide
+      className="fb-rt"
       title={title}
       onClose={saving ? () => {} : onClose}
       footer={
@@ -186,17 +202,26 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
         </>
       }
     >
+      <div className="fb-rt-hero">
+        <span className="fb-rt-hero-icon" aria-hidden="true">
+          <FiAlertTriangle />
+        </span>
+        <span>
+          <b>Tell the team what went wrong</b>
+          <small>Pick who handles it, tick the issues, set the priority and choose what happens next.</small>
+        </span>
+      </div>
       <ErrorBox error={error} />
       <div className="fb-field">
-        <span>
-          Departments <span className="fb-req">*</span> <span className="fb-small fb-muted">(choose one or more)</span>
-        </span>
+        <StepLabel n={1}>
+          Who handles it? <span className="fb-req">*</span> <span className="fb-rt-step-hint">choose one or more</span>
+        </StepLabel>
         <div className="fb-dept-pick" role="group" aria-label="Departments">
-          {departments.map((d) => {
+          {departments.map((d, i) => {
             const on = depts.includes(d.kind);
             const Icon = deptIcon(d);
             return (
-              <button key={d.kind} type="button" className={`fb-dept-opt ${on ? "is-on" : ""}`} aria-pressed={on} onClick={() => toggleDept(d.kind)}>
+              <button key={d.kind} type="button" className={`fb-dept-opt is-${DEPT_TONES[i % DEPT_TONES.length]} ${on ? "is-on" : ""}`} aria-pressed={on} onClick={() => toggleDept(d.kind)}>
                 <span className="fb-dept-icon" aria-hidden="true">
                   <Icon />
                 </span>
@@ -214,11 +239,12 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       </div>
 
       {forOps && (
-      <section className="fb-rt-sec">
+      <section className="fb-rt-sec is-blue">
+      <StepLabel n={2}>What is the problem?</StepLabel>
       {departments.length > 1 && <DeptHead d={departments.find((d) => d.kind === OPERATIONS) || { kind: OPERATIONS, name: "Operations" }} />}
       <IssuePicker kind={OPERATIONS} types={typesOf(OPERATIONS)} isTicked={isTicked} onToggle={toggleIssue} />
 
-      <div className={showServices ? "fb-form-grid" : "fb-rt-prio-only"}>
+      <div>
         {showServices ? (
         <div className="fb-field">
           <span id="fb-rt-svc-label">Which services?</span>
@@ -254,17 +280,10 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
           </span>
         </div>
         ) : null}
-        <label className="fb-field" htmlFor="fb-rt-priority">
-          Priority
-          <select id="fb-rt-priority" className="fb-select" value={form.priority} onChange={set("priority")}>
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY[p].label}
-                {p === suggested ? " (suggested)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+      </div>
+      <div className="fb-field">
+        <span>Priority</span>
+        <PriorityPills value={form.priority} suggested={suggested} onChange={set("priority")} />
       </div>
 
       <label className="fb-field" htmlFor="fb-rt-summary">
@@ -273,20 +292,25 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       </label>
 
       <div className="fb-field" role="radiogroup" aria-label="What happens next?">
-        What happens next?
-        <div className="fb-radio-grid">
-        {RAISE_ACTIONS.map((value) => [value, ACTIONS[value]]).map(([value, a]) => (
-          <button key={value} type="button" role="radio" aria-checked={form.action === value} className={`fb-radio ${form.action === value ? "is-on" : ""}`} onClick={() => set("action")(value)}>
-            <span className="fb-radio-dot" />
-            <span>
-              <span className="fb-strong">{a.label}</span>
-              <br />
-              <span className="fb-small fb-muted" style={{ fontWeight: 400 }}>
-                {a.hint}
-              </span>
-            </span>
-          </button>
-        ))}
+        <span>What happens next?</span>
+        <div className="fb-rt-actions">
+          {RAISE_ACTIONS.filter((value) => RAISE_NOW.includes(value)).map((value) => {
+            const a = ACTIONS[value];
+            const look = ACTION_LOOK[value] || ACTION_LOOK.OTHER;
+            const on = form.action === value;
+            return (
+              <button key={value} type="button" role="radio" aria-checked={on} className={`fb-rt-action is-${look.tone} ${on ? "is-on" : ""}`} onClick={() => set("action")(value)}>
+                <span className="fb-rt-action-icon" aria-hidden="true">
+                  {createElement(look.icon)}
+                </span>
+                <span className="fb-rt-action-text">
+                  <b>{a.label}</b>
+                  <small>{a.hint}</small>
+                </span>
+                {on && <FiCheck className="fb-rt-action-tick" aria-hidden="true" />}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -334,10 +358,10 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
         const p = partOf(d.kind);
         const id = `fb-rt-${d.kind.toLowerCase()}`;
         return (
-          <section key={d.kind} className="fb-rt-sec">
+          <section key={d.kind} className={`fb-rt-sec is-${DEPT_TONES[departments.indexOf(d) % DEPT_TONES.length]}`}>
             <DeptHead d={d} />
             <IssuePicker kind={d.kind} types={typesOf(d.kind)} isTicked={isTicked} onToggle={toggleIssue} />
-            <div className="fb-rt-row">
+            <div>
             <label className="fb-field" htmlFor={`${id}-summary`}>
               <span>
                 {typesOf(d.kind).length ? (
@@ -358,16 +382,10 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
                 onChange={(e) => setPart(d.kind, { issue_summary: e.target.value })}
               />
             </label>
-            <label className="fb-field" htmlFor={`${id}-priority`}>
-              Priority
-              <select id={`${id}-priority`} className="fb-select" value={p.priority} onChange={(e) => setPart(d.kind, { priority: e.target.value })}>
-                {PRIORITIES.map((x) => (
-                  <option key={x} value={x}>
-                    {PRIORITY[x].label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            </div>
+            <div className="fb-field">
+              <span>Priority</span>
+              <PriorityPills value={p.priority} onChange={(v) => setPart(d.kind, { priority: v })} />
             </div>
             {d.with_invoices && (
               <div className="fb-field">
@@ -420,6 +438,31 @@ function IssuePicker({ kind, types, isTicked, onToggle }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** A numbered step heading. */
+function StepLabel({ n, children }) {
+  return (
+    <span className="fb-rt-step">
+      <span className="fb-rt-step-no">{n}</span>
+      <span>{children}</span>
+    </span>
+  );
+}
+
+/** Priority as coloured pills (Very high red ... Low indigo); suggested = the answers' suggestion. */
+function PriorityPills({ value, suggested, onChange }) {
+  return (
+    <div className="fb-rt-prio" role="radiogroup" aria-label="Priority">
+      {PRIORITIES.map((p) => (
+        <button key={p} type="button" role="radio" aria-checked={value === p} className={`fb-rt-prio-opt is-${p.toLowerCase()} ${value === p ? "is-on" : ""}`} onClick={() => onChange(p)}>
+          <span className="fb-rt-prio-dot" aria-hidden="true" />
+          {PRIORITY[p].label}
+          {p === suggested && <small>suggested</small>}
+        </button>
+      ))}
     </div>
   );
 }

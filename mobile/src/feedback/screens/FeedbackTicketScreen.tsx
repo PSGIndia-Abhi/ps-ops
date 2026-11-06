@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import { AlertTriangleIcon, BriefcaseIcon, ClockIcon, PhoneIcon } from '../../components/icons';
 import { Toast, type ToastMessage } from '../../components/Toast';
@@ -7,7 +7,9 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { radii, spacing, typography } from '../../theme';
-import { closeTicket, errorText, getTicket, markActionDone, markPartDone } from '../api';
+import { closeTicket, errorText, getTicket, markActionDone, markPartDone, openPartAttachment, recordPartFeedback, reopenTicket, type PickedFile } from '../api';
+import { pick, isErrorWithCode, errorCodes } from '@react-native-documents/picker';
+import { QuestionsSheet } from '../QuestionsSheet';
 import { useFeedback } from '../FeedbackContext';
 import { ACTIONS, OPERATIONS, PRIORITY, TICKET_STATUS, formatDateTime, formatDay, isAssignedAction, monthLabel, rupees } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
@@ -36,6 +38,19 @@ const factory = (t: CrmTheme) => ({
   invAmt: { ...typography.captionMedium, color: t.textSecondary, textAlign: 'right' as const },
   done: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, backgroundColor: t.successBg },
   doneText: { ...typography.captionMedium, color: t.successText },
+  ask: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: '#86EFAC', backgroundColor: '#F0FDF4' },
+  askTitle: { ...typography.captionMedium, fontWeight: '700' as const, color: '#166534' },
+  askText: { ...typography.caption, color: '#15803D' },
+  fb: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radii.md, borderWidth: 1 },
+  fbHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, gap: spacing.xs },
+  fbTitle: { ...typography.captionMedium, fontWeight: '800' as const },
+  fbAgain: { ...typography.captionMedium, color: t.primary, fontWeight: '700' as const },
+  filePick: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.xs, padding: spacing.sm, borderRadius: radii.md, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: t.border, backgroundColor: t.surfaceAlt },
+  filePickOn: { borderStyle: 'solid' as const, borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  filePickText: { ...typography.caption, color: t.textSecondary, flex: 1 },
+  fileX: { ...typography.bodyMedium, color: t.primary, paddingHorizontal: 4 },
+  fileChip: { alignSelf: 'flex-start' as const, marginTop: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: t.surface, borderWidth: 1, borderColor: t.successBg, maxWidth: '100%' as const },
+  fileChipText: { ...typography.captionMedium, color: t.successText },
   noteInput: { minHeight: 46, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, paddingHorizontal: spacing.sm, marginTop: spacing.sm, color: t.textPrimary, ...typography.body },
 });
 
@@ -46,7 +61,9 @@ const factory = (t: CrmTheme) => ({
  */
 export function FeedbackTicketScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
-  const { ticketId } = useRoute<RouteProp<FeedbackStackParamList, 'FeedbackTicket'>>().params;
+  const { ticketId, reopen } = useRoute<RouteProp<FeedbackStackParamList, 'FeedbackTicket'>>().params;
+  // "reopen": the ticket was opened from the call to reopen it (asks the questions at once).
+  const [asking, setAsking] = useState<null | 'reopen' | TicketPart>(reopen ? 'reopen' : null);
   const { styles, theme } = useCrmStyles(factory);
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +71,7 @@ export function FeedbackTicketScreen() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const { can, myDepartments, deptOnly, userId } = useFeedback();
   const [partNotes, setPartNotes] = useState<Record<string, string>>({});
+  const [partFiles, setPartFiles] = useState<Record<string, PickedFile | null>>({});
   const [actionNote, setActionNote] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -164,14 +182,34 @@ export function FeedbackTicketScreen() {
   async function finishPart(p: TicketPart) {
     setSaving(true);
     try {
-      await markPartDone(ticket!.id, p.kind, (partNotes[p.kind] || '').trim());
+      const file = partFiles[p.kind] || null;
+      if (file?.size && file.size > 10 * 1024 * 1024) throw new Error('The file is too big - up to 10 MB');
+      await markPartDone(ticket!.id, p.kind, (partNotes[p.kind] || '').trim(), file);
       setPartNotes((n) => ({ ...n, [p.kind]: '' }));
+      setPartFiles((f) => ({ ...f, [p.kind]: null }));
       setToast({ message: `${p.label} part marked done.`, variant: 'success' });
       await load();
     } catch (err) {
       setToast({ message: errorText(err), variant: 'error' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function pickFile(p: TicketPart) {
+    try {
+      const [r] = await pick();
+      setPartFiles((f) => ({ ...f, [p.kind]: { uri: r.uri, name: r.name || `file-${Date.now()}`, type: r.type || 'application/octet-stream', size: r.size } }));
+    } catch (err) {
+      if (!(isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED)) setToast({ message: 'Could not open the file picker.', variant: 'error' });
+    }
+  }
+
+  async function openFile(p: TicketPart) {
+    try {
+      await openPartAttachment(ticket!.id, p.kind, p.attachment?.name || 'file', p.attachment?.type || '');
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
     }
   }
 
@@ -190,7 +228,7 @@ export function FeedbackTicketScreen() {
         <HeroPill label={TICKET_STATUS[ticket.status].label} tone={TICKET_STATUS[ticket.status].tone} />
         <HeroPill label={`${PRIORITY[ticket.priority].label} priority`} tone={PRIORITY[ticket.priority].tone} />
         {parts.map((p) => (
-          <HeroPill key={p.kind} label={`${p.label || p.kind}${p.kind !== OPERATIONS && p.status === 'DONE' ? ' ✓' : ''}`} tone={p.kind !== OPERATIONS ? (p.status === 'DONE' ? 'success' : 'warning') : 'accent'} />
+          <HeroPill key={p.kind} label={`${p.label || p.kind}${p.kind !== OPERATIONS && p.status === 'DONE' ? ' ✓' : ''}`} tone={p.kind !== OPERATIONS ? (p.status === 'DONE' ? 'success' : 'info') : 'accent'} />
         ))}
       </HeroHeader>
       <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.primary} colors={[theme.primary]} />}>
@@ -243,6 +281,11 @@ export function FeedbackTicketScreen() {
               <View style={styles.done}>
                 <Text style={styles.doneText}>✓ Done · {p.done_note}</Text>
                 <Text style={styles.small}>{[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(' · ')}</Text>
+                {!!p.attachment && (
+                  <Pressable onPress={() => openFile(p)} style={styles.fileChip} accessibilityRole="button">
+                    <Text style={styles.fileChipText} numberOfLines={1}>📎 {p.attachment.name}</Text>
+                  </Pressable>
+                )}
               </View>
             ) : canFinish(p) ? (
               <>
@@ -254,10 +297,49 @@ export function FeedbackTicketScreen() {
                   placeholder={p.with_invoices ? 'What was done? e.g. Invoice copy sent' : 'What was done?'}
                   placeholderTextColor={theme.textMuted}
                 />
+                <Pressable onPress={() => pickFile(p)} style={[styles.filePick, !!partFiles[p.kind] && styles.filePickOn]} accessibilityRole="button">
+                  <Text style={[styles.filePickText, !!partFiles[p.kind] && { color: theme.primary, fontWeight: '700' }]} numberOfLines={1}>
+                    📎 {partFiles[p.kind] ? partFiles[p.kind]!.name : 'Attach a file (optional, up to 10 MB)'}
+                  </Text>
+                  {!!partFiles[p.kind] && (
+                    <Pressable onPress={() => setPartFiles((f) => ({ ...f, [p.kind]: null }))} hitSlop={8} accessibilityLabel="Remove the file">
+                      <Text style={styles.fileX}>✕</Text>
+                    </Pressable>
+                  )}
+                </Pressable>
                 <PrimaryButton label={`Mark ${p.label} done`} onPress={() => finishPart(p)} loading={saving} disabled={!(partNotes[p.kind] || '').trim()} style={{ marginTop: spacing.xs }} />
               </>
             ) : (
               <Text style={[styles.small, { marginTop: spacing.xs }]}>{open ? `Waiting for ${p.label}.` : 'Closed.'}</Text>
+            )}
+            {/* Optional: once the department is done, ask the customer how it went. */}
+            {p.status === 'DONE' && !deptOnly && (
+              p.customer_feedback ? (
+                <View style={[styles.fb, p.customer_feedback.has_issue ? { borderColor: theme.dangerBg, backgroundColor: '#FFF8F8' } : { borderColor: theme.successBg, backgroundColor: '#F7FEF9' }]}>
+                  <View style={styles.fbHead}>
+                    <Text style={[styles.fbTitle, { color: p.customer_feedback.has_issue ? theme.dangerText : theme.successText }]}>
+                      Customer feedback · {p.customer_feedback.has_issue ? 'Not happy' : 'All good'}
+                    </Text>
+                    {canClose && (
+                      <Pressable onPress={() => setAsking(p)} hitSlop={8} accessibilityRole="button">
+                        <Text style={styles.fbAgain}>Ask again</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  <Text style={styles.small}>{[p.customer_feedback.spoke_with_name, formatDateTime(p.customer_feedback.submitted_at)].filter(Boolean).join(' · ')}</Text>
+                  <AnswersList submission={p.customer_feedback} />
+                </View>
+              ) : (
+                canClose && (
+                  <Pressable onPress={() => setAsking(p)} style={styles.ask} accessibilityRole="button">
+                    <PhoneIcon size={18} color="#166534" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.askTitle}>Call the customer about {p.label}</Text>
+                      <Text style={styles.askText}>Optional · ask how it went</Text>
+                    </View>
+                  </Pressable>
+                )
+              )
             )}
           </Panel>
         ))}
@@ -336,7 +418,12 @@ export function FeedbackTicketScreen() {
               )}
             </>
           ) : (
-            <Text style={styles.small}>{ticket.close_note || 'Closed.'}</Text>
+            <>
+              <Text style={styles.small}>{ticket.close_note || 'Closed.'}</Text>
+              {!deptOnly && canClose && (
+                <PrimaryButton label={`Reopen ${ticket.ticket_number}`} variant="secondary" onPress={() => setAsking('reopen')} style={{ marginTop: spacing.sm }} />
+              )}
+            </>
           )}
         </Panel>
 
@@ -355,6 +442,41 @@ export function FeedbackTicketScreen() {
           <PrimaryButton label="View the call" variant="secondary" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} />
         )}
       </ScrollView>
+      {asking === 'reopen' && !open && canClose && (
+        <QuestionsSheet
+          title={`Reopen ${ticket.ticket_number}`}
+          heading="The customer has the problem again?"
+          text="Ask the feedback questions. The answers are saved on the call and the same ticket opens again."
+          color="#4F46E5"
+          contacts={ticket.contacts || []}
+          services={ticket.service_label ? [ticket.service_label] : []}
+          withNote
+          submitLabel="Save & reopen"
+          onClose={() => setAsking(null)}
+          onSubmit={async (body, note) => {
+            setTicket(await reopenTicket(ticket.id, ticket.row_version ?? 0, note, body));
+            setAsking(null);
+            setToast({ message: 'Ticket reopened with the customer\'s answers.', variant: 'success' });
+          }}
+        />
+      )}
+      {asking && asking !== 'reopen' && (
+        <QuestionsSheet
+          title={`${asking.label} · customer feedback`}
+          heading={`${asking.label} has finished its part`}
+          text="Call the customer and ask how it went. Optional - the ticket doesn't change."
+          color="#16A34A"
+          contacts={ticket.contacts || []}
+          mode={`DEPT:${asking.kind}`}
+          submitLabel="Save feedback"
+          onClose={() => setAsking(null)}
+          onSubmit={async (body) => {
+            setTicket(await recordPartFeedback(ticket.id, asking.kind, body));
+            setToast({ message: `${asking.label} feedback saved.`, variant: 'success' });
+            setAsking(null);
+          }}
+        />
+      )}
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </View>
   );

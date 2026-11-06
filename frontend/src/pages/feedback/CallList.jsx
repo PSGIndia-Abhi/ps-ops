@@ -5,6 +5,7 @@ import { FEEDBACK_HOME } from "./access";
 import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, monthLabel, periodText, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
+import { EndedSchedules } from "./ScheduleMaster";
 import { Card, Empty, ErrorBox, Loading, PageHead, Segmented, Switch, Tiles } from "./ui";
 
 // The Feedback Desk home (Dashboard): the calls the call schedules made (Masters › Call schedule), one
@@ -167,6 +168,7 @@ export default function CallList() {
   return (
     <>
       <PageHead title="Dashboard" />
+      {(can("FEEDBACK_ADMIN") || can("FEEDBACK_SCHEDULE")) && <EndedSchedules />}
 
       <PeriodFilter mode={mode} month={month} from={from} to={to} onChange={setParam} />
 
@@ -225,7 +227,7 @@ export default function CallList() {
               <thead>
                 <tr>
                   <th>Due</th>
-                  <th>Site · Customer</th>
+                  <th>Customer · Site</th>
                   <th>Visits</th>
                   <th>Last visit</th>
                   <th>Services</th>
@@ -250,16 +252,28 @@ export default function CallList() {
                       </td>
                       {/* One row per site: a customer with several sites has a row for each. */}
                       <td>
-                        <div className="fb-strong">
+                        <div className="fb-strong">{row.customer.name}</div>
+                        <div className="fb-small fb-muted">
                           {row.site.name}
-                          {row.site.city ? <span className="fb-muted" style={{ fontWeight: 400 }}> · {row.site.city}</span> : null}
+                          {row.site.city ? ` · ${row.site.city}` : ""}
                         </div>
-                        <div className="fb-small fb-muted">{row.customer.name}</div>
                       </td>
                       <td className="fb-num">{row.visit_count}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{formatDay(row.last_visit_date)}</td>
+                      {/* No service in the period: the last one before it, marked "earlier". */}
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {row.last_visit_date ? (
+                          formatDay(row.last_visit_date)
+                        ) : row.earlier_visit ? (
+                          <>
+                            {formatDay(row.earlier_visit.date)}
+                            <div className="fb-earlier-tag">earlier</div>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="fb-small" style={{ maxWidth: 220 }}>
-                        {row.services || "—"}
+                        {row.services || (row.earlier_visit ? <span className="fb-muted">{row.earlier_visit.service} (earlier)</span> : <span className="fb-muted">No service yet</span>)}
                       </td>
                       <td>
                         <StatusCell status={row.status} result={row.result} />

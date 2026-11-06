@@ -11,7 +11,14 @@ const {
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
   listDepartments, departmentSetup, saveDepartments, myDepartmentKinds, markPartDone, callInvoices, listIssueTypes, saveIssueTypes,
   markActionDone, hasAssignedTickets,
+  recordPartFeedback,
+  partAttachment,
 } = require("../services/feedback.service");
+const multer = require("multer");
+const crypto = require("crypto");
+const minioClient = require("../lib/minio");
+// A department's file when it marks its part done: one file, up to 10 MB.
+const partUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }).single("file");
 const numberRequests = require("../services/feedbackNumberRequest.service");
 const { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, ensureDueCalls } = require("../services/feedbackSchedule.service");
 const { buildCustomerReport, exportCustomerReport, exportTickets } = require("../services/feedbackReport.service");
@@ -351,12 +358,49 @@ router.get("/tickets/:id", async (req, res) => {
 });
 
 // The Accounts team finishes its part of a ticket. Body: { note }.
-router.post("/tickets/:id/parts/:kind/done", async (req, res) => {
+// Body (JSON, or multipart with an optional "file"): { note }.
+router.post("/tickets/:id/parts/:kind/done", (req, res, next) => partUpload(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "The file is too big - up to 10 MB" : "Could not read the file" });
+  return next();
+}), async (req, res) => {
   try {
     requireAny(req, ANY_OR_DEPT);
-    res.json(await markPartDone(req, req.params.id, req.params.kind, req.body));
+    let file = null;
+    if (req.file) {
+      const name = String(req.file.originalname || "file").replace(/[^\w.\- ]+/g, "_").slice(-150);
+      const key = `feedback/parts/${String(req.params.id).replace(/[^\w-]/g, "")}/${crypto.randomUUID()}-${name.replace(/\s+/g, "_")}`;
+      await minioClient.putObject(process.env.MINIO_BUCKET, key, req.file.buffer, req.file.size, { "Content-Type": req.file.mimetype || "application/octet-stream" });
+      file = { key, name, type: req.file.mimetype || "application/octet-stream" };
+    }
+    res.json(await markPartDone(req, req.params.id, req.params.kind, req.body, file));
   } catch (err) {
     sendError(res, err, "Failed to finish the department's part");
+  }
+});
+
+router.get("/tickets/:id/parts/:kind/attachment", async (req, res) => {
+  try {
+    requireAny(req, ANY_OR_DEPT);
+    const f = await partAttachment(req, req.params.id, req.params.kind);
+    const stream = await minioClient.getObject(process.env.MINIO_BUCKET, f.key);
+    res.setHeader("Content-Type", f.type);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.name)}"`);
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+    stream.pipe(res);
+  } catch (err) {
+    sendError(res, err, "Failed to open the file");
+  }
+});
+
+// Optional: the customer's feedback on a finished department's part (that department's questions).
+// Body: { contact_id?, spoke_with_name, responses, other_feedback? }. The call's collector or a desk manager.
+router.post("/tickets/:id/parts/:kind/feedback", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    const id = await recordPartFeedback(req, req.params.id, req.params.kind, req.body);
+    res.json(await getTicket(req, id));
+  } catch (err) {
+    sendError(res, err, "Failed to save the customer's feedback");
   }
 });
 

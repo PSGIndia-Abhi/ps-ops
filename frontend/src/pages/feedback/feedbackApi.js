@@ -77,12 +77,37 @@ export const listTickets = (params) => feedbackRequest(`/tickets${query(params)}
 export const getTicket = (id) => feedbackRequest(`/tickets/${encodeURIComponent(id)}`);
 export const updateTicket = (id, body) => feedbackRequest(`/tickets/${id}`, send("PATCH", body));
 export const closeTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/close`, send("POST", { row_version: rowVersion, close_note: note }));
-export const reopenTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/reopen`, send("POST", { row_version: rowVersion, note }));
+/** extra = the customer's answers when reopening: { spoke_with_name, contact_id?, responses, other_feedback?, question_mode }. */
+export const reopenTicket = (id, rowVersion, note, extra = {}) => feedbackRequest(`/tickets/${id}/reopen`, send("POST", { row_version: rowVersion, note, ...extra }));
 /** Deletes a ticket raised by mistake (desk managers and whoever raised it). */
 export const deleteTicket = (id, note) => feedbackRequest(`/tickets/${id}`, send("DELETE", note ? { note } : {}));
 export const getRevisitOptions = (id) => feedbackRequest(`/tickets/${id}/revisit-options`);
 /** The call back after the work, with the call's questions: all good closes the ticket, a bad answer keeps it open. */
-export const markPartDone = (id, kind, note) => feedbackRequest(`/tickets/${id}/parts/${kind}/done`, send("POST", { note }));
+/** Optional: the customer's answers to a finished department's questions. */
+export const recordPartFeedback = (id, kind, body) => feedbackRequest(`/tickets/${id}/parts/${kind}/feedback`, send("POST", body));
+/** A department finishes its part; file (optional) = one attachment, up to 10 MB. */
+export const markPartDone = (id, kind, note, file = null) => {
+  if (!file) return feedbackRequest(`/tickets/${id}/parts/${kind}/done`, send("POST", { note }));
+  const form = new FormData();
+  form.append("note", note);
+  form.append("file", file);
+  return feedbackRequest(`/tickets/${id}/parts/${kind}/done`, { method: "POST", body: form });
+};
+/** Opens a department's attached file in a new tab (it needs the login token, so it is fetched first). */
+export async function openPartAttachment(id, kind) {
+  const tab = window.open("", "_blank");
+  try {
+    const res = await apiFetch(`/api/feedback/tickets/${id}/parts/${kind}/attachment`);
+    if (!res?.ok) throw new Error((await safeJson(res))?.error || "Could not open the file");
+    const url = URL.createObjectURL(await res.blob());
+    if (tab && !tab.closed) tab.location.href = url;
+    else window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
 /** The assigned supervisor / salesperson marks the Site audit, Supervisor visit or Sales step done. */
 export const markActionDone = (id, note) => feedbackRequest(`/tickets/${id}/action-done`, send("POST", { note }));
 export const getCallInvoices = (id) => feedbackRequest(`/calls/${id}/invoices`);

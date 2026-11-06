@@ -1,9 +1,9 @@
 -- =============================================================================================
--- Customer Feedback - ALL database changes in one file: steps 01 to 32, in order.
+-- Customer Feedback - ALL database changes in one file: steps 01 to 33, in order.
 --
 -- Every step is safe to run again: tables are created only when missing, columns added only when
 -- missing, seed rows and permissions only when not there yet. So it can run on a database that has
--- none of it, some of it (e.g. steps 01-21 already) or all of it - it brings it to step 32.
+-- none of it, some of it (e.g. steps 01-21 already) or all of it - it brings it to step 33.
 --
 -- How to run (production):
 --   1. Take a backup first:  mysqldump -u <user> -p <database> > backup_before_feedback.sql
@@ -14,7 +14,7 @@
 --   3. Check the results at the bottom, then deploy the new backend / website and the new app.
 --   4. Then set up Feedback Desk > Masters > Call schedule: only sites with a schedule get calls.
 --
--- Made from backend/src/data/migrations/*_feedback_01 ... _32 (steps 16, 21 and 24 rewritten to be
+-- Made from backend/src/data/migrations/*_feedback_01 ... _33 (steps 16, 21 and 24 rewritten to be
 -- safe to re-run; the result is the same).
 -- =============================================================================================
 
@@ -1075,6 +1075,27 @@ JOIN permissions p
 WHERE r.name = 'Operations Manager'
   AND p.name = 'FEEDBACK_ADMIN';
 
+-- ---------------------------------------------------------------------------------------------
+-- Step 33 · 20261106_feedback_33_part_attachments.sql
+-- ---------------------------------------------------------------------------------------------
+-- Customer Feedback, step 33: a file attached when a department marks its part of a ticket done.
+--
+-- feedback_ticket_parts gets attachment_key (the file in MinIO), attachment_name (the file's name)
+-- and attachment_type (its content type). One file per department part, optional; e.g. the invoice
+-- copy the Accounts Team sent.
+--
+-- Adds columns only; existing rows keep their values. Safe to re-run.
+
+SET @has_col := (SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'feedback_ticket_parts' AND COLUMN_NAME = 'attachment_key');
+SET @sql := IF(@has_col = 0,
+  'ALTER TABLE `feedback_ticket_parts`
+     ADD COLUMN `attachment_key` VARCHAR(255) NULL DEFAULT NULL AFTER `done_note`,
+     ADD COLUMN `attachment_name` VARCHAR(255) NULL DEFAULT NULL AFTER `attachment_key`,
+     ADD COLUMN `attachment_type` VARCHAR(120) NULL DEFAULT NULL AFTER `attachment_name`',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- =============================================================================================
 -- Checks - each should return rows / the values shown
 -- =============================================================================================
@@ -1086,6 +1107,7 @@ SHOW COLUMNS FROM feedback_tickets LIKE 'priority';                             
 SHOW COLUMNS FROM feedback_requests LIKE 'due_date';                                      -- date, NOT NULL
 SHOW INDEX FROM feedback_requests WHERE Key_name = 'uniq_freq_site_due';
 SHOW COLUMNS FROM feedback_schedules LIKE 'month_days';
+SHOW COLUMNS FROM feedback_ticket_parts LIKE 'attachment%';                               -- attachment_key, attachment_name, attachment_type
 SELECT r.name AS role, p.name AS permission FROM role_permissions rp
   JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
   WHERE p.name LIKE 'FEEDBACK%' ORDER BY p.name, r.name;

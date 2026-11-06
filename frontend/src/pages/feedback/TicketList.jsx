@@ -208,7 +208,7 @@ export default function TicketList() {
                       <td>
                         <span className="fb-dept-chips">
                           {(t.parts?.length ? t.parts : [{ kind: OPERATIONS, label: "Operations" }]).map((p) => (
-                            <span key={p.kind} className={`fb-dept-chip ${p.kind !== OPERATIONS ? "is-accounts" : ""} ${p.kind !== OPERATIONS && p.status === "DONE" ? "is-done" : ""}`}>
+                            <span key={p.kind} className={`fb-dept-chip ${p.kind === OPERATIONS ? "is-ops" : p.kind === "ACCOUNTS" ? "is-acc" : p.kind === "SALES" ? "is-sales" : "is-other"} ${p.kind !== OPERATIONS && p.status === "DONE" ? "is-done" : ""}`}>
                               {p.label || p.kind}
                               {p.kind !== OPERATIONS && p.status === "DONE" ? " ✓" : ""}
                             </span>

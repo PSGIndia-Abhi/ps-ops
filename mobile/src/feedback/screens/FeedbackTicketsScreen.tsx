@@ -28,7 +28,7 @@ const factory = (t: CrmTheme) => ({
   deptRow: { flexDirection: 'row' as const, gap: 6, marginTop: spacing.sm, flexWrap: 'wrap' as const },
   deptChip: { ...typography.caption, fontWeight: '700' as const, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, overflow: 'hidden' as const },
   deptOps: { color: t.accentText, backgroundColor: t.accentBg },
-  deptAcc: { color: t.warningText, backgroundColor: t.warningBg },
+  deptAcc: { color: t.info, backgroundColor: t.infoBg },
   deptDone: { color: t.successText, backgroundColor: t.successBg },
   stripe: { position: 'absolute' as const, left: 0, top: 0, bottom: 0, width: 5 },
   nextRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: t.surfaceAlt },
@@ -155,8 +155,8 @@ export function FeedbackTicketsScreen() {
                 <View style={styles.flex1}>
                   <Text style={styles.no}>{t.ticket_number}</Text>
                   <Text style={styles.site} numberOfLines={1}>
-                    {t.site.name}
-                    <Text style={styles.customer}> · {t.customer.name}</Text>
+                    {t.customer.name}
+                    <Text style={styles.customer}> · {t.site.name}</Text>
                   </Text>
                 </View>
                 <StatusBadge label={TICKET_STATUS[t.status].label} tone={TICKET_STATUS[t.status].tone} dot={false} />

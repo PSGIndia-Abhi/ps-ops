@@ -13,6 +13,9 @@ import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHin
 import type { AssignablePerson, DepartmentKind, Invoice, IssueType, NewTicket, Priority, TicketAction, Visit } from './types';
 import { Chips, RadioCard } from './ui';
 
+// Offered when raising; Site audit, Supervisor visit and Sales are set later on the ticket (web).
+const RAISE_NOW: TicketAction[] = ['RESOLVED_ON_CALL', 'SCHEDULE_REVISIT', 'OTHER'];
+
 const factory = (t: CrmTheme) => ({
   body: { maxHeight: 600 },
   label: { ...typography.captionMedium, color: t.textMuted, marginBottom: spacing.xs, marginTop: spacing.sm },
@@ -274,7 +277,7 @@ export function RaiseTicketSheet({
             />
 
             <Text style={styles.label}>What happens next?</Text>
-            {RAISE_ACTIONS.map((a) => (
+            {RAISE_ACTIONS.filter((a) => RAISE_NOW.includes(a)).map((a) => (
               <RadioCard key={a} title={ACTIONS[a].label} hint={ACTIONS[a].hint} on={action === a} onPress={() => setAction(a)} />
             ))}
             {assignMeta && (

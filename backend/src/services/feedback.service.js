@@ -885,6 +885,11 @@ function callListPeriod(query) {
 }
 
 // The services of a call's period, for its row: count, last date and names.
+// The site's last service before the call's period (shown when the period had none).
+const EARLIER_VISIT = (what) => `(SELECT ${what}
+     FROM job_visits v JOIN jobs j ON j.id = v.job_id
+     WHERE j.company_id = r.site_id AND ${SERVICE_VISIT} AND COALESCE(v.completed_at, v.scheduled_date) < r.period_start
+     ORDER BY COALESCE(v.completed_at, v.scheduled_date) DESC, v.id DESC LIMIT 1)`;
 const CALL_VISITS = (what) => `(SELECT ${what}
      FROM job_visits v JOIN jobs j ON j.id = v.job_id
      WHERE j.company_id = r.site_id AND ${SERVICE_VISIT}
@@ -921,6 +926,8 @@ async function callList(req) {
            ${CALL_VISITS("COUNT(DISTINCT v.id)")} AS visit_count,
            ${CALL_VISITS("DATE_FORMAT(MAX(COALESCE(v.completed_at, v.scheduled_date)), '%Y-%m-%d')")} AS last_visit_date,
            ${CALL_VISITS("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(j.sub_service, ''), j.service_type) SEPARATOR ', ')")} AS services,
+           ${EARLIER_VISIT("DATE_FORMAT(COALESCE(v.completed_at, v.scheduled_date), '%Y-%m-%d')")} AS earlier_visit_date,
+           ${EARLIER_VISIT("COALESCE(NULLIF(j.sub_service, ''), j.service_type)")} AS earlier_service,
            -- A done call whose ticket is still open shows as TICKET_OPEN until the ticket is closed.
            CASE WHEN r.status = 'DONE' AND EXISTS (SELECT 1 FROM feedback_tickets ot WHERE ot.request_id = r.id AND ot.status = 'ACTION_PENDING')
                 THEN 'TICKET_OPEN' ELSE r.status END AS status, r.result,
@@ -976,6 +983,8 @@ async function callList(req) {
       visit_count: Number(r.visit_count || 0),
       last_visit_date: r.last_visit_date,
       services: r.services,
+      // No service in the period: the last one before it (date and service), else null.
+      earlier_visit: Number(r.visit_count || 0) || !r.earlier_visit_date ? null : { date: r.earlier_visit_date, service: r.earlier_service },
       collector: person(r.collector_user_id, r.collector_name),
       next_call_at: r.next_call_at,
       last_activity_at: r.last_activity_at,
@@ -1093,6 +1102,22 @@ async function getCall(req, id) {
      ORDER BY COALESCE(v.completed_at, v.scheduled_date)`,
     [start, next, r.site_id]
   );
+  // No service in the period: the site's last service before it.
+  let earlier = null;
+  if (!visits.length) {
+    const [[e]] = await pool.query(
+      `SELECT v.id, v.job_id, j.code AS job_code, v.status,
+              DATE_FORMAT(COALESCE(v.completed_at, v.scheduled_date), '%Y-%m-%d') AS visit_date,
+              COALESCE(NULLIF(j.sub_service, ''), j.service_type) AS service,
+              (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ')
+               FROM visit_technicians vt JOIN users u ON u.id = vt.technician_id WHERE vt.visit_id = v.id) AS technicians
+       FROM job_visits v JOIN jobs j ON j.id = v.job_id
+       WHERE j.company_id = ? AND ${SERVICE_VISIT} AND COALESCE(v.completed_at, v.scheduled_date) < ?
+       ORDER BY COALESCE(v.completed_at, v.scheduled_date) DESC, v.id DESC LIMIT 1`,
+      [r.site_id, start]
+    );
+    if (e) earlier = { id: e.id, job_id: e.job_id, job_code: e.job_code, status: e.status, date: e.visit_date, service: e.service, technicians: e.technicians };
+  }
   const [calls] = await pool.query(
     `SELECT a.id, a.contact_id, a.contact_name, a.phone, a.outcome, a.called_at, a.called_by_user_id, u.name AS called_by_name
      FROM feedback_call_attempts a LEFT JOIN users u ON u.id = a.called_by_user_id
@@ -1165,6 +1190,7 @@ async function getCall(req, id) {
     visits: visits.map((v) => ({
       id: v.id, job_id: v.job_id, job_code: v.job_code, status: v.status, date: v.visit_date, service: v.service, technicians: v.technicians,
     })),
+    earlier_visit: earlier, // no service in the period: the last one before it
     call_attempts: calls.map((c) => ({
       id: c.id, contact_id: c.contact_id, contact_name: c.contact_name, phone: c.phone,
       outcome: c.outcome, called_at: c.called_at, called_by: person(c.called_by_user_id, c.called_by_name),
@@ -1458,13 +1484,9 @@ async function saveSubmission(conn, { requestId, source, formLinkId = null, cont
 // Raises one ticket from a monthly call. input: { priority?, action, issue_summary?, visit_id?,
 // action_owner_user_id?, action_due_at?, action_note? }. suggested = priority suggested by the
 // answers (used when priority is left out). RESOLVED_ON_CALL closes the ticket at once.
-// One ticket per call: a new problem later goes on the same ticket (reopened when closed).
+// A call can have several tickets: a new complaint gets its own, even while another is still open.
 async function raiseTicket(conn, req, r, submissionId, suggested, input) {
   if (!input || typeof input !== "object") throw new HttpError(400, "Send the ticket details");
-  const [[existing]] = await conn.query("SELECT ticket_number, status FROM feedback_tickets WHERE request_id = ? ORDER BY seq LIMIT 1", [r.id]);
-  if (existing) {
-    throw new HttpError(409, `This call already has ticket ${existing.ticket_number} - ${existing.status === "CLOSED" ? "reopen it" : "work on it"} instead of raising another`);
-  }
   // departments: which teams get the ticket (one or more); left out = Operations, as before.
   const kinds = Array.isArray(input.departments) && input.departments.length
     ? [...new Set(input.departments.map((x) => String(x || "").trim().toUpperCase()))]
@@ -1594,9 +1616,18 @@ async function markCallDone(conn, req, r, result, note) {
 //         started_at?, ticket?: { ...raiseTicket input }, no_ticket?: true }
 // The feedback is always saved. With a bad answer the collector must either send `ticket` or
 // confirm `no_ticket: true`. The call is then DONE: result ISSUE if a ticket was raised, else GOOD.
+// new_round: true = new feedback on a call already done (a new complaint): saved the same way; the
+// call stays done (result Issue when a ticket is raised).
 async function saveCallFeedback(req, requestId, body) {
   const out = await inTransaction(async (conn) => {
-    const r = await lockCallForWork(conn, req, requestId);
+    const newRound = body?.new_round === true;
+    const r = await lockCallForWork(conn, req, requestId, { openDone: newRound });
+    if (newRound && r.status !== "DONE") throw new HttpError(409, "Finish this call first - new feedback is for a call already done");
+    // The last call reached a wrong number: the right number must be called (and answer) first.
+    if (!newRound) {
+      const [[lastTry]] = await conn.query("SELECT outcome FROM feedback_call_attempts WHERE request_id = ? ORDER BY called_at DESC, id DESC LIMIT 1", [requestId]);
+      if (lastTry?.outcome === "WRONG_NUMBER") throw new HttpError(400, "The last call was a wrong number - call the right number and save it as Answered before taking the feedback");
+    }
     const contact = await siteContact(conn, r.site_id, body?.contact_id);
     const spokeWith = optionalText(body?.spoke_with_name, "name", 150) || contact?.name || null;
     if (!spokeWith) throw new HttpError(400, "Choose who gave the feedback");
@@ -1619,11 +1650,17 @@ async function saveCallFeedback(req, requestId, body) {
     await bumpCall(conn, requestId, { latest_submission_id: submission.id });
     await addHistory(conn, {
       requestId, event: "FEEDBACK_SAVED",
-      note: `On call with ${spokeWith} - ${hasBad ? `${rows.filter((x) => x.is_bad).length} answer(s) show an issue` : "all answers good"}`,
+      note: `${newRound ? "New feedback" : "On call"} with ${spokeWith} - ${hasBad ? `${rows.filter((x) => x.is_bad).length} answer(s) show an issue` : "all answers good"}`,
       userId: req.user.id,
     });
 
     const ticket = wantsTicket ? await raiseTicket(conn, req, r, submission.id, suggested, body.ticket) : null;
+    if (newRound) {
+      // Already done: a new ticket makes the result Issue; otherwise the result stays as it was.
+      if (ticket && r.result !== "ISSUE") await bumpCall(conn, requestId, { result: "ISSUE" });
+      const result = ticket ? "ISSUE" : r.result;
+      return { submission_id: submission.id, has_issue: hasBad, suggested_priority: suggested, ticket, status: "DONE", result, siteId: r.site_id };
+    }
     await markCallDone(conn, req, r, ticket ? "ISSUE" : "GOOD", hasBad && !ticket ? "Done - issue noted, no ticket needed" : null);
     return { submission_id: submission.id, has_issue: hasBad, suggested_priority: suggested, ticket, status: "DONE", result: ticket ? "ISSUE" : "GOOD", siteId: r.site_id };
   });
@@ -1761,6 +1798,8 @@ async function loadParts(executor, ticketIds) {
       done_by: person(p.done_by, p.done_by_name),
       done_at: p.done_at,
       done_note: p.done_note,
+      // The file the department attached when it marked its part done (GET .../parts/:kind/attachment).
+      attachment: p.attachment_key ? { name: p.attachment_name, type: p.attachment_type } : null,
     });
   }
   return byTicket;
@@ -1919,9 +1958,11 @@ async function getTicket(req, id) {
      WHERE h.ticket_id = ? ORDER BY h.created_at DESC, h.id DESC`,
     [row.id]
   );
+  const partFeedback = await departmentFeedback(row.request_id, allParts);
   return {
     ...ticketRow(row),
-    parts: visibleParts(req, row, allParts),
+    // customer_feedback: the customer's answers about a finished department's work (optional call).
+    parts: visibleParts(req, row, allParts).map((p) => ({ ...p, customer_feedback: partFeedback.get(p.kind) || null })),
     follow_up_due: followUpDue(row, row.revisit_status, allParts),
     feedback: submission,
     contacts: contacts.map((c) => ({ ...c, is_primary: Boolean(c.is_primary) })),
@@ -2484,16 +2525,36 @@ async function reopenTicket(req, id, body) {
     // Desk managers, and whoever raised it (the customer has the problem again on their call).
     if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(t.raised_by) !== Number(req.user.id)) throw new HttpError(404, "Feedback ticket not found");
     if (t.status !== "CLOSED") throw new HttpError(409, "The ticket is not closed");
-    const note = optionalText(body?.note, "note", 500);
-    if (!note) throw new HttpError(400, "Say why the ticket is reopened");
+    // The customer's answers to the feedback questions (asked when reopening) become the ticket's problem.
+    let submissionId = t.submission_id;
+    let answersNote = null;
+    if (Array.isArray(body?.responses) && body.responses.length) {
+      const [[r]] = await conn.query(`SELECT r.*, ${CALL_WINDOW} FROM feedback_requests r WHERE r.id = ?`, [t.request_id]);
+      const contact = await siteContact(conn, r.site_id, body?.contact_id);
+      const spokeWith = optionalText(body?.spoke_with_name, "name", 150) || contact?.name || null;
+      if (!spokeWith) throw new HttpError(400, "Choose who gave the feedback");
+      const settings = await getSettings(conn);
+      const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
+      const rows = await cleanResponses(conn, body.responses, { scope: await questionScope(conn, r, body) });
+      const submission = await saveSubmission(conn, {
+        requestId: r.id, source: "CALL", contactId: contact?.id ?? null, spokeWith, collectedBy: req.user.id, otherFeedback, startedAt: null, rows,
+      });
+      await bumpCall(conn, r.id, { latest_submission_id: submission.id });
+      submissionId = submission.id;
+      const badCount = rows.filter((x) => x.is_bad).length;
+      answersNote = `Feedback from ${spokeWith} - ${badCount ? `${badCount} answer(s) show an issue` : "all answers good"}`;
+    }
+    const typed = optionalText(body?.note, "note", 500);
+    const note = [typed, answersNote].filter(Boolean).join(" · ").slice(0, 500);
+    if (!note) throw new HttpError(400, "Ask the feedback questions, or say why the ticket is reopened");
     // The problem is back, so the earlier re-visit no longer counts: it is unlinked and a new one is
     // booked on the same ticket. "Resolved on call" no longer fits, so it becomes "Book a re-visit".
     const action = t.action === "RESOLVED_ON_CALL" ? "SCHEDULE_REVISIT" : t.action;
     await conn.query(
       `UPDATE feedback_tickets SET status = 'ACTION_PENDING', action = ?, revisit_visit_id = NULL, closed_by = NULL, closed_at = NULL, close_note = NULL,
-              action_done_by = NULL, action_done_at = NULL, action_done_note = NULL,
+              action_done_by = NULL, action_done_at = NULL, action_done_note = NULL, submission_id = ?,
               row_version = row_version + 1 WHERE id = ?`,
-      [action, t.id]
+      [action, submissionId, t.id]
     );
     // The other departments have their work to do again too.
     await conn.query("UPDATE feedback_ticket_parts SET status = 'PENDING', done_by = NULL, done_at = NULL, done_note = NULL WHERE ticket_id = ? AND kind <> 'OPERATIONS'", [t.id]);
@@ -2505,7 +2566,8 @@ async function reopenTicket(req, id, body) {
 // POST /tickets/:id/parts/:kind/done - Body: { note } (what was done, e.g. "Invoice sent").
 // A department's team (or a desk manager) finishes its part of an open ticket. Operations' part is
 // done by its re-visit, so every department but Operations is marked here.
-async function markPartDone(req, id, kindValue, body) {
+// file (optional): { key, name, type } of the file already put in MinIO - saved with the part.
+async function markPartDone(req, id, kindValue, body, file = null) {
   const kind = String(kindValue || "").trim().toUpperCase();
   if (kind === OPERATIONS) throw new HttpError(400, "The Operations part is done when its re-visit is completed");
   const name = await departmentName(pool, kind);
@@ -2519,9 +2581,12 @@ async function markPartDone(req, id, kindValue, body) {
     const [[p]] = await conn.query("SELECT id, status FROM feedback_ticket_parts WHERE ticket_id = ? AND kind = ? FOR UPDATE", [t.id, kind]);
     if (!p) throw new HttpError(404, `${t.ticket_number} has no ${name} part`);
     if (p.status === "DONE") throw new HttpError(409, `The ${name} part is already done`);
-    await conn.query("UPDATE feedback_ticket_parts SET status = 'DONE', done_by = ?, done_at = NOW(), done_note = ? WHERE id = ?", [req.user.id, note, p.id]);
+    await conn.query(
+      "UPDATE feedback_ticket_parts SET status = 'DONE', done_by = ?, done_at = NOW(), done_note = ?, attachment_key = ?, attachment_name = ?, attachment_type = ? WHERE id = ?",
+      [req.user.id, note, file?.key || null, file?.name || null, file?.type || null, p.id]
+    );
     await conn.query("UPDATE feedback_tickets SET row_version = row_version + 1 WHERE id = ?", [t.id]);
-    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "PART_DONE", note: `${name} done - ${note}`, userId: req.user.id });
+    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "PART_DONE", note: `${name} done - ${note}${file ? ` · file: ${file.name}` : ""}`.slice(0, 500), userId: req.user.id });
     return { ticket_id: t.id, ticket_number: t.ticket_number };
   });
 }
@@ -2529,6 +2594,70 @@ async function markPartDone(req, id, kindValue, body) {
 // POST /tickets/:id/action-done - Body: { note } (what was done). The supervisor / salesperson a
 // Site audit, Supervisor visit or Sales step is assigned to (or a desk manager) finishes it; then the
 // customer is called back.
+// The customer's feedback on each finished department's part (optional): a submission on the ticket's
+// call whose answers are all that department's questions (Questions › Department). Latest first.
+async function departmentFeedback(requestId, parts) {
+  const kinds = parts.filter((p) => p.kind !== OPERATIONS && p.status === "DONE").map((p) => p.kind);
+  if (!kinds.length) return new Map();
+  const deptQuestions = new Map((await listQuestions(pool, { includeInactive: true })).filter((q) => q.question_type === "DEPARTMENT").map((q) => [q.id, q.departments]));
+  const [subs] = await pool.query(
+    `SELECT sb.*, u.name AS collected_by_name FROM feedback_submissions sb
+     LEFT JOIN users u ON u.id = sb.collected_by_user_id WHERE sb.request_id = ? ORDER BY sb.submitted_at DESC`,
+    [requestId]
+  );
+  const answers = await questionsAnswers(subs.map((s) => s.id));
+  const out = new Map();
+  for (const s of subs) {
+    const mine = answers.filter((a) => a.submission_id === s.id);
+    if (!mine.length || !mine.every((a) => deptQuestions.has(a.question_id))) continue;
+    for (const kind of kinds) {
+      if (!out.has(kind) && mine.every((a) => (deptQuestions.get(a.question_id) || []).includes(kind))) out.set(kind, submissionRow(s, mine, null));
+    }
+  }
+  return out;
+}
+
+// GET /tickets/:id/parts/:kind/attachment - the file a department attached (whoever can see the ticket).
+async function partAttachment(req, id, kindValue) {
+  const kind = String(kindValue || "").trim().toUpperCase();
+  const t = await getTicket(req, id); // checks the user can see this ticket
+  const [[p]] = await pool.query("SELECT attachment_key, attachment_name, attachment_type FROM feedback_ticket_parts WHERE ticket_id = ? AND kind = ?", [t.id, kind]);
+  if (!p?.attachment_key) throw new HttpError(404, "No file attached");
+  return { key: p.attachment_key, name: p.attachment_name, type: p.attachment_type || "application/octet-stream" };
+}
+
+// POST /tickets/:id/parts/:kind/feedback - optional: once a department has finished its part, the
+// collector calls the customer and asks that department's questions. Body: { contact_id?,
+// spoke_with_name, responses, other_feedback? }. Saved on the ticket's call; the ticket is not changed.
+async function recordPartFeedback(req, id, kindValue, body) {
+  const kind = String(kindValue || "").trim().toUpperCase();
+  const [[t]] = await pool.query("SELECT id, request_id, ticket_number FROM feedback_tickets WHERE id = ? OR ticket_number = ?", [id, id]);
+  if (!t) throw new HttpError(404, "Feedback ticket not found");
+  return inTransaction(async (conn) => {
+    const r = await lockCallForWork(conn, req, t.request_id, { openDone: true });
+    const [[p]] = await conn.query("SELECT status FROM feedback_ticket_parts WHERE ticket_id = ? AND kind = ?", [t.id, kind]);
+    const name = await departmentName(conn, kind);
+    if (!p || kind === OPERATIONS) throw new HttpError(404, `${t.ticket_number} has no ${name} part`);
+    if (p.status !== "DONE") throw new HttpError(400, `Ask for the customer's feedback once ${name} has finished its part`);
+    const contact = await siteContact(conn, r.site_id, body?.contact_id);
+    const spokeWith = optionalText(body?.spoke_with_name, "name", 150) || contact?.name || null;
+    if (!spokeWith) throw new HttpError(400, "Choose who gave the feedback");
+    const settings = await getSettings(conn);
+    const otherFeedback = settings.other_text_enabled ? optionalText(body?.other_feedback, "other feedback", 2000) : null;
+    const rows = await cleanResponses(conn, body?.responses, { scope: await questionScope(conn, r, { question_mode: "DEPARTMENT", question_department: kind }) });
+    const submission = await saveSubmission(conn, {
+      requestId: r.id, source: "CALL", contactId: contact?.id ?? null, spokeWith, collectedBy: req.user.id, otherFeedback, startedAt: null, rows,
+    });
+    const bad = rows.filter((x) => x.is_bad).length;
+    await addHistory(conn, {
+      requestId: r.id, ticketId: t.id, event: "PART_FEEDBACK",
+      note: `${name} feedback from ${spokeWith} - ${bad ? `${bad} answer(s) show an issue` : "all answers good"}`,
+      userId: req.user.id,
+    });
+    return t.id;
+  });
+}
+
 async function markActionDone(req, id, body) {
   const note = optionalText(body?.note, "note", 500);
   if (!note) throw new HttpError(400, "Say what was done");
@@ -2855,6 +2984,8 @@ async function revisitOptions(req, id) {
 }
 
 module.exports = {
+  recordPartFeedback,
+  partAttachment,
   listIssueTypes,
   saveIssueTypes,
   PRIORITIES,

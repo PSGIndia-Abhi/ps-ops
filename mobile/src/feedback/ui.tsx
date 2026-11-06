@@ -209,16 +209,6 @@ export function QuestionForm({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modes}>
         <Chips options={questionModes(departments).filter((m) => counts[m.value] > 0).map((m) => ({ value: m.value, label: `${m.label} · ${counts[m.value]}` }))} value={mode} onChange={onMode} />
       </ScrollView>
-      {questions.length > 0 && (
-        <View style={styles.progress}>
-          <Text style={styles.progressText}>
-            {done} of {questions.length} answered
-          </Text>
-          <View style={styles.bar}>
-            <View style={[styles.barFill, { width: `${pct}%` }]} />
-          </View>
-        </View>
-      )}
       {questions.map((q, n) => {
         const answered = !!answers[q.id];
         return (
@@ -263,6 +253,16 @@ export function QuestionForm({
           </View>
         );
       })}
+      {questions.length > 0 && (
+        <View style={styles.progress}>
+          <Text style={styles.progressText}>
+            {done} of {questions.length} answered
+          </Text>
+          <View style={styles.bar}>
+            <View style={[styles.barFill, { width: `${pct}%` }]} />
+          </View>
+        </View>
+      )}
       {otherEnabled && (
         <View style={styles.qCard}>
           <Text style={[styles.qTitle, { marginBottom: spacing.xs }]}>Other feedback (optional)</Text>
