@@ -181,6 +181,10 @@ ol.ft-log.ft-log { list-style: none; margin: 0; padding: 2px 20px 8px; display: 
 .ft-legs tbody tr { cursor: default; }
 .ft-legs tbody tr:hover { box-shadow: none; }
 .ft-legs .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The shared ".lm-root .lm-table th" left-aligns every heading; number headings sit over their right-aligned values. */
+.lm-table.ft-legs th.num { text-align: right; }
+/* .ft-cell is a grid, which would stretch the Check badge across the whole column; keep it text-sized. */
+.ft-legs .ft-cell > .lm-badge { justify-self: start; }
 .ft-legs td.muted { color: var(--lm-muted); }
 .ft-legs .ft-leg-return td { background: var(--lm-bg); }
 .ft-legs tfoot td { border-top: 2px solid var(--lm-line); font-size: 14px; }

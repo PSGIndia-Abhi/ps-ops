@@ -1211,7 +1211,7 @@ const LEG_STATUS = {
   NO_GPS: { tone: "warn", label: "No GPS", note: "Paid the direct road distance" },
   PENDING: { tone: "neutral", label: "Working out", note: "" },
   OPEN: { tone: "info", label: "After End Shift", note: "Counted when the shift ends" },
-  GPS_ONLY: { tone: "info", label: "No client visit", note: "Paid on GPS km" },
+  GPS_ONLY: { tone: "info", label: "No client visit", note: "" },
 };
 const NOT_MEASURED = { tone: "warn", label: "Not measured", note: "Google Maps did not load" };
 const legKm = (n) => (n === null || n === undefined ? "-" : `${n.toFixed(1)} km`);
@@ -1270,11 +1270,14 @@ function PetrolLegs({ petrol, working, failed, onShift }) {
                         {l.kind === "RETURN" ? "Return: " : l.kind === "SHIFT" ? "Whole shift: " : ""}
                         {l.from} → {l.to}
                       </strong>
-                      <small>
-                        {l.fromAt ? timeLabel(l.fromAt) : ""}
-                        {l.toAt ? ` - ${timeLabel(l.toAt)}` : ""}
-                        {l.kind === "RETURN" ? " · limit = way back to the shift's start point" : ""}
-                      </small>
+                      {/* A whole-shift row under its Shift heading: the heading already shows these times. */}
+                      {!(multi && l.kind === "SHIFT") && (
+                        <small>
+                          {l.fromAt ? timeLabel(l.fromAt) : ""}
+                          {l.toAt ? ` - ${timeLabel(l.toAt)}` : ""}
+                          {l.kind === "RETURN" ? " · limit = way back to the shift's start point" : ""}
+                        </small>
+                      )}
                     </span>
                   </td>
                   <td className="num">{l.status === "OPEN" ? "-" : legKm(l.gpsKm)}</td>
@@ -1299,7 +1302,7 @@ function PetrolLegs({ petrol, working, failed, onShift }) {
               <td>
                 <strong>Petrol for the day</strong>
                 {flagged > 0 && <small className="ft-legs-flag"> · {flagged} trip{flagged === 1 ? "" : "s"} to check</small>}
-                {petrol.legs.length > 0 && petrol.legs.every((l) => l.status === "GPS_ONLY") && <small className="muted"> · No client visit · paid on GPS km</small>}
+                {petrol.legs.length > 0 && petrol.legs.every((l) => l.status === "GPS_ONLY") && <small className="muted"> · No client visit</small>}
               </td>
               <td className="num">{legKm(petrol.legs.reduce((s, l) => s + (l.gpsKm || 0), 0))}</td>
               <td className="num" />
