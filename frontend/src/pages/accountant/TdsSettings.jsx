@@ -1,25 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCheckCircle } from "react-icons/fi";
 import { DataError, EmptyRow, Pager } from "./ui";
-import { fetchTdsSettings, saveTdsSettings, useAccountantData, usePaged } from "./data";
+import { fetchTdsSettings, nameKey, saveTdsSettings, useAccountantData, usePaged } from "./data";
 import { money } from "./format";
 import "./accountant.css";
 
 // Customer TDS master: whether TDS applies to a customer and at what rate.
 // New invoices copy this setting. Old invoices keep the rate they were created with,
 // unless "apply to existing invoices" is ticked (then only invoices with no TDS deducted yet are refreshed).
+// Customer records with the same display name (e.g. one per outlet) are one row here, and a change
+// is saved for every record in that row.
 export default function TdsSettings() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [edit, setEdit] = useState(null); // { id, name, applicable, rate, existing }
+  const [edit, setEdit] = useState(null); // { group, applicable, rate, existing }
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
-  const [removing, setRemoving] = useState(null); // the customer the "Remove TDS?" dialog is open for
+  const [removing, setRemoving] = useState(null); // the customer row the "Remove TDS?" dialog is open for
 
-  // TDS still to be collected per customer, from their invoices (cancelled invoices are left out).
+  // TDS still to be collected per customer record, from their invoices (cancelled invoices are left out).
   const { invoices, loading: invoicesLoading, reload: reloadInvoices } = useAccountantData();
   const pendingTds = useMemo(() => {
     const totals = new Map();
@@ -45,9 +47,42 @@ export default function TdsSettings() {
     load();
   }, [load]);
 
-  const shown = rows.filter((r) => `${r.name} ${r.code || ""}`.toLowerCase().includes(search.trim().toLowerCase()));
+  // One row per display name. `onCount` is how many of its records have TDS on; `rates` their rates.
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const key = nameKey(r.name);
+      if (!map.has(key)) map.set(key, { key, name: String(r.name || "").trim(), members: [] });
+      map.get(key).members.push(r);
+    }
+    return [...map.values()].map((g) => {
+      const on = g.members.filter((m) => m.tds_applicable);
+      return {
+        ...g,
+        ids: g.members.map((m) => m.id),
+        codes: g.members.map((m) => m.code).filter(Boolean),
+        onCount: on.length,
+        rates: [...new Set(on.map((m) => m.tds_rate))],
+      };
+    });
+  }, [rows]);
+
+  const needle = search.trim().toLowerCase();
+  const shown = groups.filter((g) => `${g.name} ${g.codes.join(" ")}`.toLowerCase().includes(needle));
   // 25 customers a page; a new search starts again on page 1.
   const { pageRows, page, setPage, pageSize } = usePaged(shown, 25);
+
+  const groupPending = (g) => g.ids.reduce((s, id) => s + (pendingTds.get(id) || 0), 0);
+
+  // Saves the same TDS setting for every record of a customer row. Returns how many invoices were updated.
+  async function saveForGroup(g, body) {
+    let updated = 0;
+    for (const id of g.ids) {
+      const res = await saveTdsSettings(id, body);
+      updated += res.updated_invoices || 0;
+    }
+    return updated;
+  }
 
   // Remove TDS (set by mistake): TDS is switched off for the customer, and taken off the
   // customer's invoices that have no TDS deducted yet. The customer and the invoices stay;
@@ -55,22 +90,22 @@ export default function TdsSettings() {
   async function removeTds() {
     setSaving(true);
     try {
-      const res = await saveTdsSettings(removing.id, { tds_applicable: false, tds_rate: null, apply_to_existing: true });
-      setNotice(`TDS removed for ${removing.name}. ${res.updated_invoices} invoice(s) updated.`);
+      const updated = await saveForGroup(removing, { tds_applicable: false, tds_rate: null, apply_to_existing: true });
+      setNotice(`TDS removed for ${removing.name}. ${updated} invoice(s) updated.`);
       setRemoving(null);
-      await Promise.all([load(), reloadInvoices()]); // the Pending TDS column reads the invoices
     } catch (err) {
       setNotice("");
       setFormError(err.message || "TDS could not be removed.");
       setRemoving(null);
     } finally {
       setSaving(false);
+      await Promise.all([load(), reloadInvoices()]); // the Pending TDS column reads the invoices
     }
   }
 
-  function open(r) {
+  function open(g) {
     setFormError("");
-    setEdit({ id: r.id, name: r.name, applicable: r.tds_applicable, rate: r.tds_rate ?? "", existing: false });
+    setEdit({ group: g, applicable: g.onCount > 0, rate: g.rates[0] ?? "", existing: false });
   }
 
   async function save() {
@@ -81,21 +116,26 @@ export default function TdsSettings() {
     }
     setSaving(true);
     setFormError("");
+    let ok = false;
     try {
-      const res = await saveTdsSettings(edit.id, {
+      const updated = await saveForGroup(edit.group, {
         tds_applicable: edit.applicable,
         tds_rate: edit.applicable ? rate : null,
         apply_to_existing: edit.existing,
       });
-      setNotice(`Saved for ${edit.name}.${edit.existing ? ` ${res.updated_invoices} existing invoice(s) updated.` : ""}`);
-      setEdit(null);
-      await Promise.all([load(), reloadInvoices()]); // the Pending TDS column reads the invoices
+      setNotice(`Saved for ${edit.group.name}.${edit.existing ? ` ${updated} existing invoice(s) updated.` : ""}`);
+      ok = true;
     } catch (err) {
       setFormError(err.message || "The TDS settings could not be saved.");
     } finally {
       setSaving(false);
+      if (ok) setEdit(null);
+      await Promise.all([load(), reloadInvoices()]); // the Pending TDS column reads the invoices
     }
   }
+
+  const applicableText = (g) => (g.onCount === 0 ? "No" : g.onCount === g.members.length ? "Yes" : `Partly (${g.onCount} of ${g.members.length})`);
+  const rateText = (g) => (g.onCount ? g.rates.map((r) => `${r}%`).join(" / ") : "—");
 
   return (
     <div className="ac-page">
@@ -116,22 +156,25 @@ export default function TdsSettings() {
           <table className="ac-table">
             <thead><tr><th>Customer</th><th>TDS Applicable</th><th className="ac-num">TDS Rate</th><th className="ac-num">Pending TDS</th><th /></tr></thead>
             <tbody>
-              {pageRows.length ? pageRows.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.name}</td>
-                  <td>{r.tds_applicable ? "Yes" : "No"}</td>
-                  <td className="ac-num">{r.tds_applicable ? `${r.tds_rate}%` : "—"}</td>
-                  <td className="ac-num">{invoicesLoading ? "…" : r.tds_applicable || pendingTds.get(r.id) ? money(pendingTds.get(r.id) || 0) : "—"}</td>
-                  <td className="ac-num">
-                    <div className="ac-actions" style={{ justifyContent: "flex-end", flexWrap: "nowrap", gap: 8 }}>
-                      <button type="button" className="ac-btn" onClick={() => open(r)}>Edit</button>
-                      {r.tds_applicable && (
-                        <button type="button" className="ac-btn" style={{ color: "#b91c1c" }} onClick={() => { setFormError(""); setRemoving(r); }}>Remove TDS</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )) : <EmptyRow cols={5} loading={loading} text="No customers found" />}
+              {pageRows.length ? pageRows.map((g) => {
+                const pending = groupPending(g);
+                return (
+                  <tr key={g.key}>
+                    <td>{g.name}{g.members.length > 1 && <div className="ac-sub">{g.members.length} customer records</div>}</td>
+                    <td>{applicableText(g)}</td>
+                    <td className="ac-num">{rateText(g)}</td>
+                    <td className="ac-num">{invoicesLoading ? "…" : g.onCount || pending ? money(pending) : "—"}</td>
+                    <td className="ac-num">
+                      <div className="ac-actions" style={{ justifyContent: "flex-end", flexWrap: "nowrap", gap: 8 }}>
+                        <button type="button" className="ac-btn" onClick={() => open(g)}>Edit</button>
+                        {g.onCount > 0 && (
+                          <button type="button" className="ac-btn" style={{ color: "#b91c1c" }} onClick={() => { setFormError(""); setRemoving(g); }}>Remove TDS</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }) : <EmptyRow cols={5} loading={loading} text="No customers found" />}
             </tbody>
           </table>
         </div>
@@ -143,8 +186,10 @@ export default function TdsSettings() {
           <div className="ac-modal" onMouseDown={(e) => e.stopPropagation()}>
             <h3>Remove TDS for {removing.name}?</h3>
             <p className="ac-sub" style={{ fontSize: 14 }}>
-              TDS ({removing.tds_rate}%) is switched off for this customer and taken off their invoices that have no TDS
-              deducted yet. The customer and the invoices are not deleted. Invoices where TDS was already deducted keep it.
+              TDS ({rateText(removing)}) is switched off for this customer
+              {removing.members.length > 1 ? ` (all ${removing.members.length} customer records with this name)` : ""} and taken off
+              their invoices that have no TDS deducted yet. The customer and the invoices are not deleted. Invoices where TDS was
+              already deducted keep it.
             </p>
             <div className="ac-modal-foot">
               <button type="button" className="ac-btn" onClick={() => setRemoving(null)} disabled={saving}>Cancel</button>
@@ -157,7 +202,12 @@ export default function TdsSettings() {
       {edit && (
         <div className="ac-overlay" onMouseDown={() => !saving && setEdit(null)}>
           <div className="ac-modal" onMouseDown={(e) => e.stopPropagation()}>
-            <h3>TDS for {edit.name}</h3>
+            <h3>TDS for {edit.group.name}</h3>
+            {edit.group.members.length > 1 && (
+              <p className="ac-sub" style={{ fontSize: 14, marginTop: 0 }}>
+                Saved for all {edit.group.members.length} customer records with this name.
+              </p>
+            )}
             <label className="ac-checkline" style={{ marginBottom: 12 }}>
               <input type="checkbox" checked={edit.applicable} onChange={(e) => setEdit({ ...edit, applicable: e.target.checked })} /> TDS applicable
             </label>

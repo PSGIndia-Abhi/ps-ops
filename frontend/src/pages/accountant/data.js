@@ -155,19 +155,31 @@ const isFollowUpRow = (row) =>
 export const byDue = (a, b) =>
   `${a.due_date || "9999-99-99"} ${a.due_time || "99:99"}`.localeCompare(`${b.due_date || "9999-99-99"} ${b.due_time || "99:99"}`);
 
+// Customer records with the same display name are one customer on screen (e.g. one record per outlet).
+// This is the key they are matched on: spaces and capitals do not matter.
+export const nameKey = (name) => String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+
 // One row per customer with an unpaid balance, worked out from the invoices.
-export function groupByCustomer(invoices, payments = []) {
+// With { byName: true } records that share a display name become one row: its `id` is the name key
+// and `ids` lists the customer records in it. Otherwise `id` is the customer id and `ids` is [id].
+export function groupByCustomer(invoices, payments = [], { byName = false } = {}) {
   const map = new Map();
+  const groupOf = new Map(); // customer id -> row
   for (const inv of invoices) {
     if (inv.status === "CANCELLED") continue;
-    let c = map.get(inv.customer_id);
+    const key = byName ? nameKey(inv.customer_name) : inv.customer_id;
+    let c = map.get(key);
     if (!c) {
       c = {
-        id: inv.customer_id, name: inv.customer_name, code: inv.customer_code || "", phone: "",
+        id: key, ids: [], name: String(inv.customer_name || "").trim(), code: inv.customer_code || "", phone: "",
         total_invoiced: 0, total_paid: 0, outstanding: 0, overdue_amount: 0, oldest_due: "",
         unpaid_count: 0, invoice_count: 0, overdue_count: 0, last_payment_date: "", invoices: [],
       };
-      map.set(inv.customer_id, c);
+      map.set(key, c);
+    }
+    if (!groupOf.has(inv.customer_id)) {
+      groupOf.set(inv.customer_id, c);
+      c.ids.push(inv.customer_id);
     }
     c.invoice_count += 1;
     c.total_invoiced += inv.invoice_amount;
@@ -184,7 +196,7 @@ export function groupByCustomer(invoices, payments = []) {
     }
   }
   for (const p of payments) {
-    const c = map.get(p.customer_id);
+    const c = groupOf.get(p.customer_id);
     if (c && p.status !== "CANCELLED" && p.payment_date > c.last_payment_date) c.last_payment_date = p.payment_date;
   }
   return [...map.values()];
