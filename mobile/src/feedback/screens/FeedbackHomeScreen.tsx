@@ -91,7 +91,7 @@ export function FeedbackHomeScreen() {
       setData(calls);
       setOpenTickets(tickets.length);
       // Open tickets whose work is done: call the customer back to confirm (Other needs no visit).
-      setFollowUps(tickets.filter((t) => t.follow_up_due ?? (t.action === 'OTHER' || t.revisit?.status === 'COMPLETED')).length);
+      setFollowUps(tickets.filter((t) => t.follow_up_due ?? (!!t.action_done || (t.action !== 'OTHER' && t.revisit?.status === 'COMPLETED'))).length);
     } catch (err) {
       setError(errorText(err, 'Could not load the calls.'));
     } finally {

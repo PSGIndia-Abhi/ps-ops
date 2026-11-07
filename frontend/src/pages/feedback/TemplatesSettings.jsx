@@ -212,7 +212,7 @@ export default function TemplatesSettings() {
         />
       </div>
 
-      <div className="fb-grid-side" style={{ gridTemplateColumns: "minmax(0,1fr) 400px" }}>
+      <div className="fb-grid-side" style={{ "--fb-side": "400px" }}>
         <div className="fb-stack">
           {tab === "whatsapp"
             ? templates.map((t) => (

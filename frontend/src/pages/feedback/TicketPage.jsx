@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { FiCheck, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser, FiPaperclip } from "react-icons/fi";
+import { FiCheck, FiCheckCircle, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser, FiPaperclip, FiXCircle } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -34,6 +34,7 @@ import {
   pendingTab,
   prepareWhatsapp,
   closeTicket,
+  cancelTicket,
   deleteTicket,
   ticketStages,
   toLocalInput,
@@ -123,12 +124,14 @@ function FollowUpCard({ ticket, deptOnly, canClose, onClose }) {
   const ready = followUpReady(ticket);
   const ops = hasOpsPart(ticket);
   const assigned = isAssignedAction(ticket.action);
-  const opsWaiting = ops && ticket.action !== "OTHER" && (assigned ? !ticket.action_done : ticket.revisit?.status !== "COMPLETED");
+  const opsWaiting = ops && !ticket.action_done && (assigned || ticket.action === "OTHER" || ticket.revisit?.status !== "COMPLETED");
   const waitingFor = [
     opsWaiting
       ? assigned
         ? `${ticket.action_owner?.name || "the assigned person"} to finish the ${ACTIONS[ticket.action].label.toLowerCase()}`
-        : ticket.revisit
+        : ticket.action === "OTHER"
+          ? "the action to be marked Completed"
+          : ticket.revisit
           ? "the technician to complete the re-visit"
           : "the re-visit to be booked and completed"
       : null,
@@ -277,6 +280,7 @@ export default function TicketPage() {
   // The saved step's assigned person (or a desk manager) marks it done.
   const savedAssigned = isAssignedAction(ticket.action);
   const canFinishAction = open && savedAssigned && !ticket.action_done && (canManage || ticket.action_owner?.id === userId);
+  const canComplete = editable && !savedAssigned && !ticket.action_done;
 
   // A visit was just booked from this ticket: link its first visit at the ticket's site as the
   // re-visit. Unsaved edits in the form stay as they are.
@@ -342,6 +346,43 @@ export default function TicketPage() {
       await load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // "Completed": the Operations step is done. The collector is notified to call the customer back
+  // (or close the ticket). modalNote = what was done (optional).
+  async function completeIt() {
+    setSaving(true);
+    setError("");
+    try {
+      await markActionDone(ticket.id, modalNote.trim());
+      setModal(null);
+      setModalNote("");
+      setNotice("Action marked completed. The feedback collector is notified to call the customer back or close the ticket.");
+      await load();
+    } catch (err) {
+      setError(err.message);
+      setModal(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // "Cancel": the action won't be done; the ticket closes as cancelled (modalNote = the reason, required).
+  async function cancelIt() {
+    setSaving(true);
+    setError("");
+    try {
+      show(await cancelTicket(ticket.id, ticket.row_version, modalNote.trim()));
+      setNotice(`${ticket.ticket_number} is cancelled. The feedback collector is notified.`);
+      setModal(null);
+      setModalNote("");
+    } catch (err) {
+      setError(err.message);
+      setModal(null);
+      if (err.status === 409) load();
     } finally {
       setSaving(false);
     }
@@ -733,7 +774,25 @@ export default function TicketPage() {
                     <textarea id="fb-t-note" className="fb-textarea" rows={2} maxLength={2000} value={form.note} onChange={set("note")} />
                   </label>
                 )}
-                <div className="fb-row" style={{ justifyContent: "flex-end" }}>
+                <div className="fb-row fb-action-btns">
+                  {/* Cancel / Completed on the left; saving edits stays on the right. */}
+                  <span className="fb-row" style={{ gap: 8, marginRight: "auto" }}>
+                    <button type="button" className="fb-btn fb-btn-danger-outline" onClick={() => { setModalNote(""); setModal("cancel"); }} disabled={saving}>
+                      <FiXCircle aria-hidden="true" /> Cancel ticket
+                    </button>
+                    {canComplete && (
+                      <button
+                        type="button"
+                        className="fb-btn fb-btn-ok"
+                        onClick={() => { setModalNote(""); setModal("complete"); }}
+                        disabled={saving || dirty}
+                        title={dirty ? "Save your changes first" : "The work is done - the collector is notified"}
+                      >
+                        <FiCheckCircle aria-hidden="true" /> Completed
+                      </button>
+                    )}
+                    {canComplete && dirty && <span className="fb-small fb-muted">Save changes first</span>}
+                  </span>
                   {dirty && (
                     <button type="button" className="fb-btn" onClick={() => setForm(formFrom(ticket))} disabled={saving}>
                       Undo changes
@@ -778,6 +837,19 @@ export default function TicketPage() {
                   </>
                 )}
               </dl>
+            )}
+            {/* Any other step: marked Completed on this card. */}
+            {!savedAssigned && ticket.action_done && (
+              <div className="fb-assigned-step">
+                <div className="fb-part-done">
+                  <FiCheck aria-hidden="true" style={{ color: "#16a34a", marginTop: 2 }} />
+                  <span>
+                    <span className="fb-strong">Action completed</span>
+                    {ticket.action_done.note && ticket.action_done.note !== "Completed" ? ` · ${ticket.action_done.note}` : ""}
+                    <span className="fb-small fb-muted"> · {[formatDateTime(ticket.action_done.at), ticket.action_done.by?.name].filter(Boolean).join(" · ")}</span>
+                  </span>
+                </div>
+              </div>
             )}
             {/* Site audit / Supervisor visit / Sales: the assigned person marks it done. */}
             {savedAssigned && (
@@ -946,6 +1018,62 @@ export default function TicketPage() {
             <label className="fb-field" htmlFor="fb-t-close-note">
               Note (optional)
               <textarea id="fb-t-close-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer said on WhatsApp it is sorted" value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
+            </label>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "complete" && open && canComplete && (
+        <Modal
+          title="Mark the action completed?"
+          onClose={() => setModal(null)}
+          footer={
+            <>
+              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
+                Back
+              </button>
+              <button type="button" className="fb-btn fb-btn-ok" onClick={completeIt} disabled={saving}>
+                <FiCheckCircle aria-hidden="true" /> {saving ? "Saving…" : "Completed"}
+              </button>
+            </>
+          }
+        >
+          <div className="fb-stack" style={{ gap: 12 }}>
+            <div className="fb-small fb-muted">
+              The feedback collector is notified. They call the customer back for feedback, or close the ticket directly.
+            </div>
+            <label className="fb-field" htmlFor="fb-t-complete-note">
+              What was done? (optional)
+              <textarea id="fb-t-complete-note" className="fb-textarea" rows={2} maxLength={500} placeholder="e.g. Deep service done on Monday" value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
+            </label>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "cancel" && open && editable && (
+        <Modal
+          title={`Cancel ${ticket.ticket_number}?`}
+          onClose={() => setModal(null)}
+          footer={
+            <>
+              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
+                Back
+              </button>
+              <button type="button" className="fb-btn fb-btn-danger" onClick={cancelIt} disabled={saving || !modalNote.trim()}>
+                <FiXCircle aria-hidden="true" /> {saving ? "Cancelling…" : "Cancel ticket"}
+              </button>
+            </>
+          }
+        >
+          <div className="fb-stack" style={{ gap: 12 }}>
+            <div className="fb-small fb-muted">
+              The action won't be done. The ticket closes as cancelled, without a follow-up call, and the feedback collector is notified. It can be reopened later.
+            </div>
+            <label className="fb-field" htmlFor="fb-t-cancel-note">
+              <span>
+                Why is it cancelled? <span className="fb-req">*</span>
+              </span>
+              <textarea id="fb-t-cancel-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer says the problem is gone" value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
             </label>
           </div>
         </Modal>

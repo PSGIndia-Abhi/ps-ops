@@ -489,6 +489,8 @@ const EVENT_ICONS = {
   TICKET_RAISED: FiAlertTriangle,
   DONE: FiCheckCircle,
   CLOSED: FiCheckCircle,
+  CANCELLED: FiXCircle,
+  ACTION_DONE: FiCheckCircle,
   REOPENED: FiRotateCcw,
   FORM_LINK_SENT: FiSend,
   FORM_SUBMITTED: FiInbox,

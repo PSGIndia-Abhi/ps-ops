@@ -78,6 +78,7 @@ export const getTicket = (id) => feedbackRequest(`/tickets/${encodeURIComponent(
 export const updateTicket = (id, body) => feedbackRequest(`/tickets/${id}`, send("PATCH", body));
 export const closeTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/close`, send("POST", { row_version: rowVersion, close_note: note }));
 /** extra = the customer's answers when reopening: { spoke_with_name, contact_id?, responses, other_feedback?, question_mode }. */
+export const cancelTicket = (id, rowVersion, note) => feedbackRequest(`/tickets/${id}/cancel`, send("POST", { row_version: rowVersion, note }));
 export const reopenTicket = (id, rowVersion, note, extra = {}) => feedbackRequest(`/tickets/${id}/reopen`, send("POST", { row_version: rowVersion, note, ...extra }));
 /** Deletes a ticket raised by mistake (desk managers and whoever raised it). */
 export const deleteTicket = (id, note) => feedbackRequest(`/tickets/${id}`, send("DELETE", note ? { note } : {}));
@@ -333,6 +334,8 @@ const HISTORY = {
   FORM_EXPIRED: ["Form link expired", "muted"],
   WHATSAPP_SENT: ["WhatsApp message", "info"],
   CLOSED: ["Ticket closed", "ok"],
+  CANCELLED: ["Ticket cancelled", "muted"],
+  ACTION_DONE: ["Action completed", "ok"],
   REOPENED: ["Ticket reopened", "warn"],
   FOLLOWUP_CALL: ["Follow-up call", "ok"],
   TICKET_DELETED: ["Ticket deleted", "muted"],
@@ -513,7 +516,8 @@ export function followUpReady(t) {
   if (t.status !== "ACTION_PENDING") return false;
   // The server says when every department has finished (re-visit completed, the others marked done).
   if (typeof t.follow_up_due === "boolean") return t.follow_up_due;
-  return t.action === "OTHER" || (isAssignedAction(t.action) ? Boolean(t.action_done) : t.revisit?.status === "COMPLETED");
+  // Operations: its step marked Completed, or (a re-visit step) the re-visit completed.
+  return Boolean(t.action_done) || (!isAssignedAction(t.action) && t.action !== "OTHER" && t.revisit?.status === "COMPLETED");
 }
 
 /* ---- departments a ticket goes to ---- */

@@ -170,20 +170,32 @@ function cleanRule(body) {
   };
 }
 
-// One switched-on rule per customer (all sites) and per site.
+// The rules from a request body: body.rules = [{ mode, every_days, month_days, first_services,
+// then_every_days }] (several "when to call" options at once), sharing the body's dates, note and
+// services. Older form: one rule in the body itself.
+function cleanRules(body) {
+  const raw = Array.isArray(body?.rules) && body.rules.length ? body.rules : [body];
+  if (raw.length > MODES.length) throw new HttpError(400, "Pick each way of calling once");
+  const rules = raw.map((r) => cleanRule({ ...body, ...r }));
+  if (new Set(rules.map((r) => r.mode)).size !== rules.length) throw new HttpError(400, "Pick each way of calling once");
+  return rules;
+}
+
+// One switched-on rule per way of calling (mode), per customer (all sites) and per site.
 async function checkOneRule(conn, s, exceptId) {
   if (!s.is_active) return;
   const [[other]] = await conn.query(
-    `SELECT id FROM feedback_schedules WHERE is_active = 1 AND company_id = ? AND ${s.site_id ? "site_id = ?" : "site_id IS NULL"} ${exceptId ? "AND id <> ?" : ""} LIMIT 1`,
-    [s.company_id, ...(s.site_id ? [s.site_id] : []), ...(exceptId ? [exceptId] : [])]
+    `SELECT id FROM feedback_schedules WHERE is_active = 1 AND company_id = ? AND ${s.site_id ? "site_id = ?" : "site_id IS NULL"} AND mode = ? ${exceptId ? "AND id <> ?" : ""} LIMIT 1`,
+    [s.company_id, ...(s.site_id ? [s.site_id] : []), s.mode, ...(exceptId ? [exceptId] : [])]
   );
   if (!other) return;
   const [[n]] = await conn.query("SELECT co.name AS customer, s.name AS site FROM companies co LEFT JOIN sites s ON s.id = ? WHERE co.id = ?", [s.site_id, s.company_id]);
+  const how = ruleText(s).toLowerCase();
   throw new HttpError(
     409,
     s.site_id
-      ? `${n?.site || "This site"} (${n?.customer || "customer"}) already has a schedule - edit that one`
-      : `${n?.customer || "This customer"} already has a schedule for all its sites - edit that one`
+      ? `${n?.site || "This site"} (${n?.customer || "customer"}) already has a schedule of this kind (${how}) - edit that one`
+      : `${n?.customer || "This customer"} already has a schedule of this kind (${how}) for all its sites - edit that one`
   );
 }
 
@@ -196,7 +208,7 @@ async function saveSchedule(req, id, body) {
   if (raw.length > 200) throw new HttpError(400, "Pick at most 200 customers and sites at once");
   if (id && raw.length > 1) throw new HttpError(400, "A schedule is for one customer or one site - add the others as new schedules");
   await inTransaction(async (conn) => {
-    const rule = cleanRule(body);
+    const rules = cleanRules(body);
     const targets = [];
     const seen = new Set();
     for (const t of raw) {
@@ -206,10 +218,12 @@ async function saveSchedule(req, id, body) {
       seen.add(key);
       targets.push(target);
     }
-    for (const target of targets) {
+    // Each target gets one schedule per way of calling. A change (PUT) keeps its schedule for the
+    // first rule; any other rules picked while editing are added as new schedules for the same target.
+    for (const target of targets) for (const [n, rule] of rules.entries()) {
       const s = { ...target, ...rule };
       const keys = Object.keys(s);
-      if (id) {
+      if (id && n === 0) {
         const [[found]] = await conn.query("SELECT id FROM feedback_schedules WHERE id = ? FOR UPDATE", [id]);
         if (!found) throw new HttpError(404, "Schedule not found");
         await checkOneRule(conn, s, Number(id));
@@ -251,12 +265,17 @@ async function siteServices(siteId, from, rule) {
 // Every N days from `anchor`: the latest due date up to `until` (a call is made whether or not the
 // site had a service; the call page shows the last earlier service when there was none).
 // covered = where the last call's period stopped.
-function everyDaysCall(anchor, days, until, covered, ruleStart) {
-  const k = Math.floor(daysBetween(anchor, until) / days);
-  if (k < 1) return null;
+// onAnchor: the first call is ON the anchor day itself (a schedule starting 7 Nov, every 15 days, calls
+// 7 Nov, 22 Nov, 7 Dec...); that first call asks about the N days before it. Without it the first call
+// is one period after the anchor (used after the first N services, whose own call is on the anchor day).
+function everyDaysCall(anchor, days, until, covered, ruleStart, { onAnchor = false } = {}) {
+  const passed = daysBetween(anchor, until);
+  if (passed < 0) return null;
+  const k = Math.floor(passed / days);
+  if (k < 1 && !onAnchor) return null;
   const due = addDays(anchor, k * days);
   if (covered && due <= covered) return null;
-  const start = maxDate(covered || addDays(due, -days), ruleStart);
+  const start = onAnchor ? maxDate(covered, addDays(due, -days)) : maxDate(covered || addDays(due, -days), ruleStart);
   return { due, start };
 }
 
@@ -303,7 +322,7 @@ async function dueCallFor(siteId, rule, today) {
   const until = rule.end_date && rule.end_date < today ? rule.end_date : today;
   const covered = last?.covered || null;
 
-  if (rule.mode === "EVERY_N_DAYS") return everyDaysCall(rule.start_date, rule.every_days, until, covered, rule.start_date);
+  if (rule.mode === "EVERY_N_DAYS") return everyDaysCall(rule.start_date, rule.every_days, until, covered, rule.start_date, { onAnchor: true });
   if (rule.mode === "MONTH_DAYS") return monthDaysCall(monthDaysOf(rule.month_days), until, covered, rule.start_date);
 
   // After each service: the site's services since the start date.
@@ -334,18 +353,28 @@ async function generateDueCalls() {
     [today]
   );
   if (!rules.length) return 0;
-  // Each site's rule: its own, else its customer's.
+  // Each site's rules: its own (one per way of calling), else its customer's.
   const bySite = new Map();
-  const customerRules = new Map(rules.filter((r) => !r.site_id).map((r) => [r.company_id, r]));
+  const customerRules = new Map();
+  for (const r of rules.filter((x) => !x.site_id)) customerRules.set(r.company_id, [...(customerRules.get(r.company_id) || []), r]);
   if (customerRules.size) {
     const [sites] = await pool.query("SELECT id, company_id FROM sites WHERE company_id IN (?)", [[...customerRules.keys()]]);
-    for (const s of sites) bySite.set(s.id, { rule: customerRules.get(s.company_id), companyId: s.company_id });
+    for (const s of sites) bySite.set(s.id, { rules: customerRules.get(s.company_id), companyId: s.company_id, own: false });
   }
-  for (const r of rules.filter((x) => x.site_id)) bySite.set(r.site_id, { rule: r, companyId: r.company_id });
+  for (const r of rules.filter((x) => x.site_id)) {
+    const cur = bySite.get(r.site_id);
+    bySite.set(r.site_id, { rules: cur?.own ? [...cur.rules, r] : [r], companyId: r.company_id, own: true });
+  }
 
   let added = 0;
-  for (const [siteId, { rule, companyId }] of bySite) {
-    const call = await dueCallFor(siteId, rule, today);
+  for (const [siteId, { rules: siteRules, companyId }] of bySite) {
+    // Several rules can be due: one call, for the latest due date (calls never pile up).
+    let call = null;
+    let rule = null;
+    for (const r of siteRules) {
+      const c = await dueCallFor(siteId, r, today);
+      if (c && (!call || c.due > call.due)) [call, rule] = [c, r];
+    }
     if (!call) continue;
     const id = crypto.randomUUID();
     const [result] = await pool.query(

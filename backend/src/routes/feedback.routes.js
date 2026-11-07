@@ -6,7 +6,7 @@ const {
   HttpError, sendError, inTransaction, hasPerm, hasAnyPerm,
   listQuestions, saveQuestions, listTemplates, saveTemplates, getSettings, saveSettings,
   callList, openCall, getCall, recordCallAttempt, saveCallFeedback, raiseTicketFromCall, finishCall,
-  listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
+  listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, cancelTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
   myFeedbackAccess, feedbackPeople, feedbackCustomers, siteDetails, revisitOptions,
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
   listDepartments, departmentSetup, saveDepartments, myDepartmentKinds, markPartDone, callInvoices, listIssueTypes, saveIssueTypes,
@@ -626,6 +626,17 @@ router.delete("/tickets/:id", async (req, res) => {
 });
 
 // Body: { row_version, note }. Desk managers and whoever raised the ticket (checked in the service).
+// POST /tickets/:id/cancel { row_version, note } - the action won't be done: closes the ticket as cancelled (desk managers).
+router.post("/tickets/:id/cancel", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    const id = await cancelTicket(req, req.params.id, req.body);
+    res.json(await getTicket(req, id));
+  } catch (err) {
+    sendError(res, err, "Failed to cancel the ticket");
+  }
+});
+
 router.post("/tickets/:id/reopen", async (req, res) => {
   try {
     requireAny(req, ANY_FEEDBACK);

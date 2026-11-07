@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiAlertCircle, FiCalendar, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
+import { FiAlertCircle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
 import { deleteSchedule, formatDay, getScheduleOptions, getSchedules, saveSchedule } from "./feedbackApi";
 import { Card, Chip, Empty, ErrorBox, Loading, Modal, PageHead, Switch, Toast } from "./ui";
 
@@ -27,7 +27,7 @@ const MODES = [
 
 const EMPTY = {
   targets: [], // [{ company_id, site_id }] - site_id null = all the customer's sites
-  mode: "EVERY_N_DAYS",
+  modes: ["EVERY_N_DAYS"], // one or more ways of calling - each becomes its own schedule
   every_days: "7",
   month_days: [1],
   limit_first: false,
@@ -45,7 +45,7 @@ function formOf(s) {
   if (!s) return { ...EMPTY, start_date: todayIso() };
   return {
     targets: [{ company_id: s.customer.id, site_id: s.site?.id || null }],
-    mode: s.mode,
+    modes: [s.mode],
     every_days: String(s.every_days || 7),
     month_days: s.month_days?.length ? s.month_days : [1],
     limit_first: Boolean(s.first_services),
@@ -75,15 +75,23 @@ function renewForm(s) {
   return { ...f, start_date: from, end_date: addDaysIso(from, Math.max(1, daysBetween(s.start_date, s.end_date))), is_active: true };
 }
 
-function bodyOf(f) {
-  const after = f.mode === "AFTER_EACH_SERVICE";
+// One rule per ticked way of calling.
+function ruleOf(f, mode) {
+  const after = mode === "AFTER_EACH_SERVICE";
   return {
-    targets: f.targets,
-    mode: f.mode,
-    every_days: f.mode === "EVERY_N_DAYS" ? Number(f.every_days) : null,
-    month_days: f.mode === "MONTH_DAYS" ? f.month_days : null,
+    mode,
+    every_days: mode === "EVERY_N_DAYS" ? Number(f.every_days) : null,
+    month_days: mode === "MONTH_DAYS" ? f.month_days : null,
     first_services: after && f.limit_first ? Number(f.first_services) : null,
     then_every_days: after && f.limit_first && f.then === "every" ? Number(f.then_every_days) : null,
+  };
+}
+
+function bodyOf(f) {
+  return {
+    targets: f.targets,
+    ...ruleOf(f, f.modes[0]),
+    rules: f.modes.map((m) => ruleOf(f, m)),
     service_types: [], // every service counts
     start_date: f.start_date,
     end_date: f.end_date || null,
@@ -92,11 +100,15 @@ function bodyOf(f) {
   };
 }
 
-/** The rule in words. */
-function previewText(f) {
+/** The rules in words, one line per ticked way of calling. */
+function previewLines(f) {
+  return f.modes.map((mode) => previewText(f, mode));
+}
+
+function previewText(f, mode) {
   const only = f.service_types.length ? `, only for ${f.service_types.join(", ")}` : "";
-  if (f.mode === "EVERY_N_DAYS") return `A call every ${f.every_days || "?"} days${only}.`;
-  if (f.mode === "MONTH_DAYS") return `A call on the ${listText([...f.month_days].sort((a, b) => a - b).map(ordinal))} of every month${only}.`;
+  if (mode === "EVERY_N_DAYS") return `A call every ${f.every_days || "?"} days, the first on the start date${f.start_date ? ` (${formatDay(f.start_date)})` : ""}${only}.`;
+  if (mode === "MONTH_DAYS") return `A call on the ${listText([...f.month_days].sort((a, b) => a - b).map(ordinal))} of every month${only}.`;
   if (!f.limit_first) return `A call the day after each service${only}.`;
   const then = f.then === "every" ? `, then a call every ${f.then_every_days || "?"} days` : ", then no more calls";
   return `A call the day after each of the first ${f.first_services || "?"} services${then}${only}.`;
@@ -136,17 +148,29 @@ function TargetPicker({ customers, value, onChange, single }) {
       .slice(0, 60);
   }, [q, customers]);
 
-  function toggle(cid, sid) {
+  // After a pick the list closes, so the rest of the form is reachable at once;
+  // clicking the field opens it again to add more.
+  function closeList() {
+    setOpen(false);
+    setQ("");
+    inputRef.current?.blur();
+  }
+
+  function toggle(cid, sid, { fromList = true } = {}) {
     const on = has(cid, sid);
     if (single) {
       onChange(on ? [] : [{ company_id: cid, site_id: sid || null }]);
-      setOpen(false);
+      closeList();
       return;
     }
-    if (on) return onChange(value.filter((t) => !(t.company_id === cid && (t.site_id || null) === (sid || null))));
-    // A whole customer replaces its single sites.
-    const rest = sid ? value : value.filter((t) => t.company_id !== cid);
-    onChange([...rest, { company_id: cid, site_id: sid || null }]);
+    if (on) {
+      onChange(value.filter((t) => !(t.company_id === cid && (t.site_id || null) === (sid || null))));
+    } else {
+      // A whole customer replaces its single sites.
+      const rest = sid ? value : value.filter((t) => t.company_id !== cid);
+      onChange([...rest, { company_id: cid, site_id: sid || null }]);
+    }
+    if (fromList) closeList();
   }
 
   const label = (t) => {
@@ -166,7 +190,7 @@ function TargetPicker({ customers, value, onChange, single }) {
             <span key={`${t.company_id}|${t.site_id || ""}`} className="fb-tp-tag">
               <b>{l.main}</b>
               <small>{l.sub}</small>
-              <button type="button" aria-label={`Remove ${l.main}`} onClick={(e) => { e.stopPropagation(); toggle(t.company_id, t.site_id); }}>
+              <button type="button" aria-label={`Remove ${l.main}`} onClick={(e) => { e.stopPropagation(); toggle(t.company_id, t.site_id, { fromList: false }); }}>
                 <FiX />
               </button>
             </span>
@@ -230,7 +254,8 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
 
   async function save() {
     if (!f.targets.length) return setError("Pick at least one customer or site");
-    if (f.mode === "MONTH_DAYS" && !f.month_days.length) return setError("Pick at least one date of the month");
+    if (!f.modes.length) return setError("Pick when to call");
+    if (f.modes.includes("MONTH_DAYS") && !f.month_days.length) return setError("Pick at least one date of the month");
     setSaving(true);
     setError("");
     try {
@@ -270,13 +295,23 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
         </section>
 
         <section className="fb-sched-sec">
-          <div className="fb-sched-label">When to call</div>
-          <div className="fb-sched-modes" role="radiogroup" aria-label="When to call">
+          <div className="fb-sched-label">
+            When to call <small>Pick one or more. Each one becomes its own schedule; a site never gets two calls at once.</small>
+          </div>
+          <div className="fb-sched-modes" role="group" aria-label="When to call">
             {MODES.map((m) => {
-              const on = f.mode === m.value;
+              const on = f.modes.includes(m.value);
               const Icon = m.icon;
               return (
-                <button key={m.value} type="button" role="radio" aria-checked={on} className={`fb-sched-mode ${on ? "is-on" : ""}`} onClick={() => setF((x) => ({ ...x, mode: m.value }))}>
+                <button
+                  key={m.value}
+                  type="button"
+                  aria-pressed={on}
+                  className={`fb-sched-mode ${on ? "is-on" : ""}`}
+                  // At least one stays ticked; the order follows the list above.
+                  onClick={() => setF((x) => ({ ...x, modes: on ? (x.modes.length > 1 ? x.modes.filter((v) => v !== m.value) : x.modes) : MODES.map((y) => y.value).filter((v) => v === m.value || x.modes.includes(v)) }))}
+                >
+                  <span className="fb-sched-mode-tick" aria-hidden="true">{on && <FiCheck />}</span>
                   <Icon aria-hidden="true" />
                   <span>
                     <b>{m.label}</b>
@@ -287,8 +322,9 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
             })}
           </div>
 
+          {f.modes.includes("EVERY_N_DAYS") && (
           <div className="fb-sched-panel">
-            {f.mode === "EVERY_N_DAYS" && (
+            {f.modes.length > 1 && <div className="fb-sched-panel-h">Every few days</div>}
               <div className="fb-sched-line">
                 Call every
                 <input type="number" min={1} max={365} className="fb-input fb-input-num" value={f.every_days} onChange={set("every_days")} aria-label="Days" />
@@ -301,9 +337,12 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
                   ))}
                 </span>
               </div>
-            )}
+          </div>
+          )}
 
-            {f.mode === "MONTH_DAYS" && (
+          {f.modes.includes("MONTH_DAYS") && (
+          <div className="fb-sched-panel">
+            {f.modes.length > 1 && <div className="fb-sched-panel-h">Dates of the month</div>}
               <div className="fb-month-pick">
                 {/* A month calendar: tick the dates the call is made on, every month. */}
                 <div className="fb-month-cal" role="group" aria-label="Dates of the month">
@@ -342,9 +381,12 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
                   </span>
                 </div>
               </div>
-            )}
+          </div>
+          )}
 
-            {f.mode === "AFTER_EACH_SERVICE" && (
+          {f.modes.includes("AFTER_EACH_SERVICE") && (
+          <div className="fb-sched-panel">
+            {f.modes.length > 1 && <div className="fb-sched-panel-h">After each service</div>}
               <div className="fb-stack" style={{ gap: 10 }}>
                 <label className="fb-sched-line">
                   <input type="checkbox" checked={f.limit_first} onChange={set("limit_first")} />
@@ -369,8 +411,8 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
                   </div>
                 )}
               </div>
-            )}
           </div>
+          )}
         </section>
 
         <section className="fb-sched-sec fb-sched-grid is-3">
@@ -392,7 +434,11 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
 
         <div className="fb-sched-preview">
           <FiCalendar aria-hidden="true" />
-          <span>{previewText(f)}</span>
+          <span className="fb-stack" style={{ gap: 2 }}>
+            {previewLines(f).map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+          </span>
         </div>
       </div>
     </Modal>
