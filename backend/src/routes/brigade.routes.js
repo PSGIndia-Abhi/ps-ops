@@ -7,6 +7,7 @@ const PERMISSIONS = require("../access/permissions");
 const brigade = require("../controllers/brigade.controller");
 const poFiles = require("../controllers/brigadePoFiles.controller");
 const invoices = require("../controllers/brigadeInvoices.controller");
+const imports = require("../controllers/brigadeImport.controller");
 
 /*
 Brigade Executive module (admin passes every permission check by role).
@@ -79,5 +80,11 @@ router.delete("/po-files/:id", auth, requirePermission(PERMISSIONS.BRIGADE_ACCES
 router.get("/jobs/:jobId", auth, requirePermission(PERMISSIONS.VIEW_JOB), brigade.getJobDetails);
 router.get("/visits/:visitId/photos", auth, requirePermission(PERMISSIONS.VIEW_VISIT), brigade.getVisitPhotos);
 router.post("/visits/:visitId/photos/:phase", auth, requirePermission(PERMISSIONS.SUBMIT_VISIT), brigade.startPhotoUpload);
+
+// Bulk import of existing work from the client's Excel tracker: check (nothing saved), import, history, undo
+router.post("/import/check", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_MASTERS), imports.acceptFile, imports.checkImport);
+router.post("/import", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_MASTERS), imports.acceptFile, imports.startImport);
+router.get("/import/history", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_MASTERS), imports.listImports);
+router.post("/import/:id/undo", auth, requirePermission(PERMISSIONS.BRIGADE_MANAGE_MASTERS), imports.undoImport);
 
 module.exports = router;
