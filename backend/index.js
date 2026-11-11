@@ -24,6 +24,7 @@ const visitRoutes = require('./src/routes/visits.routes');
 const clientInviteRoutes = require("./src/routes/clientInvite.routes");
 const inviteAcceptRoutes = require("./src/routes/invite.accept.routes");
 const ticketsRoutes = require("./src/routes/tickets.routes");
+const helpdeskRoutes = require("./src/routes/helpdesk.routes");
 const notificationsRoutes = require("./src/routes/notifications.routes");
 const pushRoutes = require("./src/routes/push.routes");
 const rolesRoutes = require("./src/routes/roles.routes");
@@ -152,6 +153,8 @@ app.use("/api/audits", auditsRoutes);
 // Customer Feedback Tickets (feedback_* tables): questions master, tickets, desk.
 app.use("/api/feedback", feedbackRoutes);
 app.use("/api/public/feedback", feedbackPublicRoutes); // customer's form (no login, token in the link)
+// Helpdesk: every user raises support tickets; the technical team answers (helpdesk_* tables).
+app.use("/api/helpdesk", helpdeskRoutes);
 
 
 

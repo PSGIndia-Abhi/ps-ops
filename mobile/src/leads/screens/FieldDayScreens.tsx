@@ -3,7 +3,7 @@ import { AppState, Animated, Easing, FlatList, Pressable, Text, View } from 'rea
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { GlossyBadge } from '../../components/GlossyBadge';
-import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlusIcon, ShieldIcon } from '../../components/icons';
+import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlayIcon, PlusIcon, ShieldIcon, StopIcon } from '../../components/icons';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { formatShiftClock } from '../../screens/technician/shiftTime';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -21,7 +21,7 @@ import * as tracking from '../fieldTracking';
 import type { FieldShift } from '../fieldApi';
 import type { LeadStackParamList } from '../navigation';
 import type { Coords, PipelineLead, PipelineStage } from '../types';
-import { errorMessage, LeadRow, MeetingRow, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
+import { errorMessage, GradientFill, LeadRow, MeetingRow, useLoad, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 /**
  * Sales Executive field day: Start Shift (from wherever they are - petrol is counted from that
@@ -34,7 +34,7 @@ type Nav = NativeStackNavigationProp<LeadStackParamList>;
 const WHITE = '#FFFFFF';
 
 /** The small stopwatch dial on the Field Day card. */
-const DIAL = 112;
+const DIAL = 66;
 const DIAL_CENTER = DIAL / 2;
 const TICKS = 60;
 
@@ -81,24 +81,26 @@ const VISITABLE_STAGES: PipelineStage[] = [
 ];
 
 const factory = (t: CrmTheme) => ({
-  // Shift card: the app's white home card (as the visit card below it) with the technician's
-  // stopwatch idea as a small dial - on the left, status / time / button on the right.
+  // Shift card: one compact gradient row - blue off duty, green and "live" on duty: the stopwatch
+  // dial, the status and time, and a small pill button; My Day as a slim link under it.
   hero: {
-    backgroundColor: t.surface,
-    borderRadius: radii.xl,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: spacing.md,
+    borderRadius: 22,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    overflow: 'hidden' as const,
     ...t.raisedShadow,
   },
+  bubble: { position: 'absolute' as const, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
+  bubbleBig: { width: 150, height: 150, top: -70, right: -40 },
+  bubbleSmall: { width: 90, height: 90, bottom: -50, left: 60 },
   row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
   faceWrap: { width: DIAL, height: DIAL, alignItems: 'center' as const, justifyContent: 'center' as const },
   glow: {
     position: 'absolute' as const,
-    width: DIAL - 10,
-    height: DIAL - 10,
-    borderRadius: (DIAL - 10) / 2,
-    borderWidth: 4,
+    width: DIAL - 8,
+    height: DIAL - 8,
+    borderRadius: (DIAL - 8) / 2,
+    borderWidth: 3,
   },
   faceCenter: {
     position: 'absolute' as const,
@@ -109,41 +111,56 @@ const factory = (t: CrmTheme) => ({
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
-  clockText: { ...typography.bodyMedium, fontSize: 17, lineHeight: 21, fontWeight: '700' as const, color: t.textPrimary },
-  faceSub: { ...typography.caption, fontSize: 10, lineHeight: 13, color: t.textMuted },
-  side: { flex: 1, gap: 6 },
+  faceIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  faceSec: { fontSize: 15, lineHeight: 18, fontWeight: '800' as const, color: WHITE },
+  side: { flex: 1 },
   statusPill: {
     alignSelf: 'flex-start' as const,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 6,
+    gap: 5,
     borderRadius: radii.pill,
-    paddingVertical: 3,
-    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  dot: { width: 7, height: 7, borderRadius: 4 },
-  statusText: { ...typography.overline },
-  sideTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  sideSub: { ...typography.caption, color: t.textMuted, marginTop: -4 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: WHITE },
+  dotIdle: { opacity: 0.6 },
+  statusText: { ...typography.overline, fontSize: 10, color: WHITE },
+  bigClock: { fontSize: 24, lineHeight: 30, fontWeight: '800' as const, color: WHITE, letterSpacing: 0.5, marginTop: 2 },
+  since: { ...typography.caption, fontSize: 11, color: 'rgba(255,255,255,0.8)' },
   heroButton: {
-    minHeight: 42,
-    borderRadius: radii.md,
+    flexDirection: 'row' as const,
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: radii.pill,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    marginTop: 2,
   },
-  heroButtonText: { ...typography.button },
+  startButton: { backgroundColor: WHITE },
+  endButton: { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)' },
+  heroButtonText: { ...typography.bodyMedium, fontWeight: '800' as const },
+  startText: { color: '#1D4ED8' },
+  endText: { color: WHITE },
   link: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: t.border,
-    minHeight: 40,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    minHeight: 38,
   },
-  linkText: { ...typography.bodyMedium, color: t.primary },
+  linkText: { ...typography.caption, fontWeight: '700' as const, color: WHITE, flex: 1 },
   pressed: { opacity: 0.85 },
 
   body: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md },
@@ -232,7 +249,7 @@ let askedBatteryThisRun = false;
  */
 export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?: boolean; onChange?: () => void }) {
   const navigation = useNavigation<Nav>();
-  const { styles, theme } = useCrmStyles(factory);
+  const { styles } = useCrmStyles(factory);
   const { shift, setShift, loaded, error, reload } = useCurrentShift();
   const [busy, setBusy] = useState<'start' | 'end' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -328,60 +345,62 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
     return () => loop.stop();
   }, [active, isFocused, pulse]);
 
-  if (!loaded) return <CrmSkeleton height={showMyDayLink ? 196 : 146} radius={radii.xl} />;
+  if (!loaded) return <CrmSkeleton height={showMyDayLink ? 150 : 98} radius={22} />;
 
   // started_at is the server's wall-clock time, read as local time on the phone.
   const elapsed = shift ? Math.max(0, now - new Date(shift.startedAt.replace(' ', 'T')).getTime()) : 0;
   const litSeconds = Math.floor(elapsed / 1000) % 60;
   const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.06] });
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.3] });
-  const tone = active ? theme.success : theme.primary;
-  const soft = active ? theme.successBg : theme.primarySoftBg;
+  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.45] });
+  const dotOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35] });
 
   return (
     <View>
       <CrmErrorBanner message={error} onRetry={reload} />
       <CrmErrorBanner message={actionError} />
       <View style={styles.hero}>
+        <GradientFill from={active ? '#10B981' : '#2563EB'} to={active ? '#047857' : '#1E3A8A'} />
+        <View style={[styles.bubble, styles.bubbleBig]} pointerEvents="none" />
+        <View style={[styles.bubble, styles.bubbleSmall]} pointerEvents="none" />
+
         <View style={styles.row}>
           <View style={styles.faceWrap}>
-            {active && <Animated.View style={[styles.glow, { borderColor: tone, opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />}
-            <ShiftDial litSeconds={litSeconds} running={active} color={tone} rest={theme.border} />
+            {active && <Animated.View style={[styles.glow, { borderColor: WHITE, opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />}
+            <ShiftDial litSeconds={litSeconds} running={active} color={WHITE} rest="rgba(255,255,255,0.3)" />
             <View style={styles.faceCenter} pointerEvents="none">
-              <Text style={styles.clockText} accessibilityLabel={shift ? `Time on duty ${formatShiftClock(elapsed)}` : 'Not on duty'}>
-                {shift ? formatShiftClock(elapsed) : '--:--'}
-              </Text>
-              <Text style={styles.faceSub}>{shift ? 'on duty' : 'off duty'}</Text>
+              {active ? (
+                <Text style={styles.faceSec}>{String(litSeconds).padStart(2, '0')}</Text>
+              ) : (
+                <View style={styles.faceIcon}>
+                  <ClockIcon size={15} color={WHITE} />
+                </View>
+              )}
             </View>
           </View>
 
           <View style={styles.side}>
-            <View style={[styles.statusPill, { backgroundColor: soft }]}>
-              <View style={[styles.dot, { backgroundColor: tone }]} />
-              <Text style={[styles.statusText, { color: tone }]}>{active ? 'ON DUTY' : 'OFF DUTY'}</Text>
+            <View style={styles.statusPill}>
+              {active ? <Animated.View style={[styles.dot, { opacity: dotOpacity }]} /> : <View style={[styles.dot, styles.dotIdle]} />}
+              <Text style={styles.statusText}>{active ? 'ON DUTY · LIVE' : 'OFF DUTY'}</Text>
             </View>
-            <Text style={styles.sideTitle} numberOfLines={1}>
-              {shift ? `Since ${clock(shift.startedAt)}` : 'Shift not started'}
+            <Text style={styles.bigClock} accessibilityLabel={shift ? `Time on duty ${formatShiftClock(elapsed)}` : 'Not on duty'} numberOfLines={1} adjustsFontSizeToFit>
+              {shift ? formatShiftClock(elapsed) : '--:--'}
             </Text>
-            {/* <Text style={styles.sideSub} numberOfLines={1}>
-              {active ? 'Your location is being recorded' : 'Start when you leave for the field'}
-            </Text> */}
-            <Pressable
-              onPress={active ? () => setConfirmEnd(true) : onStart}
-              disabled={busy !== null}
-              accessibilityRole="button"
-              accessibilityLabel={active ? 'End shift' : 'Start shift'}
-              style={({ pressed }) => [
-                styles.heroButton,
-                { backgroundColor: active ? theme.dangerBg : theme.primary },
-                (pressed || busy !== null) && styles.pressed,
-              ]}
-            >
-              <Text style={[styles.heroButtonText, { color: active ? theme.danger : theme.textOnPrimary }]}>
-                {busy === 'start' ? 'Starting...' : busy === 'end' ? 'Ending...' : active ? 'End shift' : 'Start shift'}
-              </Text>
-            </Pressable>
+            {!!shift && <Text style={styles.since}>Since {clock(shift.startedAt)}</Text>}
           </View>
+
+          <Pressable
+            onPress={active ? () => setConfirmEnd(true) : onStart}
+            disabled={busy !== null}
+            accessibilityRole="button"
+            accessibilityLabel={active ? 'End shift' : 'Start shift'}
+            style={({ pressed }) => [styles.heroButton, active ? styles.endButton : styles.startButton, (pressed || busy !== null) && styles.pressed]}
+          >
+            {active ? <StopIcon size={14} color={WHITE} /> : <PlayIcon size={14} color="#1D4ED8" />}
+            <Text style={[styles.heroButtonText, active ? styles.endText : styles.startText]}>
+              {busy === 'start' ? 'Starting' : busy === 'end' ? 'Ending' : active ? 'End' : 'Start'}
+            </Text>
+          </Pressable>
         </View>
 
         {showMyDayLink && (
@@ -390,8 +409,9 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
             accessibilityRole="button"
             style={({ pressed }) => [styles.link, pressed && styles.pressed]}
           >
+            <PinIcon size={15} color={WHITE} />
             <Text style={styles.linkText}>My day · visits & unplanned visit</Text>
-            <ChevronRightIcon size={16} color={theme.primary} />
+            <ChevronRightIcon size={15} color={WHITE} />
           </Pressable>
         )}
       </View>

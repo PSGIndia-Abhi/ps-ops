@@ -12,6 +12,8 @@ import { CrmScreen } from '../../crm/ui/CrmScreen';
 import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
+import { useHelpRow } from '../../helpdesk/useHelpRow';
+import { CountBadge } from '../../helpdesk/ui';
 import { FEEDBACK_ROLE } from '../feedbackApi';
 import { isActive, isOverdue } from '../format';
 import { useTasks } from '../TasksContext';
@@ -81,6 +83,7 @@ const factory = (t: CrmTheme) => ({
 /** Profile (opened from the avatar on Home) - the viewer's own numbers, their team, password and sign out. */
 export function TaskProfileScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  const help = useHelpRow('Profile · Task Management');
   const taskNavigation = useNavigation<NavigationProp<TaskStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
   const { user, logout } = useAuth();
@@ -192,6 +195,15 @@ export function TaskProfileScreen() {
             <LockIcon size={18} color={theme.primary} />
           </View>
           <Text style={styles.rowLabel}>Change password</Text>
+          <ChevronRightIcon size={16} color={theme.textMuted} />
+        </Pressable>
+        <Pressable onPress={help.open} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && { opacity: 0.7 }]} accessibilityRole="button" accessibilityLabel={help.badge ? `${help.label}, ${help.hint}` : help.label}>
+          <View style={styles.rowIcon}>
+            <help.Icon size={18} color={theme.primary} />
+          </View>
+          <Text style={styles.rowLabel}>{help.label}</Text>
+          {!help.badge && <Text style={styles.rowHint}>{help.hint}</Text>}
+          <CountBadge count={help.badge} />
           <ChevronRightIcon size={16} color={theme.textMuted} />
         </Pressable>
         <Pressable onPress={() => setConfirmOut(true)} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && { opacity: 0.7 }]} accessibilityRole="button">

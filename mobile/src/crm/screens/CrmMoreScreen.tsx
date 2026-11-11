@@ -14,6 +14,7 @@ import { CrmScreen } from '../ui/CrmScreen';
 import { StatusBadge, toneColors, type Tone } from '../ui/StatusBadge';
 import { ClipboardListIcon } from '../ui/crmIcons';
 import { useAppSwitch, type AppKind } from '../../navigation/AppSwitchContext';
+import { useHelpRow } from '../../helpdesk/useHelpRow';
 
 // The "More" tab of the sales apps (Commercial, Residential and CRM): who is signed in, in a
 // coloured header, then the options in sections - each with its own colour icon and a one-line
@@ -137,6 +138,7 @@ export function CrmMoreScreen() {
   const manager = leadPersonaForRole(rawRole) === 'sales_manager' && !residentialApp;
   const performance = !telecaller && !residentialApp;
   const openProfile = () => leadNavigation.navigate('LeadProfile');
+  const help = useHelpRow(`More menu · ${APP_NAMES[current] ?? 'Sales'}`);
 
   // The Work section, in order; dividers go between the rows that are shown.
   const work: Omit<MenuRowProps, 'divider'>[] = [];
@@ -231,6 +233,7 @@ export function CrmMoreScreen() {
             onPress={() => openSwitcher()}
           />
         )}
+        <MenuRow icon={help.Icon} tone="info" label={help.label} hint={help.hint} divider onPress={help.open} />
         <MenuRow icon={SettingsIcon} tone="neutral" label="Settings" hint="Notifications, theme and more" soon divider />
       </View>
 

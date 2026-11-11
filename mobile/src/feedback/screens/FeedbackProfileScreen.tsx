@@ -15,6 +15,8 @@ import { SwapIcon } from '../../tasks/ui/taskIcons';
 import { HeroHeader } from '../Hero';
 import { Sheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
+import { useHelpRow } from '../../helpdesk/useHelpRow';
+import { CountBadge } from '../../helpdesk/ui';
 
 // Same layout as Payment Reminders' profile (reminders/screens/ReminderProfileScreen.tsx).
 const factory = (t: CrmTheme) => ({
@@ -51,6 +53,7 @@ const factory = (t: CrmTheme) => ({
 /** Profile: who is signed in, change password and sign out. */
 export function FeedbackProfileScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  const help = useHelpRow('Profile · Customer Feedback');
   const { styles, theme } = useCrmStyles(factory);
   const { user, logout } = useAuth();
   const rawRole = useRawRole();
@@ -96,6 +99,14 @@ export function FeedbackProfileScreen() {
               <LockIcon size={18} color={theme.primary} />
             </View>
             <Text style={styles.rowLabel}>Change password</Text>
+            <ChevronRightIcon size={16} color={theme.textMuted} />
+          </Pressable>
+          <Pressable onPress={help.open} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={help.badge ? `${help.label}, ${help.hint}` : help.label}>
+            <View style={styles.rowIcon}>
+              <help.Icon size={18} color={theme.primary} />
+            </View>
+            <Text style={styles.rowLabel}>{help.label}</Text>
+            <CountBadge count={help.badge} />
             <ChevronRightIcon size={16} color={theme.textMuted} />
           </Pressable>
           <Pressable onPress={() => setConfirmOut(true)} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.pressed]} accessibilityRole="button">

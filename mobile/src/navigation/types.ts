@@ -22,6 +22,13 @@ export type AuthenticatedStackParamList = {
   /** Reached from AppHeader's avatar - identity/contact info, own screen (no longer the "More" tab). */
   Profile: undefined;
   ChangePassword: undefined;
+  /** Help & Support (helpdesk/) - reachable from every app's Profile / More screen. `from` = where it was opened (sent with a new ticket). */
+  Helpdesk: { from?: string } | undefined;
+  HelpdeskNew: { from?: string } | undefined;
+  /** `justRaised` = the new ticket's code, to confirm it was raised. */
+  HelpdeskTicket: { ticketId: string; justRaised?: string };
+  /** The technical team's queue (Technical Lead / Team only). */
+  HelpdeskDesk: undefined;
 };
 
 /**

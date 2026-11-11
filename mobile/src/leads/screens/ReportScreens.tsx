@@ -445,7 +445,7 @@ export function AchievementHistoryScreen() {
  */
 // The sales team only (Sales Executives and sales managers) - not the whole Task Management
 // hierarchy, which for a Managing Director / Personal Assistant is everyone in the company.
-async function loadTeam(myId: number): Promise<Person[]> {
+export async function loadTeam(myId: number): Promise<Person[]> {
   const sales = await api.salesEmployees().catch(() => [] as Person[]);
   const byId = new Map<number, Person>();
   for (const p of sales) {
