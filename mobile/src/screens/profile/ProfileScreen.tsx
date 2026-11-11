@@ -18,6 +18,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { useUserRole, normalizeRole, roleLabel } from '../../auth/role';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
+import { useHelpRow } from '../../helpdesk/useHelpRow';
 
 type Nav = NativeStackNavigationProp<AuthenticatedStackParamList>;
 
@@ -44,6 +45,7 @@ export function ProfileScreen() {
   const role = useUserRole();
   const navigation = useNavigation<Nav>();
   const name = user?.name ?? 'BestServe user';
+  const help = useHelpRow('More menu');
 
   return (
     <ScreenContainer edges={['top', 'bottom']}>
@@ -83,6 +85,20 @@ export function ProfileScreen() {
           label="Phone number"
         />
       </View>
+
+      <View style={styles.sectionHeaderRow}>
+        <help.Icon size={14} color={colors.textMuted} />
+        <Text style={styles.sectionTitle}>Support</Text>
+      </View>
+      <RichActionTile
+        title={help.label}
+        description={help.hint}
+        icon={<help.Icon size={20} color={colors.textOnPrimary} />}
+        ghostIcon={<help.Icon size={56} color={colors.info} />}
+        accentColor={colors.info}
+        style={styles.accountTile}
+        onPress={help.open}
+      />
 
       <View style={styles.sectionHeaderRow}>
         <SettingsIcon size={14} color={colors.textMuted} />

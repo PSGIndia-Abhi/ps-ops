@@ -66,6 +66,7 @@ import TaskProProfile from "./pages/taskpro/TaskProfile";
 import TaskProNotifications from "./pages/taskpro/Notifications";
 import TaskProFeedback from "./pages/taskpro/Feedback";
 import { ACCOUNTANT_PANEL_ROLES, TASKPRO_HOME, TASKPRO_ROLES } from "./pages/taskpro/access";
+import HelpdeskDesk from "./helpdesk/HelpdeskDesk";
 import LeadsLayout from "./pages/leads/LeadsLayout";
 import LeadsHome from "./pages/leads/Home";
 import LeadsList from "./pages/leads/LeadsList";
@@ -380,6 +381,9 @@ const router = createBrowserRouter([
       { path: "reports", element: <TaskProReports /> },
       { path: "profile", element: <TaskProProfile /> },
       { path: "notifications", element: <TaskProNotifications /> },
+      // Helpdesk desk for the technical team (the page and the server check the role).
+      { path: "helpdesk", element: <HelpdeskDesk /> },
+      { path: "helpdesk/:id", element: <HelpdeskDesk /> },
       // The Managing Director's private feedback on their team (the page and the server check the role).
       { path: "feedback", element: <TaskProFeedback /> },
       // Customer Feedback tickets for a department's team (e.g. Accounts) and assigned people.

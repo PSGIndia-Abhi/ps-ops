@@ -39,6 +39,8 @@ import { MarkAllRead, NotificationRow } from "./Notifications";
 import ViewerProvider from "./ViewerProvider";
 import { useViewer } from "./viewerContext";
 import { Avatar } from "./ui";
+import { isHelpdeskAgentRole, useHelpdeskSummary } from "../../helpdesk/helpdeskHooks";
+import { FiLifeBuoy } from "react-icons/fi";
 import "./taskpro.css";
 
 const NAV = [
@@ -121,6 +123,9 @@ function TaskProShell() {
   useEffect(() => {
     if (onTickets && unseenTickets > 0) markSeen("tickets");
   });
+  // Helpdesk desk: technical team only; the badge counts tickets with new messages for them.
+  const isHelpdeskAgent = isHelpdeskAgentRole(localStorage.getItem("role"));
+  const helpdesk = useHelpdeskSummary(isHelpdeskAgent, location.pathname);
   const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
 
@@ -241,6 +246,20 @@ function TaskProShell() {
                   {item.feedbackTickets && unseenTickets > 0 && <span className="tp-nav-badge">{unseenTickets}</span>}
                 </NavLink>
               ),
+            )}
+            {isHelpdeskAgent && (
+              <NavLink
+                to={`${TASKPRO_HOME}/helpdesk`}
+                className={({ isActive }) => `tp-nav-item ${isActive ? "active" : ""}`}
+                onClick={() => setDrawer(false)}
+                title={collapsed ? "Helpdesk" : undefined}
+              >
+                <FiLifeBuoy className="tp-nav-icon" />
+                <span className="tp-nav-label">Helpdesk</span>
+                {(helpdesk?.unread || helpdesk?.unassigned) > 0 && (
+                  <span className="tp-nav-badge">{Math.max(helpdesk.unread, helpdesk.unassigned)}</span>
+                )}
+              </NavLink>
             )}
           </nav>
 

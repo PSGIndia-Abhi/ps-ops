@@ -11,10 +11,25 @@ import { CreateBookingScreen } from '../screens/bookings/CreateBookingScreen';
 import { NotificationsScreen } from '../screens/notifications/NotificationsScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { ChangePasswordScreen } from '../screens/profile/ChangePasswordScreen';
+import { HelpdeskHomeScreen } from '../helpdesk/screens/HelpdeskHomeScreen';
+import { HelpdeskNewTicketScreen } from '../helpdesk/screens/HelpdeskNewTicketScreen';
+import { HelpdeskTicketScreen } from '../helpdesk/screens/HelpdeskTicketScreen';
+import { HelpdeskDeskScreen } from '../helpdesk/screens/HelpdeskDeskScreen';
+import { HelpdeskPushBridge } from '../helpdesk/HelpdeskPushBridge';
 import { colors } from '../theme';
 import type { AuthenticatedStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<AuthenticatedStackParamList>();
+
+/** The role's apps, plus the listener that opens a Helpdesk ticket when its push is tapped. */
+function TabsRoot() {
+  return (
+    <>
+      <RoleTabs />
+      <HelpdeskPushBridge />
+    </>
+  );
+}
 
 /**
  * The whole signed-in app is one stack: the role-appropriate tab navigator
@@ -32,7 +47,7 @@ export function AuthenticatedNavigator() {
         headerShadowVisible: false,
       }}
     >
-      <Stack.Screen name="Tabs" component={RoleTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
       {/* Own custom gradient header (back button + title, built into the hero) - see JobDetailScreen. */}
       <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ headerShown: false }} />
       <Stack.Screen
@@ -68,6 +83,11 @@ export function AuthenticatedNavigator() {
         component={ChangePasswordScreen}
         options={{ title: 'Change password' }}
       />
+      {/* Help & Support - own headers (helpdesk/screens). Opened from every app's Profile / More. */}
+      <Stack.Screen name="Helpdesk" component={HelpdeskHomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="HelpdeskNew" component={HelpdeskNewTicketScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="HelpdeskTicket" component={HelpdeskTicketScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="HelpdeskDesk" component={HelpdeskDeskScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

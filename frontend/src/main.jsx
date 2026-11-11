@@ -7,6 +7,7 @@ import "./styles/admin.css";
 import "./styles/job.css";
 import { APIProvider } from "@vis.gl/react-google-maps";
 import { useMapsLibrary } from "@vis.gl/react-google-maps";
+import HelpdeskWidget from "./helpdesk/HelpdeskWidget";
 
 window._0xA13H1 = () => {
   console.log("RW5naW5lZXJlZCBieSBBYmhpLiBRdWlldGx5IHJlbGlhYmxlLgpTaW1wbGljaXR5IGlzIHRoZSB1bHRpbWF0ZSBzb3BoaXN0aWNhdGlvbi4gCkxlb25hcmRvIGRhIFZpbmNp Groups of four might help");
@@ -19,6 +20,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     >
       <RouterProvider
        router={router}/>
+      {/* Help & Support button on every signed-in page (see helpdesk/HelpdeskWidget.jsx) */}
+      <HelpdeskWidget router={router} />
     </APIProvider>
   </React.StrictMode>
 );

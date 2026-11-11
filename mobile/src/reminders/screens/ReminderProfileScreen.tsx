@@ -13,6 +13,8 @@ import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { Avatar, ScreenHeader } from '../../tasks/ui/parts';
 import { Sheet } from '../../tasks/ui/sheets';
 import { radii, spacing, typography } from '../../theme';
+import { useHelpRow } from '../../helpdesk/useHelpRow';
+import { CountBadge } from '../../helpdesk/ui';
 import { useReminders } from '../RemindersContext';
 
 // Same layout as Task Management's profile (tasks/screens/TaskProfileScreen.tsx).
@@ -59,6 +61,7 @@ const factory = (t: CrmTheme) => ({
 /** Profile (opened from the avatar's "View profile") - the accountant's reminder numbers, password and sign out. */
 export function ReminderProfileScreen() {
   const navigation = useNavigation<NavigationProp<AuthenticatedStackParamList>>();
+  const help = useHelpRow('Profile · Payment Reminders');
   const { styles, theme } = useCrmStyles(factory);
   const { user, logout } = useAuth();
   const rawRole = useRawRole();
@@ -117,6 +120,14 @@ export function ReminderProfileScreen() {
               <LockIcon size={18} color={theme.primary} />
             </View>
             <Text style={styles.rowLabel}>Change password</Text>
+            <ChevronRightIcon size={16} color={theme.textMuted} />
+          </Pressable>
+          <Pressable onPress={help.open} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={help.badge ? `${help.label}, ${help.hint}` : help.label}>
+            <View style={styles.rowIcon}>
+              <help.Icon size={18} color={theme.primary} />
+            </View>
+            <Text style={styles.rowLabel}>{help.label}</Text>
+            <CountBadge count={help.badge} />
             <ChevronRightIcon size={16} color={theme.textMuted} />
           </Pressable>
           <Pressable onPress={() => setConfirmOut(true)} style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.pressed]} accessibilityRole="button">
