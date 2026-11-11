@@ -166,7 +166,7 @@ function AppIcon({ kind, color }: { kind: AppKind; color: string }) {
 /** The header's blue gradient, drawn behind its content. */
 function HeadGradient() {
   return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" preserveAspectRatio="none">
+    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
         <LinearGradient id="switchHead" x1="0" y1="0" x2="1" y2="1">
           <Stop offset="0" stopColor={HEAD_FROM} />
