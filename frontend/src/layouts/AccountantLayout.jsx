@@ -27,6 +27,7 @@ import useStackedTables from "../hooks/useStackedTables";
 import NotificationsMenu from "../components/NotificationsMenu";
 import ReminderAlerts from "../components/accountant/ReminderAlerts";
 import UserMenu from "../components/UserMenu";
+import { useNotificationsFor } from "../pages/taskpro/tasksApi";
 import "./AccountantLayout.css";
 import "../pages/accountant/accountant.css";
 
@@ -83,8 +84,6 @@ const NAV_ITEMS = [
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell, also: ["/accountant/follow-ups"] },
-  // The shared Task Management area (same login); it has an "Accountant Panel" link back here.
-  { label: "Task Management", path: "/taskpro", icon: FiClipboard },
   { label: "Contacts", path: "/accountant/contacts", icon: FiPhone },
   { label: "TDS", path: "/accountant/settings", icon: FiPercent },
 ];
@@ -93,6 +92,7 @@ export default function AccountantLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useMe();
+  const { unread: taskUnread } = useNotificationsFor(user?.id ?? null);
 
   const mainRef = useRef(null);
   useStackedTables(mainRef);
@@ -195,6 +195,14 @@ export default function AccountantLayout() {
         );
       })}
       <div className="acc-foot">
+        {/* The shared Task Management area (same login); it has an "Accountant Panel" link back here.
+            The red number is its unread notifications, the same count as the bell inside it. */}
+        <button type="button" className="acc-item" onClick={() => go("/taskpro")}
+          aria-label={taskUnread ? `Task Management, ${taskUnread} unread` : "Task Management"}>
+          <FiClipboard className="acc-icon" />
+          <span className="acc-label">Task Management</span>
+          {taskUnread > 0 && <span className="acc-badge">{taskUnread > 9 ? "9+" : taskUnread}</span>}
+        </button>
         <button type="button" className="acc-item" onClick={logout}>
           <FiLogOut className="acc-icon" />
           <span className="acc-label">Logout</span>

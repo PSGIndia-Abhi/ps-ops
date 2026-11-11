@@ -1,10 +1,14 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { FiArrowLeft, FiCheckSquare, FiLogOut } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
 import { getBadges, getDepartments, getMyAccess } from "./feedbackApi";
+import { taskSwitchCount } from "../taskpro/tasksApi";
+import { useUnseenCounts } from "./unseenCounts";
+import { TASKPRO_HOME } from "../taskpro/access";
 import { FeedbackContext } from "./feedbackContext";
 import { ErrorBox, Loading } from "./ui";
 import "./feedback.css";
@@ -17,7 +21,7 @@ const WORKERS = ["FEEDBACK_COLLECT", ...DESK];
 const NAV = [
   { path: FEEDBACK_HOME, label: "Dashboard", exact: true, match: [`${FEEDBACK_HOME}/calls`], needs: WORKERS },
   // FEEDBACK_ASSIGNED: a supervisor / salesperson with a ticket's next step assigned to them.
-  { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets", needs: [...WORKERS, "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"] },
+  { path: `${FEEDBACK_HOME}/tickets`, label: "Tickets", needs: [...WORKERS, "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"], badge: "open_tickets" },
   // Wrong numbers: collectors ask, service coordinators (and desk managers) add the right number.
   { path: `${FEEDBACK_HOME}/requests`, label: "Requests", needs: [...WORKERS, "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"], badge: "open_requests" },
   { path: `${FEEDBACK_HOME}/report`, label: "Customer report", needs: DESK },
@@ -72,6 +76,31 @@ export default function FeedbackLayout() {
     return () => clearInterval(timer);
   }, [access, loadBadges, location.pathname]);
 
+  // The number on the "Task Management" switch: its menu's red numbers added up (Overdue + Requests).
+  const switchesToTasks = back?.path === TASKPRO_HOME;
+  const [taskUpdates, setTaskUpdates] = useState(null);
+  useEffect(() => {
+    if (!access || !switchesToTasks) return undefined;
+    let live = true;
+    const load = () =>
+      taskSwitchCount()
+        .then((n) => live && setTaskUpdates(n))
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [access, switchesToTasks, location.pathname]);
+
+  // Each red number clears once its item is opened, and only new ones show after (see unseenCounts).
+  const { unseen, markSeen } = useUnseenCounts(access?.user_id ? `${access.user_id}.desk` : null, {
+    open_tickets: badges.open_tickets ?? null,
+    open_requests: badges.open_requests ?? null,
+    tasks: taskUpdates,
+  });
+
   // A department member opens straight on their tickets; a service coordinator (Issues only) on Issues.
   const deptOnly = Boolean(access) && !WORKERS.some((p) => (access.permissions || []).includes(p));
   const issuesOnly = deptOnly && !["FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"].some((p) => (access.permissions || []).includes(p));
@@ -122,6 +151,18 @@ export default function FeedbackLayout() {
       ? location.pathname === item.path || (item.match || []).some((m) => location.pathname.startsWith(m))
       : location.pathname.startsWith(item.path);
 
+  // Being on an item's page counts as opening it (also when reached from a link, not the menu).
+  const openBadge = nav.find((item) => item.badge && isActive(item))?.badge;
+  const openBadgeCount = openBadge ? unseen(openBadge) : 0;
+  useEffect(() => {
+    if (openBadge && openBadgeCount > 0) markSeen(openBadge);
+  });
+
+  function openSwitch() {
+    if (switchesToTasks) markSeen("tasks");
+    go(back.path);
+  }
+
   return (
     <div className="app-shell fb-shell">
       <header className="app-header">
@@ -139,11 +180,6 @@ export default function FeedbackLayout() {
         {!isMobile && (
           <aside className="sidebar">
             <nav className="nav" aria-label="Customer Feedback">
-              {back && (
-                <button type="button" className="fb-nav-back" onClick={() => navigate(back.path)}>
-                  ‹ Back to {back.label}
-                </button>
-              )}
               {access &&
                 nav.map((item) =>
                   item.group ? (
@@ -155,14 +191,31 @@ export default function FeedbackLayout() {
                       key={item.path}
                       className={`nav-btn ${isActive(item) ? "active" : ""}`}
                       aria-current={isActive(item) ? "page" : undefined}
-                      onClick={() => navigate(item.path)}
+                      onClick={() => {
+                        if (item.badge) markSeen(item.badge);
+                        navigate(item.path);
+                      }}
                     >
                       <span>{item.label}</span>
-                      {item.badge && badges[item.badge] > 0 && <span className="fb-nav-count">{badges[item.badge]}</span>}
+                      {item.badge && unseen(item.badge) > 0 && <span className="fb-nav-count">{unseen(item.badge)}</span>}
                     </button>
                   ),
                 )}
             </nav>
+            {/* Switch to the user's other panel, at the bottom like Task Management's own switches. */}
+            <div className="fb-nav-switch">
+              {back && (
+                <button type="button" className="nav-btn" onClick={openSwitch}>
+                  {switchesToTasks ? <FiCheckSquare aria-hidden="true" /> : <FiArrowLeft aria-hidden="true" />}
+                  <span>{back.label}</span>
+                  {unseen("tasks") > 0 && <span className="fb-nav-count">{unseen("tasks")}</span>}
+                </button>
+              )}
+              <button type="button" className="nav-btn" onClick={logout}>
+                <FiLogOut aria-hidden="true" />
+                <span>Logout</span>
+              </button>
+            </div>
           </aside>
         )}
 
@@ -188,7 +241,12 @@ export default function FeedbackLayout() {
                 {item.label}
               </button>
             ))}
-          {back && <button onClick={() => go(back.path)}>{back.label}</button>}
+          {back && (
+            <button onClick={openSwitch}>
+              {back.label}
+              {unseen("tasks") > 0 ? ` (${unseen("tasks")})` : ""}
+            </button>
+          )}
           <button onClick={logout}>Logout</button>
         </div>
       )}

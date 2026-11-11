@@ -48,6 +48,9 @@ export async function getJson(url) {
 // ---------------------------------------------------------------------------
 // Turning server rows into what the screens use.
 // ---------------------------------------------------------------------------
+// Shown in the Group filter for invoices whose customer has no group.
+export const NO_GROUP = "No Group";
+
 function cleanInvoice(row) {
   return {
     id: row.id,
@@ -56,6 +59,7 @@ function cleanInvoice(row) {
     customer_name: row.customer_name,
     customer_code: row.customer_code,
     site_name: row.site_name || "",
+    group_name: (row.group_name || "").trim() || NO_GROUP,
     invoice_date: ymd(row.invoice_date),
     due_date: ymd(row.due_date),
     invoice_amount: num(row.invoice_amount),
@@ -156,6 +160,20 @@ export const byDue = (a, b) =>
   `${a.due_date || "9999-99-99"} ${a.due_time || "99:99"}`.localeCompare(`${b.due_date || "9999-99-99"} ${b.due_time || "99:99"}`);
 
 // One row per customer with an unpaid balance, worked out from the invoices.
+// customer_id -> group name, taken from that customer's invoices ("No Group" if none has one).
+export function customerGroups(invoices) {
+  const map = new Map();
+  for (const i of invoices) {
+    if (!map.has(i.customer_id) || (map.get(i.customer_id) === NO_GROUP && i.group_name !== NO_GROUP)) map.set(i.customer_id, i.group_name);
+  }
+  return map;
+}
+
+// Distinct group names, A-Z, with "No Group" last.
+export function sortGroups(names) {
+  return [...new Set(names)].sort((a, b) => (a === NO_GROUP) - (b === NO_GROUP) || a.localeCompare(b));
+}
+
 export function groupByCustomer(invoices, payments = []) {
   const map = new Map();
   for (const inv of invoices) {

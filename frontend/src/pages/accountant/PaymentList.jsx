@@ -4,9 +4,10 @@ import { FiCalendar, FiCheckCircle, FiChevronDown, FiChevronRight, FiCreditCard,
 import { MdEventAvailable } from "react-icons/md";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { fetchPayment, showDate, todayYmd, useAccountantData, usePaged } from "./data";
+import { NO_GROUP, customerGroups, fetchPayment, showDate, sortGroups, todayYmd, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 import DateInput from "../../components/accountant/DateInput";
+import MultiSelect from "../../components/accountant/MultiSelect";
 
 const MODES = [
   ["CASH", "Cash"],
@@ -23,23 +24,44 @@ const sum = (list, key) => list.reduce((s, p) => s + (Number(p[key]) || 0), 0);
 
 export default function PaymentList() {
   const navigate = useNavigate();
-  const { payments, loading, error, reload } = useAccountantData();
+  const { invoices, payments, loading, error, reload } = useAccountantData();
   const [search, setSearch] = useState("");
-  const [customer, setCustomer] = useState("");
-  const [mode, setMode] = useState("");
-  const [status, setStatus] = useState("");
+  // Ticked filter values; [] = all.
+  const [picked, setPicked] = useState([]);
+  const [modes, setModes] = useState([]);
+  const [statuses, setStatuses] = useState([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [open, setOpen] = useState(null); // id of the expanded row
   const [details, setDetails] = useState({}); // payment id -> { allocations } or { error }
 
-  const customers = useMemo(() => [...new Set(payments.map((p) => p.customer_name))].sort(), [payments]);
+  const [groups, setGroups] = useState([]); // [] = all groups
+  // A payment's group is its customer's group (from the customer's invoices).
+  const groupMap = useMemo(() => customerGroups(invoices), [invoices]);
+  const groupOf = (p) => groupMap.get(p.customer_id) || NO_GROUP;
+  const groupOptions = useMemo(() => sortGroups(payments.map((p) => groupMap.get(p.customer_id) || NO_GROUP)), [payments, groupMap]);
+  const inGroups = (p) => !groups.length || groups.includes(groupOf(p));
+  // Only the customers of the ticked groups.
+  const customers = useMemo(
+    () => [...new Set(payments.filter((p) => !groups.length || groups.includes(groupMap.get(p.customer_id) || NO_GROUP)).map((p) => p.customer_name))].sort(),
+    [payments, groups, groupMap]
+  );
   const hasData = payments.length > 0;
+  // Ticking groups unticks customers that are not in them.
+  const changeGroups = (list) => {
+    setGroups(list);
+    if (list.length) {
+      const keep = picked.filter((c) => payments.some((p) => p.customer_name === c && list.includes(groupOf(p))));
+      if (keep.length !== picked.length) setPicked(keep);
+    }
+    setPage(0);
+  };
 
   const rows = payments.filter((p) => {
-    if (customer && p.customer_name !== customer) return false;
-    if (mode && p.payment_mode !== mode) return false;
-    if (status && p.status !== status) return false;
+    if (!inGroups(p)) return false;
+    if (picked.length && !picked.includes(p.customer_name)) return false;
+    if (modes.length && !modes.includes(p.payment_mode)) return false;
+    if (statuses.length && !statuses.includes(p.status)) return false;
     if (from && p.payment_date < from) return false;
     if (to && p.payment_date > to) return false;
     const q = search.trim().toLowerCase();
@@ -61,6 +83,7 @@ export default function PaymentList() {
   ];
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
+  const listChange = (setter) => (list) => { setter(list); setPage(0); };
 
   // The invoices a payment was applied to are loaded when its row is opened.
   async function toggle(id) {
@@ -82,6 +105,7 @@ export default function PaymentList() {
     exportCsv("payments.csv", [
       { header: "Payment No", value: (p) => p.payment_number },
       { header: "Date", value: (p) => p.payment_date },
+      { header: "Group", value: (p) => groupOf(p) },
       { header: "Customer", value: (p) => p.customer_name },
       { header: "Mode", value: (p) => MODE_LABEL[p.payment_mode] || p.payment_mode },
       { header: "UTR No", value: (p) => p.reference_number },
@@ -124,18 +148,10 @@ export default function PaymentList() {
       <div className="ac-card">
         <div className="ac-filters-pl" style={{ marginBottom: 14 }}>
           <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search payment no, customer or UTR no" value={search} onChange={filterChange(setSearch)} /></div>
-          <select className="ac-select" value={customer} onChange={filterChange(setCustomer)}>
-            <option value="">All Customers</option>
-            {customers.map((c) => <option key={c}>{c}</option>)}
-          </select>
-          <select className="ac-select" value={mode} onChange={filterChange(setMode)}>
-            <option value="">All Modes</option>
-            {MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          <select className="ac-select" value={status} onChange={filterChange(setStatus)}>
-            <option value="">All Status</option>
-            <option value="POSTED">Posted</option>
-          </select>
+          <MultiSelect options={groupOptions} value={groups} onChange={changeGroups} allLabel="All Groups" ariaLabel="Groups" />
+          <MultiSelect options={customers} value={picked} onChange={listChange(setPicked)} allLabel="All Customers" ariaLabel="Customers" />
+          <MultiSelect options={MODES.map(([v, l]) => ({ value: v, label: l }))} value={modes} onChange={listChange(setModes)} allLabel="All Modes" ariaLabel="Payment modes" />
+          <MultiSelect options={[{ value: "POSTED", label: "Posted" }]} value={statuses} onChange={listChange(setStatuses)} allLabel="All Status" ariaLabel="Status" />
           <div className="ac-grid-2" style={{ gap: 6 }}>
             <DateInput ariaLabel="From date" style={{ width: "100%", minWidth: 0 }} value={from} onChange={(v) => filterChange(setFrom)({ target: { value: v } })} />
             <DateInput ariaLabel="To date" style={{ width: "100%", minWidth: 0 }} value={to} onChange={(v) => filterChange(setTo)({ target: { value: v } })} />

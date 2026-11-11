@@ -54,6 +54,11 @@ class HttpError extends Error {
 function sendError(res, err, fallback) {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
   console.error(fallback, err);
+  // A database that is missing an update: say which table / column, so it can be fixed without the server log.
+  if (["ER_NO_SUCH_TABLE", "ER_BAD_FIELD_ERROR"].includes(err?.code)) {
+    return res.status(500).json({ error: `${fallback} - the database is missing an update (${err.sqlMessage})` });
+  }
+  if (err?.code === "CONFIG_MISSING") return res.status(500).json({ error: `${fallback} - ${err.message}` });
   return res.status(500).json({ error: fallback });
 }
 
@@ -2143,7 +2148,9 @@ const hashToken = (token) => crypto.createHash("sha256").update(token).digest("h
 
 function formUrl(token) {
   let base = String(process.env.FRONTEND_URL || "").trim().replace(/\/+$/, "");
-  if (!base) throw new Error("FRONTEND_URL is not set - the feedback form link can't be made");
+  if (!base) {
+    throw Object.assign(new Error("FRONTEND_URL is not set on the server. Add FRONTEND_URL=https://www.bestserve.in to the backend settings and restart it."), { code: "CONFIG_MISSING" });
+  }
   // A full https:// address, so WhatsApp shows the link as one the customer can tap.
   if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
   return `${base}/feedback/${token}`;
@@ -2400,7 +2407,10 @@ function followUpDue(t, revisitStatus, parts = null) {
   // any other department when its team marked it done. No parts loaded = an Operations ticket.
   const list = parts || [];
   const hasOps = !list.length || list.some((p) => p.kind === OPERATIONS);
-  const opsDone = !hasOps || t.action === "OTHER" || (isAssignedAction(t.action) ? Boolean(t.action_done_at) : Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED");
+  // Operations: its step marked Completed (any step; "Other" and assigned steps only this way), or the
+  // re-visit completed by the technician.
+  const revisitDone = !isAssignedAction(t.action) && t.action !== "OTHER" && Boolean(t.revisit_visit_id) && revisitStatus === "COMPLETED";
+  const opsDone = !hasOps || Boolean(t.action_done_at) || revisitDone;
   const othersDone = list.filter((p) => p.kind !== OPERATIONS).every((p) => p.status === "DONE");
   return opsDone && othersDone;
 }
@@ -2658,28 +2668,82 @@ async function recordPartFeedback(req, id, kindValue, body) {
   });
 }
 
+// POST /tickets/:id/action-done - Body: { note }. The Operations step is done: an assigned step
+// (Site audit, Supervisor visit, Sales) by its person or a desk manager - note required; any other
+// step ("Completed" on the Action card) by a desk manager - note optional. The collector and whoever
+// raised the ticket are notified, to call the customer back or close the ticket.
 async function markActionDone(req, id, body) {
-  const note = optionalText(body?.note, "note", 500);
-  if (!note) throw new HttpError(400, "Say what was done");
-  return inTransaction(async (conn) => {
-    const [[t]] = await conn.query(
-      "SELECT id, request_id, ticket_number, status, action, action_owner_user_id, action_done_at FROM feedback_tickets WHERE id = ? OR ticket_number = ? FOR UPDATE",
+  const given = optionalText(body?.note, "note", 500);
+  const t = await inTransaction(async (conn) => {
+    const [[row]] = await conn.query(
+      `SELECT t.id, t.request_id, t.ticket_number, t.status, t.action, t.action_owner_user_id, t.action_done_at, t.raised_by, r.collector_user_id
+       FROM feedback_tickets t JOIN feedback_requests r ON r.id = t.request_id
+       WHERE t.id = ? OR t.ticket_number = ? FOR UPDATE`,
       [id, id]
     );
-    if (!t) throw new HttpError(404, "Feedback ticket not found");
-    if (!isAssignedAction(t.action)) throw new HttpError(400, "This ticket's next step is not assigned to a person");
-    if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(t.action_owner_user_id) !== Number(req.user.id)) {
-      throw new HttpError(403, `Only the person the ${ACTION_LABELS[t.action].toLowerCase()} is assigned to can mark it done`);
+    if (!row) throw new HttpError(404, "Feedback ticket not found");
+    if (isAssignedAction(row.action)) {
+      if (!hasPerm(req, "FEEDBACK_MANAGE") && Number(row.action_owner_user_id) !== Number(req.user.id)) {
+        throw new HttpError(403, `Only the person the ${ACTION_LABELS[row.action].toLowerCase()} is assigned to can mark it done`);
+      }
+      if (!given) throw new HttpError(400, "Say what was done");
+    } else if (!hasPerm(req, "FEEDBACK_MANAGE")) {
+      throw new HttpError(403, "Only a desk manager can mark the action completed");
     }
-    if (t.status === "CLOSED") throw new HttpError(409, `${t.ticket_number} is closed`);
-    if (t.action_done_at) throw new HttpError(409, `The ${ACTION_LABELS[t.action].toLowerCase()} is already done`);
+    if (row.status === "CLOSED") throw new HttpError(409, `${row.ticket_number} is closed`);
+    if (row.action_done_at) throw new HttpError(409, `The ${ACTION_LABELS[row.action].toLowerCase()} is already done`);
+    const note = given || "Completed";
     await conn.query(
       "UPDATE feedback_tickets SET action_done_by = ?, action_done_at = NOW(), action_done_note = ?, row_version = row_version + 1 WHERE id = ?",
-      [req.user.id, note, t.id]
+      [req.user.id, note, row.id]
     );
-    await addHistory(conn, { requestId: t.request_id, ticketId: t.id, event: "ACTION_DONE", note: `${ACTION_LABELS[t.action]} done - ${note}`, userId: req.user.id });
-    return { ticket_id: t.id, ticket_number: t.ticket_number };
+    await addHistory(conn, { requestId: row.request_id, ticketId: row.id, event: "ACTION_DONE", note: `${ACTION_LABELS[row.action]} done - ${note}`, userId: req.user.id });
+    return row;
   });
+  await notifyTicketPeople(req, t, {
+    type: "FEEDBACK_ACTION_DONE",
+    title: `${t.ticket_number}: action completed`,
+    message: "The work on this ticket is done. Call the customer back for feedback, or close the ticket.",
+  });
+  return { ticket_id: t.id, ticket_number: t.ticket_number };
+}
+
+// The collector of the call and whoever raised the ticket get a notification (bell + phone), not the
+// person who did it. Best effort: a failed notification never undoes the ticket change.
+async function notifyTicketPeople(req, t, { type, title, message }) {
+  try {
+    const { notifyUsers } = require("./notifications.service");
+    await notifyUsers([t.collector_user_id, t.raised_by], { type, title, message, entityType: "feedback_ticket", entityId: t.id }, { exceptUserId: req.user.id });
+  } catch (err) {
+    console.error("Feedback ticket notification failed", err);
+  }
+}
+
+// POST /tickets/:id/cancel - Body: { row_version, note } (why; required). The action will not be done
+// (raised wrongly, the customer withdrew...): the ticket closes as cancelled, without a follow-up
+// call, and the collector is notified. Desk managers only. It can be reopened like any closed ticket.
+async function cancelTicket(req, id, body) {
+  if (!hasPerm(req, "FEEDBACK_MANAGE")) throw new HttpError(403, "Only a desk manager can cancel a ticket");
+  const reason = optionalText(body?.note, "reason", 400);
+  if (!reason) throw new HttpError(400, "Say why the ticket is cancelled");
+  const t = await inTransaction(async (conn) => {
+    const row = await lockTicket(conn, id, body?.row_version);
+    if (row.status === "CLOSED") throw new HttpError(409, "The ticket is already closed");
+    const closeNote = `Cancelled - ${reason}`.slice(0, 500);
+    await conn.query(
+      "UPDATE feedback_tickets SET status = 'CLOSED', closed_by = ?, closed_at = NOW(), close_note = ?, row_version = row_version + 1 WHERE id = ?",
+      [req.user.id, closeNote, row.id]
+    );
+    await addHistory(conn, { requestId: row.request_id, ticketId: row.id, event: "CANCELLED", from: "ACTION_PENDING", to: "CLOSED", note: closeNote, userId: req.user.id });
+    const [[r]] = await conn.query("SELECT collector_user_id FROM feedback_requests WHERE id = ?", [row.request_id]);
+    return { ...row, collector_user_id: r?.collector_user_id };
+  });
+  await notifyTicketPeople(req, t, {
+    type: "FEEDBACK_TICKET_CANCELLED",
+    title: `${t.ticket_number} cancelled`,
+    message: `Reason: ${reason}`,
+  });
+  return t.id;
 }
 
 // The assigned person must be an active user of the right group (supervisor / salesperson).
@@ -3021,6 +3085,7 @@ module.exports = {
   submitPublicForm,
   updateTicket,
   closeTicket,
+  cancelTicket,
   recordFollowUp,
   deleteTicket,
   addCallContact,

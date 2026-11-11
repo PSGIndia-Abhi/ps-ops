@@ -213,7 +213,7 @@ export default function QuestionsMaster() {
         )}
       </div>
 
-      <div className="fb-grid-side" style={{ gridTemplateColumns: current ? "minmax(0,1fr) 460px" : "minmax(0,1fr)" }}>
+      <div className={`fb-grid-side ${current ? "" : "is-single"}`} style={{ "--fb-side": "460px" }}>
         <div className="fb-qlist">
           {shown.length === 0 && (
             <div className="fb-qempty">
@@ -378,6 +378,19 @@ export default function QuestionsMaster() {
                   Remove this new question
                 </button>
               )}
+            </div>
+            {/* Add and save right here, so nobody has to scroll back up to the page buttons. */}
+            <div className="fb-qeditor-foot">
+              {error && <ErrorBox error={error} />}
+              {dirty && !error && <span className="fb-small fb-muted">Changes not saved yet</span>}
+              <div className="fb-qeditor-foot-btns">
+                <button type="button" className="fb-btn" onClick={addQuestion} disabled={saving}>
+                  <FiPlus /> Add question
+                </button>
+                <button type="button" className="fb-btn fb-btn-ok" onClick={save} disabled={!dirty || saving}>
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
             </div>
           </section>
         )}

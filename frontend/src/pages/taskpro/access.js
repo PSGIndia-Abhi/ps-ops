@@ -37,6 +37,9 @@ export const TASKPRO_ROLES = [
   "Accounts Executive",
   "Collection Executive",
   "Admin Executive",
+  // The feedback collector lands on the Feedback Desk and opens Task Management (their own tasks)
+  // from its sidebar.
+  "feedback_collector",
 ];
 
 // The Accountant Panel (payments, invoices, payment reminders) belongs to the Collection Executive,

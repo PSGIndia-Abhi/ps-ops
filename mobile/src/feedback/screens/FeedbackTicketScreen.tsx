@@ -111,7 +111,8 @@ export function FeedbackTicketScreen() {
   const others = parts.filter((p) => p.kind !== OPERATIONS);
   // Site audit / Supervisor visit / Sales: done when the assigned person marks it done.
   const assigned = isAssignedAction(ticket.action);
-  const opsDone = !hasOps || ticket.action === 'OTHER' || (assigned ? !!ticket.action_done : visit?.status === 'COMPLETED');
+  // Operations is done once its step is marked Completed (any step), or a re-visit step's visit is completed.
+  const opsDone = !hasOps || !!ticket.action_done || (!assigned && ticket.action !== 'OTHER' && visit?.status === 'COMPLETED');
   const canFinishAction = open && assigned && !ticket.action_done && (can('FEEDBACK_MANAGE') || ticket.action_owner?.id === userId);
   const ready = open && (ticket.follow_up_due ?? opsDone);
   const canFinish = (p: TicketPart) => open && p.status !== 'DONE' && (can('FEEDBACK_MANAGE') || myDepartments.includes(p.kind));
@@ -126,7 +127,7 @@ export function FeedbackTicketScreen() {
       : hasOps
       ? ([
           [visit ? `Re-visit booked · Job ${visit.job_code}${visit.technicians ? ` · ${visit.technicians}` : ''}` : ticket.action === 'OTHER' ? 'No technician visit (Other)' : 'Re-visit to be booked', !!visit || ticket.action === 'OTHER'],
-          [visit?.status === 'COMPLETED' ? `Work done ${formatDay(visit.completed_at || visit.date)}` : 'Work done', visit?.status === 'COMPLETED' || ticket.action === 'OTHER'],
+          [visit?.status === 'COMPLETED' ? `Work done ${formatDay(visit.completed_at || visit.date)}` : 'Work done', visit?.status === 'COMPLETED' || (ticket.action === 'OTHER' && !!ticket.action_done)],
         ] as [string, boolean][])
       : []),
     ...others.map((p) => [p.status === 'DONE' ? `${p.label} done · ${p.done_note || ''}` : `With ${p.label}`, p.status === 'DONE' || !open] as [string, boolean]),
