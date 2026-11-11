@@ -43,6 +43,7 @@ import ProfilePage from "./pages/ProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
 import AdminTickets from "./pages/AdminTickets";
+import AdminAuditLog from "./pages/AdminAuditLog";
 import ContactsPage from "./pages/contactsPage";
 import TemporaryWorkerHome from "./pages/TemporaryWorkerHome";
 import TrackingHistory from "./pages/TrackingHistory";
@@ -136,6 +137,8 @@ const router = createBrowserRouter([
       { path: "invoices", element: <InvoicesPage /> },
       { path: "payments", element: <PaymentsPage /> },
       { path: "tasks", element: <TasksPage /> },
+      // Audit Log: admin only (branch admins use this panel too, so it is guarded again here).
+      { path: "audit-log", element: <ProtectedRoute allowedRoles={["admin"]}><AdminAuditLog /></ProtectedRoute> },
       { path: "profile", element: <ProfilePage /> },
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/:contactId", element: <ContactsPage /> },

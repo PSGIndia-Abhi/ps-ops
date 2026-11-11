@@ -1,8 +1,29 @@
 // Downloads the rows currently shown on a screen as a CSV file that opens in Excel.
 // columns: [{ header: "Invoice No", value: (row) => row.invoice_number }, ...]
+// Every export is also recorded in the audit log (which screen, how many rows).
+
+import { apiFetch } from "../../api";
 
 // Marks the file as UTF-8 so Excel shows the rupee sign and other characters correctly.
 const BOM = String.fromCharCode(0xfeff);
+
+// "customer-outstanding.csv" -> "Customer Outstanding"
+function reportName(fileName) {
+  return String(fileName || "export")
+    .replace(/\.[^.]+$/, "")
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+// Fire and forget: a failed audit call never blocks the download.
+function recordExport(fileName, rowCount) {
+  apiFetch("/api/audit-logs/export-event", {
+    method: "POST",
+    body: JSON.stringify({ report: reportName(fileName), file_name: fileName, rows: rowCount, format: "CSV" }),
+  }).catch(() => {});
+}
 
 export function exportCsv(fileName, columns, rows) {
   // A cell starting with = + - @ could run as a formula when opened in Excel, so it is marked as text.
@@ -21,4 +42,5 @@ export function exportCsv(fileName, columns, rows) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(href);
+  recordExport(fileName, rows.length);
 }

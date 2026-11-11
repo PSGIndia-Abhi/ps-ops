@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCheckCircle } from "react-icons/fi";
 import { DataError, EmptyRow, Pager } from "./ui";
-import { fetchTdsSettings, nameKey, saveTdsSettings, useAccountantData, usePaged } from "./data";
+import { fetchTdsSettings, nameKey, saveTdsSettingsForRow, useAccountantData, usePaged } from "./data";
 import { money } from "./format";
 import "./accountant.css";
 
@@ -74,14 +74,11 @@ export default function TdsSettings() {
 
   const groupPending = (g) => g.ids.reduce((s, id) => s + (pendingTds.get(id) || 0), 0);
 
-  // Saves the same TDS setting for every record of a customer row. Returns how many invoices were updated.
+  // Saves the same TDS setting for every record of a customer row in one request: all records
+  // change together (or none do) and the audit log gets one entry. Returns how many invoices were updated.
   async function saveForGroup(g, body) {
-    let updated = 0;
-    for (const id of g.ids) {
-      const res = await saveTdsSettings(id, body);
-      updated += res.updated_invoices || 0;
-    }
-    return updated;
+    const res = await saveTdsSettingsForRow(g.ids, body);
+    return res.updated_invoices || 0;
   }
 
   // Remove TDS (set by mistake): TDS is switched off for the customer, and taken off the

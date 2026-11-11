@@ -3,6 +3,7 @@ const { v4: uuid } = require("uuid");
 const { round2, tdsStatus } = require("./Tds.service");
 const { syncInvoiceStatusesSafely } = require("./InvoiceStatus.service");
 const { closeClearedFollowUpsSafely } = require("./PaymentFollowUp.service");
+const { logAudit } = require("./Audit.service");
 
 function withStatus(message, status = 400) {
   const err = new Error(message);
@@ -32,13 +33,14 @@ async function recordPayment({
   remarks,
   allocations,
   created_by,
-}) {
+}, req = null) {
   const connection = await pool.getConnection();
+  const auditLines = []; // invoice-wise cash / TDS for the audit entry
 
   try {
     await connection.beginTransaction();
 
-    const [[customer]] = await connection.query("SELECT id FROM companies WHERE id = ?", [customer_id]);
+    const [[customer]] = await connection.query("SELECT id, COALESCE(display_name, name) AS name FROM companies WHERE id = ?", [customer_id]);
     if (!customer) throw withStatus("Invalid customer", 400);
 
     const cash = round2(received_amount);
@@ -125,15 +127,49 @@ async function recordPayment({
       }
 
       // Cash and TDS both settle an invoice that still has a balance. A fully paid invoice is left alone.
+      let newPending = pending;
       if (open) {
         const newPaid = round2(Number(invoice.paid_amount) + alloc.cash + alloc.tds);
-        const newPending = Math.max(0, round2(Number(invoice.invoice_amount) - newPaid));
+        newPending = Math.max(0, round2(Number(invoice.invoice_amount) - newPaid));
         await connection.query(
           "UPDATE invoices SET paid_amount = ?, pending_amount = ?, status = ?, updated_by = ? WHERE id = ?",
           [newPaid, newPending, newPending <= EPS ? "PAID" : "PARTIAL", created_by, invoice.id]
         );
       }
+      auditLines.push({
+        invoice_id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        cash: alloc.cash,
+        tds: alloc.tds,
+        tds_type: alloc.tds > 0 ? (open ? "CURRENT" : "PREVIOUS") : null,
+        pending_before: pending,
+        pending_after: newPending,
+      });
     }
+
+    const tdsPart = tdsTotal > 0 ? ` + ₹${tdsTotal.toFixed(2)} TDS` : "";
+    await logAudit(connection, req, {
+      module: "PAYMENT",
+      action: auditLines.length && auditLines.every((l) => l.cash === 0 && l.tds > 0) ? "PREVIOUS_TDS_RECORDED" : "PAYMENT_RECORDED",
+      entity_type: "PAYMENT",
+      entity_id: paymentId,
+      entity_label: paymentNumber,
+      customer_id,
+      summary: `₹${cash.toFixed(2)} ${payment_mode}${reference_number ? ` · UTR ${reference_number}` : ""}${tdsPart} → ${
+        auditLines.map((l) => l.invoice_number).join(", ") || "no invoice"
+      }`,
+      details: {
+        customer_name: customer.name,
+        payment_date,
+        received_amount: cash,
+        tds_amount: tdsTotal,
+        payment_mode,
+        reference_number: reference_number || null,
+        remarks: remarks || null,
+        allocations: auditLines,
+      },
+      refs: auditLines.map((l) => ({ entity_type: "INVOICE", entity_id: l.invoice_id })),
+    });
 
     await connection.commit();
     await syncInvoiceStatusesSafely(); // a part-paid invoice that is past its due date is stored as OVERDUE

@@ -258,6 +258,8 @@ export const fetchPayment = (id) => getJson(`/api/payments/${id}`);
 export const fetchInvoice = (id) => getJson(`/api/invoices/${id}`);
 export const fetchTdsSettings = () => getJson("/api/invoices/tds-settings");
 export const saveTdsSettings = (customerId, body) => send("PUT", `/api/invoices/tds-settings/${customerId}`, body);
+// Every record of one TDS Settings row in one save (all change or none do; one audit entry).
+export const saveTdsSettingsForRow = (customerIds, body) => send("PUT", "/api/invoices/tds-settings", { ...body, customer_ids: customerIds });
 
 // Splits a list into pages. Returns { pageRows, page, setPage, pageSize }.
 export function usePaged(rows, pageSize = 10) {

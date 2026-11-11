@@ -21,7 +21,7 @@ const {
   restoreCustomerContact,
 } = require("../controllers/customerPaymentContacts.controller");
 
-const { listTdsSettings, updateTdsSettings } = require("../controllers/tds.controller");
+const { listTdsSettings, updateTdsSettings, updateTdsSettingsBulk } = require("../controllers/tds.controller");
 
 const {
   uploadFile,
@@ -38,6 +38,8 @@ const {
 // Customer TDS settings. Declared before "/:id" so "tds-settings" is never read as an invoice id.
 router.get("/tds-settings", auth, requirePermission(PERMISSIONS.VIEW_INVOICE), listTdsSettings);
 router.put("/tds-settings/:customerId", auth, requirePermission(PERMISSIONS.UPDATE_INVOICE), updateTdsSettings);
+// One TDS Settings row (several records with the same display name) saved together, one audit entry.
+router.put("/tds-settings", auth, requirePermission(PERMISSIONS.UPDATE_INVOICE), updateTdsSettingsBulk);
 
 // The accountant's own phone list for a customer (who to call about payments), kept in
 // customer_payment_contacts -- not the admin's `contacts`. Declared before "/:id".

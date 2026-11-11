@@ -5,6 +5,7 @@ import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
 import { fetchInvoice, showDate, ymd } from "./data";
 import { fetchCustomerContact } from "./followups";
+import ChangeHistory from "./ChangeHistory";
 
 const dash = (v) => (v == null || v === "" ? "—" : v);
 const MODE_LABEL = { CASH: "Cash", UPI: "UPI", BANK_TRANSFER: "Bank Transfer", NEFT: "NEFT", CHEQUE: "Cheque", CARD: "Card", OTHER: "Other" };
@@ -168,6 +169,8 @@ export default function InvoiceDetails() {
           </div>
         </div>
       </div>
+
+      {invoice && <ChangeHistory invoiceId={invoiceId} key={`${invoiceId}-${attempt}`} />}
     </div>
   );
 }
