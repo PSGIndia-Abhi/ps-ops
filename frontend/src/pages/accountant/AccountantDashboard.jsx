@@ -19,9 +19,10 @@ import {
 } from "recharts";
 import useMe from "../../hooks/useMe";
 import DateInput from "../../components/accountant/DateInput";
+import MultiSelect from "../../components/accountant/MultiSelect";
 import { Badge, DataError, EmptyRow, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, daysOverdue, groupByCustomer, showDate, todayYmd, ymd, useAccountantData } from "./data";
+import { NO_GROUP, byDue, customerGroups, daysOverdue, groupByCustomer, showDate, sortGroups, todayYmd, ymd, useAccountantData } from "./data";
 import { showDue } from "./followups";
 
 // Y-axis labels in lakhs (1L = 1,00,000), e.g. 500000 -> "5L".
@@ -72,7 +73,9 @@ const MODE_LABEL = Object.fromEntries(PAYMENT_MODES);
 
 // The dashboard tables only preview this many rows; "View All" opens the full list on its own page.
 const PREVIEW_ROWS = 5;
-const EMPTY_FILTERS = { customer: "", site: "", status: "", mode: "" };
+// Each filter is a list of ticked values; [] = all.
+const EMPTY_FILTERS = { group: [], customer: [], site: [], status: [], mode: [] };
+const matches = (list, v) => !list.length || list.includes(v);
 const uniq = (list, key) => [...new Set(list.map((i) => i[key]).filter(Boolean))].sort();
 const sum = (list, key) => list.reduce((s, i) => s + (Number(i[key]) || 0), 0);
 
@@ -128,42 +131,71 @@ export default function AccountantDashboard() {
   }, [showFilters]);
 
   const firstName = (user?.name || "").split(" ")[0];
-  const setFilter = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
-  // Picking a customer narrows the Site list to that customer's own sites; a
-  // previously chosen site that doesn't belong to them is cleared so the two
-  // filters never disagree with each other.
-  const setCustomerFilter = (e) => setFilters((f) => ({ ...f, customer: e.target.value, site: "" }));
-  // The count on the Filters button counts only the choices inside the menu, not the two date boxes.
-  const activeFilters = Object.values(filters).filter(Boolean).length;
+  const setFilter = (key) => (list) => setFilters((f) => ({ ...f, [key]: list }));
+  // Picking customers narrows the Site list to their own sites; ticked sites that
+  // don't belong to them are unticked so the two filters never disagree.
+  // Ticking groups unticks customers and sites outside them.
+  const setGroupFilter = (list) => setFilters((f) => {
+    const customer = f.customer.filter((c) => !list.length || invoices.some((i) => i.customer_name === c && list.includes(i.group_name)));
+    return {
+      ...f,
+      group: list,
+      customer,
+      site: f.site.filter((s) => invoices.some((i) => i.site_name === s && matches(list, i.group_name) && matches(customer, i.customer_name))),
+    };
+  });
+  const setCustomerFilter = (list) => setFilters((f) => ({
+    ...f,
+    customer: list,
+    site: f.site.filter((s) => invoices.some((i) => i.site_name === s && matches(f.group, i.group_name) && matches(list, i.customer_name))),
+  }));
+  // The count on the Filters button counts only the menus with something ticked, not the two date boxes.
+  const activeFilters = Object.values(filters).filter((v) => v.length).length;
   const isDefaultRange = range === null;
   const canReset = activeFilters > 0 || !isDefaultRange;
 
-  const customerOptions = useMemo(() => uniq([...invoices, ...payments], "customer_name"), [invoices, payments]);
+  // Payments and follow-ups take their customer's group (from the customer's invoices).
+  const groupMap = useMemo(() => customerGroups(invoices), [invoices]);
+  const groupOf = (row) => groupMap.get(row.customer_id) || NO_GROUP;
+  const groupOptions = useMemo(
+    () => sortGroups([...invoices.map((i) => i.group_name), ...payments.map((p) => groupMap.get(p.customer_id) || NO_GROUP)]),
+    [invoices, payments, groupMap]
+  );
+  // Only the customers / sites of the ticked groups (and customers).
+  const customerOptions = useMemo(
+    () => uniq([
+      ...invoices.filter((i) => matches(filters.group, i.group_name)),
+      ...payments.filter((p) => matches(filters.group, groupMap.get(p.customer_id) || NO_GROUP)),
+    ], "customer_name"),
+    [invoices, payments, groupMap, filters.group]
+  );
   const siteOptions = useMemo(
-    () => uniq(invoices.filter((i) => !filters.customer || i.customer_name === filters.customer), "site_name"),
-    [invoices, filters.customer]
+    () => uniq(invoices.filter((i) => matches(filters.group, i.group_name) && matches(filters.customer, i.customer_name)), "site_name"),
+    [invoices, filters.group, filters.customer]
   );
 
   // ---- apply the filters to each list --------------------------------------------------------
   const inRange = (date) => (!effectiveRange.from || (date && date >= effectiveRange.from)) && (!effectiveRange.to || (date && date <= effectiveRange.to));
 
   const fInvoices = invoices.filter((i) =>
-    (!filters.customer || i.customer_name === filters.customer) &&
-    (!filters.site || i.site_name === filters.site) &&
-    (!filters.status || i.status === filters.status) &&
+    matches(filters.group, i.group_name) &&
+    matches(filters.customer, i.customer_name) &&
+    matches(filters.site, i.site_name) &&
+    matches(filters.status, i.status) &&
     inRange(i.invoice_date)
   );
   const fPayments = payments.filter((p) =>
     p.status !== "CANCELLED" &&
-    (!filters.customer || p.customer_name === filters.customer) &&
-    (!filters.mode || p.payment_mode === filters.mode) &&
+    matches(filters.group, groupOf(p)) &&
+    matches(filters.customer, p.customer_name) &&
+    matches(filters.mode, p.payment_mode) &&
     inRange(p.payment_date)
   );
   // Follow-ups due today or already overdue. "Today" is always today, so the date range
   // does not apply here; the customer filter does.
   const dueFollowUps = followUps
     .filter((f) => f.active && (f.display_status === "TODAY" || f.display_status === "OVERDUE"))
-    .filter((f) => !filters.customer || f.customer_name === filters.customer)
+    .filter((f) => matches(filters.group, groupOf(f)) && matches(filters.customer, f.customer_name))
     .sort(byDue);
 
   // ---- numbers ----------------------------------------------------------------------------
@@ -212,7 +244,7 @@ export default function AccountantDashboard() {
 
   // Payment status donut.
   const paymentStatus = STATUS_SLICES
-    .filter((sl) => !filters.status || sl.key === filters.status)
+    .filter((sl) => matches(filters.status, sl.key))
     .map((sl) => ({ ...sl, value: live.filter((i) => i.status === sl.key).length }));
   const statusTotal = paymentStatus.reduce((sum2, p) => sum2 + p.value, 0);
 
@@ -251,32 +283,26 @@ export default function AccountantDashboard() {
             {showFilters && (
               <div className="ac-dropdown" role="dialog" aria-label="Filters">
                 <div className="ac-field">
+                  <label>Group</label>
+                  <MultiSelect options={groupOptions} value={filters.group} onChange={setGroupFilter} allLabel="All groups" ariaLabel="Groups" />
+                </div>
+                <div className="ac-field">
                   <label>Customer</label>
-                  <select className="ac-select" value={filters.customer} onChange={setCustomerFilter}>
-                    <option value="">All customers</option>
-                    {customerOptions.map((c) => <option key={c}>{c}</option>)}
-                  </select>
+                  <MultiSelect options={customerOptions} value={filters.customer} onChange={setCustomerFilter} allLabel="All customers" ariaLabel="Customers" />
                 </div>
                 <div className="ac-field">
                   <label>Site</label>
-                  <select className="ac-select" value={filters.site} onChange={setFilter("site")}>
-                    <option value="">All sites</option>
-                    {siteOptions.map((s2) => <option key={s2}>{s2}</option>)}
-                  </select>
+                  <MultiSelect options={siteOptions} value={filters.site} onChange={setFilter("site")} allLabel="All sites" ariaLabel="Sites" />
                 </div>
                 <div className="ac-field">
                   <label>Invoice status</label>
-                  <select className="ac-select" value={filters.status} onChange={setFilter("status")}>
-                    <option value="">All statuses</option>
-                    {STATUS_SLICES.map((sl) => <option key={sl.key} value={sl.key}>{sl.name}</option>)}
-                  </select>
+                  <MultiSelect options={STATUS_SLICES.map((sl) => ({ value: sl.key, label: sl.name }))} value={filters.status}
+                    onChange={setFilter("status")} allLabel="All statuses" ariaLabel="Invoice status" />
                 </div>
                 <div className="ac-field">
                   <label>Payment mode</label>
-                  <select className="ac-select" value={filters.mode} onChange={setFilter("mode")}>
-                    <option value="">All modes</option>
-                    {PAYMENT_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
+                  <MultiSelect options={PAYMENT_MODES.map(([v, l]) => ({ value: v, label: l }))} value={filters.mode}
+                    onChange={setFilter("mode")} allLabel="All modes" ariaLabel="Payment mode" />
                 </div>
                 <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="ac-btn" disabled={!canReset}

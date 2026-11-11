@@ -3,8 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { FiActivity, FiAlertTriangle, FiCalendar, FiClock, FiDownload, FiFileText, FiList, FiPlusCircle, FiSearch } from "react-icons/fi";
 import { DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { daysOverdue, showDate, useAccountantData, usePaged } from "./data";
+import { sortGroups, daysOverdue, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
+import MultiSelect from "../../components/accountant/MultiSelect";
 
 const CHIPS = [
   { key: "ALL", label: "All Unpaid", icon: <FiList />, test: () => true },
@@ -15,7 +16,6 @@ const CHIPS = [
 ];
 
 const BUCKETS = [
-  { key: "", label: "All Ageing" },
   { key: "NOTDUE", label: "Not Due", test: (d) => d <= 0 },
   { key: "1-30", label: "1 – 30 Days", test: (d) => d >= 1 && d <= 30 },
   { key: "31-60", label: "31 – 60 Days", test: (d) => d >= 31 && d <= 60 },
@@ -38,9 +38,10 @@ export default function Outstanding() {
   const [chip, setChip] = useState("ALL");
   const [search, setSearch] = useState("");
   // "Open in Outstanding" from Customer Outstanding arrives filtered to that customer.
-  const [customer, setCustomer] = useState(location.state?.customer || "");
-  const [site, setSite] = useState("");
-  const [bucket, setBucket] = useState("");
+  // Several customers can be ticked; [] means all customers.
+  const [picked, setPicked] = useState(location.state?.customer ? [location.state.customer] : []);
+  const [pickedSites, setPickedSites] = useState([]); // [] = all sites
+  const [buckets, setBuckets] = useState([]); // ageing keys; [] = all
   const [minAmount, setMinAmount] = useState("");
 
   // Unpaid invoices only, most overdue first.
@@ -52,25 +53,41 @@ export default function Outstanding() {
     [invoices]
   );
 
-  const customers = useMemo(() => [...new Set(unpaid.map((i) => i.customer_name))].sort(), [unpaid]);
-  // Narrowed to the selected customer's own sites, so the Site dropdown never
+  const [groups, setGroups] = useState([]); // [] = all groups
+  // "No Group" goes last.
+  const groupOptions = useMemo(
+    () => sortGroups(unpaid.map((i) => i.group_name)),
+    [unpaid]
+  );
+  const inGroups = (i) => !groups.length || groups.includes(i.group_name);
+  // Only the customers of the ticked groups.
+  const customers = useMemo(
+    () => [...new Set(unpaid.filter((i) => !groups.length || groups.includes(i.group_name)).map((i) => i.customer_name))].sort(),
+    [unpaid, groups]
+  );
+  const pickedSet = useMemo(() => new Set(picked), [picked]);
+  const customerMatch = (i) => !pickedSet.size || pickedSet.has(i.customer_name);
+  // Narrowed to the selected customers' own sites, so the Site dropdown never
   // offers a site that belongs to someone else.
   const sites = useMemo(
-    () => [...new Set(unpaid.filter((i) => !customer || i.customer_name === customer).map((i) => i.site_name).filter(Boolean))].sort(),
-    [unpaid, customer]
+    () => [...new Set(unpaid
+      .filter((i) => (!groups.length || groups.includes(i.group_name)) && (!pickedSet.size || pickedSet.has(i.customer_name)))
+      .map((i) => i.site_name).filter(Boolean))].sort(),
+    [unpaid, groups, pickedSet]
   );
 
   const activeChip = CHIPS.find((c) => c.key === chip);
-  const activeBucket = BUCKETS.find((b) => b.key === bucket);
+  const activeBuckets = BUCKETS.filter((b) => buckets.includes(b.key));
 
   const rows = unpaid.filter((i) => {
     if (!activeChip.test(i)) return false;
-    if (customer && i.customer_name !== customer) return false;
-    if (site && i.site_name !== site) return false;
+    if (!inGroups(i)) return false;
+    if (!customerMatch(i)) return false;
+    if (pickedSites.length && !pickedSites.includes(i.site_name)) return false;
     if (minAmount && i.pending_amount < Number(minAmount)) return false;
-    if (activeBucket?.test) {
+    if (activeBuckets.length) {
       const d = daysOverdue(i.due_date);
-      if (d == null || !activeBucket.test(d)) return false;
+      if (d == null || !activeBuckets.some((b) => b.test(d))) return false;
     }
     const q = search.trim().toLowerCase();
     return !q || `${i.invoice_number} ${i.customer_name}`.toLowerCase().includes(q);
@@ -95,12 +112,34 @@ export default function Outstanding() {
   ];
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
-  // Changing the customer clears any site pick that no longer applies.
-  const changeCustomer = (e) => { setCustomer(e.target.value); setSite(""); setPage(0); };
+  // Unticks sites that no longer belong to the ticked groups / customers.
+  const pruneSites = (groupList, customerList) => {
+    const keep = pickedSites.filter((s) => unpaid.some((i) => i.site_name === s
+      && (!groupList.length || groupList.includes(i.group_name))
+      && (!customerList.length || customerList.includes(i.customer_name))));
+    if (keep.length !== pickedSites.length) setPickedSites(keep);
+  };
+  // Ticking groups unticks customers and sites that are not in them.
+  const changeGroups = (list) => {
+    setGroups(list);
+    let customerList = picked;
+    if (list.length) {
+      customerList = picked.filter((c) => unpaid.some((i) => i.customer_name === c && list.includes(i.group_name)));
+      if (customerList.length !== picked.length) setPicked(customerList);
+    }
+    pruneSites(list, customerList);
+    setPage(0);
+  };
+  const changeCustomers = (list) => {
+    setPicked(list);
+    pruneSites(groups, list);
+    setPage(0);
+  };
 
   function exportRows() {
     exportCsv("outstanding-invoices.csv", [
       { header: "Invoice No", value: (i) => i.invoice_number },
+      { header: "Group", value: (i) => i.group_name },
       { header: "Customer", value: (i) => i.customer_name },
       { header: "Site", value: (i) => i.site_name },
       { header: "Due Date", value: (i) => i.due_date },
@@ -144,17 +183,11 @@ export default function Outstanding() {
 
         <div className="ac-filters-6" style={{ marginBottom: 14 }}>
           <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={filterChange(setSearch)} /></div>
-          <select className="ac-select" value={customer} onChange={changeCustomer}>
-            <option value="">All Customers</option>
-            {customers.map((c) => <option key={c}>{c}</option>)}
-          </select>
-          <select className="ac-select" value={site} onChange={filterChange(setSite)}>
-            <option value="">All Sites</option>
-            {sites.map((s) => <option key={s}>{s}</option>)}
-          </select>
-          <select className="ac-select" value={bucket} onChange={filterChange(setBucket)}>
-            {BUCKETS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
-          </select>
+          <MultiSelect options={groupOptions} value={groups} onChange={changeGroups} allLabel="All Groups" ariaLabel="Groups" />
+          <MultiSelect options={customers} value={picked} onChange={changeCustomers} allLabel="All Customers" ariaLabel="Customers" />
+          <MultiSelect options={sites} value={pickedSites} onChange={(list) => { setPickedSites(list); setPage(0); }} allLabel="All Sites" ariaLabel="Sites" />
+          <MultiSelect options={BUCKETS.map((b) => ({ value: b.key, label: b.label }))} value={buckets}
+            onChange={(list) => { setBuckets(list); setPage(0); }} allLabel="All Ageing" ariaLabel="Ageing" />
           <input className="ac-input" type="number" min="0" placeholder="Min. pending (₹)" value={minAmount} onChange={filterChange(setMinAmount)} />
         </div>
 
