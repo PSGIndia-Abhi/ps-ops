@@ -423,14 +423,19 @@ export function markAllNotificationsRead() {
 /** { items, ready, unread, isUnread(e) } — refreshed on mount and every minute. */
 export function useNotifications() {
   const viewer = useViewer();
+  return useNotificationsFor(viewer.id);
+}
+
+/** The same as useNotifications, for screens outside TaskPro that know the user's id (e.g. the Accountant Panel menu badge). */
+export function useNotificationsFor(userId) {
   const snap = useSyncExternalStore(subscribeNtf, () => ntf);
   useEffect(() => {
-    if (!viewer.id) return undefined;
-    if (ntf.forId !== viewer.id) setNtf({ items: [], ready: false, forId: viewer.id, ...loadRead(viewer.id) });
+    if (!userId) return undefined;
+    if (ntf.forId !== userId) setNtf({ items: [], ready: false, forId: userId, ...loadRead(userId) });
     refreshNotifications();
     const t = setInterval(refreshNotifications, 60000);
     return () => clearInterval(t);
-  }, [viewer.id]);
+  }, [userId]);
   const isUnread = (e) => !((snap.allReadAt && new Date(e.at) <= new Date(snap.allReadAt)) || snap.readIds.has(e.id));
   return { ...snap, unread: snap.items.filter(isUnread).length, isUnread };
 }
