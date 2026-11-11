@@ -63,8 +63,10 @@ export const roleBasePath = (role) => ROLE_HOME[role] || "/staff";
 // The page a role opens right after login, when it is not the role's own panel above.
 // The panel stays the same (job links, route checks and "Back" links still use ROLE_HOME).
 const LOGIN_HOME = {
-  // Operations Manager starts in the Customer Feedback desk; Task Management is one click away.
+  // These start in the Customer Feedback desk; Task Management is one click away.
+  // (feedback_collector's own panel is already the desk, see ROLE_HOME.)
   "Operations Manager": "/feedback-desk",
+  "Service Coordinator": "/feedback-desk",
 };
 
 export const loginHomePath = (role) => LOGIN_HOME[role] || roleBasePath(role);

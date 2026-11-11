@@ -17,9 +17,10 @@ const PANEL_NAMES = {
   "/staff": "My Workspace",
 };
 
-// Where "Back" in the desk sidebar goes: the user's own panel (the collector has no other panel).
+// Where the switch at the bottom of the desk sidebar goes: the user's own panel. The collector's own
+// panel is the desk itself, so theirs goes to Task Management.
 export function feedbackBackLink(role) {
-  if (role === FEEDBACK_COLLECTOR_ROLE) return null;
+  if (role === FEEDBACK_COLLECTOR_ROLE) return { path: "/taskpro", label: PANEL_NAMES["/taskpro"] };
   const path = roleBasePath(role);
   return { path, label: PANEL_NAMES[path] || "my panel" };
 }

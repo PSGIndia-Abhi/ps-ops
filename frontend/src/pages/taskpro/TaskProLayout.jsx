@@ -6,6 +6,7 @@ import {
   FiBarChart2,
   FiBriefcase,
   FiBell,
+  FiInbox,
   FiCalendar,
   FiCheckCircle,
   FiCheckSquare,
@@ -25,7 +26,8 @@ import {
 } from "react-icons/fi";
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import { FEEDBACK_HOME } from "../feedback/access";
-import { useFeedbackPermissions, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
+import { useFeedbackPermissions, useFeedbackSwitchCount, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
+import { useUnseenCounts } from "../feedback/unseenCounts";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
 import TaskReminderAlerts from "./TaskReminderAlerts";
@@ -47,6 +49,8 @@ const NAV = [
   { label: "Upcoming", to: `${TASKPRO_HOME}/upcoming`, icon: FiCalendar },
   { label: "Completed", to: `${TASKPRO_HOME}/completed`, icon: FiCheckCircle },
   { label: "Requests", to: `${TASKPRO_HOME}/requests`, icon: FiRefreshCw, badge: "requests" },
+  // Customer Feedback tickets, for anyone whose feedback permissions include tickets (see showNavItem).
+  { label: "Tickets", to: `${TASKPRO_HOME}/tickets`, icon: FiInbox, feedbackTickets: true },
   { divider: true },
   { label: "Reports", to: `${TASKPRO_HOME}/reports`, icon: FiBarChart2 },
   { divider: true },
@@ -88,16 +92,31 @@ function NewTaskButton() {
   );
 }
 
+// Feedback permissions that open the ticket list (GET /api/feedback/tickets).
+const TICKET_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN", "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"];
+
 function TaskProShell() {
-  // Customer Feedback: desk users get a link to the Feedback Desk; those who only work tickets (a
-  // department's team such as Accounts, an assigned supervisor / salesperson) get "Tickets" here.
+  // Customer Feedback: desk users get a link to the Feedback Desk; everyone who works tickets (desk
+  // users too, and a department's team such as Accounts, an assigned supervisor / salesperson) gets
+  // "Tickets" here as well.
   const { permissions: feedbackPerms, ticketsOnly } = useFeedbackPermissions();
   const hasFeedback = feedbackPerms.length > 0 && !ticketsOnly;
+  const showTickets = feedbackPerms.some((p) => TICKET_PERMISSIONS.includes(p));
   const navigate = useNavigate();
   const location = useLocation();
   // Open tickets waiting for them: the number on "Tickets" (reloaded on each page change).
-  const ticketCount = useFeedbackTicketCount(ticketsOnly, location.pathname);
+  const ticketCount = useFeedbackTicketCount(showTickets, location.pathname);
+  // What waits in the Feedback Desk: the number on the "Customer Feedback" switch.
+  const feedbackCount = useFeedbackSwitchCount(hasFeedback, location.pathname);
   const viewer = useViewer();
+  // The switch's number clears once clicked; only new ones show after (see unseenCounts).
+  const { unseen, markSeen } = useUnseenCounts(viewer.id ? `${viewer.id}.taskpro` : null, { feedback: feedbackCount, tickets: ticketCount });
+  // Being on Tickets counts as opening it (also when reached from a link, not the menu).
+  const onTickets = location.pathname.startsWith(`${TASKPRO_HOME}/tickets`);
+  const unseenTickets = unseen("tickets");
+  useEffect(() => {
+    if (onTickets && unseenTickets > 0) markSeen("tickets");
+  });
   const { tasks, ready } = useTaskStore();
   const isMobile = useIsMobile();
 
@@ -177,7 +196,8 @@ function TaskProShell() {
 
   // Team Tasks is pointless for someone nobody reports to. Hidden until the
   // team has loaded, so it never flashes up and disappears.
-  const showNavItem = (item) => !item.needsTeam || (viewer.ready && (viewer.isAdmin || viewer.team.length > 0));
+  const showNavItem = (item) =>
+    item.feedbackTickets ? showTickets : !item.needsTeam || (viewer.ready && (viewer.isAdmin || viewer.team.length > 0));
 
   const toggleMenu = () => (isMobile ? setDrawer((d) => !d) : setCollapsed((c) => !c));
   const name = viewer.name;
@@ -214,20 +234,9 @@ function TaskProShell() {
                   <item.icon className="tp-nav-icon" />
                   <span className="tp-nav-label">{item.label}</span>
                   {item.badge && ready && counts[item.badge] > 0 && <span className="tp-nav-badge">{counts[item.badge]}</span>}
+                  {item.feedbackTickets && unseenTickets > 0 && <span className="tp-nav-badge">{unseenTickets}</span>}
                 </NavLink>
               ),
-            )}
-            {ticketsOnly && (
-              <NavLink
-                to={`${TASKPRO_HOME}/tickets`}
-                className={({ isActive }) => `tp-nav-item ${isActive ? "active" : ""}`}
-                onClick={() => setDrawer(false)}
-                title={collapsed ? "Tickets" : undefined}
-              >
-                <FiMessageSquare className="tp-nav-icon" />
-                <span className="tp-nav-label">Tickets</span>
-                {ticketCount > 0 && <span className="tp-nav-badge">{ticketCount}</span>}
-              </NavLink>
             )}
           </nav>
 
@@ -254,9 +263,18 @@ function TaskProShell() {
           )}
           {/* Roles that admin gave a Customer Feedback permission (e.g. Operations Manager) open the desk here. */}
           {hasFeedback && (
-            <button type="button" className="tp-nav-item" onClick={() => navigate(FEEDBACK_HOME)} title={collapsed ? "Customer Feedback" : undefined}>
+            <button
+              type="button"
+              className="tp-nav-item"
+              onClick={() => {
+                markSeen("feedback");
+                navigate(FEEDBACK_HOME);
+              }}
+              title={collapsed ? "Customer Feedback" : undefined}
+            >
               <FiMessageSquare className="tp-nav-icon" />
               <span className="tp-nav-label">Customer Feedback</span>
+              {unseen("feedback") > 0 && <span className="tp-nav-badge">{unseen("feedback")}</span>}
             </button>
           )}
           <button type="button" className="tp-nav-item tp-exit" onClick={logout} title="Log out">

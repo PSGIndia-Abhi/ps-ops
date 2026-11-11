@@ -53,7 +53,8 @@ useEffect(() => {
       setLoadingUsers(true);
       // ADMIN
       // (Brigade Executive picks from the same lists, scoped to her branch by the backend.)
-      if (role === "admin" || role === "branch_admin" || role === "brigade_executive") {
+      // The Feedback Desk roles book re-visits from the same form (backend needs VIEW_USER).
+      if (["admin", "branch_admin", "brigade_executive", "Operations Manager", "Service Coordinator", "feedback_collector"].includes(role)) {
         const [supRes, techRes] = await Promise.all([
           apiFetch("/api/users?role=supervisor"),
           apiFetch("/api/users?role=technician"),

@@ -11,6 +11,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { API_BASE, apiFetch, safeJson } from "../../api";
 import { useViewer } from "./viewerContext";
+import { isOverdue } from "./selectors";
 
 // Identical GETs already on their way share one request instead of sending
 // another. Two screens (or React's development double-run of effects) asking
@@ -390,6 +391,20 @@ function saveRead() {
   } catch {
     // Storage unavailable: read state just resets next visit.
   }
+}
+
+/**
+ * The number on the "Task Management" switch in other panels (Feedback Desk): the red numbers its
+ * own menu shows, added up - Overdue + Requests waiting for this user.
+ */
+export async function taskSwitchCount() {
+  const [tasks, requests] = await Promise.all([
+    call("GET", "/api/work-tasks"),
+    call("GET", "/api/work-tasks/reschedule-requests?box=incoming"),
+  ]);
+  // Same list as the menu: lead follow-ups / meetings are worked in Lead Management.
+  const overdue = (Array.isArray(tasks) ? tasks : []).filter((t) => t.task_type !== "LEAD_FOLLOW_UP" && t.task_type !== "LEAD_MEETING" && isOverdue(t)).length;
+  return overdue + (Array.isArray(requests) ? requests.length : 0);
 }
 
 let ntfLoading = null;

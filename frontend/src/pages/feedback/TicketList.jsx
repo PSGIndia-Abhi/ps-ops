@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiAlertCircle, FiCheckCircle, FiDownload, FiLayers, FiSearch } from "react-icons/fi";
+import { FiAlertCircle, FiCalendar, FiCheckCircle, FiChevronDown, FiDownload, FiFlag, FiGrid, FiLayers, FiSearch, FiUser, FiX } from "react-icons/fi";
 import { OPERATIONS, PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, getPeople, isPast, listTickets, monthLabel } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { Card, Empty, ErrorBox, Loading, PageHead, PriorityChip, Segmented, TicketStatusChip, Tiles } from "./ui";
 
 const PAGE_SIZE = 25;
+
+// One filter as a rounded chip: icon, short label, then the control. Light blue while it filters.
+function FilterChip({ icon, label, active, caret = true, children }) {
+  return (
+    <label className={`fb-fchip ${active ? "is-on" : ""}`}>
+      <span className="fb-fchip-icon" aria-hidden="true">{icon}</span>
+      <span className="fb-fchip-label">{label}</span>
+      {children}
+      {caret && <FiChevronDown aria-hidden="true" className="fb-fchip-caret" />}
+    </label>
+  );
+}
 
 export default function TicketList() {
   const navigate = useNavigate();
@@ -110,7 +122,7 @@ export default function TicketList() {
       <ErrorBox error={error} />
 
       <Card bodyClass="is-flush">
-        <div className="fb-filters">
+        <div className="fb-filterbar">
           <Segmented
             label="Status"
             options={[
@@ -121,52 +133,62 @@ export default function TicketList() {
             value={status}
             onChange={(v) => setParam({ status: v })}
           />
-          <label className="fb-row" style={{ gap: 6, flex: "1 1 220px", maxWidth: 300 }}>
-            <FiSearch aria-hidden="true" className="fb-muted" />
-            <input className="fb-input" placeholder="Ticket no., customer or site" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search tickets" />
-          </label>
-          <select className="fb-select" value={priority} onChange={(e) => setParam({ priority: e.target.value })} aria-label="Priority">
-            <option value="">Priority: all</option>
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY[p].label}
-              </option>
-            ))}
-          </select>
-          {!deptOnly && departmentList.length > 0 && (
-            <select className="fb-select" value={department} onChange={(e) => setParam({ department: e.target.value })} aria-label="Department">
-              <option value="">Department: all</option>
-              {departmentList.map((d) => (
-                <option key={d.kind} value={d.kind}>
-                  {d.name}
+          <div className="fb-fsearch">
+            <FiSearch aria-hidden="true" />
+            <input placeholder="Search ticket no., customer or site" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search tickets" />
+            {search && (
+              <button type="button" className="fb-fsearch-clear" onClick={() => setSearch("")} aria-label="Clear search">
+                <FiX />
+              </button>
+            )}
+          </div>
+          <FilterChip icon={<FiFlag />} label="Priority" active={Boolean(priority)}>
+            <select value={priority} onChange={(e) => setParam({ priority: e.target.value })} aria-label="Priority">
+              <option value="">All</option>
+              {PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY[p].label}
                 </option>
               ))}
             </select>
+          </FilterChip>
+          {!deptOnly && departmentList.length > 0 && (
+            <FilterChip icon={<FiGrid />} label="Department" active={Boolean(department)}>
+              <select value={department} onChange={(e) => setParam({ department: e.target.value })} aria-label="Department">
+                <option value="">All</option>
+                {departmentList.map((d) => (
+                  <option key={d.kind} value={d.kind}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </FilterChip>
           )}
           {isDesk && (
-            <select className="fb-select" value={owner} onChange={(e) => setParam({ owner: e.target.value })} aria-label="Owner">
-              <option value="">Owner: all</option>
-              {owners.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
+            <FilterChip icon={<FiUser />} label="Owner" active={Boolean(owner)}>
+              <select value={owner} onChange={(e) => setParam({ owner: e.target.value })} aria-label="Owner">
+                <option value="">All</option>
+                {owners.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </FilterChip>
           )}
-          <label className="fb-row" style={{ gap: 6, fontSize: 13 }}>
-            Month
-            <input type="month" className="fb-input" style={{ width: 160 }} value={month} onChange={(e) => setParam({ month: e.target.value })} aria-label="Month" />
-          </label>
+          <FilterChip icon={<FiCalendar />} label="Month" active={Boolean(month)} caret={false}>
+            <input type="month" className={month ? "" : "is-empty"} value={month} onChange={(e) => setParam({ month: e.target.value })} aria-label="Month" />
+          </FilterChip>
           {(priority || owner || month || q || department) && (
             <button
               type="button"
-              className="fb-btn fb-btn-sm fb-btn-link"
+              className="fb-fclear"
               onClick={() => {
                 setSearch("");
                 setParam({ priority: "", owner: "", month: "", q: "", department: "" });
               }}
             >
-              Clear filters
+              <FiX aria-hidden="true" /> Clear filters
             </button>
           )}
         </div>

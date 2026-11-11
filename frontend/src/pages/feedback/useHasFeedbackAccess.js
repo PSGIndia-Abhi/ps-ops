@@ -46,14 +46,28 @@ export default function useHasFeedbackAccess() {
  * (e.g. the page) and every minute. enabled = false: 0, nothing loaded.
  */
 export function useFeedbackTicketCount(enabled, refreshKey) {
-  const [count, setCount] = useState(0);
+  return useFeedbackBadgeCount(enabled, refreshKey, "open_tickets");
+}
+
+/**
+ * What waits for this user in the Feedback Desk (wrong-number requests + open tickets) - the number
+ * on the "Customer Feedback" switch in other panels. Same reloading as above.
+ */
+export function useFeedbackSwitchCount(enabled, refreshKey) {
+  return useFeedbackBadgeCount(enabled, refreshKey, "open_requests,open_tickets");
+}
+
+// keys: the /api/feedback/badges counts to add up, comma-separated ("open_requests,open_tickets").
+// null until the first load, so a "seen" number isn't mistaken for a drop to 0.
+function useFeedbackBadgeCount(enabled, refreshKey, keys) {
+  const [count, setCount] = useState(null);
   useEffect(() => {
     if (!enabled) return undefined;
     let live = true;
     const load = () =>
       apiFetch("/api/feedback/badges")
         .then((res) => res?.ok && res.json())
-        .then((b) => live && b && setCount(Number(b.open_tickets) || 0))
+        .then((b) => live && b && setCount(keys.split(",").reduce((sum, k) => sum + (Number(b[k]) || 0), 0)))
         .catch(() => {});
     load();
     const timer = setInterval(load, 60000);
@@ -61,6 +75,6 @@ export function useFeedbackTicketCount(enabled, refreshKey) {
       live = false;
       clearInterval(timer);
     };
-  }, [enabled, refreshKey]);
-  return enabled ? count : 0;
+  }, [enabled, refreshKey, keys]);
+  return enabled ? count : null;
 }
