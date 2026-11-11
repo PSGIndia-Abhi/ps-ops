@@ -125,13 +125,14 @@ export function FeedbackRequestsScreen() {
             <Pressable onPress={() => navigation.navigate('FeedbackCall', { callId: q.call_id })} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
               <View style={[styles.stripe, { backgroundColor: stripe }]} />
               <View style={styles.top}>
-                <Text style={styles.site} numberOfLines={1}>
-                  {q.site.name}
+                <Text style={[styles.site, { flex: 1 }]} numberOfLines={1}>
+                  {q.customer.name}
                 </Text>
                 <StatusBadge label={s.label} tone={s.tone} dot={false} />
               </View>
               <Text style={styles.muted}>
-                {q.customer.name}
+                {q.site.name}
+                {q.site.city ? ` · ${q.site.city}` : ''}
                 {q.due_date ? ` · call due ${formatDay(q.due_date)}` : ''}
               </Text>
               <Text style={styles.wrong}>

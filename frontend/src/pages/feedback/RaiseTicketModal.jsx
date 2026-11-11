@@ -1,5 +1,6 @@
 import { createElement, useEffect, useRef, useState } from "react";
 import { FiAlertTriangle, FiBriefcase, FiCheck, FiChevronDown, FiClipboard, FiFileText, FiMoreHorizontal, FiPhoneCall, FiTool, FiTrendingUp, FiUserCheck } from "react-icons/fi";
+import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHint, endOfDay, formatDay, getCallInvoices, getIssueTypes, getPeople, rupees } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { ErrorBox, Modal } from "./ui";
@@ -68,7 +69,13 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       else mine[id] = "";
       return { ...t, [kind]: mine };
     });
-  const issuesBody = (kind) => typesOf(kind).filter((t) => isTicked(kind, t.id)).map((t) => ({ id: t.id, text: null }));
+  const setIssueText = (kind, id, text) => setTicked((t) => ({ ...t, [kind]: { ...(t[kind] || {}), [id]: text } }));
+  // "Others" (every department with issues has it): what it is goes in its own box and is required.
+  const otherText = (kind) => (isTicked(kind, OTHER_ISSUE) ? String(tickedOf(kind)[OTHER_ISSUE] || "") : "");
+  const issuesBody = (kind) => [
+    ...typesOf(kind).filter((t) => isTicked(kind, t.id)).map((t) => ({ id: t.id, text: null })),
+    ...(isTicked(kind, OTHER_ISSUE) ? [{ id: OTHER_ISSUE, text: otherText(kind).trim() }] : []),
+  ];
   // Operations: the services list shows when "Services" is ticked (or Operations has no such issue).
   const opsServiceType = typesOf(OPERATIONS).find((t) => t.is_service);
   const showServices = !opsServiceType || isTicked(OPERATIONS, opsServiceType.id);
@@ -91,9 +98,11 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       .then((p) => setPeople({ supervisors: p.supervisors || [], sales: p.sales || [] }))
       .catch(() => {});
   }, []);
-  // each service once, in visit date order
-  const services = [...new Set(visits.map((v) => v.service).filter(Boolean))];
-  const [picked, setPicked] = useState(() => (services.length === 1 ? [services[0]] : []));
+  // each service once, in visit date order. No service in the period: every service we offer, to pick from.
+  const visitServices = [...new Set(visits.map((v) => v.service).filter(Boolean))];
+  const noVisits = visitServices.length === 0;
+  const services = noVisits ? [...new Set([...pestServices, ...deepCleaningServices])] : visitServices;
+  const [picked, setPicked] = useState(() => (visitServices.length === 1 ? [visitServices[0]] : []));
   const [menuOpen, setMenuOpen] = useState(false);
   const pickRef = useRef(null);
   const [saving, setSaving] = useState(false);
@@ -148,6 +157,11 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       setError(`Tick at least one issue for ${noIssue.name}`);
       return;
     }
+    const otherEmpty = departments.filter((d) => depts.includes(d.kind)).find((d) => isTicked(d.kind, OTHER_ISSUE) && !otherText(d.kind).trim());
+    if (otherEmpty) {
+      setError(`Type what the other issue is for ${otherEmpty.name}`);
+      return;
+    }
     const missing = others.find((d) => !typesOf(d.kind).length && !partOf(d.kind).issue_summary.trim());
     if (missing) {
       setError(`Describe the issue for ${missing.name}`);
@@ -157,7 +171,7 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
     setError("");
     const summary = form.issue_summary.trim();
     const servicesNow = showServices ? chosenServices : [];
-    const servicesLine = servicesNow.length > 1 ? `Services: ${servicesNow.join(", ")}` : "";
+    const servicesLine = servicesNow.length > 1 || (noVisits && servicesNow.length) ? `Service${servicesNow.length > 1 ? "s" : ""}: ${servicesNow.join(", ")}` : "";
     const ops = forOps
       ? {
           issue_summary: [summary, servicesLine].filter(Boolean).join("\n").slice(0, 500) || null,
@@ -242,7 +256,7 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
       <section className="fb-rt-sec is-blue">
       <StepLabel n={2}>What is the problem?</StepLabel>
       {departments.length > 1 && <DeptHead d={departments.find((d) => d.kind === OPERATIONS) || { kind: OPERATIONS, name: "Operations" }} />}
-      <IssuePicker kind={OPERATIONS} types={typesOf(OPERATIONS)} isTicked={isTicked} onToggle={toggleIssue} />
+      <IssuePicker kind={OPERATIONS} types={typesOf(OPERATIONS)} isTicked={isTicked} onToggle={toggleIssue} otherText={otherText(OPERATIONS)} onOtherText={(v) => setIssueText(OPERATIONS, OTHER_ISSUE, v)} />
 
       <div>
         {showServices ? (
@@ -272,11 +286,13 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
                 </div>
               )}
             </div>
-          ) : (
-            <span className="fb-field-hint">No services this month.</span>
-          )}
+          ) : null}
           <span className="fb-field-hint">
-            {chosen.length ? `Technician: ${technicians || "not recorded"}` : "None ticked = not about one particular service."}
+            {noVisits
+              ? "No service in this period - pick from all our services. None ticked = not about one particular service."
+              : chosen.length
+                ? `Technician: ${technicians || "not recorded"}`
+                : "None ticked = not about one particular service."}
           </span>
         </div>
         ) : null}
@@ -360,7 +376,7 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
         return (
           <section key={d.kind} className={`fb-rt-sec is-${DEPT_TONES[departments.indexOf(d) % DEPT_TONES.length]}`}>
             <DeptHead d={d} />
-            <IssuePicker kind={d.kind} types={typesOf(d.kind)} isTicked={isTicked} onToggle={toggleIssue} />
+            <IssuePicker kind={d.kind} types={typesOf(d.kind)} isTicked={isTicked} onToggle={toggleIssue} otherText={otherText(d.kind)} onOtherText={(v) => setIssueText(d.kind, OTHER_ISSUE, v)} />
             <div>
             <label className="fb-field" htmlFor={`${id}-summary`}>
               <span>
@@ -417,12 +433,16 @@ export default function RaiseTicketModal({ callId, title, visits, suggested, def
   );
 }
 
+// The built-in "Others" issue (the server knows it by this id).
+const OTHER_ISSUE = "OTHER";
+
 /**
  * A department's issues as chips (one or more). One Details box below covers them all; "Services"
  * (Operations) also shows the month's services to pick.
  */
-function IssuePicker({ kind, types, isTicked, onToggle }) {
+function IssuePicker({ kind, types, isTicked, onToggle, otherText, onOtherText }) {
   if (!types.length) return null;
+  const otherOn = isTicked(kind, OTHER_ISSUE);
   return (
     <div className="fb-field">
       <span>
@@ -437,7 +457,28 @@ function IssuePicker({ kind, types, isTicked, onToggle }) {
             </button>
           );
         })}
+        <button type="button" className={`fb-issue-chip ${otherOn ? "is-on" : ""}`} aria-pressed={otherOn} onClick={() => onToggle(kind, OTHER_ISSUE)}>
+          {otherOn && <FiCheck aria-hidden="true" />} Others
+        </button>
       </div>
+      {otherOn && (
+        <label className="fb-field" htmlFor={`fb-rt-other-${kind}`} style={{ marginTop: 8 }}>
+          <span>
+            What is the other issue? <span className="fb-req">*</span>
+          </span>
+          <textarea
+            id={`fb-rt-other-${kind}`}
+            className="fb-textarea"
+            rows={2}
+            maxLength={500}
+            placeholder="Describe the issue"
+            value={otherText}
+            onChange={(e) => onOtherText(e.target.value)}
+            autoFocus
+          />
+          {!otherText.trim() && <span className="fb-field-hint fb-danger-text">Required when Others is ticked.</span>}
+        </label>
+      )}
     </div>
   );
 }

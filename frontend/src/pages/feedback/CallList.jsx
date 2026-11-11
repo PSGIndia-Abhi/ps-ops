@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, monthLabel, periodText, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
+import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listNumberRequests, monthLabel, periodText, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
 import { EndedSchedules } from "./ScheduleMaster";
@@ -136,6 +136,23 @@ export default function CallList() {
 
   useEffect(load, [load]);
 
+  // "Number added": the service coordinator added the right number (Requests) and nobody has called
+  // it yet - the call is back on To call and nothing happened on it since. call id -> when it was added.
+  const [addedNumbers, setAddedNumbers] = useState({});
+  useEffect(() => {
+    listNumberRequests("DONE")
+      .then((d) => {
+        const at = {};
+        for (const q of d.requests || []) if (q.resolved_at && (!at[q.call_id] || q.resolved_at > at[q.call_id])) at[q.call_id] = q.resolved_at;
+        setAddedNumbers(at);
+      })
+      .catch(() => setAddedNumbers({}));
+  }, [data]);
+  const numberAdded = (row) =>
+    row.status === "TO_CALL" &&
+    Boolean(addedNumbers[row.request_id]) &&
+    (!row.last_activity_at || new Date(row.last_activity_at).getTime() <= new Date(addedNumbers[row.request_id]).getTime() + 5000);
+
   async function start(requestId) {
     setBusySite(requestId);
     setError("");
@@ -237,7 +254,8 @@ export default function CallList() {
                 </tr>
               </thead>
               <tbody>
-                {data.sites.map((row) => {
+                {/* Calls to make first (To call, Not answered), then the rest; in each, calls nobody has taken first. */}
+                {[...data.sites].sort((a, b) => callRank(a) - callRank(b)).map((row) => {
                   const open = () => navigate(`${FEEDBACK_HOME}/calls/${row.request_id}`);
                   const takenBySomeoneElse = row.collector && row.collector.id !== userId;
                   return (
@@ -276,7 +294,7 @@ export default function CallList() {
                         {row.services || (row.earlier_visit ? <span className="fb-muted">{row.earlier_visit.service} (earlier)</span> : <span className="fb-muted">No service yet</span>)}
                       </td>
                       <td>
-                        <StatusCell status={row.status} result={row.result} />
+                        <StatusCell status={row.status} result={row.result} numberAdded={numberAdded(row)} />
                       </td>
                       <td>{row.collector?.name || <span className="fb-muted">—</span>}</td>
                       <td className="fb-right" onClick={(e) => e.stopPropagation()}>
@@ -337,6 +355,14 @@ export default function CallList() {
   );
 }
 
+// Dashboard order: the calls to make (To call, Not answered) on top, then the others in the
+// order of the status filter; untaken calls before taken ones in each.
+const CALL_FIRST = ["TO_CALL", "NOT_ANSWERED", "WRONG_NUMBER", "FORM_SENT", "FORM_RECEIVED", "TICKET_OPEN", "DONE"];
+function callRank(row) {
+  const at = CALL_FIRST.indexOf(row.status);
+  return (at < 0 ? CALL_FIRST.length : at) * 2 + (row.collector ? 1 : 0);
+}
+
 /** "Overdue · 4 days" for a call not done by its due date. */
 function lateText(due) {
   const days = Math.floor((Date.now() - new Date(`${due}T00:00:00`).getTime()) / 86400000);
@@ -346,12 +372,17 @@ function lateText(due) {
 const RESULT_TEXT = { GOOD: { text: "All good", tone: "ok" }, ISSUE: { text: "Issue reported", tone: "danger" }, NO_RESPONSE: { text: "Not responded", tone: "muted" } };
 
 /** The call's status as one soft pill with a dot, and its result as a small line under it. */
-function StatusCell({ status, result }) {
+function StatusCell({ status, result, numberAdded }) {
   const s = CALL_STATUS[status] || { label: status, tone: "muted" };
   const r = RESULT_TEXT[result];
   return (
     <div className="fb-status-cell">
       <span className={`fb-pill fb-pill-${s.tone}`}>{s.label}</span>
+      {numberAdded && (
+        <span className="fb-number-added" title="The service coordinator added the right number - call it">
+          Number added
+        </span>
+      )}
       {r && <span className={`fb-result-line fb-result-${r.tone}`}>{r.text}</span>}
     </div>
   );

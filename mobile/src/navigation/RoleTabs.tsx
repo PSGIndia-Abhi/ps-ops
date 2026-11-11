@@ -11,7 +11,7 @@ import { LeadsNavigator } from './LeadsNavigator';
 import { RemindersNavigator } from './RemindersNavigator';
 import { FeedbackNavigator } from './FeedbackNavigator';
 import { getMyAccess, getOpenTicketCount } from '../feedback/api';
-import { TICKETS_ONLY, TicketsTabContext } from '../feedback/FeedbackTicketsTab';
+import { TICKET_PERMISSIONS, TICKETS_ONLY, TicketsTabContext } from '../feedback/FeedbackTicketsTab';
 import { TaskNavigator } from './TaskNavigator';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
@@ -78,14 +78,16 @@ export function RoleTabs() {
   }, [ticketsTab, refreshTickets]);
   const ticketsValue = useMemo(() => ({ show: ticketsTab, count: ticketCount, refresh: refreshTickets }), [ticketsTab, ticketCount, refreshTickets]);
   useEffect(() => {
-    if (!rawRole || feedbackCollector) return undefined;
+    if (!rawRole) return undefined;
     let alive = true;
     getMyAccess()
       .then((perms) => {
         if (!alive) return;
         const only = perms.length > 0 && perms.every((p) => TICKETS_ONLY.includes(p));
-        setTicketsTab(only);
-        setFeedbackAccess(perms.length > 0 && !only);
+        // The Tickets tab in their other apps (Task / Lead Management) for anyone who works tickets -
+        // the desk (Service Coordinator, Operations Manager) and the collector too, as on the web.
+        setTicketsTab(perms.some((p) => TICKET_PERMISSIONS.includes(p)));
+        setFeedbackAccess(!feedbackCollector && perms.length > 0 && !only);
       })
       .catch(() => alive && setFeedbackAccess(false));
     return () => {

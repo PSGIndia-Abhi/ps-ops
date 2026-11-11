@@ -722,6 +722,15 @@ async function pickedIssues(conn, dept, input) {
   const seen = new Set();
   const picked = [];
   for (const x of list) {
+    // "Others": built in for every department (not in the Issues list); what it is must be typed.
+    if (String(x?.id).toUpperCase() === "OTHER") {
+      if (seen.has("OTHER")) continue;
+      seen.add("OTHER");
+      const otherText = optionalText(x?.text, "Others details", 500);
+      if (!otherText) throw new HttpError(400, `${dept.name}: type what the other issue is`);
+      picked.push({ id: "OTHER", name: "Others", text: otherText, is_service: false });
+      continue;
+    }
     const t = byId.get(Number(x?.id));
     if (!t) throw new HttpError(400, `${dept.name}: that issue is not in its list`);
     if (seen.has(t.id)) continue;
@@ -2581,7 +2590,8 @@ async function markPartDone(req, id, kindValue, body, file = null) {
   const kind = String(kindValue || "").trim().toUpperCase();
   if (kind === OPERATIONS) throw new HttpError(400, "The Operations part is done when its re-visit is completed");
   const name = await departmentName(pool, kind);
-  if (!hasPerm(req, "FEEDBACK_MANAGE") && !(req.feedbackDepts || []).includes(kind)) throw new HttpError(403, `Only ${name} can finish this part`);
+  // Only that department's own team (or the admin login) updates its part; the desk only watches it.
+  if (req.user?.role !== "admin" && !(req.feedbackDepts || []).includes(kind)) throw new HttpError(403, `Only ${name} can update this part`);
   const note = optionalText(body?.note, "note", 500);
   if (!note) throw new HttpError(400, "Say what was done (e.g. invoice sent)");
   return inTransaction(async (conn) => {

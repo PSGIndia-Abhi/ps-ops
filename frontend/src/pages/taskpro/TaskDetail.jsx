@@ -1280,12 +1280,6 @@ export default function TaskDetail() {
 
   return (
     <div className="tp-detail">
-      <nav className="tp-crumbs" aria-label="Breadcrumb">
-        <Link to={`${TASKPRO_HOME}/my-tasks`}>My Tasks</Link>
-        <FiChevronRight />
-        <span>{task.title}</span>
-      </nav>
-
       <section className="tp-card tp-headcard">
         <div className="tp-head-left">
           <span className="tp-head-tile" style={{ background: task.status === "COMPLETED" ? "#16a34a" : "#ef4444" }}>

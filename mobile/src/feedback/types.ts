@@ -25,6 +25,8 @@ export interface Person {
 /** One row of the call list: a site with services in the month (one call per site per month). */
 /** One call on the list (made by Masters > Call schedule on its due date). */
 export interface CallRow {
+  /** When anything last changed on the call (a call made, a number added). */
+  last_activity_at?: string | null;
   month: string;
   request_id: string;
   /** The day it is due, and the services it asks about (period_start .. period_end). */
@@ -120,7 +122,7 @@ export interface IssueType {
 
 /** An issue ticked on a ticket part, with its typed details. */
 export interface PickedIssue {
-  id: number;
+  id: number | 'OTHER';
   name: string;
   text: string | null;
   is_service: boolean;
@@ -199,7 +201,7 @@ export interface Call {
   visits: Visit[];
   /** No service in the call's period: the site's last service before it. */
   earlier_visit?: Visit | null;
-  call_attempts: { id: number; contact_name: string | null; phone: string; outcome: CallOutcome; called_at: string }[];
+  call_attempts: { id: number; contact_id: string | null; contact_name: string | null; phone: string; outcome: CallOutcome; called_at: string }[];
   submissions: Submission[];
   tickets: CallTicket[];
   history: HistoryItem[];
@@ -317,7 +319,7 @@ export interface NewTicket {
   /** The departments it goes to; left out = Operations. */
   departments?: DepartmentKind[];
   /** Each other department's part, by key. */
-  parts?: Record<string, { issue_summary?: string; priority?: Priority; invoice_ids?: string[]; issues: { id: number; text: string | null }[] }>;
+  parts?: Record<string, { issue_summary?: string; priority?: Priority; invoice_ids?: string[]; issues: { id: number | 'OTHER'; text: string | null }[] }>;
   issue_summary: string | null;
   visit_id: string | null;
   priority: Priority;

@@ -176,7 +176,7 @@ export default function NumberRequests() {
             <table className="fb-table">
               <thead>
                 <tr>
-                  <th>Site · Customer</th>
+                  <th>Customer · Site</th>
                   <th>Wrong number</th>
                   <th>Asked by</th>
                   <th>Status</th>
@@ -187,12 +187,11 @@ export default function NumberRequests() {
                 {data.requests.map((q) => (
                   <tr key={q.id}>
                     <td>
-                      <div className="fb-strong">
-                        {q.site.name}
-                        {q.site.city ? <span className="fb-muted" style={{ fontWeight: 400 }}> · {q.site.city}</span> : null}
-                      </div>
+                      {/* Customer first (as on the Dashboard), the site under it. */}
+                      <div className="fb-strong">{q.customer.name}</div>
                       <div className="fb-small fb-muted">
-                        {q.customer.name}
+                        {q.site.name}
+                        {q.site.city ? ` · ${q.site.city}` : ""}
                         {q.due_date ? ` · call due ${formatDay(q.due_date)}` : ""}
                       </div>
                     </td>

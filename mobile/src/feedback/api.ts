@@ -20,9 +20,9 @@ export async function getMyAccess(): Promise<string[]> {
  * Permissions plus the departments the user works in. FEEDBACK_DEPT = a member of the Operations /
  * Accounts team: they see only their department's tickets.
  */
-export async function getMyAccessFull(): Promise<{ permissions: string[]; departments: DepartmentKind[] }> {
-  const { data } = await httpClient.get<{ permissions: string[]; departments?: DepartmentKind[] }>('/api/feedback/me');
-  return { permissions: data.permissions || [], departments: data.departments || [] };
+export async function getMyAccessFull(): Promise<{ permissions: string[]; departments: DepartmentKind[]; role: string }> {
+  const { data } = await httpClient.get<{ permissions: string[]; departments?: DepartmentKind[]; role?: string }>('/api/feedback/me');
+  return { permissions: data.permissions || [], departments: data.departments || [], role: data.role || '' };
 }
 
 /** The open tickets waiting for this user (their department's part, or the step assigned to them). */

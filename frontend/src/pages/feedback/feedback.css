@@ -1092,3 +1092,143 @@ button.fb-dept-tag { padding: 6px 14px; cursor: pointer; gap: 8px; }
   .fb-fchip { flex: 1 1 calc(50% - 5px); }
   .fb-fchip select { flex: 1; max-width: none; }
 }
+
+/* A WhatsApp problem (e.g. a number WhatsApp cannot use), under its button. */
+.fb-wa-problem { font-size: 13px; line-height: 1.45; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; }
+.fb-contact-select { max-width: 520px; }
+
+/* Dashboard: the right number came back from the service coordinator (under "To call"). */
+.fb-number-added { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11.5px; font-weight: 700; width: fit-content; }
+.fb-number-added::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #16a34a; }
+
+/* Call page: the saved-numbers card (radio, dropdown of the site numbers, details under it). */
+.fb-contact-saved { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.fb-contact-saved .fb-contact-select { max-width: none; font-weight: 600; }
+
+/* ---- Call page: "1 · Call the customer" (scoped to .fb-callbox) ---- */
+.fb-callbox .fb-contact { position: relative; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px 16px; background: #fff; gap: 14px; transition: border-color .18s, box-shadow .18s, background .18s; }
+.fb-callbox .fb-contact:hover { border-color: #cbd5e1; box-shadow: 0 2px 10px rgba(15, 23, 42, .05); }
+.fb-callbox .fb-contact.is-on { border-color: #7dd3fc; background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 70%); box-shadow: 0 6px 20px rgba(2, 132, 199, .10); }
+.fb-callbox .fb-contact.is-on::before { content: ""; position: absolute; left: -1px; top: 14px; bottom: 14px; width: 4px; border-radius: 0 4px 4px 0; background: var(--fb-primary); }
+.fb-callbox .fb-contact.is-new.is-on { border-color: #86efac; background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 70%); }
+.fb-callbox .fb-contact.is-new.is-on::before { background: #16a34a; }
+.fb-callbox .fb-contact-pick input[type="radio"] { width: 18px; height: 18px; accent-color: var(--fb-primary); cursor: pointer; margin: 0; }
+
+.fb-callbox-avatar { flex: none; width: 42px; height: 42px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; letter-spacing: .02em; color: #fff; background: linear-gradient(135deg, #0ea5e9, #6366f1); box-shadow: 0 4px 12px rgba(99, 102, 241, .25); }
+.fb-callbox .fb-contact:not(.is-on) .fb-callbox-avatar { background: linear-gradient(135deg, #cbd5e1, #94a3b8); box-shadow: none; }
+
+.fb-callbox .fb-contact-saved { gap: 5px; }
+.fb-callbox .fb-contact-select { appearance: none; -webkit-appearance: none; height: 42px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 38px 0 12px; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 12px center; font-size: 15px; font-weight: 600; color: #0f172a; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.fb-callbox .fb-contact-select:hover { border-color: #94a3b8; }
+.fb-callbox .fb-contact-select:focus { outline: none; border-color: var(--fb-primary); box-shadow: 0 0 0 3px rgba(2, 132, 199, .15); }
+.fb-callbox .fb-contact-saved .fb-small { padding-left: 2px; }
+
+.fb-callbox .fb-icon-btn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid #e2e8f0; background: #fff; color: #64748b; transition: background .15s, color .15s, border-color .15s; }
+.fb-callbox .fb-icon-btn:hover { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
+.fb-callbox .fb-contact > .fb-btn-primary { width: 210px; height: 44px; border-radius: 12px; border: 0; font-weight: 700; background: linear-gradient(135deg, #0ea5e9, #0284c7); box-shadow: 0 6px 16px rgba(2, 132, 199, .28); transition: transform .15s, box-shadow .15s; }
+.fb-callbox .fb-contact > .fb-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(2, 132, 199, .34); }
+
+/* "Another number": a dashed card until picked. */
+.fb-callbox .fb-contact:not(.is-on):has(.fb-callbox-plus) { border-style: dashed; background: #fafcff; }
+.fb-callbox-plus { flex: none; width: 30px; height: 30px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: #e0f2fe; color: var(--fb-primary); font-size: 16px; }
+
+/* Call result: pills, each coloured by what happened. */
+.fb-callbox-result { margin-top: 4px; padding-top: 14px; border-top: 1px dashed #e2e8f0; font-weight: 600; color: #334155; }
+.fb-callbox-result .fb-seg { border: 0; background: #f1f5f9; border-radius: 999px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+.fb-callbox-result .fb-seg button { border: 0; border-radius: 999px; padding: 8px 16px; color: #475569; display: inline-flex; align-items: center; gap: 7px; transition: background .15s, color .15s, box-shadow .15s; }
+.fb-callbox-result .fb-seg button::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); opacity: .55; }
+.fb-callbox-result .fb-seg button:nth-child(1) { --dot: #16a34a; --on: #15803d; --bg: #dcfce7; }
+.fb-callbox-result .fb-seg button:nth-child(2) { --dot: #d97706; --on: #b45309; --bg: #fef3c7; }
+.fb-callbox-result .fb-seg button:nth-child(3) { --dot: #ea580c; --on: #c2410c; --bg: #ffedd5; }
+.fb-callbox-result .fb-seg button:nth-child(4) { --dot: #dc2626; --on: #b91c1c; --bg: #fee2e2; }
+.fb-callbox-result .fb-seg button:hover:not(.is-on) { background: #fff; color: #0f172a; }
+.fb-callbox-result .fb-seg button.is-on { background: var(--bg); color: var(--on); box-shadow: 0 1px 2px rgba(15, 23, 42, .06), inset 0 0 0 1px color-mix(in srgb, var(--dot) 35%, transparent); }
+.fb-callbox-result .fb-seg button.is-on::before { opacity: 1; }
+.fb-callbox-result .fb-field-hint { display: inline-flex; align-items: center; gap: 6px; width: fit-content; margin-top: 2px; padding: 4px 10px; border-radius: 999px; background: #f8fafc; border: 1px solid #eef2f7; color: #64748b; font-weight: 500; }
+
+@media (max-width: 640px) {
+  .fb-callbox .fb-contact > .fb-btn-primary { width: 100%; }
+  .fb-callbox-result .fb-seg button { flex: 1 1 calc(50% - 4px); justify-content: center; }
+}
+
+/* ---- ticket page: a department's file (pick / picked) ---- */
+.fb-file-pick { gap: 12px; padding: 12px 14px; border-radius: 12px; transition: border-color .15s, background .15s; }
+.fb-file-pick-icon { flex: none; width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #e0f2fe; color: var(--fb-primary); font-size: 17px; }
+.fb-file-chip { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border: 1px solid #bfdbfe; border-radius: 12px; background: linear-gradient(135deg, #eff6ff, #fff 75%); }
+.fb-file-chip-icon { flex: none; width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 19px; color: #fff; background: #3b82f6; }
+.fb-file-chip.is-image .fb-file-chip-icon { background: #10b981; }
+.fb-file-chip.is-pdf .fb-file-chip-icon { background: #ef4444; }
+.fb-file-chip-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fb-file-chip-text b { font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-file-chip-text small { font-size: 12px; color: #64748b; }
+.fb-file-chip-x { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #f1f5f9; color: #475569; font-size: 16px; cursor: pointer; transition: background .15s, color .15s; }
+.fb-file-chip-x svg { display: block; }
+.fb-file-chip-x:hover { background: #fee2e2; color: #b91c1c; }
+.fb-part-waiting { display: inline-flex; align-items: center; gap: 8px; width: fit-content; padding: 6px 12px; border-radius: 999px; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 13px; font-weight: 600; }
+.fb-part-waiting::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+
+/* ---- close a ticket: without feedback / by taking feedback ---- */
+.fb-close-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.fb-close-opt { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1.5px solid #e2e8f0; border-radius: 14px; background: #fff; text-align: left; font: inherit; color: #0f172a; cursor: pointer; transition: border-color .15s, box-shadow .15s, background .15s; }
+.fb-close-opt:hover { border-color: #cbd5e1; box-shadow: 0 4px 14px rgba(15, 23, 42, .06); }
+.fb-close-opt > span:last-child { display: flex; flex-direction: column; gap: 3px; }
+.fb-close-opt small { font-size: 12.5px; color: #64748b; line-height: 1.4; }
+.fb-close-opt-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; }
+.fb-close-opt.is-feedback .fb-close-opt-icon { background: #e0f2fe; color: #0284c7; }
+.fb-close-opt.is-now .fb-close-opt-icon { background: #dcfce7; color: #15803d; }
+.fb-close-opt.is-feedback.is-on { border-color: #38bdf8; background: #f0f9ff; box-shadow: 0 0 0 3px rgba(56, 189, 248, .18); }
+.fb-close-opt.is-now.is-on { border-color: #4ade80; background: #f0fdf4; box-shadow: 0 0 0 3px rgba(74, 222, 128, .18); }
+
+/* ---- call page: the follow-up call, folded until "Take feedback" ---- */
+.fb-followup-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border: 1px solid #bae6fd; border-radius: 14px; background: linear-gradient(135deg, #f0f9ff, #fff 70%); box-shadow: 0 6px 18px rgba(2, 132, 199, .08); }
+.fb-followup-bar-icon { flex: none; width: 42px; height: 42px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: #0284c7; color: #fff; font-size: 19px; }
+.fb-followup-bar-text { flex: 1 1 280px; display: flex; flex-direction: column; gap: 3px; }
+.fb-followup-bar-text small { font-size: 13px; color: #475569; }
+
+/* ---- ticket page: the department's "call the customer" box with a Call button ---- */
+.fb-part-ask-row { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+.fb-part-ask-row .fb-part-ask { flex: 1 1 280px; width: auto; }
+.fb-part-call { align-self: center; }
+
+/* ---- ticket page: a department's card (issue, done, call the customer) ---- */
+.fb-dept-card .fb-card-h { background: linear-gradient(180deg, #fbfcfe, #fff); border-radius: 12px 12px 0 0; }
+.fb-dept-label { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+.fb-dept-issue { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: #f8fafc; border: 1px solid #eef2f7; }
+.fb-dept-issue-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-dept-issue-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #fff; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; }
+.fb-dept-issue-chip b { font-weight: 700; color: #0f172a; }
+.fb-dept-issue-text { margin: 0; font-size: 14.5px; line-height: 1.5; color: #0f172a; white-space: pre-line; }
+
+.fb-dept-done { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; border: 1px solid #bbf7d0; background: linear-gradient(135deg, #f0fdf4, #ffffff 75%); }
+.fb-dept-done-icon { flex: none; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #16a34a; color: #fff; font-size: 18px; box-shadow: 0 4px 12px rgba(22, 163, 74, .3); }
+.fb-dept-done-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.fb-dept-done-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fb-dept-done-pill { padding: 2px 10px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.fb-dept-done-meta { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #64748b; }
+.fb-dept-avatar { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; font-size: 10px; font-weight: 700; }
+.fb-dept-done-note { margin: 0; font-size: 15px; font-weight: 500; color: #0f172a; line-height: 1.5; }
+.fb-dept-file { display: inline-flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; padding: 6px 8px 6px 6px; border: 1px solid #d1fae5; border-radius: 10px; background: #fff; font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.fb-dept-file:hover { border-color: #86efac; box-shadow: 0 2px 10px rgba(22, 163, 74, .12); }
+.fb-dept-file-icon { flex: none; width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: #ecfdf5; color: #059669; }
+.fb-dept-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: #0f172a; }
+.fb-dept-file-open { flex: none; font-size: 12px; font-weight: 700; color: #059669; padding-left: 8px; border-left: 1px solid #d1fae5; }
+
+.fb-dept-ask { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; border: 1px solid #e0e7ff; background: linear-gradient(135deg, #eef2ff, #ffffff 75%); }
+.fb-dept-ask-icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: #6366f1; color: #fff; font-size: 18px; box-shadow: 0 4px 12px rgba(99, 102, 241, .28); }
+.fb-dept-ask-text { flex: 1 1 240px; display: flex; flex-direction: column; gap: 2px; }
+.fb-dept-ask-text b { color: #1e1b4b; font-size: 14.5px; }
+.fb-dept-ask-text small { color: #64748b; font-size: 12.5px; }
+.fb-dept-ask-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fb-dept-ask-btn { border-radius: 10px; border-color: #c7d2fe; color: #4338ca; background: #fff; font-weight: 600; }
+.fb-dept-ask-btn:hover { background: #eef2ff; }
+.fb-dept-call { border: 0; border-radius: 10px; color: #fff; font-weight: 700; background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 6px 14px rgba(22, 163, 74, .28); transition: transform .15s, box-shadow .15s; }
+.fb-dept-call:hover { transform: translateY(-1px); box-shadow: 0 10px 20px rgba(22, 163, 74, .32); }
+@media (max-width: 640px) { .fb-dept-ask-actions { width: 100%; } .fb-dept-ask-actions .fb-btn { flex: 1; justify-content: center; } }
+
+/* Follow-up bar while the work is still going on. */
+.fb-followup-bar.is-waiting { border-color: #fde68a; background: linear-gradient(135deg, #fffbeb, #fff 70%); box-shadow: none; }
+.fb-followup-bar.is-waiting .fb-followup-bar-icon { background: #f59e0b; }
+
+/* Customer card: the company icon. */
+.fb-cust-avatar { background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; font-size: 18px; box-shadow: 0 4px 12px rgba(99, 102, 241, .25); }
+.fb-cust-avatar svg { display: block; }

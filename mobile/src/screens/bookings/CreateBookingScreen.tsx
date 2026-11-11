@@ -19,7 +19,7 @@ type Nav = NativeStackNavigationProp<AuthenticatedStackParamList>;
 
 // Exact list from the real web app (frontend/src/components/CreateBookingModal.jsx)
 // - not invented.
-const PEST_SERVICES = [
+export const PEST_SERVICES = [
   'General Pest Control (GPC)',
   'General Pest Control + Rodent Control (GPC + RC)',
   'Mosquito Treatment',
@@ -41,7 +41,7 @@ const PEST_SERVICES = [
   'Deep Fumigation',
 ];
 
-const DEEP_CLEANING_SERVICES = [
+export const DEEP_CLEANING_SERVICES = [
   'Floor Protection',
   'Electrical Shifting',
   'Electrical New Point Installation',

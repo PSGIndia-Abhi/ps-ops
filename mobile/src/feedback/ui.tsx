@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, PersonIcon, PinIcon } from '../components/icons';
+import { BuildingIcon, CalendarIcon, ChevronLeftIcon, ChevronRightIcon, PersonIcon, PinIcon } from '../components/icons';
 import { CloseIcon } from '../components/icons';
 import { CheckIcon, ChevronDownIcon } from '../crm/ui/crmIcons';
 import { StatusBadge } from '../crm/ui/StatusBadge';
@@ -114,7 +114,7 @@ const factory = (t: CrmTheme) => ({
   issueLine: { ...typography.caption, color: t.dangerText, marginBottom: 2 },
   // customer card
   cust: { flexDirection: 'row' as const, gap: spacing.sm, alignItems: 'center' as const },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatar: { width: 44, height: 44, borderRadius: 14, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
   avatarText: { ...typography.bodyMedium, fontWeight: '700' as const, color: t.textOnPrimary },
   custName: { ...typography.subtitle, color: t.textPrimary },
   siteTag: { alignSelf: 'flex-start' as const, marginTop: 4, paddingHorizontal: 10, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: t.accentBg },
@@ -540,17 +540,12 @@ function AnswerRow({ response: r }: { response: Response }) {
 /** Who the call is for: the customer and their site (highlighted), then short icon rows. */
 export function CustomerCard({ customer, site, place, services = [], by }: { customer: string; site: string; place?: string | null; services?: string[]; by?: string | null }) {
   const { styles, theme } = useCrmStyles(factory);
-  const initials = customer
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join('');
   return (
     <View style={styles.card}>
       <View style={styles.cust}>
+        {/* Every customer is a company: the same building icon for all. */}
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials || '?'}</Text>
+          <BuildingIcon size={22} color={theme.textOnPrimary} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.custName} numberOfLines={1}>

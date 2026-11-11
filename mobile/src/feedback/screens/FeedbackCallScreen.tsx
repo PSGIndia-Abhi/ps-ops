@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
-import { AlertTriangleIcon, CheckCircleIcon, InboxIcon, PencilIcon, PhoneIcon } from '../../components/icons';
+import { AlertTriangleIcon, CheckCircleIcon, InboxIcon, PencilIcon, PhoneIcon, PlusIcon } from '../../components/icons';
 import { ClipboardIcon } from '../../tasks/ui/taskIcons';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -15,9 +15,11 @@ import { radii, spacing, typography } from '../../theme';
 import {
   addContact,
   cancelNumberRequest,
+  closeTicket,
   errorText,
   finishCall,
   getCall,
+  getTicket,
   raiseTicket,
   recordAttempt,
   recordFollowUp,
@@ -27,7 +29,7 @@ import {
   updateContact,
 } from '../api';
 import { useFeedback } from '../FeedbackContext';
-import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, formatDateTime, formatDay, modeBody, modeCounts, questionsFor, type QuestionMode, monthLabel, nowStamp, periodText, suggestedPriority } from '../format';
+import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, formatDateTime, formatDay, modeBody, modeCounts, questionsFor, type QuestionMode, monthLabel, nowStamp, periodText, suggestedPriority, waPhoneProblem } from '../format';
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
@@ -85,7 +87,44 @@ const factory = (t: CrmTheme) => ({
   editBtn: { width: 40, minHeight: 40, borderRadius: radii.md, borderWidth: 1, borderColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
   editBox: { borderWidth: 1, borderColor: t.primary, borderRadius: radii.md, padding: spacing.sm, marginBottom: spacing.xs, backgroundColor: t.primarySoftBg },
   fieldError: { ...typography.caption, color: t.dangerText, marginBottom: spacing.xs },
+  // The saved-numbers card: the picked number, a dropdown of the site's other numbers, Call and Edit.
+  saved: { borderWidth: 1, borderColor: t.border, borderRadius: 16, padding: spacing.sm, marginBottom: spacing.xs, backgroundColor: t.surface },
+  savedOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg, borderWidth: 1.5 },
+  savedHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  avatar: { width: 40, height: 40, borderRadius: 12, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatarOff: { backgroundColor: t.textMuted },
+  avatarText: { ...typography.captionMedium, fontWeight: '800' as const, color: t.textOnPrimary },
+  savedActions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.xs },
+  callWide: { flex: 1, minHeight: 44, borderRadius: radii.md, backgroundColor: t.primary, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: spacing.sm },
+  editSquare: { width: 44, minHeight: 44, borderRadius: radii.md, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface, alignItems: 'center' as const, justifyContent: 'center' as const },
+  another: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: t.border, borderRadius: 16, padding: spacing.sm, marginBottom: spacing.xs },
+  anotherOn: { borderStyle: 'solid' as const, borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  plus: { width: 32, height: 32, borderRadius: 10, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  savedHint: { ...typography.caption, color: t.textMuted, marginTop: spacing.xs },
+  waProblem: { marginTop: spacing.xs, padding: spacing.sm, borderRadius: radii.md, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
+  waProblemText: { ...typography.caption, color: '#991B1B' },
+  noteInput: { minHeight: 64, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, padding: spacing.sm, color: t.textPrimary, textAlignVertical: 'top' as const, marginBottom: spacing.sm, ...typography.body },
 });
+
+// Each call result in its own colour once picked.
+const OUTCOME_COLORS: Record<string, { bg: string; fg: string; border: string }> = {
+  ANSWERED: { bg: '#DCFCE7', fg: '#15803D', border: '#86EFAC' },
+  NO_ANSWER: { bg: '#FEF3C7', fg: '#B45309', border: '#FCD34D' },
+  BUSY: { bg: '#FFEDD5', fg: '#C2410C', border: '#FDBA74' },
+  WRONG_NUMBER: { bg: '#FEE2E2', fg: '#B91C1C', border: '#FCA5A5' },
+};
+
+/** "RK" for "Ravi Kumar". */
+function initialsOf(name: string | null | undefined): string {
+  return (
+    String(name || '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() || '')
+      .join('') || '?'
+  );
+}
 
 /** WhatsApp messages open the WhatsApp app with the text ready; the person presses Send there. */
 async function openWhatsapp(url: string) {
@@ -114,7 +153,13 @@ export function FeedbackCallScreen() {
 
   // calling
   const [contactKey, setContactKey] = useState<string>('');
-  const [outcome, setOutcome] = useState<CallOutcome>('ANSWERED');
+  // The result being saved right now (picking one saves it); null = show the last saved one.
+  const [outcome, setOutcome] = useState<CallOutcome | null>(null);
+  // The saved number last picked, so the saved card keeps it while "Another number" is open.
+  const [lastSavedKey, setLastSavedKey] = useState('');
+  // A WhatsApp problem (e.g. a number WhatsApp can't use), shown under the WhatsApp button.
+  const [waError, setWaError] = useState<string | null>(null);
+  const [closeNote, setCloseNote] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState('');
@@ -132,7 +177,7 @@ export function FeedbackCallScreen() {
   const [startedAt, setStartedAt] = useState<string | null>(null);
   // ticket = raise with the answers on this screen; later = a ticket on feedback already saved;
   // choice = Raise new ticket (new feedback, or a ticket without feedback).
-  const [sheet, setSheet] = useState<'ticket' | 'later' | 'choice' | 'no-ticket' | null>(null);
+  const [sheet, setSheet] = useState<'ticket' | 'later' | 'choice' | 'no-ticket' | 'close' | null>(null);
   // New feedback on a call already done (Raise new ticket > Take new feedback).
   const [newRound, setNewRound] = useState(false);
 
@@ -143,7 +188,8 @@ export function FeedbackCallScreen() {
       setCall(c);
       // A right number just added by the service coordinator is the one to call next.
       const added = freshAddedContact(c);
-      setContactKey((k) => added || k || c.contacts[0]?.id || OTHER);
+      const primary = c.contacts.find((x) => x.is_primary) || c.contacts[0];
+      setContactKey((k) => added || k || primary?.id || OTHER);
       setError(null);
     } catch (err) {
       setError(errorText(err, 'Could not load the call.'));
@@ -159,7 +205,14 @@ export function FeedbackCallScreen() {
   );
 
   // The questions asked: general, for the month's services, or both. Optional ones can be skipped.
-  const monthServices = useMemo(() => [...new Set((call?.visits || []).map((v) => v.service).filter((x): x is string => !!x))], [call]);
+  // No service in the period: the site's last service before it decides the Service questions; a site
+  // with no service at all gets every Service question (the server accepts answers to any active question).
+  const monthServices = useMemo(() => {
+    const inPeriod = [...new Set((call?.visits || []).map((v) => v.service).filter((x): x is string => !!x))];
+    if (inPeriod.length) return inPeriod;
+    if (call?.earlier_visit?.service) return [call.earlier_visit.service];
+    return [...new Set(questions.filter((q) => q.question_type === 'SERVICE').flatMap((q) => q.services || []))];
+  }, [call, questions]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
   const counts = useMemo(() => modeCounts(questions, monthServices, []), [questions, monthServices]);
   const chosen = useMemo(() => chosenAnswers(asked, answers), [asked, answers]);
@@ -183,11 +236,13 @@ export function FeedbackCallScreen() {
   const lastDone = numberRequests.find((q) => q.status === 'DONE');
   // Shown under the call result when Wrong number is picked; the right number, once added and not called yet.
   const lastCallAt = call.call_attempts[0]?.called_at;
-  // The last call (or the result picked now) is a wrong number: no feedback until the right number answers.
-  const wrongLock = call.call_attempts[0]?.outcome === 'WRONG_NUMBER' || outcome === 'WRONG_NUMBER';
+  // The questions open only after a call saved as Answered; No answer / Busy / Wrong number keep them closed.
+  const lastOutcome = call.call_attempts[0]?.outcome || null;
+  const feedbackLock = lastOutcome !== 'ANSWERED';
+  const wrongLock = lastOutcome === 'WRONG_NUMBER';
   const freshNumber = !openRequest && !!lastDone && (!lastCallAt || new Date(lastCallAt) < new Date(lastDone.resolved_at || 0));
   // Not again right after the coordinator added the number - only after that one is wrong too.
-  const canAskNumber = canWork && outcome === 'WRONG_NUMBER' && !openRequest && (call.status === 'WRONG_NUMBER' || !freshNumber);
+  const canAskNumber = canWork && lastOutcome === 'WRONG_NUMBER' && !openRequest && (call.status === 'WRONG_NUMBER' || !freshNumber);
   // The right number from the coordinator (not called yet): under the wrong one, marked New.
   const newContactId = freshNumber ? lastDone?.right?.contact_id ?? null : null;
   const primaryId = call.contacts.find((x) => x.is_primary)?.id;
@@ -231,6 +286,16 @@ export function FeedbackCallScreen() {
   }
   const formReceived = call.status === 'FORM_RECEIVED';
   const contact = call.contacts.find((c) => c.id === contactKey) || null;
+  // The dropdown's order: the coordinator's new number, the primary, then the rest.
+  const contactOptions = [
+    ...contactsShown.filter((c) => c.id === newContactId),
+    ...contactsShown.filter((c) => c.id !== newContactId && c.id === primaryId),
+    ...contactsShown.filter((c) => c.id !== newContactId && c.id !== primaryId),
+  ];
+  const savedContact = contactOptions.find((c) => c.id === contactKey) || contactOptions.find((c) => c.id === lastSavedKey) || contactOptions[0] || null;
+  // The result shown: the one being saved, else the last saved one when it was for this contact.
+  const savedForThis = !!contact && call.call_attempts[0]?.contact_id === contact.id;
+  const shownOutcome = outcome ?? (savedForThis ? lastOutcome : null);
   const latest = call.submissions.find((s) => s.is_latest) || call.submissions[0] || null;
   const firstTicket = call.tickets[0] || null; // the call's first ticket (a new complaint gets its own)
   // The ticket to open from the call: the latest still open, else the latest.
@@ -312,26 +377,49 @@ export function FeedbackCallScreen() {
     }
   }
 
-  async function dial(phone: string | null, id: string) {
+  function pickContact(id: string) {
     setContactKey(id);
+    setWaError(null);
+    if (id !== OTHER) setLastSavedKey(id);
+  }
+
+  async function dial(phone: string | null, id: string) {
+    pickContact(id);
     if (phone) await Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`);
   }
 
-  const saveAttempt = () =>
-    run(async () => {
-      if (!contact) throw new Error('Pick the contact you called');
-      const res = await recordAttempt(call.id, { contact_id: contact.id, outcome });
-      return outcome === 'ANSWERED'
-        ? 'Call saved. Ask the questions below.'
-        : res.offer_form_link
-        ? "Call saved. The customer didn't answer - you can send the form on WhatsApp."
-        : 'Call saved.';
-    });
+  async function saveAttempt(picked: CallOutcome) {
+    if (saving) return;
+    if (!contact) {
+      setToast({ message: 'Pick the contact you called', variant: 'error' });
+      return;
+    }
+    setOutcome(picked);
+    setSaving(true);
+    try {
+      const res = await recordAttempt(call!.id, { contact_id: contact.id, outcome: picked });
+      setNotice(
+        picked === 'ANSWERED'
+          ? 'Call saved. Ask the questions below.'
+          : picked === 'WRONG_NUMBER'
+          ? 'Saved as wrong number. Send a request for the right one below.'
+          : res.offer_form_link
+          ? "Call saved. The customer didn't answer - you can send the form on WhatsApp."
+          : 'Call saved.',
+      );
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setOutcome(null);
+      setSaving(false);
+    }
+  }
 
   const saveContact = () =>
     run(async () => {
       const c = await addContact(call.id, { name: newName.trim(), phone: newPhone.trim(), role: newRole.trim() || null, email: newEmail.trim() || null });
-      setContactKey(c.id);
+      pickContact(c.id);
       setNewPhone('');
       setNewName('');
       setNewRole('');
@@ -339,12 +427,39 @@ export function FeedbackCallScreen() {
       return c.created ? `${c.name} saved to ${call.site.name}'s contacts.` : `This number is already saved as ${c.name}.`;
     });
 
-  const formLink = () =>
-    run(async () => {
-      if (!contact?.phone) throw new Error('Pick a contact with a phone number');
-      const res = await sendFormLink(call.id, contact.id);
+  async function formLink() {
+    if (!contact?.phone) {
+      setWaError('Pick a contact with a phone number to send the form link to.');
+      return;
+    }
+    const problem = waPhoneProblem(contact);
+    if (problem) {
+      setWaError(problem);
+      return;
+    }
+    setWaError(null);
+    setSaving(true);
+    try {
+      const res = await sendFormLink(call!.id, contact.id);
       if (res.whatsapp?.wa_me_url) await openWhatsapp(res.whatsapp.wa_me_url);
-      return `Form link made for ${contact.name}. Press Send in WhatsApp.`;
+      setNotice(`Form link made for ${contact.name}. Press Send in WhatsApp.`);
+      await load();
+    } catch (err) {
+      const text = errorText(err);
+      setWaError(/not a phone number whatsapp can use/i.test(text) ? waPhoneProblem(contact) || text : text);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // The work is done: close the follow-up ticket without the customer's feedback.
+  const closeWithoutFeedback = () =>
+    run(async () => {
+      const fresh = await getTicket(followUpTicket!.id);
+      await closeTicket(followUpTicket!.id, fresh.row_version ?? 0, closeNote.trim() || null);
+      setCloseNote('');
+      setSheet(null);
+      return `${followUpTicket!.ticket_number} is closed.`;
     });
 
   const saveGood = (noTicket = false) =>
@@ -423,50 +538,72 @@ export function FeedbackCallScreen() {
     </>
   );
 
-  const contactsList = (
-    <>
-      {contactsShown.map((c) =>
-        editId === c.id ? (
-          <View key={c.id} style={styles.editBox}>
-            <Text style={[styles.name, { marginBottom: spacing.xs }]}>Edit contact</Text>
-            <TextInput style={styles.input} placeholder="Name *" placeholderTextColor={theme.textMuted} value={edit.name} onChangeText={(v) => setEdit((e) => ({ ...e, name: v }))} maxLength={150} />
-            <TextInput style={styles.input} placeholder="10-digit phone *" placeholderTextColor={theme.textMuted} keyboardType="number-pad" value={edit.phone} onChangeText={(v) => setEdit((e) => ({ ...e, phone: v.replace(/\D/g, '').slice(0, 10) }))} maxLength={10} />
-            {!!edit.phone && !editPhoneOk && <Text style={styles.fieldError}>Phone must be 10 digits ({edit.phone.length} entered).</Text>}
-            <TextInput style={styles.input} placeholder="Position (optional)" placeholderTextColor={theme.textMuted} value={edit.role} onChangeText={(v) => setEdit((e) => ({ ...e, role: v }))} maxLength={100} />
-            <TextInput style={styles.input} placeholder="Email (optional)" placeholderTextColor={theme.textMuted} keyboardType="email-address" autoCapitalize="none" value={edit.email} onChangeText={(v) => setEdit((e) => ({ ...e, email: v }))} maxLength={150} />
-            <View style={styles.row}>
-              <PrimaryButton label="Cancel" variant="secondary" style={{ flex: 1 }} onPress={() => setEditId(null)} disabled={saving} />
-              <PrimaryButton label="Save" style={{ flex: 1 }} onPress={saveEdit} loading={saving} disabled={!edit.name.trim() || !editPhoneOk} />
-            </View>
+  // The saved-numbers card: the picked number (the primary by default), the site's other numbers in a
+  // dropdown, and Call / Edit. Used on the call, the follow-up call and new feedback.
+  const savedOn = contactKey !== OTHER;
+  const savedCard =
+    !savedContact ? null : editId === savedContact.id ? (
+      <View style={styles.editBox}>
+        <Text style={[styles.name, { marginBottom: spacing.xs }]}>Edit contact</Text>
+        <TextInput style={styles.input} placeholder="Name *" placeholderTextColor={theme.textMuted} value={edit.name} onChangeText={(v) => setEdit((e) => ({ ...e, name: v }))} maxLength={150} />
+        <TextInput style={styles.input} placeholder="10-digit phone *" placeholderTextColor={theme.textMuted} keyboardType="number-pad" value={edit.phone} onChangeText={(v) => setEdit((e) => ({ ...e, phone: v.replace(/\D/g, '').slice(0, 10) }))} maxLength={10} />
+        {!!edit.phone && !editPhoneOk && <Text style={styles.fieldError}>Phone must be 10 digits ({edit.phone.length} entered).</Text>}
+        <TextInput style={styles.input} placeholder="Position (optional)" placeholderTextColor={theme.textMuted} value={edit.role} onChangeText={(v) => setEdit((e) => ({ ...e, role: v }))} maxLength={100} />
+        <TextInput style={styles.input} placeholder="Email (optional)" placeholderTextColor={theme.textMuted} keyboardType="email-address" autoCapitalize="none" value={edit.email} onChangeText={(v) => setEdit((e) => ({ ...e, email: v }))} maxLength={150} />
+        <View style={styles.row}>
+          <PrimaryButton label="Cancel" variant="secondary" style={{ flex: 1 }} onPress={() => setEditId(null)} disabled={saving} />
+          <PrimaryButton label="Save" style={{ flex: 1 }} onPress={saveEdit} loading={saving} disabled={!edit.name.trim() || !editPhoneOk} />
+        </View>
+      </View>
+    ) : (
+      <View style={[styles.saved, savedOn && styles.savedOn, savedOn && savedContact.id === newContactId && styles.contactNew]}>
+        <Pressable onPress={() => pickContact(savedContact.id)} style={styles.savedHead} accessibilityRole="radio" accessibilityState={{ checked: savedOn }}>
+          <View style={[styles.dot, savedOn && styles.dotOn]} />
+          <View style={[styles.avatar, !savedOn && styles.avatarOff]}>
+            <Text style={styles.avatarText}>{initialsOf(savedContact.name)}</Text>
           </View>
-        ) : (
-        <Pressable key={c.id} onPress={() => setContactKey(c.id)} style={[styles.contact, contactKey === c.id && styles.contactOn, c.id === newContactId && styles.contactNew]}>
-          <View style={[styles.dot, contactKey === c.id && styles.dotOn]} />
           <View style={{ flex: 1 }}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{c.name}</Text>
-              {c.id === newContactId && <Text style={styles.newTag}>NEW</Text>}
+              <Text style={styles.name} numberOfLines={1}>
+                {savedContact.name}
+              </Text>
+              {savedContact.id === newContactId && <Text style={styles.newTag}>NEW</Text>}
             </View>
-            <Text style={styles.small}>
-              {[c.role, c.phone?.trim() || 'No phone number', c.id === primaryId ? 'Primary' : null].filter(Boolean).join(' · ')}
+            <Text style={styles.small} numberOfLines={2}>
+              {[savedContact.phone?.trim() || 'No phone number', savedContact.role, savedContact.id === primaryId ? 'Primary' : null].filter(Boolean).join(' · ')}
             </Text>
           </View>
-          {!!c.phone?.trim() && (
-            <Pressable onPress={() => dial(c.phone, c.id)} style={styles.callBtn} accessibilityRole="button" accessibilityLabel={`Call ${c.name}`}>
+        </Pressable>
+        {contactOptions.length > 1 && (
+          <SelectField
+            label={`Saved numbers · ${contactOptions.length}`}
+            placeholder="Choose a number"
+            sheetTitle="Which number?"
+            options={contactOptions.map((c) => ({
+              value: c.id,
+              label: `${c.name} · ${c.phone?.trim() || 'No phone'}${c.id === primaryId ? ' (Primary)' : ''}${c.id === newContactId ? ' · New' : ''}`,
+            }))}
+            value={savedContact.id}
+            onChange={pickContact}
+          />
+        )}
+        <View style={styles.savedActions}>
+          {!!savedContact.phone?.trim() && (
+            <Pressable onPress={() => dial(savedContact.phone, savedContact.id)} style={styles.callWide} accessibilityRole="button" accessibilityLabel={`Call ${savedContact.name}`}>
               <PhoneIcon size={16} color={theme.textOnPrimary} />
-              <Text style={styles.callText}>Call</Text>
+              <Text style={styles.callText} numberOfLines={1}>
+                Call {savedContact.phone.trim()}
+              </Text>
             </Pressable>
           )}
           {canMessage && (
-            <Pressable onPress={() => startEdit(c.id)} style={styles.editBtn} accessibilityRole="button" accessibilityLabel={`Edit ${c.name}`}>
+            <Pressable onPress={() => startEdit(savedContact.id)} style={styles.editSquare} accessibilityRole="button" accessibilityLabel={`Edit ${savedContact.name}`}>
               <PencilIcon size={16} color={theme.textSecondary} />
             </Pressable>
           )}
-        </Pressable>
-        ),
-      )}
-    </>
-  );
+        </View>
+      </View>
+    );
 
   return (
     <View style={styles.screen}>
@@ -510,9 +647,12 @@ export function FeedbackCallScreen() {
         {canWork && !formReceived && (
           <>
             <Panel title="Call the customer" icon={<PhoneIcon size={17} color={theme.primary} />}>
-              {contactsList}
-              <Pressable onPress={() => setContactKey(OTHER)} style={[styles.contact, contactKey === OTHER && styles.contactOn]}>
+              {savedCard}
+              <Pressable onPress={() => pickContact(OTHER)} style={[styles.another, contactKey === OTHER && styles.anotherOn]} accessibilityRole="radio" accessibilityState={{ checked: contactKey === OTHER }}>
                 <View style={[styles.dot, contactKey === OTHER && styles.dotOn]} />
+                <View style={styles.plus}>
+                  <PlusIcon size={16} color={theme.primary} />
+                </View>
                 <Text style={styles.name}>Another number</Text>
               </Pressable>
               {contactKey === OTHER && (
@@ -529,21 +669,33 @@ export function FeedbackCallScreen() {
                 <>
                   <Text style={styles.label}>What happened on this call?</Text>
                   <View style={styles.outcomes} accessibilityRole="radiogroup">
-                    {CALL_OUTCOMES.map((o) => (
-                      <Pressable
-                        key={o.value}
-                        onPress={() => setOutcome(o.value)}
-                        style={[styles.outcome, outcome === o.value && styles.outcomeOn]}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: outcome === o.value }}
-                      >
-                        <Text style={[styles.outcomeText, outcome === o.value && styles.outcomeTextOn]} numberOfLines={1}>
-                          {o.label}
-                        </Text>
-                      </Pressable>
-                    ))}
+                    {CALL_OUTCOMES.map((o) => {
+                      const on = shownOutcome === o.value;
+                      const c = OUTCOME_COLORS[o.value];
+                      return (
+                        <Pressable
+                          key={o.value}
+                          onPress={() => saveAttempt(o.value)}
+                          disabled={saving}
+                          style={[styles.outcome, on && { backgroundColor: c.bg, borderColor: c.border }]}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: on, disabled: saving }}
+                        >
+                          <Text style={[styles.outcomeText, on && { color: c.fg, fontWeight: '800' }]} numberOfLines={1}>
+                            {o.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-                  <PrimaryButton label="Save call result" onPress={saveAttempt} loading={saving} style={{ marginTop: spacing.sm }} />
+                  {/* Picking a result saves it straight away. */}
+                  {saving && outcome ? (
+                    <Text style={styles.savedHint}>Saving…</Text>
+                  ) : call.call_attempts[0] ? (
+                    <Text style={styles.savedHint}>
+                      Saved: {CALL_OUTCOMES.find((o) => o.value === call.call_attempts[0].outcome)?.label || call.call_attempts[0].outcome} · {call.call_attempts[0].contact_name || call.call_attempts[0].phone} · {formatDateTime(call.call_attempts[0].called_at)}
+                    </Text>
+                  ) : null}
                   {/* Wrong number: ask the service coordinator for the right one (web: Feedback Desk > Requests). */}
                   {openRequest ? (
                     <View style={styles.nrWait}>
@@ -578,18 +730,31 @@ export function FeedbackCallScreen() {
               <Text style={styles.small}>Send the feedback form on WhatsApp; they answer the same questions.</Text>
               <Pressable onPress={formLink} disabled={!contact?.phone || saving} style={[styles.wa, !contact?.phone && { opacity: 0.5 }]} accessibilityRole="button">
                 <WhatsAppIcon size={18} />
-                <Text style={styles.waText}>Form link{contact ? ` to ${contact.name}` : ''}</Text>
+                <Text style={styles.waText} numberOfLines={1}>
+                  Form link{contact ? ` to ${contact.name}` : ''}
+                </Text>
               </Pressable>
+              {!!waError && (
+                <View style={styles.waProblem}>
+                  <Text style={styles.waProblemText}>{waError}</Text>
+                </View>
+              )}
             </Panel>
 
             <Panel title="Feedback from the call" icon={<ClipboardIcon size={17} color={theme.primary} />}>
-              {wrongLock && (
+              {feedbackLock && (
                 <View style={styles.lockBox}>
-                  <Text style={styles.lockTitle}>Wrong number</Text>
-                  <Text style={styles.lockText}>The questions open once you call the right number and save the result as Answered. Send a request for the number, or call another contact.</Text>
+                  <Text style={styles.lockTitle}>{wrongLock ? 'Wrong number' : lastOutcome ? "The customer didn't answer" : 'Call the customer first'}</Text>
+                  <Text style={styles.lockText}>
+                    {wrongLock
+                      ? 'The questions open once you call the right number and pick Answered. Send a request for the number, or call another contact.'
+                      : lastOutcome
+                      ? 'Call again and pick Answered to open the questions, or send the feedback form on WhatsApp.'
+                      : 'Call the customer and pick Answered above to open the questions.'}
+                  </Text>
                 </View>
               )}
-              <View pointerEvents={wrongLock ? 'none' : 'auto'} style={wrongLock ? styles.locked : undefined}>
+              <View pointerEvents={feedbackLock ? 'none' : 'auto'} style={feedbackLock ? styles.locked : undefined}>
               {spokeField}
               <QuestionForm
                 questions={asked}
@@ -606,10 +771,10 @@ export function FeedbackCallScreen() {
               {bad.length > 0 ? (
                 <View style={styles.row}>
                   <PrimaryButton label="No ticket · Done" variant="secondary" style={{ flex: 1 }} onPress={() => setSheet('no-ticket')} disabled={saving || !chosen.length} />
-                  <PrimaryButton label="Raise ticket" variant="brand" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || wrongLock} />
+                  <PrimaryButton label="Raise ticket" variant="brand" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || feedbackLock} />
                 </View>
               ) : (
-                <PrimaryButton label="Save · Done (Good)" onPress={() => saveGood()} loading={saving} disabled={!chosen.length || wrongLock} style={{ marginTop: spacing.sm }} />
+                <PrimaryButton label="Save · Done (Good)" onPress={() => saveGood()} loading={saving} disabled={!chosen.length || feedbackLock} style={{ marginTop: spacing.sm }} />
               )}
               </View>
             </Panel>
@@ -635,8 +800,9 @@ export function FeedbackCallScreen() {
         {/* ---- follow-up call after the re-visit ---- */}
         {call.status === 'DONE' && canFollowUp && followUpTicket && (
           <Panel title={`Follow-up call · ${followUpTicket.ticket_number}`} icon={<PhoneIcon size={17} color={theme.primary} />}>
-            <Text style={styles.small}>The re-visit is done. Call the customer and ask the questions again.</Text>
-            <View style={{ marginTop: spacing.sm }}>{contactsList}</View>
+            <Text style={styles.small}>The work is done. Call the customer and ask the questions again (satisfied: the ticket closes), or close it without the call.</Text>
+            <PrimaryButton label="Close without feedback" variant="secondary" onPress={() => setSheet('close')} disabled={saving} style={{ marginTop: spacing.sm }} />
+            <View style={{ marginTop: spacing.sm }}>{savedCard}</View>
             {spokeField}
             <QuestionForm
               questions={asked}
@@ -701,7 +867,7 @@ export function FeedbackCallScreen() {
         {call.status === 'DONE' && newRound && canRaiseLater && (
           <Panel title="New feedback · new complaint" icon={<ClipboardIcon size={17} color={theme.primary} />}>
             <Text style={styles.small}>Call the customer and ask the questions again; then raise the ticket from their answers.</Text>
-            <View style={{ marginTop: spacing.sm }}>{contactsList}</View>
+            <View style={{ marginTop: spacing.sm }}>{savedCard}</View>
             {spokeField}
             <QuestionForm
               questions={asked}
@@ -742,6 +908,7 @@ export function FeedbackCallScreen() {
           <MessagesPanel
             callId={call.id}
             contacts={call.contacts}
+            defaultContactId={contact?.id}
             messages={messages}
             info={{ customer: call.customer.name, site: call.site.name, month: call.month }}
             onSent={setNotice}
@@ -795,6 +962,14 @@ export function FeedbackCallScreen() {
         <View style={styles.row}>
           <PrimaryButton label="Back" variant="secondary" style={{ flex: 1 }} onPress={() => setSheet(null)} />
           <PrimaryButton label="Yes, no ticket" style={{ flex: 1 }} onPress={() => saveGood(true)} loading={saving} />
+        </View>
+      </Sheet>
+      <Sheet visible={sheet === 'close'} onClose={() => setSheet(null)} title={followUpTicket ? `Close ${followUpTicket.ticket_number}?` : 'Close the ticket?'}>
+        <Text style={styles.sheetText}>Every team has finished its work. The ticket closes without the follow-up call; it can be reopened later.</Text>
+        <TextInput style={styles.noteInput} placeholder="Note (optional), e.g. Customer said on WhatsApp it is sorted" placeholderTextColor={theme.textMuted} value={closeNote} onChangeText={setCloseNote} multiline maxLength={400} />
+        <View style={styles.row}>
+          <PrimaryButton label="Back" variant="secondary" style={{ flex: 1 }} onPress={() => setSheet(null)} />
+          <PrimaryButton label="Close the ticket" style={{ flex: 1 }} onPress={closeWithoutFeedback} loading={saving} />
         </View>
       </Sheet>
       <Toast toast={toast} onDismiss={() => setToast(null)} />

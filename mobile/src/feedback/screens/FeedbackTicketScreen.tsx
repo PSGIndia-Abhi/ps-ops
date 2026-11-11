@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
-import { AlertTriangleIcon, BriefcaseIcon, ClockIcon, PhoneIcon } from '../../components/icons';
+import { AlertTriangleIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon, CloseIcon, DocumentIcon, GalleryIcon, PhoneIcon } from '../../components/icons';
+import { Sheet } from '../../tasks/ui/sheets';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
@@ -52,7 +53,74 @@ const factory = (t: CrmTheme) => ({
   fileChip: { alignSelf: 'flex-start' as const, marginTop: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: t.surface, borderWidth: 1, borderColor: t.successBg, maxWidth: '100%' as const },
   fileChipText: { ...typography.captionMedium, color: t.successText },
   noteInput: { minHeight: 46, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, paddingHorizontal: spacing.sm, marginTop: spacing.sm, color: t.textPrimary, ...typography.body },
+  // A department's card: the issue, what the team did, and a Call button for the customer.
+  label: { ...typography.overline, fontSize: 10, letterSpacing: 0.8, color: t.textMuted, marginBottom: 6 },
+  issueBox: { padding: spacing.sm, borderRadius: 12, backgroundColor: t.surfaceAlt, borderWidth: 1, borderColor: t.border },
+  issueChips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginBottom: 6 },
+  issueChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, maxWidth: '100%' as const },
+  issueChipText: { ...typography.caption, color: t.textSecondary },
+  issueText: { ...typography.body, color: t.textPrimary },
+  doneCard: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, borderRadius: 14, borderWidth: 1, borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' },
+  doneIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#16A34A', alignItems: 'center' as const, justifyContent: 'center' as const },
+  doneTop: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, gap: 6 },
+  donePill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: '#DCFCE7', color: '#166534', fontSize: 11, fontWeight: '800' as const, overflow: 'hidden' as const },
+  doneMeta: { ...typography.caption, color: t.textMuted, flexShrink: 1 },
+  doneNote: { ...typography.bodyMedium, color: t.textPrimary, marginTop: 4 },
+  avatar: { width: 20, height: 20, borderRadius: 10, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatarText: { fontSize: 9, fontWeight: '800' as const, color: t.textOnPrimary },
+  fileCard: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.xs, padding: 8, borderRadius: 12, borderWidth: 1, borderColor: '#D1FAE5', backgroundColor: t.surface },
+  fileIcon: { width: 32, height: 32, borderRadius: 9, alignItems: 'center' as const, justifyContent: 'center' as const },
+  fileName: { ...typography.captionMedium, color: t.textPrimary },
+  fileSub: { ...typography.caption, fontSize: 11, color: t.textMuted },
+  fileOpen: { ...typography.captionMedium, fontWeight: '800' as const, color: '#059669' },
+  fileRemove: { width: 34, height: 34, borderRadius: 17, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
+  pickBox: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.xs, padding: spacing.sm, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: t.border, backgroundColor: t.surfaceAlt },
+  pickIcon: { width: 32, height: 32, borderRadius: 9, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  waiting: { alignSelf: 'flex-start' as const, marginTop: spacing.sm, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', overflow: 'hidden' as const, color: '#92400E', fontSize: 12, fontWeight: '700' as const },
+  callRow: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, borderRadius: 14, borderWidth: 1, borderColor: '#E0E7FF', backgroundColor: '#EEF2FF' },
+  callRowIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#6366F1', alignItems: 'center' as const, justifyContent: 'center' as const },
+  callRowTitle: { ...typography.captionMedium, fontWeight: '800' as const, color: '#1E1B4B' },
+  callRowText: { ...typography.caption, color: t.textMuted },
+  callBtn: { flexGrow: 1, minHeight: 44, borderRadius: radii.md, backgroundColor: '#16A34A', flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: spacing.md },
+  callBtnText: { ...typography.captionMedium, fontWeight: '800' as const, color: '#FFFFFF' },
+  // Follow-up call as one bar.
+  fuBar: { padding: spacing.md, borderRadius: 16, borderWidth: 1, borderColor: '#BAE6FD', backgroundColor: '#F0F9FF', marginBottom: spacing.md },
+  fuBarWait: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+  fuBarHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  fuBarIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#0284C7', alignItems: 'center' as const, justifyContent: 'center' as const },
+  fuBarTitle: { ...typography.bodyMedium, fontWeight: '800' as const, color: t.textPrimary },
+  fuBarText: { ...typography.caption, color: t.textSecondary, marginTop: spacing.xs },
+  fuBarBtns: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs, marginTop: spacing.sm },
+  choice: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, padding: spacing.md, borderRadius: 16, borderWidth: 1.5, marginBottom: spacing.sm },
+  choiceIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center' as const, justifyContent: 'center' as const },
+  choiceTitle: { ...typography.bodyMedium, fontWeight: '800' as const, color: t.textPrimary },
+  sheetInput: { minHeight: 64, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, padding: spacing.sm, color: t.textPrimary, textAlignVertical: 'top' as const, marginBottom: spacing.sm, ...typography.body },
+  sheetRow: { flexDirection: 'row' as const, gap: spacing.sm },
 });
+
+/** "TJ" for "Tejas Jain". */
+function initialsOf(name: string | null | undefined): string {
+  return (
+    String(name || '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() || '')
+      .join('') || '?'
+  );
+}
+
+/** "1.2 MB" / "340 KB". */
+function fileSize(bytes?: number | null): string {
+  if (!bytes && bytes !== 0) return '';
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** A file's look by its type: photos green, PDFs red, the rest blue. */
+function fileLook(type?: string | null): { bg: string; image: boolean } {
+  const t = type || '';
+  return t.startsWith('image/') ? { bg: '#10B981', image: true } : t === 'application/pdf' ? { bg: '#EF4444', image: false } : { bg: '#3B82F6', image: false };
+}
 
 /**
  * A ticket: its problem (the bad answers), the re-visit booked for it, and the follow-up calls.
@@ -69,7 +137,10 @@ export function FeedbackTicketScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const { can, myDepartments, deptOnly, userId } = useFeedback();
+  const { can, myDepartments, deptOnly, userId, role } = useFeedback();
+  // Close the ticket: by taking the customer's feedback, or without it (with a note).
+  const [closing, setClosing] = useState<null | 'choose' | 'now'>(null);
+  const [closeNote, setCloseNote] = useState('');
   const [partNotes, setPartNotes] = useState<Record<string, string>>({});
   const [partFiles, setPartFiles] = useState<Record<string, PickedFile | null>>({});
   const [actionNote, setActionNote] = useState('');
@@ -115,7 +186,8 @@ export function FeedbackTicketScreen() {
   const opsDone = !hasOps || !!ticket.action_done || (!assigned && ticket.action !== 'OTHER' && visit?.status === 'COMPLETED');
   const canFinishAction = open && assigned && !ticket.action_done && (can('FEEDBACK_MANAGE') || ticket.action_owner?.id === userId);
   const ready = open && (ticket.follow_up_due ?? opsDone);
-  const canFinish = (p: TicketPart) => open && p.status !== 'DONE' && (can('FEEDBACK_MANAGE') || myDepartments.includes(p.kind));
+  // Only the department's own team (or admin) updates its part; everyone else just sees it.
+  const canFinish = (p: TicketPart) => open && p.status !== 'DONE' && (role === 'admin' || myDepartments.includes(p.kind));
   const followUps = (ticket.history || []).filter((h) => h.event === 'FOLLOWUP_CALL');
   const steps: [string, boolean][] = [
     [`Raised ${formatDay(ticket.created_at)}`, true],
@@ -144,27 +216,26 @@ export function FeedbackTicketScreen() {
 
   // The action is taken (every team finished): close without the follow-up call.
   const canClose = can('FEEDBACK_MANAGE') || ticket.raised_by?.id === userId;
-  function askClose() {
-    Alert.alert(`Close ${ticket!.ticket_number}?`, 'Every team has finished its work. The ticket closes without the follow-up call; it can be reopened later.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Close the ticket',
-        onPress: async () => {
-          setSaving(true);
-          try {
-            const fresh = await getTicket(ticket!.id);
-            await closeTicket(ticket!.id, fresh.row_version ?? 0, null);
-            setToast({ message: `${ticket!.ticket_number} is closed.`, variant: 'success' });
-            await load();
-          } catch (err) {
-            setToast({ message: errorText(err), variant: 'error' });
-          } finally {
-            setSaving(false);
-          }
-        },
-      },
-    ]);
+  async function closeNow() {
+    setSaving(true);
+    try {
+      const fresh = await getTicket(ticket!.id);
+      await closeTicket(ticket!.id, fresh.row_version ?? 0, closeNote.trim() || null);
+      setClosing(null);
+      setCloseNote('');
+      setToast({ message: `${ticket!.ticket_number} is closed.`, variant: 'success' });
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
   }
+
+  // Who the Call button on a department's part dials: whoever gave the feedback, else the first with a phone.
+  const contacts = ticket.contacts || [];
+  const customerToCall = contacts.find((c) => c.id === ticket.feedback?.contact_id && c.phone?.trim()) || contacts.find((c) => c.phone?.trim()) || null;
+  const dialCustomer = () => customerToCall?.phone && Linking.openURL(`tel:${customerToCall.phone.replace(/[^\d+]/g, '')}`);
 
   async function finishAction() {
     setSaving(true);
@@ -253,13 +324,22 @@ export function FeedbackTicketScreen() {
 
         {others.map((p) => (
           <Panel key={p.kind} title={`${p.label}${p.with_invoices ? ' · invoice issue' : ''}`} icon={<BriefcaseIcon size={17} color={theme.warningText} />}>
-            {(p.issues || []).map((i) => (
-              <Text key={i.id} style={styles.v}>
-                • <Text style={{ fontWeight: '700' }}>{i.name}</Text>
-                {i.text ? ` - ${i.text}` : ''}
-              </Text>
-            ))}
-            {(!!p.issue_summary || !(p.issues || []).length) && <Text style={styles.v}>{p.issue_summary || 'No details written.'}</Text>}
+            <View style={styles.issueBox}>
+              <Text style={styles.label}>ISSUE</Text>
+              {(p.issues || []).length > 0 && (
+                <View style={styles.issueChips}>
+                  {(p.issues || []).map((i) => (
+                    <View key={String(i.id)} style={styles.issueChip}>
+                      <Text style={styles.issueChipText}>
+                        <Text style={{ fontWeight: '800' }}>{i.name}</Text>
+                        {i.text ? ` · ${i.text}` : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {(!!p.issue_summary || !(p.issues || []).length) && <Text style={styles.issueText}>{p.issue_summary || 'No details written.'}</Text>}
+            </View>
             {!!p.priority && (
               <View style={[styles.kv, { marginTop: spacing.xs }]}>
                 <Text style={styles.k}>Priority</Text>
@@ -279,14 +359,35 @@ export function FeedbackTicketScreen() {
               </View>
             ))}
             {p.status === 'DONE' ? (
-              <View style={styles.done}>
-                <Text style={styles.doneText}>✓ Done · {p.done_note}</Text>
-                <Text style={styles.small}>{[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(' · ')}</Text>
-                {!!p.attachment && (
-                  <Pressable onPress={() => openFile(p)} style={styles.fileChip} accessibilityRole="button">
-                    <Text style={styles.fileChipText} numberOfLines={1}>📎 {p.attachment.name}</Text>
-                  </Pressable>
-                )}
+              <View style={styles.doneCard}>
+                <View style={styles.doneIcon}>
+                  <CheckCircleIcon size={18} color="#FFFFFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.doneTop}>
+                    <Text style={styles.donePill}>Completed</Text>
+                    {!!p.done_by?.name && (
+                      <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>{initialsOf(p.done_by.name)}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.doneMeta} numberOfLines={1}>
+                      {[p.done_by?.name, formatDateTime(p.done_at)].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                  <Text style={styles.doneNote}>{p.done_note}</Text>
+                  {!!p.attachment && (
+                    <Pressable onPress={() => openFile(p)} style={styles.fileCard} accessibilityRole="button" accessibilityLabel={`Open ${p.attachment.name}`}>
+                      <View style={[styles.fileIcon, { backgroundColor: fileLook(p.attachment.type).bg }]}>
+                        {fileLook(p.attachment.type).image ? <GalleryIcon size={16} color="#FFFFFF" /> : <DocumentIcon size={16} color="#FFFFFF" />}
+                      </View>
+                      <Text style={[styles.fileName, { flex: 1 }]} numberOfLines={1}>
+                        {p.attachment.name}
+                      </Text>
+                      <Text style={styles.fileOpen}>Open</Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
             ) : canFinish(p) ? (
               <>
@@ -298,20 +399,35 @@ export function FeedbackTicketScreen() {
                   placeholder={p.with_invoices ? 'What was done? e.g. Invoice copy sent' : 'What was done?'}
                   placeholderTextColor={theme.textMuted}
                 />
-                <Pressable onPress={() => pickFile(p)} style={[styles.filePick, !!partFiles[p.kind] && styles.filePickOn]} accessibilityRole="button">
-                  <Text style={[styles.filePickText, !!partFiles[p.kind] && { color: theme.primary, fontWeight: '700' }]} numberOfLines={1}>
-                    📎 {partFiles[p.kind] ? partFiles[p.kind]!.name : 'Attach a file (optional, up to 10 MB)'}
-                  </Text>
-                  {!!partFiles[p.kind] && (
-                    <Pressable onPress={() => setPartFiles((f) => ({ ...f, [p.kind]: null }))} hitSlop={8} accessibilityLabel="Remove the file">
-                      <Text style={styles.fileX}>✕</Text>
+                {partFiles[p.kind] ? (
+                  <View style={[styles.fileCard, { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }]}>
+                    <View style={[styles.fileIcon, { backgroundColor: fileLook(partFiles[p.kind]!.type).bg }]}>
+                      {fileLook(partFiles[p.kind]!.type).image ? <GalleryIcon size={16} color="#FFFFFF" /> : <DocumentIcon size={16} color="#FFFFFF" />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fileName} numberOfLines={1}>
+                        {partFiles[p.kind]!.name}
+                      </Text>
+                      <Text style={styles.fileSub}>{[(partFiles[p.kind]!.name.split('.').pop() || '').toUpperCase().slice(0, 5), fileSize(partFiles[p.kind]!.size)].filter(Boolean).join(' · ')}</Text>
+                    </View>
+                    <Pressable onPress={() => setPartFiles((f) => ({ ...f, [p.kind]: null }))} hitSlop={8} style={styles.fileRemove} accessibilityRole="button" accessibilityLabel="Remove the file">
+                      <CloseIcon size={16} color={theme.textSecondary} />
                     </Pressable>
-                  )}
-                </Pressable>
+                  </View>
+                ) : (
+                  <Pressable onPress={() => pickFile(p)} style={styles.pickBox} accessibilityRole="button">
+                    <View style={styles.pickIcon}>
+                      <DocumentIcon size={16} color={theme.primary} />
+                    </View>
+                    <Text style={[styles.filePickText, { flex: 1 }]} numberOfLines={2}>
+                      Attach a file (optional, up to 10 MB)
+                    </Text>
+                  </Pressable>
+                )}
                 <PrimaryButton label={`Mark ${p.label} done`} onPress={() => finishPart(p)} loading={saving} disabled={!(partNotes[p.kind] || '').trim()} style={{ marginTop: spacing.xs }} />
               </>
             ) : (
-              <Text style={[styles.small, { marginTop: spacing.xs }]}>{open ? `Waiting for ${p.label}.` : 'Closed.'}</Text>
+              <Text style={styles.waiting}>{open ? `Waiting for ${p.label} to update this.` : 'Closed.'}</Text>
             )}
             {/* Optional: once the department is done, ask the customer how it went. */}
             {p.status === 'DONE' && !deptOnly && (
@@ -332,13 +448,24 @@ export function FeedbackTicketScreen() {
                 </View>
               ) : (
                 canClose && (
-                  <Pressable onPress={() => setAsking(p)} style={styles.ask} accessibilityRole="button">
-                    <PhoneIcon size={18} color="#166534" />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.askTitle}>Call the customer about {p.label}</Text>
-                      <Text style={styles.askText}>Optional · ask how it went</Text>
+                  <View style={styles.callRow}>
+                    <View style={styles.callRowIcon}>
+                      <PhoneIcon size={18} color="#FFFFFF" />
                     </View>
-                  </Pressable>
+                    <View style={{ flex: 1, minWidth: 160 }}>
+                      <Text style={styles.callRowTitle}>Call the customer about {p.label}</Text>
+                      <Text style={styles.callRowText}>Optional · ask how it went</Text>
+                    </View>
+                    {/* Only the Call button: dials whoever gave the feedback, else the first number. */}
+                    {!!customerToCall?.phone?.trim() && (
+                      <Pressable onPress={dialCustomer} style={styles.callBtn} accessibilityRole="button" accessibilityLabel={`Call ${customerToCall.name}`}>
+                        <PhoneIcon size={16} color="#FFFFFF" />
+                        <Text style={styles.callBtnText} numberOfLines={1}>
+                          Call {customerToCall.name}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
                 )
               )
             )}
@@ -409,15 +536,25 @@ export function FeedbackTicketScreen() {
             );
           })}
           {open ? (
-            <>
-              <Text style={[styles.small, followUps.length > 0 && { marginTop: spacing.xs }]}>
-                {ready ? 'Ready to call the customer back.' : `Waiting for ${waitingFor.join(' and ') || 'the work'}.`}
+            <View style={[styles.fuBar, !ready && styles.fuBarWait, followUps.length > 0 && { marginTop: spacing.xs }, { marginBottom: 0 }]}>
+              <View style={styles.fuBarHead}>
+                <View style={[styles.fuBarIcon, !ready && { backgroundColor: '#F59E0B' }]}>
+                  <PhoneIcon size={18} color="#FFFFFF" />
+                </View>
+                <Text style={[styles.fuBarTitle, { flex: 1 }]}>Follow-up call · {ticket.ticket_number}</Text>
+              </View>
+              <Text style={styles.fuBarText}>
+                {ready
+                  ? 'The action is taken. Call the customer and ask the feedback questions again (satisfied: the ticket closes), or close the ticket without the call.'
+                  : `Waiting for ${waitingFor.join(' and ') || 'the work'}. Then the customer is called back.`}
               </Text>
-              {!deptOnly && <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ marginTop: spacing.sm }} />}
-              {!deptOnly && ready && canClose && (
-                <PrimaryButton label="Close the ticket" variant="secondary" onPress={askClose} loading={saving} style={{ marginTop: spacing.xs }} />
+              {!deptOnly && (
+                <View style={styles.fuBarBtns}>
+                  {ready && canClose && <PrimaryButton label="Close the ticket" variant="secondary" onPress={() => setClosing('choose')} disabled={saving} style={{ flexGrow: 1 }} />}
+                  <PrimaryButton label="Open the call" onPress={() => navigation.navigate('FeedbackCall', { callId: ticket.request_id })} disabled={!ready} style={{ flexGrow: 1 }} />
+                </View>
               )}
-            </>
+            </View>
           ) : (
             <>
               <Text style={styles.small}>{ticket.close_note || 'Closed.'}</Text>
@@ -478,6 +615,47 @@ export function FeedbackTicketScreen() {
           }}
         />
       )}
+      <Sheet visible={!!closing} onClose={() => setClosing(null)} title={`Close ${ticket.ticket_number}?`}>
+        {closing === 'choose' ? (
+          <>
+            <Text style={[styles.small, { marginBottom: spacing.sm }]}>Every team has finished its work. How do you want to close it?</Text>
+            <Pressable
+              onPress={() => {
+                setClosing(null);
+                navigation.navigate('FeedbackCall', { callId: ticket.request_id });
+              }}
+              style={[styles.choice, { borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }]}
+              accessibilityRole="button"
+            >
+              <View style={[styles.choiceIcon, { backgroundColor: '#0284C7' }]}>
+                <PhoneIcon size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.choiceTitle}>Close by taking feedback</Text>
+                <Text style={styles.small}>Call the customer and ask the questions again. Satisfied: the ticket closes.</Text>
+              </View>
+            </Pressable>
+            <Pressable onPress={() => setClosing('now')} style={[styles.choice, { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }]} accessibilityRole="button">
+              <View style={[styles.choiceIcon, { backgroundColor: '#16A34A' }]}>
+                <CheckCircleIcon size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.choiceTitle}>Close without feedback</Text>
+                <Text style={styles.small}>Close it now, without the follow-up call. You can reopen it later.</Text>
+              </View>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.small, { marginBottom: spacing.sm }]}>The ticket closes without the follow-up call.</Text>
+            <TextInput style={styles.sheetInput} value={closeNote} onChangeText={setCloseNote} multiline maxLength={400} placeholder="Note (optional), e.g. Customer said on WhatsApp it is sorted" placeholderTextColor={theme.textMuted} />
+            <View style={styles.sheetRow}>
+              <PrimaryButton label="Back" variant="secondary" style={{ flex: 1 }} onPress={() => setClosing('choose')} disabled={saving} />
+              <PrimaryButton label="Close the ticket" style={{ flex: 1 }} onPress={closeNow} loading={saving} />
+            </View>
+          </>
+        )}
+      </Sheet>
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </View>
   );

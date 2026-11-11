@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { FiCheck, FiCheckCircle, FiChevronDown, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUser, FiPaperclip, FiXCircle } from "react-icons/fi";
+import { FiCheck, FiCheckCircle, FiChevronDown, FiFile, FiFileText, FiImage, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUploadCloud, FiUser, FiPaperclip, FiX, FiXCircle } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -46,7 +46,7 @@ import BookVisitButton from "./BookVisitButton";
 import ReopenTicketModal from "./ReopenTicketModal";
 import PartFeedbackModal from "./PartFeedbackModal";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
-import { Card, Chip, CustomerCard, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, SubmissionAnswers, TicketStatusChip, Timeline, Toast } from "./ui";
+import { CallButton, Card, Chip, CloseTicketChoice, CustomerCard, ErrorBox, Loading, Modal, PageHead, PriorityChip, Steps, SubmissionAnswers, TicketStatusChip, Timeline, Toast } from "./ui";
 
 const SERVICES = [...pestServices, ...deepCleaningServices];
 
@@ -140,8 +140,7 @@ function FollowUpCard({ ticket, deptOnly, canClose, onClose }) {
   if (!open && !done.length) return null;
 
   return (
-    <Card title="Follow-up call" aside={open ? "Closes the ticket when the customer is satisfied" : null}>
-      <div className="fb-stack" style={{ gap: 14 }}>
+    <div className="fb-stack" style={{ gap: 10 }}>
         {done.length > 0 && (
           <div className="fb-stack" style={{ gap: 8 }}>
             {done.map((h) => (
@@ -159,12 +158,19 @@ function FollowUpCard({ ticket, deptOnly, canClose, onClose }) {
             ))}
           </div>
         )}
+        {/* The follow-up call as one bar: what is next, Close the ticket and Open the call. */}
         {open && (
-          <div className="fb-row" style={{ justifyContent: "space-between" }}>
-            <span className="fb-small fb-muted" style={{ maxWidth: 440 }}>
-              {ready
-                ? "The action is taken. Call the customer and ask the feedback questions again (satisfied: the ticket closes), or close the ticket without the call."
-                : `Waiting for ${waitingFor.join(" and ") || "the work"}. Then the collector calls the customer and asks the feedback questions again.`}
+          <div className={`fb-followup-bar ${ready ? "" : "is-waiting"}`}>
+            <span className="fb-followup-bar-icon" aria-hidden="true">
+              <FiPhoneCall />
+            </span>
+            <span className="fb-followup-bar-text">
+              <b>Follow-up call · {ticket.ticket_number}</b>
+              <small>
+                {ready
+                  ? "The action is taken. Call the customer and ask the feedback questions again (satisfied: the ticket closes), or close the ticket without the call."
+                  : `Waiting for ${waitingFor.join(" and ") || "the work"}. Then the collector calls the customer and asks the feedback questions again.`}
+              </small>
             </span>
             {deptOnly ? null : ready ? (
               <span className="fb-row" style={{ gap: 8 }}>
@@ -178,21 +184,20 @@ function FollowUpCard({ ticket, deptOnly, canClose, onClose }) {
                 </Link>
               </span>
             ) : (
-              <button type="button" className="fb-btn fb-btn-primary" disabled title="Opens when the technician completes the re-visit">
+              <button type="button" className="fb-btn fb-btn-primary" disabled title="Opens when the work is done">
                 Open the call
               </button>
             )}
           </div>
         )}
-      </div>
-    </Card>
+    </div>
   );
 }
 
 export default function TicketPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { can, userId, departments, deptOnly, ticketsBase } = useFeedbackAccess();
+  const { can, userId, role, departments, deptOnly, ticketsBase } = useFeedbackAccess();
   const canManage = can("FEEDBACK_MANAGE");
   const [partNotes, setPartNotes] = useState({});
   const [partFiles, setPartFiles] = useState({}); // a file attached when a department marks its part done
@@ -254,10 +259,14 @@ export default function TicketPage() {
   const ops = hasOpsPart(ticket);
   // Each other department's team (or a desk manager) finishes its own part.
   const others = otherParts(ticket);
-  const canFinish = (p) => open && p.status !== "DONE" && (canManage || departments.includes(p.kind));
+  // Only the department's own team (or admin) updates its part; everyone else just sees it.
+  const canFinish = (p) => open && p.status !== "DONE" && (role === "admin" || departments.includes(p.kind));
   const editable = canManage && open;
   const late = open && ticket.action_due_at && isPast(ticket.action_due_at);
   const canMessage = canManage || ticket.raised_by?.id === userId;
+  // Who the Call button on a department's part dials: whoever gave the feedback, else the first with a phone.
+  const customerToCall =
+    ticket.contacts.find((c) => c.id === ticket.feedback?.contact_id && c.phone?.trim()) || ticket.contacts.find((c) => c.phone?.trim()) || null;
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   function changes() {
@@ -561,19 +570,23 @@ export default function TicketPage() {
           </Card>
 
           {others.map((p) => (
-            <Card key={p.kind} title={`${p.label}${p.with_invoices ? " · invoice issue" : ""}`} aside={<PriorityChip priority={p.priority || ticket.priority} />}>
+            <Card key={p.kind} className="fb-dept-card" title={`${p.label}${p.with_invoices ? " · invoice issue" : ""}`} aside={<PriorityChip priority={p.priority || ticket.priority} />}>
               <div className="fb-stack" style={{ gap: 12 }}>
-                {(p.issues || []).length > 0 && (
-                  <ul className="fb-part-issues">
-                    {p.issues.map((i) => (
-                      <li key={i.id}>
-                        <span className="fb-strong">{i.name}</span>
-                        {i.text ? ` - ${i.text}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {(p.issue_summary || !(p.issues || []).length) && <div style={{ whiteSpace: "pre-line" }}>{p.issue_summary || <span className="fb-muted">No details written.</span>}</div>}
+                {/* The problem for this team: the ticked issues as chips, the details under them. */}
+                <div className="fb-dept-issue">
+                  <span className="fb-dept-label">Issue</span>
+                  {(p.issues || []).length > 0 && (
+                    <div className="fb-dept-issue-chips">
+                      {p.issues.map((i) => (
+                        <span key={i.id} className="fb-dept-issue-chip">
+                          <b>{i.name}</b>
+                          {i.text ? ` · ${i.text}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(p.issue_summary || !(p.issues || []).length) && <p className="fb-dept-issue-text">{p.issue_summary || <span className="fb-muted">No details written.</span>}</p>}
+                </div>
                 {p.invoices.length > 0 && (
                   <div className="fb-table-wrap">
                     <table className="fb-table">
@@ -599,22 +612,40 @@ export default function TicketPage() {
                   </div>
                 )}
                 {p.status === "DONE" ? (
-                  <div className="fb-part-done">
-                    <FiCheck aria-hidden="true" style={{ color: "#16a34a", marginTop: 2 }} />
-                    <span>
-                      <span className="fb-strong">Done</span> · {p.done_note}
-                      <span className="fb-small fb-muted"> · {[formatDateTime(p.done_at), p.done_by?.name].filter(Boolean).join(" · ")}</span>
+                  <div className="fb-dept-done">
+                    <span className="fb-dept-done-icon" aria-hidden="true">
+                      <FiCheck />
+                    </span>
+                    <div className="fb-dept-done-body">
+                      <div className="fb-dept-done-top">
+                        <span className="fb-dept-done-pill">Completed</span>
+                        <span className="fb-dept-done-meta">
+                          {p.done_by?.name && (
+                            <span className="fb-dept-avatar" aria-hidden="true">
+                              {initialsOf(p.done_by.name)}
+                            </span>
+                          )}
+                          {[p.done_by?.name, formatDateTime(p.done_at)].filter(Boolean).join(" · ")}
+                        </span>
+                      </div>
+                      <p className="fb-dept-done-note">{p.done_note}</p>
                       {p.attachment && (
-                        <button type="button" className="fb-part-file" onClick={() => openPartAttachment(ticket.id, p.kind).catch((err) => setError(err.message))}>
-                          <FiPaperclip aria-hidden="true" /> {p.attachment.name}
+                        <button type="button" className="fb-dept-file" onClick={() => openPartAttachment(ticket.id, p.kind).catch((err) => setError(err.message))} title="Open the file">
+                          <span className="fb-dept-file-icon" aria-hidden="true">
+                            <FiPaperclip />
+                          </span>
+                          <span className="fb-dept-file-name">{p.attachment.name}</span>
+                          <span className="fb-dept-file-open">Open</span>
                         </button>
                       )}
-                    </span>
+                    </div>
                   </div>
                 ) : canFinish(p) ? (
                   <div className="fb-stack" style={{ gap: 8 }}>
                     <label className="fb-field" htmlFor={`fb-t-part-${p.kind}`}>
-                      What was done? <span className="fb-req">*</span>
+                      <span>
+                        What was done? <span className="fb-req">*</span>
+                      </span>
                       <input
                         id={`fb-t-part-${p.kind}`}
                         className="fb-input"
@@ -628,24 +659,17 @@ export default function TicketPage() {
                       <span>
                         Attach a file <span className="fb-small fb-muted">(optional, up to 10 MB)</span>
                       </span>
-                      <label className={`fb-file-pick ${partFiles[p.kind] ? "has-file" : ""}`}>
-                        <FiPaperclip aria-hidden="true" />
-                        <span>{partFiles[p.kind] ? partFiles[p.kind].name : p.with_invoices ? "Choose a file, e.g. the invoice copy sent" : "Choose a file (photo, PDF, document)"}</span>
-                        <input type="file" onChange={(e) => setPartFiles((f) => ({ ...f, [p.kind]: e.target.files?.[0] || null }))} />
-                        {partFiles[p.kind] && (
-                          <button
-                            type="button"
-                            className="fb-file-x"
-                            aria-label="Remove the file"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              setPartFiles((f) => ({ ...f, [p.kind]: null }));
-                            }}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </label>
+                      {partFiles[p.kind] ? (
+                        <FileChip file={partFiles[p.kind]} onRemove={() => setPartFiles((f) => ({ ...f, [p.kind]: null }))} />
+                      ) : (
+                        <label className="fb-file-pick">
+                          <span className="fb-file-pick-icon" aria-hidden="true">
+                            <FiUploadCloud />
+                          </span>
+                          <span>{p.with_invoices ? "Choose a file, e.g. the invoice copy sent" : "Choose a file (photo, PDF, document)"}</span>
+                          <input type="file" onChange={(e) => setPartFiles((f) => ({ ...f, [p.kind]: e.target.files?.[0] || null }))} />
+                        </label>
+                      )}
                     </div>
                     <div>
                       <button type="button" className="fb-btn fb-btn-primary" disabled={saving || !(partNotes[p.kind] || "").trim()} onClick={() => finishPart(p)}>
@@ -654,7 +678,7 @@ export default function TicketPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="fb-small fb-muted">{open ? `Waiting for ${p.label}.` : "Closed."}</div>
+                  <div className="fb-part-waiting">{open ? `Waiting for ${p.label} to update this.` : "Closed."}</div>
                 )}
                 {/* Optional: once the department is done, ask the customer how it went. */}
                 {p.status === "DONE" && p.kind !== OPERATIONS && (
@@ -675,13 +699,23 @@ export default function TicketPage() {
                     </div>
                   ) : (
                     canMessage && (
-                      <button type="button" className="fb-part-ask" onClick={() => setAskPart(p)}>
-                        <FiPhoneCall aria-hidden="true" />
-                        <span>
-                          <b>Call the customer about {p.label}</b>
-                          <small>Optional · ask how it went with {p.label}'s questions</small>
+                      <div className="fb-dept-ask">
+                        <span className="fb-dept-ask-icon" aria-hidden="true">
+                          <FiPhoneCall />
                         </span>
-                      </button>
+                        <span className="fb-dept-ask-text">
+                          <b>Call the customer about {p.label}</b>
+                          <small>Optional · ask how it went with {p.label}&apos;s questions</small>
+                        </span>
+                        <span className="fb-dept-ask-actions">
+                          {/* Dial the customer straight from here: whoever gave the feedback, else the first number. */}
+                          {customerToCall?.phone?.trim() && (
+                            <CallButton className="fb-btn fb-dept-call" name={customerToCall.name} phone={customerToCall.phone}>
+                              Call {customerToCall.name}
+                            </CallButton>
+                          )}
+                        </span>
+                      </div>
                     )
                   )
                 )}
@@ -999,28 +1033,15 @@ export default function TicketPage() {
       )}
       {modal === "reopen" && !open && canMessage && <ReopenTicketModal ticket={ticket} onDone={reopened} onClose={() => setModal(null)} />}
       {modal === "close" && open && canMessage && (
-        <Modal
-          title={`Close ${ticket.ticket_number}?`}
-          onClose={() => setModal(null)}
-          footer={
-            <>
-              <button type="button" className="fb-btn" onClick={() => setModal(null)}>
-                Cancel
-              </button>
-              <button type="button" className="fb-btn fb-btn-ok" onClick={closeIt} disabled={saving}>
-                {saving ? "Closing…" : "Close the ticket"}
-              </button>
-            </>
-          }
-        >
-          <div className="fb-stack" style={{ gap: 12 }}>
-            <div className="fb-small fb-muted">Every team has finished its work. The ticket closes without the follow-up call; you can reopen it later if needed.</div>
-            <label className="fb-field" htmlFor="fb-t-close-note">
-              Note (optional)
-              <textarea id="fb-t-close-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer said on WhatsApp it is sorted" value={modalNote} onChange={(e) => setModalNote(e.target.value)} />
-            </label>
-          </div>
-        </Modal>
+        <CloseTicketChoice
+          ticketNumber={ticket.ticket_number}
+          saving={saving}
+          note={modalNote}
+          onNote={setModalNote}
+          onCloseNow={closeIt}
+          onTakeFeedback={() => navigate(`${FEEDBACK_HOME}/calls/${ticket.request_id}?followup=1`)}
+          onCancel={() => setModal(null)}
+        />
       )}
 
       {modal === "complete" && open && canComplete && (
@@ -1104,5 +1125,45 @@ export default function TicketPage() {
         </Modal>
       )}
     </>
+  );
+}
+
+/** "1.2 MB" / "340 KB". */
+function fileSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** The picked file: an icon for its kind, name and size, and a round remove button. */
+function FileChip({ file, onRemove }) {
+  const type = file.type || "";
+  const kind = type.startsWith("image/") ? "image" : type === "application/pdf" ? "pdf" : "doc";
+  const Icon = kind === "image" ? FiImage : kind === "pdf" ? FiFileText : FiFile;
+  const ext = (file.name.split(".").pop() || "").toUpperCase().slice(0, 5);
+  return (
+    <div className={`fb-file-chip is-${kind}`}>
+      <span className="fb-file-chip-icon" aria-hidden="true">
+        <Icon />
+      </span>
+      <span className="fb-file-chip-text">
+        <b title={file.name}>{file.name}</b>
+        <small>{[ext, fileSize(file.size)].filter(Boolean).join(" · ")}</small>
+      </span>
+      <button type="button" className="fb-file-chip-x" aria-label="Remove the file" title="Remove" onClick={onRemove}>
+        <FiX />
+      </button>
+    </div>
+  );
+}
+
+/** "TJ" for "Tejas Jain": the small avatar next to who finished a department's part. */
+function initialsOf(name) {
+  return (
+    String(name || "")
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() || "")
+      .join("") || "?"
   );
 }
