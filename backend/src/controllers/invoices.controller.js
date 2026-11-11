@@ -72,11 +72,16 @@ async function listInvoices(req, res) {
               (SELECT MAX(p.payment_date) FROM payment_allocations pa
                  JOIN payments p ON p.id = pa.payment_id AND p.status = 'POSTED'
                 WHERE pa.invoice_id = i.id) AS last_payment_date,
-              t.tds_applicable, t.tds_rate, t.expected_tds, t.deducted_tds, t.pending_tds, t.status AS tds_status
+              t.tds_applicable, t.tds_rate, t.expected_tds, t.deducted_tds, t.pending_tds, t.status AS tds_status,
+              -- Group: the customer's own group, else the group of the company the site belongs to.
+              COALESCE(g.name, sg.name) AS group_name
        FROM invoices i
        JOIN companies co ON co.id = i.customer_id
        LEFT JOIN sites s ON s.id = i.site_id
        LEFT JOIN invoice_tds t ON t.invoice_id = i.id
+       LEFT JOIN group_name g ON g.id = co.group_id
+       LEFT JOIN companies sco ON sco.id = s.company_id
+       LEFT JOIN group_name sg ON sg.id = sco.group_id
        ${where}
        ORDER BY i.invoice_date DESC, i.created_at DESC`,
       params

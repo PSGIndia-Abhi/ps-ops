@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiUpload, FiXCircle } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
-import { showDate, useAccountantData, usePaged } from "./data";
+import { showDate, sortGroups, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 import DateInput from "../../components/accountant/DateInput";
+import MultiSelect from "../../components/accountant/MultiSelect";
 
 const TABS = [
   { key: "ALL", label: "All Invoices", icon: <FiList /> },
@@ -16,21 +17,50 @@ const TABS = [
   { key: "CANCELLED", label: "Cancelled", icon: <FiXCircle /> },
 ];
 
+const STATUS_OPTIONS = [
+  { value: "PENDING", label: "Pending" },
+  { value: "PARTIAL", label: "Partially Paid" },
+  { value: "PAID", label: "Paid" },
+  { value: "OVERDUE", label: "Overdue" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
 export default function InvoiceList() {
   const navigate = useNavigate();
   const { invoices, loading, error, reload } = useAccountantData();
   const [tab, setTab] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [customer, setCustomer] = useState("");
+  const [picked, setPicked] = useState([]); // customers; [] = all
   const [date, setDate] = useState("");
-  const [status, setStatus] = useState("");
+  const [statuses, setStatuses] = useState([]); // [] = all
+  const [groups, setGroups] = useState([]); // [] = all groups
 
-  const customers = useMemo(() => [...new Set(invoices.map((i) => i.customer_name))].sort(), [invoices]);
+  // "No Group" goes last.
+  const groupOptions = useMemo(
+    () => sortGroups(invoices.map((i) => i.group_name)),
+    [invoices]
+  );
+  const inGroups = (i) => !groups.length || groups.includes(i.group_name);
+  // Only the customers of the ticked groups.
+  const customers = useMemo(
+    () => [...new Set(invoices.filter((i) => !groups.length || groups.includes(i.group_name)).map((i) => i.customer_name))].sort(),
+    [invoices, groups]
+  );
+  // Ticking groups unticks customers that are not in them.
+  const changeGroups = (list) => {
+    setGroups(list);
+    if (list.length) {
+      const keep = picked.filter((c) => invoices.some((i) => i.customer_name === c && list.includes(i.group_name)));
+      if (keep.length !== picked.length) setPicked(keep);
+    }
+    setPage(0);
+  };
 
   const rows = invoices.filter((i) => {
     if (tab !== "ALL" && i.status !== tab) return false;
-    if (status && i.status !== status) return false;
-    if (customer && i.customer_name !== customer) return false;
+    if (statuses.length && !statuses.includes(i.status)) return false;
+    if (!inGroups(i)) return false;
+    if (picked.length && !picked.includes(i.customer_name)) return false;
     if (date && i.invoice_date !== date) return false;
     const q = search.trim().toLowerCase();
     return !q || `${i.invoice_number} ${i.customer_name}`.toLowerCase().includes(q);
@@ -42,6 +72,7 @@ export default function InvoiceList() {
       { header: "Invoice No", value: (i) => i.invoice_number },
       { header: "Date", value: (i) => i.invoice_date },
       { header: "Due Date", value: (i) => i.due_date },
+      { header: "Group", value: (i) => i.group_name },
       { header: "Customer", value: (i) => i.customer_name },
       { header: "Site", value: (i) => i.site_name },
       { header: "Invoice Amount", value: (i) => i.invoice_amount },
@@ -74,21 +105,12 @@ export default function InvoiceList() {
           ))}
         </div>
 
-        <div className="ac-filters" style={{ marginBottom: 14 }}>
+        <div className="ac-filters-5" style={{ marginBottom: 14 }}>
           <div className="ac-search"><FiSearch /><input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} /></div>
-          <select className="ac-select" value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(0); }}>
-            <option value="">All Customers</option>
-            {customers.map((c) => <option key={c}>{c}</option>)}
-          </select>
+          <MultiSelect options={groupOptions} value={groups} onChange={changeGroups} allLabel="All Groups" ariaLabel="Groups" />
+          <MultiSelect options={customers} value={picked} onChange={(list) => { setPicked(list); setPage(0); }} allLabel="All Customers" ariaLabel="Customers" />
           <DateInput ariaLabel="Invoice date" style={{ width: "100%" }} value={date} onChange={(v) => { setDate(v); setPage(0); }} />
-          <select className="ac-select" value={status} onChange={(e) => { setStatus(e.target.value); setPage(0); }}>
-            <option value="">All Status</option>
-            <option value="PENDING">Pending</option>
-            <option value="PARTIAL">Partially Paid</option>
-            <option value="PAID">Paid</option>
-            <option value="OVERDUE">Overdue</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+          <MultiSelect options={STATUS_OPTIONS} value={statuses} onChange={(list) => { setStatuses(list); setPage(0); }} allLabel="All Status" ariaLabel="Status" />
         </div>
 
         <div className="ac-table-wrap">

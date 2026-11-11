@@ -2,9 +2,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiBell, FiChevronDown, FiChevronRight, FiClock, FiCreditCard, FiDownload, FiEye, FiZap } from "react-icons/fi";
 import CustomerReminderPanel from "../../components/accountant/CustomerReminderPanel";
+import MultiSelect from "../../components/accountant/MultiSelect";
 import { Badge, DataError, EmptyRow, Pager, Skeleton } from "./ui";
 import { money } from "./format";
-import { byDue, daysOverdue, groupByCustomer, showDate, useAccountantData, usePaged } from "./data";
+import { byDue, customerGroups, daysOverdue, groupByCustomer, showDate, sortGroups, useAccountantData, usePaged } from "./data";
 import { showDue } from "./followups";
 import { exportCsv } from "./exportCsv";
 
@@ -32,7 +33,8 @@ function compare(sort) {
 
 export default function CustomerOutstanding() {
   const navigate = useNavigate();
-  const [customer, setCustomer] = useState("");
+  const [picked, setPicked] = useState([]); // customer ids as strings; [] = all
+  const [groups, setGroups] = useState([]); // [] = all groups
   const location = useLocation();
   const { invoices, payments, followUps, loading, error, reminderError, reload } = useAccountantData();
   // Every invoice of each customer (paid ones too, cancelled left out), by due date, for the expanded row.
@@ -65,11 +67,25 @@ export default function CustomerOutstanding() {
     return map;
   }, [followUps]);
   const hasData = withDues.length > 0;
-  const customerOptions = [...withDues].sort(compare("NAME"));
+  const groupOf = useMemo(() => customerGroups(invoices), [invoices]);
+  const groupOptions = useMemo(() => sortGroups(withDues.map((c) => groupOf.get(c.id))), [withDues, groupOf]);
+  const inGroups = (c) => !groups.length || groups.includes(groupOf.get(c.id));
+  // Only the customers of the ticked groups.
+  const customerOptions = withDues.filter(inGroups).sort(compare("NAME"));
+  // Ticking groups unticks customers that are not in them.
+  const changeGroups = (list) => {
+    setGroups(list);
+    if (list.length) {
+      const keep = picked.filter((id) => withDues.some((c) => String(c.id) === id && list.includes(groupOf.get(c.id))));
+      if (keep.length !== picked.length) setPicked(keep);
+    }
+    setPage(0);
+  };
 
   const rows = withDues
     .filter((c) => {
-      if (customer && String(c.id) !== customer) return false;
+      if (!inGroups(c)) return false;
+      if (picked.length && !picked.includes(String(c.id))) return false;
       if (minAmount && Number(c.outstanding) < Number(minAmount)) return false;
       const q = search.trim().toLowerCase();
       return !q || `${c.name} ${c.code || ""}`.toLowerCase().includes(q);
@@ -91,6 +107,7 @@ export default function CustomerOutstanding() {
 
   function exportRows() {
     exportCsv("customer-outstanding.csv", [
+      { header: "Group", value: (c) => groupOf.get(c.id) },
       { header: "Customer", value: (c) => c.name },
       { header: "Code", value: (c) => c.code },
       { header: "Total Invoiced", value: (c) => c.total_invoiced },
@@ -127,12 +144,11 @@ export default function CustomerOutstanding() {
       </div>
 
       <div className="ac-card">
-        <div className="ac-filters" style={{ marginBottom: 14 }}>
+        <div className="ac-filters-5" style={{ marginBottom: 14 }}>
           <input className="ac-input" placeholder="Search customer name or code" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-          <select className="ac-select" value={customer} onChange={(e) => { setCustomer(e.target.value); setPage(0); }}>
-            <option value="">All Customers</option>
-            {customerOptions.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-          </select>
+          <MultiSelect options={groupOptions} value={groups} onChange={changeGroups} allLabel="All Groups" ariaLabel="Groups" />
+          <MultiSelect options={customerOptions.map((c) => ({ value: String(c.id), label: c.name }))} value={picked}
+            onChange={(list) => { setPicked(list); setPage(0); }} allLabel="All Customers" ariaLabel="Customers" />
           <select className="ac-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort by">
             {SORTS.map(([v, l]) => <option key={v} value={v}>Sort: {l}</option>)}
           </select>

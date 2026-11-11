@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { FiCheckCircle, FiChevronDown, FiChevronRight, FiPlus, FiRepeat } from "react-icons/fi";
 import DateInput from "../../components/accountant/DateInput";
 import FollowUpModal from "../../components/accountant/FollowUpModal";
-import SearchSelect from "../../components/accountant/SearchSelect";
+import MultiSelect from "../../components/accountant/MultiSelect";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { byDue, showDate, useAccountantData, usePaged, ymd } from "./data";
@@ -19,7 +19,10 @@ const TABS = [
   { key: "COMPLETED", label: "Completed", test: (f) => f.status === "COMPLETED" },
 ];
 const REPEATING = "REPEATING"; // the tab that lists repeating reminders (schedules), not reminders
-const EMPTY_FILTERS = { priority: "", scope: "", customer: "", from: "", to: "" };
+const SCOPE_OPTIONS = [{ value: "CUSTOMER", label: "Entire customer" }, { value: "INVOICE", label: "Specific invoice" }];
+const PRIORITY_OPTIONS = [{ value: "LOW", label: "Low" }, { value: "NORMAL", label: "Normal" }, { value: "HIGH", label: "High" }];
+// priority / scope / customer are lists of ticked values ([] = all); from / to are dates.
+const EMPTY_FILTERS = { priority: [], scope: [], customer: [], from: "", to: "" };
 const uniq = (list, key) => [...new Set(list.map((i) => i[key]).filter(Boolean))].sort();
 
 export default function TaskManagement() {
@@ -64,7 +67,8 @@ export default function TaskManagement() {
   }, [showFilters]);
 
   const setFilter = (key) => (e) => { setFilters((f) => ({ ...f, [key]: e.target.value })); setPage(0); };
-  const activeFilters = Object.values(filters).filter(Boolean).length;
+  const setList = (key) => (list) => { setFilters((f) => ({ ...f, [key]: list })); setPage(0); };
+  const activeFilters = Object.values(filters).filter((v) => v.length).length;
   const customerOptions = useMemo(() => uniq(followUps, "customer_name"), [followUps]);
 
   // Live outstanding per reminder: the invoice's pending, or the customer's total pending.
@@ -82,9 +86,9 @@ export default function TaskManagement() {
   const rows = followUps
     .filter((f) => {
       if (!activeTab.test(f)) return false;
-      if (filters.priority && f.priority !== filters.priority) return false;
-      if (filters.scope && f.scope !== filters.scope) return false;
-      if (filters.customer && f.customer_name !== filters.customer) return false;
+      if (filters.priority.length && !filters.priority.includes(f.priority)) return false;
+      if (filters.scope.length && !filters.scope.includes(f.scope)) return false;
+      if (filters.customer.length && !filters.customer.includes(f.customer_name)) return false;
       if (filters.from && (!f.due_date || f.due_date < filters.from)) return false;
       if (filters.to && (!f.due_date || f.due_date > filters.to)) return false;
       return true;
@@ -159,31 +163,15 @@ export default function TaskManagement() {
               <div className="ac-dropdown" role="dialog" aria-label="Filters">
                 <div className="ac-field">
                   <label>Reminder for</label>
-                  <select className="ac-select" value={filters.scope} onChange={setFilter("scope")}>
-                    <option value="">Customer and invoice</option>
-                    <option value="CUSTOMER">Entire customer</option>
-                    <option value="INVOICE">Specific invoice</option>
-                  </select>
+                  <MultiSelect options={SCOPE_OPTIONS} value={filters.scope} onChange={setList("scope")} allLabel="Customer and invoice" ariaLabel="Reminder for" />
                 </div>
                 <div className="ac-field">
                   <label>Priority</label>
-                  <select className="ac-select" value={filters.priority} onChange={setFilter("priority")}>
-                    <option value="">All priorities</option>
-                    <option value="LOW">Low</option>
-                    <option value="NORMAL">Normal</option>
-                    <option value="HIGH">High</option>
-                  </select>
+                  <MultiSelect options={PRIORITY_OPTIONS} value={filters.priority} onChange={setList("priority")} allLabel="All priorities" ariaLabel="Priority" />
                 </div>
                 <div className="ac-field">
                   <label>Customer</label>
-                  <SearchSelect
-                    ariaLabel="Customer"
-                    listId="tm-customer-filter"
-                    allLabel="All customers"
-                    options={customerOptions.map((c) => ({ value: c, label: c }))}
-                    value={filters.customer}
-                    onChange={(v) => setFilter("customer")({ target: { value: v } })}
-                  />
+                  <MultiSelect options={customerOptions} value={filters.customer} onChange={setList("customer")} allLabel="All customers" ariaLabel="Customer" />
                 </div>
                 <div className="ac-field">
                   <label>Due date</label>

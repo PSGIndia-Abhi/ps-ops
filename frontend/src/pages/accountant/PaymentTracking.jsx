@@ -6,6 +6,7 @@ import { money } from "./format";
 import { daysOverdue, showDate, useAccountantData, usePaged } from "./data";
 import { exportCsv } from "./exportCsv";
 import DateInput from "../../components/accountant/DateInput";
+import MultiSelect from "../../components/accountant/MultiSelect";
 
 const PIPELINE = [
   { key: "PENDING", label: "Pending" },
@@ -36,9 +37,9 @@ const sum = (list, key) => list.reduce((s, i) => s + (Number(i[key]) || 0), 0);
 export default function PaymentTracking() {
   const navigate = useNavigate();
   const { invoices, loading, error, reload } = useAccountantData();
-  const [status, setStatus] = useState("");
+  const [statuses, setStatuses] = useState([]); // [] = all
   const [search, setSearch] = useState("");
-  const [customer, setCustomer] = useState("");
+  const [picked, setPicked] = useState([]); // customers; [] = all
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -63,8 +64,8 @@ export default function PaymentTracking() {
   const unpaid = active.filter((i) => i.pending_amount > 0);
 
   const rows = invoices.filter((i) => {
-    if (status && i.status !== status) return false;
-    if (customer && i.customer_name !== customer) return false;
+    if (statuses.length && !statuses.includes(i.status)) return false;
+    if (picked.length && !picked.includes(i.customer_name)) return false;
     if (from && (!i.due_date || i.due_date < from)) return false;
     if (to && (!i.due_date || i.due_date > to)) return false;
     const q = search.trim().toLowerCase();
@@ -86,6 +87,7 @@ export default function PaymentTracking() {
   }
 
   const filterChange = (setter) => (e) => { setter(e.target.value); setPage(0); };
+  const listChange = (setter) => (list) => { setter(list); setPage(0); };
 
   return (
     <div className="ac-page">
@@ -116,8 +118,8 @@ export default function PaymentTracking() {
             <button
               key={p.key}
               type="button"
-              className={`ac-pipe ${status === p.key ? "active" : ""}`}
-              onClick={() => { setStatus((s) => (s === p.key ? "" : p.key)); setPage(0); }}
+              className={`ac-pipe ${statuses.includes(p.key) ? "active" : ""}`}
+              onClick={() => { setStatuses((s) => (s.includes(p.key) ? s.filter((k) => k !== p.key) : [...s, p.key])); setPage(0); }}
             >
               <Badge value={p.key} />
               <div className="ac-pipe-count">{list.length}</div>
@@ -149,14 +151,8 @@ export default function PaymentTracking() {
       <div className="ac-card">
         <div className="ac-filters-5" style={{ marginBottom: 14 }}>
           <input className="ac-input" placeholder="Search invoice no or customer" value={search} onChange={filterChange(setSearch)} />
-          <select className="ac-select" value={customer} onChange={filterChange(setCustomer)}>
-            <option value="">All Customers</option>
-            {customers.map((c) => <option key={c}>{c}</option>)}
-          </select>
-          <select className="ac-select" value={status} onChange={filterChange(setStatus)}>
-            <option value="">All Status</option>
-            {PIPELINE.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </select>
+          <MultiSelect options={customers} value={picked} onChange={listChange(setPicked)} allLabel="All Customers" ariaLabel="Customers" />
+          <MultiSelect options={PIPELINE.map((p) => ({ value: p.key, label: p.label }))} value={statuses} onChange={listChange(setStatuses)} allLabel="All Status" ariaLabel="Status" />
           <DateInput ariaLabel="Due from" style={{ width: "100%" }} value={from} onChange={(v) => filterChange(setFrom)({ target: { value: v } })} />
           <DateInput ariaLabel="Due to" style={{ width: "100%" }} value={to} onChange={(v) => filterChange(setTo)({ target: { value: v } })} />
         </div>
