@@ -47,7 +47,7 @@ const factory = (t: CrmTheme) => ({
   sub: { ...typography.caption, color: t.textMuted, flex: 1 },
   contact: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, borderWidth: 1, borderColor: t.border, borderRadius: radii.md, padding: spacing.sm, marginBottom: spacing.xs },
   contactOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
-  dot: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: t.textMuted },
+  dot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: t.textMuted },
   dotOn: { borderWidth: 6, borderColor: t.primary },
   name: { ...typography.bodyMedium, color: t.textPrimary },
   small: { ...typography.caption, color: t.textMuted },
@@ -89,15 +89,15 @@ const factory = (t: CrmTheme) => ({
   editBox: { borderWidth: 1, borderColor: t.primary, borderRadius: radii.md, padding: spacing.sm, marginBottom: spacing.xs, backgroundColor: t.primarySoftBg },
   fieldError: { ...typography.caption, color: t.dangerText, marginBottom: spacing.xs },
   // The saved-numbers card: the picked number, a dropdown of the site's other numbers, Call and Edit.
-  saved: { borderWidth: 1, borderColor: t.border, borderRadius: 16, padding: spacing.sm, marginBottom: spacing.xs, backgroundColor: t.surface },
+  saved: { borderWidth: 1, borderColor: t.border, borderRadius: 14, paddingVertical: spacing.xs, paddingHorizontal: 10, marginBottom: spacing.xs, backgroundColor: t.surface },
   savedOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg, borderWidth: 1.5 },
-  savedHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
-  avatar: { width: 40, height: 40, borderRadius: 12, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
+  savedHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs },
+  avatar: { width: 28, height: 28, borderRadius: 9, backgroundColor: t.primary, alignItems: 'center' as const, justifyContent: 'center' as const },
   avatarOff: { backgroundColor: t.textMuted },
-  avatarText: { ...typography.captionMedium, fontWeight: '800' as const, color: t.textOnPrimary },
+  avatarText: { ...typography.captionMedium, fontWeight: '800' as const, fontSize: 12, color: t.textOnPrimary },
   savedActions: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.xs },
-  callWide: { flex: 1, minHeight: 44, borderRadius: radii.md, backgroundColor: t.primary, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: spacing.sm },
-  editSquare: { width: 44, minHeight: 44, borderRadius: radii.md, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface, alignItems: 'center' as const, justifyContent: 'center' as const },
+  callWide: { flex: 1, minHeight: 36, borderRadius: radii.md, backgroundColor: t.primary, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, paddingHorizontal: spacing.sm },
+  editSquare: { width: 36, minHeight: 36, borderRadius: radii.md, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface, alignItems: 'center' as const, justifyContent: 'center' as const },
   another: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: t.border, borderRadius: 16, padding: spacing.sm, marginBottom: spacing.xs },
   anotherOn: { borderStyle: 'solid' as const, borderColor: t.primary, backgroundColor: t.primarySoftBg },
   plus: { width: 32, height: 32, borderRadius: 10, backgroundColor: t.primarySoftBg, alignItems: 'center' as const, justifyContent: 'center' as const },
@@ -586,6 +586,7 @@ export function FeedbackCallScreen() {
         </Pressable>
         {contactOptions.length > 1 && (
           <SelectField
+            compact
             label={`Saved numbers · ${contactOptions.length}`}
             placeholder="Choose a number"
             sheetTitle="Which number?"

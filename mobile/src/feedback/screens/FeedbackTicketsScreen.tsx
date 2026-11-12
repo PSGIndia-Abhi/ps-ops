@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner } from '../../crm/ui/CrmScreen';
@@ -16,6 +16,9 @@ import { ClipboardListIcon, SearchIcon } from '../../crm/ui/crmIcons';
 import { ChevronRightIcon, CloseIcon } from '../../components/icons';
 import { toneColors } from '../../crm/ui/StatusBadge';
 import { Dropdown } from '../Dropdown';
+
+/** Priority colours - the same dots as the website's ticket list. */
+const PRIORITY_DOT: Record<string, string> = { VERY_HIGH: '#991b1b', HIGH: '#dc2626', MEDIUM: '#ea580c', LOW: '#4f46e5' };
 
 
 const factory = (t: CrmTheme) => ({
@@ -158,10 +161,20 @@ export function FeedbackTicketsScreen() {
                 <Dropdown<string>
                   caption="Priority"
                   value={priority}
-                  options={[{ value: '', label: 'Any' }, ...PRIORITIES.map((p) => ({ value: p as string, label: PRIORITY[p].label }))]}
+                  options={[{ value: '', label: 'Any' }, ...PRIORITIES.map((p) => ({ value: p as string, label: PRIORITY[p].label, dot: PRIORITY_DOT[p] }))]}
                   onChange={setPriority}
                   highlight={!!priority}
                 />
+                {/* Department as a dropdown too (same as the website's ticket list). */}
+                {!deptOnly && departmentList.length > 0 && (
+                  <Dropdown<DepartmentKind | ''>
+                    caption="Department"
+                    value={department}
+                    options={[{ value: '' as DepartmentKind | '', label: 'All' }, ...departmentList.map((d) => ({ value: d.kind as DepartmentKind | '', label: d.name || d.label }))]}
+                    onChange={setDepartment}
+                    highlight={!!department}
+                  />
+                )}
               </View>
               <View style={[styles.search, !!search && styles.searchOn]}>
                 <SearchIcon size={17} color={theme.textMuted} />
@@ -180,18 +193,6 @@ export function FeedbackTicketsScreen() {
                   </Pressable>
                 )}
               </View>
-              {!deptOnly && departmentList.length > 0 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={[styles.chipRow, styles.chipScrollContent]}>
-                  {[{ value: '' as DepartmentKind | '', label: 'All departments' }, ...departmentList.map((d) => ({ value: d.kind as DepartmentKind | '', label: d.name || d.label }))].map((o) => {
-                    const on = department === o.value;
-                    return (
-                      <Pressable key={o.label} onPress={() => setDepartment(o.value)} style={[styles.chip, on && styles.chipOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
-                        <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              )}
               <View style={styles.filterFoot}>
                 <Text style={styles.filterNow}>{tickets ? `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}` : ''}</Text>
                 {(!!priority || !!department || !!search || status !== 'OPEN') && (
