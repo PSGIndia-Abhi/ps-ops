@@ -1,5 +1,21 @@
 const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
+const { logAudit, diff } = require("../services/Audit.service");
+
+// One audit entry for a change to a customer's payment contact.
+function auditContact(connection, req, customerId, contactId, action, summary, extra = {}) {
+  return logAudit(connection, req, {
+    module: "CONTACT",
+    action,
+    entity_type: "CONTACT",
+    entity_id: contactId,
+    entity_label: extra.label || null,
+    customer_id: customerId,
+    summary,
+    changes: extra.changes,
+    details: extra.details,
+  });
+}
 
 // The accountant's own phone list for a customer (table customer_payment_contacts):
 // who to call about payments. Separate from `contacts`, the admin's site contacts --
@@ -120,11 +136,16 @@ async function createCustomerContact(req, res) {
         [customerId]
       );
     }
+    const newId = uuid();
     await connection.query(
       `INSERT INTO customer_payment_contacts (id, customer_id, name, phone, email, is_primary, created_by, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [uuid(), customerId, input.name, input.phone, input.email || null, primary ? 1 : 0, req.user.id, req.user.id]
+      [newId, customerId, input.name, input.phone, input.email || null, primary ? 1 : 0, req.user.id, req.user.id]
     );
+    await auditContact(connection, req, customerId, newId, "CONTACT_ADDED", `Contact added: ${input.name} · ${input.phone}${primary ? " (primary)" : ""}`, {
+      label: `${input.name} · ${input.phone}`,
+      details: { name: input.name, phone: input.phone, email: input.email || null, is_primary: primary },
+    });
     await connection.commit();
 
     res.status(201).json(contactView(await loadContacts(connection, customerId)));
@@ -147,6 +168,10 @@ async function updateCustomerContact(req, res) {
     await connection.beginTransaction();
     const existing = await assertNotDuplicate(connection, customerId, input.digits, contactId);
     if (!existing.some((r) => r.id === contactId)) throw withStatus("Contact not found", 404);
+    const [[before]] = await connection.query(
+      "SELECT name, phone, email, is_primary FROM customer_payment_contacts WHERE id = ?",
+      [contactId]
+    );
     if (input.primary) {
       await connection.query(
         "UPDATE customer_payment_contacts SET is_primary = 0 WHERE customer_id = ? AND is_primary = 1 AND id <> ?",
@@ -158,6 +183,17 @@ async function updateCustomerContact(req, res) {
         WHERE id = ? AND customer_id = ?`,
       [input.name, input.phone, input.primary ? 1 : 0, req.user.id, ...(input.email !== undefined ? [input.email] : []), contactId, customerId]
     );
+    const changes = diff(
+      { ...before, is_primary: Boolean(before?.is_primary) },
+      { name: input.name, phone: input.phone, email: input.email !== undefined ? input.email : before?.email, is_primary: input.primary },
+      ["name", "phone", "email", "is_primary"]
+    );
+    if (changes.length) {
+      await auditContact(connection, req, customerId, contactId, "CONTACT_EDITED", `Contact edited: ${changes.map((c) => c.field.replace("is_", "")).join(", ")}`, {
+        label: `${input.name} · ${input.phone}`,
+        changes,
+      });
+    }
     await connection.commit();
 
     res.json(contactView(await loadContacts(connection, customerId)));
@@ -232,6 +268,11 @@ async function archiveCustomerContact(req, res) {
     if (target.is_primary && next) {
       await connection.query("UPDATE customer_payment_contacts SET is_primary = 1 WHERE id = ?", [next.id]);
     }
+    const [[archived]] = await connection.query("SELECT name, phone FROM customer_payment_contacts WHERE id = ?", [contactId]);
+    await auditContact(connection, req, customerId, contactId, "CONTACT_ARCHIVED", `Contact archived: ${archived?.name} · ${archived?.phone}`, {
+      label: `${archived?.name} · ${archived?.phone}`,
+      details: { was_primary: Boolean(target.is_primary), new_primary_id: target.is_primary && next ? next.id : null },
+    });
     await connection.commit();
 
     res.json(contactView(await loadContacts(connection, customerId)));
@@ -263,6 +304,10 @@ async function restoreCustomerContact(req, res) {
       "UPDATE customer_payment_contacts SET is_active = 1, is_primary = ?, updated_by = ? WHERE id = ?",
       [active.length ? 0 : 1, req.user.id, contactId]
     );
+    await auditContact(connection, req, customerId, contactId, "CONTACT_RESTORED", `Contact restored: ${target.phone}`, {
+      label: String(target.phone),
+      details: { restored_as_primary: !active.length },
+    });
     await connection.commit();
 
     res.json(contactView(await loadContacts(connection, customerId)));

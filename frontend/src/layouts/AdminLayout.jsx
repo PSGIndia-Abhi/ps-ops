@@ -262,6 +262,16 @@ export default function AdminLayout() {
 
               {isAdmin && <AuditsNav base="/admin" />}
 
+              {/* Audit Log: who changed what in the Accountant Panel (admin only). */}
+              {isAdmin && (
+                <button
+                  className={`nav-btn ${isActive("/admin/audit-log") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/audit-log")}
+                >
+                  Audit Log
+                </button>
+              )}
+
               {/* Lead Management is its own area (pages/leads); admin can look at every dashboard there. */}
               {role === "admin" && (
                 <button className="nav-btn" onClick={() => navigate("/leads")}>
@@ -421,6 +431,17 @@ export default function AdminLayout() {
               }}
             >
               Customer Feedback
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/audit-log");
+              }}
+            >
+              Audit Log
             </button>
           )}
 

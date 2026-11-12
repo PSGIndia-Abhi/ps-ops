@@ -5,6 +5,7 @@ const { v4: uuid } = require("uuid");
 const { notifyInvoiceImport } = require("./notifications.service");
 const { insertInvoiceTds } = require("./Tds.service");
 const { syncInvoiceStatusesSafely } = require("./InvoiceStatus.service");
+const { logAudit } = require("./Audit.service");
 
 const MAX_ROWS = 10000;
 const MAX_AMOUNT = 9999999999999.99;
@@ -387,9 +388,18 @@ async function listImports(user) {
 }
 
 // Removes an upload from the history. Invoices that were already imported from it are NOT touched.
-async function deleteImport(importId, user) {
-  await loadImport(importId, user);
+async function deleteImport(importId, user, req = null) {
+  const imp = await loadImport(importId, user);
   await pool.query("DELETE FROM invoice_imports WHERE id = ?", [importId]);
+  await logAudit(pool, req || { user }, {
+    module: "IMPORT",
+    action: "IMPORT_DELETED",
+    entity_type: "IMPORT",
+    entity_id: importId,
+    entity_label: imp.file_name,
+    summary: `Upload "${imp.file_name}" removed from history (${imp.total_rows || 0} rows; invoices already imported are kept)`,
+    details: { status: imp.status, total_rows: imp.total_rows, valid_rows: imp.valid_rows, error_rows: imp.error_rows },
+  });
   return { success: true };
 }
 
@@ -397,7 +407,7 @@ async function deleteImport(importId, user) {
 // and, only now, writes anything to the database: the invoice_imports record, one
 // invoice_import_rows row per line (for the audit trail), and the invoices themselves.
 // This is the only place any of this data is ever persisted.
-async function confirmImport(fileName, submittedRows, user) {
+async function confirmImport(fileName, submittedRows, user, req = null) {
   if (!Array.isArray(submittedRows) || !submittedRows.length) throw withStatus("There is nothing to submit.");
 
   const rawRows = submittedRows.map((r, i) => ({ rowNumber: Number(r.rowNumber) || i + 2, ...(r.raw || {}) }));
@@ -478,6 +488,24 @@ async function confirmImport(fileName, submittedRows, user) {
         [rowValues.slice(i, i + 500)]
       );
     }
+
+    // One entry for the whole file. Each invoice's own history finds it through its import row.
+    await logAudit(connection, req || { user }, {
+      module: "IMPORT",
+      action: "INVOICES_IMPORTED",
+      entity_type: "IMPORT",
+      entity_id: importId,
+      entity_label: safeFileName,
+      source: "IMPORT",
+      summary: `${validated.length} rows · ${imported} invoices created · ${validated.length - imported} failed`,
+      details: {
+        file_name: safeFileName,
+        total_rows: validated.length,
+        imported,
+        failed: validated.length - imported,
+        skipped: skipped.slice(0, 50),
+      },
+    });
 
     await connection.commit();
     await syncInvoiceStatusesSafely(); // invoices imported with a past due date are stored as OVERDUE right away

@@ -61,7 +61,7 @@ async function listImportHistory(req, res) {
 
 async function removeImport(req, res) {
   try {
-    res.json(await deleteImport(req.params.id, req.user));
+    res.json(await deleteImport(req.params.id, req.user, req));
   } catch (err) {
     fail(res, err, "Failed to remove the upload");
   }
@@ -80,7 +80,7 @@ async function downloadErrorRows(req, res) {
 
 async function confirmInvoiceImport(req, res) {
   try {
-    res.json(await confirmImport(req.body?.file_name, req.body?.rows, req.user));
+    res.json(await confirmImport(req.body?.file_name, req.body?.rows, req.user, req));
   } catch (err) {
     fail(res, err, "Failed to import the invoices");
   }

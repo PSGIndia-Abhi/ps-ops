@@ -142,7 +142,7 @@ async function createPayment(req, res) {
       remarks,
       allocations,
       created_by: userId,
-    });
+    }, req);
     res.json({ success: true, id: paymentId });
   } catch (err) {
     console.error("Failed to create payment:", err);

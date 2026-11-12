@@ -858,3 +858,81 @@ a.ac-contact-call:hover { background: #dcfce7; }
   .ac-fu-amount { align-items: flex-start; text-align: left; flex: 1 1 100%; }
   .ac-track-note { display: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Audit log (Admin -> Audit Log page, and "Change History" on Invoice Details)
+   Large screens: one filter row. Laptops: 4 per row. Tablets: 2. Phones: 1,
+   and the table turns into one card per entry.
+   --------------------------------------------------------------------------- */
+.ac-audit-page { min-width: 0; }
+.ac-audit-title { display: flex; align-items: center; gap: 8px; }
+.ac-audit-title .ac-title-icon { margin: 0; flex: none; }
+
+.ac-audit-filters { display: grid; grid-template-columns: repeat(2, minmax(150px, 0.8fr)) repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr) auto auto; gap: 10px; align-items: center; }
+.ac-audit-filters > * { min-width: 0; }
+.ac-audit-filters .ac-date-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ac-audit-filters .ac-date-field .ac-input { flex: 1; min-width: 0; width: auto; }
+.ac-audit-filter-btns { display: flex; gap: 8px; }
+.ac-audit-filter-btns .ac-btn { justify-content: center; }
+
+.ac-audit-old { color: #b91c1c; text-decoration: line-through; }
+.ac-audit-new { color: #15803d; font-weight: 600; }
+.ac-audit-muted { color: #64748b; font-size: 12px; }
+.ac-audit-row { cursor: pointer; }
+.ac-audit-row:hover td { background: #f8fafc; }
+.ac-audit-expand td { background: #f8fafc; }
+.ac-audit-table td.ac-audit-change { min-width: 260px; overflow-wrap: anywhere; }
+.ac-audit-detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; font-size: 13px; overflow-wrap: anywhere; }
+.ac-audit-detail b { display: block; font-size: 12px; color: #64748b; font-weight: 600; }
+
+.ac-history { display: flex; flex-direction: column; }
+.ac-history-item { display: grid; grid-template-columns: 140px 110px minmax(0, 1fr); gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 13.5px; overflow-wrap: anywhere; }
+.ac-history-item:last-child { border-bottom: 0; }
+
+/* laptops */
+@media (max-width: 1400px) {
+  .ac-audit-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ac-audit-filters .ac-audit-search { grid-column: span 2; }
+}
+/* tablets */
+@media (max-width: 900px) {
+  .ac-audit-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ac-audit-filters .ac-audit-search { grid-column: auto; }
+  .ac-audit-filter-btns { grid-column: span 2; }
+  .ac-audit-filter-btns .ac-btn { flex: 1; }
+  .ac-history-item { grid-template-columns: 130px minmax(0, 1fr); }
+  .ac-history-item > :nth-child(2) { display: none; }
+}
+/* phones */
+@media (max-width: 640px) {
+  .ac-audit-head { flex-direction: column; align-items: stretch; }
+  .ac-audit-head .ac-btn { justify-content: center; }
+  .ac-audit-filters { grid-template-columns: minmax(0, 1fr); }
+  .ac-audit-filters .ac-audit-search,
+  .ac-audit-filter-btns { grid-column: auto; }
+  .ac-audit-filters .ac-date-field { justify-content: space-between; }
+  .ac-audit-filters .ac-date-field > span { width: 42px; }
+
+  .ac-audit-card .ac-pager { flex-direction: column; gap: 10px; align-items: center; }
+  .ac-history-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+/* tablets and phones: table -> one card per entry, each value with its column name */
+@media (max-width: 900px) {
+  .ac-audit-card { padding: 12px; }
+  .ac-audit-card .ac-table-wrap { overflow-x: visible; }
+  .ac-audit-table, .ac-rp-main .ac-audit-table { min-width: 0 !important; width: 100%; }
+  .ac-audit-table td.ac-audit-change { min-width: 0; }
+  .ac-audit-table tr.ac-audit-row td > * { min-width: 0; overflow-wrap: anywhere; }
+  .ac-audit-table thead { display: none; }
+  .ac-audit-table, .ac-audit-table tbody { display: block; }
+  .ac-audit-table tr.ac-audit-row { display: block; border: 1px solid #e5e7eb; border-radius: 12px; padding: 6px 12px; margin-bottom: 10px; background: #fff; }
+  .ac-audit-table tr.ac-audit-row td { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; white-space: normal !important; min-width: 0; }
+  .ac-audit-table tr.ac-audit-row td:last-child { border-bottom: 0; }
+  .ac-audit-table tr.ac-audit-row td::before { content: attr(data-label); color: #64748b; font-size: 12px; font-weight: 600; }
+  .ac-audit-table tr.ac-audit-expand { display: block; margin: -6px 0 12px; }
+  .ac-audit-table tr.ac-audit-expand td { display: block; padding: 0; background: transparent; border: 0; }
+  .ac-audit-detail { grid-template-columns: minmax(0, 1fr); }
+  .ac-audit-table tr:not(.ac-audit-row):not(.ac-audit-expand) { display: block; }
+  .ac-audit-table tr:not(.ac-audit-row):not(.ac-audit-expand) td { display: block; }
+
+}

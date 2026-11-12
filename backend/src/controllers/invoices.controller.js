@@ -2,6 +2,7 @@ const { pool } = require("../../db");
 const { v4: uuid } = require("uuid");
 const { insertInvoiceTds } = require("../services/Tds.service");
 const { syncInvoiceStatusesSafely } = require("../services/InvoiceStatus.service");
+const { logAudit, diff } = require("../services/Audit.service");
 
 function withStatus(message, status = 400) {
   const err = new Error(message);
@@ -190,6 +191,22 @@ async function createInvoice(req, res) {
       [id, invoice_number, customer_id, resolvedSiteId, invoice_date, due_date || null, invoice_amount, invoice_amount, remarks || null, userId]
     );
     await insertInvoiceTds(connection, id, customer, invoice_amount);
+    await logAudit(connection, req, {
+      module: "INVOICE",
+      action: "INVOICE_CREATED",
+      entity_type: "INVOICE",
+      entity_id: id,
+      entity_label: invoice_number,
+      customer_id,
+      summary: `Invoice ${invoice_number} created for ₹${Number(invoice_amount).toFixed(2)}`,
+      details: {
+        invoice_date,
+        due_date: due_date || null,
+        invoice_amount: Number(invoice_amount),
+        site_id: resolvedSiteId,
+        tds_rate: customer.tds_applicable ? Number(customer.tds_rate) : null,
+      },
+    });
     await connection.commit();
     await syncInvoiceStatusesSafely();
 
@@ -230,25 +247,41 @@ async function updateInvoice(req, res) {
     const newPending = newAmount - Number(invoice.paid_amount);
     const newStatus = newPending <= 0 ? "PAID" : Number(invoice.paid_amount) > 0 ? "PARTIAL" : "PENDING";
 
+    const after = {
+      invoice_date: invoice_date || invoice.invoice_date,
+      due_date: due_date !== undefined ? due_date : invoice.due_date,
+      invoice_amount: newAmount,
+      pending_amount: newPending,
+      status: newStatus,
+      remarks: remarks !== undefined ? remarks : invoice.remarks,
+    };
+
+    await connection.beginTransaction();
     await connection.query(
       `UPDATE invoices
        SET invoice_date = ?, due_date = ?, invoice_amount = ?, pending_amount = ?, status = ?, remarks = ?, updated_by = ?
        WHERE id = ?`,
-      [
-        invoice_date || invoice.invoice_date,
-        due_date !== undefined ? due_date : invoice.due_date,
-        newAmount,
-        newPending,
-        newStatus,
-        remarks !== undefined ? remarks : invoice.remarks,
-        userId,
-        id,
-      ]
+      [after.invoice_date, after.due_date, after.invoice_amount, after.pending_amount, after.status, after.remarks, userId, id]
     );
+    const changes = diff(invoice, after, ["invoice_date", "due_date", "invoice_amount", "pending_amount", "status", "remarks"]);
+    if (changes.length) {
+      await logAudit(connection, req, {
+        module: "INVOICE",
+        action: "INVOICE_EDITED",
+        entity_type: "INVOICE",
+        entity_id: id,
+        entity_label: invoice.invoice_number,
+        customer_id: invoice.customer_id,
+        summary: `Invoice ${invoice.invoice_number} edited: ${changes.map((c) => c.field.replace(/_/g, " ")).join(", ")}`,
+        changes,
+      });
+    }
+    await connection.commit();
     await syncInvoiceStatusesSafely(); // the due date may have moved, so re-check the stored status
 
     res.json({ success: true });
   } catch (err) {
+    await connection.rollback().catch(() => {});
     console.error("Failed to update invoice:", err);
     res.status(500).json({ error: "Failed to update invoice" });
   } finally {
@@ -274,10 +307,25 @@ async function cancelInvoice(req, res) {
       if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(403).json({ error: "Forbidden" });
     }
 
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    await connection.beginTransaction();
     await connection.query("UPDATE invoices SET status = 'CANCELLED', updated_by = ? WHERE id = ?", [userId, id]);
+    await logAudit(connection, req, {
+      module: "INVOICE",
+      action: "INVOICE_CANCELLED",
+      entity_type: "INVOICE",
+      entity_id: id,
+      entity_label: invoice.invoice_number,
+      customer_id: invoice.customer_id,
+      summary: `Invoice ${invoice.invoice_number} cancelled (₹${Number(invoice.invoice_amount).toFixed(2)})`,
+      changes: [{ field: "status", from: invoice.status, to: "CANCELLED" }],
+      reason: reason || null,
+    });
+    await connection.commit();
 
     res.json({ success: true });
   } catch (err) {
+    await connection.rollback().catch(() => {});
     console.error("Failed to cancel invoice:", err);
     res.status(500).json({ error: "Failed to cancel invoice" });
   } finally {
