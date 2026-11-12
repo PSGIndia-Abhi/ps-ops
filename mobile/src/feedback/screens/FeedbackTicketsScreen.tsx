@@ -253,6 +253,16 @@ export function FeedbackTicketsScreen() {
                   {t.issue_summary}
                 </Text>
               )}
+              {/* With Operations on the ticket, each other department's issues and note (not in the summary above). */}
+              {(t.parts || []).some((p) => p.kind === OPERATIONS) &&
+                (t.parts || [])
+                  .filter((p) => p.kind !== OPERATIONS && (!!p.issue_summary || (p.issues || []).length > 0))
+                  .map((p) => (
+                    <Text key={p.kind} style={styles.summary} numberOfLines={2}>
+                      <Text style={{ fontWeight: '700' }}>{p.label}: </Text>
+                      {[(p.issues || []).map((i) => (i.text ? `${i.name} (${i.text})` : i.name)).join(', '), p.issue_summary].filter(Boolean).join(' - ')}
+                    </Text>
+                  ))}
               {/* What happens next, as a coloured strip across the bottom of the card. */}
               <View style={[styles.nextBar, { backgroundColor: nextBg }]}>
                 <Text style={[styles.next, { color: nextFg }]} numberOfLines={1}>

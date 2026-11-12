@@ -143,7 +143,7 @@ export function FeedbackCallsScreen() {
       <View style={styles.searchRow}>
         <View style={[styles.search, { flex: 1 }]}>
           <SearchIcon size={18} color={theme.textMuted} />
-          <TextInput style={styles.searchInput} placeholder="Search site or customer" placeholderTextColor={theme.textMuted} value={q} onChangeText={setQ} />
+          <TextInput style={styles.searchInput} placeholder="Search customer, site or number" placeholderTextColor={theme.textMuted} value={q} onChangeText={setQ} />
         </View>
       </View>
       <CrmErrorBanner message={error} onRetry={load} />

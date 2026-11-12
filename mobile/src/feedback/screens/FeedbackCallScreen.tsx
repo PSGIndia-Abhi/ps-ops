@@ -786,7 +786,11 @@ export function FeedbackCallScreen() {
                   <PrimaryButton label="Raise ticket" variant="brand" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || feedbackLock} />
                 </View>
               ) : (
-                <PrimaryButton label="Save · Done (Good)" onPress={() => saveGood()} loading={saving} disabled={!chosen.length || feedbackLock} style={{ marginTop: spacing.sm }} />
+                // All good: still let them raise a ticket for any other complaint.
+                <View style={styles.row}>
+                  <PrimaryButton label="Raise ticket" variant="secondary" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || feedbackLock} />
+                  <PrimaryButton label="Save · Done (Good)" style={{ flex: 1 }} onPress={() => saveGood()} loading={saving} disabled={!chosen.length || feedbackLock} />
+                </View>
               )}
               </View>
             </Panel>

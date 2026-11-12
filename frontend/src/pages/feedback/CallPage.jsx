@@ -844,9 +844,15 @@ export default function CallPage() {
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="fb-btn fb-btn-ok" disabled={saving || !chosen.length} onClick={() => saveGood()}>
-                      <FiCheck /> {saving ? "Saving…" : "Save feedback · Done (Good)"}
-                    </button>
+                    <>
+                      {/* All good: a ticket can still be raised for any other complaint. */}
+                      <button type="button" className="fb-btn fb-btn-danger-outline" disabled={saving || !chosen.length} onClick={openTicketForNewFeedback}>
+                        Raise ticket · Done
+                      </button>
+                      <button type="button" className="fb-btn fb-btn-ok" disabled={saving || !chosen.length} onClick={() => saveGood()}>
+                        <FiCheck /> {saving ? "Saving…" : "Save feedback · Done (Good)"}
+                      </button>
+                    </>
                   )}
                 </div>
                 </fieldset>

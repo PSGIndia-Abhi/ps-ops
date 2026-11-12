@@ -2,23 +2,15 @@ const { pool } = require("../../db");
 
 // Customer Feedback (feedback_* tables) - the timed work, every minute: a call waiting for the
 // customer's form (FORM_SENT) whose links have all expired unused:
-//  - the collector had already tried calling (at least "offer_link_after_missed_calls" missed calls,
-//    the point where the app offers the link): the call is closed - DONE, result NO_RESPONSE
-//    ("Not responded"), no feedback taken;
-//  - otherwise it goes back to NOT_ANSWERED, so it shows again in the collector's list.
+//  - the customer had not answered at least one call: the call is finished without feedback by
+//    itself - DONE, result NO_RESPONSE ("Not responded"), note "Customer not answered";
+//  - otherwise (no missed call) it goes back to NOT_ANSWERED, so it shows again in the list.
 // History says why. (No notifications: call-backs that are due show as a count on the sidebar.)
 
 let running = false;
 let lastSchedule = 0;
 
-async function missedCallsNeeded() {
-  const [[row]] = await pool.query("SELECT setting_value FROM feedback_settings WHERE setting_key = 'offer_link_after_missed_calls'");
-  const n = Number(row?.setting_value);
-  return Number.isInteger(n) && n >= 1 ? n : 1;
-}
-
 async function expireFormLinks() {
-  const needed = await missedCallsNeeded();
   const [calls] = await pool.query(
     `SELECT r.id,
             (SELECT COUNT(*) FROM feedback_call_attempts a WHERE a.request_id = r.id AND a.outcome <> 'ANSWERED') AS missed
@@ -29,7 +21,7 @@ async function expireFormLinks() {
   );
   let closed = 0;
   for (const { id, missed } of calls) {
-    const noResponse = Number(missed) >= needed;
+    const noResponse = Number(missed) >= 1;
     const [result] = await pool.query(
       noResponse
         ? "UPDATE feedback_requests SET status = 'DONE', result = 'NO_RESPONSE', done_at = NOW(), next_call_at = NULL, row_version = row_version + 1 WHERE id = ? AND status = 'FORM_SENT'"
@@ -41,7 +33,7 @@ async function expireFormLinks() {
       await pool.query(
         `INSERT INTO feedback_history (request_id, event, from_status, to_status, note) VALUES (?, 'FORM_EXPIRED', 'FORM_SENT', ?, ?)`,
         noResponse
-          ? [id, "DONE", `Closed without feedback - not responded (${missed} call(s) not answered and the form link expired)`]
+          ? [id, "DONE", "Customer not answered"]
           : [id, "NOT_ANSWERED", "The form link expired without an answer"]
       );
     }
