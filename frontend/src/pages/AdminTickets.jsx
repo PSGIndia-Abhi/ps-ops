@@ -264,6 +264,7 @@ export default function AdminTickets() {
                   <div className="ticket-list-meta">
                     By {activeTicket.created_by?.name || "Unknown"} ·{" "}
                     {formatDateTime(activeTicket.created_at)}
+                    {activeTicket.site && <> · Outlet: {activeTicket.site.name || activeTicket.site.id}</>}
                   </div>
                 </div>
 

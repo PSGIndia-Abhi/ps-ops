@@ -64,6 +64,10 @@ export default function CreateBookingModal({
   initialContactId = "",
   initialSubServices = [],
   siteId = null,
+  // Optional (Admin > Service Requests): carry over the client's request. Unset = old behaviour.
+  initialServiceType = "",
+  initialStartDate = "",
+  initialNotes = "",
 }) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -83,10 +87,10 @@ export default function CreateBookingModal({
 
   const [form, setForm] = useState({
     contactId: initialContactId ? String(initialContactId) : "",
-    serviceType: "BOTH",
+    serviceType: initialServiceType || "BOTH",
     subServices: initialSubServices,
     location: "",
-    notes: "",
+    notes: initialNotes || "",
     recurrenceEnabled: false,
     recurrenceType: "WEEKLY",
     recurrenceInterval: 1,
@@ -98,7 +102,7 @@ export default function CreateBookingModal({
     recurrenceEndDate: "",
   });
   const defaultSchedule = { scheduleType: "single", start_date: "", end_date: "" };
-  const [serviceSchedules, setServiceSchedules] = useState(() => Object.fromEntries(initialSubServices.map((s) => [s, { ...defaultSchedule }])));
+  const [serviceSchedules, setServiceSchedules] = useState(() => Object.fromEntries(initialSubServices.map((s) => [s, { ...defaultSchedule, start_date: initialStartDate || "" }])));
 
   const [contacts, setContacts] = useState([]);
   const [loadingContacts, setLoadingContacts] = useState(true);

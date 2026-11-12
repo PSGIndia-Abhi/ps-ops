@@ -69,6 +69,9 @@ const { startSalesFieldAlertsCron } = require("./src/jobs/salesFieldAlerts.cron"
 const brigadeRoutes = require("./src/routes/brigade.routes");
 const feedbackRoutes = require("./src/routes/feedback.routes");
 const feedbackPublicRoutes = require("./src/routes/feedback.public.routes");
+const clientAccountsRoutes = require("./src/routes/client-accounts.routes");
+const clientPortalRoutes = require("./src/routes/client-portal.routes");
+const serviceRequestsRoutes = require("./src/routes/service-requests.routes");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -157,6 +160,10 @@ app.use("/api/feedback", feedbackRoutes);
 app.use("/api/public/feedback", feedbackPublicRoutes); // customer's form (no login, token in the link)
 // Helpdesk: every user raises support tickets; the technical team answers (helpdesk_* tables).
 app.use("/api/helpdesk", helpdeskRoutes);
+// Client Portal: admin manages company/outlet logins; clients see only their company's data.
+app.use("/api/client-accounts", clientAccountsRoutes);
+app.use("/api/client-portal", clientPortalRoutes);
+app.use("/api/service-requests", serviceRequestsRoutes);
 
 
 

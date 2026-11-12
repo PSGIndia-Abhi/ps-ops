@@ -18,8 +18,18 @@ import Terms from "./pages/terms";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import SupervisorLayout from "./layouts/SupervisorLayout";
 import TechnicianLayout from "./layouts/TechnicianLayout";
-import ClientDashboard from "./pages/ClientDashboard";
-import ClientLayout from "./layouts/ClientLayout";
+import ClientPortalLayout from "./clientPortal/ClientPortalLayout";
+import PortalDashboard from "./clientPortal/PortalDashboard";
+import PortalOutlets from "./clientPortal/PortalOutlets";
+import PortalOutletDetail from "./clientPortal/PortalOutletDetail";
+import PortalJobs from "./clientPortal/PortalJobs";
+import PortalJobDetail from "./clientPortal/PortalJobDetail";
+import PortalComplaints from "./clientPortal/PortalComplaints";
+import PortalComplaintDetail from "./clientPortal/PortalComplaintDetail";
+import PortalDocuments from "./clientPortal/PortalDocuments";
+import PortalAudits from "./clientPortal/PortalAudits";
+import PortalRequestService from "./clientPortal/PortalRequestService";
+import PortalProfile from "./clientPortal/PortalProfile";
 import AccountantLayout from "./layouts/AccountantLayout";
 import AccountantPlaceholder from "./pages/AccountantPlaceholder";
 import AccountantDashboard from "./pages/accountant/AccountantDashboard";
@@ -36,9 +46,6 @@ import CustomerOutstanding from "./pages/accountant/CustomerOutstanding";
 import TdsSettings from "./pages/accountant/TdsSettings";
 import FollowUpDetails from "./pages/accountant/FollowUpDetails";
 import CustomerContactsPage from "./pages/accountant/CustomerContactsPage";
-import ClientJobsPage from "./pages/ClientJobsPage";
-import ClientJobUpdates from "./pages/ClientJobUpdates";
-import ClientTickets from "./pages/ClientTickets";
 import ProfilePage from "./pages/ProfilePage";
 import AcceptInvite from "./pages/AcceptInvite";
 import SiteContactsPage from "./pages/SiteContactsPage";
@@ -52,6 +59,8 @@ import AnalysisDataPage from "./pages/AnalysisDataPage";
 import UpcomingCalendarPage from "./pages/UpcomingCalendarPage";
 import AdminUserManagement from "./pages/AdminUserManagement";
 import AdminGroupManagement from "./pages/AdminGroupManagement";
+import ClientAccounts from "./pages/clientAccounts/ClientAccounts";
+import ServiceRequests from "./pages/serviceRequests/ServiceRequests";
 import AdminUserHierarchy from "./pages/AdminUserHierarchy";
 import AdminDepartments from "./pages/AdminDepartments";
 import AdminUserActivity from "./pages/AdminUserActivity";
@@ -157,6 +166,8 @@ const router = createBrowserRouter([
       { path: "user-activity", element: <AdminUserActivity /> },
       { path: "group-management", element: <AdminGroupManagement /> },
       { path: "companies", element: <AdminCompanies /> },
+      { path: "client-accounts", element: <ClientAccounts /> },
+      { path: "service-requests", element: <ServiceRequests /> },
       { path: "branches", element: <AdminBranches /> },
       { path: "map", element: <MapView /> },
       { path: "jobs/:jobId", element: <JobPage /> },
@@ -250,15 +261,22 @@ const router = createBrowserRouter([
     path: "/client",
     element: (
       <ProtectedRoute allowedRoles={["client"]}>
-        <ClientLayout />
+        <ClientPortalLayout />
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <ClientDashboard /> },
-      { path: "jobs", element: <ClientJobsPage /> },
-      { path: "jobs/:jobId", element: <ClientJobUpdates /> },
-      { path: "tickets", element: <ClientTickets /> },
-      { path: "profile", element: <ProfilePage /> },
+      { index: true, element: <PortalDashboard /> },
+      { path: "outlets", element: <PortalOutlets /> },
+      { path: "outlets/:siteId", element: <PortalOutletDetail /> },
+      { path: "jobs", element: <PortalJobs /> },
+      { path: "jobs/:jobId", element: <PortalJobDetail /> },
+      { path: "complaints", element: <PortalComplaints /> },
+      { path: "complaints/:complaintId", element: <PortalComplaintDetail /> },
+      { path: "tickets", element: <Navigate to="/client/complaints" replace /> },
+      { path: "documents", element: <PortalDocuments /> },
+      { path: "audits", element: <PortalAudits /> },
+      { path: "request-service", element: <PortalRequestService /> },
+      { path: "profile", element: <PortalProfile /> },
     ],
   },
 
