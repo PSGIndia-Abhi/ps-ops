@@ -60,7 +60,7 @@ export default function CreateBookingModal({
   technicians,
   clientContact,
   // Optional (the Feedback Desk's re-visit booking): a starting contact and services, and siteId
-  // to offer only that site's contacts. siteContacts: the site's own contacts, offered even when
+  // to offer only the contacts of that site's customer. siteContacts: the site's own contacts, offered even when
   // /api/contacts leaves them out (it lists verified contacts only).
   initialContactId = "",
   initialSubServices = [],
@@ -206,11 +206,25 @@ export default function CreateBookingModal({
     }));
   }, [role, selectedContact?.company_id, companyAddress]);
 
+  // With siteId: the contacts of that site's customer (contacts.company_id holds a site id, and
+  // sites.company_id is the customer), the site's own contacts first.
+  const customerContacts = useMemo(() => {
+    if (!siteId) return contacts;
+    const customerId = companies.find((s) => String(s.id) === String(siteId))?.company_id;
+    const customerSiteIds = new Set(
+      companies.filter((s) => customerId && String(s.company_id) === String(customerId)).map((s) => String(s.id))
+    );
+    customerSiteIds.add(String(siteId));
+    if (customerId) customerSiteIds.add(String(customerId));
+    const mine = contacts.filter((c) => customerSiteIds.has(String(c.company_id)));
+    const atSite = mine.filter((c) => String(c.company_id) === String(siteId));
+    return [...atSite, ...mine.filter((c) => String(c.company_id) !== String(siteId))];
+  }, [contacts, companies, siteId]);
+
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
-    const atSite = siteId ? contacts.filter((c) => String(c.company_id) === String(siteId)) : contacts;
-    if (!query) return atSite;
-    return atSite.filter((c) => {
+    if (!query) return customerContacts;
+    return customerContacts.filter((c) => {
       const name = (c.name || "").toLowerCase();
       const phone = (c.phone || c.contact_phone || "").toLowerCase();
       const email = (c.email || c.contact_email || "").toLowerCase();
@@ -222,7 +236,7 @@ export default function CreateBookingModal({
         company.includes(query)
       );
     });
-  }, [contacts, contactSearch, siteId]);
+  }, [customerContacts, contactSearch]);
 
   async function reloadContacts() {
     if (role === "client") return;
@@ -651,13 +665,13 @@ export default function CreateBookingModal({
             {!isClient && (
               <section className="bgm-section">
                 <SectionHead step={nextStep()} title="Requested by" done={stepDone.contact} />
-                {/* Booked from a feedback ticket: the site's contacts, all listed to pick from. */}
+                {/* Booked from a feedback ticket: the customer's contacts, all listed to pick from. */}
                 {siteId ? (
                   <div className="bgm-search-results" role="listbox" style={{ position: "static", boxShadow: "none", maxHeight: 260 }}>
                     {loadingContacts ? (
                       <div className="bgm-search-empty">Loading contacts…</div>
                     ) : filteredContacts.length === 0 ? (
-                      <div className="bgm-search-empty">No contacts saved for this site</div>
+                      <div className="bgm-search-empty">No contacts saved for this customer</div>
                     ) : (
                       filteredContacts.map(c => {
                         const on = String(form.contactId) === String(c.id);
@@ -673,7 +687,9 @@ export default function CreateBookingModal({
                             onClick={() => setForm(prev => ({ ...prev, contactId: c.id }))}
                           >
                             <span className="bgm-contact-name">{c.name}{on ? " ✓" : ""}</span>
-                            <span className="bgm-contact-sub">{[phoneLabel, c.role, c.email].filter(Boolean).join(" · ")}</span>
+                            <span className="bgm-contact-sub">
+                              {[phoneLabel, c.role, c.email, String(c.company_id) !== String(siteId) && c.company_site].filter(Boolean).join(" · ")}
+                            </span>
                           </button>
                         );
                       })
