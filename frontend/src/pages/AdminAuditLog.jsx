@@ -137,7 +137,6 @@ export default function AdminAuditLog() {
       <div className="ac-head ac-audit-head">
         <div>
           <h2 className="ac-title ac-audit-title"><FiShield className="ac-title-icon" /><span>Audit Log</span></h2>
-          <p className="ac-sub">Who changed what in the Accountant Panel — invoices, payments, TDS, imports, contacts and exports. Read only.</p>
         </div>
         <button type="button" className="ac-btn ac-btn-primary" onClick={exportCsv} disabled={exporting || !data.ready}>
           <FiDownload /> {exporting ? "Exporting…" : "Export CSV"}
