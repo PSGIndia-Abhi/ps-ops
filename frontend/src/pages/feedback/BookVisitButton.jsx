@@ -6,7 +6,8 @@ import CreateBookingModal from "../../components/CreateBookingModal";
 // "Book a visit" (Feedback Desk header, and a ticket's re-visit): opens the same Create Booking form
 // as the admin panel and saves through POST /api/bookings. The backend needs CREATE_BOOKING (bookings)
 // and VIEW_USER (the supervisor / technician lists) for the user's role. contactId / services fill
-// the form in, siteId limits the contacts to that site; onBooked(jobs) gets the jobs created.
+// the form in, siteId limits the contacts to that site (siteContacts adds the site's unverified ones);
+// onBooked(jobs) gets the jobs created.
 async function usersByRole(role) {
   const res = await apiFetch(`/api/users?role=${role}`);
   if (!res?.ok) return [];
@@ -14,7 +15,7 @@ async function usersByRole(role) {
   return Array.isArray(data) ? data : [];
 }
 
-export default function BookVisitButton({ onBooked, contactId, siteId, services, label = "Book a visit", className = "fb-btn fb-btn-primary fb-book-btn", disabled = false }) {
+export default function BookVisitButton({ onBooked, contactId, siteId, siteContacts, services, label = "Book a visit", className = "fb-btn fb-btn-primary fb-book-btn", disabled = false }) {
   const [open, setOpen] = useState(false);
   const [people, setPeople] = useState({ supervisors: [], technicians: [] });
 
@@ -76,6 +77,7 @@ export default function BookVisitButton({ onBooked, contactId, siteId, services,
           initialContactId={contactId}
           initialSubServices={services}
           siteId={siteId}
+          siteContacts={siteContacts}
         />
       )}
     </>

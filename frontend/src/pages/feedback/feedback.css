@@ -1260,7 +1260,7 @@ button.fb-fchip { font: inherit; font-size: 13px; padding-right: 34px; }
 .fb-dept-ask-btn { border-radius: 10px; border-color: #c7d2fe; color: #4338ca; background: #fff; font-weight: 600; }
 .fb-dept-ask-btn:hover { background: #eef2ff; }
 .fb-dept-call { border: 0; border-radius: 10px; color: #fff; font-weight: 700; background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 6px 14px rgba(22, 163, 74, .28); transition: transform .15s, box-shadow .15s; }
-.fb-dept-call:hover { transform: translateY(-1px); box-shadow: 0 10px 20px rgba(22, 163, 74, .32); }
+.fb-dept-call:hover:not(:disabled) { background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; transform: translateY(-1px); box-shadow: 0 10px 20px rgba(22, 163, 74, .32); }
 @media (max-width: 640px) { .fb-dept-ask-actions { width: 100%; } .fb-dept-ask-actions .fb-btn { flex: 1; justify-content: center; } }
 
 /* Follow-up bar while the work is still going on. */

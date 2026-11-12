@@ -805,6 +805,7 @@ export default function TicketPage() {
                         onBooked={linkBooking}
                         contactId={ticket.contacts[0]?.id}
                         siteId={ticket.site.id}
+                        siteContacts={ticket.contacts}
                         services={services}
                         label={ticket.revisit ? "Book another visit" : "Book a visit"}
                         className={`fb-btn ${ticket.revisit ? "" : "fb-btn-primary"}`}
