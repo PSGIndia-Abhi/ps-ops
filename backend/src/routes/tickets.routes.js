@@ -107,7 +107,9 @@ const ensureTicketAccess = async (req, res, executor, ticketId) => {
 
   if (!jobIds.length) {
     const [[ticket]] = await executor.query(
-      `SELECT created_by_user_id FROM job_tickets WHERE id = ?`,
+      `SELECT t.created_by_user_id, s.branch_id AS site_branch_id
+       FROM job_tickets t LEFT JOIN sites s ON s.id = t.site_id
+       WHERE t.id = ?`,
       [ticketId]
     );
 
@@ -122,6 +124,14 @@ const ensureTicketAccess = async (req, res, executor, ticketId) => {
 
     if (ticket?.created_by_user_id === req.user.id) {
       return { allowed: true, jobIds };
+    }
+
+    // Client complaint raised against an outlet: staff of that outlet's branch may handle it.
+    if (ticket.site_branch_id && req.user.role !== "client") {
+      const branchId = await getUserBranchId(executor, req.user.id);
+      if (branchId && branchId === ticket.site_branch_id) {
+        return { allowed: true, jobIds };
+      }
     }
 
     res.status(404).json({ error: "Ticket not found" });
@@ -175,6 +185,7 @@ messages.forEach((msg) => {
       email: t.created_by_email,
     },
     jobs: links.get(t.id) || [],
+    site: t.site_id ? { id: t.site_id, name: t.site_name || null } : null,
     messages: messageMap.get(t.id) || [],
   }));
 }
@@ -210,7 +221,9 @@ router.get(
       }
 
       if (req.user.role === "supervisor" && !jobId) {
-        where = "WHERE j.supervisor_id = ?";
+        // Their jobs' tickets, plus client complaints raised against an outlet without a job
+        // (the branch check below keeps those to the supervisor's branch).
+        where = "WHERE (j.supervisor_id = ? OR (l.id IS NULL AND t.site_id IS NOT NULL))";
         params.push(req.user.id);
       }
 
@@ -229,10 +242,11 @@ router.get(
       }
 
       if (branchId) {
+        // ts.branch_id: client complaints raised against an outlet (job_tickets.site_id).
         where = where
-          ? `${where} AND (j.branch_id = ? OR t.created_by_user_id = ?)`
-          : "WHERE (j.branch_id = ? OR t.created_by_user_id = ?)";
-        params.push(branchId, req.user.id);
+          ? `${where} AND (j.branch_id = ? OR ts.branch_id = ? OR t.created_by_user_id = ?)`
+          : "WHERE (j.branch_id = ? OR ts.branch_id = ? OR t.created_by_user_id = ?)";
+        params.push(branchId, branchId, req.user.id);
       }
 
       const [tickets] = await pool.query(
@@ -240,9 +254,11 @@ router.get(
         SELECT DISTINCT
           t.*,
           u.name AS created_by_name,
-          u.email AS created_by_email
+          u.email AS created_by_email,
+          ts.name AS site_name
         FROM job_tickets t
         JOIN users u ON u.id = t.created_by_user_id
+        LEFT JOIN sites ts ON ts.id = t.site_id
         LEFT JOIN job_ticket_links l ON l.ticket_id = t.id
         LEFT JOIN jobs j ON j.id = l.job_id
         ${where}

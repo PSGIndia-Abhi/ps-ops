@@ -6,6 +6,7 @@ import DashboardActions from "../components/DashboardActions";
 import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
 import AuditsNav from "../pages/audits/AuditsNav";
+import useServiceRequestCount from "../pages/serviceRequests/useServiceRequestCount";
 import {
   getPendingGroupManagementCounts,
   getPendingGroupManagementTotal,
@@ -29,6 +30,9 @@ export default function AdminLayout() {
       setGroupMgmtCount(getPendingGroupManagementTotal(counts))
     );
   }, []);
+
+  /* ---------------- CLIENT SERVICE REQUESTS BADGE ---------------- */
+  const serviceRequestCount = useServiceRequestCount(location.pathname);
 
   /* ---------------- MOBILE DETECTION ---------------- */
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -162,10 +166,25 @@ export default function AdminLayout() {
               </button>
 
               <button
+                className={`nav-btn ${isActive("/admin/service-requests") ? "active" : ""}`}
+                onClick={() => navigate("/admin/service-requests")}
+              >
+                Service Requests
+                {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
+              </button>
+
+              <button
                 className={`nav-btn ${isActive("/admin/companies") ? "active" : ""}`}
                 onClick={() => navigate("/admin/companies")}
               >
                 Companies
+              </button>
+
+              <button
+                className={`nav-btn ${isActive("/admin/client-accounts") ? "active" : ""}`}
+                onClick={() => navigate("/admin/client-accounts")}
+              >
+                Client Accounts
               </button>
 
               <button
@@ -309,10 +328,27 @@ export default function AdminLayout() {
           <button
             onClick={() => {
               setMobilePanel(null);
+              navigate("/admin/service-requests");
+            }}
+          >
+            Service Requests
+            {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
+          </button>
+          <button
+            onClick={() => {
+              setMobilePanel(null);
               navigate("/admin/companies");
             }}
           >
             Companies
+          </button>
+          <button
+            onClick={() => {
+              setMobilePanel(null);
+              navigate("/admin/client-accounts");
+            }}
+          >
+            Client Accounts
           </button>
           <button
             onClick={() => {
