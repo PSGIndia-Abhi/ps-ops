@@ -22,6 +22,8 @@ export type AuthenticatedStackParamList = {
   /** Reached from AppHeader's avatar - identity/contact info, own screen (no longer the "More" tab). */
   Profile: undefined;
   ChangePassword: undefined;
+  /** Customer Feedback tickets as a page, opened from "More" (supervisor). */
+  FeedbackTickets: undefined;
 };
 
 /**

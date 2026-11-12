@@ -23,7 +23,7 @@ import type { CallList, CallRow } from '../types';
 /** How far the stat tiles hang below the header band. */
 const TILE_OVERLAP = 64;
 /** How many calls "Needs attention" shows before "See all". */
-const ATTENTION_LIMIT = 4;
+const ATTENTION_LIMIT = 3;
 
 // Same shape as Task Management's and Payment Reminders' Home (blue band, tiles hanging below it).
 const factory = (t: CrmTheme) => ({
@@ -194,8 +194,9 @@ export function FeedbackHomeScreen() {
           </View>
           {!data ? (
             <>
-              <CrmSkeleton height={150} radius={16} style={styles.skeleton} />
-              <CrmSkeleton height={150} radius={16} style={styles.skeleton} />
+              <CrmSkeleton height={84} radius={16} style={styles.skeleton} />
+              <CrmSkeleton height={84} radius={16} style={styles.skeleton} />
+              <CrmSkeleton height={84} radius={16} style={styles.skeleton} />
             </>
           ) : attention.length ? (
             attention.map((row) => (
@@ -206,6 +207,7 @@ export function FeedbackHomeScreen() {
                 busy={busy === row.request_id}
                 onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id })}
                 onTake={() => take(row)}
+                compact
               />
             ))
           ) : (

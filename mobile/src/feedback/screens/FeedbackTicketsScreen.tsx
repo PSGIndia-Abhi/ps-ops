@@ -15,6 +15,7 @@ import { HeroHeader } from '../Hero';
 import { ClipboardListIcon, SearchIcon } from '../../crm/ui/crmIcons';
 import { ChevronRightIcon, CloseIcon } from '../../components/icons';
 import { toneColors } from '../../crm/ui/StatusBadge';
+import { Dropdown } from '../Dropdown';
 
 
 const factory = (t: CrmTheme) => ({
@@ -45,14 +46,18 @@ const factory = (t: CrmTheme) => ({
   muted: { ...typography.caption, color: t.textMuted, marginTop: 2 },
   next: { ...typography.captionMedium, fontWeight: '700' as const, flexShrink: 1 },
   pressed: { opacity: 0.85 },
-  // Filters: a card with status pills, search, and priority / department chips.
-  filterCard: { backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.border, padding: spacing.sm, marginBottom: spacing.md, gap: spacing.sm, ...t.cardShadow },
-  seg: { flexDirection: 'row' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 3 },
+  // Filters sit on the page like the Calls list (no card): status pills, search, and priority / department chips.
+  filterCard: { marginBottom: spacing.md, gap: spacing.sm },
+  // Chip rows run to the screen edges and scroll sideways (as on Calls), instead of being cut at a card border.
+  chipScroll: { marginHorizontal: -spacing.md },
+  dropRow: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm },
+  chipScrollContent: { paddingHorizontal: spacing.md },
+  seg: { flexDirection: 'row' as const, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: radii.pill, padding: 3 },
   segBtn: { flex: 1, minHeight: 38, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 6 },
-  segOn: { backgroundColor: t.surface, ...t.cardShadow },
+  segOn: { backgroundColor: t.primarySoftBg },
   segText: { ...typography.captionMedium, color: t.textSecondary },
   segTextOn: { color: t.primary, fontWeight: '800' as const },
-  search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, paddingHorizontal: spacing.sm, minHeight: 44 },
+  search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, backgroundColor: t.surface, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, paddingHorizontal: spacing.sm, minHeight: 44 },
   searchOn: { borderColor: t.primary, backgroundColor: t.surface },
   searchInput: { flex: 1, color: t.textPrimary, paddingVertical: 0, ...typography.body },
   clear: { width: 26, height: 26, borderRadius: 13, backgroundColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
@@ -137,17 +142,26 @@ export function FeedbackTicketsScreen() {
           <View>
             {/* Filters: All / Open / Closed, search, priority and department - all fit any phone width. */}
             <View style={styles.filterCard}>
-              <View style={styles.seg} accessibilityRole="radiogroup">
-                {([['', 'All'], ['OPEN', 'Open'], ['CLOSED', 'Closed']] as const).map(([v, label]) => {
-                  const on = status === v;
-                  return (
-                    <Pressable key={label} onPress={() => setStatus(v)} style={[styles.segBtn, on && styles.segOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
-                      <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>
-                        {label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              {/* Status (All / Open / Closed) and priority as two dropdowns side by side. */}
+              <View style={styles.dropRow}>
+                <Dropdown<'OPEN' | 'CLOSED' | ''>
+                  caption="Show"
+                  value={status}
+                  options={[
+                    { value: 'OPEN', label: 'Open' },
+                    { value: 'CLOSED', label: 'Closed' },
+                    { value: '', label: 'All' },
+                  ]}
+                  onChange={setStatus}
+                  highlight={status !== 'OPEN'}
+                />
+                <Dropdown<string>
+                  caption="Priority"
+                  value={priority}
+                  options={[{ value: '', label: 'Any' }, ...PRIORITIES.map((p) => ({ value: p as string, label: PRIORITY[p].label }))]}
+                  onChange={setPriority}
+                  highlight={!!priority}
+                />
               </View>
               <View style={[styles.search, !!search && styles.searchOn]}>
                 <SearchIcon size={17} color={theme.textMuted} />
@@ -166,20 +180,8 @@ export function FeedbackTicketsScreen() {
                   </Pressable>
                 )}
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {[{ value: '', label: 'Any priority' }, ...PRIORITIES.map((p) => ({ value: p as string, label: PRIORITY[p].label }))].map((o) => {
-                  const on = priority === o.value;
-                  const dot = o.value ? toneColors(theme, PRIORITY[o.value as keyof typeof PRIORITY].tone).fg : null;
-                  return (
-                    <Pressable key={o.label} onPress={() => setPriority(o.value)} style={[styles.chip, on && styles.chipOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
-                      {!!dot && <View style={[styles.chipDot, { backgroundColor: dot }]} />}
-                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
               {!deptOnly && departmentList.length > 0 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={[styles.chipRow, styles.chipScrollContent]}>
                   {[{ value: '' as DepartmentKind | '', label: 'All departments' }, ...departmentList.map((d) => ({ value: d.kind as DepartmentKind | '', label: d.name || d.label }))].map((o) => {
                     const on = department === o.value;
                     return (

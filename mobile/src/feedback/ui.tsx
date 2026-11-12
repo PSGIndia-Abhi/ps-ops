@@ -40,13 +40,15 @@ const factory = (t: CrmTheme) => ({
   modes: { marginBottom: spacing.xs },
   skip: { alignSelf: 'flex-start' as const, marginBottom: spacing.xs },
   skipText: { ...typography.caption, color: t.primary, textDecorationLine: 'underline' as const },
-  opts: { flexDirection: 'row' as const, gap: spacing.xs },
-  opt: { flex: 1, minHeight: 44, borderRadius: radii.md, borderWidth: 1, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.surface },
+  // Answer buttons: side by side, wrapping to the next line; each sized to its words and stretched to fill its row.
+  opts: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs },
+  opt: { flexGrow: 1, flexBasis: 'auto' as const, minWidth: 84, maxWidth: '100%' as const, minHeight: 44, paddingHorizontal: spacing.sm, paddingVertical: 8, borderRadius: radii.md, borderWidth: 1, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.surface },
   optGood: { borderColor: '#BBF7D0' },
   optBad: { borderColor: '#FECACA' },
   optGoodOn: { backgroundColor: t.success, borderColor: t.success },
   optBadOn: { backgroundColor: t.danger, borderColor: t.danger },
-  optText: { ...typography.bodyMedium, fontWeight: '700' as const },
+  // flexShrink only matters when one answer is wider than the whole row: then it wraps inside its button.
+  optText: { ...typography.bodyMedium, fontWeight: '700' as const, textAlign: 'center' as const, flexShrink: 1 },
   optTextGood: { color: t.successText },
   optTextBad: { color: t.dangerText },
   optTextOn: { color: '#FFFFFF' },
@@ -93,7 +95,7 @@ const factory = (t: CrmTheme) => ({
   tagSvc: { color: t.accentText, backgroundColor: t.accentBg },
   tagOpt: { color: t.textMuted, backgroundColor: t.surfaceAlt },
   tagReq: { color: t.dangerText, backgroundColor: t.dangerBg },
-  optRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  optRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, maxWidth: '100%' as const },
   // modern answers
   ans: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingVertical: spacing.xs, borderBottomWidth: 1, borderBottomColor: t.surfaceAlt },
   ansIcon: { width: 26, height: 26, borderRadius: 13, alignItems: 'center' as const, justifyContent: 'center' as const },
@@ -173,6 +175,10 @@ export function Panel({ title, icon, right, children }: { title?: string; icon?:
  * The feedback questions (Masters > Questions) with answer buttons - good answers green, bad red -
  * and the customer's own words.
  */
+/** Answer labels as typed on the website can carry line breaks / double spaces: show them as one line of text. */
+const cleanLabel = (label: string) => String(label || '').replace(/\s+/g, ' ').trim();
+
+
 export function QuestionForm({
   questions,
   answers,
@@ -225,6 +231,8 @@ export function QuestionForm({
                 </View>
               </View>
             </View>
+            {/* Answers flow side by side and move to the next line when they don't fit; each button is as
+                wide as its words (never squeezed), and buttons stretch to fill their row. */}
             <View style={styles.opts} accessibilityRole="radiogroup">
               {q.options.map((o) => {
                 const on = answers[q.id] === o.id;
@@ -239,7 +247,14 @@ export function QuestionForm({
                   >
                     <View style={styles.optRow}>
                       {o.is_bad ? <CloseIcon size={14} color={tint} /> : <CheckIcon size={14} color={tint} />}
-                      <Text style={[styles.optText, o.is_bad ? styles.optTextBad : styles.optTextGood, on && styles.optTextOn]}>{o.label}</Text>
+                      <Text
+                        style={[styles.optText, o.is_bad ? styles.optTextBad : styles.optTextGood, on && styles.optTextOn]}
+                        // No hyphenation ("improve-ment") and plain line breaking, so Android doesn't wrap bold text early.
+                        textBreakStrategy="simple"
+                        android_hyphenationFrequency="none"
+                      >
+                        {cleanLabel(o.label)}
+                      </Text>
                     </View>
                   </Pressable>
                 );
@@ -538,7 +553,22 @@ function AnswerRow({ response: r }: { response: Response }) {
 }
 
 /** Who the call is for: the customer and their site (highlighted), then short icon rows. */
-export function CustomerCard({ customer, site, place, services = [], by }: { customer: string; site: string; place?: string | null; services?: string[]; by?: string | null }) {
+export function CustomerCard({
+  customer,
+  site,
+  place,
+  services = [],
+  lastService,
+  by,
+}: {
+  customer: string;
+  site: string;
+  place?: string | null;
+  services?: string[];
+  /** "General Pest Control (GPC) · 29 Oct": the last service given to the site (shown instead of a service list). */
+  lastService?: string | null;
+  by?: string | null;
+}) {
   const { styles, theme } = useCrmStyles(factory);
   return (
     <View style={styles.card}>
@@ -573,6 +603,14 @@ export function CustomerCard({ customer, site, place, services = [], by }: { cus
               {s}
             </Text>
           ))}
+        </View>
+      )}
+      {!!lastService && (
+        <View style={styles.custRow}>
+          <CalendarIcon size={14} color={theme.textMuted} />
+          <Text style={styles.custRowText} numberOfLines={2}>
+            Last service: {lastService}
+          </Text>
         </View>
       )}
       {!!by && (

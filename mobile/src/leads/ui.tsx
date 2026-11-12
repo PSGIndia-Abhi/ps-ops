@@ -244,7 +244,9 @@ type IconType = React.ComponentType<{ size?: number; color?: string }>;
 export function GradientFill({ from, to }: { from: string; to: string }) {
   const id = useRef(`lead${Math.round(Math.random() * 1e9)}`).current;
   return (
-    <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+    // width/height 100% as well as absoluteFill: on Android an Svg without them can stop short of a
+    // tall parent (e.g. the Feedback header with status chips), leaving a hard edge across it.
+    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" pointerEvents="none">
       <Defs>
         <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
           <Stop offset="0" stopColor={from} />

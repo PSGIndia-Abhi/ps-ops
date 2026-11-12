@@ -19,13 +19,19 @@ const factory = (t: CrmTheme) => ({
   siteName: { ...typography.subtitle, color: t.textPrimary },
   city: { ...typography.caption, color: t.textMuted },
   cust: { ...typography.caption, color: t.textSecondary, marginTop: 1 },
-  services: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: spacing.sm },
-  svc: { backgroundColor: t.surfaceAlt, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  // Every card has the same rows (services: one line; facts: two lines), so all cards are the same height.
+  services: { flexDirection: 'row' as const, flexWrap: 'nowrap' as const, gap: 6, marginTop: spacing.sm, overflow: 'hidden' as const },
+  svc: { flexShrink: 1, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  svcMore: { flexShrink: 0 },
+  svcNone: { backgroundColor: 'transparent', borderWidth: 1, borderColor: t.border, borderStyle: 'dashed' as const },
   svcText: { ...typography.caption, fontSize: 11.5, color: t.textSecondary },
-  facts: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, columnGap: spacing.md, rowGap: 4, marginTop: spacing.sm },
-  added: { alignSelf: 'flex-start' as const, marginTop: spacing.xs, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: '#DCFCE7', overflow: 'hidden' as const, color: '#166534', fontSize: 11, fontWeight: '800' as const },
-  fact: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4 },
-  factText: { ...typography.caption, color: t.textMuted },
+  svcTextNone: { color: t.textMuted },
+  added: { flexShrink: 0, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radii.pill, backgroundColor: '#DCFCE7' },
+  addedText: { color: '#166534', fontSize: 11, fontWeight: '800' as const },
+  facts: { marginTop: spacing.sm, gap: 4 },
+  factsRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, gap: spacing.sm },
+  fact: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, flexShrink: 1 },
+  factText: { ...typography.caption, color: t.textMuted, flexShrink: 1 },
   foot: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: t.surfaceAlt, gap: spacing.sm },
   footText: { ...typography.captionMedium, color: t.textMuted, flex: 1 },
   footLate: { color: t.dangerText },
@@ -34,6 +40,17 @@ const factory = (t: CrmTheme) => ({
   btnText: { ...typography.captionMedium, color: t.primary },
   btnTextSolid: { color: t.textOnPrimary },
   pressed: { opacity: 0.8 },
+  // Compact card (Home "Needs attention"): name, site, due and the action - nothing else.
+  cBody: { flex: 1, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  cInitial: { width: 36, height: 36, borderRadius: 12, alignItems: 'center' as const, justifyContent: 'center' as const },
+  cInitialText: { ...typography.captionMedium, fontWeight: '800' as const },
+  cName: { ...typography.bodyMedium, fontWeight: '700' as const, color: t.textPrimary },
+  cFoot: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, gap: spacing.sm, marginTop: 6, paddingLeft: 36 + spacing.sm },
+  cDue: { ...typography.caption, color: t.textMuted, flexShrink: 1 },
+  cLink: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2 },
+  cLinkText: { ...typography.captionMedium, color: t.primary, fontWeight: '700' as const },
+  cTake: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, paddingHorizontal: spacing.sm, height: 30, borderRadius: radii.pill, backgroundColor: t.primary },
+  cTakeText: { ...typography.captionMedium, color: t.textOnPrimary, fontWeight: '700' as const },
 });
 
 /** "General Pest Control, Mosquito Fogging, Ant Treatment" -> two chips and "+1". */
@@ -46,7 +63,24 @@ function serviceChips(services: string | null): string[] {
  * One site's call for a month: a coloured status strip and badge, the site and customer, services,
  * last visit, and Take call / Open / Review form. onOpen opens a taken call; onTake takes it.
  */
-export function SiteCard({ row, myId, busy, onOpen, onTake, numberAdded }: { row: CallRow; myId: number; busy?: boolean; onOpen: () => void; onTake: () => void; numberAdded?: boolean }) {
+export function SiteCard({
+  row,
+  myId,
+  busy,
+  onOpen,
+  onTake,
+  numberAdded,
+  compact = false,
+}: {
+  row: CallRow;
+  myId: number;
+  busy?: boolean;
+  onOpen: () => void;
+  onTake: () => void;
+  numberAdded?: boolean;
+  /** A small card (Home "Needs attention"): customer, site, due and the action only. */
+  compact?: boolean;
+}) {
   const { styles, theme } = useCrmStyles(factory);
   const someoneElse = !!row.collector && row.collector.id !== myId;
   const callBack = row.next_call_at && row.status !== 'DONE';
@@ -55,6 +89,61 @@ export function SiteCard({ row, myId, busy, onOpen, onTake, numberAdded }: { row
   const tint = toneColors(theme, meta.tone);
   const accent = meta.tone === 'neutral' ? theme.primary : tint.fg;
   const chips = serviceChips(row.services);
+
+  if (compact) {
+    const due = callBack
+      ? `Call back ${formatDateTime(row.next_call_at)}`
+      : !row.due_date
+      ? 'No due date'
+      : row.overdue
+      ? `Overdue · due ${formatDay(row.due_date)}`
+      : `Due ${formatDay(row.due_date)}`;
+    const dueRed = late || (!callBack && row.overdue);
+    return (
+      <Pressable onPress={row.collector ? onOpen : undefined} style={({ pressed }) => [styles.card, pressed && row.collector ? styles.pressed : null]}>
+        <View style={[styles.strip, { backgroundColor: accent }]} />
+        <View style={styles.cBody}>
+          <View style={styles.top}>
+            <View style={[styles.cInitial, { backgroundColor: tint.bg }]}>
+              <Text style={[styles.cInitialText, { color: accent }]}>{initialsOf(row.customer.name)}</Text>
+            </View>
+            <View style={styles.flex1}>
+              <Text style={styles.cName} numberOfLines={1}>
+                {row.customer.name}
+              </Text>
+              <Text style={styles.cust} numberOfLines={1}>
+                {row.site.name}
+                {row.site.city ? ` · ${row.site.city}` : ''}
+              </Text>
+            </View>
+            <StatusBadge label={meta.label} tone={meta.tone} />
+          </View>
+          <View style={styles.cFoot}>
+            <Text style={[styles.cDue, dueRed && { color: theme.dangerText, fontWeight: '700' }]} numberOfLines={1}>
+              {due}
+            </Text>
+            {row.collector ? (
+              <View style={styles.cLink}>
+                <Text style={styles.cLinkText}>{row.status === 'FORM_RECEIVED' ? 'Review form' : row.status === 'DONE' || someoneElse ? 'View' : 'Open'}</Text>
+                <ChevronRightIcon size={14} color={theme.primary} />
+              </View>
+            ) : (
+              <Pressable onPress={onTake} disabled={busy} style={({ pressed }) => [styles.cTake, pressed && styles.pressed]} accessibilityRole="button">
+                {busy ? (
+                  <ActivityIndicator size="small" color={theme.textOnPrimary} />
+                ) : (
+                  <>
+                    <PhoneIcon size={12} color={theme.textOnPrimary} />
+                    <Text style={styles.cTakeText}>Take call</Text>
+                  </>
+                )}
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable onPress={row.collector ? onOpen : undefined} style={({ pressed }) => [styles.card, pressed && row.collector ? styles.pressed : null]}>
@@ -75,40 +164,51 @@ export function SiteCard({ row, myId, busy, onOpen, onTake, numberAdded }: { row
           </View>
           <StatusBadge label={meta.label} tone={meta.tone} />
         </View>
-        {/* The service coordinator added the right number and nobody has called it yet. */}
-        {numberAdded && <Text style={styles.added}>● Number added</Text>}
-
-        {chips.length > 0 && (
-          <View style={styles.services}>
-            {chips.map((s) => (
-              <View key={s} style={styles.svc}>
+        {/* Services: always one line (an empty site says so), so every card is the same height. */}
+        <View style={styles.services}>
+          {/* The service coordinator added the right number and nobody has called it yet. */}
+          {numberAdded && (
+            <View style={styles.added}>
+              <Text style={styles.addedText} numberOfLines={1}>● Number added</Text>
+            </View>
+          )}
+          {chips.length > 0 ? (
+            chips.map((s) => (
+              <View key={s} style={[styles.svc, s.startsWith('+') && styles.svcMore]}>
                 <Text style={styles.svcText} numberOfLines={1}>
                   {s}
                 </Text>
               </View>
-            ))}
-          </View>
-        )}
-
-        <View style={styles.facts}>
-          {!!row.due_date && (
-            <View style={styles.fact}>
-              <CalendarIcon size={14} color={row.overdue ? theme.dangerText : theme.textMuted} />
-              <Text style={[styles.factText, row.overdue && { color: theme.dangerText, fontWeight: '700' }]}>
-                {row.overdue ? `Overdue · due ${formatDay(row.due_date)}` : `Due ${formatDay(row.due_date)}`}
+            ))
+          ) : (
+            <View style={[styles.svc, styles.svcNone]}>
+              <Text style={[styles.svcText, styles.svcTextNone]} numberOfLines={1}>
+                No service this month
               </Text>
             </View>
           )}
-          <View style={styles.fact}>
-            <CalendarIcon size={14} color={theme.textMuted} />
-            <Text style={styles.factText}>
-              {row.last_visit_date ? `Last visit ${formatDay(row.last_visit_date)}` : row.earlier_visit ? `Earlier visit ${formatDay(row.earlier_visit.date)}` : 'No service yet'}
-            </Text>
+        </View>
+
+        {/* Facts: always two lines - due + visits, then the last visit. */}
+        <View style={styles.facts}>
+          <View style={styles.factsRow}>
+            <View style={styles.fact}>
+              <CalendarIcon size={14} color={row.overdue ? theme.dangerText : theme.textMuted} />
+              <Text style={[styles.factText, row.overdue && { color: theme.dangerText, fontWeight: '700' }]} numberOfLines={1}>
+                {!row.due_date ? 'No due date' : row.overdue ? `Overdue · due ${formatDay(row.due_date)}` : `Due ${formatDay(row.due_date)}`}
+              </Text>
+            </View>
+            <View style={[styles.fact, { flexShrink: 0 }]}>
+              <ClockIcon size={14} color={theme.textMuted} />
+              <Text style={styles.factText} numberOfLines={1}>
+                {row.visit_count} visit{row.visit_count === 1 ? '' : 's'}
+              </Text>
+            </View>
           </View>
           <View style={styles.fact}>
-            <ClockIcon size={14} color={theme.textMuted} />
-            <Text style={styles.factText}>
-              {row.visit_count} visit{row.visit_count === 1 ? '' : 's'}
+            <CalendarIcon size={14} color={theme.textMuted} />
+            <Text style={styles.factText} numberOfLines={1}>
+              {row.last_visit_date ? `Last visit ${formatDay(row.last_visit_date)}` : row.earlier_visit ? `Earlier visit ${formatDay(row.earlier_visit.date)}` : 'No service yet'}
             </Text>
           </View>
         </View>
