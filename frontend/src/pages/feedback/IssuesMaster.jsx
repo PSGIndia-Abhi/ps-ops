@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { FiBriefcase, FiChevronDown, FiChevronUp, FiFileText, FiPlus, FiTool, FiX } from "react-icons/fi";
+import { FiAlertTriangle, FiBriefcase, FiChevronDown, FiChevronUp, FiFileText, FiPlus, FiTool, FiX } from "react-icons/fi";
 import { OPERATIONS, departmentHint, getDepartmentSetup, getIssueTypes, saveDepartments, saveIssueTypes } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
-import { Card, ErrorBox, Loading, PageHead, Switch, Toast } from "./ui";
+import { Card, ErrorBox, Loading, Modal, PageHead, Switch, Toast } from "./ui";
 
 // Feedback Desk › Issues (admin and service coordinators): the departments that take feedback
 // tickets - picked from the user hierarchy - and each department's issues (Operations: Services,
@@ -21,6 +21,8 @@ export default function IssuesMaster() {
   const [notice, setNotice] = useState("");
   const clearNotice = useCallback(() => setNotice(""), []);
   const [saving, setSaving] = useState(false);
+  // Leaving a department with unsaved issues: the department to open once confirmed.
+  const [leaveTo, setLeaveTo] = useState(null);
 
   const load = useCallback(() => {
     Promise.all([getDepartmentSetup(), getIssueTypes(true)])
@@ -86,7 +88,10 @@ export default function IssuesMaster() {
   }
 
   function pickDept(kind) {
-    if (dirty && !window.confirm("Leave without saving the issues you changed?")) return;
+    if (dirty) {
+      setLeaveTo(kind);
+      return;
+    }
     setDept(kind);
   }
 
@@ -159,7 +164,48 @@ export default function IssuesMaster() {
           </div>
         </Card>
       )}
+
+      {leaveTo !== null && (
+        <ConfirmDialog
+          title="Leave without saving?"
+          text={`You changed ${current?.name || "this department"}'s issues and haven't saved them. They will be lost.`}
+          confirmLabel="Leave without saving"
+          onConfirm={() => {
+            setDept(leaveTo);
+            setLeaveTo(null);
+          }}
+          onCancel={() => setLeaveTo(null)}
+        />
+      )}
     </>
+  );
+}
+
+/** A centred confirmation in the app's own style (instead of the browser's pop-up). */
+function ConfirmDialog({ title, text, confirmLabel, busy = false, onConfirm, onCancel }) {
+  return (
+    <Modal
+      title={title}
+      onClose={busy ? () => {} : onCancel}
+      className="fb-confirm"
+      footer={
+        <>
+          <button type="button" className="fb-btn" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="fb-btn fb-btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? "Please wait…" : confirmLabel}
+          </button>
+        </>
+      }
+    >
+      <div className="fb-confirm-body">
+        <span className="fb-confirm-icon" aria-hidden="true">
+          <FiAlertTriangle />
+        </span>
+        <p>{text}</p>
+      </div>
+    </Modal>
   );
 }
 
@@ -174,6 +220,7 @@ const deptIcon = (d) => (d.kind === OPERATIONS ? FiTool : d.with_invoices ? FiFi
 function DepartmentsBar({ setup, filter, onFilter, count, onChange }) {
   const [adding, setAdding] = useState("");
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState(null);
   if (!setup) return <Loading />;
   const active = setup.departments.filter((d) => d.is_active);
   const used = new Set(active.map((d) => d.org_unit_id));
@@ -192,10 +239,12 @@ function DepartmentsBar({ setup, filter, onFilter, count, onChange }) {
     await run([before ? rowOf(before, { is_active: true }) : { org_unit_id: unit.id, is_active: true, with_invoices: false }], `${unit.name} added. Now add its issues.`);
     setAdding("");
   }
-  async function remove(d) {
-    if (!window.confirm(`Remove ${d.name}? It gets no new tickets and its people lose Customer Feedback. Old tickets and questions stay.`)) return;
+  // The department waiting for "Remove" to be confirmed in the dialog.
+  async function confirmRemove() {
+    const d = removing;
     if (filter === d.kind) onFilter("");
     await run([rowOf(d, { is_active: false })], `${d.name} removed.`);
+    setRemoving(null);
   }
 
   return (
@@ -210,13 +259,7 @@ function DepartmentsBar({ setup, filter, onFilter, count, onChange }) {
                   <Icon aria-hidden="true" /> {d.name} <span className="fb-qtab-count">{count(d.kind)}</span>
                 </button>
                 {d.kind !== OPERATIONS && (
-                  <label className="fb-dept-tag-inv" title="This department can pick the customer's invoices on a ticket">
-                    <input type="checkbox" checked={d.with_invoices} disabled={busy} onChange={(e) => run([rowOf(d, { with_invoices: e.target.checked })], `${d.name}: invoices ${e.target.checked ? "on" : "off"}.`)} />
-                    Invoices
-                  </label>
-                )}
-                {d.kind !== OPERATIONS && (
-                  <button type="button" className="fb-dept-tag-x" aria-label={`Remove ${d.name}`} title="Remove" disabled={busy} onClick={() => remove(d)}>
+                  <button type="button" className="fb-dept-tag-x" aria-label={`Remove ${d.name}`} title="Remove" disabled={busy} onClick={() => setRemoving(d)}>
                     <FiX />
                   </button>
                 )}
@@ -239,6 +282,16 @@ function DepartmentsBar({ setup, filter, onFilter, count, onChange }) {
           <span className="fb-small fb-muted">People in these departments get Customer Feedback next to Task Management and see only their department's tickets.</span>
         </div>
       </div>
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.name}?`}
+          text={`${removing.name} gets no new tickets and its people lose Customer Feedback. Old tickets and questions stay. You can add it again later.`}
+          confirmLabel="Remove"
+          busy={busy}
+          onConfirm={confirmRemove}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
     </Card>
   );
 }

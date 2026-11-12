@@ -732,7 +732,9 @@ button.fb-dept-tag { padding: 6px 14px; cursor: pointer; gap: 8px; }
 .fb-dept-tag-main { display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; font-weight: 600; }
 .fb-dept-tag.is-on .fb-qtab-count { background: #dbeafe; color: #1d4ed8; }
 .fb-dept-tag-inv { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-left: 1px solid #e2e8f0; font-size: 12px; color: #64748b; cursor: pointer; }
-.fb-dept-tag-x { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-right: 4px; border: 0; border-radius: 999px; background: none; color: #94a3b8; cursor: pointer; }
+.fb-dept-tag-x { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; margin-right: 5px; padding: 0; border: 0; border-radius: 999px; background: #f1f5f9; color: #64748b; cursor: pointer; transition: background .15s, color .15s; }
+.fb-dept-tag-x svg { display: block; width: 14px; height: 14px; flex: none; }
+.fb-dept-tag-x:disabled { opacity: .5; cursor: default; }
 .fb-dept-tag-x:hover { background: #fee2e2; color: #b91c1c; }
 
 /* Feedback Desk › Issues: compact rows, two or three per line */
@@ -1232,3 +1234,9 @@ button.fb-dept-tag { padding: 6px 14px; cursor: pointer; gap: 8px; }
 /* Customer card: the company icon. */
 .fb-cust-avatar { background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; font-size: 18px; box-shadow: 0 4px 12px rgba(99, 102, 241, .25); }
 .fb-cust-avatar svg { display: block; }
+
+/* A centred confirmation (instead of the browser pop-up). */
+.fb-confirm { max-width: 460px; }
+.fb-confirm-body { display: flex; gap: 14px; align-items: flex-start; }
+.fb-confirm-body p { margin: 0; font-size: 14.5px; line-height: 1.55; color: #334155; }
+.fb-confirm-icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: #fee2e2; color: #dc2626; font-size: 19px; }
