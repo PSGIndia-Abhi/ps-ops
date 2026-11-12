@@ -5,6 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const { uuid, hasPerm, resolveVisibleUserIds, SALES_EXECUTIVE_ROLES } = require("../utils/crmLeadManagement");
 const { computeDay } = require("../utils/salesFieldTracking");
+const { buildFieldReport, fieldReportWorkbook, MAX_DAYS } = require("../services/salesFieldReport.service");
 
 // Sales Executive Field Tracking. The executive's own day (shift start/end, GPS batches) and the
 // sales manager's after-the-day review (team list, one executive's route). Mounted at
@@ -373,6 +374,45 @@ router.get("/team", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) =
     res.json({ date, team });
   } catch (err) {
     sendError(res, err, "Failed to load team tracking");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/field-tracking/report?from=YYYY-MM-DD&to=YYYY-MM-DD&userId=12&format=xlsx
+// Every field day of one executive (userId) or all the executives the manager may see, over at
+// most 31 days: day summaries, client visits, petrol trips, stops, GPS gaps and alerts
+// (services/salesFieldReport.service.js). JSON for the Report tab; format=xlsx downloads it.
+// ---------------------------------------------------------------------------
+router.get("/report", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    if (!isManager(req)) throw new HttpError(403, "Only sales managers can see the field report");
+    const from = readDate(req.query.from);
+    const to = readDate(req.query.to);
+    if (!from || !to) throw new HttpError(400, "from and to are required (YYYY-MM-DD)");
+    if (to < from) throw new HttpError(400, "to cannot be before from");
+    const span = (Date.parse(to) - Date.parse(from)) / 86400000 + 1;
+    if (span > MAX_DAYS) throw new HttpError(400, `Choose ${MAX_DAYS} days or fewer`);
+
+    let executives = await listExecutives(req);
+    const userId = req.query.userId ? parseId(req.query.userId) : null;
+    if (req.query.userId && !userId) throw new HttpError(400, "Invalid user id");
+    if (userId) {
+      executives = executives.filter((e) => e.id === userId);
+      if (!executives.length) throw new HttpError(404, "Sales executive not found");
+    }
+
+    const report = await buildFieldReport(pool, executives, from, to);
+    if (req.query.format !== "xlsx") return res.json(report);
+
+    const title = userId ? executives[0].name : "All sales executives";
+    const buffer = await fieldReportWorkbook(report, title);
+    const safe = title.replace(/[^A-Za-z0-9 _-]/g, "").trim().replace(/\s+/g, "-") || "field";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Field-Report-${safe}-${from}-to-${to}.xlsx"`);
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+    res.send(buffer);
+  } catch (err) {
+    sendError(res, err, "Failed to build the field report");
   }
 });
 

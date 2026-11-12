@@ -4,6 +4,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const { isValidDate, hasPerm, resolveVisibleUserIds, LEAD_ASSIGNEE_ROLES } = require("../utils/crmLeadManagement");
+const { buildLeadsReport } = require("../services/crmLeadsReport.service");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -395,6 +396,55 @@ router.get("/targets/history", auth, requirePermission("CRM_VIEW_LEAD"), async (
     });
   } catch (err) {
     sendError(res, err, "Failed to load the achievement");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/crm/reports/leads-export?from=&to=&employeeId=102     -> one person's leads (.xlsx)
+// GET /api/crm/reports/leads-export?from=&to=&scope=team          -> the whole visible team (.xlsx)
+//
+// Commercial leads ADDED in the period, with their current status, follow-ups, visits, quotations
+// and history (services/crmLeadsReport.service.js). One person: same access as the report above
+// (yourself, or someone in your team). Team: needs VIEW_TEAM_LEADS / MANAGE_LEADS / VIEW_ALL_LEADS.
+// ---------------------------------------------------------------------------
+router.get("/reports/leads-export", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const { from, to } = reportPeriod(req);
+    const label = from <= "2020-01-01" ? `All time (to ${to})` : from === to ? from : `${from} to ${to}`;
+    let subject;
+    if (req.query.scope === "team") {
+      const manager = req.user.role === "admin" || ["VIEW_TEAM_LEADS", "MANAGE_LEADS", "VIEW_ALL_LEADS"].some((p) => hasPerm(req, p));
+      if (!manager) throw new HttpError(403, "You cannot download the team's leads");
+      const visibleIds = await resolveVisibleUserIds(pool, req);
+      const where = ["u.is_active = 1", "p.name = 'CRM_VIEW_LEAD'"];
+      const params = [];
+      if (visibleIds !== null) {
+        where.push("u.id IN (?)");
+        params.push(visibleIds);
+      }
+      const [team] = await pool.query(
+        `SELECT DISTINCT u.id, u.name, r.name AS role
+           FROM users u JOIN roles r ON r.id = u.role_id
+           JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id
+          WHERE ${where.join(" AND ")} ORDER BY u.name`,
+        params
+      );
+      subject = { title: "Whole team", people: visibleIds === null ? null : visibleIds, perPerson: team };
+    } else {
+      const employeeId = await reportSubject(req);
+      const [[user]] = await pool.query("SELECT name FROM users WHERE id = ?", [employeeId]);
+      if (!user) throw new HttpError(404, "Person not found");
+      subject = { title: user.name, people: [employeeId], perPerson: null };
+    }
+
+    const { buffer } = await buildLeadsReport(pool, { subject, period: { from, to, label } });
+    const safe = subject.title.replace(/[^A-Za-z0-9 _-]/g, "").trim().replace(/\s+/g, "-") || "leads";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Lead-Report-${safe}-${from}-to-${to}.xlsx"`);
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+    res.send(buffer);
+  } catch (err) {
+    sendError(res, err, "Failed to build the lead report");
   }
 });
 

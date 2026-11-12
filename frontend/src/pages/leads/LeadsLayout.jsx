@@ -24,6 +24,7 @@ import {
   FiSearch,
   FiTag,
   FiThumbsDown,
+  FiTarget,
   FiTrendingUp,
   FiUserCheck,
   FiX,
@@ -115,6 +116,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/all`, label: "My Leads", icon: <FiList />, count: counts.leads },
         { to: `${LEADS_HOME}/follow-ups`, label: "Follow-ups", icon: <FiPhoneCall />, count: counts.followUps },
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
+        { to: `${LEADS_HOME}/targets`, label: "My Target", icon: <FiTarget /> },
         { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
       ];
     default:
@@ -127,6 +129,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/field-tracking`, label: "Field Tracking", icon: <FiNavigation /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
         { to: `${LEADS_HOME}/quote-master`, label: "Quotation Master", icon: <FiFileText /> },
+        { to: `${LEADS_HOME}/targets`, label: "Targets", icon: <FiTarget /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
       ];
   }

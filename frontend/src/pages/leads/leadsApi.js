@@ -692,6 +692,13 @@ export async function fieldDay(userId, date) {
   };
 }
 
+/** GET /api/field-tracking/report?format=xlsx - the field report (one executive or all, 31 days at most) as an Excel file. */
+export function downloadFieldReport({ from, to, userId }) {
+  const query = new URLSearchParams({ from, to, format: "xlsx" });
+  if (userId) query.set("userId", String(userId));
+  return saveDownload(`/api/field-tracking/report?${query}`, "Field-Report.xlsx");
+}
+
 export async function teamVisits(date) {
   const rows = await request(`/api/crm/team-visits?date=${encodeURIComponent(date)}`);
   return rows.map((row) => ({
@@ -873,6 +880,32 @@ export async function getPerformance({ from, to, employeeId }) {
   const query = new URLSearchParams({ from, to });
   if (employeeId) query.set("employeeId", String(employeeId));
   return request(`/api/crm/reports/sales-performance?${query}`);
+}
+
+/**
+ * GET /reports/leads-export - downloads the lead report Excel: one person's leads (employeeId) or the
+ * whole team's (team: true), added between from and to.
+ */
+export async function downloadLeadReport({ from, to, employeeId, team }) {
+  const query = new URLSearchParams({ from, to });
+  if (team) query.set("scope", "team");
+  else if (employeeId) query.set("employeeId", String(employeeId));
+  return saveDownload(`/api/crm/reports/leads-export?${query}`, "Lead-Report.xlsx");
+}
+
+/** Fetches a file with the login token and saves it under the name the server gives. */
+async function saveDownload(endpoint, fallbackName) {
+  const res = await apiFetch(endpoint);
+  if (!res?.ok) throw new Error((await safeJson(res))?.error || "Could not download the report");
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 /** GET /reports/sales-performance/items - the records behind one number of the report, by the same rules. */

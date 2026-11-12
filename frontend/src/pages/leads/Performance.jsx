@@ -4,9 +4,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { FiAward, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
-import { LEADS_HOME, ROLE_ALIASES } from "./access";
-import { getPerformance, getPerformanceItems, getTargetHistory, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
+import { FiAward, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiDownload, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
+import { LEADS_HOME } from "./access";
+import { downloadLeadReport, getPerformance, getPerformanceItems, getTargetHistory, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
 import { money } from "./format";
 import { useToast } from "./hooks";
 import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, StageBadge, Who } from "./ui";
@@ -63,6 +63,19 @@ export default function Performance() {
   const [result, setResult] = useState({ key: null, data: null, error: "" });
   const [teamResult, setTeamResult] = useState({ key: null, rows: null });
   const [opened, setOpened] = useState(null); // the card whose records are showing
+  const [downloading, setDownloading] = useState(""); // "" | "person" | "team"
+  const toast = useToast();
+
+  async function download(kind) {
+    setDownloading(kind);
+    try {
+      await downloadLeadReport({ from, to, employeeId: personId || undefined, team: kind === "team" });
+    } catch (err) {
+      toast(err.message || "Could not download the report");
+    } finally {
+      setDownloading("");
+    }
+  }
 
   const today = ymd(new Date());
   const from = range === "custom" ? custom.from : RANGES.find((r) => r.key === range).from();
@@ -104,10 +117,6 @@ export default function Performance() {
   const teamRows = teamResult.key === teamKey ? teamResult.rows : null;
   const period = { from, to };
   const whose = personId ? team.find((u) => u.id === personId)?.name || "Team member" : me?.name || "You";
-  // The achievement card is for sales people (they have targets), not telecallers.
-  const rawRole = personId ? team.find((u) => u.id === personId)?.role : viewer.persona;
-  const whoseRole = ROLE_ALIASES[rawRole] || rawRole; // "Sales Executive" -> "sales"
-  const showAchievement = whoseRole === "sales" || whoseRole === "sales_manager";
   const periodText = range === "lifetime" ? "All time" : period.from === period.to ? period.from : `${period.from} to ${period.to}`;
 
   return (
@@ -141,7 +150,7 @@ export default function Performance() {
       </div>
 
       {range === "custom" && (
-        <div className="lm-head-actions" style={{ marginBottom: 16 }}>
+        <div className="lm-head-actions lm-custom-range">
           <label className="lm-check">
             From
             <input className="lm-input" type="date" value={custom.from} max={today} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
@@ -154,11 +163,17 @@ export default function Performance() {
         </div>
       )}
 
-      {(manager || viewer.persona === "sales") && <Targets manager={manager} myId={String(me?.id || "")} />}
-
-      {showAchievement && <Achievement userId={personId || undefined} whose={whose} />}
-
-      <Card title={whose} sub={`${periodText} - click a number to see what is behind it`} index={0}>
+      <div className="lm-stack">
+      <Card
+        title={whose}
+        sub={`${periodText} - click a number to see what is behind it`}
+        index={0}
+        action={
+          <Button size="sm" variant="ghost" icon={<FiDownload />} busy={downloading === "person"} disabled={badCustom} onClick={() => download("person")}>
+            Excel - {personId ? whose : "my leads"}
+          </Button>
+        }
+      >
         {error ? (
           <Empty title="Could not load the report" text={error} icon={<FiCheckCircle />} />
         ) : !report || badCustom ? (
@@ -174,7 +189,18 @@ export default function Performance() {
       </Card>
 
       {manager && (
-        <Card title="Whole Team" sub="Click a person to see their numbers above" index={1} flush className="lm-detail">
+        <Card
+          title="Whole Team"
+          sub="Click a person to see their numbers above"
+          index={1}
+          flush
+          className="lm-detail"
+          action={
+            <Button size="sm" variant="ghost" icon={<FiDownload />} busy={downloading === "team"} disabled={badCustom} onClick={() => download("team")}>
+              Excel - whole team
+            </Button>
+          }
+        >
           <div style={{ height: 14 }} />
           {!teamRows ? (
             <SkeletonRows rows={4} />
@@ -220,6 +246,7 @@ export default function Performance() {
           )}
         </Card>
       )}
+      </div>
 
       {opened && (
         <ReportItems metric={opened} from={from} to={to} employeeId={personId || undefined} whose={whose} periodText={periodText} onClose={() => setOpened(null)} />
@@ -428,7 +455,7 @@ function TargetBar({ t }) {
  * converted this month (the amounts of their converted leads) and sets or changes each one; a sales
  * executive sees their own.
  */
-function Targets({ manager, myId }) {
+function Targets({ manager, myId, picked, onPick }) {
   const [month, setMonth] = useState(thisMonth);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
@@ -479,7 +506,12 @@ function Targets({ manager, myId }) {
               </thead>
               <tbody>
                 {list.map((t, i) => (
-                  <tr key={t.user_id} style={{ "--i": i }}>
+                  <tr
+                    key={t.user_id}
+                    style={{ "--i": i }}
+                    className={onPick ? `lm-pickable${String(picked) === String(t.user_id) ? " on" : ""}` : undefined}
+                    onClick={onPick ? () => onPick(t) : undefined}
+                  >
                     <td>
                       <Who name={t.name} sub={ROLE_LABEL[t.role] || t.role} size={34} />
                     </td>
@@ -492,7 +524,14 @@ function Targets({ manager, myId }) {
                     <td className="num">
                       {/* only the Managing Director sets the Personal Assistant's target */}
                       {t.can_set !== false && (
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditing(t);
+                          }}
+                        >
                           {t.target ? "Change" : "Set target"}
                         </Button>
                       )}
@@ -600,5 +639,48 @@ function SetTargetModal({ target, month, onClose, onSaved }) {
         </label>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Targets (its own sidebar item): the month's targets and, under them, one sales person's
+ * achievement history. The sales manager picks the person by clicking their row; a sales
+ * executive sees their own.
+ */
+export function TargetsPage() {
+  const viewer = useViewer();
+  const { me, ready } = useLeadData();
+  const manager = viewer.persona === "sales_manager";
+  const [picked, setPicked] = useState(null); // { user_id, name } - manager only
+
+  if (viewer.persona !== "sales_manager" && viewer.persona !== "sales") return <Navigate to={LEADS_HOME} replace />;
+
+  const myId = String(me?.id || "");
+  const subjectId = manager ? picked?.user_id : undefined;
+  const subjectName = manager ? picked?.name : me?.name || "You";
+
+  return (
+    <>
+      <div className="lm-head">
+        <div>
+          <h1>{manager ? "Targets" : "My Target"}</h1>
+          <p>
+            {manager
+              ? "Each sales person's monthly target against the deals they closed. Click a person to see their history."
+              : "Your monthly target against the deals you closed, and how the last months went."}
+          </p>
+        </div>
+      </div>
+      <div className="lm-stack">
+        {ready && <Targets manager={manager} myId={myId} picked={picked?.user_id} onPick={manager ? (t) => setPicked({ user_id: t.user_id, name: t.name }) : undefined} />}
+        {manager && !picked ? (
+          <Card index={1}>
+            <Empty title="Pick a sales person" text="Click a row above to see their last month, total converted and six-month history." icon={<FiAward />} />
+          </Card>
+        ) : (
+          ready && <Achievement key={subjectId || "me"} userId={subjectId} whose={subjectName} />
+        )}
+      </div>
+    </>
   );
 }

@@ -21,6 +21,7 @@ import {
   FiChevronLeft,
   FiChevronRight,
   FiClock,
+  FiDownload,
   FiExternalLink,
   FiFlag,
   FiMapPin,
@@ -31,9 +32,10 @@ import {
 } from "react-icons/fi";
 import { LuBuilding2 } from "react-icons/lu";
 import { LEADS_HOME } from "./access";
-import { fieldDay, fieldExecutives, fieldTeam, saveFieldRoute } from "./leadsApi";
+import { downloadFieldReport, fieldDay, fieldExecutives, fieldTeam, saveFieldRoute } from "./leadsApi";
 import { timeLabel } from "./format";
-import { Avatar, Badge, Card, Empty, Kpi, SkeletonRows, Tabs } from "./ui";
+import { mapLink } from "./places";
+import { Avatar, Badge, Button, Card, Empty, Kpi, SkeletonRows, Tabs } from "./ui";
 import { useViewer } from "./viewer";
 import "./fieldTracking.css";
 
@@ -730,6 +732,68 @@ function VisitDetails({ v, compact = false }) {
   );
 }
 
+// Written places for GPS points, looked up once per point for the session. The Maps JavaScript
+// geocoder is used (not the Geocoding web API): the browser key is limited to our websites, and
+// Google refuses such a key on the web API.
+const geocodeCache = new globalThis.Map();
+const PLUS_CODE = /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3},?\s*/i;
+function lookupPlace(geocoding, point) {
+  const id = `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`;
+  if (!geocodeCache.has(id)) {
+    const lookup = new geocoding.Geocoder()
+      .geocode({ location: point })
+      .then(({ results }) => {
+        // the first result that is a street address or place, not just a plus code
+        const best = results.find((r) => !PLUS_CODE.test(r.formatted_address)) || results[0];
+        return best ? best.formatted_address.replace(PLUS_CODE, "") : null;
+      })
+      .catch(() => {
+        geocodeCache.delete(id); // try again next time
+        return null;
+      });
+    geocodeCache.set(id, lookup);
+  }
+  return geocodeCache.get(id);
+}
+
+/**
+ * Where a day-log event happened: the written place for its GPS point, the client's saved address
+ * when it differs, and links to the map.
+ */
+function LogPlace({ point, address, onShow }) {
+  const geocoding = useMapsLibrary("geocoding");
+  const failed = useMapsFailed();
+  const id = `${point.lat},${point.lng}`;
+  const [found, setFound] = useState({ id: null, text: null });
+  useEffect(() => {
+    if (!geocoding) return undefined;
+    let alive = true;
+    lookupPlace(geocoding, point).then((text) => alive && setFound({ id, text }));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geocoding, id]);
+  const loading = !failed && found.id !== id;
+  const place = found.text || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+  return (
+    <span className="ft-log-place">
+      <span>
+        <FiMapPin /> {loading ? "Finding the place..." : place}
+      </span>
+      {!!address && !loading && address !== found.text && <small>Client address: {address}</small>}
+      <span className="ft-log-links">
+        <button type="button" onClick={onShow}>
+          Show on map
+        </button>
+        <a href={mapLink(point)} target="_blank" rel="noreferrer">
+          Google Maps <FiExternalLink />
+        </a>
+      </span>
+    </span>
+  );
+}
+
 function DayPicker({ date, onChange }) {
   const today = dayKey(new Date());
   return (
@@ -945,28 +1009,42 @@ function ExecutiveDay({ userId, date }) {
       .catch(() => savedDays.delete(key));
   }, [day, savedPaths, key, userId, date, waypoints, legRoad, liveRoad]);
 
+  // The day as a report: every event with where it happened, and the travel between them (GPS km
+  // and time, from the track of that shift).
   const log = useMemo(() => {
     if (!day) return [];
     const events = [];
-    day.shifts.forEach((s) => {
-      events.push({ at: s.startedAt, icon: <FiActivity />, tone: "info", text: "Shift started", sub: "" });
+    day.shifts.forEach((s, i) => {
+      const shiftNo = day.shifts.length > 1 ? ` (shift ${i + 1})` : "";
+      events.push({ at: s.startedAt, icon: <FiActivity />, tone: "info", text: `Shift started${shiftNo}`, sub: "", place: toLatLng(s.start), shiftId: s.id });
       if (s.endedAt) {
         events.push({
           at: s.endedAt,
           icon: <FiCheckCircle />,
           tone: "success",
-          text: s.status === "AUTO_ENDED" ? "Shift closed by the system" : "Shift ended",
+          text: s.status === "AUTO_ENDED" ? `Shift closed by the system${shiftNo}` : `Shift ended${shiftNo}`,
           sub: s.status === "AUTO_ENDED" ? "End Shift was not pressed" : "",
+          place: toLatLng(s.end),
+          shiftId: s.id,
         });
       }
     });
     day.visits.forEach((v) => {
+      const where = toLatLng(v.checkIn || v.leadLocation);
       events.push({
         at: v.checkInAt,
+        until: v.checkOutAt,
         icon: <FiMapPin />,
         tone: v.unplanned ? "violet" : "info",
         text: `Punched in at ${v.company}`,
-        sub: [v.unplanned ? "Unplanned visit" : "Planned visit", v.distanceFromLeadM !== null ? `${metersText(v.distanceFromLeadM)} from the client's location` : null].filter(Boolean).join(" · "),
+        sub: [
+          v.leadNumber,
+          v.unplanned ? "Unplanned visit" : "Planned visit",
+          v.distanceFromLeadM !== null ? `${metersText(v.distanceFromLeadM)} from the client's location` : "Client location not saved",
+        ].filter(Boolean).join(" · "),
+        address: v.address || "",
+        place: where,
+        meetingId: v.meetingId,
       });
       if (v.checkOutAt) {
         events.push({
@@ -974,11 +1052,15 @@ function ExecutiveDay({ userId, date }) {
           icon: <FiMapPin />,
           tone: v.unplanned ? "violet" : "info",
           text: `Punched out at ${v.company}`,
-          sub: [`Spent ${spentText(v.checkInAt, v.checkOutAt)}`, v.outcomeNotes].filter(Boolean).join(" · "),
+          sub: [`Spent ${spentText(v.checkInAt, v.checkOutAt)}`, v.outcomeNotes ? `Outcome: ${v.outcomeNotes}` : null].filter(Boolean).join(" · "),
+          place: toLatLng(v.checkOut) || where,
+          meetingId: v.meetingId,
         });
       }
     });
-    day.stops.forEach((s) => events.push({ at: s.from, icon: <FiClock />, tone: "neutral", text: `Stopped for ${minutesText(s.minutes)}`, sub: `until ${timeLabel(s.to)}` }));
+    day.stops.forEach((s) =>
+      events.push({ at: s.from, until: s.to, icon: <FiClock />, tone: "neutral", text: `Stopped for ${minutesText(s.minutes)}`, sub: `${timeLabel(s.from)} to ${timeLabel(s.to)}`, place: toLatLng(s) })
+    );
     (day.alerts || []).forEach((a) =>
       events.push({
         at: a.startedAt,
@@ -986,11 +1068,48 @@ function ExecutiveDay({ userId, date }) {
         tone: "warn",
         text: `Stayed ${minutesText(a.minutes)} at one place`,
         sub: `No client punch-in · alert sent to the executive and managers${a.notifiedAt ? ` at ${timeLabel(a.notifiedAt)}` : ""}`,
+        place: toLatLng(a.location),
       })
     );
-    day.gaps.forEach((g) => events.push({ at: g.from, icon: <FiAlertTriangle />, tone: "danger", text: `No GPS for ${minutesText(g.minutes)}`, sub: "Phone off, location off or app closed" }));
-    return events.filter((e) => e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+    day.gaps.forEach((g) => events.push({ at: g.from, until: g.to, icon: <FiAlertTriangle />, tone: "danger", text: `No GPS for ${minutesText(g.minutes)}`, sub: `${timeLabel(g.from)} to ${timeLabel(g.to)} · phone off, location off or app closed` }));
+    const sorted = events.filter((e) => e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+
+    // Travel between one event and the next, inside the same shift: GPS km along the track and time.
+    const ms = (t) => new Date(t).getTime();
+    const shiftAt = (t) => day.shifts.find((s) => ms(s.startedAt) <= ms(t) && (!s.endedAt || ms(t) <= ms(s.endedAt)));
+    const out = [];
+    sorted.forEach((e, i) => {
+      out.push(e);
+      const next = sorted[i + 1];
+      if (!next) return;
+      const fromT = e.until && ms(e.until) <= ms(next.at) ? e.until : e.at;
+      const shift = shiftAt(fromT);
+      if (!shift || shift !== shiftAt(next.at) || next.text.startsWith("Shift started")) return;
+      const track = day.points.filter((p) => p.valid && p.shiftId === shift.id && ms(p.capturedAt) >= ms(fromT) && ms(p.capturedAt) <= ms(next.at)).map(toLatLng);
+      let meters = 0;
+      for (let k = 1; k < track.length; k++) meters += haversineM(track[k - 1], track[k]);
+      const minutes = Math.round((ms(next.at) - ms(fromT)) / 60000);
+      if (meters < 100 || minutes < 1) return;
+      out.push({ travel: true, text: `Travelled ${metersText(Math.round(meters))}`, sub: `${minutesText(minutes)} on the road · GPS track` });
+    });
+    return out;
   }, [day]);
+  const [dayDownload, setDayDownload] = useState({ busy: false, error: "" });
+  async function downloadDay() {
+    setDayDownload({ busy: true, error: "" });
+    try {
+      await downloadFieldReport({ from: date, to: date, userId });
+      setDayDownload({ busy: false, error: "" });
+    } catch (err) {
+      setDayDownload({ busy: false, error: err.message || "Could not download the report." });
+    }
+  }
+  const showOnMap = (point, meetingId) => {
+    if (meetingId) setSelected(meetingId);
+    setView("map");
+    // a new key each click, so the same place can be shown again after moving the map
+    setFocus((f) => ({ key: `p-${(f?.n || 0) + 1}`, n: (f?.n || 0) + 1, points: [point] }));
+  };
 
   if (!day) {
     return result.error && result.key === key ? (
@@ -1078,6 +1197,7 @@ function ExecutiveDay({ userId, date }) {
           tabs={[
             { key: "map", label: "Map & visits", count: day.visits.length || undefined },
             { key: "petrol", label: "Petrol breakdown", count: petrol?.legs.length || undefined },
+            { key: "report", label: "Day report" },
           ]}
           value={view}
           onChange={setView}
@@ -1101,6 +1221,53 @@ function ExecutiveDay({ userId, date }) {
             <Empty title="No petrol for this day" text="No shift with GPS points on this day." icon={<FiTruck />} />
           </Card>
         ))}
+
+
+      {view === "report" && (
+        <Card
+          flush
+          className="ft-report-card"
+          title="Day report"
+          sub="Everything the executive did, in order - where each thing happened and the travel in between"
+          action={
+            <Button size="sm" variant="ghost" icon={<FiDownload />} busy={dayDownload.busy} onClick={downloadDay}>
+              Download Excel
+            </Button>
+          }
+        >
+            {!!dayDownload.error && <p className="ft-report-note ft-side-note">{dayDownload.error}</p>}
+            <ol className="ft-log">
+              {log.map((e, i) =>
+                e.travel ? (
+                  <li key={i} className="ft-log-travel">
+                    <span className="ft-log-time" />
+                    <span className="ft-log-icon">
+                      <FiNavigation />
+                    </span>
+                    <span className="ft-log-text">
+                      <strong>{e.text}</strong>
+                      <small>{e.sub}</small>
+                    </span>
+                  </li>
+                ) : (
+                  <li key={i} className={`tone-${e.tone}`}>
+                    <span className="ft-log-time">{timeLabel(e.at)}</span>
+                    <span className="ft-log-icon">{e.icon}</span>
+                    <span className="ft-log-text">
+                      <strong>{e.text}</strong>
+                      {!!e.sub && <small>{e.sub}</small>}
+                      {e.place ? (
+                        <LogPlace point={e.place} address={e.address} onShow={() => showOnMap(e.place, e.meetingId)} />
+                      ) : (
+                        !!e.address && <span className="ft-log-place">{e.address}</span>
+                      )}
+                    </span>
+                  </li>
+                )
+              )}
+            </ol>
+        </Card>
+      )}
 
       {view === "map" && (
       <div className="ft-day">
@@ -1174,27 +1341,6 @@ function ExecutiveDay({ userId, date }) {
                 })}
               </ol>
             )}
-          </section>
-
-          <section className="ft-side-section">
-            <header className="ft-side-head">
-              <h2>Day log</h2>
-              <small>
-                {log.length} event{log.length === 1 ? "" : "s"}
-              </small>
-            </header>
-            <ol className="ft-log">
-              {log.map((e, i) => (
-                <li key={i} className={`tone-${e.tone}`}>
-                  <span className="ft-log-time">{timeLabel(e.at)}</span>
-                  <span className="ft-log-icon">{e.icon}</span>
-                  <span className="ft-log-text">
-                    <strong>{e.text}</strong>
-                    {!!e.sub && <small>{e.sub}</small>}
-                  </span>
-                </li>
-              ))}
-            </ol>
           </section>
           </div>
         </aside>

@@ -84,7 +84,7 @@ import LeadDetail from "./pages/leads/LeadDetail";
 import ResidentialLeads from "./pages/leads/ResidentialLeads";
 import { ResidentialDashboard, ResidentialLeadPage, ResidentialNewLead } from "./pages/leads/residential";
 import { FollowUps, LeadFollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
-import LeadsPerformance from "./pages/leads/Performance";
+import LeadsPerformance, { TargetsPage as LeadsTargets } from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
 import QuoteMaster from "./pages/leads/QuoteMaster";
 import TeamVisits from "./pages/leads/TeamVisits";
@@ -364,6 +364,7 @@ const router = createBrowserRouter([
       { path: "meetings", element: <Meetings /> },
       { path: "providers", element: <Providers /> },
       { path: "performance", element: <LeadsPerformance /> },
+      { path: "targets", element: <LeadsTargets /> },
       { path: "sources", element: <LeadSources /> },
       { path: "quote-master", element: <QuoteMaster /> },
       // Customer Feedback tickets for salespeople (a Sales step assigned to them) and other lead staff.

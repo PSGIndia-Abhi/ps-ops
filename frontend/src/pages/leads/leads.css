@@ -1199,3 +1199,13 @@
   .lm-outlet input { width: 18px; height: 18px; accent-color: var(--lm-primary); }
   .lm-outlet span { display: grid; gap: 1px; strong { font-size: 14px; } small { color: var(--lm-muted); font-size: 12px; } }
 }
+
+/* Report pages (Team Report, Targets): cards stacked with even spacing. */
+.lm-root {
+  .lm-stack { display: grid; gap: 20px; }
+  .lm-stack > .lm-card { margin: 0; }
+  .lm-custom-range { margin: -6px 0 18px; align-items: center; }
+  .lm-table tr.lm-pickable { cursor: pointer; }
+  .lm-table tr.lm-pickable.on td { background: rgba(37, 99, 235, .06); }
+  .lm-table tr.lm-pickable.on td:first-child { box-shadow: inset 3px 0 0 var(--lm-primary, #2563eb); }
+}
