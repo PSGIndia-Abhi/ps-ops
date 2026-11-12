@@ -8,8 +8,10 @@ export interface TicketsTab {
   count: number;
   /** Reload the count (the list does it when it comes into view). */
   refresh: () => void;
+  /** The list was opened: the number clears until new tickets come. */
+  markSeen: () => void;
 }
-export const TicketsTabContext = createContext<TicketsTab>({ show: false, count: 0, refresh: () => {} });
+export const TicketsTabContext = createContext<TicketsTab>({ show: false, count: 0, refresh: () => {}, markSeen: () => {} });
 export const useTicketsTab = () => useContext(TicketsTabContext);
 
 /** Set when the tickets are opened as a page (from More): the list shows a back arrow that calls it. */

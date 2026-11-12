@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useUnseen } from '../feedback/unseen';
 import { Text, View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator, type BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -6,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChartIcon, HomeIcon, PhoneIcon, SendIcon } from '../components/icons';
 import { useCrmTheme } from '../crm/theme';
 import { ClipboardListIcon } from '../crm/ui/crmIcons';
-import { getOpenRequestCount } from '../feedback/api';
+import { getDeskBadges } from '../feedback/api';
 import { FeedbackProvider, useFeedback } from '../feedback/FeedbackContext';
 import type { FeedbackStackParamList, FeedbackTabParamList } from '../feedback/navigation';
 import { FeedbackCallScreen } from '../feedback/screens/FeedbackCallScreen';
@@ -47,13 +48,18 @@ function FeedbackTabs() {
   const insets = useSafeAreaInsets();
   // An Operations / Accounts team member works their department's tickets only.
   const { deptOnly } = useFeedback();
-  // The number on Requests: requests still waiting for the service coordinator (every minute, and on each tab change).
-  const [waiting, setWaiting] = useState(0);
+  // The numbers on Requests (wrong-number requests waiting) and Tickets (open tickets), every minute and
+  // on each tab change. Each clears once its tab is opened; only new ones show after (as on the web).
+  const { userId } = useFeedback();
+  const [counts, setCounts] = useState<{ open_requests: number; open_tickets: number } | null>(null);
   const loadWaiting = useCallback(() => {
-    getOpenRequestCount()
-      .then(setWaiting)
+    getDeskBadges()
+      .then(setCounts)
       .catch(() => {});
   }, []);
+  const scope = userId ? String(userId) : '';
+  const requestsSeen = useUnseen(scope, 'desk.requests', counts ? counts.open_requests : null);
+  const ticketsSeen = useUnseen(scope, 'desk.tickets', counts ? counts.open_tickets : null);
   useEffect(() => {
     if (deptOnly) return undefined;
     loadWaiting();
@@ -80,8 +86,8 @@ function FeedbackTabs() {
     <Tab.Navigator key={deptOnly ? 'dept' : 'all'} screenOptions={screenOptions} screenListeners={{ state: loadWaiting }}>
       {!deptOnly && <Tab.Screen name="Home" component={FeedbackHomeScreen} options={{ tabBarIcon: homeIcon }} />}
       {!deptOnly && <Tab.Screen name="Calls" component={FeedbackCallsScreen} options={{ tabBarIcon: callsIcon }} />}
-      <Tab.Screen name="Tickets" component={FeedbackTicketsScreen} options={{ tabBarIcon: ticketsIcon }} />
-      {!deptOnly && <Tab.Screen name="Requests" component={FeedbackRequestsScreen} options={{ tabBarIcon: requestsIcon, tabBarBadge: waiting || undefined }} />}
+      <Tab.Screen name="Tickets" component={FeedbackTicketsScreen} options={{ tabBarIcon: ticketsIcon, tabBarBadge: ticketsSeen.unseen || undefined }} listeners={{ focus: ticketsSeen.markSeen }} />
+      {!deptOnly && <Tab.Screen name="Requests" component={FeedbackRequestsScreen} options={{ tabBarIcon: requestsIcon, tabBarBadge: requestsSeen.unseen || undefined }} listeners={{ focus: requestsSeen.markSeen }} />}
       {!deptOnly && <Tab.Screen name="Insights" component={FeedbackInsightsScreen} options={{ tabBarIcon: insightsIcon }} />}
     </Tab.Navigator>
   );

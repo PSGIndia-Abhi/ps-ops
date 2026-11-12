@@ -1,4 +1,5 @@
 import React from 'react';
+import { SwitchCountBadge } from '../navigation/SwitchCountBadge';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
@@ -122,6 +123,7 @@ function MeButton() {
       accessibilityLabel={canSwitch ? 'Switch app' : 'Profile'}
     >
       <Text style={styles.meText}>{initialsOf(user?.name || '')}</Text>
+      <SwitchCountBadge />
       {canSwitch && (
         <View style={styles.swap}>
           <SwapIcon size={10} color={theme.primary} />

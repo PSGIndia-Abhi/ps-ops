@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SwitchCountBadge } from '../../navigation/SwitchCountBadge';
 import { Animated, Easing, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -353,6 +354,7 @@ export function TaskHomeScreen() {
               testID="header-avatar"
             >
               <Text style={styles.meText}>{initials(viewer.name)}</Text>
+              <SwitchCountBadge />
               {canSwitch && (
                 <View style={styles.switchBadge}>
                   <SwapIcon size={11} color={theme.primary} />

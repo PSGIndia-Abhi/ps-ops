@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { SwitchCountBadge } from '../../navigation/SwitchCountBadge';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -152,6 +153,7 @@ export function FeedbackHomeScreen() {
               accessibilityLabel={canSwitch ? 'Switch app' : 'Profile'}
             >
               <Text style={styles.meText}>{initialsOf(user?.name || '')}</Text>
+              <SwitchCountBadge />
               {canSwitch && (
                 <View style={styles.switchBadge}>
                   <SwapIcon size={11} color={theme.primary} />

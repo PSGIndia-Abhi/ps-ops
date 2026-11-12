@@ -19,12 +19,18 @@ export interface AppSwitchValue {
    * Home passes its own way of opening the profile, since the sheet replaces that tap.
    */
   openSwitcher: (onProfile?: () => void) => void;
+  /** What waits in each of the person's other apps, not seen yet (the numbers in "Switch app"). */
+  badges: Partial<Record<AppKind, number>>;
+  /** All of them added up - the red number on the avatar. */
+  badgeTotal: number;
 }
 
 const AppSwitchContext = createContext<AppSwitchValue>({
   canSwitch: false,
   current: 'tasks',
   openSwitcher: () => undefined,
+  badges: {},
+  badgeTotal: 0,
 });
 
 export const AppSwitchProvider = AppSwitchContext.Provider;
