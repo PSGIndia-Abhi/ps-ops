@@ -49,29 +49,33 @@ export default function RecordPayment() {
   // The page reloads after a save, so their pending amounts already have this payment taken off;
   // working the table out from the reloaded invoices would take it off a second time.
   const [savedInvoices, setSavedInvoices] = useState(null);
+  const [savedCount, setSavedCount] = useState(1); // how many payments the last save made (one per customer record)
 
   // Customers the accountant can record payments for: the ones that have invoices in their branch.
+  // Records with the same display name (e.g. one per outlet) are one customer here.
   const customers = useMemo(
-    () => groupByCustomer(invoices, payments).sort((a, b) => String(a.name).localeCompare(String(b.name))),
+    () => groupByCustomer(invoices, payments, { byName: true }).sort((a, b) => String(a.name).localeCompare(String(b.name))),
     [invoices, payments]
   );
-  const customer = customers.find((c) => c.id === customerId) || null;
+  // customerId is a name key from the dropdown, or a customer id when another screen opened this page.
+  const customer = customers.find((c) => c.id === customerId || c.ids.includes(customerId)) || null;
+  const ids = useMemo(() => customer?.ids || [], [customer]);
 
   // Opened from a payment reminder: after a part payment the reminder is still open (the server
   // only completes it once its outstanding is cleared), so the accountant is asked when to be
   // reminded next. `reminderOwed` is what that reminder is still chasing, read from the invoices.
-  const reminder = followUps.find((f) => f.id === location.state?.followUpId && f.active && f.customer_id === customerId) || null;
+  const reminder = followUps.find((f) => f.id === location.state?.followUpId && f.active && ids.includes(f.customer_id)) || null;
   const reminderOwed = !reminder ? 0
     : reminder.scope === "INVOICE" ? amt(invoices.find((i) => i.id === reminder.invoice_id)?.pending_amount)
-    : amt(customer?.outstanding);
+    : r2(invoices.filter((i) => i.customer_id === reminder.customer_id && i.status !== "CANCELLED").reduce((s, i) => s + i.pending_amount, 0));
 
-  // The customer's invoices, oldest first.
+  // The customer's invoices (from all its records), oldest first.
   const allInvoices = useMemo(
     () =>
       invoices
-        .filter((i) => i.customer_id === customerId && i.status !== "CANCELLED")
+        .filter((i) => ids.includes(i.customer_id) && i.status !== "CANCELLED")
         .sort((a, b) => (a.due_date || a.invoice_date).localeCompare(b.due_date || b.invoice_date)),
-    [invoices, customerId]
+    [invoices, ids]
   );
   // After a save the table shows just the invoices that were paid, with the amounts as entered
   // and each one's new status; it cannot be edited until "Record Another Payment".
@@ -79,7 +83,7 @@ export default function RecordPayment() {
     ? savedInvoices.map((inv) => ({ ...inv, status: allInvoices.find((i) => i.id === inv.id)?.status || inv.status }))
     : null;
   const visibleInvoices = paidRows || allInvoices.filter((i) => showPaid || isOpen(i));
-  const history = payments.filter((p) => p.customer_id === customerId && p.status !== "CANCELLED").slice(0, 5);
+  const history = payments.filter((p) => ids.includes(p.customer_id) && p.status !== "CANCELLED").slice(0, 5);
 
   // The customer's TDS setting, read from their newest invoice that has TDS.
   const tdsInvoice = [...allInvoices].reverse().find((i) => i.tds_applicable);
@@ -214,7 +218,7 @@ export default function RecordPayment() {
 
   // Checks the form and returns a message for the first problem found.
   function problem() {
-    if (!customerId) return "Please select a customer.";
+    if (!customer) return "Please select a customer.";
     if (!form.date) return "Please choose the payment date.";
     if (!(received > 0)) return "Please enter the cash received.";
     if (!allocatedCount) return "Tick at least one invoice and enter an amount.";
@@ -231,7 +235,32 @@ export default function RecordPayment() {
       }
       if (t > 0 && !inv.tds_applicable) return `TDS is not applicable for ${inv.invoice_number}.`;
     }
+    const tdsOnly = paymentParts().find((p) => !(p.cash > 0));
+    if (tdsOnly) {
+      return `${tdsOnly.invoices.map((i) => i.invoice_number).join(", ")} only has TDS in this payment and belongs to a separate customer record, so it can't be saved with it. Put some cash on it, or untick it.`;
+    }
     return "";
+  }
+
+  // The invoices can come from several customer records with the same name, but the server takes one
+  // record per payment. So one payment is saved per record, all with the same date, mode, UTR and remarks.
+  // Each one takes the cash allocated to its own invoices; cash left unallocated goes on the first one.
+  function paymentParts() {
+    const parts = new Map();
+    for (const inv of selectedInvoices) {
+      const c = amt(cash[inv.id]);
+      const t = amt(tds[inv.id]);
+      if (c + t <= 0) continue;
+      if (!parts.has(inv.customer_id)) parts.set(inv.customer_id, { customer_id: inv.customer_id, cash: 0, invoices: [], allocations: [] });
+      const p = parts.get(inv.customer_id);
+      p.cash = r2(p.cash + c);
+      p.invoices.push(inv);
+      p.allocations.push({ invoice_id: inv.id, cash_amount: c, tds_amount: t, tds_type: isOpen(inv) ? "CURRENT" : "PREVIOUS" });
+    }
+    const list = [...parts.values()].sort((a, b) => b.cash - a.cash);
+    if (list.length === 1) list[0].cash = received;
+    else if (list.length) list[0].cash = r2(list[0].cash + Math.max(0, received - cashTotal));
+    return list;
   }
 
   async function save() {
@@ -242,31 +271,41 @@ export default function RecordPayment() {
     }
     setSaving(true);
     setSaveError("");
-    const paid = selectedInvoices.filter((inv) => amt(cash[inv.id]) + amt(tds[inv.id]) > 0);
+    const parts = paymentParts();
+    const done = []; // invoices whose payment was saved
+    let failure = null;
+    for (const part of parts) {
+      try {
+        await savePayment({
+          customer_id: part.customer_id,
+          payment_date: form.date,
+          received_amount: part.cash,
+          payment_mode: form.mode,
+          reference_number: form.reference.trim() || null,
+          remarks: form.remarks.trim() || null,
+          allocations: part.allocations,
+        });
+        done.push(...part.invoices);
+      } catch (err) {
+        failure = err;
+        break;
+      }
+    }
     try {
-      await savePayment({
-        customer_id: customerId,
-        payment_date: form.date,
-        received_amount: received,
-        payment_mode: form.mode,
-        reference_number: form.reference.trim() || null,
-        remarks: form.remarks.trim() || null,
-        allocations: selectedInvoices
-          .map((inv) => ({
-            invoice_id: inv.id,
-            cash_amount: amt(cash[inv.id]),
-            tds_amount: amt(tds[inv.id]),
-            tds_type: isOpen(inv) ? "CURRENT" : "PREVIOUS",
-          }))
-          .filter((a) => a.cash_amount > 0 || a.tds_amount > 0),
-      });
-      // Stay on this page -- no automatic redirect. The accountant chooses what to
-      // do next from the confirmation below (record another, or go to Payment List).
-      await reload();
-      setSavedInvoices(paid);
-      setSaved(true);
-    } catch (err) {
-      setSaveError(err.message || "The payment could not be saved. Please try again.");
+      if (done.length) {
+        // Stay on this page -- no automatic redirect. The accountant chooses what to
+        // do next from the confirmation below (record another, or go to Payment List).
+        await reload();
+        setSavedInvoices(done);
+        setSavedCount(parts.length);
+        setSaved(true);
+      }
+      if (failure) {
+        const msg = failure.message || "The payment could not be saved. Please try again.";
+        setSaveError(done.length
+          ? `Only part of this payment was saved (${done.map((i) => i.invoice_number).join(", ")}). The rest was not saved: ${msg} Record the rest as a new payment.`
+          : msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -297,7 +336,7 @@ export default function RecordPayment() {
 
       {saved && (
         <div className="ac-info ok" style={{ marginBottom: 16, justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-          <span><FiCheckCircle style={{ marginRight: 6 }} />Payment saved successfully.</span>
+          <span><FiCheckCircle style={{ marginRight: 6 }} />{savedCount > 1 ? `Payment saved as ${savedCount} payments, one for each customer record.` : "Payment saved successfully."}</span>
           <div className="ac-actions">
             {location.state?.followUpId && (
               <button type="button" className="ac-btn" onClick={() => navigate(`/accountant/follow-ups/${location.state.followUpId}`)}>Back to Reminder</button>
@@ -318,9 +357,9 @@ export default function RecordPayment() {
         <div className="ac-rp-top">
           <div>
             <h3 className="ac-section-title"><span className="ac-sec-ic"><FiUser /></span>1. Select Customer</h3>
-            <select className="ac-select" value={customerId} onChange={(e) => changeCustomer(e.target.value)}>
+            <select className="ac-select" value={customer?.id || ""} onChange={(e) => changeCustomer(e.target.value)}>
               <option value="">{loading ? "Loading customers…" : "Select customer"}</option>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ""}</option>)}
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.code && c.ids.length === 1 ? ` (${c.code})` : ""}</option>)}
             </select>
           </div>
 
@@ -337,6 +376,7 @@ export default function RecordPayment() {
               <>
                 <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4 }}>{customer.name}</div>
                 <div className="ac-cust-line">Unpaid invoices: {customer.unpaid_count}</div>
+                {ids.length > 1 && <div className="ac-cust-line">Includes {ids.length} customer records with this name</div>}
               </>
             ) : (
               <p className="ac-sub" style={{ marginTop: 6 }}>Select a customer to see their details</p>
@@ -396,7 +436,7 @@ export default function RecordPayment() {
                         <input type="checkbox" aria-label={`Select ${inv.invoice_number}`} checked={on}
                           disabled={saved || !canPick(inv)} onChange={() => toggleInvoice(inv)} />
                       </td>
-                      <td>{inv.invoice_number}</td>
+                      <td>{inv.invoice_number}{ids.length > 1 && inv.site_name && <div className="ac-sub">{inv.site_name}</div>}</td>
                       <td className="ac-col-lo">{showDate(inv.invoice_date)}</td>
                       <td className={inv.status === "OVERDUE" ? "ac-money-red" : ""}>{showDate(inv.due_date) || "—"}</td>
                       <td className="ac-num">{money(inv.invoice_amount)}</td>
