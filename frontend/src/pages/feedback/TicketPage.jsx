@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { FiCheck, FiCheckCircle, FiChevronDown, FiFile, FiFileText, FiImage, FiInbox, FiMail, FiPhoneCall, FiTool, FiTrash2, FiUploadCloud, FiUser, FiPaperclip, FiX, FiXCircle } from "react-icons/fi";
+import { FiCheck, FiCheckCircle, FiChevronDown, FiFile, FiFileText, FiImage, FiInbox, FiMail, FiMessageSquare, FiPhoneCall, FiTool, FiTrash2, FiUploadCloud, FiUser, FiPaperclip, FiX, FiXCircle } from "react-icons/fi";
 import { FaWhatsapp } from "react-icons/fa";
 import { FEEDBACK_HOME } from "./access";
 import {
@@ -585,7 +585,17 @@ export default function TicketPage() {
                       ))}
                     </div>
                   )}
-                  {(p.issue_summary || !(p.issues || []).length) && <p className="fb-dept-issue-text">{p.issue_summary || <span className="fb-muted">No details written.</span>}</p>}
+                  {!p.issue_summary && !(p.issues || []).length && <p className="fb-dept-issue-text fb-muted">No details written.</p>}
+                  {/* What the collector wrote for this department when raising the ticket. */}
+                  {p.issue_summary && (
+                    <div className="fb-dept-note">
+                      <FiMessageSquare aria-hidden="true" />
+                      <div>
+                        <small>Note from {ticket.raised_by?.name || "the feedback desk"}</small>
+                        <p>{p.issue_summary}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {p.invoices.length > 0 && (
                   <div className="fb-table-wrap">
@@ -795,6 +805,7 @@ export default function TicketPage() {
                         onBooked={linkBooking}
                         contactId={ticket.contacts[0]?.id}
                         siteId={ticket.site.id}
+                        siteContacts={ticket.contacts}
                         services={services}
                         label={ticket.revisit ? "Book another visit" : "Book a visit"}
                         className={`fb-btn ${ticket.revisit ? "" : "fb-btn-primary"}`}

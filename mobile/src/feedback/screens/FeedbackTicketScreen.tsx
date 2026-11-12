@@ -60,6 +60,8 @@ const factory = (t: CrmTheme) => ({
   issueChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, maxWidth: '100%' as const },
   issueChipText: { ...typography.caption, color: t.textSecondary },
   issueText: { ...typography.body, color: t.textPrimary },
+  deptNote: { marginTop: spacing.xs, padding: spacing.sm, borderRadius: radii.md, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
+  deptNoteLabel: { fontSize: 11, fontWeight: '800' as const, color: '#92400E', letterSpacing: 0.3, marginBottom: 2 },
   doneCard: { flexDirection: 'row' as const, gap: spacing.sm, marginTop: spacing.sm, padding: spacing.sm, borderRadius: 14, borderWidth: 1, borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' },
   doneIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#16A34A', alignItems: 'center' as const, justifyContent: 'center' as const },
   doneTop: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, gap: 6 },
@@ -338,7 +340,14 @@ export function FeedbackTicketScreen() {
                   ))}
                 </View>
               )}
-              {(!!p.issue_summary || !(p.issues || []).length) && <Text style={styles.issueText}>{p.issue_summary || 'No details written.'}</Text>}
+              {!p.issue_summary && !(p.issues || []).length && <Text style={styles.issueText}>No details written.</Text>}
+              {/* What the collector wrote for this department when raising the ticket. */}
+              {!!p.issue_summary && (
+                <View style={styles.deptNote}>
+                  <Text style={styles.deptNoteLabel}>NOTE FROM {(ticket.raised_by?.name || 'the feedback desk').toUpperCase()}</Text>
+                  <Text style={styles.issueText}>{p.issue_summary}</Text>
+                </View>
+              )}
             </View>
             {!!p.priority && (
               <View style={[styles.kv, { marginTop: spacing.xs }]}>

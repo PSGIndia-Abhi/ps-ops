@@ -29,6 +29,8 @@ export type AuthenticatedStackParamList = {
   HelpdeskTicket: { ticketId: string; justRaised?: string };
   /** The technical team's queue (Technical Lead / Team only). */
   HelpdeskDesk: undefined;
+  /** Customer Feedback tickets as a page, opened from "More" (supervisor). */
+  FeedbackTickets: undefined;
 };
 
 /**

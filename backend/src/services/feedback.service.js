@@ -930,11 +930,27 @@ async function callList(req) {
   }
   if (query.company_id) { outer.push("x.company_id = ?"); outerParams.push(String(query.company_id)); }
   const q = typeof query.q === "string" ? query.q.trim() : "";
-  if (q) { outer.push("(x.company_name LIKE ? OR x.site_name LIKE ?)"); outerParams.push(likeOf(q), likeOf(q)); }
+  if (q) {
+    // Customer or site name, or a contact number of the site / customer (spaces, +, - and brackets
+    // ignored; at least 4 digits so short numbers do not match everything).
+    const digits = q.replace(/\D/g, "");
+    if (digits.length >= 4) {
+      outer.push(`(x.company_name LIKE ? OR x.site_name LIKE ? OR EXISTS (
+        SELECT 1 FROM contacts pc WHERE pc.company_id IN (x.site_id, x.company_id)
+          AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(pc.phone, ' ', ''), '+', ''), '-', ''), '(', ''), ')', '') LIKE ?))`);
+      outerParams.push(likeOf(q), likeOf(q), `%${digits}%`);
+    } else {
+      outer.push("(x.company_name LIKE ? OR x.site_name LIKE ?)");
+      outerParams.push(likeOf(q), likeOf(q));
+    }
+  }
 
   const inner = `
     SELECT r.id AS request_id, DATE_FORMAT(r.period_month, '%Y-%m') AS call_month, ${CALL_WINDOW},
-           r.due_date, (r.due_date < CURDATE() AND r.status <> 'DONE') AS overdue,
+           -- Overdue: past its due date, not done, and nobody has tried calling yet (a call not
+           -- answered, busy or a wrong number is not overdue).
+           r.due_date, (r.due_date < CURDATE() AND r.status <> 'DONE'
+             AND NOT EXISTS (SELECT 1 FROM feedback_call_attempts oa WHERE oa.request_id = r.id)) AS overdue,
            s.id AS site_id, s.name AS site_name, s.city AS site_city,
            co.id AS company_id, co.name AS company_name,
            ${CALL_VISITS("COUNT(DISTINCT v.id)")} AS visit_count,

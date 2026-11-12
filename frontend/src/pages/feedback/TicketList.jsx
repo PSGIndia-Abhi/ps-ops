@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FiAlertCircle, FiCalendar, FiCheckCircle, FiChevronDown, FiDownload, FiFlag, FiGrid, FiLayers, FiSearch, FiUser, FiX } from "react-icons/fi";
-import { OPERATIONS, PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, getPeople, isPast, listTickets, monthLabel } from "./feedbackApi";
+import { FiAlertCircle, FiCalendar, FiCheck, FiCheckCircle, FiChevronDown, FiDownload, FiFlag, FiGrid, FiLayers, FiSearch, FiX } from "react-icons/fi";
+import { OPERATIONS, PRIORITIES, PRIORITY, actionText, exportTickets, formatDay, isPast, listTickets, monthLabel } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import { Card, Empty, ErrorBox, Loading, PageHead, PriorityChip, Segmented, TicketStatusChip, Tiles } from "./ui";
 
@@ -19,13 +19,125 @@ function FilterChip({ icon, label, active, caret = true, children }) {
   );
 }
 
+const PRIORITY_DOT = { VERY_HIGH: "#991b1b", HIGH: "#dc2626", MEDIUM: "#ea580c", LOW: "#4f46e5" };
+
+// A filter chip that opens its own styled list (the browser's option list cannot be styled).
+// options: [{ value, label, dot? }] - the first is "All" (value ""). Long lists get a search box.
+function FilterMenu({ icon, label, value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [find, setFind] = useState("");
+  const [hi, setHi] = useState(0);
+  const boxRef = useRef(null);
+  const listRef = useRef(null);
+  const selected = options.find((o) => o.value === value) || options[0];
+  const shown = find ? options.filter((o) => o.label.toLowerCase().includes(find.toLowerCase())) : options;
+  const withSearch = options.length > 8;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  function toggle(next) {
+    if (next) {
+      setFind("");
+      setHi(Math.max(0, options.findIndex((o) => o.value === value)));
+    }
+    setOpen(next);
+  }
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-i="${hi}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [hi, open]);
+
+  function pick(o) {
+    onChange(o.value);
+    setOpen(false);
+  }
+  function onKey(e) {
+    if (!open) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key) && e.target.tagName === "BUTTON") {
+        e.preventDefault();
+        toggle(true);
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHi((i) => Math.min(shown.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHi((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (shown[hi]) pick(shown[hi]);
+    }
+  }
+
+  return (
+    <div className={`fb-fmenu ${open ? "is-open" : ""}`} ref={boxRef} onKeyDown={onKey}>
+      <button type="button" className={`fb-fchip ${value ? "is-on" : ""}`} aria-haspopup="listbox" aria-expanded={open} onClick={() => toggle(!open)}>
+        <span className="fb-fchip-icon" aria-hidden="true">{icon}</span>
+        <span className="fb-fchip-label">{label}</span>
+        <span className="fb-fchip-value">
+          {selected?.dot && <span className="fb-fmenu-dot" style={{ background: selected.dot }} aria-hidden="true" />}
+          {selected?.label}
+        </span>
+        <FiChevronDown aria-hidden="true" className="fb-fchip-caret" />
+      </button>
+      {open && (
+        <div className="fb-fmenu-pop">
+          {withSearch && (
+            <div className="fb-fmenu-find">
+              <FiSearch aria-hidden="true" />
+              <input
+                autoFocus
+                placeholder={`Find ${label.toLowerCase()}`}
+                value={find}
+                onChange={(e) => {
+                  setFind(e.target.value);
+                  setHi(0);
+                }}
+                aria-label={`Find ${label.toLowerCase()}`}
+              />
+            </div>
+          )}
+          <ul className="fb-fmenu-list" role="listbox" aria-label={label} ref={listRef}>
+            {shown.map((o, i) => (
+              <li
+                key={o.value || "all"}
+                data-i={i}
+                role="option"
+                aria-selected={o.value === value}
+                className={`fb-fmenu-opt ${o.value === value ? "is-sel" : ""} ${i === hi ? "is-hi" : ""}`}
+                onMouseEnter={() => setHi(i)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(o)}
+              >
+                {o.dot ? <span className="fb-fmenu-dot" style={{ background: o.dot }} aria-hidden="true" /> : <span className="fb-fmenu-dot is-none" aria-hidden="true" />}
+                <span className="fb-fmenu-text">{o.label}</span>
+                {o.value === value && <FiCheck aria-hidden="true" className="fb-fmenu-check" />}
+              </li>
+            ))}
+            {!shown.length && <li className="fb-fmenu-empty">No match</li>}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TicketList() {
   const navigate = useNavigate();
-  const { isDesk, departmentList, deptOnly, ticketsBase } = useFeedbackAccess();
+  const { departmentList, deptOnly, ticketsBase } = useFeedbackAccess();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") || "ALL";
   const priority = params.get("priority") || "";
-  const owner = params.get("owner") || "";
   const month = params.get("month") || "";
   const department = params.get("department") || "";
   const page = Number(params.get("page")) || 1;
@@ -33,7 +145,6 @@ export default function TicketList() {
   const [search, setSearch] = useState(q);
 
   const [data, setData] = useState(null);
-  const [owners, setOwners] = useState([]);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
 
@@ -59,17 +170,7 @@ export default function TicketList() {
     return () => clearTimeout(t);
   }, [search, q, setParam]);
 
-  useEffect(() => {
-    getPeople()
-      .then((p) => {
-        // Owners: desk users, and the supervisors / salespeople steps are assigned to.
-        const all = new Map([...p.owners, ...(p.supervisors || []), ...(p.sales || [])].map((u) => [u.id, u]));
-        setOwners([...all.values()].sort((a, b) => a.name.localeCompare(b.name)));
-      })
-      .catch(() => {});
-  }, []);
-
-  const filters = { status: status === "ALL" ? "" : status, priority, owner_user_id: owner, month, q, department };
+  const filters = { status: status === "ALL" ? "" : status, priority, month, q, department };
   const filterKey = JSON.stringify(filters);
 
   const load = useCallback(() => {
@@ -142,50 +243,32 @@ export default function TicketList() {
               </button>
             )}
           </div>
-          <FilterChip icon={<FiFlag />} label="Priority" active={Boolean(priority)}>
-            <select value={priority} onChange={(e) => setParam({ priority: e.target.value })} aria-label="Priority">
-              <option value="">All</option>
-              {PRIORITIES.map((p) => (
-                <option key={p} value={p}>
-                  {PRIORITY[p].label}
-                </option>
-              ))}
-            </select>
-          </FilterChip>
+          <FilterMenu
+            icon={<FiFlag />}
+            label="Priority"
+            value={priority}
+            onChange={(v) => setParam({ priority: v })}
+            options={[{ value: "", label: "All" }, ...PRIORITIES.map((p) => ({ value: p, label: PRIORITY[p].label, dot: PRIORITY_DOT[p] }))]}
+          />
           {!deptOnly && departmentList.length > 0 && (
-            <FilterChip icon={<FiGrid />} label="Department" active={Boolean(department)}>
-              <select value={department} onChange={(e) => setParam({ department: e.target.value })} aria-label="Department">
-                <option value="">All</option>
-                {departmentList.map((d) => (
-                  <option key={d.kind} value={d.kind}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </FilterChip>
-          )}
-          {isDesk && (
-            <FilterChip icon={<FiUser />} label="Owner" active={Boolean(owner)}>
-              <select value={owner} onChange={(e) => setParam({ owner: e.target.value })} aria-label="Owner">
-                <option value="">All</option>
-                {owners.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </FilterChip>
+            <FilterMenu
+              icon={<FiGrid />}
+              label="Department"
+              value={department}
+              onChange={(v) => setParam({ department: v })}
+              options={[{ value: "", label: "All" }, ...departmentList.map((d) => ({ value: d.kind, label: d.name }))]}
+            />
           )}
           <FilterChip icon={<FiCalendar />} label="Month" active={Boolean(month)} caret={false}>
             <input type="month" className={month ? "" : "is-empty"} value={month} onChange={(e) => setParam({ month: e.target.value })} aria-label="Month" />
           </FilterChip>
-          {(priority || owner || month || q || department) && (
+          {(priority || month || q || department) && (
             <button
               type="button"
               className="fb-fclear"
               onClick={() => {
                 setSearch("");
-                setParam({ priority: "", owner: "", month: "", q: "", department: "" });
+                setParam({ priority: "", month: "", q: "", department: "" });
               }}
             >
               <FiX aria-hidden="true" /> Clear filters
@@ -236,6 +319,18 @@ export default function TicketList() {
                             </span>
                           ))}
                         </span>
+                        {/* Each department's issues and the note written for it. */}
+                        {(t.parts || [])
+                          .filter((p) => p.kind !== OPERATIONS && (p.issue_summary || (p.issues || []).length))
+                          .map((p) => {
+                            const text = [(p.issues || []).map((i) => (i.text ? `${i.name} (${i.text})` : i.name)).join(", "), p.issue_summary].filter(Boolean).join(" - ");
+                            return (
+                              <div key={p.kind} className="fb-list-note" title={`${p.label}: ${text}`}>
+                                {(t.parts || []).length > 1 && <b>{p.label}: </b>}
+                                {text}
+                              </div>
+                            );
+                          })}
                       </td>
                       <td>
                         <PriorityChip priority={t.priority} />

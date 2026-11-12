@@ -16,6 +16,7 @@ import { HelpdeskNewTicketScreen } from '../helpdesk/screens/HelpdeskNewTicketSc
 import { HelpdeskTicketScreen } from '../helpdesk/screens/HelpdeskTicketScreen';
 import { HelpdeskDeskScreen } from '../helpdesk/screens/HelpdeskDeskScreen';
 import { HelpdeskPushBridge } from '../helpdesk/HelpdeskPushBridge';
+import { FeedbackTicketsPage } from '../feedback/FeedbackTicketsTab';
 import { colors } from '../theme';
 import type { AuthenticatedStackParamList } from './types';
 
@@ -78,6 +79,8 @@ export function AuthenticatedNavigator() {
         options={{ title: 'Notifications' }}
       />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+      {/* Feedback tickets opened from "More" (the list has its own header with a back arrow). */}
+      <Stack.Screen name="FeedbackTickets" component={FeedbackTicketsPage} options={{ headerShown: false }} />
       <Stack.Screen
         name="ChangePassword"
         component={ChangePasswordScreen}

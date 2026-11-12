@@ -33,6 +33,7 @@ import { CALL_OUTCOMES, PRIORITY, callStatusMeta, TICKET_STATUS, chosenAnswers, 
 import { HeroHeader, HeroPill } from '../Hero';
 import { MessagesPanel, type CustomerMessage } from '../MessagesPanel';
 import type { FeedbackStackParamList } from '../navigation';
+import { FEEDBACK_FEATURES } from '../featureFlags';
 import { RaiseTicketSheet } from '../RaiseTicketSheet';
 import type { Call, CallOutcome, FeedbackBody, NewTicket } from '../types';
 import { AnswersList, CustomerCard, FeedbackRound, Panel, QuestionForm } from '../ui';
@@ -213,6 +214,15 @@ export function FeedbackCallScreen() {
     if (call?.earlier_visit?.service) return [call.earlier_visit.service];
     return [...new Set(questions.filter((q) => q.question_type === 'SERVICE').flatMap((q) => q.services || []))];
   }, [call, questions]);
+  // The customer card shows only the last service given (newest visit in the period, else the last one
+  // before it). monthServices above still decides which Service questions are asked.
+  const lastServiceText = useMemo(() => {
+    const withService = (call?.visits || []).filter((v) => v.service);
+    const latestVisit = [...withService].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+      || (call?.earlier_visit?.service ? call.earlier_visit : null);
+    if (!latestVisit?.service) return null;
+    return latestVisit.date ? `${latestVisit.service} · ${formatDay(latestVisit.date)}` : latestVisit.service;
+  }, [call]);
   const asked = useMemo(() => questionsFor(questions, qMode, monthServices), [questions, qMode, monthServices]);
   const counts = useMemo(() => modeCounts(questions, monthServices, []), [questions, monthServices]);
   const chosen = useMemo(() => chosenAnswers(asked, answers), [asked, answers]);
@@ -621,7 +631,7 @@ export function FeedbackCallScreen() {
           customer={call.customer.name}
           site={call.site.name}
           place={[call.site.city, call.site.address].filter(Boolean).join(' · ')}
-          services={monthServices}
+          lastService={lastServiceText}
           by={call.collector?.name ? `Call taken by ${call.collector.name}` : null}
         />
         {/* No service in this period: the site's last service before it. */}
@@ -741,6 +751,8 @@ export function FeedbackCallScreen() {
               )}
             </Panel>
 
+            {/* Hidden in the app (featureFlags.feedbackQuestions): the questions are answered on the website. */}
+            {FEEDBACK_FEATURES.feedbackQuestions && (
             <Panel title="Feedback from the call" icon={<ClipboardIcon size={17} color={theme.primary} />}>
               {feedbackLock && (
                 <View style={styles.lockBox}>
@@ -774,10 +786,15 @@ export function FeedbackCallScreen() {
                   <PrimaryButton label="Raise ticket" variant="brand" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || feedbackLock} />
                 </View>
               ) : (
-                <PrimaryButton label="Save · Done (Good)" onPress={() => saveGood()} loading={saving} disabled={!chosen.length || feedbackLock} style={{ marginTop: spacing.sm }} />
+                // All good: still let them raise a ticket for any other complaint.
+                <View style={styles.row}>
+                  <PrimaryButton label="Raise ticket" variant="secondary" style={{ flex: 1 }} onPress={() => { try { body(); setSheet('ticket'); } catch (err) { setToast({ message: errorText(err), variant: 'error' }); } }} disabled={saving || !chosen.length || feedbackLock} />
+                  <PrimaryButton label="Save · Done (Good)" style={{ flex: 1 }} onPress={() => saveGood()} loading={saving} disabled={!chosen.length || feedbackLock} />
+                </View>
               )}
               </View>
             </Panel>
+            )}
           </>
         )}
 
@@ -797,8 +814,8 @@ export function FeedbackCallScreen() {
           </Panel>
         )}
 
-        {/* ---- follow-up call after the re-visit ---- */}
-        {call.status === 'DONE' && canFollowUp && followUpTicket && (
+        {/* ---- follow-up call after the re-visit (hidden in the app: featureFlags.followUpCall) ---- */}
+        {FEEDBACK_FEATURES.followUpCall && call.status === 'DONE' && canFollowUp && followUpTicket && (
           <Panel title={`Follow-up call · ${followUpTicket.ticket_number}`} icon={<PhoneIcon size={17} color={theme.primary} />}>
             <Text style={styles.small}>The work is done. Call the customer and ask the questions again (satisfied: the ticket closes), or close it without the call.</Text>
             <PrimaryButton label="Close without feedback" variant="secondary" onPress={() => setSheet('close')} disabled={saving} style={{ marginTop: spacing.sm }} />
@@ -857,14 +874,15 @@ export function FeedbackCallScreen() {
                     onPress={() => navigation.navigate('FeedbackTicket', { ticketId: lastTicket.id, reopen: lastTicket.status === 'CLOSED' })}
                   />
                 )}
-                <PrimaryButton label={lastTicket ? 'Raise new ticket' : 'Raise ticket'} variant="brand" style={{ flex: 1 }} onPress={() => setSheet(lastTicket ? 'choice' : 'later')} />
+                {/* With "new feedback" hidden, the choice sheet would have one option: go straight to it. */}
+                <PrimaryButton label={lastTicket ? 'Raise new ticket' : 'Raise ticket'} variant="brand" style={{ flex: 1 }} onPress={() => setSheet(lastTicket && FEEDBACK_FEATURES.newFeedbackRound ? 'choice' : 'later')} />
               </View>
             )}
           </Panel>
         )}
 
-        {/* ---- new feedback on a done call: a new complaint ---- */}
-        {call.status === 'DONE' && newRound && canRaiseLater && (
+        {/* ---- new feedback on a done call: a new complaint (hidden in the app: featureFlags.newFeedbackRound) ---- */}
+        {FEEDBACK_FEATURES.newFeedbackRound && call.status === 'DONE' && newRound && canRaiseLater && (
           <Panel title="New feedback · new complaint" icon={<ClipboardIcon size={17} color={theme.primary} />}>
             <Text style={styles.small}>Call the customer and ask the questions again; then raise the ticket from their answers.</Text>
             <View style={{ marginTop: spacing.sm }}>{savedCard}</View>
@@ -930,6 +948,7 @@ export function FeedbackCallScreen() {
         />
       )}
       <Sheet visible={sheet === 'choice'} onClose={() => setSheet(null)} title="Raise a new ticket">
+        {FEEDBACK_FEATURES.newFeedbackRound && (
         <Pressable
           onPress={() => {
             resetAnswers();
@@ -947,6 +966,7 @@ export function FeedbackCallScreen() {
             <Text style={styles.small}>Call the customer, ask the questions again, then raise the ticket from their answers.</Text>
           </View>
         </Pressable>
+        )}
         <Pressable onPress={() => setSheet('later')} style={[styles.choice, { borderColor: '#FECACA', backgroundColor: '#FEF2F2' }]} accessibilityRole="button">
           <View style={[styles.choiceIcon, { backgroundColor: '#DC2626' }]}>
             <AlertTriangleIcon size={20} color="#FFFFFF" />

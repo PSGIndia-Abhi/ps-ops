@@ -19,6 +19,8 @@ import { useUserRole, normalizeRole, roleLabel } from '../../auth/role';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { useHelpRow } from '../../helpdesk/useHelpRow';
+import { useTicketsTab } from '../../feedback/ticketsTabContext';
+import { ClipboardListIcon } from '../../crm/ui/crmIcons';
 
 type Nav = NativeStackNavigationProp<AuthenticatedStackParamList>;
 
@@ -44,6 +46,8 @@ export function ProfileScreen() {
   const { user, logout } = useAuth();
   const role = useUserRole();
   const navigation = useNavigation<Nav>();
+  // Customer Feedback tickets (supervisor and others who work tickets): a tile here, not a tab.
+  const tickets = useTicketsTab();
   const name = user?.name ?? 'BestServe user';
   const help = useHelpRow('More menu');
 
@@ -85,6 +89,24 @@ export function ProfileScreen() {
           label="Phone number"
         />
       </View>
+
+      {tickets.show && (
+        <>
+          <View style={styles.sectionHeaderRow}>
+            <ClipboardListIcon size={14} color={colors.textMuted} />
+            <Text style={styles.sectionTitle}>Customer feedback</Text>
+          </View>
+          <RichActionTile
+            title="Tickets"
+            description={tickets.count ? `${tickets.count} waiting for you` : 'Customer feedback tickets for you'}
+            icon={<ClipboardListIcon size={20} color={colors.textOnPrimary} />}
+            ghostIcon={<ClipboardListIcon size={56} color={colors.danger} />}
+            accentColor={colors.danger}
+            style={styles.accountTile}
+            onPress={() => navigation.navigate('FeedbackTickets')}
+          />
+        </>
+      )}
 
       <View style={styles.sectionHeaderRow}>
         <help.Icon size={14} color={colors.textMuted} />

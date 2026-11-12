@@ -213,7 +213,7 @@ export default function CallList() {
           />
           <label className="fb-row" style={{ gap: 6, flex: "1 1 220px", maxWidth: 300 }}>
             <FiSearch aria-hidden="true" className="fb-muted" />
-            <input className="fb-input" placeholder="Search customer or site" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search customer or site" />
+            <input className="fb-input" placeholder="Search customer, site or number" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search customer, site or number" />
           </label>
           {canCollect && (
             <label className="fb-row" style={{ gap: 8, fontSize: 14 }}>

@@ -60,7 +60,8 @@ export default function CreateBookingModal({
   technicians,
   clientContact,
   // Optional (the Feedback Desk's re-visit booking): a starting contact and services, and siteId
-  // to offer only that site's contacts.
+  // to offer only that site's contacts. siteContacts: the site's own contacts, offered even when
+  // /api/contacts leaves them out (it lists verified contacts only).
   initialContactId = "",
   initialSubServices = [],
   siteId = null,
@@ -68,6 +69,7 @@ export default function CreateBookingModal({
   initialServiceType = "",
   initialStartDate = "",
   initialNotes = "",
+  siteContacts = null,
 }) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -115,6 +117,16 @@ export default function CreateBookingModal({
   // admin can fix the input and resubmit.
   const [status, setStatus] = useState(null);
 
+  // Adds the site's contacts that /api/contacts did not return (e.g. unverified ones saved by the Feedback Desk).
+  function withSiteContacts(list) {
+    if (!siteId || !siteContacts?.length) return list;
+    const have = new Set(list.map(c => String(c.id)));
+    const extra = siteContacts
+      .filter(c => !have.has(String(c.id)))
+      .map(c => ({ ...c, company_id: siteId }));
+    return [...list, ...extra];
+  }
+
   useEffect(() => {
     async function loadContacts() {
       if (role === "client") {
@@ -128,9 +140,10 @@ export default function CreateBookingModal({
         const res = await apiFetch(`/api/contacts`);
         if (!res?.ok) throw new Error("Failed to load contacts");
         const data = await res.json();
-        setContacts(Array.isArray(data) ? data : []);
+        setContacts(withSiteContacts(Array.isArray(data) ? data : []));
       } catch (err) {
         console.error("Failed to load contacts", err);
+        setContacts(withSiteContacts([]));
       } finally {
         setLoadingContacts(false);
       }
@@ -223,7 +236,7 @@ export default function CreateBookingModal({
       const res = await apiFetch(`/api/contacts`);
       if (!res?.ok) throw new Error("Failed to load contacts");
       const data = await res.json();
-      setContacts(Array.isArray(data) ? data : []);
+      setContacts(withSiteContacts(Array.isArray(data) ? data : []));
     } catch (err) {
       console.error("Failed to load contacts", err);
     }
