@@ -333,7 +333,8 @@ function SheetMapping({ report, mapping, setMapping, dirty, checking, onRecheck 
 const groupKey = (msg) =>
   msg
     .replace(/(?<!like )[A-Z]-\d{4}/g, "…")
-    .replace(/\(rows [\d, ]+\)/, "")
+    .replace(/\(rows [^)]*\)/, "")
+    .replace(/row \d+/g, "another row")
     .replace(/\d+ times/, "more than once")
     .replace(/"[^"]*" (could not be read|is not Yes)/, "$1")
     .replace(/date "[^"]*"/, "date")

@@ -288,14 +288,7 @@ function readProjectSheet(ws, head, flatCol, groups) {
     });
   }
 
-  // The same flat twice in one sheet: we cannot tell a repeat from a copy.
-  const rowsByFlat = new Map();
-  for (const f of flats) (rowsByFlat.get(f.flat) || rowsByFlat.set(f.flat, []).get(f.flat)).push(f.row);
-  for (const [flat, rows] of rowsByFlat) {
-    if (rows.length > 1) {
-      for (const r of rows) addIssue(r, flat, "error", `Flat ${flat} is in this sheet ${rows.length} times (rows ${rows.join(", ")}) - keep one row per flat`);
-    }
-  }
+  checkRepeatedFlats(flats, addIssue);
 
   if (stats.filterOn && stats.hiddenRows) notes.push(`A filter is on in Excel - ${stats.hiddenRows} hidden flat rows are included anyway.`);
   if (stats.emptyRows) notes.push(`${stats.emptyRows} empty rows (no flat number) skipped.`);
@@ -305,6 +298,79 @@ function readProjectSheet(ws, head, flatCol, groups) {
   if (groups.some((g) => g.service === "TV Unit")) notes.push("TV Unit has no completed-date column - TV Unit jobs are imported with the date unknown.");
 
   return { name: ws.name, isProject: true, flats, issues, notes, stats };
+}
+
+const fmtDate = (d) => {
+  if (!d) return "no date";
+  const [y, m, day] = d.split("-");
+  return `${day}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y}`;
+};
+
+/**
+ * A flat on more than one row of a sheet. Usually extra work added later on a new PO,
+ * so every row is imported as its own booking. Only the services that repeat are checked:
+ *   - same service, same date, on two rows      -> imported once (warning)
+ *   - completed on one row, pending on another  -> the pending one is dropped (warning)
+ *   - pending on two rows                       -> kept once (warning)
+ *   - completed on two rows with different dates -> one job each (a repeat visit, warning)
+ * An empty BHK is filled from the flat's other rows when they agree.
+ * Changes the flats in place.
+ */
+function checkRepeatedFlats(flats, addIssue) {
+  const byFlat = new Map();
+  for (const f of flats) (byFlat.get(f.flat) || byFlat.set(f.flat, []).get(f.flat)).push(f);
+
+  for (const [flat, rows] of byFlat) {
+    if (rows.length < 2) continue;
+
+    const bhks = new Set(rows.map((r) => r.bhk).filter(Boolean));
+    if (bhks.size === 1) {
+      const [bhk] = bhks;
+      for (const r of rows) if (!r.bhk) r.bhk = bhk;
+    }
+
+    const services = new Set(rows.flatMap((r) => r.services.map((s) => s.service)));
+    for (const service of services) {
+      const hits = rows.flatMap((r) => r.services.filter((s) => s.service === service).map((s) => ({ r, s })));
+      if (hits.length < 2) continue;
+      const done = hits.filter((h) => h.s.status === "completed");
+      const todo = hits.filter((h) => h.s.status === "pending");
+      const drop = (h) => { h.r.services = h.r.services.filter((x) => x !== h.s); };
+
+      if (done.length) {
+        for (const h of todo) {
+          drop(h);
+          addIssue(h.r.row, flat, "warning", `${service}: still to do here but already completed on row ${done[0].r.row} - not added to Pending`);
+        }
+      } else {
+        for (const h of todo.slice(1)) {
+          drop(h);
+          addIssue(h.r.row, flat, "warning", `${service}: also still to do on row ${todo[0].r.row} - added to Pending once`);
+        }
+      }
+
+      if (done.length > 1) {
+        const dates = new Set(done.map((h) => h.s.date || ""));
+        if (dates.size === 1) {
+          for (const h of done.slice(1)) {
+            drop(h);
+            addIssue(h.r.row, flat, "warning", `${service}: same service and date as row ${done[0].r.row} - imported once`);
+          }
+        } else {
+          // Done again on another date = a repeat visit (the app allows re-booking a completed service).
+          const detail = done.map((h) => `${h.r.row}: ${fmtDate(h.s.date)}`).join(", ");
+          for (const h of done) {
+            addIssue(h.r.row, flat, "warning",
+              `${service} was done more than once (rows ${detail}) - each is imported as its own job`);
+          }
+        }
+      }
+    }
+
+    for (const r of rows) {
+      if (!r.services.length) addIssue(r.row, flat, "warning", `Flat ${flat} is on another row too and this row has nothing to import - skipped`);
+    }
+  }
 }
 
 module.exports = { readWorkbook, normalizeFlat, normalizeBhk, readDate, readFlag, readPoItems, SERVICE_GROUPS };

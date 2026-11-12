@@ -185,6 +185,7 @@ async function buildPlan(db, buffer, mappingInput, user) {
   }
 
   const flatSheets = new Map(); // company|flat -> first sheet, to catch a flat in two sheets of one property
+  const pendingItems = new Map(); // company|flat -> plan item holding its Pending services (one Pending flat per flat)
   for (const { sheet, m, company, site, contact, mappingError, guessed } of mapped) {
     const report = {
       name: sheet.name,
@@ -214,7 +215,7 @@ async function buildPlan(db, buffer, mappingInput, user) {
     for (const f of sheet.flats) {
       if (rowsWithErrors.has(f.row) || f.poError || !company) continue;
       const flatKey = `${company.id}|${f.flat}`;
-      if (flatSheets.has(flatKey)) {
+      if (flatSheets.has(flatKey) && flatSheets.get(flatKey) !== sheet.name) {
         add(f.row, f.flat, "error", `Flat ${f.flat} is also in sheet "${flatSheets.get(flatKey)}" for the same property - keep one row`);
         continue;
       }
@@ -261,14 +262,23 @@ async function buildPlan(db, buffer, mappingInput, user) {
         }
       }
 
+      // The flat already has a Pending entry from an earlier row: add these services to it.
+      const earlier = pending.length ? pendingItems.get(flatKey) : null;
+      if (earlier) {
+        earlier.pending.push(...pending);
+        report.pending_services += pending.length;
+        add(f.row, f.flat, "warning", `Services still to do added to the Pending flat from row ${earlier.row}`);
+        pending.length = 0;
+      }
+
       if (!completed.length && !pending.length) {
-        report.nothing_to_import++;
+        if (!earlier) report.nothing_to_import++;
         continue;
       }
       report.completed += completed.length;
       report.pending_services += pending.length;
       if (pending.length) report.pending_flats++;
-      plan.push({
+      const item = {
         sheet: sheet.name,
         row: f.row,
         flat: f.flat,
@@ -282,7 +292,9 @@ async function buildPlan(db, buffer, mappingInput, user) {
         remarks: f.remarks,
         completed,
         pending,
-      });
+      };
+      plan.push(item);
+      if (pending.length) pendingItems.set(flatKey, item);
     }
     report.errors = sheetIssues.filter((i) => i.level === "error").length;
     report.warnings = sheetIssues.filter((i) => i.level === "warning").length;

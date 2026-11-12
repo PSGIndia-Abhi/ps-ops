@@ -3,4 +3,4 @@
  * Keep it the same as `versionName` in android/app/build.gradle - bump both together.
  * (The app has no native module that reads its own version, so it lives here.)
  */
-export const APP_VERSION = '1.30';
+export const APP_VERSION = '1.31';
