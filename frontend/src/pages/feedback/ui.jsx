@@ -1,35 +1,9 @@
 // Small building blocks shared by the Customer Feedback screens.
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { FaBuilding } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
-import {
-  FiAlertTriangle,
-  FiArrowLeft,
-  FiArrowRight,
-  FiCheck,
-  FiCheckCircle,
-  FiCircle,
-  FiClock,
-  FiEdit2,
-  FiFlag,
-  FiInbox,
-  FiMail,
-  FiMessageCircle,
-  FiMessageSquare,
-  FiMinus,
-  FiMinusCircle,
-  FiPhone,
-  FiPhoneCall,
-  FiRotateCcw,
-  FiSend,
-  FiSmartphone,
-  FiTrash2,
-  FiUser,
-  FiUserCheck,
-  FiUserPlus,
-  FiX,
-  FiXCircle,
-} from "react-icons/fi";
+import { FiAlertTriangle, FiArrowLeft, FiArrowRight, FiCheck, FiCheckCircle, FiCircle, FiClock, FiEdit2, FiFlag, FiInbox, FiMail, FiMessageCircle, FiMessageSquare, FiMinus, FiMinusCircle, FiPhone, FiPhoneCall, FiRotateCcw, FiSend, FiSmartphone, FiTrash2, FiUser, FiUserCheck, FiUserPlus, FiX, FiXCircle } from "react-icons/fi";
 import { CALL_STATUS, PRIORITY, TICKET_STATUS, VISIT_STATUS } from "./feedbackApi";
 
 export function Chip({ tone = "muted", children, title }) {
@@ -365,8 +339,9 @@ export function CustomerCard({ customer, site, contacts = [], feedback }) {
     <Card title="Customer">
       <div className="fb-cust">
         <div className="fb-cust-top">
+          {/* Every customer is a company: the same building icon for all. */}
           <span className="fb-cust-avatar" aria-hidden="true">
-            {(customer?.name || "?").slice(0, 1).toUpperCase()}
+            <FaBuilding />
           </span>
           <div>
             <div className="fb-strong">{customer?.name}</div>
@@ -612,5 +587,68 @@ export function QuestionModePicker({ value, onChange, counts, departments = [] }
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Closing a ticket whose work is done: without the customer's feedback (an optional note), or by
+ * taking the feedback first (the follow-up questions; all good closes it).
+ */
+export function CloseTicketChoice({ ticketNumber, saving, note, onNote, onCloseNow, onTakeFeedback, onCancel }) {
+  const [mode, setMode] = useState("");
+  return (
+    <Modal
+      title={`Close ${ticketNumber}?`}
+      onClose={onCancel}
+      footer={
+        <>
+          <button type="button" className="fb-btn" onClick={onCancel}>
+            Cancel
+          </button>
+          {mode === "now" && (
+            <button type="button" className="fb-btn fb-btn-ok" disabled={saving} onClick={onCloseNow}>
+              {saving ? "Closing…" : "Close the ticket"}
+            </button>
+          )}
+          {mode === "feedback" && (
+            <button type="button" className="fb-btn fb-btn-primary" onClick={onTakeFeedback}>
+              Take the feedback
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="fb-stack" style={{ gap: 12 }}>
+        <p className="fb-small fb-muted" style={{ margin: 0 }}>
+          Every team has finished its work. How do you want to close it?
+        </p>
+        <div className="fb-close-choice" role="radiogroup" aria-label="How to close">
+          <button type="button" role="radio" aria-checked={mode === "feedback"} className={`fb-close-opt is-feedback ${mode === "feedback" ? "is-on" : ""}`} onClick={() => setMode("feedback")}>
+            <span className="fb-close-opt-icon" aria-hidden="true">
+              <FiPhoneCall />
+            </span>
+            <span>
+              <b>Close by taking feedback</b>
+              <small>Call the customer and ask the questions again. Satisfied: the ticket closes.</small>
+            </span>
+          </button>
+          <button type="button" role="radio" aria-checked={mode === "now"} className={`fb-close-opt is-now ${mode === "now" ? "is-on" : ""}`} onClick={() => setMode("now")}>
+            <span className="fb-close-opt-icon" aria-hidden="true">
+              <FiCheck />
+            </span>
+            <span>
+              <b>Close without feedback</b>
+              <small>Close it now, without the follow-up call. You can reopen it later.</small>
+            </span>
+          </button>
+        </div>
+        {mode === "now" && (
+          <label className="fb-field" htmlFor="fb-close-choice-note">
+            Note (optional)
+            <textarea id="fb-close-choice-note" className="fb-textarea" rows={2} maxLength={400} placeholder="e.g. Customer said on WhatsApp it is sorted" value={note} onChange={(e) => onNote(e.target.value)} />
+          </label>
+        )}
+      </div>
+    </Modal>
   );
 }

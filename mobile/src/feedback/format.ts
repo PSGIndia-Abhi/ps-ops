@@ -275,3 +275,10 @@ export function suggestedPriority(rows: Response[]): Priority {
   const rank: Record<Priority, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
   return rows.reduce<Priority | null>((best, r) => (r.suggested_priority && (!best || rank[r.suggested_priority] > rank[best]) ? r.suggested_priority : best), null) ?? 'MEDIUM';
 }
+
+/** Why WhatsApp can't use a contact's number ('' = it can): it needs a 10-digit mobile number. */
+export function waPhoneProblem(c: { name: string; phone: string | null } | null | undefined): string {
+  if (!c) return '';
+  const digits = String(c.phone || '').replace(/\D/g, '').replace(/^(?:91|0)(?=\d{10}$)/, '');
+  return digits.length === 10 ? '' : `${c.name}'s number (${c.phone?.trim() || 'none'}) isn't a 10-digit mobile number, so WhatsApp can't use it. Edit the contact's number and try again.`;
+}

@@ -28,7 +28,7 @@ import {
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import { FEEDBACK_ROLE } from "./Feedback";
 import { FEEDBACK_HOME } from "../feedback/access";
-import { useFeedbackPermissions, useFeedbackSwitchCount, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
+import { TICKET_PERMISSIONS, useFeedbackPermissions, useFeedbackSwitchCount, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
 import { useUnseenCounts } from "../feedback/unseenCounts";
 import NewTaskModal from "./NewTaskModal";
 import ToastProvider from "./ToastProvider";
@@ -97,9 +97,6 @@ function NewTaskButton() {
     </>
   );
 }
-
-// Feedback permissions that open the ticket list (GET /api/feedback/tickets).
-const TICKET_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN", "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"];
 
 function TaskProShell() {
   // Customer Feedback: desk users get a link to the Feedback Desk; everyone who works tickets (desk

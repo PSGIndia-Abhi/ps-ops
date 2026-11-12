@@ -21,6 +21,8 @@ interface FeedbackContextValue {
   myDepartments: DepartmentKind[];
   /** Only a department member: works their department's tickets, no calls. */
   deptOnly: boolean;
+  /** The signed-in role (e.g. "admin", "Service Coordinator"). */
+  role: string;
   /** Reloads the questions (e.g. pull-to-refresh after a change in Masters). */
   reloadQuestions: () => void;
 }
@@ -36,6 +38,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [departmentList, setDepartmentList] = useState<Department[]>([]);
   const [myDepartments, setMyDepartments] = useState<DepartmentKind[]>([]);
+  const [role, setRole] = useState('');
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -43,6 +46,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       .then((a) => {
         setPermissions(a.permissions);
         setMyDepartments(a.departments);
+        setRole(a.role);
       })
       .catch(() => setPermissions([]));
   }, []);
@@ -65,9 +69,10 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       myDepartments,
       // Team members and assigned supervisors / salespeople: their tickets only.
       deptOnly: permissions.length > 0 && permissions.every((p) => ['FEEDBACK_DEPT', 'FEEDBACK_ISSUES', 'FEEDBACK_ASSIGNED', 'FEEDBACK_SCHEDULE'].includes(p)),
+      role,
       reloadQuestions: () => setTick((n) => n + 1),
     }),
-    [userId, permissions, questions, otherEnabled, emailTemplates, departmentList, myDepartments],
+    [userId, permissions, questions, otherEnabled, emailTemplates, departmentList, myDepartments, role],
   );
   return <FeedbackContext.Provider value={value}>{children}</FeedbackContext.Provider>;
 }

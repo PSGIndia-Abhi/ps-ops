@@ -11,8 +11,10 @@ import { LeadsNavigator } from './LeadsNavigator';
 import { RemindersNavigator } from './RemindersNavigator';
 import { FeedbackNavigator } from './FeedbackNavigator';
 import { getMyAccess, getOpenTicketCount } from '../feedback/api';
-import { TICKETS_ONLY, TicketsTabContext } from '../feedback/FeedbackTicketsTab';
+import { TICKET_PERMISSIONS, TICKETS_ONLY, TicketsTabContext } from '../feedback/FeedbackTicketsTab';
 import { TaskNavigator } from './TaskNavigator';
+import { feedbackSwitchCount, taskSwitchCount } from './switchCounts';
+import { useUnseen } from '../feedback/unseen';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
@@ -64,7 +66,11 @@ export function RoleTabs() {
   // "Tickets" tab in their own app instead of the Customer Feedback app.
   const [ticketsTab, setTicketsTab] = useState(false);
   // The number on the Tickets tab: open tickets waiting for them (every minute, and when the list shows).
-  const [ticketCount, setTicketCount] = useState(0);
+  // It clears once the list is opened; only new tickets show after (kept on this phone, per user).
+  const auth = useAuth();
+  const seenScope = String(auth.user?.id ?? auth.session?.userId ?? '');
+  const [ticketCount, setTicketCount] = useState<number | null>(null);
+  const ticketsSeen = useUnseen(seenScope, 'ticketsTab', ticketCount);
   const refreshTickets = useCallback(() => {
     getOpenTicketCount()
       .then(setTicketCount)
@@ -76,16 +82,21 @@ export function RoleTabs() {
     const timer = setInterval(refreshTickets, 60000);
     return () => clearInterval(timer);
   }, [ticketsTab, refreshTickets]);
-  const ticketsValue = useMemo(() => ({ show: ticketsTab, count: ticketCount, refresh: refreshTickets }), [ticketsTab, ticketCount, refreshTickets]);
+  const ticketsValue = useMemo(
+    () => ({ show: ticketsTab, count: ticketsSeen.unseen, refresh: refreshTickets, markSeen: ticketsSeen.markSeen }),
+    [ticketsTab, ticketsSeen.unseen, ticketsSeen.markSeen, refreshTickets],
+  );
   useEffect(() => {
-    if (!rawRole || feedbackCollector) return undefined;
+    if (!rawRole) return undefined;
     let alive = true;
     getMyAccess()
       .then((perms) => {
         if (!alive) return;
         const only = perms.length > 0 && perms.every((p) => TICKETS_ONLY.includes(p));
-        setTicketsTab(only);
-        setFeedbackAccess(perms.length > 0 && !only);
+        // The Tickets tab in their other apps (Task / Lead Management) for anyone who works tickets -
+        // the desk (Service Coordinator, Operations Manager) and the collector too, as on the web.
+        setTicketsTab(perms.some((p) => TICKET_PERMISSIONS.includes(p)));
+        setFeedbackAccess(!feedbackCollector && perms.length > 0 && !only);
       })
       .catch(() => alive && setFeedbackAccess(false));
     return () => {
@@ -107,9 +118,19 @@ export function RoleTabs() {
         : [],
     [salesSwitch, leadRole, residentialToo, accountant, taskRole],
   );
+  // Service Coordinator and Operations Manager start in Customer Feedback (as on the web); Task
+  // Management is one switch away. Their own "Set as default" choice still wins.
+  const feedbackFirst = ['service coordinator', 'operations manager'].includes((rawRole || '').toLowerCase().trim());
   const apps = useMemo<AppKind[]>(
-    () => (feedbackCollector ? ['feedback', 'tasks'] : feedbackAccess && baseApps.length ? [...baseApps, 'feedback'] : baseApps),
-    [feedbackCollector, feedbackAccess, baseApps],
+    () =>
+      feedbackCollector
+        ? ['feedback', 'tasks']
+        : feedbackAccess && baseApps.length
+        ? feedbackFirst
+          ? ['feedback', ...baseApps]
+          : [...baseApps, 'feedback']
+        : baseApps,
+    [feedbackCollector, feedbackAccess, feedbackFirst, baseApps],
   );
   const canSwitch = apps.length > 1;
   const [picked, setPicked] = useState<AppKind | null>(null);
@@ -142,13 +163,52 @@ export function RoleTabs() {
   // navigator with the other in a single step leaves the native screen stack unable to open screens.
   const [swapping, setSwapping] = useState(false);
   const [sheet, setSheet] = useState<{ onProfile?: () => void } | null>(null);
+  // The numbers on "Switch app" (as on the web's switch buttons) for people with both Task Management
+  // and Customer Feedback: what waits in each, cleared once that app is opened (kept on this phone).
+  const withBoth = apps.includes('tasks') && apps.includes('feedback');
+  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const [fbCount, setFbCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!withBoth) return undefined;
+    let alive = true;
+    const load = () => {
+      taskSwitchCount()
+        .then((n) => alive && setTaskCount(n))
+        .catch(() => {});
+      feedbackSwitchCount()
+        .then((n) => alive && setFbCount(n))
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [withBoth, current]);
+  const tasksSeen = useUnseen(seenScope, 'switch.tasks', withBoth ? taskCount : null);
+  const fbSeen = useUnseen(seenScope, 'switch.feedback', withBoth ? fbCount : null);
+  // The app being used counts as opened.
+  const markTasksSeen = tasksSeen.markSeen;
+  const markFbSeen = fbSeen.markSeen;
+  useEffect(() => {
+    if (current === 'tasks') markTasksSeen();
+    if (current === 'feedback') markFbSeen();
+  }, [current, taskCount, fbCount, markTasksSeen, markFbSeen]);
+  const badges = useMemo<Partial<Record<AppKind, number>>>(
+    () => (withBoth ? { tasks: current === 'tasks' ? 0 : tasksSeen.unseen, feedback: current === 'feedback' ? 0 : fbSeen.unseen } : {}),
+    [withBoth, current, tasksSeen.unseen, fbSeen.unseen],
+  );
+  const badgeTotal = (badges.tasks || 0) + (badges.feedback || 0);
   const appSwitch = useMemo(
     () => ({
       canSwitch,
       current,
       openSwitcher: (onProfile?: () => void) => setSheet({ onProfile }),
+      badges,
+      badgeTotal,
     }),
-    [canSwitch, current],
+    [canSwitch, current, badges, badgeTotal],
   );
 
   return (
@@ -179,6 +239,7 @@ export function RoleTabs() {
               visible={sheet !== null}
               current={current}
               apps={apps}
+              badges={badges}
               defaultApp={defaultApp ?? null}
               onSetDefault={chooseDefault}
               onPick={app => {

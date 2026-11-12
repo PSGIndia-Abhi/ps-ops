@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { EmailIcon } from '../components/icons';
@@ -8,7 +8,7 @@ import { SelectField } from '../crm/ui/SelectField';
 import { radii, spacing, typography } from '../theme';
 import { errorText, prepareWhatsapp } from './api';
 import { useFeedback } from './FeedbackContext';
-import { EMAIL_LABELS, emailTemplateFor, fillEmail, mailtoUrl } from './format';
+import { EMAIL_LABELS, emailTemplateFor, fillEmail, mailtoUrl, waPhoneProblem } from './format';
 import type { Contact } from './types';
 import { Panel } from './ui';
 
@@ -39,6 +39,8 @@ const factory = (t: CrmTheme) => ({
   off: { opacity: 0.45 },
   btnText: { ...typography.captionMedium, fontWeight: '700' as const, color: '#FFFFFF' },
   hint: { ...typography.caption, color: t.textMuted, marginTop: spacing.xs },
+  problem: { marginTop: spacing.xs, padding: spacing.sm, borderRadius: radii.md, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
+  problemText: { ...typography.caption, color: '#991B1B' },
 });
 
 /**
@@ -52,9 +54,12 @@ export function MessagesPanel({
   info,
   onSent,
   onError,
+  defaultContactId,
 }: {
   callId: string;
   contacts: Contact[];
+  /** The number picked on the call - messages go to it unless another is chosen here. */
+  defaultContactId?: string | null;
   messages: CustomerMessage[];
   info: { customer: string; site: string; month: string };
   onSent: (text: string) => void;
@@ -63,9 +68,17 @@ export function MessagesPanel({
   const { styles, theme } = useCrmStyles(factory);
   const { user } = useAuth();
   const { emailTemplates } = useFeedback();
-  const first = contacts.find((c) => c.is_primary && c.phone) || contacts.find((c) => c.phone) || contacts[0];
+  const picked = contacts.find((c) => c.id === defaultContactId && c.phone);
+  const first = picked || contacts.find((c) => c.is_primary && c.phone) || contacts.find((c) => c.phone) || contacts[0];
   const [toKey, setToKey] = useState<string>(first?.id || '');
+  // Follow the number picked on the call until a different one is chosen here.
+  const [chosenHere, setChosenHere] = useState(false);
+  useEffect(() => {
+    if (!chosenHere && picked) setToKey(picked.id);
+  }, [chosenHere, picked]);
   const [busy, setBusy] = useState('');
+  // A WhatsApp problem (e.g. a number it can't use), shown in this panel, not at the top.
+  const [problem, setProblem] = useState<{ key: string; text: string } | null>(null);
   const to = contacts.find((c) => c.id === toKey) || null;
   const phone = !!to?.phone?.trim();
   const email = !!to?.email && EMAIL_RE.test(to.email.trim());
@@ -74,13 +87,20 @@ export function MessagesPanel({
 
   async function sendWhatsapp(m: CustomerMessage) {
     if (!to || !m.whatsapp) return;
+    const bad = waPhoneProblem(to);
+    if (bad) {
+      setProblem({ key: m.key, text: bad });
+      return;
+    }
+    setProblem(null);
     setBusy(m.key + 'wa');
     try {
       const res = await prepareWhatsapp(callId, { template_code: m.whatsapp, contact_id: to.id, ticket_id: m.ticketId });
       await Linking.openURL(res.wa_me_url);
       onSent(`WhatsApp "${m.label}" opened for ${to.name}. Press Send there.`);
     } catch (err) {
-      onError(errorText(err, 'Could not open WhatsApp.'));
+      const text = errorText(err, 'Could not open WhatsApp.');
+      setProblem({ key: m.key, text: /not a phone number whatsapp can use/i.test(text) ? waPhoneProblem(to) || text : text });
     } finally {
       setBusy('');
     }
@@ -117,7 +137,11 @@ export function MessagesPanel({
         sheetTitle="Who gets the message?"
         options={contacts.map((c) => ({ value: c.id, label: [c.name, c.role, c.phone].filter(Boolean).join(' · ') }))}
         value={toKey || null}
-        onChange={setToKey}
+        onChange={(v) => {
+          setToKey(v);
+          setChosenHere(true);
+          setProblem(null);
+        }}
       />
       {to && (!phone || !email) && (
         <Text style={styles.hint}>
@@ -155,6 +179,11 @@ export function MessagesPanel({
                 </Pressable>
               )}
             </View>
+            {problem?.key === m.key && (
+              <View style={styles.problem}>
+                <Text style={styles.problemText}>{problem.text}</Text>
+              </View>
+            )}
           </View>
         );
       })}

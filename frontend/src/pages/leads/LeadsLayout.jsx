@@ -39,6 +39,8 @@ import { dayLabel, timeLabel } from "./format";
 import { kindLabel, todayKey } from "./remindersApi";
 import { Avatar, ToastProvider } from "./ui";
 import { useMyReminders } from "./useMyReminders";
+import { TICKET_PERMISSIONS, useFeedbackPermissions, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
+import { useUnseenCounts } from "../feedback/unseenCounts";
 import { ViewerContext, visibleLeads, visibleMeetings } from "./viewer";
 import "./leads.css";
 
@@ -194,6 +196,18 @@ export default function LeadsLayout() {
     [persona, me, canPick],
   );
 
+  // Customer Feedback tickets (e.g. a Sales step assigned to this salesperson): a "Tickets" tab here
+  // too. Its number clears once opened; only new ones show after (see unseenCounts).
+  const { permissions: feedbackPerms } = useFeedbackPermissions();
+  const showTickets = persona !== "lead_provider" && feedbackPerms.some((p) => TICKET_PERMISSIONS.includes(p));
+  const ticketCount = useFeedbackTicketCount(showTickets, location.pathname);
+  const { unseen, markSeen } = useUnseenCounts(me?.id ? `${me.id}.leads` : null, { tickets: ticketCount });
+  const onTickets = location.pathname.startsWith(`${LEADS_HOME}/tickets`);
+  const unseenTickets = unseen("tickets");
+  useEffect(() => {
+    if (onTickets && unseenTickets > 0) markSeen("tickets");
+  });
+
   const counts = useMemo(() => {
     const mine = visibleLeads(leads, viewer);
     return {
@@ -298,6 +312,7 @@ export default function LeadsLayout() {
   // Lead staff open Task Management from here with the same login (it has its own login for everyone else).
   const nav = [
     ...(residential ? residentialNav() : navFor(persona, counts)),
+    ...(showTickets ? [{ to: `${LEADS_HOME}/tickets`, label: "Tickets", icon: <FiInbox />, count: unseenTickets }] : []),
     ...(persona !== "lead_provider" ? [{ to: `${LEADS_HOME}/reminders`, label: "Reminders", icon: <FiBell /> }] : []),
     ...(LEAD_ROLES.includes(role) || LEAD_MANAGER_ROLES.includes(role) ? [{ to: TASKPRO_HOME, label: "Task Management", icon: <FiCheckSquare /> }] : []),
   ];

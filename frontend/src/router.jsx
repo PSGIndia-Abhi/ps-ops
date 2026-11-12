@@ -366,6 +366,15 @@ const router = createBrowserRouter([
       { path: "performance", element: <LeadsPerformance /> },
       { path: "sources", element: <LeadSources /> },
       { path: "quote-master", element: <QuoteMaster /> },
+      // Customer Feedback tickets for salespeople (a Sales step assigned to them) and other lead staff.
+      {
+        path: "tickets",
+        element: <FeedbackTicketsShell base={`${LEADS_HOME}/tickets`} />,
+        children: [
+          { index: true, element: <FeedbackTicketList /> },
+          { path: ":id", element: <FeedbackTicketPage /> },
+        ],
+      },
       // Residential (home-service) leads: the sales executive's and sales manager's second area.
       {
         path: "residential",

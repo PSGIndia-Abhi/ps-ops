@@ -116,6 +116,9 @@ const factory = (t: CrmTheme) => ({
   },
   hint: { ...typography.caption, fontSize: 11, color: t.textMuted, paddingHorizontal: spacing.xs, marginTop: 2 },
   line: { height: 1, backgroundColor: t.border, marginVertical: spacing.sm },
+  // What waits in that app, not seen yet.
+  count: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, backgroundColor: '#DC2626', alignItems: 'center' as const, justifyContent: 'center' as const },
+  countText: { fontSize: 11, fontWeight: '800' as const, color: '#FFFFFF' },
   profile: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -183,6 +186,8 @@ interface AppSwitchSheetProps {
   current: AppKind;
   /** The apps this user has, in the order shown. */
   apps: AppKind[];
+  /** What waits in each app, not seen yet (a red number on its row). */
+  badges?: Partial<Record<AppKind, number>>;
   onPick: (app: AppKind) => void;
   /** The app this user opens in when they sign in (null: the first of `apps`). */
   defaultApp: AppKind | null;
@@ -197,7 +202,7 @@ interface AppSwitchSheetProps {
  * header), the user's apps (the one showing now marked, the default with a star) and a link to the
  * profile.
  */
-export function AppSwitchSheet({ visible, current, apps, onPick, defaultApp, onSetDefault, onProfile, onClose }: AppSwitchSheetProps) {
+export function AppSwitchSheet({ visible, current, apps, badges = {}, onPick, defaultApp, onSetDefault, onProfile, onClose }: AppSwitchSheetProps) {
   const { styles, theme } = useCrmStyles(factory);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -280,6 +285,11 @@ export function AppSwitchSheet({ visible, current, apps, onPick, defaultApp, onS
                       </Pressable>
                     )}
                   </View>
+                  {!on && !!badges[app.kind] && (
+                    <View style={styles.count} accessibilityLabel={`${badges[app.kind]} new`}>
+                      <Text style={styles.countText}>{badges[app.kind]! > 99 ? '99+' : badges[app.kind]}</Text>
+                    </View>
+                  )}
                   {on ? (
                     <View style={styles.check}>
                       <CheckIcon size={15} color="#FFFFFF" />

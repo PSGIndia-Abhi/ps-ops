@@ -12,6 +12,10 @@ import { useFeedback } from './FeedbackContext';
 import { ACTIONS, OPERATIONS, PRIORITIES, PRIORITY, RAISE_ACTIONS, departmentHint, formatDay, rupees } from './format';
 import type { AssignablePerson, DepartmentKind, Invoice, IssueType, NewTicket, Priority, TicketAction, Visit } from './types';
 import { Chips, RadioCard } from './ui';
+import { DEEP_CLEANING_SERVICES, PEST_SERVICES } from '../screens/bookings/CreateBookingScreen';
+
+// The built-in "Others" issue (every department with issues has it; the server knows it by this id).
+const OTHER_ISSUE = 'OTHER';
 
 // Offered when raising; Site audit, Supervisor visit and Sales are set later on the ticket (web).
 const RAISE_NOW: TicketAction[] = ['RESOLVED_ON_CALL', 'SCHEDULE_REVISIT', 'OTHER'];
@@ -75,10 +79,13 @@ export function RaiseTicketSheet({
   const { styles, theme } = useCrmStyles(factory);
   const { departmentList } = useFeedback();
   const departments = departmentList.length ? departmentList : [{ kind: OPERATIONS, label: 'Operations', name: 'Operations Team', org_unit_id: '' }];
-  const services = [...new Set(visits.map((v) => v.service).filter((s): s is string => !!s))];
+  // The period's services; none in the period = every service we offer, to pick from.
+  const visitServices = [...new Set(visits.map((v) => v.service).filter((s): s is string => !!s))];
+  const noVisits = visitServices.length === 0;
+  const services = noVisits ? [...new Set([...PEST_SERVICES, ...DEEP_CLEANING_SERVICES])] : visitServices;
   const [depts, setDepts] = useState<DepartmentKind[]>([OPERATIONS]);
   const [summary, setSummary] = useState(defaultSummary);
-  const [picked, setPicked] = useState<string[]>(services.length === 1 ? services : []);
+  const [picked, setPicked] = useState<string[]>(visitServices.length === 1 ? visitServices : []);
   const [priority, setPriority] = useState<Priority>(suggested);
   const [action, setAction] = useState<TicketAction>('SCHEDULE_REVISIT');
   // Site audit / Supervisor visit / Sales: the person it is assigned to.
@@ -121,17 +128,23 @@ export function RaiseTicketSheet({
       .catch(() => setIssueTypes([]));
   }, []);
   const typesOf = (k: DepartmentKind) => issueTypes.filter((t) => t.department === k);
-  const [ticked, setTicked] = useState<Record<string, Record<number, string>>>({});
+  const [ticked, setTicked] = useState<Record<string, Record<string, string>>>({});
   const tickedOf = (k: DepartmentKind) => ticked[k] || {};
-  const isTicked = (k: DepartmentKind, id: number) => Object.prototype.hasOwnProperty.call(tickedOf(k), id);
-  const toggleIssue = (k: DepartmentKind, id: number) =>
+  const isTicked = (k: DepartmentKind, id: number | string) => Object.prototype.hasOwnProperty.call(tickedOf(k), String(id));
+  // "Others": what it is goes in its own box and is required.
+  const otherText = (k: DepartmentKind) => (isTicked(k, OTHER_ISSUE) ? tickedOf(k)[OTHER_ISSUE] || '' : '');
+  const setOtherText = (k: DepartmentKind, v: string) => setTicked((t) => ({ ...t, [k]: { ...(t[k] || {}), [OTHER_ISSUE]: v } }));
+  const toggleIssue = (k: DepartmentKind, id: number | string) =>
     setTicked((t) => {
       const mine = { ...(t[k] || {}) };
       if (Object.prototype.hasOwnProperty.call(mine, id)) delete mine[id];
       else mine[id] = '';
       return { ...t, [k]: mine };
     });
-  const issuesBody = (k: DepartmentKind) => typesOf(k).filter((t) => isTicked(k, t.id)).map((t) => ({ id: t.id, text: null }));
+  const issuesBody = (k: DepartmentKind): { id: number | 'OTHER'; text: string | null }[] => [
+    ...typesOf(k).filter((t) => isTicked(k, t.id)).map((t) => ({ id: t.id, text: null })),
+    ...(isTicked(k, OTHER_ISSUE) ? [{ id: OTHER_ISSUE as 'OTHER', text: otherText(k).trim() }] : []),
+  ];
   // Operations: the services list shows when "Services" is ticked (or Operations has no such issue).
   const opsServiceType = typesOf(OPERATIONS).find((t) => t.is_service);
   const showServices = !opsServiceType || isTicked(OPERATIONS, opsServiceType.id);
@@ -153,7 +166,18 @@ export function RaiseTicketSheet({
               </Pressable>
             );
           })}
+          <Pressable onPress={() => toggleIssue(k, OTHER_ISSUE)} style={[styles.issueChip, isTicked(k, OTHER_ISSUE) && styles.issueChipOn]} accessibilityRole="checkbox" accessibilityState={{ checked: isTicked(k, OTHER_ISSUE) }}>
+            {isTicked(k, OTHER_ISSUE) && <CheckIcon size={13} color={theme.primary} />}
+            <Text style={[styles.issueChipText, isTicked(k, OTHER_ISSUE) && styles.issueChipTextOn]}>Others</Text>
+          </Pressable>
         </View>
+        {isTicked(k, OTHER_ISSUE) && (
+          <>
+            <Text style={styles.label}>What is the other issue? *</Text>
+            <TextInput style={styles.input} value={otherText(k)} onChangeText={(v) => setOtherText(k, v)} multiline maxLength={500} placeholder="Describe the issue" placeholderTextColor={theme.textMuted} autoFocus />
+            {!otherText(k).trim() && <Text style={[styles.hint, { color: theme.dangerText }]}>Required when Others is ticked.</Text>}
+          </>
+        )}
       </>
     );
   };
@@ -180,13 +204,19 @@ export function RaiseTicketSheet({
       setError(`Tick at least one issue for ${noIssue.name}`);
       return;
     }
+    const otherEmpty = departments.filter((d) => depts.includes(d.kind)).find((d) => isTicked(d.kind, OTHER_ISSUE) && !otherText(d.kind).trim());
+    if (otherEmpty) {
+      setError(`Type what the other issue is for ${otherEmpty.name}`);
+      return;
+    }
     const missing = others.find((d) => !typesOf(d.kind).length && !partOf(d.kind).issue_summary.trim());
     if (missing) {
       setError(`Describe the issue for ${missing.name}`);
       return;
     }
     const chosen = showServices ? services.filter((s) => picked.includes(s)) : [];
-    const servicesLine = chosen.length > 1 ? `Services: ${chosen.join(', ')}` : '';
+    // A service with no visit in the period is named in the problem text (it has no visit to link).
+    const servicesLine = chosen.length > 1 || (noVisits && chosen.length) ? `Service${chosen.length > 1 ? 's' : ''}: ${chosen.join(', ')}` : '';
     setSaving(true);
     setError(null);
     try {
@@ -251,7 +281,7 @@ export function RaiseTicketSheet({
 
             {showServices && <Text style={styles.label}>Which services?</Text>}
             {!showServices ? null : services.length ? (
-              <View style={styles.box}>
+              <ScrollView style={[styles.box, noVisits && { maxHeight: 260 }]} nestedScrollEnabled>
                 {services.map((s) => {
                   const on = picked.includes(s);
                   return (
@@ -261,10 +291,9 @@ export function RaiseTicketSheet({
                     </Pressable>
                   );
                 })}
-              </View>
-            ) : (
-              <Text style={styles.hint}>No services this month.</Text>
-            )}
+              </ScrollView>
+            ) : null}
+            {showServices && noVisits && <Text style={[styles.hint, { marginTop: spacing.xs }]}>No service in this period - pick from all our services. None ticked = not about one particular service.</Text>}
 
             <Text style={styles.label}>{typesOf(OPERATIONS).length ? "Details (in the customer's words)" : "What is the problem? (in the customer's words)"}</Text>
             <TextInput style={styles.input} value={summary} onChangeText={setSummary} multiline maxLength={500} placeholder="The bad answers are attached already" placeholderTextColor={theme.textMuted} />

@@ -1,21 +1,19 @@
-import React, { useCallback, useContext, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { StatusBadge } from '../../crm/ui/StatusBadge';
 import { radii, spacing, typography } from '../../theme';
 import { errorText, listTickets } from '../api';
-import { OPERATIONS, PRIORITY, TICKET_STATUS, formatDay } from '../format';
+import { OPERATIONS, PRIORITIES, PRIORITY, TICKET_STATUS, formatDay } from '../format';
 import { useFeedback } from '../FeedbackContext';
 import type { FeedbackStackParamList } from '../navigation';
 import { TicketsBackContext, useTicketsTab } from '../ticketsTabContext';
 import type { DepartmentKind, Ticket } from '../types';
 import { HeroHeader } from '../Hero';
-import { Dropdown } from '../Dropdown';
-import { ClipboardListIcon } from '../../crm/ui/crmIcons';
-import { Chips } from '../ui';
-import { ChevronRightIcon } from '../../components/icons';
+import { ClipboardListIcon, SearchIcon } from '../../crm/ui/crmIcons';
+import { ChevronRightIcon, CloseIcon } from '../../components/icons';
 import { toneColors } from '../../crm/ui/StatusBadge';
 
 
@@ -47,6 +45,25 @@ const factory = (t: CrmTheme) => ({
   muted: { ...typography.caption, color: t.textMuted, marginTop: 2 },
   next: { ...typography.captionMedium, fontWeight: '700' as const, flexShrink: 1 },
   pressed: { opacity: 0.85 },
+  // Filters: a card with status pills, search, and priority / department chips.
+  filterCard: { backgroundColor: t.surface, borderRadius: 18, borderWidth: 1, borderColor: t.border, padding: spacing.sm, marginBottom: spacing.md, gap: spacing.sm, ...t.cardShadow },
+  seg: { flexDirection: 'row' as const, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, padding: 3 },
+  segBtn: { flex: 1, minHeight: 38, borderRadius: radii.pill, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 6 },
+  segOn: { backgroundColor: t.surface, ...t.cardShadow },
+  segText: { ...typography.captionMedium, color: t.textSecondary },
+  segTextOn: { color: t.primary, fontWeight: '800' as const },
+  search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, backgroundColor: t.surfaceAlt, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, paddingHorizontal: spacing.sm, minHeight: 44 },
+  searchOn: { borderColor: t.primary, backgroundColor: t.surface },
+  searchInput: { flex: 1, color: t.textPrimary, paddingVertical: 0, ...typography.body },
+  clear: { width: 26, height: 26, borderRadius: 13, backgroundColor: t.border, alignItems: 'center' as const, justifyContent: 'center' as const },
+  chipRow: { flexDirection: 'row' as const, gap: 6, paddingRight: spacing.sm },
+  chip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, minHeight: 34, paddingHorizontal: 12, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface },
+  chipOn: { borderColor: t.primary, backgroundColor: t.primarySoftBg },
+  chipDot: { width: 8, height: 8, borderRadius: 4 },
+  chipText: { ...typography.captionMedium, color: t.textSecondary },
+  chipTextOn: { color: t.primary, fontWeight: '800' as const },
+  filterFoot: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const },
+  clearAll: { ...typography.captionMedium, fontWeight: '700' as const, color: t.dangerText },
 });
 
 /** What the ticket is waiting for, in a few words. */
@@ -69,13 +86,21 @@ function nextStep(t: Ticket): { text: string; tone: 'ok' | 'wait' | 'todo' } {
 export function FeedbackTicketsScreen() {
   const navigation = useNavigation<NavigationProp<FeedbackStackParamList>>();
   // The Tickets tab's badge (in another app's tabs) is brought up to date when the list shows.
-  const { refresh: refreshBadge } = useTicketsTab();
+  const { refresh: refreshBadge, markSeen } = useTicketsTab();
   // Opened from More: a back arrow to return there.
   const goBack = useContext(TicketsBackContext);
   const { styles, theme } = useCrmStyles(factory);
   const [status, setStatus] = useState<'OPEN' | 'CLOSED' | ''>('OPEN');
   const { departmentList, deptOnly } = useFeedback();
   const [department, setDepartment] = useState<DepartmentKind | ''>('');
+  const [priority, setPriority] = useState('');
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  // Search after typing stops.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,19 +109,21 @@ export function FeedbackTicketsScreen() {
     setLoading(true);
     setError(null);
     try {
-      setTickets(await listTickets(status, department));
+      setTickets(await listTickets(status, department, { q, priority }));
     } catch (err) {
       setError(errorText(err, 'Could not load the tickets.'));
     } finally {
       setLoading(false);
     }
-  }, [status, department]);
+  }, [status, department, q, priority]);
 
   useFocusEffect(
     useCallback(() => {
       load();
       refreshBadge();
-    }, [load, refreshBadge]),
+      // Opening the list clears the Tickets tab's number until new tickets come.
+      markSeen();
+    }, [load, refreshBadge, markSeen]),
   );
 
   return (
@@ -108,33 +135,79 @@ export function FeedbackTicketsScreen() {
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <View>
-            {/* Open / Closed / All behind the filter button. */}
-            <View style={styles.filterRow}>
-              <Dropdown
-                caption="Show"
-                value={status}
-                options={[
-                  { value: 'OPEN' as const, label: 'Open tickets' },
-                  { value: 'CLOSED' as const, label: 'Closed tickets' },
-                  { value: '' as const, label: 'All tickets' },
-                ]}
-                onChange={setStatus}
-                highlight={status !== 'OPEN'}
-              />
-              <Text style={styles.filterNow}>{tickets ? `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}` : ''}</Text>
-            </View>
-            {!deptOnly && departmentList.length > 0 && (
-              <View style={styles.filters}>
-                <Text style={styles.filterLabel}>Departments</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <Chips
-                    options={[{ value: '' as DepartmentKind | '', label: 'All' }, ...departmentList.map((d) => ({ value: d.kind as DepartmentKind | '', label: d.name || d.label }))]}
-                    value={department}
-                    onChange={setDepartment}
-                  />
-                </ScrollView>
+            {/* Filters: All / Open / Closed, search, priority and department - all fit any phone width. */}
+            <View style={styles.filterCard}>
+              <View style={styles.seg} accessibilityRole="radiogroup">
+                {([['', 'All'], ['OPEN', 'Open'], ['CLOSED', 'Closed']] as const).map(([v, label]) => {
+                  const on = status === v;
+                  return (
+                    <Pressable key={label} onPress={() => setStatus(v)} style={[styles.segBtn, on && styles.segOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
+                      <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
-            )}
+              <View style={[styles.search, !!search && styles.searchOn]}>
+                <SearchIcon size={17} color={theme.textMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search ticket no., customer or site"
+                  placeholderTextColor={theme.textMuted}
+                  value={search}
+                  onChangeText={setSearch}
+                  returnKeyType="search"
+                  accessibilityLabel="Search tickets"
+                />
+                {!!search && (
+                  <Pressable onPress={() => setSearch('')} style={styles.clear} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+                    <CloseIcon size={13} color={theme.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                {[{ value: '', label: 'Any priority' }, ...PRIORITIES.map((p) => ({ value: p as string, label: PRIORITY[p].label }))].map((o) => {
+                  const on = priority === o.value;
+                  const dot = o.value ? toneColors(theme, PRIORITY[o.value as keyof typeof PRIORITY].tone).fg : null;
+                  return (
+                    <Pressable key={o.label} onPress={() => setPriority(o.value)} style={[styles.chip, on && styles.chipOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
+                      {!!dot && <View style={[styles.chipDot, { backgroundColor: dot }]} />}
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              {!deptOnly && departmentList.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                  {[{ value: '' as DepartmentKind | '', label: 'All departments' }, ...departmentList.map((d) => ({ value: d.kind as DepartmentKind | '', label: d.name || d.label }))].map((o) => {
+                    const on = department === o.value;
+                    return (
+                      <Pressable key={o.label} onPress={() => setDepartment(o.value)} style={[styles.chip, on && styles.chipOn]} accessibilityRole="radio" accessibilityState={{ checked: on }}>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+              <View style={styles.filterFoot}>
+                <Text style={styles.filterNow}>{tickets ? `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}` : ''}</Text>
+                {(!!priority || !!department || !!search || status !== 'OPEN') && (
+                  <Pressable
+                    onPress={() => {
+                      setPriority('');
+                      setDepartment('');
+                      setSearch('');
+                      setStatus('OPEN');
+                    }}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.clearAll}>Clear filters</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
             <CrmErrorBanner message={error} onRetry={load} />
           </View>
         }

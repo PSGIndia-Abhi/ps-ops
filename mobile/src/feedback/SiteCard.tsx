@@ -22,7 +22,8 @@ const factory = (t: CrmTheme) => ({
   services: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: spacing.sm },
   svc: { backgroundColor: t.surfaceAlt, borderRadius: radii.pill, paddingHorizontal: spacing.sm, paddingVertical: 3 },
   svcText: { ...typography.caption, fontSize: 11.5, color: t.textSecondary },
-  facts: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, marginTop: spacing.sm },
+  facts: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, alignItems: 'center' as const, columnGap: spacing.md, rowGap: 4, marginTop: spacing.sm },
+  added: { alignSelf: 'flex-start' as const, marginTop: spacing.xs, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.pill, backgroundColor: '#DCFCE7', overflow: 'hidden' as const, color: '#166534', fontSize: 11, fontWeight: '800' as const },
   fact: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4 },
   factText: { ...typography.caption, color: t.textMuted },
   foot: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: t.surfaceAlt, gap: spacing.sm },
@@ -45,7 +46,7 @@ function serviceChips(services: string | null): string[] {
  * One site's call for a month: a coloured status strip and badge, the site and customer, services,
  * last visit, and Take call / Open / Review form. onOpen opens a taken call; onTake takes it.
  */
-export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; myId: number; busy?: boolean; onOpen: () => void; onTake: () => void }) {
+export function SiteCard({ row, myId, busy, onOpen, onTake, numberAdded }: { row: CallRow; myId: number; busy?: boolean; onOpen: () => void; onTake: () => void; numberAdded?: boolean }) {
   const { styles, theme } = useCrmStyles(factory);
   const someoneElse = !!row.collector && row.collector.id !== myId;
   const callBack = row.next_call_at && row.status !== 'DONE';
@@ -74,6 +75,8 @@ export function SiteCard({ row, myId, busy, onOpen, onTake }: { row: CallRow; my
           </View>
           <StatusBadge label={meta.label} tone={meta.tone} />
         </View>
+        {/* The service coordinator added the right number and nobody has called it yet. */}
+        {numberAdded && <Text style={styles.added}>● Number added</Text>}
 
         {chips.length > 0 && (
           <View style={styles.services}>

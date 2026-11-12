@@ -659,3 +659,19 @@ export function TrashIcon({ size = 20, color = '#6B7280' }: IconProps) {
     </Svg>
   );
 }
+
+/** A company / office building - used for customers (every customer is a company). */
+export function BuildingIcon({ size = 20, color = '#6B7280' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={4} y={3} width={11} height={18} rx={1.5} stroke={color} strokeWidth={1.8} />
+      <Path d="M15 9h3.5A1.5 1.5 0 0120 10.5V21" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Line x1={2.5} y1={21} x2={21.5} y2={21} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={7.5} y1={7} x2={8.5} y2={7} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={10.5} y1={7} x2={11.5} y2={7} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={7.5} y1={11} x2={8.5} y2={11} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Line x1={10.5} y1={11} x2={11.5} y2={11} stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Path d="M8 21v-4h3v4" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+    </Svg>
+  );
+}

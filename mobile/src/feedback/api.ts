@@ -20,9 +20,15 @@ export async function getMyAccess(): Promise<string[]> {
  * Permissions plus the departments the user works in. FEEDBACK_DEPT = a member of the Operations /
  * Accounts team: they see only their department's tickets.
  */
-export async function getMyAccessFull(): Promise<{ permissions: string[]; departments: DepartmentKind[] }> {
-  const { data } = await httpClient.get<{ permissions: string[]; departments?: DepartmentKind[] }>('/api/feedback/me');
-  return { permissions: data.permissions || [], departments: data.departments || [] };
+export async function getMyAccessFull(): Promise<{ permissions: string[]; departments: DepartmentKind[]; role: string }> {
+  const { data } = await httpClient.get<{ permissions: string[]; departments?: DepartmentKind[]; role?: string }>('/api/feedback/me');
+  return { permissions: data.permissions || [], departments: data.departments || [], role: data.role || '' };
+}
+
+/** The Feedback Desk's numbers: open tickets and wrong-number requests waiting. */
+export async function getDeskBadges(): Promise<{ open_tickets: number; open_requests: number }> {
+  const { data } = await httpClient.get<{ open_tickets?: number; open_requests?: number }>('/api/feedback/badges');
+  return { open_tickets: Number(data.open_tickets) || 0, open_requests: Number(data.open_requests) || 0 };
 }
 
 /** The open tickets waiting for this user (their department's part, or the step assigned to them). */
@@ -256,9 +262,19 @@ export async function prepareWhatsapp(
 }
 
 /** The tickets this user can see (a collector: the ones they raised). */
-export async function listTickets(status: 'OPEN' | 'CLOSED' | '', department: DepartmentKind | '' = ''): Promise<Ticket[]> {
+export async function listTickets(
+  status: 'OPEN' | 'CLOSED' | '',
+  department: DepartmentKind | '' = '',
+  more: { q?: string; priority?: string } = {},
+): Promise<Ticket[]> {
   const { data } = await httpClient.get<{ tickets: Ticket[] }>('/api/feedback/tickets', {
-    params: { status: status === 'OPEN' ? 'ACTION_PENDING' : status || undefined, department: department || undefined, page_size: 100 },
+    params: {
+      status: status === 'OPEN' ? 'ACTION_PENDING' : status || undefined,
+      department: department || undefined,
+      q: more.q || undefined,
+      priority: more.priority || undefined,
+      page_size: 100,
+    },
   });
   return data.tickets;
 }

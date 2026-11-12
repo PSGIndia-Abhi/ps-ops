@@ -6,7 +6,7 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { SearchIcon } from '../../crm/ui/crmIcons';
 import { radii, spacing, typography } from '../../theme';
-import { errorText, listCalls, takeCall } from '../api';
+import { errorText, listCalls, listNumberRequests, takeCall } from '../api';
 import { CALL_FILTERS, defaultPeriod, periodLabel, periodQuery, type Period } from '../format';
 import type { FeedbackStackParamList, FeedbackTabParamList } from '../navigation';
 import { HeroHeader } from '../Hero';
@@ -15,6 +15,13 @@ import type { CallList, CallRow } from '../types';
 import { Chips, PeriodPicker } from '../ui';
 import { Dropdown } from '../Dropdown';
 import { PhoneIcon } from '../../components/icons';
+
+// The calls to make first (To call, Not answered), then the others; in each, calls nobody has taken first.
+const CALL_FIRST = ['TO_CALL', 'NOT_ANSWERED', 'WRONG_NUMBER', 'FORM_SENT', 'FORM_RECEIVED', 'TICKET_OPEN', 'DONE'];
+function callRank(row: CallRow): number {
+  const at = CALL_FIRST.indexOf(row.status);
+  return (at < 0 ? CALL_FIRST.length : at) * 2 + (row.collector ? 1 : 0);
+}
 
 const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },
@@ -51,6 +58,8 @@ export function FeedbackCallsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Calls whose right number the service coordinator added: call id -> when it was added.
+  const [addedAt, setAddedAt] = useState<Record<string, string>>({});
 
   // A tile on Home opens this tab on its status.
   const asked = route.params?.status;
@@ -70,6 +79,13 @@ export function FeedbackCallsScreen() {
     setError(null);
     try {
       setData(await listCalls({ ...periodQuery(period), status, q: query }));
+      listNumberRequests('DONE')
+        .then((d) => {
+          const at: Record<string, string> = {};
+          for (const r of d.requests) if (r.resolved_at && (!at[r.call_id] || r.resolved_at > at[r.call_id])) at[r.call_id] = r.resolved_at;
+          setAddedAt(at);
+        })
+        .catch(() => setAddedAt({}));
     } catch (err) {
       setError(errorText(err, 'Could not load the calls.'));
     } finally {
@@ -138,7 +154,7 @@ export function FeedbackCallsScreen() {
     <View style={styles.screen}>
       <HeroHeader icon={PhoneIcon} title="Calls" subtitle={periodLabel(period)} />
       <FlatList
-        data={data?.sites || []}
+        data={[...(data?.sites || [])].sort((a, b) => callRank(a) - callRank(b))}
         keyExtractor={(r) => r.request_id}
         renderItem={({ item: row }) => (
           <SiteCard
@@ -147,6 +163,11 @@ export function FeedbackCallsScreen() {
             busy={busy === row.request_id}
             onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id })}
             onTake={() => take(row)}
+            numberAdded={
+              row.status === 'TO_CALL' &&
+              !!addedAt[row.request_id] &&
+              (!row.last_activity_at || new Date(row.last_activity_at).getTime() <= new Date(addedAt[row.request_id]).getTime() + 5000)
+            }
           />
         )}
         ListHeaderComponent={header}

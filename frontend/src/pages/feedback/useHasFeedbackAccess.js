@@ -8,6 +8,9 @@ import { apiFetch } from "../../api";
 // Permissions that only give tickets (no Feedback Desk): a department's team, and the supervisors /
 // salespeople a ticket's next step is assigned to. Such users get "Tickets" in their own panel.
 export const TICKETS_ONLY = ["FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"];
+// Feedback permissions that open the ticket list (GET /api/feedback/tickets): anyone holding one
+// gets a "Tickets" tab in their own panel (Task Management, Lead Management).
+export const TICKET_PERMISSIONS = ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN", "FEEDBACK_DEPT", "FEEDBACK_ASSIGNED"];
 
 /** The user's FEEDBACK_* permissions ([] = none), and whether they only work tickets. */
 export function useFeedbackPermissions() {

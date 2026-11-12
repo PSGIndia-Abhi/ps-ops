@@ -21,6 +21,9 @@ import { TicketsBackContext } from './ticketsTabContext';
 /** The permissions that only give tickets (anything else opens the full Customer Feedback app). */
 export const TICKETS_ONLY = ['FEEDBACK_DEPT', 'FEEDBACK_ASSIGNED'];
 
+/** Permissions that open the ticket list: anyone holding one gets the "Tickets" tab in their own app. */
+export const TICKET_PERMISSIONS = ['FEEDBACK_COLLECT', 'FEEDBACK_VIEW', 'FEEDBACK_MANAGE', 'FEEDBACK_ADMIN', 'FEEDBACK_DEPT', 'FEEDBACK_ASSIGNED'];
+
 export const ticketsTabIcon = ({ color, size }: { color: string; size: number }) => <ClipboardListIcon size={size} color={color} />;
 
 const Stack = createNativeStackNavigator<FeedbackStackParamList>();

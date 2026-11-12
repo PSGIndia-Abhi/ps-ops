@@ -316,11 +316,10 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
     <div className="bg-page bgb">
       <div className="bgb-topbar">
         <div>
-          <nav className="bgb-crumbs" aria-label="Breadcrumb">
-            <button type="button" onClick={back}>{manage ? "Purchase Orders" : "Billing"}</button>
-            <span aria-hidden="true">›</span>
-            <span>{po?.po_number || number}</span>
-          </nav>
+          {/* Back (asks first when there are unsaved changes). */}
+          <button type="button" className="bgb-back" onClick={back}>
+            ← Back
+          </button>
           <div className="bgb-title-row">
             <h2 className="bgb-h1">{po?.po_number || number}</h2>
             {po && <StateBadge state={state} />}
