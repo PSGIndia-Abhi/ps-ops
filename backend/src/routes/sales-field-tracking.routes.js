@@ -174,6 +174,51 @@ router.post("/shift/end", auth, requirePermission("CRM_VIEW_LEAD"), async (req, 
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/field-tracking/conversations -- "just a conversation" during the field day with
+// someone who is not a lead. Body: { personName, notes, latitude?, longitude? }. Saved against the
+// executive's active shift (409 without one). Location is optional so it still works without GPS.
+// Not a client stop: it is not counted in petrol km (see utils/salesFieldTracking.js).
+// ---------------------------------------------------------------------------
+router.post("/conversations", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const personName = typeof req.body?.personName === "string" ? req.body.personName.trim() : "";
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+    if (!personName) throw new HttpError(400, "Who did you meet? is required");
+    if (personName.length > 150) throw new HttpError(400, "Name is too long (max 150 characters)");
+    if (!notes) throw new HttpError(400, "What did you discuss? is required");
+    if (notes.length > 2000) throw new HttpError(400, "Notes are too long (max 2000 characters)");
+    const point = readPoint(req.body?.latitude, req.body?.longitude, false, "Current location");
+
+    const shift = await loadActiveShift(req.user.id);
+    if (!shift) throw new HttpError(409, "Start your shift first");
+
+    const id = uuid();
+    await pool.query(
+      `INSERT INTO sales_field_conversations (id, shift_id, user_id, person_name, notes, latitude, longitude, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [id, shift.id, req.user.id, personName, notes, point?.latitude ?? null, point?.longitude ?? null]
+    );
+    const [[row]] = await pool.query(
+      `SELECT id, shift_id, person_name, notes, latitude, longitude, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+         FROM sales_field_conversations WHERE id = ?`,
+      [id]
+    );
+    res.status(201).json({
+      conversation: {
+        id: row.id,
+        shiftId: row.shift_id,
+        personName: row.person_name,
+        notes: row.notes,
+        location: row.latitude !== null && row.longitude !== null ? { latitude: Number(row.latitude), longitude: Number(row.longitude) } : null,
+        createdAt: row.created_at,
+      },
+    });
+  } catch (err) {
+    sendError(res, err, "Failed to save the conversation");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/field-tracking/points -- batch upload of background GPS points for one of the
 // executive's own shifts (may arrive after the shift ended - the phone queues offline).
 // Body: { shiftId, points: [{ clientPointId, capturedAtMs, latitude, longitude,

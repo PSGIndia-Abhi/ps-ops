@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -244,18 +244,29 @@ type IconType = React.ComponentType<{ size?: number; color?: string }>;
 /** A two-colour diagonal fill for whatever it is placed in (the parent clips it to its own rounded shape). */
 export function GradientFill({ from, to }: { from: string; to: string }) {
   const id = useRef(`lead${Math.round(Math.random() * 1e9)}`).current;
+  // The Svg is drawn at the exact size measured from its parent. Percent sizes ("100%") or no size at
+  // all both go wrong on Android: one stops short of the Shift card (a hard edge and a grey box), the
+  // other short of a tall parent such as the Feedback header with status chips.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setSize((s) => (s && s.width === width && s.height === height ? s : { width, height }));
+  }, []);
   return (
-    // width/height 100% as well as absoluteFill: on Android an Svg without them can stop short of a
-    // tall parent (e.g. the Feedback header with status chips), leaving a hard edge across it.
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" pointerEvents="none">
-      <Defs>
-        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor={from} />
-          <Stop offset="1" stopColor={to} />
-        </LinearGradient>
-      </Defs>
-      <Rect x={0} y={0} width="100%" height="100%" fill={`url(#${id})`} />
-    </Svg>
+    // Until it is measured (the first frame) the plain start colour fills the shape, so nothing flashes.
+    <View style={[StyleSheet.absoluteFill, !size && { backgroundColor: from }]} pointerEvents="none" onLayout={onLayout}>
+      {size && size.width > 0 && size.height > 0 && (
+        <Svg width={size.width} height={size.height}>
+          <Defs>
+            <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor={from} />
+              <Stop offset="1" stopColor={to} />
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width={size.width} height={size.height} fill={`url(#${id})`} />
+        </Svg>
+      )}
+    </View>
   );
 }
 

@@ -60,6 +60,8 @@ export type LeadStackParamList = {
   LeadMyDay: undefined;
   /** Sales executive: pick the client they are at (no meeting booked) and punch in. */
   LeadUnplannedVisit: undefined;
+  /** Sales executive: unplanned visit that is just a conversation (anyone, not a lead) - who + note, punch in. */
+  LeadConversation: undefined;
   /** Sales manager: residential (home-service) leads, read-only. */
   LeadResidential: undefined;
   /** More -> Profile in the sales apps (CRM and Lead Management). */

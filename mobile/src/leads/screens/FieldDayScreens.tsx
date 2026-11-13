@@ -3,14 +3,14 @@ import { AppState, Animated, Easing, FlatList, Pressable, Text, View } from 'rea
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { GlossyBadge } from '../../components/GlossyBadge';
-import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PinIcon, PlayIcon, PlusIcon, ShieldIcon, StopIcon } from '../../components/icons';
+import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, ClockIcon, PersonIcon, PinIcon, PlayIcon, PlusIcon, ShieldIcon, StopIcon, UsersIcon } from '../../components/icons';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { formatShiftClock } from '../../screens/technician/shiftTime';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
 import { CrmTextField } from '../../crm/ui/CrmTextField';
 import { SearchIcon, TrendUpIcon } from '../../crm/ui/crmIcons';
-import { fmtTimestamp, todayStr } from '../../tasks/format';
+import { fmtTime, fmtTimestamp, todayStr } from '../../tasks/format';
 import { radii, spacing, typography } from '../../theme';
 import { getCurrentLocation } from '../../utils/location';
 import { refreshReminders } from '../../reminders-engine/useReminders';
@@ -195,6 +195,106 @@ const factory = (t: CrmTheme) => ({
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
   busyRow: { opacity: 0.5 },
   footer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: t.border, backgroundColor: t.surface },
+  // Unplanned visit footer: one control split into two halves.
+  split: {
+    flexDirection: 'row' as const,
+    alignItems: 'stretch' as const,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+    overflow: 'hidden' as const,
+  },
+  splitHalf: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    minHeight: 64,
+  },
+  splitPressed: { backgroundColor: t.surfaceAlt },
+  splitDivider: { width: 1, backgroundColor: t.border, marginVertical: spacing.sm },
+  splitText: { flex: 1 },
+  splitTitle: { ...typography.bodyMedium, fontWeight: '800' as const },
+  splitSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+
+  // "Just a conversation": gradient hero, a form card with quick notes, a sticky Punch in.
+  convBody: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.md },
+  convHero: { borderRadius: 24, padding: spacing.lg, overflow: 'hidden' as const, ...t.raisedShadow },
+  convHeroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  convHeroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  convHeroTitle: { fontSize: 21, lineHeight: 26, fontWeight: '800' as const, color: WHITE },
+  convHeroSub: { ...typography.caption, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  convChips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs, marginTop: spacing.md },
+  convChip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    borderRadius: radii.pill,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  convChipText: { ...typography.captionMedium, color: WHITE },
+  convForm: {
+    backgroundColor: t.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  convStep: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginBottom: spacing.sm },
+  convStepNo: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: t.accentBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  convStepNoText: { fontSize: 12, fontWeight: '800' as const, color: t.accentText },
+  convStepTitle: { ...typography.overline, color: t.textSecondary },
+  convCount: { ...typography.caption, color: t.textMuted, marginLeft: 'auto' as const },
+  convQuickLabel: { ...typography.caption, color: t.textMuted, marginBottom: spacing.xs },
+  convQuick: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.xs, marginBottom: spacing.md },
+  convQuickChip: {
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surfaceAlt,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  convQuickChipOn: { borderColor: t.accent, backgroundColor: t.accentBg },
+  convQuickText: { ...typography.captionMedium, color: t.textSecondary },
+  convQuickTextOn: { color: t.accentText },
+  convFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm, borderTopWidth: 1, borderTopColor: t.border, backgroundColor: t.surface },
+
+  // The day's conversation cards on My Day.
+  convCard: {
+    backgroundColor: t.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: spacing.md,
+    gap: spacing.xxs,
+  },
+  convHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  convWho: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
+  convTime: { ...typography.caption, color: t.textMuted },
+  convNote: { ...typography.body, color: t.textSecondary },
 });
 
 /** 'YYYY-MM-DD HH:MM:SS' -> "9:02 AM". */
@@ -552,6 +652,30 @@ export function MyDayScreen() {
             />
           </View>
         ))}
+
+        {!!data && data.day.conversations.length > 0 && (
+          <>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Conversations</Text>
+              <Text style={styles.hint}>{data.day.conversations.length} today</Text>
+            </View>
+            {data.day.conversations
+              .slice()
+              .reverse()
+              .map((c) => (
+                <View key={c.id} style={styles.convCard}>
+                  <View style={styles.convHead}>
+                    <GlossyBadge color={theme.accent} size={30} icon={<UsersIcon size={15} color={WHITE} />} />
+                    <Text style={styles.convWho} numberOfLines={1}>
+                      {c.personName}
+                    </Text>
+                    <Text style={styles.convTime}>{clock(c.createdAt)}</Text>
+                  </View>
+                  <Text style={styles.convNote}>{c.notes}</Text>
+                </View>
+              ))}
+          </>
+        )}
       </CrmScreen>
 
       <FieldDialog
@@ -663,14 +787,35 @@ export function UnplannedVisitScreen() {
           </View>
         )}
       />
+      {/* Not in the list: one control, two halves - a new client (add the lead) or just a conversation. */}
       <View style={styles.footer}>
-        <PrimaryButton
-          label="New client - add lead"
-          variant="secondary"
-          icon={<GlossyBadge color={theme.primary} size={26} icon={<PlusIcon size={15} color={WHITE} />} />}
-          onPress={() => navigation.navigate('LeadNew')}
-          disabled={busyLead !== null}
-        />
+        <View style={[styles.split, busyLead !== null && styles.busyRow]} pointerEvents={busyLead ? 'none' : 'auto'}>
+          <Pressable
+            onPress={() => navigation.navigate('LeadNew')}
+            accessibilityRole="button"
+            accessibilityLabel="New client - add lead"
+            style={({ pressed }) => [styles.splitHalf, pressed && styles.splitPressed]}
+          >
+            <GlossyBadge color={theme.primary} size={34} icon={<PlusIcon size={17} color={WHITE} />} />
+            <View style={styles.splitText}>
+              <Text style={[styles.splitTitle, { color: theme.primary }]} numberOfLines={1}>New client</Text>
+              <Text style={styles.splitSub} numberOfLines={1}>Add as a lead</Text>
+            </View>
+          </Pressable>
+          <View style={styles.splitDivider} />
+          <Pressable
+            onPress={() => navigation.replace('LeadConversation')}
+            accessibilityRole="button"
+            accessibilityLabel="Just a conversation"
+            style={({ pressed }) => [styles.splitHalf, pressed && styles.splitPressed]}
+          >
+            <GlossyBadge color={theme.accent} size={34} icon={<UsersIcon size={17} color={WHITE} />} />
+            <View style={styles.splitText}>
+              <Text style={[styles.splitTitle, { color: theme.accentText }]} numberOfLines={1}>Conversation</Text>
+              <Text style={styles.splitSub} numberOfLines={1}>Not a lead</Text>
+            </View>
+          </Pressable>
+        </View>
       </View>
 
       <FieldDialog
@@ -712,6 +857,200 @@ export function UnplannedVisitScreen() {
             },
           },
           { label: 'Cancel', variant: 'secondary', onPress: () => setNoGpsLead(null) },
+        ]}
+      />
+    </LeadScreen>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unplanned visit -> Just a conversation: anyone (not a lead). Who + what was discussed, punch in.
+// One step - no punch-out; saved against the active shift with the phone's location.
+// ---------------------------------------------------------------------------
+
+/** One-tap notes - tapping adds the phrase to "What did you discuss?" (tap again to take it out). */
+const QUICK_NOTES = ['Interested in our service', 'Asked for a quotation', 'Will call back', 'Gave a reference', 'General enquiry'];
+
+/** The phone's time now as "2:32 PM", refreshed every 30 seconds. */
+function nowLabel() {
+  const d = new Date();
+  return fmtTime(`${d.getHours()}:${d.getMinutes()}`);
+}
+function useNowLabel() {
+  const [now, setNow] = useState(nowLabel);
+  useEffect(() => {
+    const t = setInterval(() => setNow(nowLabel()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** "What did you discuss?" as its sentences (quick notes are stored as "Phrase."). */
+const noteParts = (n: string) => n.split(/\.\s*/).map((x) => x.trim()).filter(Boolean);
+
+export function ConversationScreen() {
+  const navigation = useNavigation<Nav>();
+  const { styles, theme } = useCrmStyles(factory);
+  const now = useNowLabel();
+  const [personName, setPersonName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [errors, setErrors] = useState<{ who?: string; notes?: string }>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [noGps, setNoGps] = useState(false);
+
+  const toggleQuick = (q: string) => {
+    setNotes((n) => {
+      const parts = noteParts(n);
+      const next = parts.includes(q) ? parts.filter((x) => x !== q) : [...parts, q];
+      return next.length ? `${next.join('. ')}.` : '';
+    });
+    if (errors.notes) setErrors((e) => ({ ...e, notes: undefined }));
+  };
+
+  const save = async (coords: Coords | null) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await field.logConversation(personName.trim(), notes.trim(), coords);
+      navigation.goBack();
+    } catch (err) {
+      setActionError(errorMessage(err, 'Could not save the conversation. Please try again.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onPunchIn = async () => {
+    const next: { who?: string; notes?: string } = {};
+    if (!personName.trim()) next.who = 'Enter who you met';
+    if (!notes.trim()) next.notes = 'Write what you discussed, or tap a quick note';
+    setErrors(next);
+    if (next.who || next.notes) return;
+    setBusy(true);
+    const coords = await readCoords();
+    setBusy(false);
+    if (coords) return save(coords);
+    setNoGps(true);
+  };
+
+  const parts = noteParts(notes);
+
+  return (
+    <LeadScreen edges={['top', 'bottom']}>
+      <TopBar title="Just a conversation" subtitle="Not a lead" icon="close" onBack={() => navigation.goBack()} />
+      <CrmScreen edges={[]} transparent contentStyle={styles.convBody}>
+        {/* Hero: what this is, the time now, and that the location is taken on punch-in. */}
+        <View style={styles.convHero}>
+          <GradientFill from="#8B5CF6" to="#5B21B6" />
+          <View style={[styles.bubble, styles.bubbleBig]} pointerEvents="none" />
+          <View style={[styles.bubble, styles.bubbleSmall]} pointerEvents="none" />
+          <View style={styles.convHeroTop}>
+            <View style={styles.convHeroIcon}>
+              <UsersIcon size={24} color={WHITE} />
+            </View>
+            <View style={styles.side}>
+              <Text style={styles.convHeroTitle}>Quick conversation</Text>
+              <Text style={styles.convHeroSub}>Met someone who is not a lead? Note it in seconds.</Text>
+            </View>
+          </View>
+          <View style={styles.convChips}>
+            <View style={styles.convChip}>
+              <ClockIcon size={13} color={WHITE} />
+              <Text style={styles.convChipText}>{now}</Text>
+            </View>
+          </View>
+        </View>
+
+        <CrmErrorBanner message={actionError} />
+
+        <View style={styles.convForm}>
+          <View style={styles.convStep}>
+            <View style={styles.convStepNo}>
+              <Text style={styles.convStepNoText}>1</Text>
+            </View>
+            <Text style={styles.convStepTitle}>WHO DID YOU MEET?</Text>
+          </View>
+          <CrmTextField
+            value={personName}
+            onChangeText={(v) => {
+              setPersonName(v);
+              if (errors.who) setErrors((e) => ({ ...e, who: undefined }));
+            }}
+            placeholder="Name, shop or company"
+            icon={<PersonIcon size={18} color={theme.textMuted} />}
+            error={errors.who}
+            maxLength={150}
+            autoCapitalize="words"
+            returnKeyType="next"
+          />
+
+          <View style={styles.convStep}>
+            <View style={styles.convStepNo}>
+              <Text style={styles.convStepNoText}>2</Text>
+            </View>
+            <Text style={styles.convStepTitle}>WHAT DID YOU DISCUSS?</Text>
+            {notes.length > 0 && <Text style={styles.convCount}>{notes.length}/2000</Text>}
+          </View>
+          <Text style={styles.convQuickLabel}>Tap to add a quick note</Text>
+          <View style={styles.convQuick}>
+            {QUICK_NOTES.map((q) => {
+              const on = parts.includes(q);
+              return (
+                <Pressable
+                  key={q}
+                  onPress={() => toggleQuick(q)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={({ pressed }) => [styles.convQuickChip, on && styles.convQuickChipOn, pressed && styles.pressed]}
+                >
+                  <Text style={[styles.convQuickText, on && styles.convQuickTextOn]}>{on ? `✓ ${q}` : q}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <CrmTextField
+            value={notes}
+            onChangeText={(v) => {
+              setNotes(v);
+              if (errors.notes) setErrors((e) => ({ ...e, notes: undefined }));
+            }}
+            placeholder="Or write a few words about the conversation"
+            error={errors.notes}
+            maxLength={2000}
+            multiline
+          />
+        </View>
+      </CrmScreen>
+
+      <View style={styles.convFooter}>
+        <PrimaryButton label="Punch in" icon={<PinIcon size={18} color={WHITE} />} loading={busy} onPress={onPunchIn} />
+      </View>
+
+      <FieldDialog
+        visible={noGps}
+        tone="warning"
+        icon={AlertTriangleIcon}
+        title="Location not available"
+        message="Your location could not be read. Turn on location and try again, or save without it."
+        onClose={() => setNoGps(false)}
+        actions={[
+          {
+            label: 'Try again',
+            onPress: () => {
+              setNoGps(false);
+              onPunchIn();
+            },
+          },
+          {
+            label: 'Save without location',
+            variant: 'secondary',
+            onPress: () => {
+              setNoGps(false);
+              save(null);
+            },
+          },
+          { label: 'Cancel', variant: 'secondary', onPress: () => setNoGps(false) },
         ]}
       />
     </LeadScreen>

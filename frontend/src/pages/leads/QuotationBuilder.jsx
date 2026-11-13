@@ -19,6 +19,12 @@ import { priceTableForSave, priceTableFromContent, priceTableTotal } from "./pri
 import { frequencyNames, frequencyOptions, sortPlans } from "./quoteOptions";
 import { Alert, Button, Empty, Field, Modal, Note, SkeletonRows } from "./ui";
 
+/** Today as 'YYYY-MM-DD' in the browser's local time (the default quotation date). */
+const todayYmd = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 const ROW_KEYS = ["defense_area", "material_used", "treatment_area", "frequency"];
 const BLANK_ROW = { defense_area: "", material_used: "", treatment_area: "", frequency: "" };
 
@@ -310,6 +316,7 @@ function stateFromContent(content, master) {
     missing,
     subject: content.subject || "",
     revised: !!content.revised,
+    quotationDate: content.quotationDate || "",
     validDays: String(content.validDays || 30),
     contractMonths: String(content.contractMonths || 12),
     discount: content.totals?.discount ? String(content.totals.discount) : "",
@@ -343,6 +350,8 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   const [subject, setSubject] = useState("");
   const [subjectEdited, setSubjectEdited] = useState(false);
   const [revised, setRevised] = useState(false);
+  // The date printed on the PDF - any date they like. An edit keeps the saved one; new and duplicate start at today.
+  const [quotationDate, setQuotationDate] = useState(todayYmd());
   const [validDays, setValidDays] = useState("30");
   const [contractMonths, setContractMonths] = useState("12");
   const [discount, setDiscount] = useState(""); // special discount in rupees, off the main total
@@ -375,6 +384,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           setSubjectEdited(true);
           // An edit goes to the customer as a revised proposal; it can be unticked.
           setRevised(editing || st.revised);
+          setQuotationDate(editing && st.quotationDate ? st.quotationDate : todayYmd());
           setValidDays(st.validDays);
           setContractMonths(st.contractMonths);
           setDiscount(st.discount);
@@ -500,6 +510,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
         customer: { name: customer.name.trim(), address: customer.address.trim(), attention: customer.attention.trim(), phone: customer.phone.trim() },
         subject: shownSubject.trim(),
         revised,
+        quotationDate: quotationDate || todayYmd(),
         validDays: Number(validDays) || 30,
         contractMonths: Number(contractMonths) || 12,
         discount: discountValue,
@@ -737,6 +748,9 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                     setSubject(e.target.value);
                   }}
                 />
+              </Field>
+              <Field label="Quotation date (printed on the PDF)">
+                <input className="lm-input" type="date" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} />
               </Field>
               <Field label="Valid for (days)">
                 <input className="lm-input" inputMode="numeric" value={validDays} onChange={(e) => setValidDays(e.target.value.replace(/\D/g, "").slice(0, 3))} />

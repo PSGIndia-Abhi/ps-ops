@@ -462,6 +462,31 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
     }));
   }
 
+  // "Just a conversation" visits (not a lead) logged during the shifts. Not client stops - they are
+  // not part of petrol legs or the fingerprint. Tolerates the table not being created yet.
+  let conversations = [];
+  if (shifts.length) {
+    try {
+      const [convRows] = await executor.query(
+        `SELECT id, shift_id, person_name, notes, latitude, longitude, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+           FROM sales_field_conversations
+          WHERE shift_id IN (?)
+          ORDER BY created_at ASC`,
+        [shifts.map((s) => s.id)]
+      );
+      conversations = convRows.map((c) => ({
+        id: c.id,
+        shift: shifts.findIndex((s) => s.id === c.shift_id) + 1,
+        personName: c.person_name,
+        notes: c.notes,
+        createdAt: c.created_at,
+        location: latLng(c.latitude, c.longitude),
+      }));
+    } catch (err) {
+      if (err && err.code !== "ER_NO_SUCH_TABLE") throw err;
+    }
+  }
+
   const durationMin = shifts.reduce((sum, s) => sum + Math.max(0, ((s.endTs ?? nowTs) - s.startTs) / 60), 0);
 
   return {
@@ -473,6 +498,7 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
     stops: stopsOut,
     gaps: gapsOut,
     alerts,
+    conversations,
     // Petrol: the trips (GPS km / direct road km / paid km / status, each with its shift), a total
     // per shift and, while the road km are not worked out yet, the places to ask Google about - one
     // group per shift: [start, client 1, ..., client N, start], null for a shift with no visit.
@@ -499,6 +525,7 @@ async function computeDay(executor, user, date, roadMetersOverride = null) {
       validPointCount: points.filter((p) => p.valid).length,
       visitCount: visits.length,
       unplannedVisitCount: visits.filter((v) => v.unplanned).length,
+      conversationCount: conversations.length,
       gapCount: gapsOut.length,
       longStopAlertCount: alerts.length,
       flaggedLegCount: petrol.legs.filter((l) => l.status === "CAPPED" || l.status === "NO_GPS").length,

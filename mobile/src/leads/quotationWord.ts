@@ -157,6 +157,9 @@ function priceTableWidths(t: any): number[] {
 function documentHtml(q: any, meta: { number?: string; leadNumber?: string | null; date: Date }, logoSrc: string) {
   const date = meta.date;
   const validUntil = new Date(date.getTime() + (q.validDays || 30) * 86400000);
+  // The date chosen in the builder is the one printed at the top (Valid Until still counts from the day it was made).
+  const picked = /^\d{4}-\d{2}-\d{2}$/.test(String(q.quotationDate || '')) ? new Date(`${q.quotationDate}T12:00:00`) : null;
+  const shownDate = picked && !Number.isNaN(picked.getTime()) ? picked : date;
   const by = q.preparedBy?.name ? q.preparedBy : SIGNATORY;
   const docLabel = meta.number ? `Quotation ${meta.number}` : "Quotation";
   const services = q.services || [];
@@ -188,7 +191,7 @@ function documentHtml(q: any, meta: { number?: string; leadNumber?: string | nul
   out.push(`
 <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse"><tr>
   <td style="vertical-align:middle"><span style="background:${C.red};color:#ffffff;font-size:8pt;font-weight:bold;letter-spacing:1.6pt;padding:3pt 10pt">&nbsp;${q.revised ? "REVISED QUOTATION" : "QUOTATION"}&nbsp;</span></td>
-  <td style="vertical-align:middle;text-align:right;font-size:10pt;font-weight:bold;color:${C.ink}">${esc(longDate(date))}</td>
+  <td style="vertical-align:middle;text-align:right;font-size:10pt;font-weight:bold;color:${C.ink}">${esc(longDate(shownDate))}</td>
 </tr></table>`);
   out.push(spacer(8));
 

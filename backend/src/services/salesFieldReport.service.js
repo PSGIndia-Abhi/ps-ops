@@ -4,7 +4,7 @@ const { computeDay } = require("../utils/salesFieldTracking");
 // ---------------------------------------------------------------------------
 // Field Tracking report: every field day of the chosen sales executives over a date range, built
 // with the same computeDay() the day view uses, so the numbers always match the map screen.
-// Returns plain rows (days, visits, petrol trips, stops, GPS gaps, alerts) for the screen and the
+// Returns plain rows (days, visits, conversations, petrol trips, stops, GPS gaps, alerts) for the screen and the
 // same rows as an Excel file. Read-only.
 // ---------------------------------------------------------------------------
 
@@ -34,7 +34,7 @@ const minutesBetween = (a, b) => {
 /** Builds the report rows for these executives ([{id, name}]) between from and to (inclusive). */
 async function buildFieldReport(db, executives, from, to) {
   const byId = new Map(executives.map((e) => [Number(e.id), e]));
-  const result = { from, to, days: [], visits: [], trips: [], stops: [], gaps: [], alerts: [] };
+  const result = { from, to, days: [], visits: [], conversations: [], trips: [], stops: [], gaps: [], alerts: [] };
   if (!executives.length) return result;
 
   const pairs = await activeDays(db, [...byId.keys()], from, to);
@@ -53,6 +53,7 @@ async function buildFieldReport(db, executives, from, to) {
       durationMin: s.durationMin,
       visits: s.visitCount,
       unplannedVisits: s.unplannedVisitCount,
+      conversations: s.conversationCount || 0,
       gpsKm: s.gpsKm,
       petrolKm: s.petrolKm,
       petrolFinal: s.petrolFinal,
@@ -76,6 +77,17 @@ async function buildFieldReport(db, executives, from, to) {
         distanceFromLeadM: v.distanceFromLeadM,
         status: v.status,
         outcome: v.outcomeNotes || "",
+      });
+    }
+    for (const c of d.conversations || []) {
+      result.conversations.push({
+        ...base,
+        shift: c.shift,
+        at: c.createdAt,
+        personName: c.personName || "",
+        notes: c.notes || "",
+        latitude: c.location?.latitude ?? null,
+        longitude: c.location?.longitude ?? null,
       });
     }
     for (const l of d.petrol.legs) {
@@ -157,11 +169,12 @@ async function fieldReportWorkbook(report, title) {
   // Totals per executive at the top of the Summary sheet.
   const totals = new Map();
   for (const d of report.days) {
-    const t = totals.get(d.executive) || { executive: d.executive, days: 0, durationMin: 0, visits: 0, unplanned: 0, gpsKm: 0, petrolKm: 0, petrolMissing: 0, gaps: 0, longStops: 0 };
+    const t = totals.get(d.executive) || { executive: d.executive, days: 0, durationMin: 0, visits: 0, unplanned: 0, conversations: 0, gpsKm: 0, petrolKm: 0, petrolMissing: 0, gaps: 0, longStops: 0 };
     t.days++;
     t.durationMin += d.durationMin || 0;
     t.visits += d.visits || 0;
     t.unplanned += d.unplannedVisits || 0;
+    t.conversations += d.conversations || 0;
     t.gpsKm += d.gpsKm || 0;
     if (d.petrolKm === null) t.petrolMissing++;
     else t.petrolKm += d.petrolKm;
@@ -175,6 +188,7 @@ async function fieldReportWorkbook(report, title) {
     { key: "hours", header: "Hours on Duty", width: 12, type: "num", value: (t) => hours(t.durationMin) },
     { key: "visits", header: "Client Visits", width: 11 },
     { key: "unplanned", header: "Unplanned Visits", width: 11 },
+    { key: "conversations", header: "Conversations (not leads)", width: 13 },
     { key: "gpsKm", header: "GPS km", width: 10, type: "num" },
     { key: "petrolKm", header: "Petrol km", width: 10, type: "num" },
     { key: "petrolMissing", header: "Days Petrol Not Worked Out", width: 14 },
@@ -195,6 +209,7 @@ async function fieldReportWorkbook(report, title) {
     { key: "hours", header: "Hours on Duty", width: 11, type: "num", value: (r) => hours(r.durationMin) },
     { key: "visits", header: "Client Visits", width: 10 },
     { key: "unplannedVisits", header: "Unplanned", width: 10 },
+    { key: "conversations", header: "Conversations", width: 12 },
     { key: "gpsKm", header: "GPS km", width: 9, type: "num" },
     { key: "petrolKm", header: "Petrol km", width: 10, type: "num" },
     { key: "petrolNote", header: "Petrol Note", width: 26, value: (r) => (r.petrolKm === null ? "Not worked out - open this day on the map once" : r.petrolFinal ? "" : "Provisional (day still open)") },
@@ -218,6 +233,16 @@ async function fieldReportWorkbook(report, title) {
     { key: "status", header: "Visit Status", width: 12, value: (r) => String(r.status || "").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) },
     { key: "outcome", header: "Outcome", width: 36, wrap: true },
   ], report.visits);
+
+  // "Just a conversation" from the app's Unplanned visit - people who are not leads.
+  sheet(wb, "Conversations", [
+    ...who,
+    { key: "shift", header: "Shift", width: 7 },
+    { key: "at", header: "Time", width: 14, type: "time", value: (r) => xlDate(r.at) },
+    { key: "personName", header: "Who They Met", width: 26 },
+    { key: "notes", header: "What Was Discussed", width: 50, wrap: true },
+    { key: "where", header: "Where", width: 12, value: (r) => mapLink(r.latitude, r.longitude) },
+  ], report.conversations);
 
   sheet(wb, "Petrol Trips", [
     ...who,

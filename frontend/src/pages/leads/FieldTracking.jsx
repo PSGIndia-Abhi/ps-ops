@@ -1058,6 +1058,17 @@ function ExecutiveDay({ userId, date }) {
         });
       }
     });
+    // "Just a conversation" from the app's Unplanned visit: someone who is not a lead.
+    (day.conversations || []).forEach((c) =>
+      events.push({
+        at: c.createdAt,
+        icon: <FiUsers />,
+        tone: "violet",
+        text: `Conversation with ${c.personName}`,
+        sub: ["Not a lead", c.notes].filter(Boolean).join(" · "),
+        place: toLatLng(c.location),
+      })
+    );
     day.stops.forEach((s) =>
       events.push({ at: s.from, until: s.to, icon: <FiClock />, tone: "neutral", text: `Stopped for ${minutesText(s.minutes)}`, sub: `${timeLabel(s.from)} to ${timeLabel(s.to)}`, place: toLatLng(s) })
     );
@@ -1182,7 +1193,10 @@ function ExecutiveDay({ userId, date }) {
           </span>
           <span className="ft-stat-label">Client visits</span>
           <strong>{s.visitCount}</strong>
-          <small>{s.unplannedVisitCount ? `${s.unplannedVisitCount} unplanned` : "All planned"}</small>
+          <small>
+            {s.unplannedVisitCount ? `${s.unplannedVisitCount} unplanned` : "All planned"}
+            {s.conversationCount ? ` · ${s.conversationCount} conversation${s.conversationCount > 1 ? "s" : ""}` : ""}
+          </small>
         </div>
         <div className={`ft-stat${s.gapCount ? " warn" : ""}`}>
           <span className="ft-stat-icon">{s.gapCount ? <FiAlertTriangle /> : <FiCheckCircle />}</span>

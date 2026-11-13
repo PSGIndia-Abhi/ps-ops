@@ -123,6 +123,21 @@ function columnWidths(widths, cols) {
 }
 
 /**
+ * The date printed at the top of the quotation, chosen in the builder: 'YYYY-MM-DD', or null (not
+ * chosen - older apps): the PDF then shows the day it is made. Any real calendar date is accepted.
+ * Only the printed date - "Valid Until" and the record's own created/sent times are not changed.
+ */
+function quotationDate(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+  if (!d || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3] || +m[1] < 2000 || +m[1] > 2100) {
+    throw new QuotationInputError("Quotation date must be a valid date");
+  }
+  return String(value);
+}
+
+/**
  * Checks and tidies the builder's request body. Throws QuotationInputError
  * (a 400) with a readable message. Returns the content plus its totals:
  * { ..., totals: { monthly, yearly, oneTime, primary, primaryBilling, discount, final } }.
@@ -217,6 +232,7 @@ function normalizeQuotationContent(body) {
     customer,
     subject,
     revised: Boolean(b.revised),
+    quotationDate: quotationDate(b.quotationDate),
     validDays: int(b.validDays, "Valid for (days)", 1, 180, 30),
     contractMonths: int(b.contractMonths, "Contract period (months)", 1, 60, 12),
     services,
@@ -424,7 +440,9 @@ function draw(doc, q, meta) {
   const tagW = doc.widthOfString(tagText, { characterSpacing: 1.8 }) + 30;
   doc.roundedRect(L, y, tagW, 22, 11).fill(C.red);
   font("B", 8, "#ffffff").text(tagText, L, y + 7, { width: tagW, align: "center", characterSpacing: 1.8, lineBreak: false });
-  font("B", 10, C.ink).text(longDate(meta.date), R - 200, y + 5, { width: 200, align: "right", lineBreak: false });
+  // the date chosen in the builder (noon IST, so it prints as that day), else the day it is made
+  const shownDate = q.quotationDate ? new Date(`${q.quotationDate}T12:00:00+05:30`) : meta.date;
+  font("B", 10, C.ink).text(longDate(shownDate), R - 200, y + 5, { width: 200, align: "right", lineBreak: false });
 
   // particulars, in a light card under the tag (a preview has no quotation number yet, so it is left out)
   y += 36;

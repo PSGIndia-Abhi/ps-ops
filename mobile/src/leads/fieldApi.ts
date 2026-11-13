@@ -64,6 +64,20 @@ export interface DaySummary {
   unplannedVisitCount: number;
   /** Meeting ids punched in that day that were unplanned visits. */
   unplannedMeetingIds: Set<string>;
+  /** "Just a conversation" visits (not a lead) logged that day, oldest first. */
+  conversations: FieldConversation[];
+}
+
+export interface FieldConversation {
+  id: string;
+  personName: string;
+  notes: string;
+  /** Wall-clock 'YYYY-MM-DD HH:MM:SS'. */
+  createdAt: string;
+}
+
+function toConversation(row: Row): FieldConversation {
+  return { id: str(row.id), personName: str(row.personName), notes: str(row.notes), createdAt: str(row.createdAt) };
 }
 
 /** GET /api/field-tracking/day/:userId?date= - the executive's own day (summary parts only). */
@@ -82,7 +96,22 @@ export async function myDay(userId: number, date: string): Promise<DaySummary> {
     visitCount: Number(summary.visitCount ?? 0),
     unplannedVisitCount: Number(summary.unplannedVisitCount ?? 0),
     unplannedMeetingIds: new Set(visits.filter((v) => v.unplanned).map((v) => str(v.meetingId))),
+    conversations: ((data.conversations ?? []) as Row[]).map(toConversation),
   };
+}
+
+/**
+ * POST /api/field-tracking/conversations - "just a conversation" with someone who is not a lead,
+ * saved against the active shift (the server answers 409 "Start your shift first" without one).
+ * Location is optional. Not a client stop - it is not counted in petrol km.
+ */
+export async function logConversation(personName: string, notes: string, coords: Coords | null): Promise<FieldConversation> {
+  const { data } = await httpClient.post<{ conversation: Row }>('/api/field-tracking/conversations', {
+    personName,
+    notes,
+    ...(coords ? { latitude: coords.lat, longitude: coords.lng } : {}),
+  });
+  return toConversation(data.conversation);
 }
 
 /**

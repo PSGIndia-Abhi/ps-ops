@@ -32,6 +32,8 @@ export type QuotationContent = {
   customer: { name: string; address: string; attention: string; phone: string };
   subject: string;
   revised: boolean;
+  /** The date printed at the top of the PDF, 'YYYY-MM-DD' - chosen in the builder (older quotations: none). */
+  quotationDate?: string;
   validDays: number;
   contractMonths: number;
   discount: number;

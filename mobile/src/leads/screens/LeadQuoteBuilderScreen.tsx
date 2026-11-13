@@ -5,7 +5,9 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { CloseIcon, DocumentIcon, PlusIcon } from '../../components/icons';
+import { CalendarIcon, CloseIcon, DocumentIcon, PlusIcon } from '../../components/icons';
+import { fmtDateShort, todayStr } from '../../tasks/format';
+import { DateSheet } from '../../tasks/ui/sheets';
 import { CheckIcon } from '../../crm/ui/crmIcons';
 import { formatINR } from '../../crm/format';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -23,7 +25,7 @@ import { PriceTableEditor, priceTableForSave, priceTableFromContent, priceTableT
 import { QuotationPdfDialog, SendQuotationDialog } from '../QuotationDialogs';
 import type { Billing, MasterPlan, MasterService, QuoteMaster, SavedQuotationContent, TreatmentRow } from '../quotation';
 import { isConvertedStage } from '../stage';
-import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, useLoad } from '../ui';
+import { errorMessage, FieldRow, LeadButton, LeadScreen, LeadTopBar, PickField, useLoad } from '../ui';
 
 /**
  * Build a quotation from the quotation master - the phone version of the web's Create Quotation.
@@ -136,6 +138,8 @@ type Start = {
   validDays: string;
   contractMonths: string;
   revised: boolean;
+  /** The date printed at the top of the PDF, 'YYYY-MM-DD' ('' = not saved on an older quotation). */
+  quotationDate: string;
   discount: string;
   checked: Set<string>;
   extra: { VALUE_ADDED: string[]; TERMS: string[] };
@@ -157,6 +161,7 @@ function blankStart(master: QuoteMaster, customer: Start['customer'], asked: str
     validDays: '30',
     contractMonths: '12',
     revised: false,
+    quotationDate: todayStr(),
     discount: '',
     checked: new Set(),
     extra: { VALUE_ADDED: [], TERMS: [] },
@@ -222,6 +227,7 @@ function startFromSaved(content: SavedQuotationContent, master: QuoteMaster): St
     validDays: String(content.validDays || 30),
     contractMonths: String(content.contractMonths || 12),
     revised: !!content.revised,
+    quotationDate: content.quotationDate || '',
     discount: content.totals?.discount ? String(content.totals.discount) : '',
     checked,
     extra,
@@ -273,6 +279,9 @@ function Builder({
   const [contractMonths, setContractMonths] = useState(start.contractMonths);
   // An edit goes to the customer as a revised proposal (it can be switched off).
   const [revised, setRevised] = useState(start.revised || !!from?.editing);
+  // The date printed on the PDF - any date they like. An edit keeps the saved one; new and duplicate start at today.
+  const [quotationDate, setQuotationDate] = useState(from?.editing && start.quotationDate ? start.quotationDate : todayStr());
+  const [dateSheet, setDateSheet] = useState(false);
   const [discount, setDiscount] = useState(start.discount);
   const [checked, setChecked] = useState<Set<string>>(start.checked);
   const [extra, setExtra] = useState<{ VALUE_ADDED: string[]; TERMS: string[] }>(start.extra);
@@ -401,6 +410,7 @@ function Builder({
         customer: { name: customer.name.trim(), address: customer.address.trim(), attention: '', phone: customer.phone.trim() },
         subject: shownSubject.trim(),
         revised,
+        quotationDate,
         validDays: Number(validDays) || 30,
         contractMonths: Number(contractMonths) || 12,
         discount: discountValue,
@@ -681,6 +691,23 @@ function Builder({
               }}
               multiline
               maxLength={300}
+            />
+            <PickField
+              label="Quotation date (printed on the PDF)"
+              value={fmtDateShort(quotationDate)}
+              placeholder="Pick a date"
+              icon={<CalendarIcon size={18} color={theme.textMuted} />}
+              onPress={() => setDateSheet(true)}
+            />
+            <DateSheet
+              visible={dateSheet}
+              onClose={() => setDateSheet(false)}
+              value={quotationDate}
+              title="Quotation date"
+              onPick={(d) => {
+                setQuotationDate(d);
+                setDateSheet(false);
+              }}
             />
             <FieldRow>
               <CrmTextField label="Valid for (days)" value={validDays} onChangeText={(v) => setValidDays(v.replace(/\D/g, '').slice(0, 3))} keyboardType="number-pad" />
