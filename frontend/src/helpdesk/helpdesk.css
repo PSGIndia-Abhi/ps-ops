@@ -46,6 +46,22 @@
 :is(.hd-root, .hd-desk) .hd-fab:hover { background: var(--hd-primary-dark); transform: translateY(-1px); }
 :is(.hd-root, .hd-desk) .hd-fab:focus-visible { outline: 3px solid #7dd3fc; outline-offset: 2px; }
 :is(.hd-root, .hd-desk) .hd-fab.is-open { width: 48px; padding: 0; justify-content: center; }
+/* Draggable: grab cursor, no text selection or page scroll while dragging it on touch. */
+.hd-root .hd-fab { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+/* Once placed by the script it glides to its side on release. */
+.hd-root .hd-fab.is-placed { transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1), top 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease; }
+/* Lifted while dragging - follows the pointer with no lag. */
+.hd-root .hd-fab.is-dragging,
+.hd-root .hd-fab.is-dragging:hover {
+  cursor: grabbing;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transform: scale(1.06);
+  background: var(--hd-primary-dark);
+  box-shadow: 0 16px 40px rgba(2, 132, 199, 0.4), 0 6px 14px rgba(15, 23, 42, 0.22);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hd-root .hd-fab.is-placed { transition: background 0.15s ease; }
+}
 .hd-badge {
   position: absolute;
   top: -8px;

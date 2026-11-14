@@ -22,6 +22,157 @@ function signedIn() {
   return !!token && role !== "temporary_worker";
 }
 
+// ---------------------------------------------------------------------------
+// Draggable Help button. The person can drag it anywhere so it never sits on top of a page's own
+// buttons; on release it glides to the nearest side (left/right) and the spot is remembered in this
+// browser. A press that moves less than DRAG_START_PX is an ordinary click (opens Help).
+// Stored as { side: "left" | "right", bottom: px from the bottom edge } so it stays put on resize.
+// ---------------------------------------------------------------------------
+const POS_KEY = "hd-fab-pos";
+const DRAG_START_PX = 5;
+const PANEL_GAP = 12;
+const PANEL_MAX_H = 640;
+const PANEL_TOP_ROOM = 30;
+const DEFAULT_POS = { side: "right", bottom: 20 };
+
+function readPos() {
+  try {
+    const p = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+    if (p && (p.side === "left" || p.side === "right") && Number.isFinite(p.bottom)) return p;
+  } catch {
+    /* no saved spot */
+  }
+  return DEFAULT_POS;
+}
+
+function savePos(p) {
+  try {
+    localStorage.setItem(POS_KEY, JSON.stringify(p));
+  } catch {
+    /* storage blocked - the spot just isn't remembered */
+  }
+}
+
+const clamp = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
+
+function useViewport() {
+  const [vp, setVp] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  useEffect(() => {
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return vp;
+}
+
+function useDraggableFab() {
+  const vp = useViewport();
+  const [pos, setPos] = useState(readPos);
+  const [size, setSize] = useState(null); // the button's own { w, h }, measured
+  const [drag, setDrag] = useState(null); // { left, top } while dragging
+  const [el, setEl] = useState(null); // the button element (callback ref - it mounts after the summary loads)
+  const press = useRef(null); // { id, x, y, offX, offY, moved }
+  const justDragged = useRef(false);
+
+  // Measure the button (its width changes: "Help" label, close X, badge).
+  useEffect(() => {
+    if (!el) return undefined;
+    const measure = () => setSize((s) => (s && s.w === el.offsetWidth && s.h === el.offsetHeight ? s : { w: el.offsetWidth, h: el.offsetHeight }));
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+
+  const margin = vp.w <= 560 ? 16 : 20;
+
+  // Where the button sits now (null until measured - the CSS default corner is used until then).
+  let box = null;
+  if (size) {
+    if (drag) {
+      box = { left: drag.left, top: drag.top };
+    } else {
+      const left = pos.side === "left" ? margin : vp.w - margin - size.w;
+      const top = clamp(vp.h - pos.bottom - size.h, margin, vp.h - margin - size.h);
+      box = { left, top };
+    }
+  }
+
+  const onPointerDown = (e) => {
+    if (e.button !== 0 || !el) return;
+    const r = el.getBoundingClientRect();
+    press.current = { id: e.pointerId, x: e.clientX, y: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, moved: false };
+  };
+
+  const onPointerMove = (e) => {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId || !size) return;
+    if (!p.moved) {
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < DRAG_START_PX) return;
+      p.moved = true;
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is a nicety */
+      }
+    }
+    e.preventDefault();
+    setDrag({
+      left: clamp(e.clientX - p.offX, margin, vp.w - margin - size.w),
+      top: clamp(e.clientY - p.offY, margin, vp.h - margin - size.h),
+    });
+  };
+
+  const finish = (e) => {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
+    press.current = null;
+    if (!p.moved || !drag || !size) {
+      setDrag(null);
+      return;
+    }
+    justDragged.current = true; // swallow the click that follows this release
+    const side = drag.left + size.w / 2 < vp.w / 2 ? "left" : "right";
+    const next = { side, bottom: Math.round(vp.h - drag.top - size.h) };
+    setPos(next);
+    savePos(next);
+    setDrag(null);
+  };
+
+  // True once for the click that ends a drag - the caller ignores that click.
+  const consumeDrag = () => {
+    if (!justDragged.current) return false;
+    justDragged.current = false;
+    return true;
+  };
+
+  // The panel opens beside the button: same side, above it when the button is in the lower half.
+  let panelStyle;
+  if (box && size && vp.w > 560) {
+    const below = box.top + size.h / 2 < vp.h / 2;
+    const horiz = box.left + size.w / 2 < vp.w / 2 ? { left: margin, right: "auto" } : { right: margin, left: "auto" };
+    if (below) {
+      const top = box.top + size.h + PANEL_GAP;
+      panelStyle = { ...horiz, top, bottom: "auto", height: Math.min(PANEL_MAX_H, vp.h - top - margin), transformOrigin: "top" };
+    } else {
+      const bottom = vp.h - box.top + PANEL_GAP;
+      panelStyle = { ...horiz, bottom, top: "auto", height: Math.min(PANEL_MAX_H, box.top - PANEL_GAP - PANEL_TOP_ROOM), transformOrigin: "bottom" };
+    }
+  }
+
+  const fabStyle = box ? { left: box.left, top: box.top, right: "auto", bottom: "auto" } : undefined;
+
+  return {
+    attach: setEl,
+    fabStyle,
+    panelStyle,
+    dragging: !!drag,
+    consumeDrag,
+    handlers: { onPointerDown, onPointerMove, onPointerUp: finish, onPointerCancel: finish },
+  };
+}
+
 function usePath(router) {
   const [path, setPath] = useState(() => router.state.location.pathname);
   useEffect(() => router.subscribe((state) => setPath(state.location.pathname)), [router]);
@@ -38,6 +189,7 @@ export default function HelpdeskWidget({ router }) {
   // view: { name: "list" } | { name: "new" } | { name: "ticket", id }
   const [view, setView] = useState({ name: "list" });
   const [toast, setToast] = useState("");
+  const { attach: fabAttach, fabStyle, panelStyle, dragging: fabDragging, consumeDrag, handlers: fabHandlers } = useDraggableFab();
 
   const refreshSummary = useCallback(() => {
     api.getSummary().then(setSummary).catch(() => setSummary(null));
@@ -93,7 +245,7 @@ export default function HelpdeskWidget({ router }) {
     <div className="hd-root">
       {open && <div className="hd-backdrop" onClick={close} />}
       {open && (
-        <section className="hd-panel" role="dialog" aria-label="Help and support">
+        <section className="hd-panel" role="dialog" aria-label="Help and support" style={panelStyle}>
           {view.name === "list" && (
             <ListView onClose={close} onNew={() => setView({ name: "new" })} onOpen={(id) => setView({ name: "ticket", id })} />
           )}
@@ -117,10 +269,17 @@ export default function HelpdeskWidget({ router }) {
 
       <button
         type="button"
-        className={`hd-fab ${open ? "is-open" : ""}`}
-        onClick={() => (open ? close() : setOpen(true))}
+        ref={fabAttach}
+        className={`hd-fab ${open ? "is-open" : ""} ${fabDragging ? "is-dragging" : ""} ${fabStyle ? "is-placed" : ""}`}
+        style={fabStyle}
+        {...fabHandlers}
+        onClick={() => {
+          if (consumeDrag()) return; // the release of a drag, not a click
+          if (open) close();
+          else setOpen(true);
+        }}
         aria-label={open ? "Close help" : "Help and support"}
-        title="Help & Support"
+        title={open ? "Close" : "Help & Support · drag to move"}
       >
         {open ? <FiX /> : <FiHelpCircle />}
         {!open && <span className="hd-fab-label">Help</span>}
