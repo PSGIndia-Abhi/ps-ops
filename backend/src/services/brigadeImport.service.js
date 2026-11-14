@@ -24,7 +24,8 @@ const SERVICE_GROUPS = [
   // "Task Type 5": painting type, then its status / date / amount
   { headers: ["tasktype5"], service: "Painting", cols: ["type", "flag", "date", "amount"], code: "PT" },
   { headers: ["debrisremoval", "debrisremove"], service: "Debris Removal", cols: ["flag", "date", "amount"], code: "DR" },
-  { headers: ["deepcleaning"], service: "Deep Cleaning", cols: ["flag", "date", "amount"], code: "DC" },
+  // The client has one Deep Cleaning column; it is booked as "Deep Cleaning with Scrubbing".
+  { headers: ["deepcleaning"], service: "Deep Cleaning with Scrubbing", cols: ["flag", "date", "amount"], code: "DC" },
 ];
 
 // PO Items codes (FG,ES2,PT,DR,DC) -> our service. Digits after a code are counts.
@@ -39,7 +40,7 @@ const PO_ITEM_CODES = {
   PT: "Painting",
   P: "Painting",
   DR: "Debris Removal",
-  DC: "Deep Cleaning",
+  DC: "Deep Cleaning with Scrubbing", // the client's single Deep Cleaning column is billed as with scrubbing
 };
 
 /**

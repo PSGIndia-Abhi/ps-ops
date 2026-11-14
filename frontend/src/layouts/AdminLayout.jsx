@@ -1,4 +1,4 @@
-import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import { Navigate, Outlet, useNavigate, useLocation } from "react-router-dom";
 import logo from "../assets/logo.png";
 import useMe from "../hooks/useMe";
 import { useState, useEffect } from "react";
@@ -13,12 +13,28 @@ import {
   subscribePendingGroupManagementCounts,
 } from "../utils/groupManagementNotice";
 
+/* admin_assistant: this panel with only Dashboard, Bookings, Companies, Contacts and Group Management.
+   Its data is limited to its own branch by the backend (Branch Admin rules). These are the pages it
+   may open - the five sections plus the pages they link to (job, site contacts, profile, tracking). */
+const ASSISTANT_PATHS = [
+  /^\/admin\/?$/,
+  /^\/admin\/jobs\//,
+  /^\/admin\/bookings(\/|$)/,
+  /^\/admin\/companies(\/|$)/,
+  /^\/admin\/contacts(\/|$)/,
+  /^\/admin\/sites\/[^/]+\/contacts/,
+  /^\/admin\/group-management(\/|$)/,
+  /^\/admin\/profile(\/|$)/,
+  /^\/admin\/tracking\/history\//,
+];
+
 export default function AdminLayout() {
 
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useMe();
   const role = localStorage.getItem("role");
+  const isAssistant = role === "admin_assistant";
 
   /* ---------------- GROUP MANAGEMENT NOTIFICATION BADGE ---------------- */
   const [groupMgmtCount, setGroupMgmtCount] = useState(() =>
@@ -108,6 +124,10 @@ export default function AdminLayout() {
 
 
 
+  if (isAssistant && !ASSISTANT_PATHS.some((re) => re.test(location.pathname))) {
+    return <Navigate to="/admin" replace />;
+  }
+
   return (
     <div className="app-shell">
 
@@ -116,7 +136,7 @@ export default function AdminLayout() {
         <button
           type="button"
           className="header-left header-left-btn"
-          onClick={() => navigate("/admin/analysis")}
+          onClick={() => navigate(isAssistant ? "/admin" : "/admin/analysis")}
         >
           <img src={logo} alt="BestServe" className="logo" />
           <span className="header-title">Admin Panel</span>
@@ -151,12 +171,14 @@ export default function AdminLayout() {
                 Dashboard
               </button>
 
-              <button
-                className={`nav-btn ${isActive("/admin/analysis") ? "active" : ""}`}
-                onClick={() => navigate("/admin/analysis")}
-              >
-                Analysis
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/analysis") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/analysis")}
+                >
+                  Analysis
+                </button>
+              )}
 
               <button
                 className={`nav-btn ${isActive("/admin/bookings") ? "active" : ""}`}
@@ -165,13 +187,15 @@ export default function AdminLayout() {
                 Bookings
               </button>
 
-              <button
-                className={`nav-btn ${isActive("/admin/service-requests") ? "active" : ""}`}
-                onClick={() => navigate("/admin/service-requests")}
-              >
-                Service Requests
-                {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/service-requests") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/service-requests")}
+                >
+                  Service Requests
+                  {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
+                </button>
+              )}
 
               <button
                 className={`nav-btn ${isActive("/admin/companies") ? "active" : ""}`}
@@ -180,12 +204,14 @@ export default function AdminLayout() {
                 Companies
               </button>
 
-              <button
-                className={`nav-btn ${isActive("/admin/client-accounts") ? "active" : ""}`}
-                onClick={() => navigate("/admin/client-accounts")}
-              >
-                Client Accounts
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/client-accounts") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/client-accounts")}
+                >
+                  Client Accounts
+                </button>
+              )}
 
               <button
                 className={`nav-btn ${isActive("/admin/contacts") ? "active" : ""}`}
@@ -202,23 +228,27 @@ export default function AdminLayout() {
                   Branches
                 </button>)}
 
-              <button
-                className={`nav-btn ${isActive("/admin/team") ? "active" : ""}`}
-                onClick={() => navigate("/admin/team")}
-              >
-                Team Management
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/team") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/team")}
+                >
+                  Team Management
+                </button>
+              )}
 
-              <button
-                className={`nav-btn ${inUsersGroup ? "parent-active" : ""}`}
-                onClick={() => setUsersOpen((open) => !open)}
-                aria-expanded={usersOpen}
-              >
-                Users
-                <span className="nav-chevron">{usersOpen ? "▾" : "▸"}</span>
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${inUsersGroup ? "parent-active" : ""}`}
+                  onClick={() => setUsersOpen((open) => !open)}
+                  aria-expanded={usersOpen}
+                >
+                  Users
+                  <span className="nav-chevron">{usersOpen ? "▾" : "▸"}</span>
+                </button>
+              )}
 
-              {usersOpen && (
+              {usersOpen && !isAssistant && (
                 <div className="nav-sub">
                   <button
                     className={`nav-btn nav-sub-btn ${isActive("/admin/user-management") ? "active" : ""}`}
@@ -265,19 +295,23 @@ export default function AdminLayout() {
                 {groupMgmtCount > 0 && <span className="nav-badge">{groupMgmtCount}</span>}
               </button>
 
-              <button
-                className={`nav-btn ${isActive("/admin/map") ? "active" : ""}`}
-                onClick={() => navigate("/admin/map")}
-              >
-                Map
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/map") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/map")}
+                >
+                  Map
+                </button>
+              )}
 
-              <button
-                className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
-                onClick={() => navigate("/admin/tickets")}
-              >
-                Tickets
-              </button>
+              {!isAssistant && (
+                <button
+                  className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
+                  onClick={() => navigate("/admin/tickets")}
+                >
+                  Tickets
+                </button>
+              )}
 
               {isAdmin && <AuditsNav base="/admin" />}
 
@@ -319,14 +353,16 @@ export default function AdminLayout() {
 
       {isMobile && mobilePanel === "menu" && (
         <div className="mobile-panel mobile-panel-menu">
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/analysis");
-            }}
-          >
-            Analysis
-          </button>
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/analysis");
+              }}
+            >
+              Analysis
+            </button>
+          )}
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -335,15 +371,17 @@ export default function AdminLayout() {
           >
             Bookings
           </button>
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/service-requests");
-            }}
-          >
-            Service Requests
-            {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
-          </button>
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/service-requests");
+              }}
+            >
+              Service Requests
+              {serviceRequestCount > 0 && <span className="nav-badge">{serviceRequestCount}</span>}
+            </button>
+          )}
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -352,14 +390,16 @@ export default function AdminLayout() {
           >
             Companies
           </button>
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/client-accounts");
-            }}
-          >
-            Client Accounts
-          </button>
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/client-accounts");
+              }}
+            >
+              Client Accounts
+            </button>
+          )}
           <button
             onClick={() => {
               setMobilePanel(null);
@@ -378,22 +418,26 @@ export default function AdminLayout() {
               Branches
             </button>
           )}
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/team");
-            }}
-          >
-            Team Management
-          </button>
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/user-management");
-            }}
-          >
-            User Management
-          </button>
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/team");
+              }}
+            >
+              Team Management
+            </button>
+          )}
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/user-management");
+              }}
+            >
+              User Management
+            </button>
+          )}
           {isAdmin && (
             <>
               <button
@@ -431,21 +475,25 @@ export default function AdminLayout() {
             Group Management
             {groupMgmtCount > 0 && <span className="nav-badge">{groupMgmtCount}</span>}
           </button>
-          <button
-            onClick={() => {
-              setMobilePanel(null);
-              navigate("/admin/map");
-            }}
-          >
-            Map
-          </button>
+          {!isAssistant && (
+            <button
+              onClick={() => {
+                setMobilePanel(null);
+                navigate("/admin/map");
+              }}
+            >
+              Map
+            </button>
+          )}
 
-          <button
-            className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
-            onClick={() => navigate("/admin/tickets")}
-          >
-            Tickets
-          </button>
+          {!isAssistant && (
+            <button
+              className={`nav-btn ${isActive("/admin/tickets") ? "active" : ""}`}
+              onClick={() => navigate("/admin/tickets")}
+            >
+              Tickets
+            </button>
+          )}
 
 
           {isAdmin && (
