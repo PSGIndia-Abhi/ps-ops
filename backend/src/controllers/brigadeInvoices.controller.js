@@ -244,13 +244,14 @@ async function listInvoices(req, res) {
     const [rows] = await pool.query(
       `SELECT i.id, i.invoice_number, DATE_FORMAT(i.invoice_date, '%Y-%m-%d') AS invoice_date, i.subtotal, i.cgst, i.sgst, i.total,
               i.created_at, u.name AS created_by_name,
-              (SELECT COUNT(*) FROM brigade_invoice_lines l WHERE l.invoice_id = i.id) AS lines
+              (SELECT COUNT(*) FROM brigade_invoice_lines l WHERE l.invoice_id = i.id) AS line_count
          FROM brigade_invoices i LEFT JOIN users u ON u.id = i.created_by_user_id
         WHERE i.po_number = ?
         ORDER BY i.created_at DESC`,
       [number]
     );
-    res.json(rows.map((r) => ({ ...r, subtotal: Number(r.subtotal), cgst: Number(r.cgst), sgst: Number(r.sgst), total: Number(r.total), lines: Number(r.lines) })));
+    // "lines" is a reserved word in MySQL 8, so the column is line_count; the response keeps "lines".
+    res.json(rows.map(({ line_count: lineCount, ...r }) => ({ ...r, subtotal: Number(r.subtotal), cgst: Number(r.cgst), sgst: Number(r.sgst), total: Number(r.total), lines: Number(lineCount) })));
   } catch (err) {
     sendError(res, err, "Failed to load invoices");
   }

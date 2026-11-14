@@ -26,6 +26,8 @@ const BRIGADE_SUB_SERVICES = [
   "Deep Cleaning with Scrubbing",
   "Deep Cleaning with Sticker Removal",
   "Debris Removal",
+  "Electrical Chipping",
+  "TV Unit",
 ];
 
 const BRIGADE_SERVICE_TYPE = "DEEP";

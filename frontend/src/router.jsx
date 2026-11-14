@@ -103,6 +103,7 @@ import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
+import BrigadeImport from "./pages/brigade/BrigadeImport";
 // Customer Feedback desk + the customer's form — see pages/feedback/
 import FeedbackLayout from "./pages/feedback/FeedbackLayout";
 import FeedbackCallList from "./pages/feedback/CallList";
@@ -208,6 +209,7 @@ const router = createBrowserRouter([
       { path: "masters", element: <BrigadeMasters /> },
       { path: "pos", element: <BrigadePos /> },
       { path: "billing", element: <BrigadeBilling /> },
+      { path: "import", element: <BrigadeImport /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "profile", element: <ProfilePage /> },
     ],
