@@ -28,6 +28,10 @@ const BRIGADE_SUB_SERVICES = [
   "Debris Removal",
   "Electrical Chipping",
   "TV Unit",
+  // The two painting kinds of the client's tracker (Task Type 5). "Painting Work" stays for
+  // bookings made before these existed.
+  "Painting Touch Up",
+  "Painting One Round",
 ];
 
 const BRIGADE_SERVICE_TYPE = "DEEP";

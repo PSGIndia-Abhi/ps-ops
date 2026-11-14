@@ -22,7 +22,7 @@ const SERVICE_GROUPS = [
   { headers: ["tvunit"], service: "TV Unit", cols: ["flag", "amount"], code: "TV" },
   { headers: ["plumbingwork"], service: "Plumbing Work", cols: ["flag", "date", "amount"], code: "PL" },
   // "Task Type 5": painting type, then its status / date / amount
-  { headers: ["tasktype5"], service: "Painting Work", cols: ["type", "flag", "date", "amount"], code: "PT" },
+  { headers: ["tasktype5"], service: "Painting", cols: ["type", "flag", "date", "amount"], code: "PT" },
   { headers: ["debrisremoval", "debrisremove"], service: "Debris Removal", cols: ["flag", "date", "amount"], code: "DR" },
   { headers: ["deepcleaning"], service: "Deep Cleaning", cols: ["flag", "date", "amount"], code: "DC" },
 ];
@@ -36,11 +36,21 @@ const PO_ITEM_CODES = {
   TV: "TV Unit",
   TVU: "TV Unit",
   PL: "Plumbing Work",
-  PT: "Painting Work",
-  P: "Painting Work",
+  PT: "Painting",
+  P: "Painting",
   DR: "Debris Removal",
   DC: "Deep Cleaning",
 };
+
+/**
+ * The BestServe service for a group on one row. Painting (Task Type 5) is split by the kind the
+ * client picked: "Painting One Round" when it says one round, otherwise "Painting Touch Up" -
+ * "Painting" typed by hand, any spelling, and a blank type all mean touch up.
+ */
+function serviceName(group, cell) {
+  if (group.code !== "PT") return group.service;
+  return /one\s*round/i.test(text(cell.type)) ? "Painting One Round" : "Painting Touch Up";
+}
 
 const FLAT_HEADERS = ["flatnumber", "flatno", "unit"];
 const MAX_ISSUES_PER_SHEET = 2000;
@@ -266,7 +276,7 @@ function readProjectSheet(ws, head, flatCol, groups) {
         addIssue(r, flat, "warning", `${g.service}: marked Yes but no completed date - imported as completed, date unknown`);
       }
       services.push({
-        service: g.service,
+        service: serviceName(g, cell),
         status,
         date: hasDate ? date.date : null,
         amount: amount && amount > 0 ? amount : null,
