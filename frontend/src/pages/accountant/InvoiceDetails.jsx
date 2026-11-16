@@ -144,6 +144,14 @@ export default function InvoiceDetails() {
               <>
                 <div className="ac-mini-stats" style={{ marginBottom: 12 }}>
                   <div><div className="ac-mini-label">TDS Rate</div><div className="ac-mini-value">{Number(tds.tds_rate)}%</div></div>
+                  <div>
+                    <div className="ac-mini-label">TDS On</div>
+                    <div className="ac-mini-value">
+                      {tds.tds_basis === "TAXABLE"
+                        ? `Taxable value${invoice.taxable_amount != null ? ` (${money(invoice.taxable_amount)})` : " (amount ÷ 1.18)"}`
+                        : "Invoice amount"}
+                    </div>
+                  </div>
                   <div><div className="ac-mini-label">Expected TDS</div><div className="ac-mini-value">{money(tds.expected_tds)}</div></div>
                   <div><div className="ac-mini-label">Deducted TDS</div><div className="ac-mini-value green">{money(tds.deducted_tds)}</div></div>
                   <div><div className="ac-mini-label">Pending TDS</div><div className="ac-mini-value red">{money(tds.pending_tds)}</div></div>
