@@ -119,6 +119,20 @@ import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
 import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
 import FeedbackGate from "./pages/feedback/FeedbackGate";
 import { FEEDBACK_HOME } from "./pages/feedback/access";
+// Billing (Invoice Generation) — Accounts department and Service Coordinator, see pages/billing/
+import BillingLayout from "./pages/billing/BillingLayout";
+import BillingHome from "./pages/billing/BillingHome";
+import BillingServiceTracker from "./pages/billing/ServiceTracker";
+import BillingBillRun from "./pages/billing/BillRun";
+import BillingDraftInvoices from "./pages/billing/DraftInvoices";
+import BillingDraftEditor from "./pages/billing/DraftEditor";
+import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
+import BillingServicePlans from "./pages/billing/ServicePlans";
+import BillingContracts from "./pages/billing/Contracts";
+import BillingContractForm from "./pages/billing/ContractForm";
+import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
+import BillingCustomers from "./pages/billing/BillingCustomers";
+import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -426,6 +440,31 @@ const router = createBrowserRouter([
           { path: ":id", element: <FeedbackTicketPage /> },
         ],
       },
+    ],
+  },
+
+  // BILLING — Invoice Generation: service plans and tracker, bill run, drafts, issued invoices,
+  // contracts, POs, billing customers. The menu follows GET /api/billing/me (the API checks every call).
+  // -------------------------
+  {
+    path: BILLING_HOME,
+    element: (
+      <ProtectedRoute allowedRoles={BILLING_ROLES}>
+        <BillingLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <BillingHome /> },
+      { path: "tracker", element: <BillingServiceTracker /> },
+      { path: "run", element: <BillingBillRun /> },
+      { path: "drafts", element: <BillingDraftInvoices /> },
+      { path: "drafts/:id", element: <BillingDraftEditor /> },
+      { path: "invoices", element: <BillingIssuedInvoices /> },
+      { path: "plans", element: <BillingServicePlans /> },
+      { path: "contracts", element: <BillingContracts /> },
+      { path: "contracts/:id", element: <BillingContractForm /> },
+      { path: "pos", element: <BillingPurchaseOrders /> },
+      { path: "customers", element: <BillingCustomers /> },
     ],
   },
 

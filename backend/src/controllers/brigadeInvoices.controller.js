@@ -268,4 +268,6 @@ async function invoicePdf(req, res) {
   }
 }
 
-module.exports = { checkInvoice, previewInvoice, createInvoice, listInvoices, invoicePdf, financialYear, invoiceNumber };
+// nextSeq is also used by Invoice Generation (services/billing/invoice.service.js): both modules
+// share one invoice number series.
+module.exports = { checkInvoice, previewInvoice, createInvoice, listInvoices, invoicePdf, financialYear, invoiceNumber, nextSeq };

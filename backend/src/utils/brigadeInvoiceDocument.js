@@ -399,4 +399,6 @@ function renderInvoicePdf(content, stream, { preview = false } = {}) {
   doc.end();
 }
 
-module.exports = { renderInvoicePdf, amountInWords, taxFor, round2 };
+// SELLER, BANK, TERMS and the asset paths are also used by the Invoice Generation PDF
+// (utils/billingInvoiceDocument.js), so both invoices print the same company details.
+module.exports = { renderInvoicePdf, amountInWords, taxFor, round2, SELLER, BANK, TERMS, LOGO, STAMP, FONT_DIR, FONTS };

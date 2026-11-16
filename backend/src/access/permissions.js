@@ -99,6 +99,16 @@ const PERMISSIONS = {
   // Brigade Executive module (see services/brigade.service.js)
   BRIGADE_ACCESS: 'BRIGADE_ACCESS',
   BRIGADE_MANAGE_MASTERS: 'BRIGADE_MANAGE_MASTERS',
+
+  // Invoice Generation / Billing (routes/billing.routes.js, migration 20261116_billing_module.sql).
+  // Cancelling an issued invoice reuses CANCEL_INVOICE above.
+  VIEW_BILLING: 'VIEW_BILLING',
+  MANAGE_BILLING_MASTERS: 'MANAGE_BILLING_MASTERS',
+  GENERATE_INVOICE: 'GENERATE_INVOICE',
+  ISSUE_INVOICE: 'ISSUE_INVOICE',
+  SHARE_INVOICE: 'SHARE_INVOICE',
+  MANAGE_SERVICE_PLANS: 'MANAGE_SERVICE_PLANS',
+  VIEW_SERVICE_TRACKER: 'VIEW_SERVICE_TRACKER',
 };
 
 module.exports = PERMISSIONS;
