@@ -46,26 +46,29 @@ const listCustomers = C.handle("Failed to load billing customers", async (req, r
   const q = C.str(req.query.q, "q", { max: 100 });
   const category = C.oneOf(req.query.category, "category", ["COMMERCIAL", "RESIDENTIAL"], { required: false });
   const [rows] = await pool.query(
-    `SELECT c.id AS company_id, c.name, c.type AS customer_type, c.gst_number,
+    `SELECT c.id AS company_id, c.name, c.display_name, c.type AS customer_type, c.gst_number,
             (bp.company_id IS NOT NULL AND bp.is_active = 1) AS profile_complete,
             EXISTS (SELECT 1 FROM billing_service_plans sp WHERE sp.company_id = c.id AND sp.status = 'ACTIVE') AS has_service_plan,
-            (SELECT COUNT(*) FROM billing_contracts bc WHERE bc.company_id = c.id AND bc.status = 'ACTIVE') AS active_contracts
+            (SELECT COUNT(*) FROM billing_contracts bc WHERE bc.company_id = c.id AND bc.status = 'ACTIVE') AS active_contracts,
+            (SELECT GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', ') FROM sites s WHERE s.company_id = c.id) AS site_names
        FROM companies c
        LEFT JOIN billing_profiles bp ON bp.company_id = c.id
       WHERE (c.is_active IS NULL OR c.is_active = 1)
-        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR c.code LIKE CONCAT('%', ?, '%'))
+        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR c.display_name LIKE CONCAT('%', ?, '%') OR c.code LIKE CONCAT('%', ?, '%'))
       ORDER BY c.name`,
-    [q, q, q]
+    [q, q, q, q]
   );
   let out = rows.map((r) => ({
     company_id: r.company_id,
     name: r.name,
+    display_name: (r.display_name || "").trim(),
     customer_type: r.customer_type,
     category: calc.categoryOf(r.customer_type),
     gst_number: r.gst_number,
     profile_complete: Boolean(r.profile_complete),
     has_service_plan: Boolean(r.has_service_plan),
     active_contracts: Number(r.active_contracts),
+    sites: r.site_names || "",
   }));
   if (category) out = out.filter((r) => r.category === category);
   if (C.bool(req.query.missing_profile)) out = out.filter((r) => !r.profile_complete);
@@ -81,13 +84,18 @@ function profileOut(p) {
     state_name: p.state_name,
     payment_terms_days: Number(p.payment_terms_days),
     is_active: Boolean(p.is_active),
+    gst_number: p.gst_number || "",
     updated_at: p.updated_at,
   };
 }
 
+// The profile with the customer's GSTIN (kept on companies.gst_number, shared with the Companies screen).
+const PROFILE_SQL = `SELECT bp.*, c.gst_number FROM billing_profiles bp JOIN companies c ON c.id = bp.company_id WHERE bp.company_id = ?`;
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 // GET /profiles/:companyId
 const getProfile = C.handle("Failed to load the billing profile", async (req, res) => {
-  const [[p]] = await pool.query("SELECT * FROM billing_profiles WHERE company_id = ?", [req.params.companyId]);
+  const [[p]] = await pool.query(PROFILE_SQL, [req.params.companyId]);
   if (!p) throw C.notFound("No billing profile for this customer");
   res.json(profileOut(p));
 });
@@ -99,6 +107,13 @@ const saveProfile = C.handle("Failed to save the billing profile", async (req, r
   const b = req.body || {};
   const stateCode = C.str(b.state_code, "state_code", { required: true, max: 2 }).padStart(2, "0");
   if (!GST_STATES[stateCode]) throw C.bad("state_code must be a valid GST state code");
+  // GSTIN is optional; sent as "" it is cleared. Saved on the customer (companies.gst_number).
+  let gstin;
+  if (b.gst_number !== undefined && b.gst_number !== null) {
+    gstin = String(b.gst_number).replace(/\s+/g, "").toUpperCase();
+    if (gstin && !GSTIN_RE.test(gstin)) throw C.bad("GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5");
+    if (gstin && gstin.slice(0, 2) !== stateCode) throw C.bad(`GSTIN starts with ${gstin.slice(0, 2)} but the state is ${stateCode}; they must match`);
+  }
   const values = [
     C.str(b.billing_name, "billing_name", { required: true }),
     C.str(b.billing_address, "billing_address", { required: true, max: 1000 }),
@@ -115,7 +130,8 @@ const saveProfile = C.handle("Failed to save the billing profile", async (req, r
        is_active = VALUES(is_active), updated_by = VALUES(updated_by)`,
     [companyId, ...values, req.user.id, req.user.id]
   );
-  const [[p]] = await pool.query("SELECT * FROM billing_profiles WHERE company_id = ?", [companyId]);
+  if (gstin !== undefined) await pool.query("UPDATE companies SET gst_number = ? WHERE id = ?", [gstin || null, companyId]);
+  const [[p]] = await pool.query(PROFILE_SQL, [companyId]);
   res.json(profileOut(p));
 });
 
@@ -131,7 +147,9 @@ const serviceOptions = C.handle("Failed to load the service options", async (req
       ORDER BY j.service_type, j.sub_service`,
     [companyId]
   );
-  res.json({ sites, services });
+  // The service catalogue (the same list the Leads quotations use): picked as the price line's item.
+  const [catalog] = await pool.query("SELECT id, name FROM crm_quote_services WHERE is_active = 1 ORDER BY sort_order, name");
+  res.json({ sites, services, catalog });
 });
 
 // ---- contracts --------------------------------------------------------------------------------
@@ -152,6 +170,7 @@ function contractOut(c) {
     invoice_grouping: c.invoice_grouping,
     site_id: c.site_id,
     po_required: Boolean(c.po_required),
+    gst_applicable: c.gst_applicable === undefined ? true : Boolean(c.gst_applicable),
     shortfall_billing: c.shortfall_billing,
     description_template: c.description_template,
     status: c.status,
@@ -242,12 +261,34 @@ function readContractHeader(b, sites, billingType, startDate) {
     end_date: endDate,
     invoice_grouping: grouping,
     site_id: siteId,
-    // Chemical supply is always billed against a PO.
-    po_required: billingType === "CHEMICAL" ? 1 : C.bool(b.po_required) ? 1 : 0,
+    // Chemical supply and termite work are always billed against a PO.
+    po_required: PO_TYPES.includes(billingType) ? 1 : C.bool(b.po_required) ? 1 : 0,
+    // GST on the invoices (Commercial customers); Residential customers never get GST.
+    gst_applicable: b.gst_applicable === undefined || b.gst_applicable === null ? 1 : C.bool(b.gst_applicable) ? 1 : 0,
     shortfall_billing: C.oneOf(b.shortfall_billing, "shortfall_billing", ["PRO_RATA", "FULL"], { fallback: "PRO_RATA" }),
     description_template: C.str(b.description_template, "description_template", { max: 500 }) || defaultDescription(billingType, frequency),
     notes: C.str(b.notes, "notes", { max: 1000 }),
   };
+}
+
+const PO_TYPES = ["CHEMICAL", "TERMITE"];
+
+/** Link the chosen POs (customer_pos.contract_id) to the contract; POs no longer chosen are unlinked. */
+async function linkContractPos(conn, contractId, companyId, rawIds, billingType) {
+  if (!Array.isArray(rawIds)) throw C.bad("po_ids must be a list");
+  const ids = [...new Set(rawIds.map((v) => String(v || "").trim()).filter(Boolean))];
+  if (billingType === "TERMITE" && !ids.length) throw C.bad("Choose at least one purchase order for a termite contract");
+  if (ids.length) {
+    const [rows] = await conn.query("SELECT id, po_number, company_id, contract_id, status FROM customer_pos WHERE id IN (?) FOR UPDATE", [ids]);
+    if (rows.length !== ids.length) throw C.bad("A chosen purchase order was not found");
+    for (const po of rows) {
+      if (po.company_id !== companyId) throw C.bad(`PO ${po.po_number} belongs to another customer`);
+      if (po.status !== "ACTIVE") throw C.bad(`PO ${po.po_number} is closed`);
+      if (po.contract_id && po.contract_id !== contractId) throw C.bad(`PO ${po.po_number} is already linked to another contract`);
+    }
+  }
+  await conn.query("UPDATE customer_pos SET contract_id = NULL WHERE contract_id = ?" + (ids.length ? " AND id NOT IN (?)" : ""), ids.length ? [contractId, ids] : [contractId]);
+  if (ids.length) await conn.query("UPDATE customer_pos SET contract_id = ? WHERE id IN (?)", [contractId, ids]);
 }
 
 // GET /contracts?company_id&type&status&due_month
@@ -273,7 +314,7 @@ const listContracts = C.handle("Failed to load contracts", async (req, res) => {
 
 async function contractDetail(db, id) {
   const [[c]] = await db.query(
-    `SELECT bc.*, c.name AS customer, DATE_FORMAT(bc.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key,
+    `SELECT bc.*, c.name AS customer, c.type AS customer_type, DATE_FORMAT(bc.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key,
             (SELECT bi.invoice_number FROM billing_invoices bi
               WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number
        FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id WHERE bc.id = ?`,
@@ -286,10 +327,16 @@ async function contractDetail(db, id) {
     [id]
   );
   const [[inv]] = await db.query("SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND status = 'ISSUED'", [id]);
+  const [pos] = await db.query(
+    `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status FROM customer_pos WHERE contract_id = ? ORDER BY po_date DESC`,
+    [id]
+  );
   const today = C.todayIst();
   const current = lines.filter((l) => !l.effective_to || C.ymd(l.effective_to) >= today);
   const history = lines.filter((l) => l.effective_to && C.ymd(l.effective_to) < today);
-  return { ...contractOut(c), lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n) };
+  return { ...contractOut(c), category: calc.categoryOf(c.customer_type), lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n),
+    pos: pos.map((p) => ({ id: p.id, po_number: p.po_number, po_date: C.ymd(p.po_date), expiry_date: C.ymd(p.expiry_date), po_amount: p.po_amount === null ? null : Number(p.po_amount), po_kind: p.po_kind, status: p.status })),
+  };
 }
 
 // POST /contracts
@@ -314,15 +361,16 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     await conn.query(
       `INSERT INTO billing_contracts
          (id, contract_code, company_id, billing_type, frequency_months, cycle_start_day, bill_timing, start_date, end_date,
-          next_period_start, invoice_grouping, site_id, po_required, shortfall_billing, description_template, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          next_period_start, invoice_grouping, site_id, po_required, gst_applicable, shortfall_billing, description_template, notes, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, code, companyId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
-        startDate, header.invoice_grouping, header.site_id, header.po_required, header.shortfall_billing, header.description_template,
+        startDate, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.shortfall_billing, header.description_template,
         header.notes, req.user.id, req.user.id,
       ]
     );
     for (const [i, line] of lines.entries()) await insertContractLine(conn, id, line, i, req.user.id);
+    if (billingType === "TERMITE" || b.po_ids !== undefined) await linkContractPos(conn, id, companyId, b.po_ids ?? [], billingType);
     await logAudit(conn, req, {
       module: "BILLING",
       action: "CONTRACT_CREATED",
@@ -355,13 +403,14 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     await conn.query(
       `UPDATE billing_contracts
           SET frequency_months = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
-              po_required = ?, shortfall_billing = ?, description_template = ?, notes = ?, updated_by = ?
+              po_required = ?, gst_applicable = ?, shortfall_billing = ?, description_template = ?, notes = ?, updated_by = ?
         WHERE id = ?`,
       [
         header.frequency_months, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
-        header.po_required, header.shortfall_billing, header.description_template, header.notes, req.user.id, req.params.id,
+        header.po_required, header.gst_applicable, header.shortfall_billing, header.description_template, header.notes, req.user.id, req.params.id,
       ]
     );
+    if (b.po_ids !== undefined) await linkContractPos(conn, req.params.id, current.company_id, b.po_ids, current.billing_type);
     await logAudit(conn, req, {
       module: "BILLING",
       action: "CONTRACT_UPDATED",

@@ -155,6 +155,12 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
   const setLine = (key, patch) => set({ lines: form.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
   async function save() {
+    const blank = form.lines.findIndex((l) => !String(l.sub_service || "").trim() || !l.site_id);
+    if (blank >= 0) {
+      const l = form.lines[blank];
+      setMsg({ error: `Row ${blank + 1}: ${!l.site_id ? "choose the outlet" : "type the service name in the “Service” box (e.g. General pest control)"}.` });
+      return;
+    }
     setBusy(true);
     setMsg({});
     try {
@@ -253,7 +259,7 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
           </datalist>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0 16px" }}>
             {!readOnly ? (
-              <button type="button" className="bl-link" onClick={() => set({ lines: [...form.lines, { key: Date.now(), site_id: sites.length === 1 ? sites[0].site_id : "", service_type: "Pest Control", sub_service: "", visits_per_month: 1 }] })}>+ Add service</button>
+              <button type="button" className="ac-btn ac-btn-primary" onClick={() => set({ lines: [...form.lines, { key: Date.now(), site_id: sites.length === 1 ? sites[0].site_id : "", service_type: "Pest Control", sub_service: "", visits_per_month: 1 }] })}>+ Add service</button>
             ) : <span />}
             <span style={{ fontSize: 13.5 }}>Total: <b>{total} services / month</b></span>
           </div>

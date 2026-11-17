@@ -17,6 +17,15 @@ const share = require("../controllers/billing/share.controller");
 
 const can = (permission) => [auth, requirePermission(permission)];
 
+// Any one of several permissions (admin passes, as in requirePermission).
+const canAny = (...permissions) => [
+  auth,
+  (req, res, next) =>
+    req.user.role === "admin" || permissions.some((p) => req.user.permissions?.includes(p))
+      ? next()
+      : res.status(403).json({ error: "Forbidden: insufficient permissions" }),
+];
+
 const BILLING_PERMISSIONS = [
   P.VIEW_BILLING, P.MANAGE_BILLING_MASTERS, P.GENERATE_INVOICE, P.ISSUE_INVOICE, P.CANCEL_INVOICE,
   P.SHARE_INVOICE, P.MANAGE_SERVICE_PLANS, P.VIEW_SERVICE_TRACKER,
@@ -30,7 +39,8 @@ router.get("/me", auth, (req, res) => {
 });
 
 // Customers and billing profiles
-router.get("/customers", can(P.VIEW_BILLING), masters.listCustomers);
+// The Service Coordinator picks the customer for a new service plan from this list too.
+router.get("/customers", canAny(P.VIEW_BILLING, P.MANAGE_SERVICE_PLANS), masters.listCustomers);
 router.get("/profiles/:companyId", can(P.VIEW_BILLING), masters.getProfile);
 router.put("/profiles/:companyId", can(P.MANAGE_BILLING_MASTERS), masters.saveProfile);
 

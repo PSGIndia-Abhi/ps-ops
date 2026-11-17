@@ -494,6 +494,16 @@ SELECT r.id, p.id
 --  WHERE r.name = 'Accounts Executive' AND p.name = 'ISSUE_INVOICE';
 
 
+
+-- =====================================================================
+-- PART G2. GST ON/OFF PER CONTRACT (added 17-11-2026)
+--          Run once on a database that already has PART A.
+-- =====================================================================
+
+ALTER TABLE billing_contracts
+  ADD COLUMN gst_applicable TINYINT(1) NOT NULL DEFAULT 1 AFTER po_required;
+
+
 -- =====================================================================
 -- PART H. CHECKS AFTER RUNNING (read-only)
 -- =====================================================================

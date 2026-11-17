@@ -26,8 +26,9 @@ function categoryOf(companyType) {
 }
 
 /** Which taxes apply: none for Residential, IGST outside Karnataka, else CGST + SGST. */
-function taxModeFor(category, stateCode) {
-  if (category === "RESIDENTIAL") return "NONE";
+function taxModeFor(category, stateCode, gstApplicable = true) {
+  // No GST for Residential, or when the contract is set to bill without GST.
+  if (category === "RESIDENTIAL" || !gstApplicable) return "NONE";
   return String(stateCode || HOME_STATE) === HOME_STATE ? "CGST_SGST" : "IGST";
 }
 

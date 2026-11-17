@@ -4,16 +4,24 @@ import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { amount, dmy, today } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
+import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // A contract and its price list. New: header + lines in one save. Existing: the header is saved on
 // its own; price lines are added, corrected, or re-priced from a date (the old price is kept as history).
 
 const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"], ["CHEMICAL", "Chemical"]];
-const BASES = [["FIXED", "Fixed"], ["PER_SERVICE", "Per service"], ["PER_UNIT", "Per unit"]];
-const BASIS_CLASS = { FIXED: "b-blue", PER_SERVICE: "b-purple", PER_UNIT: "b-teal" };
 const PLACEHOLDERS = ["{month}", "{period}", "{from_month}", "{to_month}"];
 
-const emptyLine = (siteId = "") => ({ key: `n${Date.now()}${Math.random()}`, site_id: siteId, item_name: "", sac_code: "998531", pricing_basis: "FIXED", unit: "Month", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "" });
+const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
+const SQM = "sq.m";
+
+const emptyLine = (siteId = "", type = "") => ({
+  key: `n${Date.now()}${Math.random()}`, site_id: siteId, sac_code: "998531", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "",
+  // Termite work is priced per square metre: area (sq. m) x rate per sq. m, set for each customer.
+  ...(type === "TERMITE" ? { item_name: "Termite Post-Construction Treatment", pricing_basis: "PER_UNIT", unit: SQM } : { item_name: "", pricing_basis: "FIXED", unit: "Nos", default_qty: 1 }),
+});
+const isSqm = (l) => l.pricing_basis === "PER_UNIT" && /^sq/i.test(l.unit || "");
+const lineTotal = (l) => (l.rate === "" || l.default_qty === "" || l.default_qty === null || l.default_qty === undefined ? null : Number(l.rate) * Number(l.default_qty));
 
 export default function ContractForm() {
   const { id } = useParams();
@@ -32,14 +40,21 @@ export default function ContractForm() {
   const [repricing, setRepricing] = useState(null);
   const [lineEdit, setLineEdit] = useState(null); // line being corrected or added
 
-  const base = contract || { billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", invoice_grouping: "PER_CUSTOMER", po_required: false, shortfall_billing: "PRO_RATA", start_date: today(), description_template: "", company_id: "" };
-  const form = edits || base;
+  const base = contract || { billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", invoice_grouping: "PER_CUSTOMER", po_required: false, gst_applicable: true, shortfall_billing: "PRO_RATA", start_date: today(), description_template: "", company_id: "" };
+  const form = edits || { ...base, po_ids: (contract?.pos || []).map((p) => p.id) };
   const set = (patch) => setEdits({ ...form, ...patch });
   const companyId = form.company_id;
   const { data: options } = useBilling(companyId ? `/service-options${qs({ company_id: companyId })}` : null);
   const sites = options?.sites || [];
   const services = options?.services || [];
+  const catalog = options?.catalog || [];
+  const serviceGroups = buildServiceGroups(services, catalog);
   const readOnly = !canEdit || form.status === "ENDED";
+  const residential = (isNew ? customers?.find((c) => c.company_id === form.company_id)?.category : contract?.category) === "RESIDENTIAL";
+  const needsPo = PO_TYPES.includes(form.billing_type) || Boolean(form.po_required);
+  const { data: poData, error: poError } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
+  const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" || form.po_ids.includes(p.id));
+  const poLabel = (p) => `${p.po_number} · ${p.is_open_po ? "Open PO" : `till ${dmy(p.expiry_date)}`}${p.kind === "ADVANCE" ? " · Advance" : ""}${p.po_amount === null ? "" : ` · ₹${amount(p.po_amount)}`}`;
 
   function header() {
     return {
@@ -52,20 +67,26 @@ export default function ContractForm() {
       end_date: form.end_date || null,
       invoice_grouping: form.invoice_grouping,
       site_id: form.site_id || null,
-      po_required: form.billing_type === "CHEMICAL" ? true : Boolean(form.po_required),
+      po_required: PO_TYPES.includes(form.billing_type) ? true : Boolean(form.po_required),
+      gst_applicable: form.gst_applicable !== false,
+      ...(needsPo ? { po_ids: form.po_ids } : {}),
       shortfall_billing: form.shortfall_billing,
       description_template: form.description_template || undefined,
       notes: form.notes || null,
     };
   }
   const lineBody = (l) => ({
-    site_id: l.site_id || null, item_name: l.item_name, sac_code: l.sac_code || null, pricing_basis: l.pricing_basis, unit: l.unit || "nos",
+    site_id: l.site_id || (sites.length === 1 ? sites[0].site_id : null), item_name: l.item_name, service_id: l.service_id || null, sac_code: l.sac_code || "998531", pricing_basis: l.pricing_basis, unit: l.unit || "nos",
     rate: l.rate, default_qty: l.default_qty === "" || l.default_qty === null ? null : l.default_qty,
     plan_service_type: l.plan_sub_service ? l.plan_service_type || null : null, plan_sub_service: l.plan_sub_service || null,
     effective_from: l.effective_from || undefined,
   });
 
   async function save() {
+    if (form.billing_type === "TERMITE" && !form.po_ids.length) {
+      setMsg({ error: "Termite contracts need a purchase order. Choose the purchase order." });
+      return;
+    }
     setBusy(true);
     setMsg({});
     try {
@@ -105,6 +126,8 @@ export default function ContractForm() {
 
   const typeIs = (t) => form.billing_type === t;
   const linesShown = isNew ? newLines : contract.lines;
+  const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
+  const cols = sqmMode ? 7 : 5;
 
   return (
     <div className="ac-page">
@@ -130,7 +153,7 @@ export default function ContractForm() {
         <div className="bl-grid g4">
           <Field label="Customer" required>
             {isNew ? (
-              <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "" }); setNewLines([emptyLine()]); }}>
+              <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "", po_ids: [] }); setNewLines([emptyLine("", form.billing_type)]); }}>
                 <option value="">Choose a customer…</option>
                 {(customers || []).map((c) => <option key={c.company_id} value={c.company_id} disabled={!c.category}>{c.name}{!c.category ? " (customer type not set)" : !c.profile_complete ? " (no billing profile)" : ""}</option>)}
               </select>
@@ -140,7 +163,11 @@ export default function ContractForm() {
             <div className="ac-pills" style={{ width: "100%" }}>
               {TYPES.map(([v, l]) => (
                 <button key={v} type="button" disabled={!isNew} className={`ac-pill ${typeIs(v) ? "active" : ""}`} style={{ whiteSpace: "nowrap", padding: "7px 10px" }}
-                  onClick={() => set({ billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: v === "CHEMICAL" ? true : form.po_required })}>{l}</button>
+                  onClick={() => {
+                    set({ billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required });
+                    // Untouched lines follow the type (termite: per square metre).
+                    if (newLines.every((l) => l.rate === "" && l.default_qty === "")) setNewLines(newLines.map((l) => ({ ...emptyLine(l.site_id, v), key: l.key })));
+                  }}>{l}</button>
               ))}
             </div>
           </Field>
@@ -174,17 +201,37 @@ export default function ContractForm() {
               <option value="FULL">Bill full amount</option>
             </select>
           </Field>
-          <Field label="Description on invoice" className="bl-span3">
+          <Field label="Description on invoice" className="bl-span2">
             <input className="ac-input" value={form.description_template || ""} disabled={readOnly} maxLength={500} placeholder={typeIs("ONE_TIME") ? "Pest control service carried out on {period}" : "Pest control services for the month of {month}"} onChange={(e) => set({ description_template: e.target.value })} />
             {!readOnly && <div className="bl-chipbar">{PLACEHOLDERS.map((p) => <button key={p} type="button" className="bl-chip" onClick={() => set({ description_template: `${form.description_template || ""}${p}` })}>{p}</button>)}</div>}
           </Field>
+          <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : "18% GST added on the invoices"}>
+            <select className="ac-select" value={residential || form.gst_applicable === false ? "NO" : "YES"} disabled={readOnly || residential}
+              onChange={(e) => set({ gst_applicable: e.target.value === "YES" })}>
+              <option value="YES">Apply GST</option>
+              <option value="NO">No GST</option>
+            </select>
+          </Field>
           <Field label="PO required">
             <label className="bl-toggle">
-              <input type="checkbox" checked={typeIs("CHEMICAL") || Boolean(form.po_required)} disabled={readOnly || typeIs("CHEMICAL")} onChange={(e) => set({ po_required: e.target.checked })} />
-              {typeIs("CHEMICAL") ? "Always for chemical supply" : form.po_required ? "Yes" : "No"}
+              <input type="checkbox" checked={PO_TYPES.includes(form.billing_type) || Boolean(form.po_required)} disabled={readOnly || PO_TYPES.includes(form.billing_type)} onChange={(e) => set({ po_required: e.target.checked })} />
+              {typeIs("CHEMICAL") ? "Always for chemical supply" : typeIs("TERMITE") ? "Always for termite work" : form.po_required ? "Yes" : "No"}
             </label>
           </Field>
-          <Field label="Notes" className="bl-span4">
+          {needsPo && (
+            <Field label="Purchase order" required={typeIs("TERMITE")} className="bl-span2"
+              hint={!companyId ? "Choose the customer first" : poError ? poError : poData && !poRows.length ? "No purchase orders for this customer. Add one in Purchase Orders." : ""}>
+              <select className="ac-select" value={form.po_ids[0] || ""} disabled={readOnly || !companyId}
+                onChange={(e) => set({ po_ids: e.target.value ? [e.target.value] : [] })}>
+                <option value="">{!companyId ? "Choose the customer first" : !poData ? "Loading…" : "Choose a purchase order…"}</option>
+                {poRows.map((p) => {
+                  const other = p.contract_id && p.contract_id !== id;
+                  return <option key={p.id} value={p.id} disabled={Boolean(other)}>{poLabel(p)}{other ? ` (used by ${p.contract_code})` : ""}</option>;
+                })}
+              </select>
+            </Field>
+          )}
+          <Field label="Notes" className={needsPo ? "bl-span2" : "bl-span4"}>
             <input className="ac-input" value={form.notes || ""} disabled={readOnly} maxLength={1000} onChange={(e) => set({ notes: e.target.value })} />
           </Field>
         </div>
@@ -199,36 +246,54 @@ export default function ContractForm() {
         {tab === "prices" && (
           <>
             <div className="ac-card-head">
-              <span className="ac-sub" style={{ fontSize: 13 }}>Rates are excluding GST. Link a line to a planned service so the invoice uses the services done.</span>
+              <span className="ac-sub" style={{ fontSize: 13 }}>
+                {typeIs("TERMITE") ? "Set this customer's rate per sq. m and the treated area. Amount = rate × area. Excluding GST." : `Set this customer's amount for each service. ${residential || form.gst_applicable === false ? "No GST is added." : "Excluding GST (18% is added on the invoice)."}`}
+              </span>
               {!readOnly && companyId && (
                 <div className="ac-actions">
-                  {isNew && sites.length > 1 && <button type="button" className="ac-btn sm" onClick={() => setNewLines([...newLines.filter((l) => l.item_name), ...sites.map((s) => emptyLine(s.site_id))])}>Add all outlets</button>}
-                  <button type="button" className="ac-btn sm ac-btn-primary" onClick={() => (isNew ? setNewLines([...newLines, emptyLine(sites.length === 1 ? sites[0].site_id : "")]) : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "")))}>+ Add line</button>
+                  <button type="button" className="ac-btn sm ac-btn-primary" onClick={() => (isNew
+                    ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => emptyLine(x.site_id, form.billing_type)) : [emptyLine(sites[0]?.site_id || "", form.billing_type)])])
+                    : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}>+ Add service</button>
                 </div>
               )}
             </div>
             <div className="ac-table-wrap">
-              <table className="ac-table">
+              <table className="ac-table bl-prices">
+                <colgroup>
+                  <col style={{ width: "22%" }} />
+                  <col />
+                  {sqmMode && <col style={{ width: 150 }} />}
+                  {sqmMode && <col style={{ width: 150 }} />}
+                  <col style={{ width: 170 }} />
+                  <col style={{ width: 130 }} />
+                  <col style={{ width: 190 }} />
+                </colgroup>
                 <thead>
-                  <tr><th>Outlet</th><th>Item text</th><th>Pricing basis</th><th>Unit</th><th className="ac-num">Rate (₹)</th><th className="ac-num">Default qty</th><th>Planned service</th><th>Valid from</th><th /></tr>
+                  <tr>
+                    <th>Outlet</th>
+                    <th>Service</th>
+                    {sqmMode && <th className="ac-num">Rate per sq. m (₹)</th>}
+                    {sqmMode && <th className="ac-num">Area (sq. m)</th>}
+                    <th className="ac-num">Amount (₹)</th>
+                    <th>Valid from</th>
+                    <th />
+                  </tr>
                 </thead>
                 <tbody>
-                  {!companyId && <EmptyRow cols={9} text="Choose the customer first" />}
-                  {companyId && !linesShown.length && <EmptyRow cols={9} text="No price lines" />}
+                  {!companyId && <EmptyRow cols={cols} text="Choose the customer first" />}
+                  {companyId && !linesShown.length && <EmptyRow cols={cols} text="No services priced yet. Use + Add service." />}
                   {companyId && isNew && newLines.map((l) => (
-                    <LineRow key={l.key} line={l} sites={sites} services={services} onChange={(patch) => setNewLines(newLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))} onRemove={newLines.length > 1 ? () => setNewLines(newLines.filter((x) => x.key !== l.key)) : null} />
+                    <LineRow key={l.key} line={l} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setNewLines(newLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))} onRemove={newLines.length > 1 ? () => setNewLines(newLines.filter((x) => x.key !== l.key)) : null} />
                   ))}
                   {!isNew && contract.lines.map((l) => (lineEdit?.id === l.id ? (
-                    <LineRow key={l.id} line={lineEdit} sites={sites} services={services} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} fixedRate onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
+                    <LineRow key={l.id} line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} fixedRate onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
                   ) : (
                     <tr key={l.id}>
                       <td>{l.site || "All outlets"}</td>
-                      <td>{l.item_name}{l.sac_code && <div className="bl-sub">SAC {l.sac_code}</div>}</td>
-                      <td><span className={`ac-badge ${BASIS_CLASS[l.pricing_basis]}`}>{BASES.find(([v]) => v === l.pricing_basis)?.[1]}</span></td>
-                      <td>{l.unit}</td>
-                      <td className="bl-num">{amount(l.rate)}</td>
-                      <td className="bl-num">{l.pricing_basis === "PER_SERVICE" && l.plan_sub_service ? "from jobs" : l.default_qty ?? "—"}</td>
-                      <td>{l.plan_sub_service || <span className="ac-sub">—</span>}</td>
+                      <td>{l.item_name}</td>
+                      {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
+                      {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
+                      <td className="bl-num"><b>{amount(isSqm(l) ? lineTotal(l) ?? 0 : Number(l.rate) * (Number(l.default_qty) || 1))}</b></td>
                       <td>
                         {dmy(l.effective_from)}
                         {l.effective_from > today() && <div><span className="ac-badge b-amber">Upcoming</span></div>}
@@ -236,8 +301,8 @@ export default function ContractForm() {
                       </td>
                       <td>
                         {!readOnly && !l.effective_to && (
-                          <div className="ac-actions">
-                            <button type="button" className="ac-btn sm" onClick={() => setLineEdit({ ...l, rate: l.rate, default_qty: l.default_qty ?? "", plan_service_type: l.plan_service_type || "", plan_sub_service: l.plan_sub_service || "" })}>Edit</button>
+                          <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
+                            <button type="button" className="ac-btn sm" onClick={() => setLineEdit({ ...l, default_qty: l.default_qty ?? "" })}>Edit</button>
                             <button type="button" className="ac-btn sm" onClick={() => setRepricing(l)}>Change price</button>
                           </div>
                         )}
@@ -245,7 +310,7 @@ export default function ContractForm() {
                     </tr>
                   )))}
                   {!isNew && lineEdit && !lineEdit.id && (
-                    <LineRow line={lineEdit} sites={sites} services={services} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
+                    <LineRow line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
                   )}
                 </tbody>
               </table>
@@ -271,50 +336,72 @@ export default function ContractForm() {
   );
 }
 
-function LineRow({ line, sites, services, onChange, onRemove, onSave, onCancel, busy, fixedRate = false }) {
+/** Pest control, deep cleaning (the booking list), then other names used on this customer's jobs or quotations. */
+function buildServiceGroups(jobServices, catalog) {
+  const seen = new Set();
+  const take = (names) => names.filter((n) => {
+    const k = String(n || "").trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return [
+    ["Pest control", take(pestServices)],
+    ["Deep cleaning", take(deepCleaningServices)],
+    ["Other", take([...jobServices.map((x) => x.sub_service), ...catalog.map((c) => c.name)]).sort((x, y) => x.localeCompare(y))],
+  ].filter(([, names]) => names.length);
+}
+
+function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, onSave, onCancel, busy, fixedRate = false }) {
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  const sqm = isSqm(line);
+  const known = groups.some(([, names]) => names.some((n) => same(n, line.item_name)));
+  // The service name also links the line to the customer's service plan (same outlet and service),
+  // so the invoice follows the services actually done.
+  // The outlet comes from the customer: its only outlet, or the outlet this row was added for.
+  const siteId = line.site_id || (sites.length === 1 ? sites[0].site_id : "");
+  const outletName = sites.find((x) => x.site_id === siteId)?.name || line.site || (sites.length ? "All outlets" : "—");
+  const link = (name) => ({ plan_service_type: "", plan_sub_service: siteId && name ? name : "" });
+  function pick(name) {
+    const svc = catalog.find((c) => same(c.name, name));
+    onChange({ item_name: name, service_id: svc?.id || null, site_id: siteId || null, ...link(name) });
+  }
+  const total = sqm ? lineTotal(line) : line.rate === "" ? null : Number(line.rate) * (Number(line.default_qty) || 1);
+  const rateInput = (label) => (fixedRate
+    ? <span className="ac-sub" title="Use Change price to change the amount from a date">{amount(line.rate)}</span>
+    : <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.rate} placeholder="0.00" onChange={(e) => onChange({ rate: e.target.value })} aria-label={label} />);
   return (
-    <tr className="bl-sel">
+    <tr className="bl-sel bl-price-edit">
       <td>
-        <select className="bl-cell-input" value={line.site_id || ""} onChange={(e) => onChange({ site_id: e.target.value })} aria-label="Outlet">
-          <option value="">All outlets</option>
-          {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
+        <span className="bl-outlet">{outletName}</span>
+      </td>
+      <td>
+        <select className="bl-cell-input" value={line.item_name || ""} onChange={(e) => pick(e.target.value)} aria-label="Service">
+          <option value="">Choose a service…</option>
+          {groups.map(([label, names]) => (
+            <optgroup key={label} label={label}>
+              {names.map((n) => <option key={n} value={n}>{n}</option>)}
+            </optgroup>
+          ))}
+          {line.item_name && !known && <option value={line.item_name}>{line.item_name}</option>}
         </select>
       </td>
-      <td>
-        <input className="bl-cell-input" value={line.item_name} placeholder="Item text *" onChange={(e) => onChange({ item_name: e.target.value })} aria-label="Item text" />
-        <input className="bl-cell-input" style={{ marginTop: 4 }} value={line.sac_code || ""} placeholder="SAC" onChange={(e) => onChange({ sac_code: e.target.value })} aria-label="SAC" />
-      </td>
-      <td>
-        <select className="bl-cell-input" value={line.pricing_basis} onChange={(e) => onChange({ pricing_basis: e.target.value, unit: e.target.value === "PER_SERVICE" ? "Service" : e.target.value === "PER_UNIT" ? "sqm" : "Month" })} aria-label="Pricing basis">
-          {BASES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-      </td>
-      <td><input className="bl-cell-input" style={{ width: 80 }} value={line.unit || ""} onChange={(e) => onChange({ unit: e.target.value })} aria-label="Unit" /></td>
-      <td>
-        {fixedRate ? <span className="ac-sub" title="Use Change price to change the rate from a date">{amount(line.rate)}</span>
-          : <input type="number" min="0" step="0.01" className="bl-cell-input num" style={{ width: 110 }} value={line.rate} onChange={(e) => onChange({ rate: e.target.value })} aria-label="Rate" />}
-      </td>
-      <td><input type="number" min="0" step="0.001" className="bl-cell-input num" style={{ width: 90 }} value={line.default_qty ?? ""} placeholder={line.pricing_basis === "PER_SERVICE" ? "from jobs" : ""} onChange={(e) => onChange({ default_qty: e.target.value })} aria-label="Default quantity" /></td>
-      <td>
-        <select className="bl-cell-input" value={line.plan_sub_service ? `${line.plan_service_type || ""}|${line.plan_sub_service}` : ""} disabled={!line.site_id}
-          title={line.site_id ? "" : "Choose the outlet to link a planned service"}
-          onChange={(e) => {
-            const [t, s] = e.target.value.split("|");
-            onChange({ plan_service_type: s ? t : "", plan_sub_service: s || "" });
-          }} aria-label="Planned service">
-          <option value="">Not linked</option>
-          {services.map((s) => <option key={`${s.service_type}|${s.sub_service}`} value={`${s.service_type}|${s.sub_service}`}>{s.sub_service}</option>)}
-          {line.plan_sub_service && !services.some((s) => s.sub_service === line.plan_sub_service) && <option value={`${line.plan_service_type || ""}|${line.plan_sub_service}`}>{line.plan_sub_service}</option>}
-        </select>
-      </td>
+      {sqmMode && <td>{sqm ? rateInput("Rate per square metre") : <span className="ac-sub">—</span>}</td>}
+      {sqmMode && (
+        <td>
+          {sqm ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.default_qty ?? ""} placeholder="sq. m" onChange={(e) => onChange({ default_qty: e.target.value })} aria-label="Area in square metres" />
+            : <span className="ac-sub">—</span>}
+        </td>
+      )}
+      <td className="bl-num">{sqm ? <b>{total === null ? "—" : amount(total)}</b> : rateInput("Amount")}</td>
       <td>{line.effective_from ? dmy(line.effective_from) : <span className="ac-sub">From start</span>}</td>
       <td>
         {onSave ? (
-          <div className="ac-actions">
-            <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy || !line.item_name || line.rate === ""} onClick={onSave}>Save</button>
+          <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy || !line.item_name || line.rate === "" || (sqm && !line.default_qty)} onClick={onSave}>Save</button>
             <button type="button" className="ac-btn sm" onClick={onCancel}>Cancel</button>
           </div>
-        ) : onRemove ? <button type="button" className="bl-x" style={{ fontSize: 15 }} onClick={onRemove} aria-label="Remove">✕</button> : null}
+        ) : onRemove ? <div style={{ textAlign: "right" }}><button type="button" className="bl-x" style={{ fontSize: 15 }} onClick={onRemove} aria-label="Remove">✕</button></div> : null}
       </td>
     </tr>
   );

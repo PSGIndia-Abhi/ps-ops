@@ -172,7 +172,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     );
     const cl = await linesInForce(db, contract.id, period.start);
     const { lines, plan } = await buildLines(db, contract, period, cl);
-    const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code);
+    const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code, contract.gst_applicable !== 0);
     const totals = calc.totalsFor(lines, taxMode);
     const linked = lines.filter((l) => l.services_planned !== null);
     const planned = linked.reduce((t, l) => t + l.services_planned, 0);
@@ -195,7 +195,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
         else warn("PO_MISSING", "No valid PO", true);
       }
     }
-    if (ctx.category === "COMMERCIAL" && !ctx.company?.gst_number) warn("GSTIN_MISSING", "GSTIN missing");
+    if (taxMode !== "NONE" && !ctx.company?.gst_number) warn("GSTIN_MISSING", "GSTIN missing");
     if (planned > done) warn("SERVICE_SHORTFALL", `${planned - done} service${planned - done > 1 ? "s" : ""} not done`);
     if (contract.end_date && contract.end_date <= period.end) warn("CONTRACT_ENDING", "Contract ends in this period");
 
@@ -284,7 +284,7 @@ async function draftContract(conn, contractId, month, runId, userId) {
   const ruleDate = contract.bill_timing === "ADVANCE" ? period.start : period.end;
   const invoiceDate = ruleDate < today ? ruleDate : today;
   const dueDate = C.addDays(invoiceDate, Number(ctx.profile.payment_terms_days) || 0);
-  const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code);
+  const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code, contract.gst_applicable !== 0);
   const pos = contract.po_required ? await validPos(conn, contract, period) : [];
   const poIds = contract.billing_type === "CHEMICAL" ? pos.map((p) => p.id) : pos.slice(0, 1).map((p) => p.id);
 
@@ -636,7 +636,7 @@ async function checkInvoice(db, id) {
   if (inv.status !== "DRAFT") errors.push(`This invoice is ${inv.status.toLowerCase()}, only drafts can be issued`);
   const [[profile]] = await db.query("SELECT billing_address, is_active FROM billing_profiles WHERE company_id = ?", [inv.customer.company_id]);
   check("PROFILE", Boolean(profile?.is_active && profile.billing_address), profile ? "Billing profile complete" : `Billing profile is missing for ${inv.customer.name}`);
-  if (inv.customer.category === "COMMERCIAL") {
+  if (inv.customer.category === "COMMERCIAL" && inv.tax_mode !== "NONE") {
     check("GSTIN", Boolean(inv.customer.gst_number), inv.customer.gst_number ? `GSTIN ${inv.customer.gst_number} present` : `GSTIN is missing for ${inv.customer.name}`, "WARNING");
   }
   const [[dup]] = await db.query(
