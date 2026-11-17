@@ -157,6 +157,7 @@ export function DateSheet({
   value,
   onPick,
   minDate,
+  maxDate,
   title = 'Pick a date',
 }: {
   visible: boolean;
@@ -164,6 +165,8 @@ export function DateSheet({
   value: string | null;
   onPick: (date: string) => void;
   minDate?: string;
+  /** Latest day that can be picked (e.g. today, for a date that cannot be in the future). */
+  maxDate?: string;
   title?: string;
 }) {
   const { styles, theme } = useCrmStyles(factory);
@@ -219,7 +222,7 @@ export function DateSheet({
           <View key={`w${wi}`} style={styles.week}>
             {week.map((d, i) => {
               if (!d) return <View key={`b${wi}-${i}`} style={styles.cell} />;
-              const disabled = !!minDate && d < minDate;
+              const disabled = (!!minDate && d < minDate) || (!!maxDate && d > maxDate);
               const selected = d === value;
               return (
                 <Pressable
