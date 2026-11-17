@@ -50,7 +50,7 @@ const listPlans = C.handle("Failed to load service plans", async (req, res) => {
             sp.id AS plan_id, sp.version, sp.effective_from, sp.print_copies, sp.invoices_per_month, sp.invoice_split,
             u.name AS updated_by,
             (SELECT SUM(l.visits_per_month) FROM billing_service_plan_lines l WHERE l.plan_id = sp.id) AS services_per_month,
-            (SELECT GROUP_CONCAT(CONCAT(l.sub_service, ' ', l.visits_per_month) ORDER BY l.sort_order SEPARATOR ' · ')
+            (SELECT GROUP_CONCAT(l.sub_service ORDER BY l.sort_order SEPARATOR ' · ')
                FROM billing_service_plan_lines l WHERE l.plan_id = sp.id) AS services_summary,
             (SELECT JSON_OBJECT('effective_from', DATE_FORMAT(x.effective_from, '%Y-%m-%d'),
                                 'services_per_month', (SELECT SUM(xl.visits_per_month) FROM billing_service_plan_lines xl WHERE xl.plan_id = x.id))

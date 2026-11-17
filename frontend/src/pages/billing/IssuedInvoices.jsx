@@ -74,7 +74,7 @@ export default function IssuedInvoices() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th>Invoice no.</th><th>Date</th><th>Customer</th><th>Type</th><th>Period</th>

@@ -936,3 +936,7 @@ a.ac-contact-call:hover { background: #dcfce7; }
   .ac-audit-table tr:not(.ac-audit-row):not(.ac-audit-expand) td { display: block; }
 
 }
+
+/* Expanded rows (Payment List, Customer Outstanding): the inner invoice table scrolls inside its
+   box on small screens instead of pushing the page wider. */
+.ac-expand-box { overflow-x: auto; }

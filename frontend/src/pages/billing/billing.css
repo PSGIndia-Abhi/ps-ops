@@ -141,3 +141,40 @@
   .bl-grid.g2, .bl-grid.g3, .bl-grid.g4 { grid-template-columns: minmax(0, 1fr); }
   .bl-span2, .bl-span3 { grid-column: auto; }
 }
+
+/* ---------- Responsive additions (phones 360px up to wide screens) ---------- */
+
+/* The 520px side panel (Service Plans, Billing Customers) moves under the list below 1400px,
+   so the list keeps a readable width on laptops. */
+@media (max-width: 1400px) {
+  .bl-split.wide { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A wide field (span 3) must not add a third column once the form drops to two columns. */
+@media (max-width: 900px) {
+  .bl-span3 { grid-column: 1 / -1; }
+}
+.bl-grid .ac-pills { flex-wrap: wrap; }
+
+/* Tablets: small tables in dialogs and side panels fit their box instead of scrolling sideways. */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .ac-table.ac-stack:not(.ac-table-wrap > .ac-table) { min-width: 0; }
+}
+
+/* Phones */
+@media (max-width: 640px) {
+  .bl-modal { max-height: calc(100vh - 32px); border-radius: 14px; }
+  /* in card mode, column widths set on cells (e.g. width: 110) would squeeze the card rows */
+  .ac-table.ac-stack td { width: auto !important; min-width: 0 !important; }
+  .bl-m-head, .bl-m-body { padding: 14px 16px; }
+  .bl-m-head h3 { font-size: 16px; }
+  .bl-m-foot { padding: 12px 16px; flex-wrap: wrap; border-radius: 0 0 14px 14px; }
+  .bl-m-foot > .ac-sub { flex: 1 1 100%; }
+  .bl-m-foot .ac-actions { margin-left: auto; }
+  .bl-tile { padding: 10px 8px; }
+  .bl-panel-title { flex-wrap: wrap; }
+  .bl-recip input { min-width: 100px; }
+  .bl-bar { width: 100%; max-width: 160px; }
+  /* invoice line cards: the remove (✕) button sits at the right */
+  .ac-table.ac-stack td .bl-x { margin-left: auto; }
+}

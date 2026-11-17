@@ -52,7 +52,7 @@ export default function BillingCustomers() {
           </div>
           <Msg error={error} />
           <div className="ac-table-wrap">
-            <table className="ac-table">
+            <table className="ac-table ac-stack">
               <thead><tr><th>Customer</th><th>Category</th><th>GSTIN</th><th>Billing profile</th><th className="ac-num">Active contracts</th><th>Service plan</th><th /></tr></thead>
               <tbody>
                 {loading || !rows.length ? (

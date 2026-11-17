@@ -124,7 +124,7 @@ export default function InvoiceDetails() {
           <div className="ac-card">
             <h3 className="ac-card-title">Payment History</h3>
             <div className="ac-table-wrap">
-              <table className="ac-table">
+              <table className="ac-table ac-stack">
                 <thead><tr><th>Date</th><th className="ac-num">Cash</th><th className="ac-num">TDS</th><th>Mode</th><th>UTR No</th><th>Received By</th></tr></thead>
                 <tbody>
                   {payments.length ? payments.map((p) => (
@@ -150,7 +150,7 @@ export default function InvoiceDetails() {
                   <div><div className="ac-mini-label">Status</div><div className="ac-mini-value"><Badge value={tds.status} /></div></div>
                 </div>
                 <div className="ac-table-wrap">
-                  <table className="ac-table">
+                  <table className="ac-table ac-stack">
                     <thead><tr><th>Date</th><th>Payment No</th><th className="ac-num">Amount</th><th>Type</th><th>Remarks</th></tr></thead>
                     <tbody>
                       {(invoice.tds_history || []).length ? invoice.tds_history.map((h) => (

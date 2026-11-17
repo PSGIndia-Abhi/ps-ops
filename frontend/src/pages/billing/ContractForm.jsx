@@ -208,7 +208,7 @@ export default function ContractForm() {
               )}
             </div>
             <div className="ac-table-wrap">
-              <table className="ac-table">
+              <table className="ac-table ac-stack">
                 <thead>
                   <tr><th>Outlet</th><th>Item text</th><th>Pricing basis</th><th>Unit</th><th className="ac-num">Rate (₹)</th><th className="ac-num">Default qty</th><th>Planned service</th><th>Valid from</th><th /></tr>
                 </thead>
@@ -254,7 +254,7 @@ export default function ContractForm() {
         )}
 
         {tab === "history" && !isNew && (
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead><tr><th>Outlet</th><th>Item</th><th className="ac-num">Rate (₹)</th><th>From</th><th>To</th></tr></thead>
             <tbody>
               {!contract.price_history.length ? <EmptyRow cols={5} text="No earlier prices" /> : contract.price_history.map((l) => (

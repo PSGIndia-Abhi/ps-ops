@@ -217,7 +217,7 @@ export default function DraftEditor() {
               )}
             </div>
             <div className="ac-table-wrap">
-              <table className="ac-table">
+              <table className="ac-table ac-stack">
                 <thead>
                   <tr><th>Item</th><th className="ac-num">Rate (₹)</th><th>Services (done / plan)</th><th className="ac-num">Qty</th><th>Billing basis</th><th className="ac-num">Amount (₹)</th><th /></tr>
                 </thead>
