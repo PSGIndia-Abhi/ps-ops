@@ -17,6 +17,7 @@ import { feedbackSwitchCount, taskSwitchCount } from './switchCounts';
 import { useUnseen } from '../feedback/unseen';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
+import { ClientNavigator } from './ClientNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
 import { colors } from '../theme';
 
@@ -257,6 +258,9 @@ export function RoleTabs() {
         </AppSwitchProvider>
       );
     }
+
+    // Client Portal logins (company admin or outlet user) get the client app.
+    if ((rawRole || '').toLowerCase().trim() === 'client') return <ClientNavigator />;
 
     switch (role) {
       case 'supervisor':
