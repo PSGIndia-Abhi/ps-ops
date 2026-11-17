@@ -85,7 +85,7 @@ export default function DraftInvoices() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th><input type="checkbox" className="bl-cb" checked={allOn} disabled={!issuable.length} onChange={() => setSelected(allOn ? new Set() : new Set(issuable.map((r) => r.id)))} aria-label="Select all" /></th>

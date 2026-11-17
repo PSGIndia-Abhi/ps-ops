@@ -64,7 +64,7 @@ export default function PurchaseOrders() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr><th>PO number</th><th>Customer</th><th>PO date</th><th>Expiry</th><th>Type</th><th className="ac-num">PO amount (₹)</th><th className="ac-num">Invoiced / adjusted (₹)</th><th>Balance</th><th>Status</th></tr>
             </thead>
@@ -242,7 +242,7 @@ function PoDetail({ id, canEdit, onClose, onEdit, onChanged }) {
 
             <div>
               <div className="bl-m-sec">Invoices on this PO</div>
-              <table className="ac-table">
+              <table className="ac-table ac-stack">
                 <thead><tr><th>Invoice</th><th>Date</th><th className="ac-num">Amount (₹)</th><th>Status</th></tr></thead>
                 <tbody>
                   {!po.invoices.length ? <EmptyRow cols={4} text="No invoices yet" /> : po.invoices.map((i) => (
@@ -255,7 +255,7 @@ function PoDetail({ id, canEdit, onClose, onEdit, onChanged }) {
             {po.kind === "ADVANCE" && (
               <div>
                 <div className="bl-m-sec">Advance payments</div>
-                <table className="ac-table">
+                <table className="ac-table ac-stack">
                   <thead><tr><th>Payment</th><th>Date</th><th className="ac-num">Received (₹)</th><th className="ac-num">Adjusted (₹)</th><th className="ac-num">Remaining (₹)</th></tr></thead>
                   <tbody>
                     {!po.advances.length ? <EmptyRow cols={5} text="No advance linked yet" /> : po.advances.map((a) => (

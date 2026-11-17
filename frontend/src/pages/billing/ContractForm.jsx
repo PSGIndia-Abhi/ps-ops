@@ -258,6 +258,7 @@ export default function ContractForm() {
               )}
             </div>
             <div className="ac-table-wrap">
+<<<<<<< HEAD
               <table className="ac-table bl-prices">
                 <colgroup>
                   <col style={{ width: "22%" }} />
@@ -268,6 +269,9 @@ export default function ContractForm() {
                   <col style={{ width: 130 }} />
                   <col style={{ width: 190 }} />
                 </colgroup>
+=======
+              <table className="ac-table ac-stack">
+>>>>>>> 6bb3fbfbc8ddc47cd7b28a262bbffb44bdde93a7
                 <thead>
                   <tr>
                     <th>Outlet</th>
@@ -319,7 +323,7 @@ export default function ContractForm() {
         )}
 
         {tab === "history" && !isNew && (
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead><tr><th>Outlet</th><th>Item</th><th className="ac-num">Rate (₹)</th><th>From</th><th>To</th></tr></thead>
             <tbody>
               {!contract.price_history.length ? <EmptyRow cols={5} text="No earlier prices" /> : contract.price_history.map((l) => (

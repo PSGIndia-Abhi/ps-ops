@@ -55,7 +55,7 @@ export default function Contracts() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr><th>Contract</th><th>Customer</th><th>Type</th><th>Next period from</th><th>Timing</th><th>PO</th><th>Status</th><th>Last invoice</th></tr>
             </thead>

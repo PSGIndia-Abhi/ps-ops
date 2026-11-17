@@ -51,7 +51,7 @@ export default function ServicePlans() {
           <input className="ac-input" style={{ marginBottom: 12 }} placeholder="Search customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
           <Msg error={error} />
           <div className="ac-table-wrap">
-            <table className="ac-table">
+            <table className="ac-table ac-stack">
               <thead>
                 <tr>
                   <th>Customer</th><th className="ac-num">Outlets</th><th>Services per month</th><th className="ac-num">Total</th>
@@ -214,7 +214,7 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
 
       {companyId && form && tab === "plan" && (
         <>
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead><tr><th>Outlet and service</th><th>Per month</th>{!readOnly && <th />}</tr></thead>
             <tbody>
               {!form.lines.length && <EmptyRow cols={readOnly ? 2 : 3} text={readOnly ? "No services planned" : "Add the services this customer gets every month"} />}
@@ -306,7 +306,7 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
       )}
 
       {companyId && tab === "history" && (
-        <table className="ac-table">
+        <table className="ac-table ac-stack">
           <thead><tr><th>Version</th><th>From</th><th>Status</th><th className="ac-num">Services</th><th className="ac-num">Copies</th><th>By</th></tr></thead>
           <tbody>
             {!history.length ? <EmptyRow cols={6} text="No plan yet" /> : history.map((h) => (

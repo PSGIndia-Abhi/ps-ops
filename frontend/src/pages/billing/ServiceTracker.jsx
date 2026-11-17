@@ -91,7 +91,7 @@ export default function ServiceTracker() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead>
               <tr>
                 <th>Customer</th><th>Outlet</th><th>Service</th><th className="ac-num">Planned</th><th className="ac-num">Done</th>
@@ -145,7 +145,7 @@ function VisitsDialog({ row, month, onClose }) {
       </div>
       <div className="bl-m-body">
         <Msg error={error} />
-        <table className="ac-table">
+        <table className="ac-table ac-stack">
           <thead><tr><th>Job</th><th>Visit</th><th>Scheduled</th><th>Status</th><th>Completed</th></tr></thead>
           <tbody>
             {loading || !data?.length ? (

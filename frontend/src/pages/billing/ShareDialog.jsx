@@ -6,56 +6,13 @@ import { rupees } from "./format";
 import { Modal, Msg } from "./ui";
 
 // Print and share an issued invoice: print every copy (count set by the Service Coordinator in
-// the service plan), download, email with the PDF, WhatsApp, copy a secure link, or another app.
-// Every print and share is recorded on the invoice.
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function Recipients({ value, onChange, placeholder }) {
-  const [text, setText] = useState("");
-  const add = () => {
-    const parts = text.split(/[,;\s]+/).map((t) => t.trim()).filter(Boolean);
-    if (parts.length) onChange([...new Set([...value, ...parts])]);
-    setText("");
-  };
-  return (
-    <div className="bl-recip">
-      {value.map((e) => (
-        <span key={e} className="bl-rchip" style={EMAIL_RE.test(e) ? undefined : { background: "#fee2e2", color: "#b91c1c" }}>
-          {e}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== e))} aria-label={`Remove ${e}`}>✕</button>
-        </span>
-      ))}
-      <input
-        value={text}
-        placeholder={value.length ? "" : placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (["Enter", ",", ";", "Tab"].includes(e.key) && text.trim()) {
-            e.preventDefault();
-            add();
-          } else if (e.key === "Backspace" && !text && value.length) onChange(value.slice(0, -1));
-        }}
-        onBlur={add}
-      />
-    </div>
-  );
-}
+// the service plan), download, or share a secure link through the user's mail app, WhatsApp,
+// the clipboard or another app. Every print and share is recorded on the invoice.
 
 export default function ShareDialog({ invoiceId, justIssued = false, onClose }) {
   const { data: opt, error: loadError } = useBilling(`/invoices/${invoiceId}/share-options`);
-  const [tab, setTab] = useState("EMAIL");
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
-  const [email, setEmail] = useState(null); // { to, cc, subject, message, attach }
-  const [phone, setPhone] = useState(null);
-  const [waText, setWaText] = useState(null);
-  const [link, setLink] = useState("");
-
-  const form = email || (opt ? { to: opt.default_email.to, cc: [], subject: opt.default_email.subject, message: opt.default_email.message, attach: "ORIGINAL" } : null);
-  const waPhone = phone ?? opt?.contacts.find((c) => c.phone)?.phone ?? "";
-  const waMessage = waText ?? opt?.default_whatsapp_text ?? "";
-  const setForm = (patch) => setEmail({ ...form, ...patch });
 
   async function run(fn) {
     setBusy(true);
@@ -69,47 +26,66 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
     }
   }
 
+  // A fresh 30-day secure link (no login needed), recorded on the invoice.
+  async function secureLink() {
+    const r = await billingPost(`/invoices/${invoiceId}/share/link`, { expires_in_days: 30 });
+    return r.link;
+  }
+  const logOpened = (note) => billingPost(`/invoices/${invoiceId}/share/log`, { channel: "OTHER", note });
+
   const print = () => run(() => openPdf(`/invoices/${invoiceId}/print?copies=${opt.print_copies}`));
   const download = () => run(() => openPdf(`/invoices/${invoiceId}/pdf`));
-  const sendEmail = () =>
+
+  // Opens the user's own mail app with the payment contacts, subject and message (with the link) filled in.
+  const openEmail = () =>
     run(async () => {
-      const r = await billingPost(`/invoices/${invoiceId}/share/email`, form);
-      setMsg({ ok: `Email sent to ${r.sent_to} address${r.sent_to === 1 ? "" : "es"}.` });
+      const url = await secureLink();
+      const to = opt.default_email.to.join(",");
+      const body = `${opt.default_email.message}\n\nView / download the invoice: ${url}`;
+      window.location.href = `mailto:${to}?subject=${encodeURIComponent(opt.default_email.subject)}&body=${encodeURIComponent(body)}`;
+      await logOpened("Opened in the mail app");
+      setMsg({ ok: "Mail app opened with the invoice link." });
     });
-  const sendWhatsapp = () =>
+
+  // Opens WhatsApp with the message ready; the user picks the chat there (no number needed).
+  const openWhatsapp = () =>
     run(async () => {
-      const tabRef = window.open("", "_blank");
+      const tabRef = window.open("", "_blank"); // opened before the await so the popup is not blocked
       try {
-        const r = await billingPost(`/invoices/${invoiceId}/share/whatsapp`, { phone: waPhone, text: waMessage });
-        if (tabRef) tabRef.location.href = r.wa_me_url;
-        else window.open(r.wa_me_url, "_blank");
-        setMsg({ ok: "WhatsApp opened with the message and a secure invoice link." });
+        const url = await secureLink();
+        const base = opt.default_whatsapp_text || `Invoice ${opt.invoice_number} for ${rupees(opt.total)}. View: {link}`;
+        const text = base.includes("{link}") ? base.replace("{link}", url) : `${base} ${url}`;
+        const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+        if (tabRef) tabRef.location.href = waUrl;
+        else window.open(waUrl, "_blank");
+        await logOpened("Opened in WhatsApp");
+        setMsg({ ok: "WhatsApp opened - choose the chat to send it to." });
       } catch (err) {
         tabRef?.close();
         throw err;
       }
     });
+
   const copyLink = () =>
     run(async () => {
-      const r = await billingPost(`/invoices/${invoiceId}/share/link`, { expires_in_days: 30 });
-      setLink(r.link);
+      const url = await secureLink();
       try {
-        await navigator.clipboard.writeText(r.link);
+        await navigator.clipboard.writeText(url);
         setMsg({ ok: "Secure link copied. It works for 30 days." });
       } catch {
-        setMsg({ ok: "Secure link created (30 days). Copy it below." });
+        setMsg({ ok: `Could not copy automatically. Secure link (30 days): ${url}` });
       }
     });
+
   const shareOther = () =>
     run(async () => {
-      const r = await billingPost(`/invoices/${invoiceId}/share/link`, { expires_in_days: 30 });
-      setLink(r.link);
+      const url = await secureLink();
       if (navigator.share) {
-        await navigator.share({ title: `Invoice ${opt.invoice_number}`, text: `Invoice ${opt.invoice_number} for ${rupees(opt.total)}`, url: r.link });
-        await billingPost(`/invoices/${invoiceId}/share/log`, { channel: "OTHER", note: "Shared from the device's share menu" });
+        await navigator.share({ title: `Invoice ${opt.invoice_number}`, text: `Invoice ${opt.invoice_number} for ${rupees(opt.total)}`, url });
+        await logOpened("Shared from the device's share menu");
         setMsg({ ok: "Shared." });
       } else {
-        setMsg({ ok: "This browser cannot open other apps. Copy the secure link below and paste it in any app." });
+        setMsg({ ok: `This browser cannot open other apps. Paste this secure link (30 days) in any app: ${url}` });
       }
     });
 
@@ -150,73 +126,13 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
             <div>
               <div className="bl-m-sec">Share</div>
               <div className="bl-tiles">
-                <button type="button" className={`bl-tile ${tab === "EMAIL" ? "on" : ""}`} onClick={() => setTab("EMAIL")}><span className="ic" style={{ background: "#2563eb" }}><FiMail /></span>Email</button>
-                <button type="button" className={`bl-tile ${tab === "WHATSAPP" ? "on" : ""}`} onClick={() => setTab("WHATSAPP")}><span className="ic" style={{ background: "#16a34a" }}><FaWhatsapp /></span>WhatsApp</button>
+                <button type="button" className="bl-tile" disabled={busy} onClick={openEmail}><span className="ic" style={{ background: "#2563eb" }}><FiMail /></span>Email</button>
+                <button type="button" className="bl-tile" disabled={busy} onClick={openWhatsapp}><span className="ic" style={{ background: "#16a34a" }}><FaWhatsapp /></span>WhatsApp</button>
                 <button type="button" className="bl-tile" disabled={busy} onClick={copyLink}><span className="ic" style={{ background: "#64748b" }}><FiCopy /></span>Copy link</button>
                 <button type="button" className="bl-tile" disabled={busy} onClick={shareOther}><span className="ic" style={{ background: "#7c3aed" }}><FiMoreHorizontal /></span>More apps</button>
               </div>
             </div>
 
-            {link && (
-              <div className="ac-field">
-                <label>Secure link (no login needed, expires in 30 days)</label>
-                <input className="ac-input" readOnly value={link} onFocus={(e) => e.target.select()} />
-              </div>
-            )}
-
-            {tab === "EMAIL" && form && (
-              <div className="bl-grid g2" style={{ gap: 12 }}>
-                <div className="ac-field bl-span2">
-                  <label>To <span className="bl-req">*</span></label>
-                  <Recipients value={form.to} onChange={(to) => setForm({ to })} placeholder="Type an email and press Enter" />
-                  {opt.contacts.filter((c) => c.email && !form.to.includes(c.email)).length > 0 && (
-                    <div className="bl-chipbar">
-                      {opt.contacts.filter((c) => c.email && !form.to.includes(c.email)).map((c) => (
-                        <button key={c.contact_id} type="button" className="bl-chip" onClick={() => setForm({ to: [...form.to, c.email] })}>+ {c.name}</button>
-                      ))}
-                    </div>
-                  )}
-                  {!opt.contacts.some((c) => c.email) && <span className="ac-sub" style={{ fontSize: 12 }}>No email saved for this customer's payment contacts.</span>}
-                </div>
-                <div className="ac-field">
-                  <label>CC</label>
-                  <Recipients value={form.cc} onChange={(cc) => setForm({ cc })} placeholder="Optional" />
-                </div>
-                <div className="ac-field">
-                  <label>Subject</label>
-                  <input className="ac-input" value={form.subject} onChange={(e) => setForm({ subject: e.target.value })} />
-                </div>
-                <div className="ac-field bl-span2">
-                  <label>Message</label>
-                  <textarea className="ac-textarea" value={form.message} onChange={(e) => setForm({ message: e.target.value })} />
-                </div>
-                {opt.print_copies > 1 && <div className="ac-field bl-span2">
-                  <label className="bl-toggle" style={{ paddingTop: 0 }}>
-                    <input type="checkbox" checked={form.attach === "ALL_COPIES"} onChange={(e) => setForm({ attach: e.target.checked ? "ALL_COPIES" : "ORIGINAL" })} />
-                    Attach all {opt.print_copies} copies (otherwise the Original only)
-                  </label>
-                </div>}
-              </div>
-            )}
-
-            {tab === "WHATSAPP" && (
-              <div className="bl-grid g2" style={{ gap: 12 }}>
-                <div className="ac-field">
-                  <label>Mobile number <span className="bl-req">*</span></label>
-                  <input className="ac-input" inputMode="tel" value={waPhone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" />
-                  <div className="bl-chipbar">
-                    {opt.contacts.filter((c) => c.phone).map((c) => (
-                      <button key={c.contact_id} type="button" className="bl-chip" onClick={() => setPhone(c.phone)}>{c.name}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="ac-field bl-span2">
-                  <label>Message</label>
-                  <textarea className="ac-textarea" value={waMessage} onChange={(e) => setWaText(e.target.value)} />
-                  <span className="ac-sub" style={{ fontSize: 12 }}>{"{link}"} is replaced with a secure link to the invoice PDF.</span>
-                </div>
-              </div>
-            )}
             <Msg {...msg} />
           </>
         )}
@@ -225,8 +141,6 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
         <span className="ac-sub" style={{ fontSize: 12 }}>Every share is logged on the invoice (who, when, to whom).</span>
         <div className="ac-actions">
           <button type="button" className="ac-btn" onClick={onClose}>Close</button>
-          {tab === "EMAIL" && <button type="button" className="ac-btn ac-btn-primary" disabled={busy || !form?.to.length} onClick={sendEmail}>{busy ? "Sending…" : "Send email"}</button>}
-          {tab === "WHATSAPP" && <button type="button" className="ac-btn green" disabled={busy || !waPhone} onClick={sendWhatsapp}>Open WhatsApp</button>}
         </div>
       </div>
     </Modal>
