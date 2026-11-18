@@ -36,7 +36,7 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
-import { TEMPERATURE_LABEL, TemperaturePicker, canSetTemperature } from '../Temperature';
+import { TemperaturePicker, canSetTemperature } from '../Temperature';
 import type { LeadTemperature, PipelineLead, PipelineStage, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -134,49 +134,64 @@ const factory = (t: CrmTheme) => ({
   primary: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: spacing.md,
-    borderRadius: radii.xl,
-    padding: spacing.lg,
+    gap: spacing.sm + 4,
+    borderRadius: radii.lg + 2,
+    paddingVertical: spacing.sm + 4,
+    paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
     backgroundColor: t.primary,
     ...t.raisedShadow,
   },
   primaryIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
   primaryText: { flex: 1 },
-  primaryKicker: { ...typography.overline, color: 'rgba(255,255,255,0.8)' },
-  primaryTitle: { ...typography.subtitle, color: '#FFFFFF', marginTop: 2 },
-  primaryHint: { ...typography.caption, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  primaryKicker: { ...typography.overline, fontSize: 10, color: 'rgba(255,255,255,0.8)' },
+  primaryTitle: { ...typography.bodyMedium, fontSize: 16, fontWeight: '700' as const, color: '#FFFFFF', marginTop: 1 },
+  primaryHint: { ...typography.caption, fontSize: 12, lineHeight: 16, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  primaryArrow: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center' as const, justifyContent: 'center' as const },
 
   // The other steps
   grid: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, justifyContent: 'space-between' as const, rowGap: spacing.sm, marginBottom: spacing.md },
   tile: {
     width: '48.5%' as const,
-    minHeight: 62,
+    minHeight: 58,
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: t.border,
     backgroundColor: t.surface,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingLeft: 10,
+    paddingRight: 8,
+    paddingVertical: 10,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: spacing.sm,
+    gap: 10,
     ...t.cardShadow,
   },
-  tileIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center' as const, justifyContent: 'center' as const },
-  tileTitle: { ...typography.captionMedium, color: t.textPrimary, flex: 1 },
+  tileIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center' as const, justifyContent: 'center' as const },
+  tileTitle: { ...typography.captionMedium, fontSize: 13, lineHeight: 17, color: t.textPrimary, flex: 1 },
   pressed: { opacity: 0.85 },
   busy: { opacity: 0.5 },
-  closeRow: { flexDirection: 'row' as const, justifyContent: 'center' as const, gap: spacing.lg, marginBottom: spacing.lg },
-  closeBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-  closeText: { ...typography.bodyMedium, color: t.danger },
+  closeRow: { flexDirection: 'row' as const, gap: spacing.sm, marginBottom: spacing.lg },
+  closeBtn: {
+    flex: 1,
+    height: 48,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+    borderRadius: radii.lg,
+    borderWidth: 1.2,
+    borderColor: `${t.danger}55`,
+    backgroundColor: `${t.danger}0D`,
+  },
+  closePressed: { backgroundColor: `${t.danger}1F` },
+  closeText: { ...typography.bodyMedium, fontSize: 15, fontWeight: '700' as const, color: t.dangerText, letterSpacing: 0.2 },
   waiting: {
     ...typography.body,
     color: t.textSecondary,
@@ -243,7 +258,11 @@ const factory = (t: CrmTheme) => ({
 
   // Activity: grouped by day, a coloured icon on a rail, title and time, the note in a soft box
   actHead: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: spacing.xs },
-  actTitle: { ...typography.overline, color: t.textMuted, flex: 1 },
+  actToggle: { gap: spacing.sm, minHeight: 36 },
+  actHeadText: { flex: 1, minWidth: 0 },
+  actTitle: { ...typography.overline, color: t.textMuted },
+  actLatest: { ...typography.caption, color: t.textSecondary, marginTop: 3 },
+  actChevron: { width: 28, height: 28, borderRadius: 14, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
   day: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.sm },
   dayText: { ...typography.overline, fontSize: 10, color: t.textSecondary },
   dayLine: { flex: 1, height: 1, backgroundColor: t.border },
@@ -287,17 +306,17 @@ const factory = (t: CrmTheme) => ({
 type IconFn = (c: string) => React.ReactNode;
 
 const ACTION_META: Record<LeadAction, { title: string; hint: string; tone: Tone; icon: IconFn }> = {
-  claim: { title: 'Start verification', hint: 'Take this lead to call and verify', tone: 'info', icon: (c) => <PersonIcon size={20} color={c} /> },
-  call: { title: 'Log a call', hint: 'Save how the call went', tone: 'info', icon: (c) => <PhoneIcon size={20} color={c} /> },
-  genuine: { title: 'Mark as genuine', hint: 'Qualified - ready for a sales meeting', tone: 'success', icon: (c) => <CheckCircleIcon size={20} color={c} /> },
-  needInfo: { title: 'Need more info', hint: 'Keep it open and call again later', tone: 'warning', icon: (c) => <AlertCircleIcon size={20} color={c} /> },
-  meeting: { title: 'Schedule meeting', hint: 'Pick the sales person and the time', tone: 'accent', icon: (c) => <CalendarIcon size={20} color={c} /> },
+  claim: { title: 'Start Verification', hint: 'Take this lead to call and verify', tone: 'info', icon: (c) => <PersonIcon size={20} color={c} /> },
+  call: { title: 'Log a Call', hint: 'Save how the call went', tone: 'info', icon: (c) => <PhoneIcon size={20} color={c} /> },
+  genuine: { title: 'Mark as Genuine', hint: 'Qualified - ready for a sales meeting', tone: 'success', icon: (c) => <CheckCircleIcon size={20} color={c} /> },
+  needInfo: { title: 'Need More Info', hint: 'Keep it open and call again later', tone: 'warning', icon: (c) => <AlertCircleIcon size={20} color={c} /> },
+  meeting: { title: 'Schedule Meeting', hint: 'Pick the sales person and the time', tone: 'accent', icon: (c) => <CalendarIcon size={20} color={c} /> },
   followUp: { title: 'Follow-up', hint: 'Set a reminder to get back to them', tone: 'warning', icon: (c) => <ClockIcon size={20} color={c} /> },
-  quote: { title: 'Create quotation', hint: 'Pick services, plan and price - the PDF is made for you', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
-  convert: { title: 'Convert to customer', hint: 'Creates the customer record', tone: 'success', icon: (c) => <UsersIcon size={20} color={c} /> },
-  lost: { title: 'Mark as lost', hint: 'Close with a reason', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
-  reject: { title: 'Reject lead', hint: 'Not genuine - a reason is required', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
-  feedback: { title: 'Feedback to provider', hint: 'Visible to the lead provider', tone: 'neutral', icon: (c) => <SendIcon size={20} color={c} /> },
+  quote: { title: 'Create Quotation', hint: 'Pick services, plan and price - the PDF is made for you', tone: 'accent', icon: (c) => <DocumentIcon size={20} color={c} /> },
+  convert: { title: 'Convert to Customer', hint: 'Creates the customer record', tone: 'success', icon: (c) => <UsersIcon size={20} color={c} /> },
+  lost: { title: 'Mark as Lost', hint: 'Close with a reason', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
+  reject: { title: 'Reject Lead', hint: 'Not genuine - a reason is required', tone: 'danger', icon: (c) => <CloseIcon size={20} color={c} /> },
+  feedback: { title: 'Feedback to Provider', hint: 'Visible to the lead provider', tone: 'neutral', icon: (c) => <SendIcon size={20} color={c} /> },
 };
 
 /** The step a lead at this stage most likely needs next - shown as the big card. */
@@ -356,6 +375,13 @@ function temperatureHistory(note: string): { title: string; tone: Tone; note: st
   return { title: `Marked ${now}`, tone: now === 'Hot' ? 'danger' : now === 'Warm' ? 'warning' : 'info', note: before };
 }
 
+/** A history row's title in plain words (as the timeline shows it). */
+function historyTitle(entry: TimelineEntry): string {
+  if (entry.action === 'TEMPERATURE_SET') return temperatureHistory(entry.note || '').title;
+  if (entry.action === 'QUALIFY' && /NEEDS_INFO/.test(entry.note || '')) return 'Marked as need more information';
+  return HISTORY_META[entry.action]?.title ?? actionLabel(entry.action);
+}
+
 const historyFallbackIcon: IconFn = (c) => <ClockIcon size={15} color={c} />;
 /** A verification call that ended "need more information" (also a QUALIFY row - its note tells). */
 const NEEDS_INFO_META = { title: 'Marked as need more information', tone: 'warning' as Tone, icon: historyFallbackIcon };
@@ -385,7 +411,8 @@ export function LeadWorkScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showAllHistory, setShowAllHistory] = useState(false);
-  const [savingTemp, setSavingTemp] = useState<LeadTemperature | null>(null);
+  // Activity is folded away until opened; open, it shows the latest few, then "Show all".
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const loader = useCallback(async () => {
     const lead = await api.getLead(leadId);
@@ -459,17 +486,16 @@ export function LeadWorkScreen() {
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
 
   // Hot / Warm / Cold: saved straight away (no confirmation - it can be changed back any time).
-  const pickTemperature = async (next: LeadTemperature | null) => {
-    setSavingTemp(next ?? data?.lead.temperature ?? 'HOT');
+  // The picker shows its own small "Saved"; only a failure uses the error banner.
+  const pickTemperature = async (next: LeadTemperature | null): Promise<boolean> => {
     setActionError(null);
     try {
       await api.setLeadTemperature(leadId, next);
-      setNotice(next ? `Marked ${TEMPERATURE_LABEL[next]}.` : 'Hot / Warm / Cold cleared.');
       reload();
+      return true;
     } catch (err) {
-      setActionError(errorMessage(err, 'Could not save. Please try again.'));
-    } finally {
-      setSavingTemp(null);
+      setActionError(errorMessage(err, 'Could not save Hot / Warm / Cold. Please try again.'));
+      return false;
     }
   };
 
@@ -631,7 +657,7 @@ export function LeadWorkScreen() {
             </View>
 
             {/* Hot / Warm / Cold - sales executives (own leads) and the heads of sales; others just see it */}
-            <TemperaturePicker lead={lead} canSet={canSetTemperature(lead, user?.role, myId)} saving={savingTemp} onPick={pickTemperature} />
+            <TemperaturePicker lead={lead} canSet={canSetTemperature(lead, user?.role, myId)} onPick={pickTemperature} />
 
             {/* What to do next */}
             <Text style={[styles.sectionTitle, styles.nextTitle]}>NEXT STEP</Text>
@@ -659,7 +685,9 @@ export function LeadWorkScreen() {
                       <Text style={styles.primaryTitle}>{busy === recommended ? 'Saving...' : metaOf(recommended).title}</Text>
                       <Text style={styles.primaryHint}>{metaOf(recommended).hint}</Text>
                     </View>
-                    <ChevronRightIcon size={20} color="#FFFFFF" />
+                    <View style={styles.primaryArrow}>
+                      <ChevronRightIcon size={16} color="#FFFFFF" />
+                    </View>
                   </Pressable>
                 )}
                 {others.length > 0 && (
@@ -676,8 +704,9 @@ export function LeadWorkScreen() {
                           accessibilityLabel={meta.title}
                           style={({ pressed }) => [styles.tile, pressed && styles.pressed, busy === action && styles.busy]}
                         >
-                          <View style={[styles.tileIcon, { backgroundColor: c.bg }]}>{meta.icon(c.fg)}</View>
+                          <View style={[styles.tileIcon, { backgroundColor: c.fg }]}>{meta.icon('#FFFFFF')}</View>
                           <Text style={styles.tileTitle}>{busy === action ? 'Saving...' : meta.title}</Text>
+                          <ChevronRightIcon size={14} color={theme.textMuted} />
                         </Pressable>
                       );
                     })}
@@ -686,8 +715,8 @@ export function LeadWorkScreen() {
                 {closing.length > 0 && (
                   <View style={styles.closeRow}>
                     {closing.map((action) => (
-                      <Pressable key={action} onPress={() => onAction(action, lead)} disabled={busy !== null} accessibilityRole="button" style={styles.closeBtn}>
-                        <CloseIcon size={16} color={theme.danger} />
+                      <Pressable key={action} onPress={() => onAction(action, lead)} disabled={busy !== null} accessibilityRole="button" style={({ pressed }) => [styles.closeBtn, pressed && styles.closePressed]}>
+                        <CloseIcon size={17} color={theme.dangerText} />
                         <Text style={styles.closeText}>{ACTION_META[action].title}</Text>
                       </Pressable>
                     ))}
@@ -822,16 +851,40 @@ export function LeadWorkScreen() {
 
             {/* What has happened, newest first - grouped by day */}
             <View style={styles.card}>
-              <View style={styles.actHead}>
-                <Text style={styles.actTitle}>ACTIVITY</Text>
+              <Pressable
+                onPress={() => {
+                  setHistoryOpen((v) => !v);
+                  setShowAllHistory(false);
+                }}
+                disabled={history.length === 0}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: historyOpen }}
+                accessibilityLabel={historyOpen ? 'Hide activity' : 'Show activity'}
+                style={({ pressed }) => [styles.actHead, styles.actToggle, pressed && styles.qPressed]}
+              >
+                <View style={styles.actHeadText}>
+                  <Text style={styles.actTitle}>ACTIVITY</Text>
+                  {!historyOpen && history.length > 0 && (
+                    <Text style={styles.actLatest} numberOfLines={1}>
+                      Latest: {historyTitle(history[0])} · {dayLabel(history[0].at) === 'Today' ? formatTime(history[0].at) : dayLabel(history[0].at)}
+                    </Text>
+                  )}
+                </View>
                 {history.length > 0 && (
                   <View style={styles.quotesCount}>
                     <Text style={styles.quotesCountText}>{history.length}</Text>
                   </View>
                 )}
-              </View>
+                {history.length > 0 && (
+                  <View style={styles.actChevron}>
+                    <View style={historyOpen ? styles.showAllChevronUp : styles.showAllChevron}>
+                      <ChevronRightIcon size={15} color={theme.textSecondary} />
+                    </View>
+                  </View>
+                )}
+              </Pressable>
               {history.length === 0 && <Text style={styles.empty}>No activity yet.</Text>}
-              {shownHistory.map((entry: TimelineEntry, i) => {
+              {historyOpen && shownHistory.map((entry: TimelineEntry, i) => {
                 // A verification call can end "genuine" or "need more information": the note says which.
                 const needsInfo = entry.action === 'QUALIFY' && /NEEDS_INFO/.test(entry.note || '');
                 const temp = entry.action === 'TEMPERATURE_SET' ? temperatureHistory(entry.note || '') : null;
@@ -875,7 +928,7 @@ export function LeadWorkScreen() {
                   </View>
                 );
               })}
-              {history.length > HISTORY_PREVIEW && (
+              {historyOpen && history.length > HISTORY_PREVIEW && (
                 <Pressable onPress={() => setShowAllHistory((v) => !v)} accessibilityRole="button" style={({ pressed }) => [styles.showAll, pressed && styles.qPressed]}>
                   <Text style={styles.showAllText}>{showAllHistory ? 'Show less' : `Show all ${history.length} updates`}</Text>
                   <View style={showAllHistory ? styles.showAllChevronUp : styles.showAllChevron}>

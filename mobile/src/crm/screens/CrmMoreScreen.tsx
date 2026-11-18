@@ -11,7 +11,9 @@ import { radii, spacing, typography } from '../../theme';
 import { initialsOf } from '../format';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import { CrmScreen } from '../ui/CrmScreen';
-import { StatusBadge, toneColors, type Tone } from '../ui/StatusBadge';
+import { toneColors, type Tone } from '../ui/StatusBadge';
+import { GlossyBadge } from '../../components/GlossyBadge';
+import { APP_VERSION } from '../../config/appVersion';
 import { ClipboardListIcon } from '../ui/crmIcons';
 import { useAppSwitch, type AppKind } from '../../navigation/AppSwitchContext';
 import { useTicketsTab } from '../../feedback/ticketsTabContext';
@@ -34,50 +36,71 @@ const APP_NAMES: Record<AppKind, string> = {
 const factory = (t: CrmTheme) => ({
   title: { ...typography.display, color: t.textPrimary, marginBottom: spacing.md },
 
-  hero: { borderRadius: radii.xl, padding: spacing.lg, marginBottom: spacing.lg, overflow: 'hidden' as const, ...t.raisedShadow },
+  // Who is signed in
+  hero: { borderRadius: 24, padding: spacing.lg, marginBottom: spacing.lg, overflow: 'hidden' as const, ...t.raisedShadow },
+  heroBubbleA: { position: 'absolute' as const, width: 180, height: 180, borderRadius: 90, right: -50, top: -70, backgroundColor: 'rgba(255,255,255,0.10)' },
+  heroBubbleB: { position: 'absolute' as const, width: 120, height: 120, borderRadius: 60, right: 40, bottom: -70, backgroundColor: 'rgba(255,255,255,0.07)' },
   heroRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
-  avatarRing: { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center' as const, justifyContent: 'center' as const },
-  avatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff', alignItems: 'center' as const, justifyContent: 'center' as const },
-  avatarText: { ...typography.title, color: '#1D4ED8' },
+  avatarRing: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: 'rgba(255,255,255,0.55)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatar: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#fff', alignItems: 'center' as const, justifyContent: 'center' as const },
+  avatarText: { ...typography.title, fontSize: 22, color: '#1D4ED8' },
   heroBody: { flex: 1, minWidth: 0 },
-  name: { ...typography.title, color: '#fff' },
-  email: { ...typography.caption, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
-  chips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: spacing.sm },
-  chip: { borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 3, backgroundColor: 'rgba(255,255,255,0.2)' },
-  chipText: { ...typography.caption, fontWeight: '600' as const, color: '#fff' },
+  name: { ...typography.title, fontSize: 21, color: '#fff' },
+  email: { ...typography.caption, fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  heroFoot: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  chips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, flex: 1 },
+  chip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.18)' },
+  chipDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#86EFAC' },
+  chipText: { ...typography.caption, fontSize: 12, fontWeight: '600' as const, color: '#fff' },
+  profileBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2, height: 30, paddingLeft: 12, paddingRight: 8, borderRadius: radii.pill, backgroundColor: '#fff' },
+  profileBtnText: { ...typography.caption, fontSize: 12, fontWeight: '700' as const, color: '#1D4ED8' },
 
-  section: { ...typography.overline, color: t.textMuted, marginBottom: spacing.sm, marginLeft: spacing.xs },
+  section: { ...typography.overline, fontSize: 11, letterSpacing: 1.1, color: t.textMuted, marginBottom: spacing.sm, marginLeft: spacing.xs },
   group: {
     backgroundColor: t.surface,
-    borderRadius: radii.xl,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: t.border,
     overflow: 'hidden' as const,
     marginBottom: spacing.lg,
     ...t.cardShadow,
   },
-  row: { flexDirection: 'row' as const, alignItems: 'center' as const, minHeight: 68, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.md },
-  rowDivider: { borderTopWidth: 1, borderTopColor: t.border },
-  rowIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center' as const, justifyContent: 'center' as const },
+  row: { flexDirection: 'row' as const, alignItems: 'center' as const, minHeight: 66, paddingHorizontal: spacing.md, paddingVertical: 10, gap: 14 },
+  rowDivider: { position: 'absolute' as const, top: 0, left: 70, right: 0, height: 1, backgroundColor: t.border },
   rowBody: { flex: 1, minWidth: 0 },
-  rowLabel: { ...typography.bodyMedium, color: t.textPrimary },
+  rowLabel: { ...typography.bodyMedium, fontSize: 15, fontWeight: '600' as const, color: t.textPrimary },
   rowLabelMuted: { color: t.textMuted },
-  rowHint: { ...typography.caption, color: t.textMuted, marginTop: 1 },
+  rowHint: { ...typography.caption, fontSize: 12.5, color: t.textMuted, marginTop: 2 },
+  chevron: { width: 28, height: 28, borderRadius: 14, backgroundColor: t.surfaceAlt, alignItems: 'center' as const, justifyContent: 'center' as const },
+  soon: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: radii.pill, backgroundColor: t.surfaceAlt },
+  soonText: { ...typography.caption, fontSize: 11, fontWeight: '700' as const, color: t.textMuted, letterSpacing: 0.4 },
 
   signOut: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    gap: spacing.xs,
-    minHeight: 52,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: t.danger,
-    backgroundColor: t.dangerBg,
-    marginBottom: spacing.lg,
+    gap: 10,
+    height: 54,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.surface,
+    marginBottom: spacing.sm,
+    ...t.cardShadow,
   },
-  signOutText: { ...typography.button, color: t.dangerText },
-  pressed: { opacity: 0.7 },
+  signOutIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: t.dangerBg, alignItems: 'center' as const, justifyContent: 'center' as const },
+  signOutText: { ...typography.bodyMedium, fontSize: 15, fontWeight: '700' as const, color: t.dangerText },
+  version: { ...typography.caption, fontSize: 11.5, color: t.textMuted, textAlign: 'center' as const, marginBottom: spacing.lg },
+  pressed: { opacity: 0.75 },
 });
 
 interface MenuRowProps {
@@ -99,11 +122,10 @@ export function MenuRow({ icon: Icon, tone, label, hint, onPress, soon, divider 
       disabled={!onPress}
       accessibilityRole="button"
       accessibilityState={{ disabled: !onPress }}
-      style={({ pressed }) => [styles.row, divider && styles.rowDivider, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: bg }]}
     >
-      <View style={[styles.rowIcon, { backgroundColor: bg }]}>
-        <Icon size={20} color={fg} />
-      </View>
+      {divider && <View style={styles.rowDivider} />}
+      <GlossyBadge color={soon ? theme.textMuted : fg} size={40} icon={<Icon size={19} color="#FFFFFF" />} />
       <View style={styles.rowBody}>
         <Text style={[styles.rowLabel, soon && styles.rowLabelMuted]} numberOfLines={1}>
           {label}
@@ -114,7 +136,15 @@ export function MenuRow({ icon: Icon, tone, label, hint, onPress, soon, divider 
           </Text>
         )}
       </View>
-      {soon ? <StatusBadge label="Soon" tone="neutral" dot={false} /> : <ChevronRightIcon size={16} color={theme.textMuted} />}
+      {soon ? (
+        <View style={styles.soon}>
+          <Text style={styles.soonText}>SOON</Text>
+        </View>
+      ) : (
+        <View style={styles.chevron}>
+          <ChevronRightIcon size={15} color={theme.textSecondary} />
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -196,6 +226,8 @@ export function CrmMoreScreen() {
       {/* Who is signed in */}
       <View style={styles.hero}>
         <GradientFill from="#3B82F6" to="#1D4ED8" />
+        <View style={styles.heroBubbleA} />
+        <View style={styles.heroBubbleB} />
         <View style={styles.heroRow}>
           <View style={styles.avatarRing}>
             <View style={styles.avatar}>
@@ -211,19 +243,26 @@ export function CrmMoreScreen() {
                 {user.email}
               </Text>
             )}
-            <View style={styles.chips}>
-              {!!roleText && (
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>{roleText}</Text>
-                </View>
-              )}
-              {canSwitch && (
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>{APP_NAMES[current]}</Text>
-                </View>
-              )}
-            </View>
           </View>
+        </View>
+        <View style={styles.heroFoot}>
+          <View style={styles.chips}>
+            {!!roleText && (
+              <View style={styles.chip}>
+                <View style={styles.chipDot} />
+                <Text style={styles.chipText}>{roleText}</Text>
+              </View>
+            )}
+            {canSwitch && (
+              <View style={styles.chip}>
+                <Text style={styles.chipText}>{APP_NAMES[current]}</Text>
+              </View>
+            )}
+          </View>
+          <Pressable onPress={openProfile} accessibilityRole="button" style={({ pressed }) => [styles.profileBtn, pressed && styles.pressed]}>
+            <Text style={styles.profileBtnText}>View profile</Text>
+            <ChevronRightIcon size={13} color="#1D4ED8" />
+          </Pressable>
         </View>
       </View>
 
@@ -264,9 +303,14 @@ export function CrmMoreScreen() {
 export function SignOutButton({ onPress }: { onPress: () => void }) {
   const { styles, theme } = useCrmStyles(factory);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}>
-      <LogoutIcon size={18} color={theme.dangerText} />
-      <Text style={styles.signOutText}>Sign out</Text>
-    </Pressable>
+    <>
+      <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.signOut, pressed && { backgroundColor: theme.dangerBg }]}>
+        <View style={styles.signOutIcon}>
+          <LogoutIcon size={16} color={theme.dangerText} />
+        </View>
+        <Text style={styles.signOutText}>Sign out</Text>
+      </Pressable>
+      <Text style={styles.version}>BestServe · Version {APP_VERSION}</Text>
+    </>
   );
 }

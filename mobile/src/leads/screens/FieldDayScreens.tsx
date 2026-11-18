@@ -520,8 +520,8 @@ export function ShiftCard({ showMyDayLink = false, onChange }: { showMyDayLink?:
         visible={askBattery}
         tone="warning"
         icon={ShieldIcon}
-        title="Keep tracking on all day"
-        message="To save battery, your phone can stop BestServe in the background - then your route has gaps and those trips are flagged. Allow BestServe to run without battery limits (on Xiaomi, Oppo or Vivo phones also turn on Autostart)."
+        title="Allow battery usage"
+        message={'Tap Allow and set BestServe\'s battery usage to "Unrestricted".'}
         onClose={() => setAskBattery(false)}
         actions={[
           { label: 'Allow', variant: 'primary', onPress: () => tracking.openBatterySettings() },

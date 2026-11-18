@@ -165,6 +165,10 @@ export interface Performance {
   leadsConverted: number;
   leadsLost: number;
   followUpsDue: number;
+  /** Hot / Warm / Cold: open leads they own by today's tag (not limited to the dates). */
+  hotLeads?: number;
+  warmLeads?: number;
+  coldLeads?: number;
 }
 
 export interface Person {

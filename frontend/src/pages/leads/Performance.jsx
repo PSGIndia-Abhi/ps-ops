@@ -47,9 +47,9 @@ const METRICS = [
   { key: "leadsConverted", label: "Converted", icon: <FiAward />, tone: "success", foot: "Became customers" },
   { key: "leadsLost", label: "Lost", icon: <FiThumbsDown />, tone: "danger", foot: "Closed without a deal" },
   // Hot / Warm / Cold: their open leads by today's tag - a snapshot, the period does not apply.
-  { key: "hotLeads", label: "Hot Leads", icon: <FiThermometer />, tone: "danger", foot: "Open leads marked Hot (today)" },
-  { key: "warmLeads", label: "Warm Leads", icon: <FiThermometer />, tone: "warn", foot: "Open leads marked Warm (today)" },
-  { key: "coldLeads", label: "Cold Leads", icon: <FiThermometer />, tone: "info", foot: "Open leads marked Cold (today)" },
+  { key: "hotLeads", label: "Hot Leads", icon: <FiThermometer />, tone: "danger", foot: "Open leads, today" },
+  { key: "warmLeads", label: "Warm Leads", icon: <FiThermometer />, tone: "warn", foot: "Open leads, today" },
+  { key: "coldLeads", label: "Cold Leads", icon: <FiThermometer />, tone: "info", foot: "Open leads, today" },
 ];
 
 const ROLE_LABEL = { telecaller: "Telecaller", sales: "Sales Executive", sales_manager: "Sales Manager", marketing: "Marketing", admin: "Admin" };

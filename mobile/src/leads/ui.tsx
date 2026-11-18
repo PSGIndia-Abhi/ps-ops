@@ -18,6 +18,7 @@ import {
   PhoneIcon,
   PinIcon,
   SparkleIcon,
+  SunIcon,
   TagIcon,
   UsersIcon,
 } from '../components/icons';
@@ -30,7 +31,7 @@ import { fmtDateShort, fmtTime, initials, todayStr } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import { formatDate } from '../utils/date';
 import { leadPersonaForRole, STAGE_META } from './stage';
-import { TemperatureChip } from './Temperature';
+import { FlameIcon, SnowIcon, TemperatureChip } from './Temperature';
 import type { LeadPersona, Meeting, PipelineLead, PipelineStage } from './types';
 
 /** Shared building blocks for the lead screens - same look as the CRM and Task apps (CRM theme). */
@@ -344,6 +345,9 @@ const TILE_ICONS: Record<string, IconType> = {
   'Genuine leads': CheckCircleIcon,
   'Meetings scheduled': CalendarIcon,
   'Visits completed': PinIcon,
+  'Hot leads': FlameIcon,
+  'Warm leads': SunIcon,
+  'Cold leads': SnowIcon,
   'Quotations sent': DocumentIcon,
   'Follow-ups due': ClockIcon,
   Lost: CloseIcon,

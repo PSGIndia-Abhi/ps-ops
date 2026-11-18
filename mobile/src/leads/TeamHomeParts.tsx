@@ -200,6 +200,66 @@ export function TeamPulseCard({
   );
 }
 
+// ---------------------------------------------------------------------------- my card
+/**
+ * The sales executive's Home card - the same design as the team card above, for their own month:
+ * ring with % of their target, amount converted, and their counts (each opens that list).
+ */
+export function MyPulseCard({
+  month,
+  achieved,
+  target,
+  stats,
+  onPress,
+}: {
+  month?: string;
+  achieved: number;
+  target: number;
+  stats: { value: number; label: string; onPress: () => void }[];
+  onPress: () => void;
+}) {
+  const { styles, theme } = useCrmStyles(factory);
+  const pct = target > 0 ? Math.round((achieved / target) * 100) : null;
+  const color = pct === null ? theme.border : pct >= 100 ? theme.success : pct >= 50 ? theme.primary : theme.warning;
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="My performance" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+      <View style={styles.top}>
+        <Text style={styles.month}>{monthLabel(month).toUpperCase()} · MY TARGET</Text>
+        <View style={styles.open}>
+          <Text style={styles.openText}>Performance</Text>
+          <ChevronRightIcon size={13} color={theme.primary} />
+        </View>
+      </View>
+      <View style={styles.row}>
+        <ProgressRing size={64} stroke={7} pct={pct ?? 0} color={color} track={theme.surfaceAlt}>
+          <Text style={styles.pct}>{pct === null ? '-' : `${pct}%`}</Text>
+        </ProgressRing>
+        <View style={styles.flex1}>
+          <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {formatINR(achieved)}
+          </Text>
+          <Text style={styles.amountSub} numberOfLines={1}>
+            {target > 0 ? `of ${formatINR(target)} target` : 'converted · no target set'}
+          </Text>
+          {target > 0 && (
+            <View style={styles.bar}>
+              <View style={[styles.barFill, { width: `${Math.min(100, pct ?? 0)}%`, backgroundColor: color }]} />
+            </View>
+          )}
+        </View>
+      </View>
+      <View style={styles.foot}>
+        {stats.map((s) => (
+          <Pressable key={s.label} onPress={s.onPress} hitSlop={6} accessibilityRole="button" accessibilityLabel={`${s.value} ${s.label}`} style={({ pressed }) => [styles.stat, pressed && styles.pressed]}>
+            <Text style={styles.statValue}>{s.value}</Text>
+            <Text style={styles.statLabel}>{s.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
 export function TeamPulseSkeleton() {
   return <CrmSkeleton height={168} radius={22} />;
 }

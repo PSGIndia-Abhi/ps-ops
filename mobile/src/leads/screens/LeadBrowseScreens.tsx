@@ -36,6 +36,8 @@ const factory = (t: CrmTheme) => ({
   chipOn: { backgroundColor: t.primary, borderColor: t.primary },
   chipText: { ...typography.captionMedium, color: t.textSecondary },
   chipTextOn: { color: t.textOnPrimary },
+  tempChip: { flexDirection: 'row' as const, gap: 6 },
+  tempDot: { width: 7, height: 7, borderRadius: 4 },
   taskRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   taskIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: t.warningBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   taskBody: { flex: 1 },
@@ -71,13 +73,18 @@ export function LeadListScreen() {
   const pushed = (route.name as string) === 'LeadList';
   const { styles, theme } = useCrmStyles(factory);
   const [group, setGroup] = useState<StageGroup>(route.params?.group ?? 'all');
+  // Hot / Warm / Cold chips sit in the same row as the stages: picking one shows all leads with that tag.
+  const [temp, setTemp] = useState<LeadTemperature | null>(null);
   const [query, setQuery] = useState('');
 
   // A home tile re-opens this (already mounted) tab with a new group.
   const wanted = route.params?.group;
   const at = route.params?.at;
   useEffect(() => {
-    if (wanted) setGroup(wanted);
+    if (wanted) {
+      setGroup(wanted);
+      setTemp(null);
+    }
   }, [wanted, at]);
 
   const { persona, myId } = useMe();
@@ -94,9 +101,6 @@ export function LeadListScreen() {
   const [who, setWho] = useState<string>('all');
   const [when, setWhen] = useState<WhenFilter>(ANY_TIME);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Hot / Warm / Cold ('all', 'NONE' = not marked yet). Not offered to telecallers - they don't use it.
-  const [temp, setTemp] = useState<'all' | 'NONE' | LeadTemperature>('all');
-  const showTemp = persona !== 'telecaller';
   const filterLeads = useCallback(
     (list: PipelineLead[], w: string, wh: WhenFilter) => {
       let out = list;
@@ -111,11 +115,7 @@ export function LeadListScreen() {
     [manager, myId],
   );
   // The stage chips, their counts, the list and the search all follow the filters.
-  const data = useMemo(() => {
-    if (!loaded?.[0]) return undefined;
-    const list = filterLeads(loaded[0], who, when);
-    return temp === 'all' ? list : list.filter((l) => (temp === 'NONE' ? !l.temperature : l.temperature === temp));
-  }, [loaded, who, when, temp, filterLeads]);
+  const data = useMemo(() => (loaded?.[0] ? filterLeads(loaded[0], who, when) : undefined), [loaded, who, when, filterLeads]);
   const onDay = whenDay(when);
   const whoLabel =
     who === 'mine' ? 'Added by me' : who === 'none' ? 'Unassigned' : people.find((p) => String(p.id) === who)?.name ?? 'Someone';
@@ -131,7 +131,6 @@ export function LeadListScreen() {
   ];
   const activeFilters = [
     ...(manager && who !== 'all' ? [{ key: 'who', label: whoLabel, onRemove: () => setWho('all') }] : []),
-    ...(temp !== 'all' ? [{ key: 'temp', label: temp === 'NONE' ? 'Not marked' : TEMPERATURE_LABEL[temp], onRemove: () => setTemp('all') }] : []),
     ...(when.kind !== 'any' ? [{ key: 'when', label: `Added ${whenLabel(when) === 'Today' || whenLabel(when) === 'Yesterday' ? whenLabel(when).toLowerCase() : whenDay(when) ? `on ${whenLabel(when)}` : whenLabel(when)}`, onRemove: () => setWhen(ANY_TIME) }] : []),
   ];
 
@@ -144,13 +143,19 @@ export function LeadListScreen() {
     return (data ?? []).filter(
       (l: PipelineLead) =>
         inGroup(l, group) &&
+        (!temp || l.temperature === temp) &&
         (!q ||
           l.companyName.toLowerCase().includes(q) ||
           l.contactPerson.toLowerCase().includes(q) ||
           l.phone.includes(q) ||
           (l.leadNumber ?? '').toLowerCase().includes(q)),
     );
-  }, [data, group, query]);
+  }, [data, group, temp, query]);
+  const tempCounts = useMemo(() => {
+    const out: Record<LeadTemperature, number> = { HOT: 0, WARM: 0, COLD: 0 };
+    for (const l of data ?? []) if (l.temperature) out[l.temperature] += 1;
+    return out;
+  }, [data]);
 
   return (
     <LeadScreen edges={['top']}>
@@ -170,43 +175,50 @@ export function LeadListScreen() {
         <FilterButton count={activeFilters.length} onPress={() => setFiltersOpen(true)} />
       </View>
       <ActiveFilterChips items={activeFilters} />
-      {showTemp && (
-        <View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-            {(['all', ...TEMPERATURES, 'NONE'] as const).map((k) => {
+      <View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {groups.map((g) => {
+            const on = !temp && group === g;
+            return (
+              <Pressable
+                key={g}
+                onPress={() => {
+                  setGroup(g);
+                  setTemp(null);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                style={[styles.chip, on && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                  {STAGE_GROUPS[g].label} ({counts[g]})
+                </Text>
+              </Pressable>
+            );
+          })}
+          {/* Not for telecallers - they do not mark Hot / Warm / Cold. */}
+          {persona !== 'telecaller' &&
+            TEMPERATURES.map((k) => {
               const on = temp === k;
+              const c = toneColors(theme, k === 'HOT' ? 'danger' : k === 'WARM' ? 'warning' : 'info');
               return (
                 <Pressable
                   key={k}
-                  onPress={() => setTemp(k)}
+                  onPress={() => {
+                    setTemp(on ? null : k);
+                    setGroup('all');
+                  }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
-                  style={[styles.chip, on && styles.chipOn]}
+                  style={[styles.chip, styles.tempChip, on ? { backgroundColor: c.fg, borderColor: c.fg } : { borderColor: c.bg }]}
                 >
-                  <Text style={[styles.chipText, on && styles.chipTextOn]}>
-                    {k === 'all' ? 'Hot / Warm / Cold: all' : k === 'NONE' ? 'Not marked' : TEMPERATURE_LABEL[k]}
+                  <View style={[styles.tempDot, { backgroundColor: on ? '#FFFFFF' : c.fg }]} />
+                  <Text style={[styles.chipText, on ? styles.chipTextOn : { color: c.fg }]}>
+                    {TEMPERATURE_LABEL[k]} ({tempCounts[k]})
                   </Text>
                 </Pressable>
               );
             })}
-          </ScrollView>
-        </View>
-      )}
-      <View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {groups.map((g) => (
-            <Pressable
-              key={g}
-              onPress={() => setGroup(g)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: group === g }}
-              style={[styles.chip, group === g && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, group === g && styles.chipTextOn]}>
-                {STAGE_GROUPS[g].label} ({counts[g]})
-              </Text>
-            </Pressable>
-          ))}
         </ScrollView>
       </View>
       <FlatList

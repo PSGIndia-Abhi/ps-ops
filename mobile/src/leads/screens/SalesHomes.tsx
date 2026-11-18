@@ -10,7 +10,6 @@ import {
   BriefcaseIcon,
   CalendarIcon,
   ChartIcon,
-  CheckCircleIcon,
   ClockIcon,
   DocumentIcon,
   PinIcon,
@@ -23,7 +22,7 @@ import { useAppSwitch } from '../../navigation/AppSwitchContext';
 import { todayStr } from '../../tasks/format';
 import { radii, spacing } from '../../theme';
 import * as api from '../api';
-import { HomeBand, HomeTile, QuickAction, SectionTitle, TILE_OVERLAP } from '../homeParts';
+import { HomeBand, QuickAction, SectionTitle, TILE_OVERLAP } from '../homeParts';
 import type { LeadRootStackParamList, LeadTabParamList } from '../navigation';
 import { countByGroup, type StageGroup } from '../stage';
 import type { LeadTask } from '../types';
@@ -31,7 +30,7 @@ import { TeamVisitsTimeline } from '../TeamVisitsTimeline';
 import { ShiftCard } from './FieldDayScreens';
 import { LeadRow, LeadWash, useLoad, useMe } from '../ui';
 import { targetPercent } from '../TargetCard';
-import { TeamPeopleRow, TeamPulseCard, TeamPulseSkeleton, type TeamPerson } from '../TeamHomeParts';
+import { MyPulseCard, TeamPeopleRow, TeamPulseCard, TeamPulseSkeleton, type TeamPerson } from '../TeamHomeParts';
 import { loadTeam } from './ReportScreens';
 
 const RECENT_LIMIT = 3;
@@ -80,15 +79,19 @@ const followUpsOf = (tasks: LeadTask[]) =>
 export function SalesExecHome() {
   const { navigation, band, actionError } = useHomeBasics();
   const { styles, theme } = useCrmStyles(factory);
+  const { myIdNum } = useMe();
 
   const loader = useCallback(async () => {
-    const [leads, tasks, unread] = await Promise.all([
+    const [leads, tasks, unread, targets] = await Promise.all([
       api.listLeads(),
       api.myTasksToday().catch(() => [] as LeadTask[]),
       getUnreadNotificationCount().catch(() => 0),
+      api.listTargets().catch(() => [] as api.SalesTarget[]),
     ]);
-    return { leads, tasks, unread };
-  }, []);
+    // This month's target and converted amount for the signed-in person (as on My performance).
+    const mine = targets.find((t) => t.userId === myIdNum) ?? targets[0] ?? null;
+    return { leads, tasks, unread, mine };
+  }, [myIdNum]);
   const { data, loading, refreshing, error, refresh, reload } = useLoad(loader, 'Could not load your leads.');
 
   const leads = useMemo(() => data?.leads ?? [], [data]);
@@ -105,15 +108,22 @@ export function SalesExecHome() {
       >
         <HomeBand {...band} role="Sales" alerts={data?.unread ?? 0} />
 
-        <View style={styles.tiles}>
-          {loading && !data ? (
-            [0, 1, 2].map((i) => <CrmSkeleton key={i} height={128} radius={22} style={styles.flex1} />)
+        {/* My month - the same card as the team card on the manager's Home; opens My performance */}
+        <View style={styles.pulse}>
+          {data ? (
+            <MyPulseCard
+              month={data.mine?.month}
+              achieved={data.mine?.achieved ?? 0}
+              target={data.mine?.target ?? 0}
+              onPress={() => navigation.navigate('LeadPerformance')}
+              stats={[
+                { value: counts.won, label: 'won', onPress: () => openGroup('won') },
+                { value: counts.meeting, label: counts.meeting === 1 ? 'meeting' : 'meetings', onPress: () => openGroup('meeting') },
+                { value: counts.quoted, label: counts.quoted === 1 ? 'quotation' : 'quotations', onPress: () => openGroup('quoted') },
+              ]}
+            />
           ) : (
-            <>
-              <HomeTile icon={<CalendarIcon size={18} color={WHITE} />} value={counts.meeting} label="Meetings" tone="accent" onPress={() => openGroup('meeting')} />
-              <HomeTile icon={<DocumentIcon size={18} color={WHITE} />} value={counts.quoted} label="Quotations" tone="info" onPress={() => openGroup('quoted')} />
-              <HomeTile icon={<CheckCircleIcon size={18} color={WHITE} />} value={counts.won} label="Converted" tone="success" onPress={() => openGroup('won')} />
-            </>
+            <TeamPulseSkeleton />
           )}
         </View>
 
