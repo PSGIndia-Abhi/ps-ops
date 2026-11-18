@@ -3,4 +3,6 @@
          frame (before Metro/JS paints anything) doesn't flash white/black
          ahead of the app's actual background. -->
     <color name="app_background">#F6F7FB</color>
+    <!-- BestServe red (the app icon): accent of every notification - tints ic_stat_bestserve. -->
+    <color name="notification_brand">#B71C2B</color>
 </resources>

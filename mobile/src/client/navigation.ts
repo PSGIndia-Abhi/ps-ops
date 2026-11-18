@@ -14,8 +14,11 @@ export type ClientStackParamList = {
   ClientTabs: NavigatorScreenParams<ClientTabParamList> | undefined;
   ClientProfile: undefined;
   ClientJobDetail: { jobId: string };
-  ClientRequestService: undefined;
+  ClientNewComplaint: { siteId?: string; jobId?: string; jobLabel?: string };
+  ClientComplaintDetail: { complaintId: string; notice?: string };
+  ClientRequestService: { siteId?: string; tab?: 'new' | 'mine' } | undefined;
   ClientDocuments: undefined;
   ClientAudits: undefined;
   ClientOutlets: undefined;
+  ClientOutletDetail: { siteId: string };
 };

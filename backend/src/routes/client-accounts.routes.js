@@ -15,6 +15,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { CLIENT_ROLE, getClientRoleId } = require("../services/clientPortal.service");
+const { notifyDocumentShared } = require("../services/clientNotify.service");
 const multer = require("multer");
 const { v4: uuid } = require("uuid");
 const minioClient = require("../lib/minio");
@@ -450,6 +451,7 @@ router.post("/companies/:companyId/documents", auth, requirePermission(PERMISSIO
     }
     const [[doc]] = await pool.query(`${DOC_SELECT} WHERE d.id = ?`, [id]);
     res.status(201).json(doc);
+    notifyDocumentShared({ companyId: company.id, siteId: fields.site_id, title: fields.title, docId: id });
   } catch (err) {
     sendError(res, err, "Failed to upload document");
   }

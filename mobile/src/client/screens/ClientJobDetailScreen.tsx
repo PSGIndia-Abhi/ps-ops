@@ -228,7 +228,7 @@ export function ClientJobDetailScreen() {
           </View>
         </View>
 
-        <Pressable onPress={() => navigation.navigate('Complaints')} style={({ pressed }) => [styles.issue, pressed && styles.pressed]} accessibilityRole="button">
+        <Pressable onPress={() => navigation.navigate('ClientNewComplaint', { siteId: job.site_id || undefined, jobId: job.id, jobLabel: `${serviceLabel(job.service_type)} · #${job.code || job.id}` })} style={({ pressed }) => [styles.issue, pressed && styles.pressed]} accessibilityRole="button">
           <AlertTriangleIcon size={18} color={TONES.amber.fg} />
           <Text style={styles.issueText}>Report an issue with this job</Text>
         </Pressable>

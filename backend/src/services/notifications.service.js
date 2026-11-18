@@ -58,6 +58,7 @@ async function insertNotifications(executor, userIds, payload) {
       title: payload.title,
       body: payload.message,
       data: { type: payload.type, entityType: payload.entityType, entityId: payload.entityId },
+      channelId: payload.channelId,
     });
   });
 

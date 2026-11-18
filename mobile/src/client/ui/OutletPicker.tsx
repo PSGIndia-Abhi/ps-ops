@@ -33,23 +33,27 @@ export function OutletSheet({
   outlets,
   value,
   onChange,
+  allowAll = true,
 }: {
   visible: boolean;
   onClose: () => void;
   outlets: ClientOutlet[];
   value: string;
   onChange: (id: string) => void;
+  /** Offer "All outlets" (filters); off when one outlet must be picked (a complaint, a request). */
+  allowAll?: boolean;
 }) {
   const { styles, theme } = useCrmStyles(factory);
   const [query, setQuery] = useState('');
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = outlets.filter((o) => !q || [o.name, o.city, o.id].some((v) => v && String(v).toLowerCase().includes(q)));
-    return [{ id: '', name: 'All outlets', city: `${outlets.length} outlets`, all: true }, ...list.map((o) => ({ ...o, all: false }))];
-  }, [outlets, query]);
+    const rows = list.map((o) => ({ ...o, all: false }));
+    return allowAll ? [{ id: '', name: 'All outlets', city: `${outlets.length} outlets`, all: true }, ...rows] : rows;
+  }, [outlets, query, allowAll]);
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Choose outlet">
+    <Sheet visible={visible} onClose={onClose} title={allowAll ? 'Choose outlet' : 'Which outlet?'}>
       {outlets.length > 6 && (
         <TextInput value={query} onChangeText={setQuery} placeholder="Search outlets" placeholderTextColor={theme.textMuted} style={styles.search} />
       )}

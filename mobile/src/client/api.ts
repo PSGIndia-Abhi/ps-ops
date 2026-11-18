@@ -236,3 +236,278 @@ export async function getJob(jobId: string): Promise<ClientJobDetail> {
 
 /** Path of a job photo (streams only with the login token). */
 export const jobAttachmentPath = (id: string | number) => `/api/client-portal/attachments/${encodeURIComponent(String(id))}`;
+
+// ---------- Complaints ----------
+
+export type ComplaintStatusFilter = 'open' | 'resolved' | 'all';
+export type ComplaintPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+
+export interface ClientComplaint {
+  id: string;
+  subject: string;
+  status: string;
+  priority: ComplaintPriority | null;
+  created_at: string;
+  updated_at: string | null;
+  raised_by_name: string | null;
+  site_id: string | null;
+  site_name: string | null;
+  message_count: number;
+  last_message_at: string | null;
+  job_code: string | null;
+  /** Our team wrote the last message. */
+  awaiting_you: boolean;
+}
+
+export interface ComplaintListResponse {
+  page: number;
+  page_size: number;
+  total: number;
+  counts: { all: number; open: number; resolved: number };
+  complaints: ClientComplaint[];
+}
+
+export interface ComplaintMessage {
+  id: string;
+  message: string;
+  created_at: string;
+  mine: boolean;
+  from_team: boolean;
+  author: string | null;
+  attachments: { id: string | number; file_name: string; file_type: string }[];
+}
+
+export interface ClientComplaintDetail {
+  complaint: {
+    id: string;
+    subject: string;
+    status: string;
+    priority: ComplaintPriority | null;
+    created_at: string;
+    updated_at: string | null;
+    site_id: string | null;
+    site_name: string | null;
+    raised_by_me: boolean;
+  };
+  jobs: { id: string; code: string | null; service_type: string | null; sub_service: string | null; site_id: string | null; site_name: string | null }[];
+  messages: ComplaintMessage[];
+}
+
+/** A photo / PDF picked on the phone (same shape as the Helpdesk picker). */
+export interface UploadFile {
+  uri: string;
+  name: string;
+  type: string;
+}
+
+const appendUploads = (form: FormData, files: UploadFile[]) =>
+  // React Native's FormData streams this {uri,name,type} shape from the uri (see api/jobs.ts).
+  files.forEach((f) => form.append('files', { uri: f.uri, name: f.name, type: f.type } as unknown as Blob));
+
+export async function listComplaints(p: { page?: number; siteId?: string; status?: ComplaintStatusFilter; search?: string }): Promise<ComplaintListResponse> {
+  const { data } = await httpClient.get<ComplaintListResponse>('/api/client-portal/complaints', {
+    params: clean({ page: p.page ?? 1, page_size: 20, site_id: p.siteId, status: p.status === 'all' ? undefined : p.status, search: p.search }),
+  });
+  return data;
+}
+
+export async function createComplaint(input: {
+  subject: string;
+  message: string;
+  priority: ComplaintPriority;
+  siteId: string;
+  jobId?: string;
+  files: UploadFile[];
+}): Promise<{ id: string; warning: string | null }> {
+  const form = new FormData();
+  form.append('subject', input.subject);
+  form.append('message', input.message);
+  form.append('priority', input.priority);
+  form.append('site_id', input.siteId);
+  if (input.jobId) form.append('job_id', input.jobId);
+  appendUploads(form, input.files);
+  const { data } = await httpClient.post('/api/client-portal/complaints', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  });
+  return data;
+}
+
+export async function getComplaint(id: string): Promise<ClientComplaintDetail> {
+  const { data } = await httpClient.get<ClientComplaintDetail>(`/api/client-portal/complaints/${encodeURIComponent(id)}`);
+  return data;
+}
+
+export async function replyToComplaint(id: string, input: { message: string; files: UploadFile[] }): Promise<{ id: string; reopened: boolean; warning: string | null }> {
+  const form = new FormData();
+  form.append('message', input.message);
+  appendUploads(form, input.files);
+  const { data } = await httpClient.post(`/api/client-portal/complaints/${encodeURIComponent(id)}/messages`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  });
+  return data;
+}
+
+export async function setComplaintStatus(id: string, status: 'CLOSED' | 'OPEN'): Promise<void> {
+  await httpClient.patch(`/api/client-portal/complaints/${encodeURIComponent(id)}/status`, { status });
+}
+
+export const complaintFilePath = (id: string | number) => `/api/client-portal/complaint-files/${encodeURIComponent(String(id))}`;
+
+// ---------- Service requests ----------
+
+export type RequestType = 'PEST' | 'DEEP' | 'BOTH';
+export type RequestSlot = 'ANY' | 'MORNING' | 'AFTERNOON' | 'EVENING';
+
+export interface ServiceRequest {
+  id: string;
+  site_id: string;
+  site_name: string | null;
+  service_type: RequestType;
+  sub_services: string[];
+  preferred_date: string | null;
+  preferred_slot: RequestSlot | null;
+  notes: string | null;
+  /** NEW (waiting) · ASSIGNED (scheduled) · REJECTED · CANCELLED */
+  status: string;
+  staff_note: string | null;
+  created_at: string;
+  handled_at: string | null;
+  requested_by_name: string | null;
+  jobs: { id: string; code: string | null; sub_service: string | null; status: string }[];
+}
+
+export async function listServiceRequests(siteId?: string): Promise<{ counts: { open: number; done: number; all: number }; requests: ServiceRequest[] }> {
+  const { data } = await httpClient.get('/api/client-portal/service-requests', { params: clean({ site_id: siteId }) });
+  return data;
+}
+
+export async function createServiceRequest(input: {
+  siteId: string;
+  type: RequestType;
+  subServices: string[];
+  preferredDate?: string;
+  slot: RequestSlot;
+  notes?: string;
+}): Promise<{ id: string }> {
+  const { data } = await httpClient.post('/api/client-portal/service-requests', {
+    site_id: input.siteId,
+    service_type: input.type,
+    sub_services: input.subServices,
+    preferred_date: input.preferredDate || null,
+    preferred_slot: input.slot,
+    notes: input.notes || '',
+  });
+  return data;
+}
+
+export async function cancelServiceRequest(id: string): Promise<void> {
+  await httpClient.patch(`/api/client-portal/service-requests/${encodeURIComponent(id)}/cancel`);
+}
+
+// ---------- Outlets ----------
+
+export interface OutletListItem extends OutletSummary {
+  address: string | null;
+  total_jobs: number;
+  services: string[];
+  audit_date: string | null;
+}
+
+export async function listOutlets(): Promise<OutletListItem[]> {
+  const { data } = await httpClient.get<{ outlets: OutletListItem[] }>('/api/client-portal/outlets');
+  return data.outlets;
+}
+
+export interface OutletDetail {
+  outlet: {
+    id: string;
+    name: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    postal_code: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    formatted_address: string | null;
+    branch_name: string | null;
+  };
+  stats: {
+    total_jobs: number;
+    active_jobs: number;
+    completed_jobs: number;
+    visits_done: number;
+    last_visit: string | null;
+    next_visit: string | null;
+    open_complaints: number;
+    audit_risk: string | null;
+    audit_date: string | null;
+  };
+  services: { service_type: string | null; jobs: number; active_jobs: number; last_done: string | null; next_due: string | null }[];
+  upcoming_visits: { id: string; job_id: string; visit_number: number | null; scheduled_date: string; status: string; job_code: string | null; service_type: string | null }[];
+  recent_visits: { id: string; job_id: string; visit_number: number | null; scheduled_date: string; completed_at: string | null; status: string; job_code: string | null; service_type: string | null }[];
+  recent_jobs: { id: string; code: string | null; service_type: string | null; sub_service: string | null; status: string; created_at: string; completed_at: string | null; due_date: string | null }[];
+  complaints: { id: string; subject: string; status: string; priority: string | null; created_at: string; updated_at: string | null }[];
+  audits: { id: string; audit_number: string | null; audit_date: string; audit_type: string | null; risk: string | null }[];
+  contacts: { id: string; name: string; role: string | null; phone: string | null; email: string | null; is_primary: boolean }[];
+}
+
+export async function getOutlet(siteId: string): Promise<OutletDetail> {
+  const { data } = await httpClient.get<OutletDetail>(`/api/client-portal/outlets/${encodeURIComponent(siteId)}`);
+  return data;
+}
+
+// ---------- Documents & audit reports ----------
+
+export type DocKind = 'shared' | 'invoice' | 'audit' | 'photos';
+
+export interface ClientDocument {
+  key: string;
+  kind: DocKind;
+  id: string;
+  title: string;
+  date: string | null;
+  site_name: string | null;
+  /** /api/client-portal/... file address, or null when there is no file to open. */
+  download: string | null;
+  // shared
+  doc_type?: string | null;
+  file_name?: string | null;
+  file_type?: string | null;
+  size_bytes?: number | null;
+  valid_until?: string | null;
+  notes?: string | null;
+  // invoice
+  status?: string;
+  amount?: number;
+  paid?: number;
+  pending?: number;
+  due_date?: string | null;
+  // audit
+  risk?: string | null;
+  audit_type?: string | null;
+  audit_number?: string | null;
+  auditor?: string | null;
+  page_count?: number | null;
+  // photos
+  service_type?: string | null;
+  sub_service?: string | null;
+  photos?: number;
+}
+
+export interface DocumentListResponse {
+  page: number;
+  page_size: number;
+  total: number;
+  counts: { all: number; shared: number; invoice: number; audit: number; photos: number };
+  expiring_soon: number;
+  documents: ClientDocument[];
+}
+
+export async function listDocuments(p: { page?: number; siteId?: string; kind?: DocKind | ''; search?: string }): Promise<DocumentListResponse> {
+  const { data } = await httpClient.get<DocumentListResponse>('/api/client-portal/documents', {
+    params: clean({ page: p.page ?? 1, page_size: 30, site_id: p.siteId, kind: p.kind, search: p.search }),
+  });
+  return data;
+}

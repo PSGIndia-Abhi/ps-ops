@@ -914,6 +914,9 @@ async function approveVisit(req, res) {
       [visitId.trim()]
     );
 
+    // The outlet's client logins: "Service completed".
+    require("../services/clientNotify.service").notifyVisitCompleted(visitId);
+
     // 3️⃣ Notify ALL technicians
     if (technicianIds.length > 0) {
       const { notifyVisitApproved } = require("../services/notifications.service");

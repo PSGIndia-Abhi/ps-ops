@@ -59,18 +59,20 @@ function stringData(obj = {}) {
  * Sends one push to every phone of these users. `data` travels with it so the app can open the
  * right screen (entityType / entityId). Never throws.
  */
-async function sendPush(userIds, { title, body, data = {} }) {
+async function sendPush(userIds, { title, body, data = {}, channelId }) {
   return deliver(userIds, {
     notification: { title: title || "BestServe", body: body || "" },
     data: stringData(data),
     android: {
       priority: "high",
       notification: {
-        // The app's own "New meetings & tasks" channel (heads-up, sound) - created on first launch.
-        channelId: "bestserve_reminder_popup",
-        // The app's white bell (res/drawable/ic_stat_reminder) - otherwise Android shows a blank square.
-        icon: "ic_stat_reminder",
-        color: "#2563EB",
+        // The app's own channel (heads-up, sound) - created on first launch. Staff: "New meetings &
+        // tasks"; clients: "BestServe updates" (clientNotify.service).
+        channelId: channelId || "bestserve_reminder_popup",
+        // The BestServe puzzle mark in white (res/drawable/ic_stat_bestserve) - Android tints it with
+        // `color`; a full-colour picture is not allowed in the status bar.
+        icon: "ic_stat_bestserve",
+        color: "#B71C2B",
         defaultSound: true,
       },
     },

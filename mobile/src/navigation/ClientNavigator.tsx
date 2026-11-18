@@ -21,14 +21,18 @@ import { ClientMoreScreen } from '../client/screens/ClientMoreScreen';
 import { ClientProfileScreen } from '../client/screens/ClientProfileScreen';
 import { ClientJobsScreen } from '../client/screens/ClientJobsScreen';
 import { ClientJobDetailScreen } from '../client/screens/ClientJobDetailScreen';
-import {
-  ClientAuditsPlaceholder,
-  ClientComplaintsPlaceholder,
-  ClientDocumentsPlaceholder,
-  ClientOutletsPlaceholder,
-  ClientRequestPlaceholder,
-} from '../client/screens/ClientComingSoonScreen';
+import { ClientRequestServiceScreen } from '../client/screens/ClientRequestServiceScreen';
+import { ClientOutletsScreen } from '../client/screens/ClientOutletsScreen';
+import { ClientOutletDetailScreen } from '../client/screens/ClientOutletDetailScreen';
+import { ClientAuditsScreen, ClientDocumentsScreen } from '../client/screens/ClientDocumentsScreen';
+import { ClientComplaintsScreen } from '../client/screens/ClientComplaintsScreen';
+import { ClientNewComplaintScreen } from '../client/screens/ClientNewComplaintScreen';
+import { ClientComplaintDetailScreen } from '../client/screens/ClientComplaintDetailScreen';
+import { useClientPush } from '../client/push';
 import { radii, shadows, spacing, typography } from '../theme';
+
+/** Route wrapper: the Documents page with every kind. */
+const ClientDocumentsScreenRoute = () => <ClientDocumentsScreen />;
 
 const Tab = createBottomTabNavigator<ClientTabParamList>();
 const Stack = createNativeStackNavigator<ClientStackParamList>();
@@ -82,6 +86,8 @@ function ClientTabs() {
   const theme = useCrmTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<ClientStackParamList>>();
+  // Push notifications: register this phone, show pushes, open the screen a tapped one is about.
+  useClientPush();
   const screenOptions: BottomTabNavigationOptions = {
     headerShown: false,
     tabBarActiveTintColor: theme.primary,
@@ -111,7 +117,7 @@ function ClientTabs() {
           },
         })}
       />
-      <Tab.Screen name="Complaints" component={ClientComplaintsPlaceholder} options={{ tabBarIcon: complaintsIcon }} />
+      <Tab.Screen name="Complaints" component={ClientComplaintsScreen} options={{ tabBarIcon: complaintsIcon }} />
       <Tab.Screen name="More" component={ClientMoreScreen} options={{ tabBarIcon: moreIcon }} />
     </Tab.Navigator>
   );
@@ -156,10 +162,13 @@ export function ClientNavigator() {
           <Stack.Screen name="ClientTabs" component={ClientTabs} />
           <Stack.Screen name="ClientProfile" component={ClientProfileScreen} />
           <Stack.Screen name="ClientJobDetail" component={ClientJobDetailScreen} />
-          <Stack.Screen name="ClientRequestService" component={ClientRequestPlaceholder} options={{ animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="ClientDocuments" component={ClientDocumentsPlaceholder} />
-          <Stack.Screen name="ClientAudits" component={ClientAuditsPlaceholder} />
-          <Stack.Screen name="ClientOutlets" component={ClientOutletsPlaceholder} />
+          <Stack.Screen name="ClientNewComplaint" component={ClientNewComplaintScreen} options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="ClientComplaintDetail" component={ClientComplaintDetailScreen} />
+          <Stack.Screen name="ClientRequestService" component={ClientRequestServiceScreen} options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="ClientDocuments" component={ClientDocumentsScreenRoute} />
+          <Stack.Screen name="ClientAudits" component={ClientAuditsScreen} />
+          <Stack.Screen name="ClientOutlets" component={ClientOutletsScreen} />
+          <Stack.Screen name="ClientOutletDetail" component={ClientOutletDetailScreen} />
         </Stack.Navigator>
       </ClientGate>
     </ClientPortalProvider>

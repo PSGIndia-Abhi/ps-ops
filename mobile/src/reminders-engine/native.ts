@@ -3,8 +3,11 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 /** One reminder handed to the phone (see android/.../reminders/ReminderScheduler.kt). */
 export interface NativeReminder {
   id: string;
-  /** "alarm": rings before something is due. "popup": a banner like a chat message. */
-  kind: 'alarm' | 'popup';
+  /**
+   * "alarm": rings before something is due. "popup": a banner like a chat message.
+   * "update": a client-app push shown while the app is open ("BestServe updates" channel).
+   */
+  kind: 'alarm' | 'popup' | 'update';
   title: string;
   body: string;
   /** Epoch milliseconds. */

@@ -219,7 +219,7 @@ export function ClientDashboardScreen() {
 
   const actions: { key: string; label: string; Icon: IconType; tone: keyof typeof TONES; onPress: () => void }[] = [
     { key: 'request', label: 'Request', Icon: PlusIcon, tone: 'blue', onPress: () => navigation.navigate('ClientRequestService') },
-    { key: 'complaint', label: 'Complaint', Icon: AlertTriangleIcon, tone: 'amber', onPress: () => navigation.navigate('Complaints') },
+    { key: 'complaint', label: 'Complaint', Icon: AlertTriangleIcon, tone: 'amber', onPress: () => navigation.navigate('ClientNewComplaint', {}) },
     { key: 'jobs', label: 'Jobs', Icon: BriefcaseIcon, tone: 'indigo', onPress: () => navigation.navigate('Jobs') },
     { key: 'docs', label: 'Documents', Icon: DocumentIcon, tone: 'violet', onPress: () => navigation.navigate('ClientDocuments') },
     { key: 'audits', label: 'Audits', Icon: ShieldIcon, tone: 'green', onPress: () => navigation.navigate('ClientAudits') },
@@ -264,7 +264,7 @@ export function ClientDashboardScreen() {
       >
         {/* Search-like outlet bar */}
         <Pressable
-          onPress={() => (multi ? setOutletSheet(true) : navigation.navigate('ClientOutlets'))}
+          onPress={() => (multi ? setOutletSheet(true) : single ? navigation.navigate('ClientOutletDetail', { siteId: single.id }) : navigation.navigate('ClientOutlets'))}
           style={({ pressed }) => [styles.bar, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={multi ? 'Choose outlet' : 'Your outlet'}

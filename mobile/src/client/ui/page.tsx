@@ -86,7 +86,8 @@ export function ClientPage({
   const { styles, theme } = useCrmStyles(factory);
   const navigation = useNavigation();
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
+    // Pushed screens have no tab bar under them, so they keep clear of the phone's navigation bar too.
+    <SafeAreaView style={styles.screen} edges={back ? ['top', 'bottom'] : ['top']}>
       {back ? (
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={({ pressed }) => [styles.back, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Back">

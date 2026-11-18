@@ -6,6 +6,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
 const { sendTicketCreatedEmail } = require("../utils/mailer");
+const { notifyComplaintReply, notifyComplaintResolved } = require("../services/clientNotify.service");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 const minioClient = require("../lib/minio");
@@ -608,6 +609,10 @@ router.post(
       }
 
       res.json({ success: true, message_id: messageId });
+      // A staff reply tells the outlet's client logins (their own replies come through the portal).
+      if (String(req.user.role || "").toLowerCase() !== "client") {
+        notifyComplaintReply(ticketId, message.trim(), created_by_user_id);
+      }
     } catch (err) {
       console.error("Failed to add ticket message:", err);
       res.status(500).json({ error: "Failed to add ticket message" });
@@ -631,7 +636,7 @@ router.patch(
 
     try {
       const [[ticket]] = await pool.query(
-        `SELECT id FROM job_tickets WHERE id = ?`,
+        `SELECT id, status FROM job_tickets WHERE id = ?`,
         [ticketId]
       );
 
@@ -648,6 +653,9 @@ router.patch(
       );
 
       res.json({ success: true });
+      if (["RESOLVED", "CLOSED"].includes(String(status).toUpperCase()) && ticket.status !== String(status).toUpperCase()) {
+        notifyComplaintResolved(ticketId, req.user.id);
+      }
     } catch (err) {
       console.error("Failed to update ticket status:", err);
       res.status(500).json({ error: "Failed to update ticket status" });

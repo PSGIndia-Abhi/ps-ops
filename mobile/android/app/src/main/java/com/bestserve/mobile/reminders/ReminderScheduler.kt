@@ -49,6 +49,10 @@ data class Reminder(
 object ReminderScheduler {
   const val CHANNEL_ALARM = "bestserve_reminder_alarm"
   const val CHANNEL_POPUP = "bestserve_reminder_popup"
+  /** Client app: complaint replies, request bookings, completed visits, new documents. */
+  const val CHANNEL_UPDATES = "bestserve_updates"
+  /** BestServe red (app icon) - tints the status-bar mark and the app name in the notification. */
+  private const val BRAND_COLOR = 0xFFB71C2B.toInt()
   const val EXTRA_ID = "reminderId"
   const val EXTRA_ROUTE = "reminderRoute"
   const val SNOOZE_MS = 10 * 60 * 1000L
@@ -166,7 +170,23 @@ object ReminderScheduler {
       }
       nm.createNotificationChannel(popup)
     }
+    if (nm.getNotificationChannel(CHANNEL_UPDATES) == null) {
+      val updates = NotificationChannel(CHANNEL_UPDATES, "BestServe updates", NotificationManager.IMPORTANCE_HIGH).apply {
+        description = "Replies to your complaints, booked requests, completed visits and new documents"
+        enableVibration(true)
+        lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+      }
+      nm.createNotificationChannel(updates)
+    }
   }
+
+  /** The full-colour app icon, shown on the right of the notification. */
+  private fun appIcon(ctx: Context): android.graphics.Bitmap? =
+    try {
+      android.graphics.BitmapFactory.decodeResource(ctx.resources, R.mipmap.ic_launcher)
+    } catch (e: Exception) {
+      null
+    }
 
   private fun openAppIntent(ctx: Context, r: Reminder): PendingIntent {
     val intent = Intent(ctx, MainActivity::class.java)
@@ -194,18 +214,32 @@ object ReminderScheduler {
   fun show(ctx: Context, r: Reminder) {
     ensureChannels(ctx)
     val alarm = r.kind == "alarm"
+    // kind "update": a client-app push shown while the app is open (ClientPushBridge).
+    val update = r.kind == "update"
     val open = openAppIntent(ctx, r)
-    val b = NotificationCompat.Builder(ctx, if (alarm) CHANNEL_ALARM else CHANNEL_POPUP)
-      .setSmallIcon(R.drawable.ic_stat_reminder)
+    val channel = when {
+      alarm -> CHANNEL_ALARM
+      update -> CHANNEL_UPDATES
+      else -> CHANNEL_POPUP
+    }
+    val b = NotificationCompat.Builder(ctx, channel)
+      .setSmallIcon(R.drawable.ic_stat_bestserve)
+      .setLargeIcon(appIcon(ctx))
       .setContentTitle(r.title)
       .setContentText(r.body)
       .setStyle(NotificationCompat.BigTextStyle().bigText(r.body))
       .setPriority(NotificationCompat.PRIORITY_MAX)
-      .setCategory(if (alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+      .setCategory(
+        when {
+          alarm -> NotificationCompat.CATEGORY_ALARM
+          update -> NotificationCompat.CATEGORY_STATUS
+          else -> NotificationCompat.CATEGORY_REMINDER
+        },
+      )
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setContentIntent(open)
       .setAutoCancel(true)
-      .setColor(0xFF2563EB.toInt())
+      .setColor(BRAND_COLOR)
     if (alarm) {
       // Locked phone: Android opens this full-screen intent by itself - the alarm screen, never the app.
       b.setFullScreenIntent(alarmScreenIntent(ctx, r), true)
@@ -229,7 +263,7 @@ object ReminderScheduler {
       android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
         try {
           val quiet = NotificationCompat.Builder(ctx, CHANNEL_POPUP)
-            .setSmallIcon(R.drawable.ic_stat_reminder)
+            .setSmallIcon(R.drawable.ic_stat_bestserve)
             .setContentTitle(r.title)
             .setContentText(r.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(r.body))
@@ -237,7 +271,7 @@ object ReminderScheduler {
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            .setColor(0xFF2563EB.toInt())
+            .setColor(BRAND_COLOR)
             .addAction(0, "Snooze 10 min", actionIntent(ctx, ReminderReceiver.ACTION_SNOOZE, r))
             .build()
           val nm = NotificationManagerCompat.from(ctx)

@@ -74,6 +74,10 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
+      <!-- Pushes Android draws itself (app closed) without an icon in the message: the BestServe mark. -->
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_stat_bestserve" />
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

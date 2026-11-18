@@ -13,6 +13,7 @@ const { pool } = require("../../db");
 const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const PERMISSIONS = require("../access/permissions");
+const { notifyServiceRequest } = require("../services/clientNotify.service");
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -176,6 +177,7 @@ router.post("/:id/booked", auth, requirePermission(PERMISSIONS.CREATE_BOOKING), 
     );
     if (!result.affectedRows) throw httpError(409, "This request has already been handled");
     res.json({ success: true, other_outlet: booking.company_id && booking.company_id !== request.site_id });
+    notifyServiceRequest(request.id, "ASSIGNED", note);
   } catch (err) {
     sendError(res, err, "Failed to update request");
   }
@@ -194,6 +196,7 @@ router.post("/:id/reject", auth, requirePermission(PERMISSIONS.CREATE_BOOKING), 
     );
     if (!result.affectedRows) throw httpError(409, "This request has already been handled");
     res.json({ success: true });
+    notifyServiceRequest(request.id, "REJECTED", note);
   } catch (err) {
     sendError(res, err, "Failed to reject request");
   }
