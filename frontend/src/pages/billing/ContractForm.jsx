@@ -258,8 +258,7 @@ export default function ContractForm() {
               )}
             </div>
             <div className="ac-table-wrap">
-<<<<<<< HEAD
-              <table className="ac-table bl-prices">
+              <table className="ac-table ac-stack bl-prices">
                 <colgroup>
                   <col style={{ width: "22%" }} />
                   <col />
@@ -269,9 +268,6 @@ export default function ContractForm() {
                   <col style={{ width: 130 }} />
                   <col style={{ width: 190 }} />
                 </colgroup>
-=======
-              <table className="ac-table ac-stack">
->>>>>>> 6bb3fbfbc8ddc47cd7b28a262bbffb44bdde93a7
                 <thead>
                   <tr>
                     <th>Outlet</th>

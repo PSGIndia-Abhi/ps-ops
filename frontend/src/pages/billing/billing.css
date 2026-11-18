@@ -142,14 +142,15 @@
   .bl-span2, .bl-span3 { grid-column: auto; }
 }
 
-<<<<<<< HEAD
-/* Contract price list: outlet, service, amount — one even row. */
-.ac-table.bl-prices { table-layout: fixed; width: 100%; }
+/* Contract price list: outlet, service, amount — one even row (cards on phones, via ac-stack). */
+@media (min-width: 641px) {
+  .ac-table.bl-prices { table-layout: fixed; width: 100%; }
+}
 .ac-table.bl-prices td { vertical-align: middle; }
 .ac-table.bl-prices .bl-cell-input { height: 36px; }
 .ac-table.bl-prices th.ac-num, .ac-table.bl-prices td.bl-num { text-align: right; }
 .ac-table.bl-prices .bl-outlet { display: inline-block; font-weight: 600; color: #0f172a; }
-=======
+
 /* ---------- Responsive additions (phones 360px up to wide screens) ---------- */
 
 /* The 520px side panel (Service Plans, Billing Customers) moves under the list below 1400px,
@@ -186,4 +187,3 @@
   /* invoice line cards: the remove (✕) button sits at the right */
   .ac-table.ac-stack td .bl-x { margin-left: auto; }
 }
->>>>>>> 6bb3fbfbc8ddc47cd7b28a262bbffb44bdde93a7
