@@ -52,6 +52,12 @@ function billing(value) {
   if (!BILLINGS.includes(value)) throw new QuotationInputError("Billing must be ONE_TIME, MONTHLY or YEARLY");
   return value;
 }
+// "Contract Period" on the PDF: the builder's text for a one-time / fixed service, else the months.
+const DEFAULT_ONE_TIME_TEXT = "One-time Service";
+function contractPeriodLabel(q) {
+  if (q.oneTimeService) return q.contractPeriodText || DEFAULT_ONE_TIME_TEXT;
+  return `${q.contractMonths} Month${q.contractMonths > 1 ? "s" : ""}`;
+}
 // What kind of contract the quotation is for - asked when it is saved, shown on the lead (not on the PDF).
 const CONTRACT_TYPES = ["ONE_TIME", "AMC"];
 function contractType(value) {
@@ -235,6 +241,10 @@ function normalizeQuotationContent(body) {
     quotationDate: quotationDate(b.quotationDate),
     validDays: int(b.validDays, "Valid for (days)", 1, 180, 30),
     contractMonths: int(b.contractMonths, "Contract period (months)", 1, 60, 12),
+    // A one-time / fixed number of services: the PDF shows contractPeriodText instead of the months.
+    ...(b.oneTimeService
+      ? { oneTimeService: true, contractPeriodText: text(b.contractPeriodText, "contract period text", 30) || DEFAULT_ONE_TIME_TEXT }
+      : {}),
     services,
     pricing,
     priceTable: table,
@@ -449,7 +459,7 @@ function draw(doc, q, meta) {
   const particulars = [
     ...(meta.draft ? [] : [["Quotation No", meta.number]]),
     ["Valid Until", longDate(validUntil)],
-    ["Contract Period", `${q.contractMonths} Month${q.contractMonths > 1 ? "s" : ""}`],
+    ["Contract Period", contractPeriodLabel(q)],
     ...(meta.leadNumber ? [["Reference", meta.leadNumber]] : []),
   ];
   doc.roundedRect(L, y, W, 48, 10).fillAndStroke(C.card, C.line);

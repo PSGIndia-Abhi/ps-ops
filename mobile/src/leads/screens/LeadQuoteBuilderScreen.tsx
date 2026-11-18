@@ -42,6 +42,8 @@ const ROW_KEYS: (keyof TreatmentRow)[] = ['defense_area', 'material_used', 'trea
 const PER: Record<Billing, string> = { MONTHLY: '/ month', YEARLY: '/ year', ONE_TIME: 'one-time' };
 const MAIN_WORD: Record<Billing, string> = { MONTHLY: 'monthly', YEARLY: 'yearly (AMC)', ONE_TIME: 'one-time' };
 const PER_UNIT: Record<Billing, string> = { MONTHLY: 'month', YEARLY: 'year', ONE_TIME: '' };
+// The contract period printed for a one-time / fixed service when no other text is typed.
+const ONE_TIME_TEXT = 'One-time Service';
 
 const joinNames = (names: string[]) => (names.length <= 1 ? names[0] || '' : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 const defaultSubject = (names: string[], customer: string) =>
@@ -137,6 +139,8 @@ type Start = {
   subject: string;
   validDays: string;
   contractMonths: string;
+  oneTimeService: boolean;
+  contractPeriodText: string;
   revised: boolean;
   /** The date printed at the top of the PDF, 'YYYY-MM-DD' ('' = not saved on an older quotation). */
   quotationDate: string;
@@ -160,6 +164,8 @@ function blankStart(master: QuoteMaster, customer: Start['customer'], asked: str
     subject: '',
     validDays: '30',
     contractMonths: '12',
+    oneTimeService: false,
+    contractPeriodText: ONE_TIME_TEXT,
     revised: false,
     quotationDate: todayStr(),
     discount: '',
@@ -226,6 +232,8 @@ function startFromSaved(content: SavedQuotationContent, master: QuoteMaster): St
     subject: content.subject || '',
     validDays: String(content.validDays || 30),
     contractMonths: String(content.contractMonths || 12),
+    oneTimeService: !!content.oneTimeService,
+    contractPeriodText: content.contractPeriodText || ONE_TIME_TEXT,
     revised: !!content.revised,
     quotationDate: content.quotationDate || '',
     discount: content.totals?.discount ? String(content.totals.discount) : '',
@@ -277,6 +285,9 @@ function Builder({
   const [subjectEdited, setSubjectEdited] = useState(!!start.subject);
   const [validDays, setValidDays] = useState(start.validDays);
   const [contractMonths, setContractMonths] = useState(start.contractMonths);
+  // One-time / fixed number of services: the PDF prints this text as the contract period, not the months.
+  const [oneTimeService, setOneTimeService] = useState(start.oneTimeService);
+  const [contractPeriodText, setContractPeriodText] = useState(start.contractPeriodText);
   // An edit goes to the customer as a revised proposal (it can be switched off).
   const [revised, setRevised] = useState(start.revised || !!from?.editing);
   // The date printed on the PDF - any date they like. An edit keeps the saved one; new and duplicate start at today.
@@ -413,6 +424,7 @@ function Builder({
         quotationDate,
         validDays: Number(validDays) || 30,
         contractMonths: Number(contractMonths) || 12,
+        ...(oneTimeService ? { oneTimeService: true, contractPeriodText: contractPeriodText.trim() || ONE_TIME_TEXT } : {}),
         discount: discountValue,
         services,
         pricing:
@@ -711,8 +723,29 @@ function Builder({
             />
             <FieldRow>
               <CrmTextField label="Valid for (days)" value={validDays} onChangeText={(v) => setValidDays(v.replace(/\D/g, '').slice(0, 3))} keyboardType="number-pad" />
-              <CrmTextField label="Contract (months)" value={contractMonths} onChangeText={(v) => setContractMonths(v.replace(/\D/g, '').slice(0, 2))} keyboardType="number-pad" />
+              <View style={{ opacity: oneTimeService ? 0.5 : 1 }}>
+                <CrmTextField
+                  label="Contract (months)"
+                  value={contractMonths}
+                  editable={!oneTimeService}
+                  onChangeText={(v) => setContractMonths(v.replace(/\D/g, '').slice(0, 2))}
+                  keyboardType="number-pad"
+                />
+              </View>
             </FieldRow>
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>One-time / fixed service (no contract months)</Text>
+              <Switch value={oneTimeService} onValueChange={setOneTimeService} trackColor={{ true: theme.primary, false: theme.border }} thumbColor="#fff" />
+            </View>
+            {oneTimeService && (
+              <CrmTextField
+                label="Contract period text (printed on the PDF)"
+                value={contractPeriodText}
+                onChangeText={setContractPeriodText}
+                maxLength={30}
+                placeholder={ONE_TIME_TEXT}
+              />
+            )}
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>This is a revised proposal</Text>
               <Switch value={revised} onValueChange={setRevised} trackColor={{ true: theme.primary, false: theme.border }} thumbColor="#fff" />
