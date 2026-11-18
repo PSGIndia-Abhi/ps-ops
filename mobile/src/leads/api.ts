@@ -7,6 +7,7 @@ import type {
   HomeSummary,
   LocalFile,
   LeadTask,
+  LeadTemperature,
   Meeting,
   MeetingType,
   NamedOption,
@@ -60,6 +61,9 @@ function toLead(row: Row): PipelineLead {
     services: Array.isArray(row.services_requested) ? (row.services_requested as unknown[]).map(String) : [],
     createdAt: str(row.created_at),
     contractType: row.contract_type === 'AMC' || row.contract_type === 'ONE_TIME' ? row.contract_type : null,
+    temperature: row.lead_temperature === 'HOT' || row.lead_temperature === 'WARM' || row.lead_temperature === 'COLD' ? row.lead_temperature : null,
+    temperatureBy: str(row.temperature_set_by_name),
+    temperatureAt: idOrNull(row.temperature_set_at),
   };
 }
 
@@ -119,6 +123,11 @@ export async function createLead(input: NewCommercialLead, clientRef: string): P
     notes: input.requirement,
   });
   return toLead(data);
+}
+
+/** POST /api/crm/leads/:id/temperature - Hot / Warm / Cold, or null to clear. */
+export async function setLeadTemperature(id: string, temperature: LeadTemperature | null): Promise<void> {
+  await httpClient.post(`/api/crm/leads/${id}/temperature`, { temperature });
 }
 
 export async function getTimeline(id: string): Promise<TimelineEntry[]> {

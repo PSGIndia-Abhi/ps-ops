@@ -277,7 +277,44 @@ async function resolveLeadServices(executor, list) {
   return { ids };
 }
 
+// ---- Hot / Warm / Cold (migration 20261118_lead_temperature.sql) ----------------------------
+// How interested the customer is. Set by the people who own leads (LEAD_OWNER_ROLES and admin):
+// heads of sales on any lead they can see, a sales executive on their own leads only.
+const LEAD_TEMPERATURES = ["HOT", "WARM", "COLD"];
+const TEMPERATURE_LABEL = { HOT: "Hot", WARM: "Warm", COLD: "Cold" };
+
+/**
+ * lead id -> { lead_temperature, temperature_set_by, temperature_set_by_name, temperature_set_at }
+ * for the leads that have one. Empty when the migration has not been run yet, so screens and
+ * reports that read it keep working exactly as before.
+ */
+async function leadTemperatures(executor, leadIds) {
+  if (!leadIds.length) return new Map();
+  try {
+    const [rows] = await executor.query(
+      `SELECT l.id, l.lead_temperature, l.temperature_set_by, u.name AS temperature_set_by_name,
+              DATE_FORMAT(l.temperature_set_at, '%Y-%m-%d %H:%i:%s') AS temperature_set_at
+         FROM crm_leads l LEFT JOIN users u ON u.id = l.temperature_set_by
+        WHERE l.id IN (?) AND l.lead_temperature IS NOT NULL`,
+      [leadIds]
+    );
+    return new Map(rows.map((r) => [r.id, {
+      lead_temperature: LEAD_TEMPERATURES.includes(r.lead_temperature) ? r.lead_temperature : null,
+      temperature_set_by: r.temperature_set_by === null ? null : String(r.temperature_set_by),
+      temperature_set_by_name: r.temperature_set_by_name || "",
+      temperature_set_at: r.temperature_set_at || null,
+    }]));
+  } catch (err) {
+    if (err?.code === "ER_BAD_FIELD_ERROR") return new Map();
+    throw err;
+  }
+}
+/** The fields a lead row carries for its temperature (all null when not set). */
+const temperatureFields = (map, leadId) =>
+  map.get(leadId) || { lead_temperature: null, temperature_set_by: null, temperature_set_by_name: "", temperature_set_at: null };
+
 module.exports = {
+  LEAD_TEMPERATURES, TEMPERATURE_LABEL, leadTemperatures, temperatureFields,
   INDUSTRY_TYPES, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,

@@ -36,7 +36,8 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { actionLabel, isTerminal, leadActions, type LeadAction } from '../stage';
-import type { PipelineLead, PipelineStage, TimelineEntry } from '../types';
+import { TEMPERATURE_LABEL, TemperaturePicker, canSetTemperature } from '../Temperature';
+import type { LeadTemperature, PipelineLead, PipelineStage, TimelineEntry } from '../types';
 import { errorMessage, StageBadge, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
 const HISTORY_PREVIEW = 4;
@@ -342,8 +343,18 @@ const HISTORY_META: Record<string, { title: string; tone: Tone; icon: IconFn }> 
   CONVERSION_CREDIT_CHANGED: { title: 'Conversion counted for someone else', tone: 'success', icon: (c) => <UsersIcon size={15} color={c} /> },
   AGREEMENT_SIGNED: { title: 'Signed agreement uploaded', tone: 'success', icon: (c) => <UploadIcon size={15} color={c} /> },
   MARK_LOST: { title: 'Marked lost', tone: 'danger', icon: (c) => <CloseIcon size={15} color={c} /> },
+  // Hot / Warm / Cold - the note says which ("Hot", "Warm (was Hot)", "Cleared (was Cold)"); see historyMeta.
+  TEMPERATURE_SET: { title: 'Hot / Warm / Cold changed', tone: 'warning', icon: (c) => <SparkleIcon size={15} color={c} /> },
   FEEDBACK_SENT: { title: 'Feedback sent to provider', tone: 'neutral', icon: (c) => <SendIcon size={15} color={c} /> },
 };
+
+/** A TEMPERATURE_SET note ("Hot", "Warm (was Hot)", "Cleared (was Cold)") as a history row. */
+function temperatureHistory(note: string): { title: string; tone: Tone; note: string } {
+  const [now, was] = note.split(' (was ');
+  const before = was ? `Was ${was.replace(/\)$/, '')}` : '';
+  if (now === 'Cleared') return { title: 'Hot / Warm / Cold cleared', tone: 'neutral', note: before };
+  return { title: `Marked ${now}`, tone: now === 'Hot' ? 'danger' : now === 'Warm' ? 'warning' : 'info', note: before };
+}
 
 const historyFallbackIcon: IconFn = (c) => <ClockIcon size={15} color={c} />;
 /** A verification call that ended "need more information" (also a QUALIFY row - its note tells). */
@@ -374,6 +385,7 @@ export function LeadWorkScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [savingTemp, setSavingTemp] = useState<LeadTemperature | null>(null);
 
   const loader = useCallback(async () => {
     const lead = await api.getLead(leadId);
@@ -445,6 +457,21 @@ export function LeadWorkScreen() {
   };
 
   const open = (url: string, fail: string) => Linking.openURL(url).catch(() => setActionError(fail));
+
+  // Hot / Warm / Cold: saved straight away (no confirmation - it can be changed back any time).
+  const pickTemperature = async (next: LeadTemperature | null) => {
+    setSavingTemp(next ?? data?.lead.temperature ?? 'HOT');
+    setActionError(null);
+    try {
+      await api.setLeadTemperature(leadId, next);
+      setNotice(next ? `Marked ${TEMPERATURE_LABEL[next]}.` : 'Hot / Warm / Cold cleared.');
+      reload();
+    } catch (err) {
+      setActionError(errorMessage(err, 'Could not save. Please try again.'));
+    } finally {
+      setSavingTemp(null);
+    }
+  };
 
 
   const lead = data?.lead;
@@ -602,6 +629,9 @@ export function LeadWorkScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* Hot / Warm / Cold - sales executives (own leads) and the heads of sales; others just see it */}
+            <TemperaturePicker lead={lead} canSet={canSetTemperature(lead, user?.role, myId)} saving={savingTemp} onPick={pickTemperature} />
 
             {/* What to do next */}
             <Text style={[styles.sectionTitle, styles.nextTitle]}>NEXT STEP</Text>
@@ -804,11 +834,14 @@ export function LeadWorkScreen() {
               {shownHistory.map((entry: TimelineEntry, i) => {
                 // A verification call can end "genuine" or "need more information": the note says which.
                 const needsInfo = entry.action === 'QUALIFY' && /NEEDS_INFO/.test(entry.note || '');
-                const meta = needsInfo
+                const temp = entry.action === 'TEMPERATURE_SET' ? temperatureHistory(entry.note || '') : null;
+                const meta = temp
+                  ? { ...HISTORY_META.TEMPERATURE_SET, title: temp.title, tone: temp.tone }
+                  : needsInfo
                   ? NEEDS_INFO_META
                   : HISTORY_META[entry.action] ?? { title: actionLabel(entry.action), tone: 'neutral' as Tone, icon: historyFallbackIcon };
                 const c = toneColors(theme, meta.tone);
-                const note = entry.note ? humanNote(entry.note) : '';
+                const note = temp ? temp.note : entry.note ? humanNote(entry.note) : '';
                 const day = dayLabel(entry.at);
                 const newDay = i === 0 || dayLabel(shownHistory[i - 1].at) !== day;
                 const lastOfDay = i === shownHistory.length - 1 || dayLabel(shownHistory[i + 1].at) !== day;

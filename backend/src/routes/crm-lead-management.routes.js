@@ -6,7 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
-  INDUSTRY_TYPES, resolveLeadServices,
+  INDUSTRY_TYPES, resolveLeadServices, LEAD_TEMPERATURES, TEMPERATURE_LABEL, leadTemperatures, temperatureFields,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -471,6 +471,59 @@ router.post("/leads/:id/reject", auth, requirePermission("CRM_VIEW_LEAD"), async
     res.json(updated);
   } catch (err) {
     sendError(res, err, "Failed to reject lead");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/crm/leads/:id/temperature { temperature: "HOT" | "WARM" | "COLD" | null }
+//   -> { lead_temperature, temperature_set_by, temperature_set_by_name, temperature_set_at }
+// Hot / Warm / Cold: how interested the customer is. Optional; null clears it. Only the people
+// who own leads: the heads of sales (Sales Manager, MD, PA) and admin on any lead they can see,
+// a Sales Executive on their own leads (created by them or assigned to them). Not telecallers.
+// Open leads only. It does not bump row_version, so it never blocks someone editing the lead.
+// Logged to the timeline as TEMPERATURE_SET.
+// ---------------------------------------------------------------------------
+router.post("/leads/:id/temperature", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const admin = req.user.role === "admin";
+    if (!admin && !LEAD_OWNER_ROLES.includes(req.user.role)) {
+      throw new HttpError(403, "Only sales executives and the heads of sales can mark Hot / Warm / Cold");
+    }
+    const lead = await loadVisibleLead(req, req.params.id);
+    const me = Number(req.user.id);
+    const ownsIt = Number(lead.created_by_user_id) === me || Number(lead.assigned_sales_employee_id) === me;
+    if (!admin && !isLeadHead(req) && !ownsIt) throw new HttpError(403, "You can mark Hot / Warm / Cold on your own leads only");
+    if (["NOT_GENUINE", "WON", "CONVERTED", "LOST", "CANCELLED"].includes(lead.pipeline_stage) || isConvertedLead(lead)) {
+      throw new HttpError(400, "Hot / Warm / Cold can only be changed on an open lead");
+    }
+
+    const raw = req.body?.temperature;
+    const next = raw === null || raw === undefined || raw === "" ? null : String(raw).toUpperCase();
+    if (next !== null && !LEAD_TEMPERATURES.includes(next)) throw new HttpError(400, "temperature must be HOT, WARM, COLD or null");
+
+    let current;
+    try {
+      [[current]] = await pool.query("SELECT lead_temperature FROM crm_leads WHERE id = ?", [lead.id]);
+    } catch (err) {
+      if (err?.code === "ER_BAD_FIELD_ERROR") throw new HttpError(503, "Hot / Warm / Cold is not set up on the server yet");
+      throw err;
+    }
+    const before = LEAD_TEMPERATURES.includes(current?.lead_temperature) ? current.lead_temperature : null;
+    if (before !== next) {
+      await inTransaction(async (conn) => {
+        await conn.query(
+          "UPDATE crm_leads SET lead_temperature = ?, temperature_set_by = ?, temperature_set_at = NOW() WHERE id = ?",
+          [next, me, lead.id]
+        );
+        // "Hot", "Warm (was Hot)", "Cleared (was Cold)"
+        const note = next ? `${TEMPERATURE_LABEL[next]}${before ? ` (was ${TEMPERATURE_LABEL[before]})` : ""}` : `Cleared (was ${TEMPERATURE_LABEL[before]})`;
+        await logLeadHistory(conn, lead.id, "TEMPERATURE_SET", { note, changedBy: me });
+      });
+    }
+    const map = await leadTemperatures(pool, [lead.id]);
+    res.json(temperatureFields(map, lead.id));
+  } catch (err) {
+    sendError(res, err, "Failed to save Hot / Warm / Cold");
   }
 });
 

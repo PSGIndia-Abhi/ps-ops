@@ -30,6 +30,7 @@ import { fmtDateShort, fmtTime, initials, todayStr } from '../tasks/format';
 import { radii, spacing, typography } from '../theme';
 import { formatDate } from '../utils/date';
 import { leadPersonaForRole, STAGE_META } from './stage';
+import { TemperatureChip } from './Temperature';
 import type { LeadPersona, Meeting, PipelineLead, PipelineStage } from './types';
 
 /** Shared building blocks for the lead screens - same look as the CRM and Task apps (CRM theme). */
@@ -385,6 +386,7 @@ export function LeadAvatar({ name, stage }: { name: string; stage: PipelineStage
 }
 
 const leadRowFactory = (t: CrmTheme) => ({
+  badges: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
   card: {
     backgroundColor: t.surface,
     borderRadius: radii.xl,
@@ -492,7 +494,10 @@ export function LeadRow({ lead, onPress }: { lead: PipelineLead; onPress: () => 
         ) : (
           <View style={styles.by} />
         )}
-        <StageBadge stage={lead.stage} />
+        <View style={styles.badges}>
+          <TemperatureChip value={lead.temperature} />
+          <StageBadge stage={lead.stage} />
+        </View>
       </View>
     </Pressable>
   );

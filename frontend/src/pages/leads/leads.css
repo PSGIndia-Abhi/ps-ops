@@ -881,6 +881,24 @@
   .lm-contract-tag i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, .9); }
   .lm-contract-tag.amc { background: linear-gradient(135deg, #f59e0b, #ea580c); }
   .lm-contract-tag.once { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+  /* Hot / Warm / Cold (temperature.jsx): the picker under the lead header and the chip on lists */
+  .lm-temp { margin: 16px 0 0; padding: 14px 16px; border: 1px solid var(--lm-border); border-radius: var(--lm-radius); background: var(--lm-surface); box-shadow: var(--lm-shadow); }
+  .lm-temp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; strong { font-size: 14px; color: var(--lm-text); } small { font-size: 12px; color: var(--lm-muted); } }
+  .lm-temp-options { display: flex; gap: 10px; flex-wrap: wrap; }
+  .lm-temp-btn { --c: var(--lm-muted); --soft: var(--lm-line); display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 110px; min-height: 42px; padding: 0 18px; border: 1.5px solid var(--lm-border); border-radius: 999px; background: var(--lm-surface); color: var(--lm-text); font-weight: 700; font-size: 14px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .lm-temp-btn i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+  .lm-temp-btn.hot { --c: var(--lm-danger); --soft: var(--lm-danger-soft); }
+  .lm-temp-btn.warm { --c: var(--lm-warn); --soft: var(--lm-warn-soft); }
+  .lm-temp-btn.cold { --c: var(--lm-primary); --soft: var(--lm-primary-soft); }
+  .lm-temp-btn:hover:not(:disabled) { border-color: var(--c); }
+  .lm-temp-btn.on { background: var(--soft); border-color: var(--c); color: var(--c); }
+  .lm-temp-btn:disabled { cursor: default; }
+  .lm-temp-btn:disabled:not(.on) { opacity: .55; }
+  .lm-temp-chip { --c: var(--lm-muted); --soft: var(--lm-line); display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: var(--soft); color: var(--c); font-size: 11px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; white-space: nowrap; }
+  .lm-temp-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+  .lm-temp-chip.hot { --c: var(--lm-danger); --soft: var(--lm-danger-soft); }
+  .lm-temp-chip.warm { --c: var(--lm-warn); --soft: var(--lm-warn-soft); }
+  .lm-temp-chip.cold { --c: var(--lm-primary); --soft: var(--lm-primary-soft); }
   .lm-hero.tagged .lm-hero-quote { margin-top: 26px; }
   .lm-hero-quote { text-align: right; small { color: #cfe0ff; font-size: 12px; } strong { display: block; font-size: 28px; letter-spacing: -.6px; font-variant-numeric: tabular-nums; } }
   .lm-hero-actions { position: relative; z-index: 1; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }

@@ -12,7 +12,8 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
-import type { Person, PipelineLead } from '../types';
+import type { LeadTemperature, Person, PipelineLead } from '../types';
+import { TEMPERATURE_LABEL, TEMPERATURES } from '../Temperature';
 import { ActiveFilterChips, ANY_TIME, FilterButton, LeadFilterSheet, whenDay, whenLabel, whenRange, type WhenFilter, type WhoOption } from '../LeadFilterSheet';
 import { LeadRow, personTone, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -93,6 +94,9 @@ export function LeadListScreen() {
   const [who, setWho] = useState<string>('all');
   const [when, setWhen] = useState<WhenFilter>(ANY_TIME);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Hot / Warm / Cold ('all', 'NONE' = not marked yet). Not offered to telecallers - they don't use it.
+  const [temp, setTemp] = useState<'all' | 'NONE' | LeadTemperature>('all');
+  const showTemp = persona !== 'telecaller';
   const filterLeads = useCallback(
     (list: PipelineLead[], w: string, wh: WhenFilter) => {
       let out = list;
@@ -107,7 +111,11 @@ export function LeadListScreen() {
     [manager, myId],
   );
   // The stage chips, their counts, the list and the search all follow the filters.
-  const data = useMemo(() => (loaded?.[0] ? filterLeads(loaded[0], who, when) : undefined), [loaded, who, when, filterLeads]);
+  const data = useMemo(() => {
+    if (!loaded?.[0]) return undefined;
+    const list = filterLeads(loaded[0], who, when);
+    return temp === 'all' ? list : list.filter((l) => (temp === 'NONE' ? !l.temperature : l.temperature === temp));
+  }, [loaded, who, when, temp, filterLeads]);
   const onDay = whenDay(when);
   const whoLabel =
     who === 'mine' ? 'Added by me' : who === 'none' ? 'Unassigned' : people.find((p) => String(p.id) === who)?.name ?? 'Someone';
@@ -123,6 +131,7 @@ export function LeadListScreen() {
   ];
   const activeFilters = [
     ...(manager && who !== 'all' ? [{ key: 'who', label: whoLabel, onRemove: () => setWho('all') }] : []),
+    ...(temp !== 'all' ? [{ key: 'temp', label: temp === 'NONE' ? 'Not marked' : TEMPERATURE_LABEL[temp], onRemove: () => setTemp('all') }] : []),
     ...(when.kind !== 'any' ? [{ key: 'when', label: `Added ${whenLabel(when) === 'Today' || whenLabel(when) === 'Yesterday' ? whenLabel(when).toLowerCase() : whenDay(when) ? `on ${whenLabel(when)}` : whenLabel(when)}`, onRemove: () => setWhen(ANY_TIME) }] : []),
   ];
 
@@ -161,6 +170,28 @@ export function LeadListScreen() {
         <FilterButton count={activeFilters.length} onPress={() => setFiltersOpen(true)} />
       </View>
       <ActiveFilterChips items={activeFilters} />
+      {showTemp && (
+        <View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            {(['all', ...TEMPERATURES, 'NONE'] as const).map((k) => {
+              const on = temp === k;
+              return (
+                <Pressable
+                  key={k}
+                  onPress={() => setTemp(k)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.chip, on && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                    {k === 'all' ? 'Hot / Warm / Cold: all' : k === 'NONE' ? 'Not marked' : TEMPERATURE_LABEL[k]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
       <View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {groups.map((g) => (

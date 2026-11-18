@@ -50,7 +50,14 @@ export interface PipelineLead {
   createdAt: string;
   /** One-time or AMC (the lead list's tag): chosen at conversion, else the latest quotation's. */
   contractType?: 'ONE_TIME' | 'AMC' | null;
+  /** Hot / Warm / Cold - how interested the customer is (null = not marked), and who set it last. */
+  temperature?: LeadTemperature | null;
+  temperatureBy?: string;
+  /** 'YYYY-MM-DD HH:MM:SS' wall clock. */
+  temperatureAt?: string | null;
 }
+
+export type LeadTemperature = 'HOT' | 'WARM' | 'COLD';
 
 export type MeetingStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
 export type MeetingType = 'SITE_VISIT' | 'OFFICE';

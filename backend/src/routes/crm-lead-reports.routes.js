@@ -75,6 +75,31 @@ const CONVERTED_LEADS_SQL = `SELECT c.lead_id, COALESCE(l.assigned_sales_employe
   FROM crm_lead_conversions c JOIN crm_leads l ON l.id = c.lead_id
   GROUP BY c.lead_id, COALESCE(l.assigned_sales_employee_id, c.converted_by)`;
 
+// Hot / Warm / Cold counts for a person: open commercial leads they own (their sales executive,
+// else who added it) by the tag they carry today, whoever set it. Not limited to the chosen dates.
+// Needs the lead as `l`; the params are [employeeId].
+const OPEN_OWNED_LEADS_SQL = `l.lead_type = 'commercial'
+  AND COALESCE(l.assigned_sales_employee_id, l.created_by_user_id) = ?
+  AND COALESCE(l.pipeline_stage, 'NEW') NOT IN ('WON','CONVERTED','NOT_GENUINE','LOST','CANCELLED')`;
+async function temperatureCounts(employeeId) {
+  const out = { hotLeads: 0, warmLeads: 0, coldLeads: 0 };
+  try {
+    const [rows] = await pool.query(
+      `SELECT l.lead_temperature AS t, COUNT(*) AS n FROM crm_leads l
+        WHERE ${OPEN_OWNED_LEADS_SQL} AND l.lead_temperature IS NOT NULL GROUP BY l.lead_temperature`,
+      [employeeId]
+    );
+    for (const r of rows) {
+      if (r.t === "HOT") out.hotLeads = Number(r.n);
+      if (r.t === "WARM") out.warmLeads = Number(r.n);
+      if (r.t === "COLD") out.coldLeads = Number(r.n);
+    }
+  } catch (err) {
+    if (err?.code !== "ER_BAD_FIELD_ERROR") throw err; // migration not run yet: all zero
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/crm/reports/sales-performance?from=YYYY-MM-DD&to=YYYY-MM-DD&employeeId=102
 //
@@ -149,10 +174,14 @@ router.get("/reports/sales-performance", auth, requirePermission("CRM_VIEW_LEAD"
       [employeeId, from, to]
     );
 
+    // Hot / Warm / Cold: their open leads by today's tag (a snapshot - the dates do not apply).
+    const temps = await temperatureCounts(employeeId);
+
     res.json({
       employeeId,
       from,
       to,
+      ...temps,
       leadsGenerated: Number(leadsGenerated),
       genuineLeads: Number(genuineLeads),
       meetingsScheduled: Number(meetingsScheduled),
@@ -204,7 +233,16 @@ const PERFORMANCE_ITEMS = {
   leadsLost: `SELECT h.lead_id, MAX(h.changed_at) AS at, NULL AS a, NULL AS b, NULL AS amount
       FROM crm_lead_history h WHERE h.action = 'MARK_LOST' AND h.changed_by = ? AND DATE(h.changed_at) BETWEEN ? AND ?
       GROUP BY h.lead_id`,
+  // Hot / Warm / Cold: a snapshot of today (see temperatureCounts), so the two dates are not used.
+  hotLeads: temperatureItemsSql("HOT"),
+  warmLeads: temperatureItemsSql("WARM"),
+  coldLeads: temperatureItemsSql("COLD"),
 };
+function temperatureItemsSql(kind) {
+  return `SELECT l.id AS lead_id, l.temperature_set_at AS at, su.name AS a, NULL AS b, l.amount AS amount
+      FROM crm_leads l LEFT JOIN users su ON su.id = l.temperature_set_by
+      WHERE ${OPEN_OWNED_LEADS_SQL} AND l.lead_temperature = '${kind}' AND ? IS NOT NULL AND ? IS NOT NULL`;
+}
 // The short line under each record.
 function itemDetail(metric, row) {
   if (metric === "meetingsScheduled") return [MEETING_TYPES[row.a] || pretty(row.a), pretty(row.b)].filter(Boolean).join(" · ");
@@ -212,6 +250,7 @@ function itemDetail(metric, row) {
   if (metric === "quotationsSent") return row.a || "";
   if (metric === "followUpsDue") return row.a === "COMPLETED" ? "Done" : "Open";
   if (metric === "leadsLost") return row.loss_reason || "";
+  if (metric === "hotLeads" || metric === "warmLeads" || metric === "coldLeads") return row.a ? `Set by ${row.a}` : "";
   return "";
 }
 

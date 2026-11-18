@@ -1,5 +1,5 @@
 const ExcelJS = require("exceljs");
-const { loadQuoteServices, quoteServiceNames } = require("../utils/crmLeadManagement");
+const { loadQuoteServices, quoteServiceNames, leadTemperatures, TEMPERATURE_LABEL } = require("../utils/crmLeadManagement");
 
 // ---------------------------------------------------------------------------
 // Lead report Excel (Team Report -> Download Excel). Commercial leads added in a period, either
@@ -22,6 +22,12 @@ const STATUS = [
   ["NOT_GENUINE", "Not Genuine"],
 ];
 const STATUS_LABEL = Object.fromEntries(STATUS);
+// Hot / Warm / Cold columns on the Summary: open leads only (a closed lead is not counted).
+const TEMPS = [
+  ["HOT", "Hot (open)"],
+  ["WARM", "Warm (open)"],
+  ["COLD", "Cold (open)"],
+];
 // The server keeps two "converted" and two "lost" values; the screens show one of each.
 function statusKey(raw) {
   if (!raw) return "NEW";
@@ -56,6 +62,7 @@ const HISTORY_ACTION = {
   AGREEMENT_CREATED: "Agreement created",
   AGREEMENT_SIGNED: "Agreement signed",
   MARK_LOST: "Marked lost",
+  TEMPERATURE_SET: "Hot / Warm / Cold",
 };
 const historyLabel = (a) => HISTORY_ACTION[a] || String(a || "").replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
@@ -192,6 +199,7 @@ async function buildLeadsReport(db, { subject, period }) {
   const leads = await loadLeads(db, { people: subject.people, from: period.from, to: period.to });
   const ids = leads.map((l) => l.id);
   const d = await loadDetails(db, ids);
+  const temps = await leadTemperatures(db, ids); // Hot / Warm / Cold (empty before the migration)
   const meetings = groupBy(d.meetings);
   const calls = groupBy(d.calls);
   const quotes = groupBy(d.quotes);
@@ -220,6 +228,7 @@ async function buildLeadsReport(db, { subject, period }) {
     const conv = (conversions.get(l.id) || []).at(-1);
     const key = statusKey(l.pipeline_stage);
     const closed = key === "LOST" || key === "NOT_GENUINE";
+    const temp = temps.get(l.id);
     return {
       number: l.lead_number || "",
       added: xlDate(l.created_at),
@@ -235,6 +244,8 @@ async function buildLeadsReport(db, { subject, period }) {
       services: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")).join(", ") : "",
       location: l.location || "",
       status: STATUS_LABEL[key] || key,
+      temperature: temp?.lead_temperature ? TEMPERATURE_LABEL[temp.lead_temperature] : "",
+      temperatureBy: temp?.temperature_set_by_name || "",
       telecaller: nameOf(l.assigned_telecaller_id),
       sales: nameOf(l.assigned_sales_employee_id),
       addedBy: nameOf(l.created_by_user_id),
@@ -257,6 +268,8 @@ async function buildLeadsReport(db, { subject, period }) {
       notes: l.notes || "",
       updated: xlDate(l.updated_at),
       _key: key,
+      // counted as Hot / Warm / Cold only while the lead is open
+      _temp: key === "WON" || closed ? null : temp?.lead_temperature || null,
       _owner: l.assigned_sales_employee_id || l.assigned_telecaller_id || l.created_by_user_id,
       _id: l.id,
     };
@@ -273,7 +286,10 @@ async function buildLeadsReport(db, { subject, period }) {
     `Lead report - ${subject.title}`,
     `Leads added: ${period.label}   ·   ${rows.length} leads   ·   status as on ${generated}`,
   ]);
-  const counts = (list) => Object.fromEntries(STATUS.map(([k]) => [k, list.filter((r) => r._key === k).length]));
+  const counts = (list) => ({
+    ...Object.fromEntries(STATUS.map(([k]) => [k, list.filter((r) => r._key === k).length])),
+    ...Object.fromEntries(TEMPS.map(([k]) => [k, list.filter((r) => r._temp === k).length])),
+  });
   if (subject.perPerson) {
     // One row per person: the leads they own (sales executive, else telecaller, else who added it).
     const people = subject.perPerson.map((p) => {
@@ -285,6 +301,7 @@ async function buildLeadsReport(db, { subject, period }) {
       { key: "role", header: "Role", width: 18 },
       ...STATUS.map(([k, label]) => ({ key: k, header: label, width: 12 })),
       { key: "total", header: "Total", width: 10 },
+      ...TEMPS.map(([k, label]) => ({ key: k, header: label, width: 12 })),
     ], [...people, { person: "Total", role: "", total: rows.length, ...counts(rows) }]);
     sum.getRow(4 + people.length + 1).font = { bold: true };
   } else {
@@ -292,7 +309,11 @@ async function buildLeadsReport(db, { subject, period }) {
     addTable(sum, 4, [
       { key: "status", header: "Status", width: 24 },
       { key: "leads", header: "Leads", width: 10 },
-    ], [...STATUS.map(([k, label]) => ({ status: label, leads: c[k] })), { status: "Total", leads: rows.length }]);
+    ], [
+      ...STATUS.map(([k, label]) => ({ status: label, leads: c[k] })),
+      { status: "Total", leads: rows.length },
+      ...TEMPS.map(([k, label]) => ({ status: label, leads: c[k] })),
+    ]);
     sum.getRow(4 + STATUS.length + 1).font = { bold: true };
   }
 
@@ -313,6 +334,8 @@ async function buildLeadsReport(db, { subject, period }) {
     { key: "services", header: "Services", width: 30, wrap: true },
     { key: "location", header: "Location", width: 32, wrap: true },
     { key: "status", header: "Current Status", width: 18 },
+    { key: "temperature", header: "Hot / Warm / Cold", width: 12 },
+    { key: "temperatureBy", header: "Hot / Warm / Cold Set By", width: 20 },
     { key: "telecaller", header: "Telecaller", width: 20 },
     { key: "sales", header: "Sales Executive", width: 20 },
     { key: "addedBy", header: "Added By", width: 20 },
