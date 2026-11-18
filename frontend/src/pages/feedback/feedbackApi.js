@@ -43,6 +43,10 @@ export const saveSettings = (settings) => feedbackRequest("/settings", send("PUT
 
 /* ---- monthly calls ---- */
 export const listCalls = (params) => feedbackRequest(`/calls${query(params)}`);
+/** Completed view: completed calls grouped by site (same params as listCalls, no status). */
+export const listCompletedSites = (params) => feedbackRequest(`/calls/completed${query(params)}`);
+/** Every completed call of one site, with answers and tickets (same params as listCalls). */
+export const getCompletedSite = (siteId, params) => feedbackRequest(`/calls/completed/${encodeURIComponent(siteId)}${query(params)}`);
 /** Take a call from the list (its id). */
 export const takeCall = (requestId) => feedbackRequest("/calls", send("POST", { request_id: requestId }));
 export const getCall = (id) => feedbackRequest(`/calls/${id}`);
