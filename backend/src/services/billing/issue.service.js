@@ -45,6 +45,7 @@ function buildContent(inv, number) {
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
     lines,
     tax_mode: inv.tax_mode,
+    gst_rate: inv.gst_rate,
     subtotal: inv.subtotal,
     cgst: inv.cgst,
     sgst: inv.sgst,

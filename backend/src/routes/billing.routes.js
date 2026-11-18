@@ -14,6 +14,7 @@ const plans = require("../controllers/billing/servicePlans.controller");
 const pos = require("../controllers/billing/pos.controller");
 const invoices = require("../controllers/billing/invoices.controller");
 const share = require("../controllers/billing/share.controller");
+const descriptions = require("../controllers/billing/descriptions.controller");
 
 const can = (permission) => [auth, requirePermission(permission)];
 
@@ -55,6 +56,11 @@ router.get("/service-tracker/jobs", can(P.VIEW_SERVICE_TRACKER), plans.trackerJo
 router.post("/service-tracker/notify", can(P.VIEW_SERVICE_TRACKER), plans.notifyOperations);
 
 // Contracts and price lists
+// Invoice descriptions master (the contract's "Description on invoice" is picked from it).
+router.get("/descriptions", can(P.VIEW_BILLING), descriptions.list);
+router.post("/descriptions", can(P.MANAGE_BILLING_MASTERS), descriptions.create);
+router.put("/descriptions/:id", can(P.MANAGE_BILLING_MASTERS), descriptions.update);
+
 router.get("/contracts", can(P.VIEW_BILLING), masters.listContracts);
 router.post("/contracts", can(P.MANAGE_BILLING_MASTERS), masters.createContract);
 router.get("/contracts/:id", can(P.VIEW_BILLING), masters.getContract);

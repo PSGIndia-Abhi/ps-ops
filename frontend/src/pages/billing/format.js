@@ -37,6 +37,39 @@ export function monthLabel(value) {
   return m ? `${LONG[Number(m[2]) - 1]} ${m[1]}` : "";
 }
 
+// Date maths matching the backend (services/billing/common.js, period.js).
+const pad2 = (n) => String(n).padStart(2, "0");
+function addDaysYmd(date, n) {
+  const [y, m, d] = date.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+}
+function addMonthsYmd(date, n) {
+  const [y, m, d] = date.split("-").map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return `${ny}-${pad2(nm)}-${pad2(Math.min(d, new Date(Date.UTC(ny, nm, 0)).getUTCDate()))}`;
+}
+
+/**
+ * The next period a contract bills and the month whose Bill Run lists it (as period.js decides):
+ * in arrears once the period has ended, in advance once it has started.
+ * contract: { billing_type, frequency_months, bill_timing, end_date }, from: the period start.
+ */
+export function nextBilling(contract, from) {
+  if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
+  if (contract.end_date && from > contract.end_date) return null;
+  let end;
+  if (contract.billing_type === "ONE_TIME") end = contract.end_date && contract.end_date >= from ? contract.end_date : from;
+  else {
+    end = addDaysYmd(addMonthsYmd(from, Number(contract.frequency_months) || 1), -1);
+    if (contract.end_date && end > contract.end_date) end = contract.end_date;
+  }
+  const advance = contract.bill_timing === "ADVANCE";
+  return { start: from, end, advance, billMonth: (advance ? from : end).slice(0, 7) };
+}
+
 /** A billing period as shown in lists: whole month -> "Nov 2026", else "01-Aug-26 – 31-Oct-26". */
 export function periodLabel(start, end) {
   if (!start) return "—";

@@ -142,14 +142,13 @@
   .bl-span2, .bl-span3 { grid-column: auto; }
 }
 
-<<<<<<< HEAD
 /* Contract price list: outlet, service, amount — one even row. */
 .ac-table.bl-prices { table-layout: fixed; width: 100%; }
 .ac-table.bl-prices td { vertical-align: middle; }
 .ac-table.bl-prices .bl-cell-input { height: 36px; }
 .ac-table.bl-prices th.ac-num, .ac-table.bl-prices td.bl-num { text-align: right; }
 .ac-table.bl-prices .bl-outlet { display: inline-block; font-weight: 600; color: #0f172a; }
-=======
+
 /* ---------- Responsive additions (phones 360px up to wide screens) ---------- */
 
 /* The 520px side panel (Service Plans, Billing Customers) moves under the list below 1400px,
@@ -186,4 +185,92 @@
   /* invoice line cards: the remove (✕) button sits at the right */
   .ac-table.ac-stack td .bl-x { margin-left: auto; }
 }
->>>>>>> 6bb3fbfbc8ddc47cd7b28a262bbffb44bdde93a7
+
+/* ---------- Service plan editor: simple sections and rows ---------- */
+.sp-section { padding: 14px 0; border-top: 1px solid #eef2f7; }
+.sp-section:first-of-type { border-top: 0; padding-top: 4px; }
+.sp-section-title { font-size: 13px; font-weight: 700; color: #334155; margin: 0 0 10px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sp-section-title span { font-weight: 500; color: #64748b; }
+.sp-service { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sp-service select { flex: 1 1 auto; min-width: 0; height: 38px; }
+.sp-service .sp-name { flex: 1 1 auto; font-weight: 600; color: #0f172a; }
+.sp-service .bl-x { margin-left: 0; font-size: 15px; padding: 4px; }
+.sp-add { width: 100%; border: 1px dashed #cbd5e1; background: #f8fafc; color: #2563eb; font-weight: 600; border-radius: 8px; padding: 9px; cursor: pointer; }
+.sp-add:hover { background: #eff6ff; border-color: #93c5fd; }
+.sp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.sp-row label { font-size: 13.5px; color: #334155; font-weight: 600; }
+.sp-row .ac-input { width: 170px; }
+.sp-help { font-size: 12.5px; color: #64748b; margin: -2px 0 4px; line-height: 1.45; }
+.sp-stp { height: 38px; flex: 0 0 auto; }
+.sp-stp button { height: 100%; padding: 0 12px; }
+.sp-stp input { height: 100%; width: 46px; }
+.sp-note { font-size: 12.5px; color: #475569; background: #f8fafc; border-radius: 8px; padding: 8px 10px; margin-top: 4px; }
+.sp-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid #eef2f7; margin-top: 10px; }
+@media (max-width: 480px) {
+  .sp-row { flex-wrap: wrap; }
+  .sp-row .ac-input { width: 100%; }
+}
+
+/* ---------- New contract: step by step ---------- */
+.nc-page { max-width: 920px; }
+.nc-steps { display: flex; gap: 6px; list-style: none; margin: 0 0 14px; padding: 0; flex-wrap: wrap; }
+.nc-steps li { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 13px; font-weight: 600; }
+.nc-steps li span { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #e2e8f0; color: #475569; font-size: 12px; }
+.nc-steps li.on { background: #eff6ff; color: #1d4ed8; }
+.nc-steps li.on span { background: #2563eb; color: #fff; }
+.nc-steps li.done { color: #15803d; }
+.nc-steps li.done span { background: #dcfce7; color: #15803d; }
+.nc-card { padding: 20px 22px; }
+.nc-title { margin: 0 0 14px; font-size: 17px; color: #0f172a; }
+.nc-chip-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; flex-wrap: wrap; }
+.nc-options { display: grid; gap: 8px; }
+.nc-option { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 10px; cursor: pointer; }
+.nc-option.on { border-color: #2563eb; background: #f5f8ff; }
+.nc-option small { display: block; color: #64748b; font-size: 12px; margin-top: 2px; }
+.nc-lines { display: grid; gap: 8px; }
+.nc-line { display: grid; grid-template-columns: minmax(0, 1fr) 150px 32px; gap: 8px; align-items: center; }
+.nc-lines.plan .nc-line { grid-template-columns: minmax(0, 1fr) 140px 130px 32px; }
+.nc-lines.termite .nc-line { grid-template-columns: minmax(0, 1fr) 140px 120px 32px; }
+.nc-line.nc-head { font-size: 12px; font-weight: 600; color: #64748b; }
+.nc-line .ac-select, .nc-line .ac-input { height: 38px; }
+.nc-line .bl-x { margin: 0; font-size: 15px; }
+.nc-line .bl-x:disabled { opacity: 0.3; cursor: default; }
+.nc-total { text-align: right; margin-top: 12px; font-size: 14px; color: #334155; }
+.nc-review { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 14px; margin: 0 0 14px; font-size: 14px; }
+.nc-review dt { color: #64748b; font-weight: 600; }
+.nc-review dd { margin: 0; color: #0f172a; }
+.nc-check { list-style: none; padding: 12px 14px; margin: 0; background: #f8fafc; border-radius: 10px; display: grid; gap: 6px; font-size: 13.5px; }
+.nc-check li::before { display: inline-block; width: 20px; font-weight: 700; }
+.nc-check li.ok::before { content: "✓"; color: #15803d; }
+.nc-check li.bad::before { content: "✕"; color: #b91c1c; }
+.nc-check li.info::before { content: "ⓘ"; color: #2563eb; }
+.nc-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid #eef2f7; }
+.nc-done { text-align: center; padding: 34px 24px; }
+.nc-done h2 { margin: 10px 0 6px; font-size: 20px; }
+.nc-done p { margin: 4px 0 10px; }
+.nc-done-mark { width: 52px; height: 52px; border-radius: 50%; background: #dcfce7; color: #15803d; font-size: 26px; display: inline-flex; align-items: center; justify-content: center; }
+@media (max-width: 640px) {
+  .nc-line, .nc-lines.plan .nc-line, .nc-lines.termite .nc-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .nc-line > select { grid-column: 1 / -1; }
+  .nc-line.nc-head { display: none; }
+  .nc-review { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .nc-review dd { margin-bottom: 8px; }
+  .nc-steps li { padding: 6px 10px; font-size: 12px; }
+}
+.nc-gst { display: flex; gap: 8px; align-items: center; }
+.nc-gst .ac-select { flex: 1 1 auto; min-width: 0; }
+.nc-rate { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.nc-rate .ac-input { width: 74px; text-align: center; font-weight: 600; }
+.nc-po-pick { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.nc-po-pick .ac-field { flex: 1 1 320px; }
+.nc-po-pick > .ac-btn { height: 40px; }
+.nc-po-state { font-size: 12.5px; font-weight: 600; color: #64748b; margin: 4px 0 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+/* ---------- Description on invoice: dropdown with Edit / New beside it ---------- */
+.dp-row { display: flex; gap: 8px; align-items: center; }
+.dp-row .ac-select { flex: 1 1 auto; min-width: 0; }
+.dp-row .ac-btn { flex: 0 0 auto; white-space: nowrap; }
+.dp-edit { display: grid; gap: 8px; padding: 10px; border: 1.5px solid #bfdbfe; background: #f8fbff; border-radius: 10px; }
+.dp-warn { font-size: 12.5px; color: #92400e; background: #fef3c7; border-radius: 6px; padding: 6px 8px; }
+.dp-error { font-size: 12.5px; color: #b91c1c; }
+@media (max-width: 520px) { .dp-row { flex-wrap: wrap; } .dp-row .ac-select { flex-basis: 100%; } }

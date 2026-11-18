@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { billingPost, billingPut, openPdf, qs, useBilling } from "./billingApi";
-import { amountInWords, lineAmount, totalsFor } from "./calc";
+import { amountInWords, gstRateOf, lineAmount, totalsFor } from "./calc";
 import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, typeLabel } from "./format";
 import IssueDialog from "./IssueDialog";
+import ShareDialog from "./ShareDialog";
 import { Field, Msg, ServicesChip } from "./ui";
 
 // Draft invoice editor: header, lines (with services done against the plan and the billing
 // basis), live totals, the checks before issuing, preview and issue.
+// Preview and Issue save unsaved changes first, so Save is optional. Issue goes straight through
+// (then opens Print / Share) when there is nothing to confirm; warnings still ask first.
 
 const ADJ = {
   NONE: "Full amount",
@@ -41,12 +44,14 @@ export default function DraftEditor() {
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
   const [issuing, setIssuing] = useState(false);
+  const [shareId, setShareId] = useState(null); // the invoice just issued, for Print / Share
   const issued = useRef(false);
 
   const editable = inv?.status === "DRAFT" && me.can("GENERATE_INVOICE");
   const form = edits || (inv ? formFrom(inv) : null);
   const dirty = Boolean(edits);
-  const totals = form && inv ? totalsFor(form.lines, inv.tax_mode) : null;
+  const gstRate = gstRateOf(inv?.gst_rate); // copied from the contract when the draft was made
+  const totals = form && inv ? totalsFor(form.lines, inv.tax_mode, gstRate) : null;
 
   // The checks before issuing, for the saved draft.
   const version = inv?.version;
@@ -116,6 +121,7 @@ export default function DraftEditor() {
 
   async function startIssue() {
     if (dirty && !(await save())) return;
+    setBusy(true);
     try {
       const r = await billingPost(`/invoices/${id}/check`);
       setCheck(r);
@@ -123,9 +129,24 @@ export default function DraftEditor() {
         setMsg({ error: "Fix these before issuing:", errors: r.errors });
         return;
       }
-      setIssuing(true);
+      // Warnings (services short, no PO, ...) still need a confirmation in the Issue dialog.
+      if (r.warnings?.length) {
+        setIssuing(true);
+        return;
+      }
+      // Nothing to confirm: issue now and open Print / Share. confirm_warnings stays false, so a
+      // warning that appears in the meantime stops the issue instead of being accepted unseen.
+      const res = await billingPost("/invoices/issue", { ids: [id], confirm_warnings: false });
+      if (res.issued?.length) {
+        issued.current = true;
+        setShareId(res.issued[0].id);
+      } else {
+        setMsg({ error: "The invoice was not issued:", errors: res.failed?.[0]?.errors || [] });
+      }
     } catch (err) {
       setMsg({ error: err.message });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -157,7 +178,7 @@ export default function DraftEditor() {
             {editable && <button type="button" className="ac-btn" disabled={busy || !dirty} onClick={save}>{busy ? "Saving…" : "Save"}</button>}
             {editable && dirty && <button type="button" className="ac-btn" disabled={busy} onClick={() => setEdits(null)}>Discard changes</button>}
             {me.can("GENERATE_INVOICE") && <button type="button" className="ac-btn" disabled={busy} onClick={preview}>Preview PDF</button>}
-            {me.can("ISSUE_INVOICE") && <button type="button" className="ac-btn green" disabled={busy} onClick={startIssue}>Issue invoice</button>}
+            {me.can("ISSUE_INVOICE") && <button type="button" className="ac-btn green" disabled={busy} onClick={startIssue}>{busy ? "Please wait…" : "Issue invoice"}</button>}
           </div>
         )}
       </div>
@@ -291,9 +312,9 @@ export default function DraftEditor() {
             <h3 className="ac-card-title">Totals{dirty ? " (unsaved)" : ""}</h3>
             <div className="bl-tot">
               <span className="k">Sub total</span><span className="v">{amount(totals.subtotal)}</span>
-              {inv.tax_mode === "CGST_SGST" && <><span className="k">CGST 9%</span><span className="v">{amount(totals.cgst)}</span><span className="k">SGST 9%</span><span className="v">{amount(totals.sgst)}</span></>}
-              {inv.tax_mode === "IGST" && <><span className="k">IGST 18%</span><span className="v">{amount(totals.igst)}</span></>}
-              {inv.tax_mode === "NONE" && <><span className="k">GST</span><span className="v">No GST – Residential</span></>}
+              {inv.tax_mode === "CGST_SGST" && <><span className="k">CGST {gstRate / 2}%</span><span className="v">{amount(totals.cgst)}</span><span className="k">SGST {gstRate / 2}%</span><span className="v">{amount(totals.sgst)}</span></>}
+              {inv.tax_mode === "IGST" && <><span className="k">IGST {gstRate}%</span><span className="v">{amount(totals.igst)}</span></>}
+              {inv.tax_mode === "NONE" && <><span className="k">GST</span><span className="v">{inv.customer.category === "RESIDENTIAL" ? "No GST – Residential" : "No GST"}</span></>}
               <span className="k">Round off</span><span className="v">{amount(totals.round_off)}</span>
               <span className="grand">Total</span><span className="v grand">{rupees(totals.total)}</span>
             </div>
@@ -342,6 +363,16 @@ export default function DraftEditor() {
           onClose={() => {
             setIssuing(false);
             if (issued.current) navigate("/billing/invoices");
+          }}
+        />
+      )}
+      {shareId && (
+        <ShareDialog
+          invoiceId={shareId}
+          justIssued
+          onClose={() => {
+            setShareId(null);
+            navigate("/billing/invoices");
           }}
         />
       )}

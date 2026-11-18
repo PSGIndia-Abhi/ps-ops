@@ -105,7 +105,7 @@ export default function ServiceTracker() {
                 data.rows.map((r) => (
                   <tr key={`${r.company_id}|${r.site_id}|${r.service_type}|${r.sub_service}`} className={r.highlight ? "bl-short" : r.status === "SCHEDULED" ? "bl-due" : ""}>
                     <td><b>{r.customer}</b></td>
-                    <td>{r.site || "—"}</td>
+                    <td>{r.site_id ? r.site || "—" : "All outlets"}</td>
                     <td>{r.sub_service}</td>
                     <td className="bl-num">{r.planned}</td>
                     <td className="bl-num"><b>{r.done}</b></td>
@@ -133,13 +133,16 @@ export default function ServiceTracker() {
 }
 
 function VisitsDialog({ row, month, onClose }) {
-  const { data, error, loading } = useBilling(`/service-tracker/jobs${qs({ site_id: row.site_id, service_type: row.service_type, sub_service: row.sub_service, month })}`);
+  // A whole-customer plan line (no outlet) lists the visits at every outlet of the customer.
+  const { data, error, loading } = useBilling(`/service-tracker/jobs${qs({
+    site_id: row.site_id, company_id: row.site_id ? null : row.company_id, service_type: row.service_type, sub_service: row.sub_service, month,
+  })}`);
   return (
     <Modal onClose={onClose} label="Visits">
       <div className="bl-m-head">
         <div>
           <h3>{row.sub_service}</h3>
-          <div className="ac-sub">{row.customer} · {row.site} · {monthLabel(month)} · {row.done} of {row.planned} done</div>
+          <div className="ac-sub">{row.customer} · {row.site_id ? row.site : "All outlets"} · {monthLabel(month)} · {row.done} of {row.planned} done</div>
         </div>
         <button type="button" className="bl-x" onClick={onClose} aria-label="Close">✕</button>
       </div>
@@ -153,7 +156,7 @@ function VisitsDialog({ row, month, onClose }) {
             ) : (
               data.map((v) => (
                 <tr key={`${v.job_id}-${v.visit_number}`}>
-                  <td>{v.job_code}</td>
+                  <td>{v.job_code}{!row.site_id && v.site && <div className="bl-sub">{v.site}</div>}</td>
                   <td>#{v.visit_number}</td>
                   <td>{dmy(v.scheduled_date)}</td>
                   <td><span className={`ac-badge ${v.status === "COMPLETED" ? "b-green" : v.status === "MISSED" ? "b-red" : "b-amber"}`}>{v.status.replace("_", " ").toLowerCase()}</span></td>

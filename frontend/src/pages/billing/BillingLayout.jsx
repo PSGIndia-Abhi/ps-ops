@@ -14,6 +14,7 @@ import {
   FiMessageSquare,
   FiPlayCircle,
   FiShoppingBag,
+  FiAlignLeft,
   FiUsers,
   FiCalendar,
 } from "react-icons/fi";
@@ -45,6 +46,7 @@ const PAGE_PERMISSION = {
   contracts: "VIEW_BILLING",
   pos: "VIEW_BILLING",
   customers: "VIEW_BILLING",
+  descriptions: "VIEW_BILLING",
 };
 
 function navFor(can, drafts) {
@@ -81,6 +83,7 @@ function navFor(can, drafts) {
         { label: "Contracts & Price Lists", path: `${BILLING_HOME}/contracts`, icon: FiClipboard },
         { label: "Purchase Orders", path: `${BILLING_HOME}/pos`, icon: FiShoppingBag },
         { label: "Billing Customers", path: `${BILLING_HOME}/customers`, icon: FiUsers },
+        accounts && { label: "Invoice Descriptions", path: `${BILLING_HOME}/descriptions`, icon: FiAlignLeft },
       ].filter(Boolean),
     },
   ];

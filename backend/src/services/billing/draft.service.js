@@ -79,7 +79,8 @@ function describe(template, period) {
 
 /**
  * Draft lines for a contract and period. A price line linked to a service-plan line
- * (site + plan_sub_service) gets the planned and done counts:
+ * (site + plan_sub_service, or a whole-customer plan line for that service) gets the planned
+ * and done counts:
  *   FIXED        billed in full; short services -> SERVICES adjustment (rate x done / planned)
  *                when the contract bills pro-rata
  *   PER_SERVICE  quantity = services done
@@ -89,16 +90,39 @@ async function buildLines(db, contract, period, contractLines) {
   const months = T.monthsCount(period.start, period.end);
   const plan = await T.planFor(db, contract.company_id, period.start);
   const siteIds = contractLines.map((l) => l.site_id).filter(Boolean);
-  const stats = await T.visitStats(db, siteIds, period.start, T.addDayExclusive(period.end));
+  const wholeCustomer = Boolean(plan && plan.lines.some((pl) => !pl.site_id)) || contractLines.some((l) => !l.site_id && l.plan_sub_service);
+  const stats = await T.visitStats(db, siteIds, period.start, T.addDayExclusive(period.end), wholeCustomer ? [contract.company_id] : []);
+
+  // The plan line for a price line: the one for its own outlet, otherwise a whole-customer line
+  // (no outlet, any job type) for the same service.
+  const sameService = (pl, cl) => norm(pl.sub_service) === norm(cl.plan_sub_service)
+    && (!cl.plan_service_type || !pl.service_type || norm(pl.service_type) === norm(cl.plan_service_type));
+  const planLineFor = (cl) => (plan
+    ? (cl.site_id && plan.lines.find((pl) => pl.site_id && pl.site_id === cl.site_id && sameService(pl, cl)))
+      || plan.lines.find((pl) => !pl.site_id && sameService(pl, cl))
+      || null
+    : null);
+  // How many price lines share each whole-customer plan line (one per outlet, say).
+  const sharing = new Map();
+  for (const cl of contractLines) {
+    const pl = cl.plan_sub_service ? planLineFor(cl) : null;
+    if (pl && !pl.site_id) sharing.set(pl, (sharing.get(pl) || 0) + 1);
+  }
 
   const lines = contractLines.map((cl, i) => {
-    const linked = Boolean(cl.site_id && cl.plan_sub_service);
-    const s = linked ? T.statsFor(stats, cl.site_id, cl.plan_service_type, cl.plan_sub_service) : null;
-    const planLine = linked && plan
-      ? plan.lines.find((pl) => pl.site_id === cl.site_id && norm(pl.sub_service) === norm(cl.plan_sub_service)
-          && (!cl.plan_service_type || norm(pl.service_type) === norm(cl.plan_service_type)))
-      : null;
-    const planned = planLine ? Number(planLine.visits_per_month) * months : null;
+    // Linked to the plan by service name; a price line with no outlet covers the whole customer.
+    const linked = Boolean(cl.plan_sub_service);
+    const planLine = linked ? planLineFor(cl) : null;
+    // A whole-customer plan line counts jobs at every outlet. When several outlet price lines
+    // share it, each counts its own outlet only, so services done are not billed twice, and the
+    // plan's total is not applied to any one of them (that would make every outlet look short and
+    // cut a pro-rata bill); the shortfall shows on the Service Tracker instead.
+    const shared = Boolean(cl.site_id && planLine && !planLine.site_id && sharing.get(planLine) > 1);
+    const customerWide = !cl.site_id || Boolean(planLine && !planLine.site_id && !shared);
+    const s = !linked ? null
+      : customerWide ? T.statsFor(stats, null, null, cl.plan_sub_service, contract.company_id)
+        : T.statsFor(stats, cl.site_id, cl.plan_service_type, cl.plan_sub_service);
+    const planned = planLine && !shared ? Number(planLine.visits_per_month) * months : null;
     const done = s ? s.done : null;
 
     let quantity = cl.default_qty === null ? null : Number(cl.default_qty);
@@ -173,7 +197,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     const cl = await linesInForce(db, contract.id, period.start);
     const { lines, plan } = await buildLines(db, contract, period, cl);
     const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code, contract.gst_applicable !== 0);
-    const totals = calc.totalsFor(lines, taxMode);
+    const totals = calc.totalsFor(lines, taxMode, contract.gst_rate);
     const linked = lines.filter((l) => l.services_planned !== null);
     const planned = linked.reduce((t, l) => t + l.services_planned, 0);
     const done = linked.reduce((t, l) => t + Math.min(l.services_done || 0, l.services_planned), 0);
@@ -291,16 +315,18 @@ async function draftContract(conn, contractId, month, runId, userId) {
   const drafts = [];
   for (const [siteKey, groupLines] of groups) {
     const siteId = split && siteKey ? siteKey : contract.invoice_grouping === "PER_SITE" ? contract.site_id : null;
-    const totals = calc.totalsFor(groupLines, taxMode);
+    // The contract's GST rate is copied onto the draft: changing the contract later leaves it alone.
+    const gstRate = calc.gstRateOf(contract.gst_rate);
+    const totals = calc.totalsFor(groupLines, taxMode, gstRate);
     const id = uuid();
     await conn.query(
       `INSERT INTO billing_invoices
-         (id, contract_id, company_id, site_id, bill_run_id, billing_type, customer_category, tax_mode, place_of_supply,
+         (id, contract_id, company_id, site_id, bill_run_id, billing_type, customer_category, tax_mode, gst_rate, place_of_supply,
           ship_to_site_id, period_start, period_end, invoice_date, due_date, subtotal, cgst, sgst, igst, round_off, total,
           print_copies, description, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
       [
-        id, contract.id, contract.company_id, siteId, runId, contract.billing_type, ctx.category, taxMode,
+        id, contract.id, contract.company_id, siteId, runId, contract.billing_type, ctx.category, taxMode, gstRate,
         `${ctx.profile.state_code}-${ctx.profile.state_name}`, siteId || contract.site_id || groupLines.find((l) => l.site_id)?.site_id || null,
         period.start, period.end, invoiceDate, dueDate, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.round_off, totals.total,
         plan ? Number(plan.print_copies) : 1, describe(contract.description_template, period), userId, userId,
@@ -454,6 +480,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     available_pos: available.map(poOut),
     lines: lines.map(lineOut),
     tax_mode: inv.tax_mode,
+    gst_rate: calc.gstRateOf(inv.gst_rate),
     subtotal: Number(inv.subtotal),
     cgst: Number(inv.cgst),
     sgst: Number(inv.sgst),
@@ -580,7 +607,7 @@ async function saveDraft(pool, id, body, userId) {
       }
     }
 
-    const totals = calc.totalsFor(lines, inv.tax_mode);
+    const totals = calc.totalsFor(lines, inv.tax_mode, inv.gst_rate);
     await conn.query(
       `UPDATE billing_invoices
           SET invoice_date = ?, due_date = ?, ship_to_site_id = ?, description = ?,

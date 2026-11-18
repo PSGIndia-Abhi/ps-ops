@@ -3,7 +3,8 @@
 //
 //   line amount   rate x quantity, then the line's adjustment (services done, days, percent, manual)
 //   subtotal      sum of line amounts
-//   tax           Commercial in Karnataka: CGST 9% + SGST 9%; other states: IGST 18%; Residential: none
+//   tax           the contract's GST rate (5, 12, 18 or 28 %; 18 by default): in Karnataka split in
+//                 half as CGST + SGST (9 % + 9 %), other states all IGST; Residential: none
 //   total         subtotal + tax rounded to whole rupees; the difference is the round-off
 
 const { amountInWords } = require("../../utils/brigadeInvoiceDocument");
@@ -54,12 +55,19 @@ function lineAmount(line) {
   }
 }
 
-/** Subtotal, taxes, round-off and total for the lines' amounts. */
-function totalsFor(lines, taxMode) {
+// The GST rates a contract may bill at (0 % is "No GST", set by gst_applicable instead).
+const GST_RATES = [5, 12, 18, 28];
+
+/** The GST rate to use: a valid slab, otherwise the standard 18 %. */
+const gstRateOf = (rate) => (GST_RATES.includes(Number(rate)) ? Number(rate) : IGST_RATE);
+
+/** Subtotal, taxes, round-off and total for the lines' amounts, at `gstRate` % (default 18). */
+function totalsFor(lines, taxMode, gstRate = IGST_RATE) {
+  const rate = gstRateOf(gstRate);
   const subtotal = round2(lines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
-  const cgst = taxMode === "CGST_SGST" ? round2((subtotal * CGST_RATE) / 100) : 0;
-  const sgst = taxMode === "CGST_SGST" ? round2((subtotal * SGST_RATE) / 100) : 0;
-  const igst = taxMode === "IGST" ? round2((subtotal * IGST_RATE) / 100) : 0;
+  const cgst = taxMode === "CGST_SGST" ? round2((subtotal * rate) / 2 / 100) : 0;
+  const sgst = taxMode === "CGST_SGST" ? round2((subtotal * rate) / 2 / 100) : 0;
+  const igst = taxMode === "IGST" ? round2((subtotal * rate) / 100) : 0;
   const raw = round2(subtotal + cgst + sgst + igst);
   const total = Math.round(raw);
   return { subtotal, cgst, sgst, igst, round_off: round2(total - raw), total };
@@ -70,6 +78,8 @@ module.exports = {
   CGST_RATE,
   SGST_RATE,
   IGST_RATE,
+  GST_RATES,
+  gstRateOf,
   ADJUSTMENTS,
   round2,
   categoryOf,

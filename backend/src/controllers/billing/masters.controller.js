@@ -6,6 +6,7 @@ const { pool } = require("../../../db");
 const C = require("../../services/billing/common");
 const calc = require("../../services/billing/calc");
 const { logAudit } = require("../../services/Audit.service");
+const { assertDescription } = require("./descriptions.controller");
 
 // GST state codes (for the place of supply and IGST outside Karnataka).
 const GST_STATES = {
@@ -135,7 +136,8 @@ const saveProfile = C.handle("Failed to save the billing profile", async (req, r
   res.json(profileOut(p));
 });
 
-// GET /service-options?company_id= : the customer's outlets and the services used on its jobs
+// GET /service-options?company_id= : the customer's outlets, the services used on its jobs,
+// and every service name used on any job (all_services)
 const serviceOptions = C.handle("Failed to load the service options", async (req, res) => {
   const companyId = C.str(req.query.company_id, "company_id", { required: true, max: 20 });
   await companyOrThrow(pool, companyId);
@@ -147,9 +149,16 @@ const serviceOptions = C.handle("Failed to load the service options", async (req
       ORDER BY j.service_type, j.sub_service`,
     [companyId]
   );
+  // Every service name used on any job (most used first): a new customer has no jobs yet, but its
+  // service plan must still name the service its jobs will carry, which is what the tracker matches.
+  const [allServices] = await pool.query(
+    `SELECT j.sub_service FROM jobs j
+      WHERE j.is_archived = 0 AND j.sub_service IS NOT NULL AND j.sub_service <> ''
+      GROUP BY j.sub_service ORDER BY COUNT(*) DESC, j.sub_service`
+  );
   // The service catalogue (the same list the Leads quotations use): picked as the price line's item.
   const [catalog] = await pool.query("SELECT id, name FROM crm_quote_services WHERE is_active = 1 ORDER BY sort_order, name");
-  res.json({ sites, services, catalog });
+  res.json({ sites, services, all_services: allServices.map((r) => r.sub_service), catalog });
 });
 
 // ---- contracts --------------------------------------------------------------------------------
@@ -171,6 +180,7 @@ function contractOut(c) {
     site_id: c.site_id,
     po_required: Boolean(c.po_required),
     gst_applicable: c.gst_applicable === undefined ? true : Boolean(c.gst_applicable),
+    gst_rate: c.gst_rate === undefined || c.gst_rate === null ? 18 : Number(c.gst_rate),
     shortfall_billing: c.shortfall_billing,
     description_template: c.description_template,
     status: c.status,
@@ -220,7 +230,8 @@ function readContractLine(raw, i, sites, fallbackFrom) {
     default_qty: C.num(raw.default_qty, `${at}: default_qty`, { min: 0, max: 9999999 }),
     effective_from: C.date(raw.effective_from, `${at}: effective_from`) || fallbackFrom,
   };
-  if (line.plan_sub_service && !line.site_id) throw C.bad(`${at}: choose the outlet for the planned service`);
+  // A line without an outlet may still name its planned service: it then follows the customer's
+  // whole-customer service plan (jobs at any outlet count).
   return line;
 }
 
@@ -265,6 +276,8 @@ function readContractHeader(b, sites, billingType, startDate) {
     po_required: PO_TYPES.includes(billingType) ? 1 : C.bool(b.po_required) ? 1 : 0,
     // GST on the invoices (Commercial customers); Residential customers never get GST.
     gst_applicable: b.gst_applicable === undefined || b.gst_applicable === null ? 1 : C.bool(b.gst_applicable) ? 1 : 0,
+    // The GST rate when GST applies: a GST slab (5, 12, 18, 28 %); 18 when not given.
+    gst_rate: readGstRate(b.gst_rate),
     shortfall_billing: C.oneOf(b.shortfall_billing, "shortfall_billing", ["PRO_RATA", "FULL"], { fallback: "PRO_RATA" }),
     description_template: C.str(b.description_template, "description_template", { max: 500 }) || defaultDescription(billingType, frequency),
     notes: C.str(b.notes, "notes", { max: 1000 }),
@@ -272,6 +285,13 @@ function readContractHeader(b, sites, billingType, startDate) {
 }
 
 const PO_TYPES = ["CHEMICAL", "TERMITE"];
+
+function readGstRate(raw) {
+  if (raw === undefined || raw === null || raw === "") return 18;
+  const rate = Number(raw);
+  if (!calc.GST_RATES.includes(rate)) throw C.bad(`GST rate must be one of ${calc.GST_RATES.join(", ")} %`);
+  return rate;
+}
 
 /** Link the chosen POs (customer_pos.contract_id) to the contract; POs no longer chosen are unlinked. */
 async function linkContractPos(conn, contractId, companyId, rawIds, billingType) {
@@ -349,6 +369,8 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     const company = await companyOrThrow(conn, companyId);
     if (!calc.categoryOf(company.type)) throw C.bad("Customer type is not set - set it on the customer before adding a contract");
     const sites = await siteIdsOf(conn, companyId);
+    // The description on invoice is required and picked from the master (Masters > Invoice Descriptions).
+    await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }));
     const header = readContractHeader(b, sites, billingType, startDate);
     const lines = (Array.isArray(b.lines) ? b.lines : []).map((l, i) => readContractLine(l, i, sites, startDate));
 
@@ -361,11 +383,11 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     await conn.query(
       `INSERT INTO billing_contracts
          (id, contract_code, company_id, billing_type, frequency_months, cycle_start_day, bill_timing, start_date, end_date,
-          next_period_start, invoice_grouping, site_id, po_required, gst_applicable, shortfall_billing, description_template, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          next_period_start, invoice_grouping, site_id, po_required, gst_applicable, gst_rate, shortfall_billing, description_template, notes, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, code, companyId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
-        startDate, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.shortfall_billing, header.description_template,
+        startDate, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.notes, req.user.id, req.user.id,
       ]
     );
@@ -399,15 +421,17 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     if (current.status === "ENDED") throw C.bad("An ended contract cannot be changed");
     const sites = await siteIdsOf(conn, current.company_id);
     const merged = { ...current, ...b };
+    // A listed, active description - or the one the contract already has, even if switched off since.
+    await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template);
     const header = readContractHeader(merged, sites, current.billing_type, current.start_date);
     await conn.query(
       `UPDATE billing_contracts
           SET frequency_months = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
-              po_required = ?, gst_applicable = ?, shortfall_billing = ?, description_template = ?, notes = ?, updated_by = ?
+              po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?, notes = ?, updated_by = ?
         WHERE id = ?`,
       [
         header.frequency_months, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
-        header.po_required, header.gst_applicable, header.shortfall_billing, header.description_template, header.notes, req.user.id, req.params.id,
+        header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template, header.notes, req.user.id, req.params.id,
       ]
     );
     if (b.po_ids !== undefined) await linkContractPos(conn, req.params.id, current.company_id, b.po_ids, current.billing_type);

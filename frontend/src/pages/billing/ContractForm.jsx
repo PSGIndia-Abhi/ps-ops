@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
-import { amount, dmy, today } from "./format";
+import { GST_RATES, gstHint } from "./calc";
+import DescriptionPicker from "./DescriptionPicker";
+import { amount, dmy, monthLabel, nextBilling, today } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
@@ -10,7 +12,6 @@ import { deepCleaningServices, pestServices } from "../../components/CreateBooki
 // its own; price lines are added, corrected, or re-priced from a date (the old price is kept as history).
 
 const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"], ["CHEMICAL", "Chemical"]];
-const PLACEHOLDERS = ["{month}", "{period}", "{from_month}", "{to_month}"];
 
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
 const SQM = "sq.m";
@@ -54,6 +55,11 @@ export default function ContractForm() {
   const needsPo = PO_TYPES.includes(form.billing_type) || Boolean(form.po_required);
   const { data: poData, error: poError } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
   const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" || form.po_ids.includes(p.id));
+  // When this contract is next billed, and whether its customer can be billed at all (Bill To profile).
+  const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : contract?.next_period_start);
+  const thisMonthKey = today().slice(0, 7);
+  const { data: profile, error: profileError, loading: profileLoading } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
+  const profileMissing = Boolean(companyId) && !profileLoading && !profile && /no billing profile/i.test(profileError || "");
   const poLabel = (p) => `${p.po_number} · ${p.is_open_po ? "Open PO" : `till ${dmy(p.expiry_date)}`}${p.kind === "ADVANCE" ? " · Advance" : ""}${p.po_amount === null ? "" : ` · ₹${amount(p.po_amount)}`}`;
 
   function header() {
@@ -69,6 +75,7 @@ export default function ContractForm() {
       site_id: form.site_id || null,
       po_required: PO_TYPES.includes(form.billing_type) ? true : Boolean(form.po_required),
       gst_applicable: form.gst_applicable !== false,
+      gst_rate: form.gst_applicable === false ? 18 : Number(form.gst_rate ?? 18),
       ...(needsPo ? { po_ids: form.po_ids } : {}),
       shortfall_billing: form.shortfall_billing,
       description_template: form.description_template || undefined,
@@ -83,6 +90,14 @@ export default function ContractForm() {
   });
 
   async function save() {
+    if (form.gst_applicable !== false && !residential && !GST_RATES.includes(Number(form.gst_rate ?? 18))) {
+      setMsg({ error: `GST rate must be one of ${GST_RATES.join(", ")} %.` });
+      return;
+    }
+    if (!form.description_template) {
+      setMsg({ error: "Choose the description on invoice (the list is in Masters › Invoice Descriptions)." });
+      return;
+    }
     if (form.billing_type === "TERMITE" && !form.po_ids.length) {
       setMsg({ error: "Termite contracts need a purchase order. Choose the purchase order." });
       return;
@@ -147,6 +162,19 @@ export default function ContractForm() {
         )}
       </div>
       <Msg {...msg} />
+      {next && (
+        <div className="ac-info" style={{ marginBottom: 12 }}>
+          ⓘ {isNew ? "First" : "Next"} invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, billed {next.advance ? "at the start" : "at the end"} of the period,
+          {" "}so it appears in the <b>Bill Run for {monthLabel(next.billMonth)}</b>
+          {next.billMonth < thisMonthKey ? " (already due: open this month's Bill Run)" : next.billMonth === thisMonthKey ? " (this month)" : ""}.
+        </div>
+      )}
+      {profileMissing && (
+        <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
+          ⚠ This customer has no billing profile (Bill To address and GST state), so the Bill Run cannot make its invoice.
+          {" "}<Link to="/billing/customers">Add it in Billing Customers</Link>.
+        </div>
+      )}
 
       <div className="ac-card">
         <h3 className="ac-card-title">Contract details</h3>
@@ -171,7 +199,7 @@ export default function ContractForm() {
               ))}
             </div>
           </Field>
-          <Field label="Frequency" required={typeIs("AMC")}>
+          <Field label="Billing frequency" required={typeIs("AMC")}>
             <select className="ac-select" value={form.frequency_months || ""} disabled={readOnly || typeIs("ONE_TIME")} onChange={(e) => set({ frequency_months: Number(e.target.value) })}>
               {typeIs("ONE_TIME") && <option value="">Once</option>}
               {[1, 3, 4, 6, 12].map((n) => <option key={n} value={n}>Every {n} month{n > 1 ? "s" : ""}</option>)}
@@ -183,10 +211,10 @@ export default function ContractForm() {
               <option value="ADVANCE">In advance (start of period)</option>
             </select>
           </Field>
-          <Field label="Start date" required>
+          <Field label="Term start date" required>
             <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew} onChange={(e) => set({ start_date: e.target.value })} />
           </Field>
-          <Field label="End date">
+          <Field label="Term end date">
             <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />
           </Field>
           <Field label="Invoice grouping">
@@ -195,22 +223,29 @@ export default function ContractForm() {
               <option value="PER_SITE">One invoice per outlet</option>
             </select>
           </Field>
-          <Field label="When services are short">
+          <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "The full amount every period, even if a service is missed" : "Billed for the services actually done (amount ÷ planned × done)"}>
             <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
-              <option value="PRO_RATA">Bill services done</option>
-              <option value="FULL">Bill full amount</option>
+              <option value="FULL">Fixed amount based</option>
+              <option value="PRO_RATA">Service based</option>
             </select>
           </Field>
-          <Field label="Description on invoice" className="bl-span2">
-            <input className="ac-input" value={form.description_template || ""} disabled={readOnly} maxLength={500} placeholder={typeIs("ONE_TIME") ? "Pest control service carried out on {period}" : "Pest control services for the month of {month}"} onChange={(e) => set({ description_template: e.target.value })} />
-            {!readOnly && <div className="bl-chipbar">{PLACEHOLDERS.map((p) => <button key={p} type="button" className="bl-chip" onClick={() => set({ description_template: `${form.description_template || ""}${p}` })}>{p}</button>)}</div>}
+          <Field label="Description on invoice" required className="bl-span2" hint="Choose one; ✎ Edit changes the wording, + New adds one">
+            <DescriptionPicker value={form.description_template || ""} canEdit={canEdit} disabled={readOnly} onChange={(text) => set({ description_template: text })} onListChanged={reload} />
           </Field>
-          <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : "18% GST added on the invoices"}>
-            <select className="ac-select" value={residential || form.gst_applicable === false ? "NO" : "YES"} disabled={readOnly || residential}
-              onChange={(e) => set({ gst_applicable: e.target.value === "YES" })}>
-              <option value="YES">Apply GST</option>
-              <option value="NO">No GST</option>
-            </select>
+          <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : `${gstHint(form.gst_rate ?? 18, profile?.state_code)}. A change applies to new drafts only.`}>
+            <div className="nc-gst">
+              <select className="ac-select" value={residential || form.gst_applicable === false ? "NO" : "YES"} disabled={readOnly || residential}
+                onChange={(e) => set({ gst_applicable: e.target.value === "YES" })}>
+                <option value="YES">Apply GST</option>
+                <option value="NO">No GST</option>
+              </select>
+              {!residential && form.gst_applicable !== false && (
+                <span className="nc-rate">
+                  <input type="number" min="5" max="28" step="1" className="ac-input" value={form.gst_rate ?? 18} disabled={readOnly} onChange={(e) => set({ gst_rate: e.target.value })} aria-label="GST rate in percent" />
+                  <b>%</b>
+                </span>
+              )}
+            </div>
           </Field>
           <Field label="PO required">
             <label className="bl-toggle">
@@ -258,8 +293,7 @@ export default function ContractForm() {
               )}
             </div>
             <div className="ac-table-wrap">
-<<<<<<< HEAD
-              <table className="ac-table bl-prices">
+              <table className="ac-table ac-stack bl-prices">
                 <colgroup>
                   <col style={{ width: "22%" }} />
                   <col />
@@ -269,9 +303,6 @@ export default function ContractForm() {
                   <col style={{ width: 130 }} />
                   <col style={{ width: 190 }} />
                 </colgroup>
-=======
-              <table className="ac-table ac-stack">
->>>>>>> 6bb3fbfbc8ddc47cd7b28a262bbffb44bdde93a7
                 <thead>
                   <tr>
                     <th>Outlet</th>
@@ -365,7 +396,8 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
   // The outlet comes from the customer: its only outlet, or the outlet this row was added for.
   const siteId = line.site_id || (sites.length === 1 ? sites[0].site_id : "");
   const outletName = sites.find((x) => x.site_id === siteId)?.name || line.site || (sites.length ? "All outlets" : "—");
-  const link = (name) => ({ plan_service_type: "", plan_sub_service: siteId && name ? name : "" });
+  // Without an outlet the line follows the customer's whole-customer plan for the same service.
+  const link = (name) => ({ plan_service_type: "", plan_sub_service: name || "" });
   function pick(name) {
     const svc = catalog.find((c) => same(c.name, name));
     onChange({ item_name: name, service_id: svc?.id || null, site_id: siteId || null, ...link(name) });

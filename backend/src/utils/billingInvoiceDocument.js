@@ -212,8 +212,11 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const mid = L + Math.round(W * 0.5);
   const taxCols = [L + PAD, L + 70, L + 160, L + 205];
   const taxTop = y;
+  // The invoice's GST rate (copied from its contract); invoices from before the rate was stored are 18 %.
+  const gstRate = [5, 12, 18, 28].includes(Number(content.gst_rate)) ? Number(content.gst_rate) : 18;
+  const halfRate = gstRate / 2;
   const taxRows =
-    content.tax_mode === "IGST" ? [["IGST", content.igst, 18]] : content.tax_mode === "NONE" ? [] : [["SGST", content.sgst, 9], ["CGST", content.cgst, 9]];
+    content.tax_mode === "IGST" ? [["IGST", content.igst, gstRate]] : content.tax_mode === "NONE" ? [] : [["SGST", content.sgst, halfRate], ["CGST", content.cgst, halfRate]];
   font("B", 8).text("Tax type", taxCols[0], y + 5, { lineBreak: false });
   font("B", 8).text("Taxable amount", taxCols[1], y + 5, { width: 85, align: "right", lineBreak: false });
   font("B", 8).text("Rate", taxCols[2], y + 5, { width: 40, align: "right", lineBreak: false });
@@ -221,7 +224,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   font("B", 8).text("Amounts", mid + PAD, y + 5, { lineBreak: false });
   let ty = y + 24;
   if (!taxRows.length) {
-    font("R", 8).text("No GST (Residential customer)", taxCols[0], ty, { width: mid - taxCols[0] - PAD, lineBreak: false });
+    font("R", 8).text(content.category === "RESIDENTIAL" ? "No GST (Residential customer)" : "No GST", taxCols[0], ty, { width: mid - taxCols[0] - PAD, lineBreak: false });
     ty += 24;
   }
   for (const [label, amt, rate] of taxRows) {
@@ -233,7 +236,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   }
   const taxTotal = round2((content.cgst || 0) + (content.sgst || 0) + (content.igst || 0));
   const amountRows = [["Sub Total", content.subtotal]];
-  if (taxRows.length) amountRows.push([`Tax (18%)`, taxTotal]);
+  if (taxRows.length) amountRows.push([`Tax (${gstRate}%)`, taxTotal]);
   if (Number(content.round_off)) amountRows.push(["Round off", content.round_off]);
   let ay = y + 24;
   for (const [label, value] of amountRows) {

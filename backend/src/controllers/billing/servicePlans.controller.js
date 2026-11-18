@@ -150,23 +150,25 @@ const savePlan = C.handle("Failed to save the service plan", async (req, res) =>
     const [siteRows] = await conn.query("SELECT id, name FROM sites WHERE company_id = ?", [companyId]);
     const siteNames = new Map(siteRows.map((s) => [s.id, s.name]));
     const seen = new Set();
+    // site_id and service_type are optional: without them the service is planned for the whole
+    // customer (jobs at any outlet, of any type, count). The Service Plans screen sends neither.
     const lines = b.lines.map((raw, i) => {
       const at = `Service ${i + 1}`;
-      const siteId = C.str(raw?.site_id, `${at}: site_id`, { required: true, max: 20 });
-      if (!siteNames.has(siteId)) throw C.bad(`${siteId} does not belong to this customer`);
+      const siteId = C.str(raw?.site_id, `${at}: site_id`, { max: 20 }) || null;
+      if (siteId && !siteNames.has(siteId)) throw C.bad(`${siteId} does not belong to this customer`);
       const line = {
         site_id: siteId,
-        service_type: C.str(raw.service_type, `${at}: service_type`, { required: true, max: 50 }),
-        sub_service: C.str(raw.sub_service, `${at}: sub_service`, { required: true, max: 100 }),
+        service_type: C.str(raw.service_type, `${at}: service_type`, { max: 50 }) || null,
+        sub_service: C.str(raw.sub_service, `${at}: service`, { required: true, max: 100 }),
         visits_per_month: C.num(raw.visits_per_month, `${at}: visits_per_month`, { required: true, integer: true }),
       };
       if (line.visits_per_month < 1 || line.visits_per_month > 31) throw C.bad("visits_per_month must be a whole number from 1 to 31");
-      const key = `${siteId}|${line.service_type.toLowerCase()}|${line.sub_service.toLowerCase()}`;
-      if (seen.has(key)) throw C.conflict(`${line.sub_service} is listed twice for ${siteNames.get(siteId)}`);
+      const key = `${siteId || "*"}|${(line.service_type || "*").toLowerCase()}|${line.sub_service.toLowerCase()}`;
+      if (seen.has(key)) throw C.conflict(`${line.sub_service} is listed twice${siteId ? ` for ${siteNames.get(siteId)}` : ""}`);
       seen.add(key);
       return line;
     });
-    const invoicesPerMonth = split === "PER_OUTLET" ? new Set(lines.map((l) => l.site_id)).size : 1;
+    const invoicesPerMonth = split === "PER_OUTLET" ? new Set(lines.map((l) => l.site_id).filter(Boolean)).size || 1 : 1;
     const status = effectiveFrom <= today ? "ACTIVE" : "SCHEDULED";
 
     await conn.query("SELECT id FROM companies WHERE id = ? FOR UPDATE", [companyId]); // one save per customer at a time
@@ -263,20 +265,25 @@ const tracker = C.handle("Failed to load the service tracker", async (req, res) 
   res.json({ month: data.month, as_of: data.as_of, summary: data.summary, rows: rows.slice(offset, offset + pageSize), total: rows.length, page, page_size: pageSize });
 });
 
-// GET /service-tracker/jobs?site_id=&service_type=&sub_service=&month=
+// GET /service-tracker/jobs?site_id=&company_id=&service_type=&sub_service=&month=
+// site_id: one outlet; or company_id (no site_id): every outlet of the customer (whole-customer line).
 const trackerJobs = C.handle("Failed to load the visits", async (req, res) => {
-  const siteId = C.str(req.query.site_id, "site_id", { required: true, max: 20 });
+  const siteId = C.str(req.query.site_id, "site_id", { max: 20 });
+  const companyId = C.str(req.query.company_id, "company_id", { max: 20 });
+  if (!siteId && !companyId) throw C.bad("site_id or company_id is required");
   const subService = C.str(req.query.sub_service, "sub_service", { required: true, max: 100 });
   const serviceType = C.str(req.query.service_type, "service_type", { max: 50 });
   const range = C.monthRange(C.month(req.query.month || C.todayIst().slice(0, 7)));
   const [rows] = await pool.query(
-    `SELECT j.id AS job_id, j.code AS job_code, v.visit_number,
+    `SELECT j.id AS job_id, j.code AS job_code, v.visit_number, s.name AS site,
             DATE_FORMAT(v.scheduled_date, '%Y-%m-%d') AS scheduled_date, v.status, v.completed_at
        FROM job_visits v JOIN jobs j ON j.id = v.job_id
-      WHERE j.company_id = ? AND j.sub_service = ? AND (? IS NULL OR j.service_type = ?) AND j.is_archived = 0
+       LEFT JOIN sites s ON s.id = j.company_id
+      WHERE ${siteId ? "j.company_id = ?" : "s.company_id = ?"}
+        AND j.sub_service = ? AND (? IS NULL OR j.service_type = ?) AND j.is_archived = 0
         AND COALESCE(v.completed_at, v.scheduled_date) >= ? AND COALESCE(v.completed_at, v.scheduled_date) < ?
       ORDER BY COALESCE(v.completed_at, v.scheduled_date)`,
-    [siteId, subService, serviceType, serviceType, range.start, range.next]
+    [siteId || companyId, subService, serviceType, serviceType, range.start, range.next]
   );
   res.json(rows);
 });

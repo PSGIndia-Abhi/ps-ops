@@ -21,11 +21,24 @@ export function lineAmount(l) {
   }
 }
 
-export function totalsFor(lines, taxMode) {
+// The GST rates a contract may bill at (same as the server's calc.GST_RATES).
+export const GST_RATES = [5, 12, 18, 28];
+export const gstRateOf = (rate) => (GST_RATES.includes(Number(rate)) ? Number(rate) : 18);
+
+/** "CGST 9% + SGST 9% (Karnataka)" / "IGST 18% (outside Karnataka)", or which rates are allowed. */
+export function gstHint(rate, stateCode = "29") {
+  const r = Number(rate);
+  if (!GST_RATES.includes(r)) return `Allowed: ${GST_RATES.join(", ")} %`;
+  return String(stateCode || "29") === "29" ? `CGST ${r / 2}% + SGST ${r / 2}% (Karnataka)` : `IGST ${r}% (outside Karnataka)`;
+}
+
+/** Totals at the invoice's GST rate (default 18 %): CGST + SGST half each, or all IGST. */
+export function totalsFor(lines, taxMode, gstRate = 18) {
+  const rate = gstRateOf(gstRate);
   const subtotal = round2(lines.reduce((t, l) => t + lineAmount(l), 0));
-  const cgst = taxMode === "CGST_SGST" ? round2(subtotal * 0.09) : 0;
-  const sgst = taxMode === "CGST_SGST" ? round2(subtotal * 0.09) : 0;
-  const igst = taxMode === "IGST" ? round2(subtotal * 0.18) : 0;
+  const cgst = taxMode === "CGST_SGST" ? round2((subtotal * rate) / 2 / 100) : 0;
+  const sgst = taxMode === "CGST_SGST" ? round2((subtotal * rate) / 2 / 100) : 0;
+  const igst = taxMode === "IGST" ? round2((subtotal * rate) / 100) : 0;
   const raw = round2(subtotal + cgst + sgst + igst);
   const total = Math.round(raw);
   return { subtotal, cgst, sgst, igst, round_off: round2(total - raw), total };

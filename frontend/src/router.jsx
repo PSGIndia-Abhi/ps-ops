@@ -130,6 +130,8 @@ import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
 import BillingServicePlans from "./pages/billing/ServicePlans";
 import BillingContracts from "./pages/billing/Contracts";
 import BillingContractForm from "./pages/billing/ContractForm";
+import BillingNewContract from "./pages/billing/NewContract";
+import BillingInvoiceDescriptions from "./pages/billing/InvoiceDescriptions";
 import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
 import BillingCustomers from "./pages/billing/BillingCustomers";
 import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
@@ -462,9 +464,12 @@ const router = createBrowserRouter([
       { path: "invoices", element: <BillingIssuedInvoices /> },
       { path: "plans", element: <BillingServicePlans /> },
       { path: "contracts", element: <BillingContracts /> },
+      // A new contract is made step by step (customer, terms, PO, services, review); an existing one is edited on ContractForm.
+      { path: "contracts/new", element: <BillingNewContract /> },
       { path: "contracts/:id", element: <BillingContractForm /> },
       { path: "pos", element: <BillingPurchaseOrders /> },
       { path: "customers", element: <BillingCustomers /> },
+      { path: "descriptions", element: <BillingInvoiceDescriptions /> },
     ],
   },
 

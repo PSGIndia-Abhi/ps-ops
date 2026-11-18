@@ -7,7 +7,8 @@ import { Kpi, Modal, Msg, ServicesChip, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
 
 // Bill Run: contracts due in the month, with their services and warnings. Select and generate
-// drafts; drafts are checked and issued from Draft Invoices.
+// drafts; drafts are checked and issued from Draft Invoices. When nothing was skipped and no
+// quantities are needed, it goes straight to the draft (one) or to Draft Invoices (several).
 
 export default function BillRun() {
   const { me } = useOutletContext();
@@ -42,6 +43,13 @@ export default function BillRun() {
     setRunError("");
     try {
       const r = await billingPost("/runs", { month, contract_ids: [...selected] });
+      // Nothing to look at (nothing skipped, no quantities to fill in): go straight on - to the
+      // draft itself when there is one, otherwise to Draft Invoices. Otherwise show the result.
+      const clean = r.drafts.length > 0 && !r.skipped.length && !r.drafts.some((d) => d.needs_input);
+      if (clean) {
+        navigate(r.drafts.length === 1 ? `/billing/drafts/${r.drafts[0].id}` : "/billing/drafts");
+        return;
+      }
       setResult(r);
       setPicked(null);
       reload();
@@ -110,7 +118,7 @@ export default function BillRun() {
             </thead>
             <tbody>
               {loading || !rows.length ? (
-                <EmptyRow cols={9} loading={loading} text="Nothing is due for billing in this month." />
+                <EmptyRow cols={9} loading={loading} text="Nothing is due for billing in this month. A contract billed in arrears appears in the month its period ends (each contract page shows which month)." />
               ) : (
                 rows.map((r) => {
                   const short = r.services && r.services.done < r.services.planned;
@@ -163,7 +171,11 @@ export default function BillRun() {
             <span />
             <div className="ac-actions">
               <button type="button" className="ac-btn" onClick={() => setResult(null)}>Close</button>
-              <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/billing/drafts")}>Open Draft Invoices</button>
+              {result.drafts.length === 1 ? (
+                <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/drafts/${result.drafts[0].id}`)}>Open draft</button>
+              ) : result.drafts.length > 1 ? (
+                <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/billing/drafts")}>Open Draft Invoices</button>
+              ) : null}
             </div>
           </div>
         </Modal>

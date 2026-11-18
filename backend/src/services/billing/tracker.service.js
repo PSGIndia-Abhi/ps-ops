@@ -4,6 +4,8 @@
 // visits each outlet gets per month for each service. "Done" is counted from the jobs module:
 // job_visits.status = 'COMPLETED' with completed_at in the period, on jobs whose outlet
 // (jobs.company_id holds a site id), service_type and sub_service match the plan line.
+// A line with no outlet (site_id NULL) covers the whole customer: jobs at ANY of its outlets
+// count, matched on sub_service alone (service_type NULL = any job type).
 // The same counts feed the Service Tracker screen, the Bill Run and the draft invoice lines.
 
 const { todayIst, monthRange, addMonths } = require("./common");
@@ -11,6 +13,7 @@ const { todayIst, monthRange, addMonths } = require("./common");
 const norm = (v) => String(v || "").trim().toLowerCase();
 const fullKey = (site, type, sub) => `${site}|${norm(type)}|${norm(sub)}`;
 const subKey = (site, sub) => `${site}|${norm(sub)}`;
+const customerKey = (companyId, sub) => `${companyId}|${norm(sub)}`;
 
 /** The plan version in force on `onDate` for a customer (with its lines), or null. */
 async function planFor(db, companyId, onDate) {
@@ -33,27 +36,34 @@ async function planFor(db, companyId, onDate) {
 }
 
 /**
- * Visit statistics for the outlets in `siteIds` between `from` (inclusive) and `to` (exclusive).
- * Returns { byFull, bySub }: Maps keyed by site|service_type|sub_service and site|sub_service, each
+ * Visit statistics between `from` (inclusive) and `to` (exclusive) for the outlets in `siteIds`
+ * and for every outlet of the customers in `companyIds` (whole-customer plan lines).
+ * Returns { byFull, bySub, byCustomer }: Maps keyed by site|service_type|sub_service,
+ * site|sub_service and customer|sub_service, each
  * { done, job_ids, visit_ids, last_visit, missed_dates, scheduled_after_today, next_visit }.
  */
-async function visitStats(db, siteIds, from, to) {
+async function visitStats(db, siteIds, from, to, companyIds = []) {
   const byFull = new Map();
   const bySub = new Map();
+  const byCustomer = new Map();
   const ids = [...new Set(siteIds.filter(Boolean))];
-  if (!ids.length) return { byFull, bySub };
+  const customers = [...new Set(companyIds.filter(Boolean))];
+  if (!ids.length && !customers.length) return { byFull, bySub, byCustomer };
 
+  // [null] keeps "IN (?)" valid when one of the two lists is empty (nothing matches NULL).
   const [rows] = await db.query(
-    `SELECT j.company_id AS site_id, j.service_type, j.sub_service, j.id AS job_id, v.id AS visit_id, v.status,
+    `SELECT j.company_id AS site_id, s.company_id AS customer_id, j.service_type, j.sub_service,
+            j.id AS job_id, v.id AS visit_id, v.status,
             DATE_FORMAT(v.completed_at, '%Y-%m-%d') AS completed_on,
             DATE_FORMAT(v.scheduled_date, '%Y-%m-%d') AS scheduled_on
        FROM job_visits v
        JOIN jobs j ON j.id = v.job_id
+       LEFT JOIN sites s ON s.id = j.company_id
       WHERE j.is_archived = 0
-        AND j.company_id IN (?)
+        AND (j.company_id IN (?) OR s.company_id IN (?))
         AND ((v.status = 'COMPLETED' AND v.completed_at >= ? AND v.completed_at < ?)
           OR (v.status <> 'COMPLETED' AND v.scheduled_date >= ? AND v.scheduled_date < ?))`,
-    [ids, from, to, from, to]
+    [ids.length ? ids : [null], customers.length ? customers : [null], from, to, from, to]
   );
 
   const today = todayIst();
@@ -78,15 +88,31 @@ async function visitStats(db, siteIds, from, to) {
   for (const r of rows) {
     add(byFull, fullKey(r.site_id, r.service_type, r.sub_service), r);
     add(bySub, subKey(r.site_id, r.sub_service), r);
+    if (r.customer_id) add(byCustomer, customerKey(r.customer_id, r.sub_service), r);
   }
-  for (const map of [byFull, bySub]) for (const s of map.values()) s.missed_dates.sort();
-  return { byFull, bySub };
+  for (const map of [byFull, bySub, byCustomer]) for (const s of map.values()) s.missed_dates.sort();
+  return { byFull, bySub, byCustomer };
 }
 
-/** The stats for one outlet + service (service_type optional) from visitStats(). */
-function statsFor(stats, siteId, serviceType, subService) {
-  const s = serviceType ? stats.byFull.get(fullKey(siteId, serviceType, subService)) : stats.bySub.get(subKey(siteId, subService));
+/**
+ * The stats for one outlet + service (service_type optional) from visitStats(). With no outlet
+ * (a whole-customer line) it is every outlet of `companyId` for that service name.
+ */
+function statsFor(stats, siteId, serviceType, subService, companyId = null) {
+  const s = !siteId
+    ? stats.byCustomer?.get(customerKey(companyId, subService))
+    : serviceType
+      ? stats.byFull.get(fullKey(siteId, serviceType, subService))
+      : stats.bySub.get(subKey(siteId, subService));
   return s || { done: 0, job_ids: [], visit_ids: [], last_visit: null, missed_dates: [], scheduled_after_today: 0, next_visit: null };
+}
+
+/** The site ids and (for whole-customer lines) customer ids that visitStats() needs for these plan lines. */
+function statsScope(planLines, companyIdOf) {
+  return {
+    siteIds: planLines.filter((l) => l.site_id).map((l) => l.site_id),
+    companyIds: planLines.filter((l) => !l.site_id).map(companyIdOf),
+  };
 }
 
 /** SHORT | SCHEDULED | COMPLETED | EXTRA for a tracker row. */
@@ -117,7 +143,8 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
         AND (? IS NULL OR sp.company_id = ?)`,
     [range.start, companyId, companyId]
   );
-  const stats = await visitStats(db, planRows.map((r) => r.site_id), range.start, range.next);
+  const scope = statsScope(planRows, (r) => r.company_id);
+  const stats = await visitStats(db, scope.siteIds, range.start, range.next, scope.companyIds);
 
   const today = todayIst();
   const periodOver = range.end < today;
@@ -125,7 +152,7 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
   const dayOfMonth = Number(today.slice(8, 10));
 
   const rows = planRows.map((p) => {
-    const s = statsFor(stats, p.site_id, p.service_type, p.sub_service);
+    const s = statsFor(stats, p.site_id, p.service_type, p.sub_service, p.company_id);
     const planned = Number(p.planned);
     const status = rowStatus(planned, s.done, s.scheduled_after_today, periodOver);
     const highlight = s.done < planned && (periodOver || (isCurrent && dayOfMonth >= Number(p.shortfall_highlight_day)));
@@ -147,7 +174,7 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
       highlight,
     };
   });
-  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.customer.localeCompare(b.customer) || String(a.site).localeCompare(String(b.site)));
+  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.customer.localeCompare(b.customer) || String(a.site || "").localeCompare(String(b.site || "")));
 
   const shortRows = rows.filter((r) => r.status === "SHORT");
   const planned = rows.reduce((t, r) => t + r.planned, 0);
@@ -171,9 +198,10 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
 async function servicesForPeriod(db, companyId, periodStart, periodEnd, months = 1) {
   const plan = await planFor(db, companyId, periodStart);
   const lines = plan ? plan.lines : [];
-  const stats = await visitStats(db, lines.map((l) => l.site_id), periodStart, addDayExclusive(periodEnd));
+  const scope = statsScope(lines, () => companyId);
+  const stats = await visitStats(db, scope.siteIds, periodStart, addDayExclusive(periodEnd), scope.companyIds);
   const rows = lines.map((l) => {
-    const s = statsFor(stats, l.site_id, l.service_type, l.sub_service);
+    const s = statsFor(stats, l.site_id, l.service_type, l.sub_service, companyId);
     return { site_id: l.site_id, service_type: l.service_type, sub_service: l.sub_service, planned: Number(l.visits_per_month) * months, ...s };
   });
   return {
@@ -202,4 +230,4 @@ function monthsCount(start, end) {
   return Math.max(n, 1);
 }
 
-module.exports = { planFor, visitStats, statsFor, trackerForMonth, servicesForPeriod, rowStatus, addDayExclusive, monthsCount };
+module.exports = { planFor, visitStats, statsFor, statsScope, trackerForMonth, servicesForPeriod, rowStatus, addDayExclusive, monthsCount };

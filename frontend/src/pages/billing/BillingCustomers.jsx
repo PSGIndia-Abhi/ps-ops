@@ -4,20 +4,13 @@ import { EmptyRow } from "../accountant/ui";
 import { ApiError, billingGet, billingPut, qs, useBilling } from "./billingApi";
 import { CATEGORY_LABEL } from "./format";
 import { Field, Msg } from "./ui";
+import { STATES } from "./states";
 import useDebounced from "./useDebounced";
 
 // Billing Customers: every customer's category (from the customer type: Corporate = Commercial
 // with GST, Individual / RWA = Residential without GST) and its billing profile (bill-to name,
 // address, GST state, payment terms). A customer without a profile cannot be invoiced.
 
-const STATES = [
-  ["29", "Karnataka"], ["33", "Tamil Nadu"], ["32", "Kerala"], ["36", "Telangana"], ["37", "Andhra Pradesh"], ["27", "Maharashtra"],
-  ["30", "Goa"], ["07", "Delhi"], ["06", "Haryana"], ["09", "Uttar Pradesh"], ["24", "Gujarat"], ["08", "Rajasthan"], ["19", "West Bengal"],
-  ["21", "Odisha"], ["23", "Madhya Pradesh"], ["22", "Chhattisgarh"], ["10", "Bihar"], ["20", "Jharkhand"], ["03", "Punjab"],
-  ["04", "Chandigarh"], ["02", "Himachal Pradesh"], ["05", "Uttarakhand"], ["01", "Jammu and Kashmir"], ["38", "Ladakh"], ["18", "Assam"],
-  ["34", "Puducherry"], ["11", "Sikkim"], ["12", "Arunachal Pradesh"], ["13", "Nagaland"], ["14", "Manipur"], ["15", "Mizoram"],
-  ["16", "Tripura"], ["17", "Meghalaya"], ["26", "Dadra and Nagar Haveli and Daman and Diu"], ["31", "Lakshadweep"], ["35", "Andaman and Nicobar Islands"],
-];
 
 export default function BillingCustomers() {
   const { me } = useOutletContext();
@@ -131,7 +124,7 @@ function ProfilePanel({ customer, canEdit, onClose, onSaved }) {
       {!form ? <div className="ac-sub">Loading…</div> : (
         <div className="bl-grid">
           <Field label="Billing name" required><input className="ac-input" value={form.billing_name} disabled={!canEdit} maxLength={255} placeholder="No display name set for this customer. Type the billing name" onChange={(e) => set({ billing_name: e.target.value })} /></Field>
-          <Field label="GSTIN" hint={customer.category === "RESIDENTIAL" ? "Residential customers are billed without GST; leave blank" : "15 characters, e.g. 29ABCDE1234F1Z5. The state below follows its first 2 digits."}>
+          <Field label="GSTIN" required={customer.category === "COMMERCIAL"} hint={customer.category === "RESIDENTIAL" ? "Residential customers are billed without GST; leave blank" : "15 characters, e.g. 29ABCDE1234F1Z5. The state below follows its first 2 digits."}>
             <input
               className="ac-input"
               value={form.gst_number || ""}
@@ -160,7 +153,7 @@ function ProfilePanel({ customer, canEdit, onClose, onSaved }) {
           {canEdit && (
             <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
               <button type="button" className="ac-btn" onClick={onClose}>Close</button>
-              <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (!edits && !form.isNew) || !form.billing_name || !form.billing_address} onClick={save}>{busy ? "Saving…" : "Save profile"}</button>
+              <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (!edits && !form.isNew) || !form.billing_name || !form.billing_address || (customer.category === "COMMERCIAL" && !(form.gst_number || "").trim())} onClick={save}>{busy ? "Saving…" : "Save profile"}</button>
             </div>
           )}
         </div>

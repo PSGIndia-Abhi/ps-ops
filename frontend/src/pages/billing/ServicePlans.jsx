@@ -6,12 +6,44 @@ import { dmy, monthLabel, nextMonthStart, thisMonth } from "./format";
 import { Field, Kpi, Msg } from "./ui";
 import useDebounced from "./useDebounced";
 
-// Service Plans (set by the Service Coordinator): for each customer, how many services each
-// outlet gets every month, how many invoices per month and how many print copies. A change
-// starts from the 1st of a month; the month in progress keeps its plan.
+// Service Plans (set by the Service Coordinator): for each customer, which services it gets and
+// how many each month (counted across all its outlets), and how many print copies. One invoice
+// per month for all outlets. A change starts from the 1st of a month; the month in progress keeps its plan.
 
 const PAGE_SIZE = 25;
-const COPY_LABELS = ["Original for Recipient", "Duplicate for Transporter", "Triplicate for Supplier", "Extra copy"];
+
+// The plan's lines, one per service. Lines saved earlier per outlet (the same service at several
+// outlets) become one line with their visits added up; saving stores it for the whole customer.
+function byService(lines) {
+  const map = new Map();
+  for (const l of lines) {
+    const name = String(l.sub_service || "").trim();
+    const k = name.toLowerCase();
+    const visits = Number(l.visits_per_month) || 0;
+    if (map.has(k)) map.get(k).visits_per_month = Math.min(31, map.get(k).visits_per_month + visits);
+    else map.set(k, { key: map.size, sub_service: name, visits_per_month: visits || 1 });
+  }
+  return [...map.values()];
+}
+
+// 1st, 2nd, 3rd, 4th ... 21st, 22nd, 23rd, 31st.
+function ordinal(value) {
+  const n = Number(value) || 0;
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
+  return `${n}${suffix}`;
+}
+
+// − [ n ] + : type the number or step it, kept between min and max.
+function Stepper({ id, label, value, min, max, onChange }) {
+  const n = Number(value);
+  return (
+    <div className="bl-stp sp-stp">
+      <button type="button" onClick={() => onChange(Math.max(min, (Number.isFinite(n) ? n : min) - 1))} aria-label={`Less: ${label}`}>−</button>
+      <input id={id} type="number" min={min} max={max} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} />
+      <button type="button" onClick={() => onChange(Math.min(max, (Number.isFinite(n) && value !== "" ? n : min - 1) + 1))} aria-label={`More: ${label}`}>+</button>
+    </div>
+  );
+}
 
 export default function ServicePlans() {
   const { me } = useOutletContext();
@@ -30,7 +62,7 @@ export default function ServicePlans() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Service Plans</h1>
-          <p className="ac-sub">Fixed number of services every month, invoices per month and print copies for each customer. Accounts bills from these.</p>
+          <p className="ac-sub">The services each customer gets every month, and how many invoice copies to print. Accounts bills from these.</p>
         </div>
         {canEdit && (
           <div className="ac-actions">
@@ -129,9 +161,8 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
           form: {
             effective_from: p && p.effective_from >= `${thisMonth()}-01` ? p.effective_from : p ? nextMonthStart() : `${thisMonth()}-01`,
             print_copies: p?.print_copies || 1,
-            invoice_split: p?.invoice_split || "ALL_OUTLETS",
             shortfall_highlight_day: p?.shortfall_highlight_day || 25,
-            lines: (p?.lines || []).map((l, i) => ({ ...l, key: i })),
+            lines: byService(p?.lines || []),
           },
         });
       })
@@ -146,19 +177,41 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
   const history = ready ? loaded.history : [];
   const form = ready ? edits || loaded.form : null;
 
-  const sites = options?.sites || [];
-  const services = useMemo(() => options?.services || [], [options]);
-  const serviceTypes = useMemo(() => [...new Set(["Pest Control", ...services.map((s) => s.service_type)])], [services]);
+  // The service names jobs carry (General Pest Control (GPC), Mosquito Fogging, ...), which is what the
+  // Service Tracker matches the plan on: this customer's own first, then every other one in use.
+  const customerServices = useMemo(
+    () => [...new Set((options?.services || []).map((s) => s.sub_service).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [options]
+  );
+  const otherServices = useMemo(
+    () => (options?.all_services || []).filter((name) => name && !customerServices.includes(name)),
+    [options, customerServices]
+  );
+  const serviceNames = useMemo(() => [...customerServices, ...otherServices], [customerServices, otherServices]);
   const total = form ? form.lines.reduce((t, l) => t + (Number(l.visits_per_month) || 0), 0) : 0;
   const customerName = target.customer || customers?.find((c) => c.company_id === companyId)?.name || "";
   const set = (patch) => setEdits({ ...form, ...patch });
   const setLine = (key, patch) => set({ lines: form.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) });
 
   async function save() {
-    const blank = form.lines.findIndex((l) => !String(l.sub_service || "").trim() || !l.site_id);
+    const blank = form.lines.findIndex((l) => !String(l.sub_service || "").trim());
     if (blank >= 0) {
-      const l = form.lines[blank];
-      setMsg({ error: `Row ${blank + 1}: ${!l.site_id ? "choose the outlet" : "type the service name in the “Service” box (e.g. General pest control)"}.` });
+      setMsg({ error: `Row ${blank + 1}: choose the service.` });
+      return;
+    }
+    const copies = Number(form.print_copies);
+    if (!Number.isInteger(copies) || copies < 1 || copies > 4) {
+      setMsg({ error: "Invoice print copies must be from 1 to 4." });
+      return;
+    }
+    const markDay = Number(form.shortfall_highlight_day);
+    if (!Number.isInteger(markDay) || markDay < 1 || markDay > 31) {
+      setMsg({ error: "“Mark short from day” must be a day from 1 to 31." });
+      return;
+    }
+    const badVisits = form.lines.findIndex((l) => !Number.isInteger(Number(l.visits_per_month)) || Number(l.visits_per_month) < 1 || Number(l.visits_per_month) > 31);
+    if (badVisits >= 0) {
+      setMsg({ error: `Row ${badVisits + 1}: services per month must be from 1 to 31.` });
       return;
     }
     setBusy(true);
@@ -166,10 +219,11 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
     try {
       const r = await billingPut(`/service-plans/${encodeURIComponent(companyId)}`, {
         effective_from: form.effective_from,
-        print_copies: form.print_copies,
-        invoice_split: form.invoice_split,
-        shortfall_highlight_day: form.shortfall_highlight_day,
-        lines: form.lines.map((l) => ({ site_id: l.site_id, service_type: l.service_type, sub_service: l.sub_service, visits_per_month: Number(l.visits_per_month) })),
+        print_copies: copies,
+        // One invoice for all outlets; each service is planned for the whole customer (no outlet, any job type).
+        invoice_split: "ALL_OUTLETS",
+        shortfall_highlight_day: markDay,
+        lines: form.lines.map((l) => ({ site_id: null, service_type: null, sub_service: l.sub_service, visits_per_month: Number(l.visits_per_month) })),
       });
       setMsg({ ok: r.status === "ACTIVE" ? `Plan saved (version ${r.version}), in force now.` : `Plan version ${r.version} saved. It starts on ${dmy(r.effective_from)}; this month keeps the current plan.` });
       setReloadKey((k) => k + 1);
@@ -214,90 +268,78 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
 
       {companyId && form && tab === "plan" && (
         <>
-          <table className="ac-table ac-stack">
-            <thead><tr><th>Outlet and service</th><th>Per month</th>{!readOnly && <th />}</tr></thead>
-            <tbody>
-              {!form.lines.length && <EmptyRow cols={readOnly ? 2 : 3} text={readOnly ? "No services planned" : "Add the services this customer gets every month"} />}
-              {form.lines.map((l) => (
-                <tr key={l.key}>
-                  <td>
-                    {readOnly ? (
-                      <><b>{l.sub_service}</b><div className="bl-sub">{l.site} · {l.service_type}</div></>
-                    ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                        <select className="bl-cell-input" style={{ gridColumn: "1 / -1" }} value={l.site_id || ""} onChange={(e) => setLine(l.key, { site_id: e.target.value })} aria-label="Outlet">
-                          <option value="">Outlet…</option>
-                          {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
-                        </select>
-                        <input className="bl-cell-input" list={`subs-${companyId}`} value={l.sub_service || ""} placeholder="Service, e.g. General pest control" onChange={(e) => {
-                          const match = services.find((s) => s.sub_service === e.target.value);
-                          setLine(l.key, { sub_service: e.target.value, ...(match ? { service_type: match.service_type } : {}) });
-                        }} aria-label="Service" />
-                        <select className="bl-cell-input" value={l.service_type || ""} onChange={(e) => setLine(l.key, { service_type: e.target.value })} aria-label="Service type">
-                          <option value="">Service type…</option>
-                          {serviceTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ width: 130 }}>
-                    {readOnly ? l.visits_per_month : (
-                      <div className="bl-stp">
-                        <button type="button" onClick={() => setLine(l.key, { visits_per_month: Math.max(1, Number(l.visits_per_month) - 1) })} aria-label="Fewer">−</button>
-                        <input type="number" min="1" max="31" value={l.visits_per_month} onChange={(e) => setLine(l.key, { visits_per_month: e.target.value })} aria-label="Visits per month" />
-                        <button type="button" onClick={() => setLine(l.key, { visits_per_month: Math.min(31, Number(l.visits_per_month) + 1) })} aria-label="More">+</button>
-                      </div>
-                    )}
-                  </td>
-                  {!readOnly && <td style={{ width: 36 }}><button type="button" className="bl-x" style={{ fontSize: 15 }} onClick={() => set({ lines: form.lines.filter((x) => x.key !== l.key) })} aria-label="Remove">✕</button></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <datalist id={`subs-${companyId}`}>
-            {services.map((s) => <option key={`${s.service_type}|${s.sub_service}`} value={s.sub_service}>{s.service_type}</option>)}
-          </datalist>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0 16px" }}>
-            {!readOnly ? (
-              <button type="button" className="ac-btn ac-btn-primary" onClick={() => set({ lines: [...form.lines, { key: Date.now(), site_id: sites.length === 1 ? sites[0].site_id : "", service_type: "Pest Control", sub_service: "", visits_per_month: 1 }] })}>+ Add service</button>
-            ) : <span />}
-            <span style={{ fontSize: 13.5 }}>Total: <b>{total} services / month</b></span>
+          {/* 1. Services every month */}
+          <div className="sp-section">
+            <div className="sp-section-title">Services every month <span>Total {total} / month</span></div>
+            {!form.lines.length && <div className="sp-help">{readOnly ? "No services planned." : "Add the services this customer gets every month."}</div>}
+            {form.lines.map((l) => (
+              <div className="sp-service" key={l.key}>
+                {readOnly ? (
+                  <><span className="sp-name">{l.sub_service}</span><b>{l.visits_per_month} / month</b></>
+                ) : (
+                  <>
+                      <select className="ac-select" value={l.sub_service || ""} onChange={(e) => setLine(l.key, { sub_service: e.target.value })} aria-label="Service">
+                        <option value="">Choose the service…</option>
+                        {customerServices.length > 0 && (
+                          <optgroup label="Used for this customer">
+                            {customerServices.map((name) => <option key={name} value={name}>{name}</option>)}
+                          </optgroup>
+                        )}
+                        {otherServices.length > 0 && (
+                          <optgroup label={customerServices.length ? "Other services" : "Services"}>
+                            {otherServices.map((name) => <option key={name} value={name}>{name}</option>)}
+                          </optgroup>
+                        )}
+                        {/* a service saved earlier that no job has any more stays selectable */}
+                        {l.sub_service && !serviceNames.includes(l.sub_service) && <option value={l.sub_service}>{l.sub_service}</option>}
+                      </select>
+                      <Stepper label="Visits per month" value={l.visits_per_month} min={1} max={31} onChange={(v) => setLine(l.key, { visits_per_month: v })} />
+                      <button type="button" className="bl-x" onClick={() => set({ lines: form.lines.filter((x) => x.key !== l.key) })} aria-label="Remove service" title="Remove">✕</button>
+                  </>
+                )}
+              </div>
+            ))}
+            {!readOnly && options && !serviceNames.length && (
+              <div className="sp-help">No services are recorded on any job yet, so there is nothing to choose.</div>
+            )}
+            {!readOnly && (
+              <button type="button" className="sp-add" onClick={() => set({ lines: [...form.lines, { key: Date.now(), sub_service: "", visits_per_month: 1 }] })}>+ Add service</button>
+            )}
           </div>
 
-          <div className="bl-grid g2">
-            <Field label="Invoice print copies" required>
-              <div className="bl-seg">
-                {[1, 2, 3, 4].map((n) => (
-                  <button key={n} type="button" disabled={readOnly} className={form.print_copies === n ? "on" : ""} onClick={() => set({ print_copies: n })}>{n}</button>
-                ))}
-              </div>
-            </Field>
-            <Field label="Invoices per month" required>
-              <select className="ac-select" value={form.invoice_split} disabled={readOnly} onChange={(e) => set({ invoice_split: e.target.value })}>
-                <option value="ALL_OUTLETS">1 – all outlets together</option>
-                <option value="PER_OUTLET">One per outlet ({new Set(form.lines.map((l) => l.site_id).filter(Boolean)).size || sites.length})</option>
-              </select>
-            </Field>
-            <div className="bl-copies bl-span2">
-              {COPY_LABELS.slice(0, form.print_copies).map((label, i) => <div key={label} className="bl-copy"><i>{i + 1}</i>{label}</div>)}
+          {/* 2. Settings */}
+          <div className="sp-section">
+            <div className="sp-section-title">Settings</div>
+            <div className="sp-row">
+              <label htmlFor="sp-copies">Invoice print copies</label>
+              {readOnly ? <b>{form.print_copies}</b> : (
+                <Stepper id="sp-copies" label="Invoice print copies" value={form.print_copies} min={1} max={4} onChange={(v) => set({ print_copies: v })} />
+              )}
             </div>
-            <Field label="Effective from" required>
-              <input type="month" className="ac-input" min={minMonth} disabled={readOnly} value={form.effective_from.slice(0, 7)} onChange={(e) => e.target.value && set({ effective_from: `${e.target.value}-01` })} />
-            </Field>
-            <Field label="Highlight shortfall from">
-              <select className="ac-select" value={form.shortfall_highlight_day} disabled={readOnly} onChange={(e) => set({ shortfall_highlight_day: Number(e.target.value) })}>
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}{d === 1 ? "st" : d === 2 ? "nd" : d === 3 ? "rd" : d === 21 ? "st" : d === 22 ? "nd" : d === 23 ? "rd" : d === 31 ? "st" : "th"} of the month</option>)}
-              </select>
-            </Field>
+            <div className="sp-row">
+              <label htmlFor="sp-from">Plan starts from</label>
+              <input id="sp-from" type="month" className="ac-input" min={minMonth} disabled={readOnly} value={form.effective_from.slice(0, 7)} onChange={(e) => e.target.value && set({ effective_from: `${e.target.value}-01` })} />
+            </div>
+            <div className="sp-row">
+              <label htmlFor="sp-day">Mark short from day</label>
+              {readOnly ? <b>{form.shortfall_highlight_day}</b> : (
+                <Stepper id="sp-day" label="Mark short from day of the month" value={form.shortfall_highlight_day} min={1} max={31} onChange={(v) => set({ shortfall_highlight_day: v })} />
+              )}
+            </div>
+            <p className="sp-help">
+              From the {ordinal(form.shortfall_highlight_day)} of every month, this customer is shown in red on the Service Tracker if
+              any planned service is still not done. A reminder only; it does not change the invoice.
+            </p>
           </div>
+
           {!readOnly && (
-            <div className="ac-info" style={{ marginTop: 14 }}>
-              ⓘ Changes start on {dmy(form.effective_from)}. {form.effective_from > `${thisMonth()}-01` ? `${monthLabel(thisMonth())} keeps the current plan, so invoices already in progress don't change.` : "This replaces the plan for the current month."}
+            <div className="sp-note">
+              ⓘ Starts on {dmy(form.effective_from)}. {form.effective_from > `${thisMonth()}-01` ? `${monthLabel(thisMonth())} keeps the current plan.` : "This replaces the plan for the current month."}
             </div>
           )}
-          <div style={{ marginTop: 12 }}><Msg {...msg} /></div>
+          <div style={{ marginTop: 10 }}><Msg {...msg} /></div>
           {!readOnly && (
-            <div className="ac-actions" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+            <div className="sp-foot">
               <button type="button" className="ac-btn" onClick={onClose}>Cancel</button>
               <button type="button" className="ac-btn ac-btn-primary" disabled={busy || !form.lines.length} onClick={save}>{busy ? "Saving…" : "Save plan"}</button>
             </div>
