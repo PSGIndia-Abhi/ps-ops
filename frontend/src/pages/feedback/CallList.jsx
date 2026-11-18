@@ -191,7 +191,7 @@ export default function CallList() {
 
       <Tiles
         items={[
-          { label: mode === "today" ? "Calls due today" : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
+          { label: mode === "today" ? "Calls assigned today" : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
           tile("TO_CALL", "To call", "muted", FiPhoneCall),
           tile("NOT_ANSWERED", "Not answered", "warn", FiPhoneMissed, dueNow ? `${dueNow} call-back due now` : undefined),
           tile("FORM_SENT", "Form sent", "info", FiSend),
