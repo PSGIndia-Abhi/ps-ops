@@ -92,6 +92,9 @@ async function buildLines(db, contract, period, contractLines) {
   const siteIds = contractLines.map((l) => l.site_id).filter(Boolean);
   const wholeCustomer = Boolean(plan && plan.lines.some((pl) => !pl.site_id)) || contractLines.some((l) => !l.site_id && l.plan_sub_service);
   const stats = await T.visitStats(db, siteIds, period.start, T.addDayExclusive(period.end), wholeCustomer ? [contract.company_id] : []);
+  // Assigned / completed typed by the Service Coordinator for the period's calendar months.
+  const monthList = T.monthStarts(period.start, months);
+  const typed = await T.typedMonths(db, [contract.company_id], monthList);
 
   // The plan line for a price line: the one for its own outlet, otherwise a whole-customer line
   // (no outlet, any job type) for the same service.
@@ -122,8 +125,15 @@ async function buildLines(db, contract, period, contractLines) {
     const s = !linked ? null
       : customerWide ? T.statsFor(stats, null, null, cl.plan_sub_service, contract.company_id)
         : T.statsFor(stats, cl.site_id, cl.plan_service_type, cl.plan_sub_service);
-    const planned = planLine && !shared ? Number(planLine.visits_per_month) * months : null;
-    const done = s ? s.done : null;
+    let planned = planLine && !shared ? Number(planLine.visits_per_month) * months : null;
+    let done = s ? s.done : null;
+    // The typed numbers replace the plan's number and the job count (completed not entered = 0;
+    // the issue check stops the invoice until it is entered).
+    if (linked && planLine && !shared) {
+      const t = T.typedFor(typed, contract.company_id, planLine.sub_service, monthList, planLine.visits_per_month);
+      planned = t.planned;
+      done = t.done;
+    }
 
     let quantity = cl.default_qty === null ? null : Number(cl.default_qty);
     let adjustment = "NONE";
@@ -147,6 +157,7 @@ async function buildLines(db, contract, period, contractLines) {
       site_id: cl.site_id,
       site: cl.site || null,
       item_name: cl.item_name,
+      invoice_group: cl.invoice_group || null,
       sac_code: cl.sac_code,
       unit: cl.unit,
       pricing_basis: cl.pricing_basis,
@@ -259,16 +270,16 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
 
 // ---- Bill Run: generating drafts ----------------------------------------------------------
 
-const lineColumns = `id, invoice_id, contract_line_id, site_id, item_name, sac_code, unit, pricing_basis, rate, quantity,
+const lineColumns = `id, invoice_id, contract_line_id, site_id, item_name, invoice_group, sac_code, unit, pricing_basis, rate, quantity,
   adjustment_type, services_planned, services_done, missed_dates, days_worked, days_in_period, percent, manual_amount,
   adjustment_reason, amount, job_ids, sort_order`;
 
 async function insertLines(conn, invoiceId, lines) {
   for (const [i, l] of lines.entries()) {
     await conn.query(
-      `INSERT INTO billing_invoice_lines (${lineColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO billing_invoice_lines (${lineColumns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        uuid(), invoiceId, l.contract_line_id || null, l.site_id || null, l.item_name, l.sac_code || null, l.unit || "nos",
+        uuid(), invoiceId, l.contract_line_id || null, l.site_id || null, l.item_name, l.invoice_group || null, l.sac_code || null, l.unit || "nos",
         l.pricing_basis, l.rate, l.quantity, l.adjustment_type || "NONE",
         l.services_planned ?? null, l.services_done ?? null, l.missed_dates ? JSON.stringify(l.missed_dates) : null,
         l.days_worked ?? null, l.days_in_period ?? null, l.percent ?? null, l.manual_amount ?? null,
@@ -386,6 +397,7 @@ const lineOut = (l) => ({
   site_id: l.site_id,
   site: l.site || null,
   item_name: l.item_name,
+  invoice_group: l.invoice_group || null,
   sac_code: l.sac_code,
   unit: l.unit,
   pricing_basis: l.pricing_basis,
@@ -515,6 +527,7 @@ function readLine(raw, i, server) {
     contract_line_id: C.str(raw.contract_line_id, `${at}: contract_line_id`, { max: 36 }),
     site_id: C.str(raw.site_id, `${at}: site_id`, { max: 20 }),
     item_name: C.str(raw.item_name, `${at}: item name`, { required: true }),
+    invoice_group: C.str(raw.invoice_group, `${at}: invoice line summary`, { max: 255 }),
     sac_code: C.str(raw.sac_code, `${at}: SAC code`, { max: 10 }),
     unit: C.str(raw.unit, `${at}: unit`, { max: 20 }) || "nos",
     pricing_basis: C.oneOf(raw.pricing_basis, `${at}: pricing_basis`, BASES, { fallback: "FIXED" }),
@@ -682,6 +695,25 @@ async function checkInvoice(db, id) {
     if (l.pricing_basis !== "FIXED" && Number(l.quantity) === 0 && l.adjustment_type !== "MANUAL") errors.push(`Enter the quantity for ${l.item_name}`);
   }
   if (inv.total <= 0) errors.push("The invoice total must be more than zero");
+  // Services completed are typed by the Service Coordinator per month: block until entered.
+  const linkedIds = inv.lines.filter((l) => l.services_planned !== null && l.contract_line_id).map((l) => l.contract_line_id);
+  if (linkedIds.length) {
+    const [cls] = await db.query("SELECT DISTINCT plan_sub_service FROM billing_contract_lines WHERE id IN (?) AND plan_sub_service IS NOT NULL", [linkedIds]);
+    const monthList = T.monthStarts(inv.period_start, T.monthsCount(inv.period_start, inv.period_end));
+    const typed = await T.typedMonths(db, [inv.customer.company_id], monthList);
+    const missing = [];
+    for (const { plan_sub_service: sub } of cls) {
+      const t = T.typedFor(typed, inv.customer.company_id, sub, monthList, 0);
+      for (const m of t.missing) missing.push(`${sub} (${C.monthName(m)})`);
+    }
+    check(
+      "COMPLETED",
+      !missing.length,
+      missing.length
+        ? `Services completed not entered yet for ${missing.join(", ")}. The Service Coordinator enters them in Service Plans.`
+        : "Services completed entered for the period"
+    );
+  }
   check("FY", inv.invoice_date <= today, inv.invoice_date <= today ? `Invoice date ${C.dmy(inv.invoice_date)}` : "The invoice date cannot be in the future");
   if (inv.invoice_date < today) {
     warnings.push(

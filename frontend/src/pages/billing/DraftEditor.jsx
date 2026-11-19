@@ -91,7 +91,7 @@ export default function DraftEditor() {
         description: form.description,
         po_ids: form.po_ids,
         lines: form.lines.map((l) => ({
-          contract_line_id: l.contract_line_id, site_id: l.site_id, item_name: l.item_name, sac_code: l.sac_code, unit: l.unit,
+          contract_line_id: l.contract_line_id, site_id: l.site_id, item_name: l.item_name, invoice_group: l.invoice_group || null, sac_code: l.sac_code, unit: l.unit,
           pricing_basis: l.pricing_basis, rate: l.rate, quantity: l.quantity, adjustment_type: l.adjustment_type,
           services_planned: l.services_planned, services_done: l.services_done, days_worked: l.days_worked, days_in_period: l.days_in_period,
           percent: l.percent, manual_amount: l.manual_amount, adjustment_reason: l.adjustment_reason,
@@ -251,6 +251,7 @@ export default function DraftEditor() {
                         <td style={{ minWidth: 200 }}>
                           {editable ? <input className="bl-cell-input" value={l.item_name} onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Item" /> : <b>{l.item_name}</b>}
                           <div className="bl-sub">{[l.site, l.sac_code && `SAC ${l.sac_code}`, l.unit && `per ${l.unit}`].filter(Boolean).join(" · ")}</div>
+                          {l.invoice_group && <div className="bl-sub" style={{ color: "#1d4ed8" }}>Printed in one line: “{l.invoice_group}”</div>}
                         </td>
                         <td className="bl-num" style={{ width: 110 }}>
                           {editable ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Rate" /> : amount(l.rate)}

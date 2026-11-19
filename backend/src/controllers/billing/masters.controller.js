@@ -198,6 +198,8 @@ function lineOut(l) {
     site_id: l.site_id,
     site: l.site || null,
     item_name: l.item_name,
+    item_kind: l.item_kind || "SERVICE",
+    invoice_group: l.invoice_group || null,
     sac_code: l.sac_code,
     service_id: l.service_id,
     plan_service_type: l.plan_service_type,
@@ -221,6 +223,10 @@ function readContractLine(raw, i, sites, fallbackFrom) {
   const line = {
     site_id: siteId,
     item_name: C.str(raw.item_name, `${at}: item name`, { required: true }),
+    // SERVICE (from the service list) or CHEMICAL (typed; kept in billing_chemicals for other customers)
+    item_kind: C.oneOf(raw.item_kind, `${at}: item_kind`, ["SERVICE", "CHEMICAL"], { fallback: "SERVICE" }),
+    // Optional summary: lines with the same text print as ONE invoice line (this text, their total).
+    invoice_group: C.str(raw.invoice_group, `${at}: invoice line summary`, { max: 255 }),
     sac_code: C.str(raw.sac_code, `${at}: sac_code`, { max: 10 }),
     service_id: C.str(raw.service_id, `${at}: service_id`, { max: 36 }),
     plan_service_type: C.str(raw.plan_service_type, `${at}: plan_service_type`, { max: 50 }),
@@ -232,22 +238,33 @@ function readContractLine(raw, i, sites, fallbackFrom) {
     effective_from: C.date(raw.effective_from, `${at}: effective_from`) || fallbackFrom,
   };
   // A line without an outlet may still name its planned service: it then follows the customer's
-  // whole-customer service plan (jobs at any outlet count).
+  // whole-customer service plan (jobs at any outlet count). A chemical is not a planned service.
+  if (line.item_kind === "CHEMICAL") {
+    line.plan_service_type = null;
+    line.plan_sub_service = null;
+  }
   return line;
+}
+
+/** A chemical typed on a contract goes into billing_chemicals, so other customers can pick it. */
+async function rememberChemical(conn, line, userId) {
+  if (line.item_kind !== "CHEMICAL") return;
+  await conn.query("INSERT IGNORE INTO billing_chemicals (id, name, created_by) VALUES (?, ?, ?)", [uuid(), line.item_name, userId]);
 }
 
 async function insertContractLine(conn, contractId, line, sortOrder, userId) {
   const id = uuid();
   await conn.query(
     `INSERT INTO billing_contract_lines
-       (id, contract_id, site_id, item_name, sac_code, service_id, plan_service_type, plan_sub_service, pricing_basis,
+       (id, contract_id, site_id, item_name, item_kind, invoice_group, sac_code, service_id, plan_service_type, plan_sub_service, pricing_basis,
         unit, rate, default_qty, effective_from, sort_order, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      id, contractId, line.site_id, line.item_name, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service,
+      id, contractId, line.site_id, line.item_name, line.item_kind, line.invoice_group, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service,
       line.pricing_basis, line.unit, line.rate, line.default_qty, line.effective_from, sortOrder, userId, userId,
     ]
   );
+  await rememberChemical(conn, line, userId);
   return id;
 }
 
@@ -532,19 +549,27 @@ const updateContractLine = C.handle("Failed to update the price line", async (re
     }
     await conn.query(
       `UPDATE billing_contract_lines
-          SET site_id = ?, item_name = ?, sac_code = ?, service_id = ?, plan_service_type = ?, plan_sub_service = ?,
+          SET site_id = ?, item_name = ?, item_kind = ?, invoice_group = ?, sac_code = ?, service_id = ?, plan_service_type = ?, plan_sub_service = ?,
               pricing_basis = ?, unit = ?, default_qty = ?, updated_by = ?
         WHERE id = ?`,
-      [line.site_id, line.item_name, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service, line.pricing_basis, line.unit, line.default_qty, req.user.id, old.id]
+      [line.site_id, line.item_name, line.item_kind, line.invoice_group, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service, line.pricing_basis, line.unit, line.default_qty, req.user.id, old.id]
     );
+    await rememberChemical(conn, line, req.user.id);
     const [[row]] = await conn.query("SELECT l.*, s.name AS site FROM billing_contract_lines l LEFT JOIN sites s ON s.id = l.site_id WHERE l.id = ?", [old.id]);
     return lineOut(row);
   });
   res.json(result);
 });
 
+// GET /chemicals - chemicals typed on contracts before, to pick for another customer (no master screen).
+const listChemicals = C.handle("Failed to load the chemicals", async (req, res) => {
+  const [rows] = await pool.query("SELECT name FROM billing_chemicals WHERE is_active = 1 ORDER BY name");
+  res.json(rows.map((r) => r.name));
+});
+
 module.exports = {
   GST_STATES,
+  listChemicals,
   listCustomers,
   getProfile,
   saveProfile,

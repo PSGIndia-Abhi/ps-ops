@@ -30,6 +30,29 @@ function buildContent(inv, number) {
     if (l.adjustment_type === "PERCENT") name += ` (${l.percent}%)`;
     return { name, sac_code: l.sac_code, unit: l.unit, bill_value: l.rate, qty: l.quantity, amount: l.amount };
   });
+  // Invoice line summaries: lines with the same group (typed on the contract's Services and prices)
+  // print as ONE line, the summary as the item name and the total of those lines (after any service
+  // shortfall) as its amount, where the group's first line was. Lines without a group print as they are.
+  // The lines stay separate in the draft (services done, checks); only the print merges them.
+  const printed = [];
+  const groups = new Map();
+  inv.lines.forEach((l, i) => {
+    const key = String(l.invoice_group || "").trim();
+    if (!key) return printed.push(lines[i]);
+    let g = groups.get(key);
+    if (!g) {
+      g = { name: key, sacs: new Set(), amount: 0 };
+      groups.set(key, g);
+      printed.push(g);
+    }
+    if (lines[i].sac_code) g.sacs.add(lines[i].sac_code);
+    g.amount += Number(lines[i].amount || 0);
+  });
+  for (const [k, row] of printed.entries()) {
+    if (!(row.sacs instanceof Set)) continue;
+    const total = calc.round2(row.amount);
+    printed[k] = { name: row.name, sac_code: [...row.sacs].join(", ") || null, unit: "Nos", bill_value: total, qty: 1, amount: total };
+  }
   const address = String(inv.bill_to.address || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   return {
     title: inv.customer.category === "RESIDENTIAL" ? "Invoice" : "Tax Invoice",
@@ -43,7 +66,7 @@ function buildContent(inv, number) {
     bill_to: { name: inv.bill_to.name, lines: address, gstin: inv.bill_to.gst_number || null, state: inv.bill_to.state },
     ship_to: inv.ship_to ? [{ name: inv.ship_to.name, addresses: inv.ship_to.address ? [inv.ship_to.address] : [] }] : [],
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
-    lines,
+    lines: printed,
     tax_mode: inv.tax_mode,
     gst_rate: inv.gst_rate,
     subtotal: inv.subtotal,

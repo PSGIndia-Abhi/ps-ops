@@ -108,7 +108,8 @@ export default function ServiceTracker() {
                     <td>{r.site_id ? r.site || "—" : "All outlets"}</td>
                     <td>{r.sub_service}</td>
                     <td className="bl-num">{r.planned}</td>
-                    <td className="bl-num"><b>{r.done}</b></td>
+                    {/* Completed is typed by the Service Coordinator (Service Plans > Services this month). */}
+                    <td className="bl-num">{r.completed_entered === false ? <span className="bl-warn" title={`${r.jobs_done ?? 0} completed job(s) recorded`}>Not entered</span> : <b>{r.done}</b>}</td>
                     <td className="bl-num">{r.pending || "—"}</td>
                     <td><Bar done={r.done} planned={r.planned} status={r.status} /></td>
                     <td>{r.last_visit ? dmy(r.last_visit) : "—"}</td>

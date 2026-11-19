@@ -7,6 +7,11 @@
 // A line with no outlet (site_id NULL) covers the whole customer: jobs at ANY of its outlets
 // count, matched on sub_service alone (service_type NULL = any job type).
 // The same counts feed the Service Tracker screen, the Bill Run and the draft invoice lines.
+//
+// Typed numbers (billing_service_months, Service Plans > This month): when the Service Coordinator
+// enters a month's "assigned" and "completed" for a customer's service, those replace the plan's
+// number and the job count. "Completed" not entered = 0 done, and a draft for that month cannot be
+// issued (see monthsMissing).
 
 const { todayIst, monthRange, addMonths } = require("./common");
 
@@ -14,6 +19,51 @@ const norm = (v) => String(v || "").trim().toLowerCase();
 const fullKey = (site, type, sub) => `${site}|${norm(type)}|${norm(sub)}`;
 const subKey = (site, sub) => `${site}|${norm(sub)}`;
 const customerKey = (companyId, sub) => `${companyId}|${norm(sub)}`;
+
+/** First days of `count` calendar months from the month of `date`: ("2026-11-16", 2) -> [2026-11-01, 2026-12-01]. */
+function monthStarts(date, count = 1) {
+  const first = `${String(date).slice(0, 7)}-01`;
+  return Array.from({ length: Math.max(1, count) }, (_, i) => addMonths(first, i));
+}
+
+/**
+ * Typed monthly numbers for these customers and months: Map customer|service|month ->
+ * { assigned, completed } (completed null = not entered).
+ */
+async function typedMonths(db, companyIds, months) {
+  const out = new Map();
+  const ids = [...new Set(companyIds.filter(Boolean))];
+  if (!ids.length || !months.length) return out;
+  const [rows] = await db.query(
+    `SELECT company_id, DATE_FORMAT(month, '%Y-%m-%d') AS month, sub_service, assigned, completed
+       FROM billing_service_months WHERE company_id IN (?) AND month IN (?)`,
+    [ids, months]
+  );
+  for (const r of rows) {
+    out.set(`${customerKey(r.company_id, r.sub_service)}|${r.month}`, { assigned: Number(r.assigned), completed: r.completed === null ? null : Number(r.completed) });
+  }
+  return out;
+}
+
+/**
+ * Planned and done for one customer's service over these months, from the typed numbers:
+ * assigned (or `planPerMonth` for a month without a row) and completed (0 when not entered).
+ * Returns { planned, done, missing: [months without "completed"], typed: any month has a row }.
+ */
+function typedFor(typed, companyId, subService, months, planPerMonth) {
+  let planned = 0;
+  let done = 0;
+  let any = false;
+  const missing = [];
+  for (const m of months) {
+    const t = typed.get(`${customerKey(companyId, subService)}|${m}`);
+    if (t) any = true;
+    planned += t ? t.assigned : Number(planPerMonth) || 0;
+    if (t && t.completed !== null) done += t.completed;
+    else missing.push(m);
+  }
+  return { planned, done, missing, typed: any };
+}
 
 /** The plan version in force on `onDate` for a customer (with its lines), or null. */
 async function planFor(db, companyId, onDate) {
@@ -145,6 +195,7 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
   );
   const scope = statsScope(planRows, (r) => r.company_id);
   const stats = await visitStats(db, scope.siteIds, range.start, range.next, scope.companyIds);
+  const typed = await typedMonths(db, planRows.map((r) => r.company_id), [range.start]);
 
   const today = todayIst();
   const periodOver = range.end < today;
@@ -152,8 +203,11 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
   const dayOfMonth = Number(today.slice(8, 10));
 
   const rows = planRows.map((p) => {
-    const s = statsFor(stats, p.site_id, p.service_type, p.sub_service, p.company_id);
-    const planned = Number(p.planned);
+    const jobs = statsFor(stats, p.site_id, p.service_type, p.sub_service, p.company_id);
+    // Assigned and completed typed by the Service Coordinator for this month.
+    const t = typedFor(typed, p.company_id, p.sub_service, [range.start], p.planned);
+    const s = { ...jobs, done: t.done };
+    const planned = t.planned;
     const status = rowStatus(planned, s.done, s.scheduled_after_today, periodOver);
     const highlight = s.done < planned && (periodOver || (isCurrent && dayOfMonth >= Number(p.shortfall_highlight_day)));
     return {
@@ -165,6 +219,8 @@ async function trackerForMonth(db, month, { companyId = null } = {}) {
       sub_service: p.sub_service,
       planned,
       done: s.done,
+      completed_entered: t.missing.length === 0,
+      jobs_done: jobs.done,
       pending: Math.max(planned - s.done, 0),
       scheduled_after_today: s.scheduled_after_today,
       last_visit: s.last_visit,
@@ -200,9 +256,12 @@ async function servicesForPeriod(db, companyId, periodStart, periodEnd, months =
   const lines = plan ? plan.lines : [];
   const scope = statsScope(lines, () => companyId);
   const stats = await visitStats(db, scope.siteIds, periodStart, addDayExclusive(periodEnd), scope.companyIds);
+  const monthList = monthStarts(periodStart, months);
+  const typed = await typedMonths(db, [companyId], monthList);
   const rows = lines.map((l) => {
     const s = statsFor(stats, l.site_id, l.service_type, l.sub_service, companyId);
-    return { site_id: l.site_id, service_type: l.service_type, sub_service: l.sub_service, planned: Number(l.visits_per_month) * months, ...s };
+    const t = typedFor(typed, companyId, l.sub_service, monthList, l.visits_per_month);
+    return { site_id: l.site_id, service_type: l.service_type, sub_service: l.sub_service, ...s, planned: t.planned, done: t.done, completed_missing: t.missing };
   });
   return {
     plan,
@@ -230,4 +289,4 @@ function monthsCount(start, end) {
   return Math.max(n, 1);
 }
 
-module.exports = { planFor, visitStats, statsFor, statsScope, trackerForMonth, servicesForPeriod, rowStatus, addDayExclusive, monthsCount };
+module.exports = { planFor, visitStats, statsFor, statsScope, trackerForMonth, servicesForPeriod, rowStatus, addDayExclusive, monthsCount, monthStarts, typedMonths, typedFor };

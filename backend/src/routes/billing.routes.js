@@ -52,6 +52,9 @@ router.get("/service-plans", can(P.VIEW_SERVICE_TRACKER), plans.listPlans);
 router.get("/service-plans/:companyId", can(P.VIEW_SERVICE_TRACKER), plans.getPlan);
 router.put("/service-plans/:companyId", can(P.MANAGE_SERVICE_PLANS), plans.savePlan);
 router.get("/service-plans/:companyId/history", can(P.VIEW_SERVICE_TRACKER), plans.planHistory);
+// Services assigned / completed per month, typed by the Service Coordinator.
+router.get("/service-plans/:companyId/months", can(P.VIEW_SERVICE_TRACKER), plans.getMonth);
+router.put("/service-plans/:companyId/months", can(P.MANAGE_SERVICE_PLANS), plans.saveMonth);
 router.get("/service-tracker", can(P.VIEW_SERVICE_TRACKER), plans.tracker);
 router.get("/service-tracker/jobs", can(P.VIEW_SERVICE_TRACKER), plans.trackerJobs);
 router.post("/service-tracker/notify", can(P.VIEW_SERVICE_TRACKER), plans.notifyOperations);
@@ -66,6 +69,8 @@ router.put("/descriptions/:id", can(P.MANAGE_BILLING_MASTERS), descriptions.upda
 router.get("/frequencies", can(P.VIEW_BILLING), frequencies.list);
 router.post("/frequencies", can(P.MANAGE_BILLING_MASTERS), frequencies.create);
 router.put("/frequencies/:months", can(P.MANAGE_BILLING_MASTERS), frequencies.update);
+// Chemicals typed on contracts before (picked again for another customer; no master screen).
+router.get("/chemicals", can(P.VIEW_BILLING), masters.listChemicals);
 router.get("/contracts", can(P.VIEW_BILLING), masters.listContracts);
 router.post("/contracts", can(P.MANAGE_BILLING_MASTERS), masters.createContract);
 router.get("/contracts/:id", can(P.VIEW_BILLING), masters.getContract);

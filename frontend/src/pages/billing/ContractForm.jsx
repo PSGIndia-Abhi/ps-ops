@@ -18,10 +18,11 @@ const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"],
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
 const SQM = "sq.m";
 
-const emptyLine = (siteId = "", type = "") => ({
-  key: `n${Date.now()}${Math.random()}`, site_id: siteId, sac_code: "998531", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "",
+const emptyLine = (siteId = "", type = "", kind = "SERVICE") => ({
+  key: `n${Date.now()}${Math.random()}`, site_id: siteId, sac_code: kind === "CHEMICAL" ? "" : "998531", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "",
+  item_kind: kind, invoice_group: "",
   // Termite work is priced per square metre: area (sq. m) x rate per sq. m, set for each customer.
-  ...(type === "TERMITE" ? { item_name: "Termite Post-Construction Treatment", pricing_basis: "PER_UNIT", unit: SQM } : { item_name: "", pricing_basis: "FIXED", unit: "Nos", default_qty: 1 }),
+  ...(type === "TERMITE" && kind === "SERVICE" ? { item_name: "Termite Post-Construction Treatment", pricing_basis: "PER_UNIT", unit: SQM } : { item_name: "", pricing_basis: "FIXED", unit: "Nos", default_qty: 1 }),
 });
 const isSqm = (l) => l.pricing_basis === "PER_UNIT" && /^sq/i.test(l.unit || "");
 const lineTotal = (l) => (l.rate === "" || l.default_qty === "" || l.default_qty === null || l.default_qty === undefined ? null : Number(l.rate) * Number(l.default_qty));
@@ -89,7 +90,8 @@ export default function ContractForm() {
     };
   }
   const lineBody = (l) => ({
-    site_id: l.site_id || (sites.length === 1 ? sites[0].site_id : null), item_name: l.item_name, service_id: l.service_id || null, sac_code: l.sac_code || "998531", pricing_basis: l.pricing_basis, unit: l.unit || "nos",
+    site_id: l.site_id || (sites.length === 1 ? sites[0].site_id : null), item_name: (l.item_name || "").trim(), item_kind: l.item_kind || "SERVICE",
+    invoice_group: (l.invoice_group || "").trim() || null, service_id: l.service_id || null, sac_code: l.item_kind === "CHEMICAL" ? l.sac_code || null : l.sac_code || "998531", pricing_basis: l.pricing_basis, unit: l.unit || "nos",
     rate: l.rate, default_qty: l.default_qty === "" || l.default_qty === null ? null : l.default_qty,
     plan_service_type: l.plan_sub_service ? l.plan_service_type || null : null, plan_sub_service: l.plan_sub_service || null,
     effective_from: l.effective_from || undefined,
@@ -309,6 +311,9 @@ export default function ContractForm() {
                   <button type="button" className="ac-btn sm ac-btn-primary" onClick={() => (isNew
                     ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => emptyLine(x.site_id, form.billing_type)) : [emptyLine(sites[0]?.site_id || "", form.billing_type)])])
                     : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}>+ Add service</button>
+                  <button type="button" className="ac-btn sm" onClick={() => (isNew
+                    ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
+                    : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}>+ Add chemical</button>
                 </div>
               )}
             </div>
@@ -326,7 +331,7 @@ export default function ContractForm() {
                 <thead>
                   <tr>
                     <th>Outlet</th>
-                    <th>Service</th>
+                    <th>Service / chemical</th>
                     {sqmMode && <th className="ac-num">Rate per sq. m (₹)</th>}
                     {sqmMode && <th className="ac-num">Area (sq. m)</th>}
                     <th className="ac-num">Amount (₹)</th>
@@ -345,7 +350,11 @@ export default function ContractForm() {
                   ) : (
                     <tr key={l.id}>
                       <td>{l.site || "All outlets"}</td>
-                      <td>{l.item_name}</td>
+                      <td>
+                        {l.item_name}
+                        {l.item_kind === "CHEMICAL" && <> <span className="ac-badge b-teal">Chemical</span></>}
+                        {l.invoice_group && <div className="bl-sub">Printed as “{l.invoice_group}”</div>}
+                      </td>
                       {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
                       {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
                       <td className="bl-num"><b>{amount(isSqm(l) ? lineTotal(l) ?? 0 : Number(l.rate) * (Number(l.default_qty) || 1))}</b></td>
@@ -409,6 +418,7 @@ function buildServiceGroups(jobServices, catalog) {
 
 function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, onSave, onCancel, busy, fixedRate = false }) {
   const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  const { data: chemicals } = useBilling(line.item_kind === "CHEMICAL" ? "/chemicals" : null);
   const sqm = isSqm(line);
   const known = groups.some(([, names]) => names.some((n) => same(n, line.item_name)));
   // The service name also links the line to the customer's service plan (same outlet and service),
@@ -432,15 +442,24 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
         <span className="bl-outlet">{outletName}</span>
       </td>
       <td>
-        <select className="bl-cell-input" value={line.item_name || ""} onChange={(e) => pick(e.target.value)} aria-label="Service">
-          <option value="">Choose a service…</option>
-          {groups.map(([label, names]) => (
-            <optgroup key={label} label={label}>
-              {names.map((n) => <option key={n} value={n}>{n}</option>)}
-            </optgroup>
-          ))}
-          {line.item_name && !known && <option value={line.item_name}>{line.item_name}</option>}
-        </select>
+        {line.item_kind === "CHEMICAL" ? (
+          <>
+            <input className="bl-cell-input" list="cf-chemicals" value={line.item_name || ""} maxLength={255} placeholder="Type or choose the chemical" onChange={(e) => onChange({ item_name: e.target.value, plan_service_type: "", plan_sub_service: "" })} aria-label="Chemical" />
+            <datalist id="cf-chemicals">{(chemicals || []).map((c) => <option key={c} value={c} />)}</datalist>
+          </>
+        ) : (
+          <select className="bl-cell-input" value={line.item_name || ""} onChange={(e) => pick(e.target.value)} aria-label="Service">
+            <option value="">Choose a service…</option>
+            {groups.map(([label, names]) => (
+              <optgroup key={label} label={label}>
+                {names.map((n) => <option key={n} value={n}>{n}</option>)}
+              </optgroup>
+            ))}
+            {line.item_name && !known && <option value={line.item_name}>{line.item_name}</option>}
+          </select>
+        )}
+        {/* Lines with the same summary print as ONE invoice line (this text, their total). */}
+        <input className="bl-cell-input" style={{ marginTop: 6 }} value={line.invoice_group || ""} maxLength={255} placeholder="Invoice line summary (optional)" title="Lines with the same summary print as one invoice line" onChange={(e) => onChange({ invoice_group: e.target.value })} aria-label="Invoice line summary" />
       </td>
       {sqmMode && <td>{sqm ? rateInput("Rate per square metre") : <span className="ac-sub">—</span>}</td>}
       {sqmMode && (

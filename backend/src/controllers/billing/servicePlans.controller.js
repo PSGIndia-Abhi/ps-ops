@@ -313,4 +313,92 @@ const notifyOperations = C.handle("Failed to notify Operations", async (req, res
   res.json({ notified_users: count, services: picked.length });
 });
 
-module.exports = { listPlans, getPlan, savePlan, planHistory, tracker, trackerJobs, notifyOperations };
+// ---- services assigned and completed per month (typed by the Service Coordinator) ----------
+// The plan's services for a month, one row per service name, with what was typed for that month.
+
+/** The services of the plan in force in `monthStart`: [{ sub_service, plan_per_month }] (one per name). */
+async function planServicesFor(db, companyId, monthStart) {
+  const plan = await T.planFor(db, companyId, monthStart);
+  const byName = new Map();
+  for (const l of plan ? plan.lines : []) {
+    const key = String(l.sub_service || "").trim().toLowerCase();
+    if (!key) continue;
+    const row = byName.get(key) || { sub_service: l.sub_service, plan_per_month: 0 };
+    row.plan_per_month += Number(l.visits_per_month) || 0;
+    byName.set(key, row);
+  }
+  return [...byName.values()];
+}
+
+// GET /service-plans/:companyId/months?month=2026-11
+// -> { month, rows: [{ sub_service, plan_per_month, assigned, completed (null = not entered), jobs_done }] }
+const getMonth = C.handle("Failed to load the services of the month", async (req, res) => {
+  const companyId = C.str(req.params.companyId, "companyId", { required: true, max: 20 });
+  const month = C.month(req.query.month || C.todayIst().slice(0, 7));
+  const range = C.monthRange(month);
+  const services = await planServicesFor(pool, companyId, range.start);
+  const [typed] = await pool.query(
+    "SELECT sub_service, assigned, completed FROM billing_service_months WHERE company_id = ? AND month = ?",
+    [companyId, range.start]
+  );
+  // Completed jobs, for reference next to the typed number.
+  const stats = await T.visitStats(pool, [], range.start, range.next, [companyId]);
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  res.json({
+    month: range.start,
+    rows: services.map((s) => {
+      const t = typed.find((r) => same(r.sub_service, s.sub_service));
+      return {
+        sub_service: s.sub_service,
+        plan_per_month: s.plan_per_month,
+        assigned: t ? Number(t.assigned) : s.plan_per_month,
+        completed: t && t.completed !== null ? Number(t.completed) : null,
+        saved: Boolean(t),
+        jobs_done: T.statsFor(stats, null, null, s.sub_service, companyId).done,
+      };
+    }),
+  });
+});
+
+// PUT /service-plans/:companyId/months { month, rows: [{ sub_service, assigned, completed (null = not entered) }] }
+const saveMonth = C.handle("Failed to save the services of the month", async (req, res) => {
+  const companyId = C.str(req.params.companyId, "companyId", { required: true, max: 20 });
+  const b = req.body || {};
+  const month = C.month(b.month);
+  const range = C.monthRange(month);
+  if (range.start > `${C.todayIst().slice(0, 7)}-01`) throw C.bad("Services can be entered up to the current month");
+  if (!Array.isArray(b.rows) || !b.rows.length) throw C.bad("rows must be a non-empty list");
+  const services = await planServicesFor(pool, companyId, range.start);
+  const rows = b.rows.map((r, i) => {
+    const at = `Row ${i + 1}`;
+    const sub = C.str(r?.sub_service, `${at}: service`, { required: true, max: 100 });
+    const planned = services.find((s) => s.sub_service.trim().toLowerCase() === sub.toLowerCase());
+    if (!planned) throw C.bad(`${sub} is not in this customer's service plan for ${C.monthName(range.start)}`);
+    return {
+      sub_service: planned.sub_service,
+      assigned: C.num(r.assigned, `${sub}: assigned`, { required: true, integer: true, min: 0, max: 999 }),
+      completed: C.num(r.completed, `${sub}: completed`, { integer: true, min: 0, max: 999 }),
+    };
+  });
+  await C.inTransaction(pool, async (conn) => {
+    for (const r of rows) {
+      await conn.query(
+        `INSERT INTO billing_service_months (company_id, month, sub_service, assigned, completed, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE assigned = VALUES(assigned), completed = VALUES(completed), updated_by = VALUES(updated_by)`,
+        [companyId, range.start, r.sub_service, r.assigned, r.completed, req.user.id]
+      );
+    }
+    await logAudit(conn, req, {
+      module: "BILLING",
+      action: "SERVICE_MONTH_SAVED",
+      entity_type: "BILLING_SERVICE_MONTH",
+      entity_id: `${companyId}|${range.start}`,
+      entity_label: `${companyId} ${C.monthName(range.start)}`,
+      summary: `Services for ${C.monthName(range.start)}: ${rows.map((r) => `${r.sub_service} ${r.completed ?? "-"}/${r.assigned}`).join(", ")}`,
+    });
+  });
+  res.json({ month: range.start, saved: rows.length });
+});
+
+module.exports = { listPlans, getPlan, savePlan, planHistory, tracker, trackerJobs, notifyOperations, getMonth, saveMonth };
