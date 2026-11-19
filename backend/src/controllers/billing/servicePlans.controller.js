@@ -262,7 +262,10 @@ const tracker = C.handle("Failed to load the service tracker", async (req, res) 
   let rows = data.rows;
   if (status) rows = rows.filter((r) => r.status === status);
   if (q) rows = rows.filter((r) => `${r.customer} ${r.site || ""} ${r.sub_service}`.toLowerCase().includes(q));
-  res.json({ month: data.month, as_of: data.as_of, summary: data.summary, rows: rows.slice(offset, offset + pageSize), total: rows.length, page, page_size: pageSize });
+  // One customer's services stay together: the page is a page of customers (total = customers).
+  const customers = [...new Set(rows.map((r) => r.company_id))];
+  const onPage = new Set(customers.slice(offset, offset + pageSize));
+  res.json({ month: data.month, as_of: data.as_of, summary: data.summary, rows: rows.filter((r) => onPage.has(r.company_id)), total: customers.length, page, page_size: pageSize });
 });
 
 // GET /service-tracker/jobs?site_id=&company_id=&service_type=&sub_service=&month=

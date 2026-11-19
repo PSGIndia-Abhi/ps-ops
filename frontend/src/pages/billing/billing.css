@@ -356,3 +356,24 @@
   .nc-lines.priced .nc-line > .nc-pickcell { grid-column: 1 / -1; }
   .nc-lines.priced .nc-line > span:empty { display: none; }
 }
+
+/* Service Tracker: one row per customer (click to show its services). */
+.st-caret { display: inline-block; width: 14px; color: #64748b; }
+.ac-table tr.st-sub td { background: #fbfcfe; font-size: 13px; }
+.ac-table tr.st-sub td.st-sub-name { padding-left: 34px; color: #475569; }
+.ac-table tr.st-sub.bl-short td { background: #fef2f2; }
+/* services: plan per month | completed this month | rate | amount */
+.nc-lines.priced.svc .nc-line { grid-template-columns: minmax(0, 1fr) 110px 130px 150px 120px; }
+.nc-plan { color: #64748b; padding-right: 6px; }
+@media (max-width: 640px) {
+  .nc-lines.priced.svc .nc-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+/* Services this month: Service | Planned (fixed) | Completed (typed; less = short, more = extra) */
+.sp-month-grid { grid-template-columns: minmax(0, 1fr) 64px auto; }
+.sp-extra { color: #6d28d9; font-weight: 600; }
+.sp-c { text-align: center; }
+.sp-planned { font-size: 16px; color: #0f172a; }
+@media (max-width: 480px) {
+  .sp-month-grid { grid-template-columns: 48px auto; }
+  .sp-month-head:nth-child(-n+3) { display: none; }
+}
