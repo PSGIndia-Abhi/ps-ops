@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import {
   AlertTriangleIcon,
@@ -23,6 +24,7 @@ import { RISK_STYLE, formatDate, formatMoney, plural } from '../format';
 import type { ClientStackParamList } from '../navigation';
 import { OutletPicker } from '../ui/OutletPicker';
 import { ChipRow, ClientPage, SOFT, TONES, type ToneKey } from '../ui/page';
+import { BrandLoaderOverlay } from '../../components/BrandLoader';
 import { STATUS_TONE } from './ClientJobsScreen';
 
 type IconType = React.ComponentType<{ size?: number; color?: string }>;
@@ -265,12 +267,17 @@ export function ClientDocumentsScreen({ fixedKind, title = 'Documents' }: { fixe
         keyExtractor={(d) => d.key}
         renderItem={renderItem}
         ItemSeparatorComponent={() => <View style={styles.divider} />}
-        ListHeaderComponent={header}
+        ListHeaderComponent={
+          <>
+            <RefreshBanner refreshing={refreshing} />
+            {header}
+          </>
+        }
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={0.4}
         onEndReached={() => canLoadMore && setPage((p) => p + 1)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
+        refreshControl={brandRefreshControl(refreshing, onRefresh)}
         ListEmptyComponent={
           firstLoad ? (
             <View>
@@ -317,6 +324,7 @@ export function ClientDocumentsScreen({ fixedKind, title = 'Documents' }: { fixe
             : []
         }
       />
+      <BrandLoaderOverlay visible={!!busy} message="Preparing the document" />
     </ClientPage>
   );
 }

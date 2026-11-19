@@ -1,172 +1,121 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StatusBar, Text, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { BrandMark } from '../../components/BrandMark';
-import {
-  AlertTriangleIcon,
-  BriefcaseIcon,
-  CalendarIcon,
-  CameraIcon,
-  CheckCircleIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  DocumentIcon,
-  InboxIcon,
-  PhoneIcon,
-  PinIcon,
-  PlusIcon,
-  ShieldIcon,
-  SparkleIcon,
-} from '../../components/icons';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
+import { ChevronRightIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
-import { CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
+import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { initials } from '../../tasks/format';
 import { avatarColor } from '../../tasks/theme';
-import { ActionSheet, DateSheet } from '../../tasks/ui/sheets';
-import { radii, spacing, typography } from '../../theme';
+import { DateSheet } from '../../tasks/ui/sheets';
+import { shadows, spacing, typography } from '../../theme';
 import { getClientDashboard, type ClientDashboard } from '../api';
 import { useClientPortal } from '../ClientPortalContext';
-import { PERIODS, RISK_STYLE, SUPPORT_CONTACT, formatDate, formatDateTime, periodRange, relativeDay, serviceLabel, type PeriodKey } from '../format';
+import { RISK_STYLE, SUPPORT_CONTACT, formatDate, periodRange, plural, relativeDay, serviceLabel, type PeriodKey } from '../format';
 import type { ClientStackParamList, ClientTabParamList } from '../navigation';
+import {
+  AuditGlyph,
+  BookServiceGlyph,
+  ComplaintGlyph,
+  DocumentsGlyph,
+  HeroArt,
+  ICON_DEEP,
+  ICON_SOFT,
+  JobsGlyph,
+  OutletGlyph,
+  SearchGlyph,
+  SupportGlyph,
+  TILE_BG,
+  VisitsGlyph,
+} from '../ui/ClientIcons';
+import { CompanyMonogram } from '../ui/CompanyMonogram';
+import { useFloatingBarSpace } from '../ui/FloatingTabBar';
+import { HealthCard } from '../ui/HealthCard';
 import { OutletSheet } from '../ui/OutletPicker';
+import { PAGE_BG, TONES } from '../ui/page';
+import { GlanceSkeleton, ShortcutsSkeleton } from '../ui/skeletons';
 
 type Nav = NavigationProp<ClientTabParamList & ClientStackParamList>;
-type IconType = React.ComponentType<{ size?: number; color?: string }>;
+type Glyph = React.ComponentType<{ size?: number; color?: string; fill?: string }>;
 
-/** Google-style tonal pairs: soft circle + strong icon colour. */
-const TONES = {
-  blue: { bg: '#E8F0FE', fg: '#1A73E8' },
-  amber: { bg: '#FEF3C7', fg: '#D97706' },
-  violet: { bg: '#F3E8FF', fg: '#7C3AED' },
-  green: { bg: '#DCFCE7', fg: '#16A34A' },
-  teal: { bg: '#CCFBF1', fg: '#0D9488' },
-  rose: { bg: '#FFE4E6', fg: '#E11D48' },
-  indigo: { bg: '#E0E7FF', fg: '#4F46E5' },
-  orange: { bg: '#FFEDD5', fg: '#EA580C' },
-} as const;
-
-function activityText(message = '') {
-  const m = /status changed from\s+(\w+)\s+to\s+(\w+)/i.exec(message);
-  if (!m) return message;
-  const label = ({ COMPLETED: 'Completed', IN_PROGRESS: 'In progress', NOT_STARTED: 'Scheduled' } as Record<string, string>)[m[2].toUpperCase()] || m[2];
-  return `Status changed to ${label}`;
-}
-
-function activityMeta(message: string): { Icon: IconType; tone: keyof typeof TONES } {
-  const m = message.toLowerCase();
-  if (m.includes('photo')) return { Icon: CameraIcon, tone: 'violet' };
-  if (m.includes('complaint')) return { Icon: AlertTriangleIcon, tone: 'amber' };
-  if (m.includes('completed')) return { Icon: CheckCircleIcon, tone: 'green' };
-  if (m.includes('status')) return { Icon: ClockIcon, tone: 'blue' };
-  return { Icon: SparkleIcon, tone: 'teal' };
-}
+/** Sky-blue hero (Google Pay style), light and dark. */
+const HERO = { light: ['#C4DAFE', '#E6EFFF'], dark: ['#1B2B4A', '#121B2E'] } as const;
 
 const factory = (t: CrmTheme) => ({
-  screen: { flex: 1, backgroundColor: t.isDark ? t.background : '#FFFFFF' },
+  screen: { flex: 1, backgroundColor: PAGE_BG(t) },
   flex1: { flex: 1 },
   pressed: { opacity: 0.7 },
-  // Fixed header
-  header: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm },
-  logo: { width: 36, height: 36, borderRadius: 10, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.isDark ? '#FFFFFF' : 'transparent' },
-  headerText: { flex: 1 },
-  company: { ...typography.subtitle, fontSize: 17, color: t.textPrimary },
-  greeting: { ...typography.caption, color: t.textMuted },
-  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
-  avatarText: { color: '#FFFFFF', fontWeight: '700' as const, fontSize: 15 },
-  content: { paddingBottom: spacing.xxxl },
-  // Search-like outlet bar
-  bar: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xs,
-    minHeight: 54,
-    paddingHorizontal: spacing.md,
-    borderRadius: 28,
-    backgroundColor: t.isDark ? t.surfaceAlt : '#F1F3F4',
-  },
-  barTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  barSub: { ...typography.caption, color: t.textMuted },
-  barCaret: { transform: [{ rotate: '90deg' }] },
-  // Round actions
-  actions: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, paddingHorizontal: spacing.sm, marginTop: spacing.lg },
-  action: { width: '25%' as const, alignItems: 'center' as const, paddingVertical: spacing.sm },
-  actionCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center' as const, justifyContent: 'center' as const },
-  actionLabel: { ...typography.caption, fontSize: 12.5, color: t.textPrimary, marginTop: 8, textAlign: 'center' as const },
-  // Sections
-  section: { paddingHorizontal: spacing.lg, marginTop: spacing.xl },
-  sectionHead: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: spacing.sm },
-  sectionTitle: { ...typography.subtitle, fontSize: 18, color: t.textPrimary, flex: 1 },
-  sectionLink: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 2, paddingVertical: 4 },
-  sectionLinkText: { ...typography.captionMedium, fontSize: 13.5, color: t.primary },
-  rule: { height: 8, backgroundColor: t.isDark ? t.surfaceAlt : '#F6F7F9', marginTop: spacing.xl },
-  // Next visit
-  next: {
+  statusStrip: { position: 'absolute' as const, top: 0, left: 0, right: 0, zIndex: 2 },
+
+  // Hero
+  hero: { paddingBottom: spacing.lg },
+  heroBg: { position: 'absolute' as const, top: 0, left: 0 },
+  topRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+  search: {
+    flex: 1,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: spacing.md,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.surface,
+    height: 56,
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    backgroundColor: t.isDark ? t.surface : '#FFFFFF',
+    ...shadows.card,
   },
-  nextDate: { width: 54, height: 58, borderRadius: 14, backgroundColor: TONES.blue.bg, alignItems: 'center' as const, justifyContent: 'center' as const },
-  nextDay: { fontSize: 21, lineHeight: 24, fontWeight: '800' as const, color: TONES.blue.fg },
-  nextMonth: { fontSize: 11, fontWeight: '700' as const, color: TONES.blue.fg, textTransform: 'uppercase' as const },
-  nextLabel: { ...typography.overline, fontSize: 10, color: t.textMuted },
-  nextTitle: { ...typography.bodyMedium, fontSize: 16, color: t.textPrimary, marginTop: 1 },
-  nextSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
-  nextWhen: { ...typography.captionMedium, color: TONES.blue.fg },
-  // Stats
-  periodLink: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 4, paddingVertical: 4, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: t.isDark ? t.surfaceAlt : '#F1F3F4' },
-  periodText: { ...typography.captionMedium, fontSize: 12.5, color: t.textPrimary },
-  stats: { flexDirection: 'row' as const, borderRadius: 20, borderWidth: 1, borderColor: t.border, paddingVertical: spacing.md },
-  stat: { flex: 1, alignItems: 'center' as const },
-  statDivider: { width: 1, backgroundColor: t.border, marginVertical: 4 },
-  statValue: { fontSize: 24, lineHeight: 30, fontWeight: '800' as const, color: t.textPrimary },
-  statLabel: { ...typography.caption, color: t.textMuted, marginTop: 2 },
-  health: { marginTop: spacing.md },
-  healthRow: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 8 },
-  healthLabel: { ...typography.bodyMedium, color: t.textPrimary, flex: 1 },
-  healthValue: { ...typography.bodyMedium, color: TONES.green.fg },
-  track: { height: 8, borderRadius: 4, backgroundColor: t.isDark ? t.surfaceAlt : '#EEF0F3', flexDirection: 'row' as const, overflow: 'hidden' as const },
-  healthNote: { ...typography.caption, color: t.textMuted, marginTop: 8 },
-  // People-style outlet row
+  searchText: { ...typography.body, fontSize: 16, color: t.textMuted, flex: 1 },
+  tileRing: { borderRadius: 16, borderWidth: 2.5, borderColor: t.isDark ? t.surface : '#FFFFFF' },
+  banner: { flexDirection: 'row' as const, alignItems: 'flex-end' as const, paddingLeft: spacing.lg, paddingRight: spacing.sm, marginTop: spacing.xl },
+  brandRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  brandText: { ...typography.captionMedium, fontSize: 12, color: t.textSecondary },
+  company: { fontSize: 25, lineHeight: 31, fontWeight: '800' as const, color: t.textPrimary, marginTop: 6 },
+  outlet: { ...typography.body, fontSize: 15, color: t.textSecondary, marginTop: 2 },
+  link: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, marginTop: spacing.md, alignSelf: 'flex-start' as const },
+  linkText: { fontSize: 16, fontWeight: '600' as const, color: t.isDark ? '#8AB4F8' : ICON_DEEP },
+  linkCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: t.isDark ? '#8AB4F8' : ICON_DEEP, alignItems: 'center' as const, justifyContent: 'center' as const },
+
+  // Actions
+  actions: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, paddingHorizontal: spacing.sm, marginTop: spacing.lg },
+  action: { width: '25%' as const, alignItems: 'center' as const, paddingVertical: spacing.sm },
+  actionTile: { width: 64, height: 64, borderRadius: 22, backgroundColor: t.isDark ? t.surfaceAlt : TILE_BG, alignItems: 'center' as const, justifyContent: 'center' as const },
+  actionLabel: { ...typography.body, fontSize: 13.5, lineHeight: 17, color: t.textPrimary, marginTop: 8, textAlign: 'center' as const },
+
+  // Shortcut pills
+  pills: { gap: 10, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  pill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, paddingVertical: 10, paddingLeft: 10, paddingRight: 18, borderRadius: 32, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface, minWidth: 168 },
+  pillIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: t.isDark ? t.surfaceAlt : TILE_BG, alignItems: 'center' as const, justifyContent: 'center' as const },
+  pillLabel: { ...typography.caption, fontSize: 12.5, color: t.textSecondary },
+  pillValue: { ...typography.bodyMedium, fontSize: 14.5, color: t.textPrimary, maxWidth: 170 },
+
+  section: { paddingHorizontal: spacing.lg, marginTop: spacing.xl },
+  sectionHead: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: spacing.md },
+  sectionTitle: { ...typography.subtitle, fontSize: 19, color: t.textPrimary, flex: 1 },
+  seeAll: { ...typography.captionMedium, fontSize: 14, color: t.isDark ? '#8AB4F8' : ICON_DEEP, paddingVertical: 4 },
+
+  // Outlets row
   people: { gap: spacing.lg, paddingHorizontal: spacing.lg },
-  person: { width: 68, alignItems: 'center' as const },
-  personCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center' as const, justifyContent: 'center' as const },
-  personRing: { borderWidth: 2.5, borderColor: t.primary },
-  personText: { color: '#FFFFFF', fontWeight: '700' as const, fontSize: 18 },
+  person: { width: 72, alignItems: 'center' as const },
+  personCircle: { width: 60, height: 60, borderRadius: 30, alignItems: 'center' as const, justifyContent: 'center' as const },
+  personRing: { borderWidth: 3, borderColor: ICON_DEEP },
+  personText: { color: '#FFFFFF', fontWeight: '700' as const, fontSize: 20 },
   personDot: { position: 'absolute' as const, right: 1, top: 1, width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#FFFFFF' },
-  personName: { ...typography.caption, fontSize: 12, color: t.textPrimary, marginTop: 6, textAlign: 'center' as const },
-  // Lists
-  row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, paddingVertical: spacing.sm + 2 },
-  rowIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center' as const, justifyContent: 'center' as const },
-  rowDate: { width: 44, height: 44, borderRadius: 22, backgroundColor: TONES.blue.bg, alignItems: 'center' as const, justifyContent: 'center' as const },
-  rowDateDay: { fontSize: 15, lineHeight: 17, fontWeight: '800' as const, color: TONES.blue.fg },
-  rowDateMonth: { fontSize: 9, fontWeight: '700' as const, color: TONES.blue.fg, textTransform: 'uppercase' as const },
-  rowTitle: { ...typography.bodyMedium, color: t.textPrimary },
-  rowSub: { ...typography.caption, color: t.textMuted, marginTop: 1 },
-  rowRight: { ...typography.caption, color: t.textMuted },
-  empty: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, paddingVertical: spacing.sm },
-  emptyText: { ...typography.body, color: t.textMuted, flex: 1 },
-  footer: { alignItems: 'center' as const, marginTop: spacing.xxl, gap: 4 },
+  personName: { ...typography.caption, fontSize: 12.5, color: t.textPrimary, marginTop: 6, textAlign: 'center' as const },
+
+  footer: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 6, marginTop: spacing.xxl },
   footerText: { ...typography.caption, color: t.textMuted },
 });
 
 export function ClientDashboardScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
+  const barSpace = useFloatingBarSpace();
   const { styles, theme } = useCrmStyles(factory);
   const { portal, outlets, outletId, setOutletId, outletName, companyName } = useClientPortal();
 
   const [period, setPeriod] = useState<PeriodKey>('30d');
   const [custom, setCustom] = useState(() => periodRange('30d'));
-  const [periodSheet, setPeriodSheet] = useState(false);
   const [outletSheet, setOutletSheet] = useState(false);
   const [picking, setPicking] = useState<'from' | 'to' | null>(null);
   const range = useMemo(() => periodRange(period, custom), [period, custom]);
@@ -176,6 +125,7 @@ export function ClientDashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [heroSize, setHeroSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -204,91 +154,106 @@ export function ClientDashboardScreen() {
 
   const k = data?.kpis;
   const nextVisit = data?.upcoming_visits?.[0];
-  const userName = portal?.user?.name || '';
-  const first = userName.trim().split(/\s+/)[0];
-  const hour = new Date().getHours();
-  const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  const periodLabel =
-    period === 'custom'
-      ? `${formatDate(range.from, { day: 'numeric', month: 'short' })} – ${formatDate(range.to, { day: 'numeric', month: 'short' })}`
-      : PERIODS.find((p) => p.key === period)?.label || '';
   const multi = outlets.length > 1;
   const single = outlets[0];
+  const firstLoad = loading && !data;
+  const heroColors = theme.isDark ? HERO.dark : HERO.light;
+  const rangeText = `${formatDate(range.from, { day: 'numeric', month: 'short' })} – ${formatDate(range.to, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  const deep = theme.isDark ? '#8AB4F8' : ICON_DEEP;
+  const soft = theme.isDark ? '#2A3B5C' : ICON_SOFT;
 
-  const openJob = (jobId: string) => navigation.navigate('ClientJobDetail', { jobId });
+  const outletTitle = multi ? (outletId ? outletName(outletId) : `All ${outlets.length} outlets`) : [single?.name, single?.city].filter(Boolean).join(', ') || 'Your outlet';
+  const openOutlet = () => (multi ? setOutletSheet(true) : single ? navigation.navigate('ClientOutletDetail', { siteId: single.id }) : navigation.navigate('ClientOutlets'));
 
-  const actions: { key: string; label: string; Icon: IconType; tone: keyof typeof TONES; onPress: () => void }[] = [
-    { key: 'request', label: 'Request', Icon: PlusIcon, tone: 'blue', onPress: () => navigation.navigate('ClientRequestService') },
-    { key: 'complaint', label: 'Complaint', Icon: AlertTriangleIcon, tone: 'amber', onPress: () => navigation.navigate('ClientNewComplaint', {}) },
-    { key: 'jobs', label: 'Jobs', Icon: BriefcaseIcon, tone: 'indigo', onPress: () => navigation.navigate('Jobs') },
-    { key: 'docs', label: 'Documents', Icon: DocumentIcon, tone: 'violet', onPress: () => navigation.navigate('ClientDocuments') },
-    { key: 'audits', label: 'Audits', Icon: ShieldIcon, tone: 'green', onPress: () => navigation.navigate('ClientAudits') },
-    { key: 'outlets', label: 'Outlets', Icon: PinIcon, tone: 'teal', onPress: () => navigation.navigate('ClientOutlets') },
-    { key: 'calendar', label: 'Visits', Icon: CalendarIcon, tone: 'rose', onPress: () => navigation.navigate('Jobs') },
-    { key: 'support', label: 'Support', Icon: PhoneIcon, tone: 'orange', onPress: () => Linking.openURL(`tel:${SUPPORT_CONTACT.phone}`) },
+  const actions: { key: string; label: string; Icon: Glyph; onPress: () => void }[] = [
+    { key: 'request', label: 'Book a\nservice', Icon: BookServiceGlyph, onPress: () => navigation.navigate('ClientRequestService') },
+    { key: 'complaint', label: 'Raise a\ncomplaint', Icon: ComplaintGlyph, onPress: () => navigation.navigate('ClientNewComplaint', {}) },
+    { key: 'jobs', label: 'Jobs', Icon: JobsGlyph, onPress: () => navigation.navigate('Jobs') },
+    { key: 'docs', label: 'Documents', Icon: DocumentsGlyph, onPress: () => navigation.navigate('ClientDocuments') },
+    { key: 'audits', label: 'Audit\nreports', Icon: AuditGlyph, onPress: () => navigation.navigate('ClientAudits') },
+    { key: 'outlets', label: 'Outlets', Icon: OutletGlyph, onPress: () => navigation.navigate('ClientOutlets') },
+    { key: 'visits', label: 'Visits', Icon: VisitsGlyph, onPress: () => navigation.navigate('Jobs') },
+    { key: 'support', label: 'Support', Icon: SupportGlyph, onPress: () => Linking.openURL(`tel:${SUPPORT_CONTACT.phone}`) },
   ];
 
-  const finished = (k?.visits_done ?? 0) + (k?.visits_missed ?? 0);
-  const rate = k && finished > 0 ? Math.round((k.visits_done / finished) * 100) : null;
+  const shortcuts: { key: string; label: string; value: string; Icon: Glyph; onPress: () => void }[] = k
+    ? [
+        nextVisit
+          ? { key: 'next', label: `Next visit · ${relativeDay(nextVisit.scheduled_date)}`, value: serviceLabel(nextVisit.service_type), Icon: VisitsGlyph, onPress: () => navigation.navigate('ClientJobDetail', { jobId: nextVisit.job_id }) }
+          : { key: 'next', label: 'Next visit', value: 'Book a service', Icon: VisitsGlyph, onPress: () => navigation.navigate('ClientRequestService') },
+        { key: 'issues', label: 'Complaints', value: k.open_complaints > 0 ? `${k.open_complaints} open` : 'All resolved', Icon: ComplaintGlyph, onPress: () => navigation.navigate('Complaints') },
+        { key: 'invoices', label: 'Invoices', value: k.pending_invoices > 0 ? `${plural(k.pending_invoices, 'invoice')} due` : 'Nothing due', Icon: DocumentsGlyph, onPress: () => navigation.navigate('ClientDocuments') },
+      ]
+    : [];
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      {/* Fixed header */}
-      <View style={styles.header}>
-        <View style={styles.logo}>
-          <BrandMark size={30} />
-        </View>
-        <View style={styles.headerText}>
-          <Text style={styles.company} numberOfLines={1}>
-            {companyName}
-          </Text>
-          <Text style={styles.greeting} numberOfLines={1}>
-            {hello}
-            {first ? `, ${first}` : ''}
-          </Text>
-        </View>
-        <Pressable
-          onPress={() => navigation.navigate('ClientProfile')}
-          style={({ pressed }) => [styles.avatar, { backgroundColor: avatarColor(portal?.user?.id ?? userName) }, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Profile"
-        >
-          <Text style={styles.avatarText}>{initials(userName)}</Text>
-        </Pressable>
-      </View>
+    <View style={styles.screen}>
+      <StatusBar barStyle={theme.isDark ? 'light-content' : 'dark-content'} />
+      {/* Status bar strip in the hero's top colour, so scrolled content never runs under the clock */}
+      <View style={[styles.statusStrip, { height: insets.top, backgroundColor: heroColors[0] }]} />
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        style={{ marginTop: insets.top }}
+        contentContainerStyle={{ paddingBottom: barSpace }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
+        refreshControl={brandRefreshControl(refreshing, onRefresh)}
       >
-        {/* Search-like outlet bar */}
-        <Pressable
-          onPress={() => (multi ? setOutletSheet(true) : single ? navigation.navigate('ClientOutletDetail', { siteId: single.id }) : navigation.navigate('ClientOutlets'))}
-          style={({ pressed }) => [styles.bar, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={multi ? 'Choose outlet' : 'Your outlet'}
-        >
-          <PinIcon size={20} color={theme.primary} />
-          <View style={styles.flex1}>
-            <Text style={styles.barTitle} numberOfLines={1}>
-              {multi ? (outletId ? outletName(outletId) : 'All outlets') : single?.name || 'Your outlet'}
-            </Text>
-            <Text style={styles.barSub} numberOfLines={1}>
-              {multi ? (outletId ? 'Tap to change outlet' : `${outlets.length} outlets · tap to choose one`) : [single?.address, single?.city].filter(Boolean).join(', ') || 'Outlet details'}
-            </Text>
-          </View>
-          <View style={multi ? styles.barCaret : undefined}>
-            <ChevronRightIcon size={18} color={theme.textMuted} />
-          </View>
-        </Pressable>
+        {/* Hero: search, company, illustration */}
+        <View style={styles.hero} onLayout={(e) => setHeroSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+          {!!heroSize && (
+            <Svg style={styles.heroBg} width={heroSize.w} height={heroSize.h} pointerEvents="none">
+              <Defs>
+                <LinearGradient id="homeHero" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={heroColors[0]} stopOpacity="1" />
+                  <Stop offset="1" stopColor={heroColors[1]} stopOpacity="1" />
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width={heroSize.w} height={heroSize.h} fill="url(#homeHero)" />
+            </Svg>
+          )}
+          <RefreshBanner refreshing={refreshing} />
 
-        {/* Round actions, two rows of four */}
+          <View style={styles.topRow}>
+            <Pressable onPress={() => navigation.navigate('ClientSearch')} style={({ pressed }) => [styles.search, pressed && styles.pressed]} accessibilityRole="search" accessibilityLabel="Search jobs, complaints and documents">
+              <SearchGlyph size={22} color={theme.textPrimary} />
+              <Text style={styles.searchText} numberOfLines={1}>
+                Search jobs, documents
+              </Text>
+            </Pressable>
+            <Pressable onPress={() => navigation.navigate('ClientProfile')} style={({ pressed }) => [styles.tileRing, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Profile">
+              <CompanyMonogram name={companyName} colorKey={portal?.companies?.[0]?.id} size={46} />
+            </Pressable>
+          </View>
+
+          <View style={styles.banner}>
+            <View style={[styles.flex1, { paddingBottom: spacing.sm }]}>
+              <View style={styles.brandRow}>
+                <BrandMark size={18} />
+                <Text style={styles.brandText}>Serviced by BestServe</Text>
+              </View>
+              <Text style={styles.company} numberOfLines={2}>
+                {companyName}
+              </Text>
+              <Text style={styles.outlet} numberOfLines={1}>
+                {outletTitle}
+              </Text>
+              <Pressable onPress={openOutlet} style={({ pressed }) => [styles.link, pressed && styles.pressed]} accessibilityRole="button">
+                <Text style={styles.linkText}>{multi ? 'Change outlet' : 'View outlet'}</Text>
+                <View style={styles.linkCircle}>
+                  <ChevronRightIcon size={17} color={theme.isDark ? '#0B1220' : '#FFFFFF'} />
+                </View>
+              </Pressable>
+            </View>
+            <HeroArt width={140} height={112} />
+          </View>
+        </View>
+
+        {/* Quick actions - custom glyphs on soft blue tiles */}
         <View style={styles.actions}>
           {actions.map((a) => (
-            <Pressable key={a.key} onPress={a.onPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={a.label}>
-              <View style={[styles.actionCircle, { backgroundColor: TONES[a.tone].bg }]}>
-                <a.Icon size={24} color={TONES[a.tone].fg} />
+            <Pressable key={a.key} onPress={a.onPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={a.label.replace('\n', ' ')}>
+              <View style={styles.actionTile}>
+                <a.Icon size={30} color={deep} fill={soft} />
               </View>
               <Text style={styles.actionLabel} numberOfLines={2}>
                 {a.label}
@@ -297,115 +262,71 @@ export function ClientDashboardScreen() {
           ))}
         </View>
 
+        {/* Shortcut pills */}
+        {firstLoad ? (
+          <ShortcutsSkeleton />
+        ) : shortcuts.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
+            {shortcuts.map((s) => (
+              <Pressable key={s.key} onPress={s.onPress} style={({ pressed }) => [styles.pill, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`${s.label}: ${s.value}`}>
+                <View style={styles.pillIcon}>
+                  <s.Icon size={22} color={deep} fill={soft} />
+                </View>
+                <View>
+                  <Text style={styles.pillLabel} numberOfLines={1}>
+                    {s.label}
+                  </Text>
+                  <Text style={styles.pillValue} numberOfLines={1}>
+                    {s.value}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
         {!!error && (
           <View style={styles.section}>
             <CrmErrorBanner message={error} onRetry={() => setReloadKey((n) => n + 1)} />
           </View>
         )}
 
-        {/* Next visit */}
-        {loading && !data ? (
-          <View style={styles.section}>
-            <CrmSkeleton height={84} radius={20} />
-          </View>
-        ) : nextVisit ? (
-          <Pressable onPress={() => openJob(nextVisit.job_id)} style={({ pressed }) => [styles.next, pressed && styles.pressed]} accessibilityRole="button">
-            <View style={styles.nextDate}>
-              <Text style={styles.nextDay}>{formatDate(nextVisit.scheduled_date, { day: '2-digit' })}</Text>
-              <Text style={styles.nextMonth}>{formatDate(nextVisit.scheduled_date, { month: 'short' })}</Text>
-            </View>
-            <View style={styles.flex1}>
-              <Text style={styles.nextLabel}>NEXT VISIT</Text>
-              <Text style={styles.nextTitle} numberOfLines={1}>
-                {serviceLabel(nextVisit.service_type)}
-              </Text>
-              <Text style={styles.nextSub} numberOfLines={1}>
-                {nextVisit.site_name || '—'}
-              </Text>
-            </View>
-            <Text style={styles.nextWhen}>{relativeDay(nextVisit.scheduled_date)}</Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={() => navigation.navigate('ClientRequestService')} style={({ pressed }) => [styles.next, pressed && styles.pressed]} accessibilityRole="button">
-            <View style={[styles.nextDate, { backgroundColor: theme.isDark ? theme.surfaceAlt : '#F1F3F4' }]}>
-              <CalendarIcon size={22} color={theme.textMuted} />
-            </View>
-            <View style={styles.flex1}>
-              <Text style={styles.nextLabel}>NEXT VISIT</Text>
-              <Text style={styles.nextTitle}>Nothing scheduled</Text>
-              <Text style={styles.nextSub}>Tap to request a service</Text>
-            </View>
-            <ChevronRightIcon size={18} color={theme.textMuted} />
-          </Pressable>
-        )}
-
-        <View style={styles.rule} />
-
-        {/* This period at a glance */}
+        {/* Service health */}
         <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>At a glance</Text>
-            <Pressable onPress={() => setPeriodSheet(true)} style={({ pressed }) => [styles.periodLink, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Period: ${periodLabel}`}>
-              <Text style={styles.periodText}>{periodLabel}</Text>
-              <View style={styles.barCaret}>
-                <ChevronRightIcon size={13} color={theme.textMuted} />
-              </View>
-            </Pressable>
-          </View>
-          {loading && !data ? (
-            <CrmSkeleton height={150} radius={20} />
+          {firstLoad ? (
+            <GlanceSkeleton />
           ) : k ? (
-            <>
-              <View style={styles.stats}>
-                <Pressable style={styles.stat} onPress={() => navigation.navigate('Jobs')} accessibilityRole="button">
-                  <Text style={styles.statValue}>{k.jobs_in_period}</Text>
-                  <Text style={styles.statLabel}>Jobs</Text>
-                </Pressable>
-                <View style={styles.statDivider} />
-                <Pressable style={styles.stat} onPress={() => navigation.navigate('Jobs')} accessibilityRole="button">
-                  <Text style={styles.statValue}>{k.visits_done}</Text>
-                  <Text style={styles.statLabel}>Visits done</Text>
-                </Pressable>
-                <View style={styles.statDivider} />
-                <Pressable style={styles.stat} onPress={() => navigation.navigate('Complaints')} accessibilityRole="button">
-                  <Text style={[styles.statValue, k.open_complaints > 0 && { color: TONES.amber.fg }]}>{k.open_complaints}</Text>
-                  <Text style={styles.statLabel}>Open issues</Text>
-                </Pressable>
-              </View>
-              <View style={styles.health}>
-                <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Visits on schedule</Text>
-                  <Text style={styles.healthValue}>{rate != null ? `${rate}%` : '—'}</Text>
-                </View>
-                <View style={styles.track}>
-                  {k.visits_done > 0 && <View style={{ flex: k.visits_done, backgroundColor: TONES.green.fg }} />}
-                  {k.visits_missed > 0 && <View style={{ flex: k.visits_missed, backgroundColor: '#EF4444' }} />}
-                  {k.upcoming_visits + k.visits_in_progress > 0 && <View style={{ flex: k.upcoming_visits + k.visits_in_progress, backgroundColor: TONES.blue.bg }} />}
-                </View>
-                <Text style={styles.healthNote}>
-                  {k.visits_total > 0
-                    ? `${k.visits_done} done · ${k.visits_missed} missed · ${k.upcoming_visits + k.visits_in_progress} still to come`
-                    : 'No visits planned in this period'}
-                </Text>
-              </View>
-            </>
+            <HealthCard
+              kpis={k}
+              onJobs={() => navigation.navigate('Jobs')}
+              onComplaints={() => navigation.navigate('Complaints')}
+              period={period}
+              rangeText={rangeText}
+              onPeriod={(key) => {
+                if (key === 'custom') {
+                  setCustom(range);
+                  setPicking('from');
+                } else setPeriod(key);
+              }}
+              busy={loading}
+            />
           ) : null}
         </View>
 
-        {/* Outlets, like Google Pay's People row */}
+        {/* Outlets row (company heads with several outlets) */}
         {data && data.outlets.length > 1 && (
-          <>
-            <View style={[styles.section, styles.sectionHead]}>
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
               <Text style={styles.sectionTitle}>Your outlets</Text>
-              <Pressable onPress={() => navigation.navigate('ClientOutlets')} style={styles.sectionLink} hitSlop={8} accessibilityRole="button">
-                <Text style={styles.sectionLinkText}>See all</Text>
+              <Pressable onPress={() => navigation.navigate('ClientOutlets')} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.seeAll}>See all</Text>
               </Pressable>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.people}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.people} style={{ marginHorizontal: -spacing.lg }}>
               {data.outlets.map((o) => {
                 const active = outletId === o.id;
                 const risk = RISK_STYLE[String(o.audit_risk || '').toUpperCase()];
-                const dot = o.open_complaints > 0 ? TONES.amber.fg : risk?.tone === 'danger' ? '#EF4444' : null;
+                const dot = o.open_complaints > 0 ? TONES.amber.fg : risk?.tone === 'danger' ? '#D93025' : null;
                 return (
                   <Pressable key={o.id} onPress={() => setOutletId(active ? '' : o.id)} style={({ pressed }) => [styles.person, pressed && styles.pressed]} accessibilityRole="button" accessibilityState={{ selected: active }}>
                     <View style={[styles.personCircle, { backgroundColor: avatarColor(o.id) }, active && styles.personRing]}>
@@ -419,111 +340,16 @@ export function ClientDashboardScreen() {
                 );
               })}
             </ScrollView>
-          </>
-        )}
-
-        {/* Upcoming visits */}
-        {data && (
-          <View style={styles.section}>
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Upcoming visits</Text>
-              {data.upcoming_visits.length > 0 && (
-                <Pressable onPress={() => navigation.navigate('Jobs')} style={styles.sectionLink} hitSlop={8} accessibilityRole="button">
-                  <Text style={styles.sectionLinkText}>See all</Text>
-                </Pressable>
-              )}
-            </View>
-            {data.upcoming_visits.length === 0 ? (
-              <View style={styles.empty}>
-                <View style={[styles.rowIcon, { backgroundColor: theme.isDark ? theme.surfaceAlt : '#F1F3F4' }]}>
-                  <CalendarIcon size={20} color={theme.textMuted} />
-                </View>
-                <Text style={styles.emptyText}>New visits show up here as soon as they are planned.</Text>
-              </View>
-            ) : (
-              data.upcoming_visits.slice(0, 4).map((v) => (
-                <Pressable key={v.id} onPress={() => openJob(v.job_id)} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button">
-                  <View style={styles.rowDate}>
-                    <Text style={styles.rowDateDay}>{formatDate(v.scheduled_date, { day: '2-digit' })}</Text>
-                    <Text style={styles.rowDateMonth}>{formatDate(v.scheduled_date, { month: 'short' })}</Text>
-                  </View>
-                  <View style={styles.flex1}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>
-                      {serviceLabel(v.service_type)}
-                    </Text>
-                    <Text style={styles.rowSub} numberOfLines={1}>
-                      {v.site_name || '—'}
-                    </Text>
-                  </View>
-                  <Text style={styles.rowRight}>{relativeDay(v.scheduled_date)}</Text>
-                </Pressable>
-              ))
-            )}
-          </View>
-        )}
-
-        {/* Recent activity */}
-        {data && (
-          <View style={styles.section}>
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
-            </View>
-            {data.activity.length === 0 ? (
-              <View style={styles.empty}>
-                <View style={[styles.rowIcon, { backgroundColor: theme.isDark ? theme.surfaceAlt : '#F1F3F4' }]}>
-                  <InboxIcon size={20} color={theme.textMuted} />
-                </View>
-                <Text style={styles.emptyText}>All quiet. Updates on your jobs will appear here.</Text>
-              </View>
-            ) : (
-              data.activity.slice(0, 5).map((a) => {
-                const meta = activityMeta(a.message);
-                return (
-                  <Pressable key={a.id} onPress={() => openJob(a.job_id)} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button">
-                    <View style={[styles.rowIcon, { backgroundColor: TONES[meta.tone].bg }]}>
-                      <meta.Icon size={19} color={TONES[meta.tone].fg} />
-                    </View>
-                    <View style={styles.flex1}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>
-                        {activityText(a.message)}
-                      </Text>
-                      <Text style={styles.rowSub} numberOfLines={1}>
-                        {a.site_name || '—'} · {serviceLabel(a.service_type)}
-                      </Text>
-                    </View>
-                    <Text style={styles.rowRight}>{formatDateTime(a.created_at).split(',')[0]}</Text>
-                  </Pressable>
-                );
-              })
-            )}
           </View>
         )}
 
         <View style={styles.footer}>
+          <BrandMark size={16} />
           <Text style={styles.footerText}>Serviced by BestServe</Text>
         </View>
       </ScrollView>
 
       <OutletSheet visible={outletSheet} onClose={() => setOutletSheet(false)} outlets={outlets} value={outletId} onChange={setOutletId} />
-      <ActionSheet
-        visible={periodSheet}
-        onClose={() => setPeriodSheet(false)}
-        title="Show data for"
-        actions={PERIODS.map((p) => ({
-          key: p.key,
-          label: p.label,
-          sub: p.key === 'custom' ? 'Pick your own dates' : undefined,
-          selected: period === p.key,
-          icon: <CalendarIcon size={18} color={theme.primary} />,
-          onPress: () => {
-            setPeriodSheet(false);
-            if (p.key === 'custom') {
-              setCustom(range);
-              setPicking('from');
-            } else setPeriod(p.key);
-          },
-        }))}
-      />
       <DateSheet
         visible={picking !== null}
         onClose={() => setPicking(null)}
@@ -541,6 +367,7 @@ export function ClientDashboardScreen() {
           }
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
+

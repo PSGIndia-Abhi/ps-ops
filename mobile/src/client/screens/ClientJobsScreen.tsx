@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { BriefcaseIcon, CalendarIcon, CloseIcon, PersonIcon, PinIcon, ShieldIcon, SparkleIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -13,6 +14,7 @@ import type { ClientStackParamList } from '../navigation';
 import { FilterPill } from '../ui/home';
 import { OutletPicker } from '../ui/OutletPicker';
 import { ChipRow, ClientPage, Segmented, SOFT, TONES, type ToneKey } from '../ui/page';
+import { useFloatingBarSpace } from '../ui/FloatingTabBar';
 
 type Tab = 'jobs' | 'visits';
 const JOB_CHIPS: { key: JobStatusFilter; label: string; count: keyof JobListResponse['counts'] }[] = [
@@ -85,6 +87,7 @@ const factory = (t: CrmTheme) => ({
 export function ClientJobsScreen() {
   const navigation = useNavigation<NavigationProp<ClientStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
+  const barSpace = useFloatingBarSpace();
   const { outlets, outletId, setOutletId, outletName } = useClientPortal();
 
   const [tab, setTab] = useState<Tab>('jobs');
@@ -293,12 +296,17 @@ export function ClientJobsScreen() {
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (tab === 'jobs' ? renderJob(item as ClientJob) : renderVisit(item as ClientVisit))}
         ItemSeparatorComponent={() => <View style={styles.divider} />}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <>
+            <RefreshBanner refreshing={refreshing} />
+            {header}
+          </>
+        }
+        contentContainerStyle={[styles.list, { paddingBottom: barSpace }]}
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={0.4}
         onEndReached={() => canLoadMore && setPage((p) => p + 1)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
+        refreshControl={brandRefreshControl(refreshing, onRefresh)}
         ListEmptyComponent={
           firstLoad ? (
             <View>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { AlertTriangleIcon, CalendarIcon, ChevronRightIcon, PinIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -62,18 +63,12 @@ export function ClientOutletsScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
+        refreshControl={brandRefreshControl(refreshing, () => {
               setRefreshing(true);
               load();
-            }}
-            tintColor={theme.primary}
-            colors={[theme.primary]}
-          />
-        }
+            })}
       >
+        <RefreshBanner refreshing={refreshing} />
         <CrmErrorBanner message={error} onRetry={load} />
         {outlets === null ? (
           Array.from({ length: 3 }).map((_, i) => <CrmSkeleton key={i} height={150} radius={20} style={{ marginBottom: spacing.sm }} />)

@@ -1,10 +1,9 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
-/** Bottom tabs of the client app: Home · Jobs · (+ Request) · Complaints · More. */
+/** Bottom tabs of the client app (floating bar): Home · Jobs · Complaints · More. */
 export type ClientTabParamList = {
   Dashboard: undefined;
   Jobs: undefined;
-  RequestTab: undefined;
   Complaints: undefined;
   More: undefined;
 };
@@ -18,6 +17,7 @@ export type ClientStackParamList = {
   ClientComplaintDetail: { complaintId: string; notice?: string };
   ClientRequestService: { siteId?: string; tab?: 'new' | 'mine' } | undefined;
   ClientDocuments: undefined;
+  ClientSearch: undefined;
   ClientAudits: undefined;
   ClientOutlets: undefined;
   ClientOutletDetail: { siteId: string };

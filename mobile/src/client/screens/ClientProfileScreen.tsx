@@ -13,6 +13,7 @@ import { avatarColor } from '../../tasks/theme';
 import { radii, spacing, typography } from '../../theme';
 import { useClientPortal } from '../ClientPortalContext';
 import { ClientPage, SOFT, TONES } from '../ui/page';
+import { BrandLoaderOverlay } from '../../components/BrandLoader';
 
 const factory = (t: CrmTheme) => ({
   flex1: { flex: 1 },
@@ -149,6 +150,7 @@ export function ClientProfileScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <BrandLoaderOverlay visible={saving} message="Saving your details" />
     </ClientPage>
   );
 }

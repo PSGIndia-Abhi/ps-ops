@@ -25,6 +25,7 @@ import { radii, spacing, typography } from '../../theme';
 import { useClientPortal } from '../ClientPortalContext';
 import { SUPPORT_CONTACT, plural } from '../format';
 import type { ClientStackParamList } from '../navigation';
+import { useFloatingBarSpace } from '../ui/FloatingTabBar';
 import { ClientPage, SOFT, TONES, type ToneKey } from '../ui/page';
 
 type Nav = NavigationProp<ClientStackParamList & AuthenticatedStackParamList>;
@@ -64,6 +65,7 @@ interface Item {
 export function ClientMoreScreen() {
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
+  const barSpace = useFloatingBarSpace();
   const { logout } = useAuth();
   const { portal, companyName, isCompanyAdmin, outlets } = useClientPortal();
   const [confirmOut, setConfirmOut] = useState(false);
@@ -102,7 +104,7 @@ export function ClientMoreScreen() {
 
   return (
     <ClientPage title="More">
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: barSpace }]} showsVerticalScrollIndicator={false}>
         <Pressable onPress={() => navigation.navigate('ClientProfile')} style={({ pressed }) => [styles.profile, pressed && styles.pressed]} accessibilityRole="button">
           <View style={[styles.avatar, { backgroundColor: avatarColor(portal?.user?.id ?? name) }]}>
             <Text style={styles.avatarText}>{initials(name)}</Text>

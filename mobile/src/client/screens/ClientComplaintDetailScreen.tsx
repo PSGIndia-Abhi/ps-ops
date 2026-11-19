@@ -10,6 +10,7 @@ import { complaintFilePath, getComplaint, replyToComplaint, setComplaintStatus, 
 import { formatDate, formatDateTime, serviceLabel } from '../format';
 import type { ClientStackParamList } from '../navigation';
 import { ClientPage, PhotoViewer, PortalImage, SOFT, TONES } from '../ui/page';
+import { BrandLoaderOverlay } from '../../components/BrandLoader';
 
 const PRIORITY_LABEL: Record<string, string> = { LOW: 'Low', MEDIUM: 'Normal', HIGH: 'High', URGENT: 'Urgent' };
 
@@ -285,6 +286,8 @@ export function ClientComplaintDetailScreen() {
 
       <AttachSheet picker={picker} />
       <PhotoViewer path={viewer} onClose={() => setViewer(null)} />
+      <BrandLoaderOverlay visible={sending} message="Sending your reply" />
+      <BrandLoaderOverlay visible={changing} message="Updating the complaint" />
     </ClientPage>
   );
 }

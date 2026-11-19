@@ -14,6 +14,7 @@ import { useClientPortal } from '../ClientPortalContext';
 import type { ClientStackParamList } from '../navigation';
 import { OutletSheet } from '../ui/OutletPicker';
 import { ClientPage, SOFT, TONES, type ToneKey } from '../ui/page';
+import { BrandLoaderOverlay } from '../../components/BrandLoader';
 
 const PRIORITIES: { key: ComplaintPriority; label: string; tone: ToneKey }[] = [
   { key: 'LOW', label: 'Low', tone: 'slate' },
@@ -180,6 +181,7 @@ export function ClientNewComplaintScreen() {
 
       <AttachSheet picker={picker} />
       <OutletSheet visible={outletSheet} onClose={() => setOutletSheet(false)} outlets={outlets} value={siteId} onChange={setSiteId} allowAll={false} />
+      <BrandLoaderOverlay visible={saving} message="Sending your complaint" />
     </ClientPage>
   );
 }

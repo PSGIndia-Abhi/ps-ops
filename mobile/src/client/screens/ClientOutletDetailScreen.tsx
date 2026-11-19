@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import {
   AlertTriangleIcon,
@@ -156,18 +157,12 @@ export function ClientOutletDetailScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
+        refreshControl={brandRefreshControl(refreshing, () => {
               setRefreshing(true);
               load();
-            }}
-            tintColor={theme.primary}
-            colors={[theme.primary]}
-          />
-        }
+            })}
       >
+        <RefreshBanner refreshing={refreshing} />
         <View style={styles.hero}>
           <View style={[styles.avatar, { backgroundColor: avatarColor(outlet.id) }]}>
             <Text style={styles.avatarText}>{initials(outlet.name || outlet.id)}</Text>

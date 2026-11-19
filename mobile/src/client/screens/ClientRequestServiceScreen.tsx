@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import {
   BriefcaseIcon,
@@ -26,6 +27,7 @@ import { formatDate, plural, serviceLabel } from '../format';
 import type { ClientStackParamList } from '../navigation';
 import { OutletSheet } from '../ui/OutletPicker';
 import { ClientPage, Segmented, SOFT, TONES, type ToneKey } from '../ui/page';
+import { BrandLoaderOverlay } from '../../components/BrandLoader';
 
 type IconType = React.ComponentType<{ size?: number; color?: string }>;
 
@@ -307,18 +309,12 @@ export function ClientRequestServiceScreen() {
     <ScrollView
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
+      refreshControl={brandRefreshControl(refreshing, () => {
             setRefreshing(true);
             loadList();
-          }}
-          tintColor={theme.primary}
-          colors={[theme.primary]}
-        />
-      }
+          })}
     >
+      <RefreshBanner refreshing={refreshing} />
       <CrmErrorBanner message={listError} onRetry={loadList} />
       {requests === null ? (
         Array.from({ length: 3 }).map((_, i) => <CrmSkeleton key={i} height={120} radius={20} style={{ marginBottom: spacing.sm }} />)
@@ -431,6 +427,8 @@ export function ClientRequestServiceScreen() {
           <PrimaryButton label="Cancel request" variant="brand" onPress={doCancel} loading={cancelling} style={styles.flex1} />
         </View>
       </Sheet>
+      <BrandLoaderOverlay visible={saving} message="Sending your request" />
+      <BrandLoaderOverlay visible={cancelling} message="Cancelling the request" />
     </ClientPage>
   );
 }

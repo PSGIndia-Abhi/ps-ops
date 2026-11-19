@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { AlertTriangleIcon, CheckCircleIcon, CloseIcon, InboxIcon, PlusIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -11,6 +12,7 @@ import { formatDate, relativeDay, statusInfo } from '../format';
 import type { ClientStackParamList } from '../navigation';
 import { OutletPicker } from '../ui/OutletPicker';
 import { ChipRow, ClientPage, SOFT, TONES } from '../ui/page';
+import { useFloatingBarSpace } from '../ui/FloatingTabBar';
 
 const CHIPS: { key: ComplaintStatusFilter; label: string }[] = [
   { key: 'open', label: 'Open' },
@@ -71,6 +73,7 @@ const factory = (t: CrmTheme) => ({
 export function ClientComplaintsScreen() {
   const navigation = useNavigation<NavigationProp<ClientStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
+  const barSpace = useFloatingBarSpace();
   const { outlets, outletId, setOutletId, outletName } = useClientPortal();
 
   const [status, setStatus] = useState<ComplaintStatusFilter>('open');
@@ -208,12 +211,17 @@ export function ClientComplaintsScreen() {
         keyExtractor={(c) => c.id}
         renderItem={renderItem}
         ItemSeparatorComponent={() => <View style={styles.divider} />}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <>
+            <RefreshBanner refreshing={refreshing} />
+            {header}
+          </>
+        }
+        contentContainerStyle={[styles.list, { paddingBottom: barSpace }]}
         keyboardShouldPersistTaps="handled"
         onEndReachedThreshold={0.4}
         onEndReached={() => canLoadMore && setPage((p) => p + 1)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
+        refreshControl={brandRefreshControl(refreshing, onRefresh)}
         ListEmptyComponent={
           firstLoad ? (
             <View>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import { AlertTriangleIcon, CameraIcon, CheckCircleIcon, ClockIcon, PersonIcon, PinIcon, PlusIcon, SparkleIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -181,8 +182,9 @@ export function ClientJobDetailScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} colors={[theme.primary]} />}
+        refreshControl={brandRefreshControl(refreshing, onRefresh)}
       >
+        <RefreshBanner refreshing={refreshing} />
         {/* Summary */}
         <View style={styles.hero}>
           <View style={[styles.heroIcon, { backgroundColor: TONES[svc.tone].bg }]}>
