@@ -41,10 +41,14 @@ function toEntry(r) {
   };
 }
 
+// The Audit Log page shows only what Collection Executives did (the Accountant Panel users);
+// entries by every other role (Accounts Executive billing, admin, ...) are left out.
+const AUDIT_ROLE = "collection executive";
+
 // WHERE clause for the Audit Log filters: from, to (YYYY-MM-DD), user_id, module, action, q.
 function buildFilter(query) {
-  const where = [];
-  const params = [];
+  const where = ["LOWER(TRIM(a.user_role)) = ?"];
+  const params = [AUDIT_ROLE];
   const day = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
   if (day(query.from)) {
     where.push("a.created_at >= ?");
@@ -101,23 +105,19 @@ async function listAuditLogs(req, res) {
        LIMIT ? OFFSET ?`,
       [...filter.params, pageSize, (page - 1) * pageSize]
     );
-    // User filter: everyone who can work in the Accountant Panel (admin, or a role that can
-    // create/edit invoices or record payments), plus anyone already in the log (e.g. a user
-    // whose role has changed since). Listed even before they have any entry.
+    // User filter: the active Collection Executives, plus anyone already in the log as one
+    // (e.g. a user whose role has changed since). Listed even before they have any entry.
     const [users] = await pool.query(
       `SELECT id, MAX(name) AS name, MAX(role) AS role FROM (
          SELECT u.id, u.name, r.name AS role
          FROM users u JOIN roles r ON r.id = u.role_id
-         WHERE COALESCE(u.is_active, 1) = 1
-           AND (r.name = 'admin' OR EXISTS (
-                 SELECT 1 FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-                 WHERE rp.role_id = r.id
-                   AND p.name IN ('CREATE_PAYMENT', 'CREATE_INVOICE', 'UPDATE_INVOICE', 'CANCEL_INVOICE')))
+         WHERE COALESCE(u.is_active, 1) = 1 AND LOWER(TRIM(r.name)) = ?
          UNION ALL
-         SELECT user_id, user_name, user_role FROM audit_logs WHERE user_id IS NOT NULL
+         SELECT user_id, user_name, user_role FROM audit_logs WHERE user_id IS NOT NULL AND LOWER(TRIM(user_role)) = ?
        ) x
        GROUP BY id
-       ORDER BY MAX(name)`
+       ORDER BY MAX(name)`,
+      [AUDIT_ROLE, AUDIT_ROLE]
     );
     res.json({
       ready: true,
