@@ -23,10 +23,20 @@ function acceptFile(req, res, next) {
   });
 }
 
+// The PO's current copy = its newest file in customer_po_files (a PO can hold several files).
+const LATEST_FILE_SQL = `
+  SELECT f.id, f.object_key, f.file_name, f.file_type
+    FROM customer_po_files f
+   WHERE f.po_id = ?
+   ORDER BY f.created_at DESC, f.id DESC
+   LIMIT 1`;
+
 // Balance of each PO: STANDARD -> invoiced = issued invoices carrying the PO;
 // ADVANCE -> invoiced = advance adjusted on issued invoices; balance = PO amount - invoiced.
 const PO_SQL = `
   SELECT po.*, c.name AS customer, bc.contract_code,
+         (SELECT f.file_name FROM customer_po_files f WHERE f.po_id = po.id
+           ORDER BY f.created_at DESC, f.id DESC LIMIT 1) AS file_name,
          DATEDIFF(po.expiry_date, CURDATE()) AS expires_in_days,
          CASE WHEN po.po_kind = 'ADVANCE'
               THEN (SELECT COALESCE(SUM(baa.amount), 0) FROM billing_advance_adjustments baa
@@ -48,6 +58,7 @@ function poOut(r) {
   else if (display === "ACTIVE" && expires !== null && expires <= 30) display = "EXPIRING";
   return {
     id: r.id,
+    source: r.source,
     po_number: r.po_number,
     company_id: r.company_id,
     customer: r.customer,
@@ -58,6 +69,7 @@ function poOut(r) {
     expiry_date: C.ymd(r.expiry_date),
     is_open_po: r.expiry_date === null,
     kind: r.po_kind,
+    po_source: r.po_source || null,
     po_amount: amount,
     invoiced: calc.round2(invoiced),
     balance: amount === null ? null : calc.round2(amount - invoiced),
@@ -91,6 +103,7 @@ async function readPo(db, b, { existing = null } = {}) {
     expiry_date: C.date(merged.expiry_date, "expiry_date"),
     po_amount: C.num(merged.po_amount, "po_amount", { min: 0, max: 99999999999 }),
     po_kind: C.oneOf(merged.kind ?? merged.po_kind, "kind", ["STANDARD", "ADVANCE"], { fallback: "STANDARD" }),
+    po_source: C.str(merged.po_source, "po_source", { max: 255 }),
     status: C.oneOf(merged.status, "status", ["ACTIVE", "CLOSED"], { fallback: "ACTIVE" }),
     remarks: C.str(merged.remarks, "remarks", { max: 1000 }),
   };
@@ -168,7 +181,7 @@ async function poDetail(db, id) {
     ...poOut(row),
     invoices: invoices.map((i) => ({ ...i, amount: Number(i.amount), advance_adjusted: Number(i.advance_adjusted) })),
     advances: advances.map((a) => ({ ...a, received: Number(a.received), adjusted: Number(a.adjusted), remaining: calc.round2(a.remaining) })),
-    file: row.file_object_key ? { name: row.file_name, url: `/api/billing/pos/${id}/file` } : null,
+    file: row.file_name ? { name: row.file_name, url: `/api/billing/pos/${id}/file` } : null,
   };
 }
 
@@ -178,9 +191,9 @@ const createPo = C.handle("Failed to save the PO", async (req, res) => {
   const id = uuid();
   try {
     await pool.query(
-      `INSERT INTO customer_pos (id, company_id, contract_id, po_number, po_date, valid_from, expiry_date, po_amount, po_kind, status, remarks, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, po.company_id, po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.status, po.remarks, req.user.id, req.user.id]
+      `INSERT INTO customer_pos (id, company_id, contract_id, po_number, po_date, valid_from, expiry_date, po_amount, po_kind, po_source, status, remarks, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, po.company_id, po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.user.id]
     );
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") throw C.conflict(`PO ${po.po_number} already exists for this customer`);
@@ -211,8 +224,8 @@ const updatePo = C.handle("Failed to update the PO", async (req, res) => {
   try {
     await pool.query(
       `UPDATE customer_pos SET contract_id = ?, po_number = ?, po_date = ?, valid_from = ?, expiry_date = ?, po_amount = ?, po_kind = ?,
-              status = ?, remarks = ?, updated_by = ? WHERE id = ?`,
-      [po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.status, po.remarks, req.user.id, req.params.id]
+              po_source = ?, status = ?, remarks = ?, updated_by = ? WHERE id = ?`,
+      [po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.params.id]
     );
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") throw C.conflict(`PO ${po.po_number} already exists for this customer`);
@@ -222,8 +235,9 @@ const updatePo = C.handle("Failed to update the PO", async (req, res) => {
 });
 
 // POST /pos/:id/file  (multipart, field "file": PDF, JPG or PNG, max 3 MB)
+// Adds a file to the PO; the newest one is the PO's current copy. Earlier copies are kept.
 const uploadPoFile = C.handle("Failed to upload the PO copy", async (req, res) => {
-  const [[po]] = await pool.query("SELECT id, file_object_key FROM customer_pos WHERE id = ?", [req.params.id]);
+  const [[po]] = await pool.query("SELECT id FROM customer_pos WHERE id = ?", [req.params.id]);
   if (!po) throw C.notFound("PO not found");
   if (!req.file) throw C.bad("Send the PO copy in the 'file' field");
   if (!FILE_TYPES.has(req.file.mimetype)) throw C.bad("The PO copy must be a PDF, JPG or PNG");
@@ -233,19 +247,24 @@ const uploadPoFile = C.handle("Failed to upload the PO copy", async (req, res) =
     await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
   }
   await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.buffer.length, { "Content-Type": req.file.mimetype });
-  await pool.query("UPDATE customer_pos SET file_object_key = ?, file_name = ?, updated_by = ? WHERE id = ?", [objectKey, name, req.user.id, po.id]);
-  if (po.file_object_key) minioClient.removeObject(process.env.MINIO_BUCKET, po.file_object_key).catch(() => {});
+  await pool.query(
+    `INSERT INTO customer_po_files (id, po_id, object_key, file_name, file_type, file_size, uploaded_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [uuid(), po.id, objectKey, name, req.file.mimetype, req.file.size, req.user.id]
+  );
+  await pool.query("UPDATE customer_pos SET updated_by = ? WHERE id = ?", [req.user.id, po.id]);
   res.json({ name, size: req.file.size });
 });
 
-// GET /pos/:id/file
+// GET /pos/:id/file  -> the PO's current (newest) copy
 const downloadPoFile = C.handle("Failed to open the PO copy", async (req, res) => {
-  const [[po]] = await pool.query("SELECT file_object_key, file_name FROM customer_pos WHERE id = ?", [req.params.id]);
-  if (!po?.file_object_key) throw C.notFound("No PO copy uploaded");
-  const stream = await minioClient.getObject(process.env.MINIO_BUCKET, po.file_object_key);
-  const ext = String(po.file_name || "").toLowerCase().split(".").pop();
-  res.setHeader("Content-Type", ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg");
-  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(po.file_name || "po")}`);
+  const [[file]] = await pool.query(LATEST_FILE_SQL, [req.params.id]);
+  if (!file) throw C.notFound("No PO copy uploaded");
+  const stream = await minioClient.getObject(process.env.MINIO_BUCKET, file.object_key);
+  const ext = String(file.file_name || "").toLowerCase().split(".").pop();
+  const type = file.file_type || (ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg");
+  res.setHeader("Content-Type", type);
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.file_name || "po")}`);
   stream.on("error", () => res.end());
   stream.pipe(res);
 });
