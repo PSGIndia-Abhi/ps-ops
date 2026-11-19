@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { ApiError, billingGet, billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
-import { CATEGORY_LABEL, amount, dmy, monthLabel, nextBilling, today } from "./format";
+import { CATEGORY_LABEL, amount, dmy, monthLabel, nextBilling, thisMonth, today } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import { STATES } from "./states";
@@ -109,17 +109,23 @@ export default function NewContract() {
   const planWanted = Boolean(companyId) && terms.billing_type !== "TERMITE";
   const { data: servicePlan, loading: planLoading } = useBilling(planWanted ? `/service-plans/${encodeURIComponent(companyId)}` : null);
   const planServices = useMemo(() => planServicesOf(servicePlan), [servicePlan]);
+  // This month's assigned / completed (Service Plans > Services this month): the quantity billed is
+  // the completed number; until it is entered the plan's number per month is shown.
+  const doneMonth = thisMonth();
+  const { data: monthData } = useBilling(planWanted && servicePlan ? `/service-plans/${encodeURIComponent(companyId)}/months${qs({ month: doneMonth })}` : null);
   useEffect(() => {
     if (!planWanted || !servicePlan) return;
     setLines((ls) => {
       const old = ls.filter((l) => l.kind === "SERVICE");
       const rows = planServicesOf(servicePlan).map((p) => {
         const had = old.find((x) => sameName(x.item_name, p.name));
-        return { ...(had || newLine(false, "SERVICE")), item_name: p.name, qty: p.qty };
+        const m = (monthData?.rows || []).find((r) => sameName(r.sub_service, p.name));
+        const completed = m && m.completed !== null && m.completed !== undefined ? Number(m.completed) : null;
+        return { ...(had || newLine(false, "SERVICE")), item_name: p.name, planQty: p.qty, completed, qty: completed ?? p.qty };
       });
       return [...rows, ...ls.filter((l) => l.kind !== "SERVICE")];
     });
-  }, [servicePlan, planWanted]);
+  }, [servicePlan, monthData, planWanted]);
   const [groupText, setGroupText] = useState("");
   function toggleKind(kind) {
     const next = { ...kinds, [kind]: !kinds[kind] };
@@ -309,7 +315,7 @@ export default function NewContract() {
             : {
               // rate per service x services: the invoice bills the services completed that month
               // (typed by the Service Coordinator); the plan's number per month is the default quantity
-              ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_SERVICE", unit: "Service", rate: l.rate, default_qty: Number(l.qty) || null,
+              ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_SERVICE", unit: "Service", rate: l.rate, default_qty: Number(l.planQty ?? l.qty) || null,
               plan_service_type: null, plan_sub_service: l.item_name,
             };
         }),
@@ -572,13 +578,18 @@ export default function NewContract() {
                       <div className="bl-msg err">This customer has no Service Plan yet. The Service Coordinator sets the services and how many per month in Service Plans; they then appear here for their rate.</div>
                     )}
                     {planServices.length > 0 && (
-                      <div className="nc-lines priced">
+                      <div className="ac-sub" style={{ fontSize: 12, marginBottom: 6 }}>
+                        Amount = completed × rate. Completed is what the Service Coordinator entered for {monthLabel(doneMonth)}; each invoice uses the completed number of its own month.
+                      </div>
+                    )}
+                    {planServices.length > 0 && (
+                      <div className="nc-lines priced svc">
                         <div className="nc-line nc-head">
                           <span>Service (from the Service Plan)</span>
-                          <span className="nc-num">Qty / month</span>
+                          <span className="nc-num">Per month (plan)</span>
+                          <span className="nc-num">Completed ({monthLabel(doneMonth).split(" ")[0]})</span>
                           <span className="nc-num">Rate per service (₹)</span>
                           <span className="nc-num">Amount (₹)</span>
-                          <span />
                         </div>
                         {lines.filter((l) => l.kind === "SERVICE").map((l) => (
                           <div key={l.key} className="nc-line-wrap">
@@ -587,10 +598,12 @@ export default function NewContract() {
                                 <input type="checkbox" className="bl-cb" checked={l.picked} disabled={l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
                                 <span className="nc-svc-name">{l.item_name}</span>
                               </div>
-                              <span className="nc-num nc-qty">{l.qty}</span>
+                              <span className="nc-num nc-plan">{l.planQty ?? l.qty}</span>
+                              <span className="nc-num nc-qty" title={l.completed === null || l.completed === undefined ? "Not entered yet in Service Plans; the plan's number is used until then" : ""}>
+                                {l.completed === null || l.completed === undefined ? <span className="bl-warn" style={{ display: "inline" }}>Not entered</span> : l.completed}
+                              </span>
                               <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={`Rate per service for ${l.item_name}`} />
                               <span className="nc-num nc-amt">{l.rate === "" ? "—" : amount(lineTotal(l, termite))}</span>
-                              <span />
                             </div>
                             {l.group && <div className="nc-in-group">In invoice line “{l.group}”</div>}
                           </div>
