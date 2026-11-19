@@ -70,7 +70,7 @@ const factory = (t: CrmTheme) => ({
   contractOnce: { backgroundColor: '#0d9488' },
   contractDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.85)' },
   contractText: { ...typography.captionMedium, fontSize: 11, fontWeight: '800' as const, letterSpacing: 1, color: '#fff' },
-  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
+  heroTop: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.sm },
   companyTile: {
     width: 40,
     height: 40,
@@ -83,6 +83,7 @@ const factory = (t: CrmTheme) => ({
   company: { ...typography.subtitle, color: t.textPrimary },
   contactPerson: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, marginTop: 1 },
   contactPersonText: { ...typography.caption, color: t.textSecondary, flex: 1 },
+  stageRow: { flexDirection: 'row' as const, marginTop: 8 },
   quoteRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -350,7 +351,8 @@ export function CommercialLeadDetail({
               <BriefcaseIcon size={20} color={theme.primary} />
             </View>
             <View style={styles.heroText}>
-              <Text style={styles.company} numberOfLines={1}>
+              {/* The full name (up to 3 lines) - the stage badge sits under it, not beside it. */}
+              <Text style={styles.company} numberOfLines={3}>
                 {lead.companyName || lead.customerName}
               </Text>
               <View style={styles.contactPerson}>
@@ -359,8 +361,8 @@ export function CommercialLeadDetail({
                   {lead.customerName}
                 </Text>
               </View>
+              <View style={styles.stageRow}>{stage ?? <LeadStatusBadge status={lead.leadStatus} />}</View>
             </View>
-            {stage ?? <LeadStatusBadge status={lead.leadStatus} />}
           </View>
 
           <View style={styles.quoteRow}>

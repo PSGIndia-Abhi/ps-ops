@@ -23,7 +23,8 @@ const MODE_LABEL = Object.fromEntries(MODES);
 
 const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const amt = (v) => Number(v) || 0;
-const inr = (n) => Number(n || 0).toLocaleString("en-IN");
+// Shown rounded off to the nearest rupee; the amounts typed and saved stay exact.
+const inr = (n) => (Math.round(Number(n || 0)) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 // An invoice with a balance takes cash and TDS. A fully paid invoice can only take its pending ("previous") TDS.
 const isOpen = (inv) => inv.pending_amount > 0;

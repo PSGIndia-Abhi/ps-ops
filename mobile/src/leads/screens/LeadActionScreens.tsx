@@ -5,23 +5,18 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { errorCodes, isErrorWithCode, pick, types } from '@react-native-documents/picker';
 import { GlossyBadge } from '../../components/GlossyBadge';
 import {
-  AlertTriangleIcon,
-  BriefcaseIcon,
   CalendarIcon,
   CheckCircleIcon,
   ClockIcon,
   DocumentIcon,
-  EmailIcon,
   PersonIcon,
-  PhoneIcon,
-  PinIcon,
-  TagIcon,
   UsersIcon,
 } from '../../components/icons';
 import { IconTile } from '../../crm/ui/IconTile';
 import { RupeeIcon } from '../../crm/ui/crmIcons';
 import { formatINR } from '../../crm/format';
 import { useLeads } from '../../crm/LeadsContext';
+import { useAuth } from '../../auth/AuthContext';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import type { Option } from '../../crm/types';
 import { CrmErrorBanner, CrmScreen, CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -40,7 +35,6 @@ import type { WorkTask } from '../../tasks/types';
 import { ClashNotice, confirmClash, loadAllReminderItems, useClashes } from './RemindersScreens';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
-import { SOURCE_LABELS } from '../stage';
 import type { CallOutcome, LocalFile, MeetingType, NamedOption, Person, PipelineLead, Qualification } from '../types';
 import { Card, errorMessage, FieldLabel, FieldRow, InfoLine, LeadHeader, personTone, PickField, RadioRow, useMe, LeadButton as PrimaryButton, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -1101,7 +1095,6 @@ export function LeadConvertScreen() {
   // The deal (closure) amount - what this conversion counts for in targets. Filled with the latest
   // quotation (else the approximate quote) and changeable before converting.
   const [amount, setAmount] = useState('');
-  const [quoted, setQuoted] = useState<number | null>(null);
   // The sales manager converting a sales executive's lead chooses who it counts for: that sales
   // person (picked to start with) or themselves.
   const { persona, myIdNum } = useMe();
@@ -1110,6 +1103,13 @@ export function LeadConvertScreen() {
   const [creditTo, setCreditTo] = useState<number | null>(null);
   // A one-time service or an AMC - asked here, when the deal is won.
   const [contractType, setContractType] = useState<'ONE_TIME' | 'AMC' | null>(null);
+  // The conversion date: today, unless the Managing Director / Personal Assistant picks the day the
+  // customer really converted (customers converted before the app was in use).
+  const { user } = useAuth();
+  const askDate = api.canSetConversionDate(user?.role);
+  const today = api.todayYmd();
+  const [convertedOn, setConvertedOn] = useState(today);
+  const [dateSheet, setDateSheet] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1126,7 +1126,6 @@ export function LeadConvertScreen() {
           .filter((q) => q.status !== 'CANCELLED' && q.total > 0)
           .sort((a, b) => String(b.sentAt ?? '').localeCompare(String(a.sentAt ?? '')))[0];
         if (!alive) return;
-        setQuoted(latest ? latest.total : null);
         const start = latest ? latest.total : l.amount;
         setAmount((a) => a || (start > 0 ? String(Math.round(start)) : ''));
         if (!manager) return;
@@ -1145,31 +1144,6 @@ export function LeadConvertScreen() {
     };
   }, [leadId, manager, myIdNum]);
 
-  // What the amount was filled with, to say where it came from or that it was changed.
-  const startAmount = quoted ?? lead?.amount ?? 0;
-  const startLabel = quoted !== null ? 'the latest quotation' : 'the approximate quote';
-  const changed = startAmount > 0 && amount !== '' && Number(amount) !== Math.round(startAmount);
-  const details: DetailRow[] = lead
-    ? [
-        { icon: BriefcaseIcon, label: 'Customer (company)', value: lead.companyName || name },
-        { icon: PinIcon, label: 'Address', value: lead.address },
-        { icon: TagIcon, label: 'Lead source', value: lead.source ? SOURCE_LABELS[lead.source] ?? lead.source : '' },
-        { icon: PersonIcon, label: 'Added by', value: lead.createdByName },
-      ]
-    : [];
-  const contact: DetailRow[] = lead
-    ? [
-        { icon: PersonIcon, label: 'Contact person', value: lead.contactPerson },
-        { icon: PhoneIcon, label: 'Phone', value: lead.phone ? `+91 ${lead.phone}` : '' },
-        ...(lead.alternatePhone ? [{ icon: PhoneIcon, label: 'Alternate phone', value: `+91 ${lead.alternatePhone}` }] : []),
-        { icon: EmailIcon, label: 'Email', value: lead.email },
-      ]
-    : [];
-  const sections = [
-    { title: 'Company', icon: <BriefcaseIcon />, color: theme.primary, rows: details },
-    { title: 'Contact', icon: <PhoneIcon />, color: theme.success, rows: contact },
-  ];
-
   return (
     <FormShell
       title="Convert to customer"
@@ -1181,8 +1155,16 @@ export function LeadConvertScreen() {
         const total = amount ? Number(amount) : undefined;
         if (total !== undefined && (!Number.isFinite(total) || total <= 0)) return setError('Enter a valid amount, or leave it empty.');
         if (!contractType) return setError('Choose One-time or AMC.');
+        if (askDate && convertedOn > today) return setError('The conversion date cannot be in the future.');
         submit(async () => {
-          await api.convertLead(leadId, notes.trim(), contractType, total, owner && creditTo !== null ? creditTo : undefined);
+          await api.convertLead(
+            leadId,
+            notes.trim(),
+            contractType,
+            total,
+            owner && creditTo !== null ? creditTo : undefined,
+            askDate && convertedOn !== today ? convertedOn : undefined,
+          );
         });
       }}
     >
@@ -1193,7 +1175,7 @@ export function LeadConvertScreen() {
           <Text style={cs.heroTitle} numberOfLines={2}>
             {lead?.companyName || name}
           </Text>
-          <Text style={cs.heroSub}>{lead?.leadNumber ? `${lead.leadNumber} · becomes a customer` : 'Becomes a customer'}</Text>
+          {!!lead?.leadNumber && <Text style={cs.heroSub}>{lead.leadNumber}</Text>}
         </View>
       </View>
       {/* <View style={cs.warn}>
@@ -1211,7 +1193,6 @@ export function LeadConvertScreen() {
               <IconTile icon={<RupeeIcon />} color={theme.success} size={32} />
               <View style={cs.flex1}>
                 <Text style={cs.cardTitle}>Deal amount</Text>
-                <Text style={cs.cardSub}>The final amount agreed - counts towards the target</Text>
               </View>
             </View>
             <CrmTextField
@@ -1221,13 +1202,6 @@ export function LeadConvertScreen() {
               keyboardType="number-pad"
               maxLength={9}
               placeholder="0"
-              hint={
-                changed
-                  ? `Changed from ${startLabel} (${formatINR(startAmount)})`
-                  : startAmount > 0
-                    ? `Filled with ${startLabel} - change it if the final amount is different.`
-                    : undefined
-              }
             />
             {!!lead.notes && (
               <View style={cs.req}>
@@ -1243,7 +1217,6 @@ export function LeadConvertScreen() {
               <IconTile icon={<DocumentIcon />} color={theme.primary} size={32} />
               <View style={cs.flex1}>
                 <Text style={cs.cardTitle}>Service type</Text>
-                <Text style={cs.cardSub}>Is this a one-time service or an AMC?</Text>
               </View>
             </View>
             <View style={cs.kindRow}>
@@ -1277,13 +1250,31 @@ export function LeadConvertScreen() {
             </View>
           </View>
 
+          {/* The conversion date - Managing Director / Personal Assistant only. */}
+          {askDate && (
+            <View style={cs.card}>
+              <View style={cs.cardHead}>
+                <IconTile icon={<CalendarIcon />} color={theme.primary} size={32} />
+                <View style={cs.flex1}>
+                  <Text style={cs.cardTitle}>Conversion date</Text>
+                </View>
+              </View>
+              <PickField
+                label="Converted on"
+                value={fmtDateShort(convertedOn)}
+                placeholder="Pick a date"
+                icon={<CalendarIcon size={18} color={theme.textMuted} />}
+                onPress={() => setDateSheet(true)}
+              />
+            </View>
+          )}
+
           {!!owner && (
             <View style={cs.card}>
               <View style={cs.cardHead}>
                 <IconTile icon={<UsersIcon />} color={theme.accent} size={32} />
                 <View style={cs.flex1}>
                   <Text style={cs.cardTitle}>Count this conversion for</Text>
-                  <Text style={cs.cardSub}>Whose target the deal amount is added to</Text>
                 </View>
               </View>
               {[
@@ -1317,36 +1308,140 @@ export function LeadConvertScreen() {
             </View>
           )}
 
-          {sections.map((sec) => (
-            <View key={sec.title} style={cs.card}>
-              <View style={cs.cardHead}>
-                <IconTile icon={sec.icon} color={sec.color} size={32} />
-                <Text style={[cs.cardTitle, cs.flex1]}>{sec.title}</Text>
-              </View>
-              {sec.rows.map((r, i) => {
-                const RowIcon = r.icon;
-                return (
-                  <View key={r.label} style={[cs.row, i > 0 && cs.rowLine]}>
-                    <RowIcon size={16} color={theme.textMuted} />
-                    <View style={cs.flex1}>
-                      <Text style={cs.rowLabel}>{r.label}</Text>
-                      <Text style={[cs.rowValue, !r.value && cs.rowEmpty]}>{r.value || 'Not added'}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          ))}
         </>
       )}
       <NotesField label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. Annual contract agreed" />
+      {askDate && (
+        <DateSheet
+          visible={dateSheet}
+          onClose={() => setDateSheet(false)}
+          value={convertedOn}
+          maxDate={today}
+          title="Conversion date"
+          onPick={(d) => {
+            setConvertedOn(d);
+            setDateSheet(false);
+          }}
+        />
+      )}
     </FormShell>
   );
 }
 
-type DetailRow = { icon: React.ComponentType<{ size?: number; color?: string }>; label: string; value: string };
-
 const WHITE = '#FFFFFF';
+
+// ---------------------------------------------------------------------------
+// Edit a saved conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Corrects a conversion that is already saved: the conversion date (Managing Director / Personal
+ * Assistant only - e.g. a customer converted before the app was in use; never in the future) and
+ * who it counts for (the heads of sales). Targets and reports follow the change; the server keeps
+ * it in the lead's history and checks the same rules.
+ */
+export function LeadEditConversionScreen() {
+  const { leadId, name, convertedOn, creditedTo, creditedToName } = useRoute<RouteProp<LeadStackParamList, 'LeadEditConversion'>>().params;
+  const { theme } = useCrmStyles(factory);
+  const { saving, error, setError, submit } = useSubmit();
+  const { persona, myIdNum } = useMe();
+  const { user } = useAuth();
+  const canDate = api.canSetConversionDate(user?.role);
+  const canPerson = persona === 'sales_manager';
+  const today = api.todayYmd();
+  const [date, setDate] = useState(convertedOn);
+  const [personId, setPersonId] = useState<number | null>(creditedTo);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [sheet, setSheet] = useState<'date' | 'person' | null>(null);
+
+  useEffect(() => {
+    if (!canPerson) return;
+    let alive = true;
+    api
+      .leadAssignees()
+      .then((list) => alive && setPeople(list.filter((p) => (p.role || '').toLowerCase() !== 'telecaller')))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [canPerson]);
+
+  const personName = personId === creditedTo ? creditedToName : people.find((p) => p.id === personId)?.name ?? '';
+  const dateChanged = canDate && !!date && date !== convertedOn;
+  const personChanged = canPerson && personId !== null && personId !== creditedTo;
+
+  return (
+    <FormShell
+      title="Edit conversion"
+      subtitle={name}
+      error={error}
+      submitLabel="Save"
+      saving={saving}
+      onSubmit={() => {
+        if (canDate && date > today) return setError('The conversion date cannot be in the future.');
+        if (!dateChanged && !personChanged) return setError('Nothing has changed.');
+        submit(async () => {
+          await api.updateConversion(leadId, {
+            convertedOn: dateChanged ? date : undefined,
+            creditTo: personChanged && personId !== null ? personId : undefined,
+          });
+        });
+      }}
+    >
+      <Card>
+        {canDate && (
+          <PickField
+            label="Conversion date"
+            value={fmtDateShort(date)}
+            placeholder="Pick a date"
+            icon={<CalendarIcon size={18} color={theme.textMuted} />}
+            onPress={() => setSheet('date')}
+          />
+        )}
+        {canDate && canPerson && <View style={{ height: spacing.md }} />}
+        {canPerson && (
+          <PickField
+            label="Counts for"
+            value={personName || null}
+            placeholder="Choose a sales person"
+            icon={<UsersIcon size={18} color={theme.textMuted} />}
+            onPress={() => setSheet('person')}
+          />
+        )}
+      </Card>
+      <View style={{ height: spacing.md }} />
+      <InfoLine label="Note" value="Targets, the Converted count and reports move to the new date and person. The change is kept in the lead's history." />
+
+      {canDate && (
+        <DateSheet
+          visible={sheet === 'date'}
+          onClose={() => setSheet(null)}
+          value={date}
+          maxDate={today}
+          title="Conversion date"
+          onPick={(d) => {
+            setDate(d);
+            setSheet(null);
+          }}
+        />
+      )}
+      {canPerson && (
+        <PeopleSheet
+          visible={sheet === 'person'}
+          onClose={() => setSheet(null)}
+          people={people}
+          selectedId={personId}
+          meId={myIdNum}
+          title="Counts for"
+          onPick={(p) => {
+            setPersonId(p.id);
+            setSheet(null);
+          }}
+        />
+      )}
+    </FormShell>
+  );
+}
 
 /** The Convert to customer screen's own look: a clear header, the deal amount first, tidy detail cards. */
 const convertFactory = (t: CrmTheme) => ({

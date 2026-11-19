@@ -13,7 +13,7 @@ const { createCompanyForPaidLead } = require("../utils/crmCustomerCompany");
 const {
   nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
-  readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices,
+  readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices, isValidDate,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -495,6 +495,27 @@ async function readCommercialFields(body, lead) {
   };
 }
 
+// The lead date: the Managing Director, Personal Assistant, sales manager and admin may give a new
+// commercial lead an earlier date (leads that came in before the app was in use), so date filters
+// and reports put it in the right month. Never in the future; not given or today = now, as before.
+// A chosen date is stored at noon, so it never slips into the day before.
+const LEAD_DATE_ROLES = ["admin", "sales_manager", "Managing Director", "Personal Assistant"];
+const istToday = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+/** -> { date: "YYYY-MM-DD" | null } or { error, status }. */
+function readLeadDate(req) {
+  const value = req.body?.lead_date;
+  if (value === undefined || value === null || value === "") return { date: null };
+  const ymd = String(value).slice(0, 10);
+  if (!isValidDate(ymd)) return { error: "Enter a valid lead date", status: 400 };
+  if (ymd > istToday()) return { error: "The lead date cannot be in the future", status: 400 };
+  if (ymd === istToday()) return { date: null };
+  if (!LEAD_DATE_ROLES.includes(req.user.role)) {
+    return { error: "Only the Managing Director, Personal Assistant or a sales manager can choose the lead date", status: 403 };
+  }
+  return { date: ymd };
+}
+
 async function createCommercialLead(req, res, lead) {
   let read;
   try {
@@ -508,6 +529,8 @@ async function createCommercialLead(req, res, lead) {
     read.values;
   const competitor = readCompetitor(req.body || {});
   if (competitor.error) return res.status(400).json({ error: competitor.error });
+  const leadDate = readLeadDate(req);
+  if (leadDate.error) return res.status(leadDate.status).json({ error: leadDate.error });
 
   // The sales manager (MANAGE_LEADS) / admin may give the new lead to someone straight away:
   // `assign_to` = a sales executive, a telecaller, or themselves (see assignmentFor).
@@ -592,6 +615,11 @@ async function createCommercialLead(req, res, lead) {
         await conn.query(`UPDATE crm_leads SET ${COMPETITOR_SET_SQL} WHERE id = ?`, [...competitor.values, id]);
       }
       await logLeadHistory(conn, id, "CREATE", { note: `Submitted by user #${req.user.id}`, changedBy: req.user.id });
+      if (leadDate.date) {
+        await conn.query("UPDATE crm_leads SET created_at = ? WHERE id = ?", [`${leadDate.date} 12:00:00`, id]);
+        const pretty = new Date(`${leadDate.date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+        await logLeadHistory(conn, id, "LEAD_DATE_SET", { note: `Lead date set to ${pretty} (entered today)`, changedBy: req.user.id });
+      }
       if (assignee) {
         const who = assignee.id === Number(req.user.id) ? "themselves" : `${assignee.name}${startTelecaller ? " (telecaller)" : ""}`;
         await logLeadHistory(conn, id, "ASSIGNED", { note: `Assigned to ${who}`.slice(0, 500), changedBy: req.user.id });

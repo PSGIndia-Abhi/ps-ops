@@ -36,7 +36,7 @@ function tabsFor(persona, leads) {
  * `onCall` / `onSchedule` add the quick action button for telecallers.
  * `compact` drops the secondary columns, for the narrower cards on a dashboard.
  */
-export function LeadTable({ leads, persona, onCall, onSchedule, compact = false }) {
+export function LeadTable({ leads, persona, onCall, onSchedule, compact = false, showConverted = false }) {
   const navigate = useNavigate();
   const provider = persona === "lead_provider";
   const full = !provider && !compact;
@@ -52,6 +52,7 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false 
             <th>Phone</th>
             {full && <th>Source</th>}
             {!provider && <th>Status</th>}
+            {full && showConverted && <th>Converted On</th>}
             {full && <th>Next Action</th>}
             {full && <th>Quote</th>}
             <th aria-label="Open" />
@@ -77,6 +78,7 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false 
                   <StageBadge stage={lead.stage} />
                 </td>
               )}
+              {full && showConverted && <td className="num muted">{lead.convertedOn ? dayLabel(`${lead.convertedOn}T12:00:00`) : "-"}</td>}
               {full && <td className="muted">{nextAction(lead)}</td>}
               {full && <td className="num">{compactMoney(lead.quote)}</td>}
               <td onClick={(e) => e.stopPropagation()}>
@@ -289,7 +291,7 @@ export default function LeadsList() {
           <>
             {/* `key` replays the row entrance when the tab or page changes. */}
             <div key={`${active.key}:${paged.page}`}>
-              <LeadTable leads={paged.rows} persona={persona} onCall={canVerify ? setCalling : undefined} onSchedule={canVerify ? setScheduling : undefined} />
+              <LeadTable leads={paged.rows} persona={persona} onCall={canVerify ? setCalling : undefined} onSchedule={canVerify ? setScheduling : undefined} showConverted={active.key === "closed"} />
             </div>
             <Pager {...paged} />
           </>

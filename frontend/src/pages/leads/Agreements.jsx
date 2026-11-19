@@ -324,6 +324,8 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(""); // "preview" | "save"
   const [preview, setPreview] = useState(null);
+  // Customer's designation follows Representative's designation until someone types their own there.
+  const [theirDesignationEdited, setTheirDesignationEdited] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -333,6 +335,9 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
         if (!alive) return;
         const c = d.content;
         setQuotation(d.quotation);
+        // A saved agreement whose two designations already differ keeps its own customer's designation.
+        const theirs = c.customerSignatory?.designation || "";
+        setTheirDesignationEdited(!!from && !!theirs && theirs !== (c.customer?.representativeDesignation || ""));
         setForm({
           ...c,
           monthlyCharge: c.monthlyCharge ? String(c.monthlyCharge) : "",
@@ -495,7 +500,11 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
               className="lm-input"
               value={form.customer.representativeDesignation || ""}
               maxLength={80}
-              onChange={(e) => setCustomer({ representativeDesignation: e.target.value })}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCustomer({ representativeDesignation: value });
+                if (!theirDesignationEdited) setTheirSignatory({ designation: value });
+              }}
             />
           </Field>
           <Field label="Customer address" required wide>
@@ -525,7 +534,11 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
             <input className="lm-input" value={form.customerSignatory.name} maxLength={80} onChange={(e) => setTheirSignatory({ name: e.target.value })} />
           </Field>
           <Field label="Customer's designation">
-            <input className="lm-input" value={form.customerSignatory.designation} maxLength={80} onChange={(e) => setTheirSignatory({ designation: e.target.value })} />
+            <input className="lm-input" value={form.customerSignatory.designation} maxLength={80} onChange={(e) => {
+                setTheirDesignationEdited(true);
+                setTheirSignatory({ designation: e.target.value });
+              }}
+            />
           </Field>
           <Field label="Customer's signing date">
             <input className="lm-input" type="date" value={form.customerSignatory.date} onChange={(e) => setTheirSignatory({ date: e.target.value })} />

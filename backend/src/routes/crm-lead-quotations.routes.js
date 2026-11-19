@@ -5,7 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, logLeadHistory, nextQuotationNumber, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
-  findLeadAssignee,
+  findLeadAssignee, isValidDate,
 } = require("../utils/crmLeadManagement");
 const { nextCompanyId } = require("../utils/crmCustomerCompany");
 const { notifyLead } = require("../utils/crmLeadNotifications");
@@ -533,6 +533,41 @@ router.post("/leads/:id/mark-lost", auth, requirePermission("CRM_VIEW_LEAD"), as
 });
 
 // ---------------------------------------------------------------------------
+// Conversion date. converted_at is the business date a conversion counts on (targets, reports,
+// Excel); recorded_at is when it was really entered and never changes. Only the Managing Director /
+// Personal Assistant (and admin) may choose a date other than today - for customers converted
+// before the app was in use. Any past date is allowed, never a future one. A chosen date is stored
+// at noon, so it never slips into the day before.
+// ---------------------------------------------------------------------------
+const CONVERSION_DATE_ROLES = ["Managing Director", "Personal Assistant"];
+const canSetConversionDate = (req) => req.user.role === "admin" || CONVERSION_DATE_ROLES.includes(req.user.role);
+const istToday = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const prettyDate = (ymd) =>
+  new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** "YYYY-MM-DD" from the request, or null when not given. Throws 400 for a bad or future date. */
+function readConversionDate(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const ymd = String(value).slice(0, 10);
+  if (!isValidDate(ymd)) throw new HttpError(400, "Enter a valid conversion date");
+  if (ymd > istToday()) throw new HttpError(400, "The conversion date cannot be in the future");
+  return ymd;
+}
+
+const CONVERSION_SELECT = `
+  SELECT c.id, c.lead_id, c.company_id, c.converted_by, u.name AS converted_by_name,
+         DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at,
+         DATE_FORMAT(c.recorded_at, '%Y-%m-%d %H:%i:%s') AS recorded_at,
+         c.notes, c.contract_type, co.name AS company_name,
+         l.assigned_sales_employee_id AS credited_to, cu.name AS credited_to_name
+    FROM crm_lead_conversions c
+    LEFT JOIN users u ON u.id = c.converted_by
+    LEFT JOIN companies co ON co.id = c.company_id
+    LEFT JOIN crm_leads l ON l.id = c.lead_id
+    LEFT JOIN users cu ON cu.id = l.assigned_sales_employee_id`;
+
+// ---------------------------------------------------------------------------
 // POST /api/crm/leads/:id/convert-to-customer -- the deliberate conversion
 // action. Creates a real companies row (type CORPORATE, since this is always
 // a commercial/business lead), links it via crm_lead_conversions (UNIQUE on
@@ -591,6 +626,14 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       if (!creditTo) throw new HttpError(400, "Choose who this conversion counts for");
     }
 
+    // converted_on (optional): the date the customer really converted. Today (or not given) = now,
+    // as before; another date only from the Managing Director / Personal Assistant.
+    let convertedOn = readConversionDate(req.body?.converted_on);
+    if (convertedOn === istToday()) convertedOn = null;
+    if (convertedOn && !canSetConversionDate(req)) {
+      throw new HttpError(403, "Only the Managing Director or Personal Assistant can choose the conversion date");
+    }
+
     const conversionId = uuid();
     const companyName = (lead.company_name || lead.customer_name || "Customer").slice(0, 150);
 
@@ -602,10 +645,17 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
         "INSERT INTO companies (id, name, type, is_active, created_at) VALUES (?, ?, 'CORPORATE', 1, NOW())",
         [newCompanyId, companyName]
       );
-      await conn.query(
-        "INSERT INTO crm_lead_conversions (id, lead_id, company_id, converted_by, notes, contract_type) VALUES (?, ?, ?, ?, ?, ?)",
-        [conversionId, lead.id, newCompanyId, req.user.id, notes, contractType]
-      );
+      if (convertedOn) {
+        await conn.query(
+          "INSERT INTO crm_lead_conversions (id, lead_id, company_id, converted_by, converted_at, notes, contract_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [conversionId, lead.id, newCompanyId, req.user.id, `${convertedOn} 12:00:00`, notes, contractType]
+        );
+      } else {
+        await conn.query(
+          "INSERT INTO crm_lead_conversions (id, lead_id, company_id, converted_by, notes, contract_type) VALUES (?, ?, ?, ?, ?, ?)",
+          [conversionId, lead.id, newCompanyId, req.user.id, notes, contractType]
+        );
+      }
       const [upd] = await conn.query(
         "UPDATE crm_leads SET pipeline_stage = 'CONVERTED', lead_status = 'converted', row_version = row_version + 1 WHERE id = ? AND row_version = ?",
         [lead.id, lead.row_version]
@@ -620,23 +670,15 @@ router.post("/leads/:id/convert-to-customer", auth, requirePermission("CRM_VIEW_
       const amountNote = amount !== null && amount !== Number(lead.amount) ? ` (amount ${Number(lead.amount) || 0} -> ${amount})` : "";
       const creditNote = creditTo && creditTo.id !== Number(req.user.id) ? ` - counted for ${creditTo.name}` : "";
       const kindNote = contractType ? ` (${contractType === "AMC" ? "AMC" : "one-time"})` : "";
+      const dateNote = convertedOn ? ` - converted on ${prettyDate(convertedOn)}` : "";
       await logLeadHistory(conn, lead.id, "CONVERTED", {
-        note: `Converted to company "${companyName}"${kindNote}${amountNote}${creditNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
+        note: `Converted to company "${companyName}"${kindNote}${amountNote}${creditNote}${dateNote}${notes ? `: ${notes}` : ""}`.slice(0, 500),
         changedBy: req.user.id,
       });
       return newCompanyId;
     });
 
-    const [[conversion]] = await pool.query(
-      `SELECT c.id, c.lead_id, c.company_id, c.converted_by, u.name AS converted_by_name,
-              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes, c.contract_type,
-              co.name AS company_name
-         FROM crm_lead_conversions c
-         LEFT JOIN users u ON u.id = c.converted_by
-         LEFT JOIN companies co ON co.id = c.company_id
-        WHERE c.id = ?`,
-      [conversionId]
-    );
+    const [[conversion]] = await pool.query(`${CONVERSION_SELECT} WHERE c.id = ?`, [conversionId]);
     notifyLead(lead.id, "CONVERTED", { actorId: req.user.id });
     res.status(201).json(conversion);
   } catch (err) {
@@ -675,20 +717,81 @@ router.put("/leads/:id/conversion/contract-type", auth, requirePermission("CRM_V
 router.get("/leads/:id/conversion", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
   try {
     const lead = await loadVisibleLead(req, req.params.id);
-    const [[conversion]] = await pool.query(
-      `SELECT c.id, c.lead_id, c.company_id, c.converted_by, u.name AS converted_by_name,
-              DATE_FORMAT(c.converted_at, '%Y-%m-%d %H:%i:%s') AS converted_at, c.notes, c.contract_type,
-              co.name AS company_name
-         FROM crm_lead_conversions c
-         LEFT JOIN users u ON u.id = c.converted_by
-         LEFT JOIN companies co ON co.id = c.company_id
-        WHERE c.lead_id = ?`,
-      [lead.id]
-    );
+    const [[conversion]] = await pool.query(`${CONVERSION_SELECT} WHERE c.lead_id = ?`, [lead.id]);
     if (!conversion) throw new HttpError(404, "This lead has not been converted");
     res.json(conversion);
   } catch (err) {
     sendError(res, err, "Failed to load conversion");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/crm/leads/:id/conversion { converted_on?, credit_to? } -- corrects a conversion that is
+// already saved (e.g. converted in the app last month, but the customer really converted earlier).
+//   converted_on: the conversion date - Managing Director / Personal Assistant / admin only; never
+//                 in the future. Moves the conversion into that day's month in targets and reports.
+//   credit_to:    who the conversion counts for (the lead's sales person) - the heads of sales
+//                 (sales manager, MD, PA, admin), as at conversion.
+// Each change is written to the lead's history. recorded_at is never changed.
+// ---------------------------------------------------------------------------
+router.put("/leads/:id/conversion", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const lead = await loadVisibleLead(req, req.params.id);
+    const [[conversion]] = await pool.query(
+      "SELECT id, DATE_FORMAT(converted_at, '%Y-%m-%d') AS converted_on FROM crm_lead_conversions WHERE lead_id = ?",
+      [lead.id]
+    );
+    if (!conversion) throw new HttpError(400, "This lead has not been converted");
+
+    const wantsDate = req.body?.converted_on !== undefined && req.body?.converted_on !== null && req.body?.converted_on !== "";
+    const wantsPerson = req.body?.credit_to !== undefined && req.body?.credit_to !== null && req.body?.credit_to !== "";
+    if (!wantsDate && !wantsPerson) throw new HttpError(400, "Nothing to change");
+
+    let newDate = null;
+    if (wantsDate) {
+      if (!canSetConversionDate(req)) throw new HttpError(403, "Only the Managing Director or Personal Assistant can change the conversion date");
+      newDate = readConversionDate(req.body.converted_on);
+      if (newDate === conversion.converted_on) newDate = null;
+    }
+
+    let creditTo = null;
+    if (wantsPerson) {
+      if (!isLeadHead(req)) throw new HttpError(403, "Only a sales manager, the Managing Director or the Personal Assistant can change who this conversion counts for");
+      creditTo = await findLeadAssignee(pool, Number(req.body.credit_to), req.user.id);
+      if (!creditTo) throw new HttpError(400, "Choose who this conversion counts for");
+      if (Number(lead.assigned_sales_employee_id) === creditTo.id) creditTo = null;
+    }
+
+    if (!newDate && !creditTo) throw new HttpError(400, "Nothing has changed");
+
+    await inTransaction(async (conn) => {
+      if (newDate) {
+        await conn.query("UPDATE crm_lead_conversions SET converted_at = ? WHERE id = ?", [`${newDate} 12:00:00`, conversion.id]);
+        await logLeadHistory(conn, lead.id, "CONVERSION_DATE_CHANGED", {
+          note: `Conversion date changed from ${prettyDate(conversion.converted_on)} to ${prettyDate(newDate)}`,
+          changedBy: req.user.id,
+        });
+      }
+      if (creditTo) {
+        const [upd] = await conn.query(
+          "UPDATE crm_leads SET assigned_sales_employee_id = ?, row_version = row_version + 1 WHERE id = ? AND row_version = ?",
+          [creditTo.id, lead.id, lead.row_version]
+        );
+        if (!upd.affectedRows) throw new HttpError(409, "This lead was just changed by someone else. Reload and try again.");
+        const [[before]] = lead.assigned_sales_employee_id
+          ? await conn.query("SELECT name FROM users WHERE id = ?", [lead.assigned_sales_employee_id])
+          : [[null]];
+        await logLeadHistory(conn, lead.id, "CONVERSION_CREDIT_CHANGED", {
+          note: `Conversion now counts for ${creditTo.name}${before?.name ? ` (was ${before.name})` : ""}`.slice(0, 500),
+          changedBy: req.user.id,
+        });
+      }
+    });
+
+    const [[updated]] = await pool.query(`${CONVERSION_SELECT} WHERE c.lead_id = ?`, [lead.id]);
+    res.json(updated);
+  } catch (err) {
+    sendError(res, err, "Failed to update the conversion");
   }
 });
 

@@ -74,7 +74,7 @@ export default function AdminDashboard() {
 
   // The job being deleted (admin / branch admin take back a booking made by mistake).
   const [deleting, setDeleting] = useState(null);
-  const canDelete = ["admin", "branch_admin"].includes(localStorage.getItem("role"));
+  const canDelete = ["admin", "branch_admin", "admin_assistant"].includes(localStorage.getItem("role"));
   // The Brigade Executive sees this same dashboard (backend limits it to Brigade jobs)
   // and books through the Brigade form.
   const isBrigadeExecutive = localStorage.getItem("role") === "brigade_executive";

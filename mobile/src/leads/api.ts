@@ -242,8 +242,36 @@ const toConversion = (r: Row): Conversion => ({
   companyName: str(r.company_name),
   convertedBy: str(r.converted_by_name),
   convertedAt: str(r.converted_at),
+  recordedAt: str(r.recorded_at),
+  creditedTo: r.credited_to === null || r.credited_to === undefined || r.credited_to === '' ? null : Number(r.credited_to),
+  creditedToName: str(r.credited_to_name),
   contractType: r.contract_type === 'AMC' || r.contract_type === 'ONE_TIME' ? r.contract_type : null,
 });
+
+/** The Managing Director, Personal Assistant, sales manager and admin may give a new lead an earlier date. */
+export const canSetLeadDate = (role?: string) => ['Managing Director', 'Personal Assistant', 'sales_manager', 'admin'].includes(role || '');
+
+/** Only the Managing Director / Personal Assistant (and admin) choose or change a conversion date. */
+export const canSetConversionDate = (role?: string) => ['Managing Director', 'Personal Assistant', 'admin'].includes(role || '');
+
+/** Today as "YYYY-MM-DD" on this phone - the latest conversion date allowed. */
+export const todayYmd = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/**
+ * PUT /api/crm/leads/:id/conversion - corrects a saved conversion: `convertedOn` ("YYYY-MM-DD",
+ * MD / PA) and / or `creditTo` (who it counts for, heads of sales). Only the fields given are sent.
+ */
+export async function updateConversion(id: string, body: { convertedOn?: string; creditTo?: number }): Promise<Conversion> {
+  const { data } = await httpClient.put<Row>(`/api/crm/leads/${id}/conversion`, {
+    ...(body.convertedOn ? { converted_on: body.convertedOn } : {}),
+    ...(body.creditTo ? { credit_to: body.creditTo } : {}),
+  });
+  return toConversion(data);
+}
 
 /**
  * PUT /api/crm/leads/:id/conversion/contract-type - One-time or AMC for a customer converted before
@@ -289,8 +317,16 @@ export async function convertLead(
   contractType: 'ONE_TIME' | 'AMC',
   amount?: number,
   creditTo?: number,
+  /** "YYYY-MM-DD" - the day it really converted (MD / PA only); not sent = today. */
+  convertedOn?: string,
 ): Promise<Conversion> {
-  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, { notes, contract_type: contractType, amount, credit_to: creditTo });
+  const { data } = await httpClient.post<Row>(`/api/crm/leads/${id}/convert-to-customer`, {
+    notes,
+    contract_type: contractType,
+    amount,
+    credit_to: creditTo,
+    ...(convertedOn ? { converted_on: convertedOn } : {}),
+  });
   return toConversion(data);
 }
 

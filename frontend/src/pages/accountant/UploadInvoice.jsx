@@ -152,7 +152,8 @@ The invoices already imported from it will stay.`;
         <div className="ac-info" style={{ marginTop: 16 }}>
           <FiInfo style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
-            Use the template: each row needs Invoice No, Customer, Invoice Date and Amount. The file is checked
+            Use the template: each row needs Invoice No, Customer, Invoice Date and Amount. Taxable Value (the amount
+            before GST) is optional: it is used for customers on Taxable TDS, and when blank it is worked out as Amount ÷ 1.18. The file is checked
             first and nothing is saved yet. On the next screen you can review every row, then click Submit to save the valid ones. Rows with errors are not saved; you can see the reason for each there.
           </span>
         </div>

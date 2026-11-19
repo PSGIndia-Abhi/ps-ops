@@ -10,6 +10,9 @@
 export const ROLE_HOME = {
   admin: "/admin",
   branch_admin: "/admin",
+  // Admin Panel with only Dashboard, Bookings, Companies, Contacts and Group Management
+  // (layouts/AdminLayout.jsx); the backend gives it Branch Admin data rules (own branch).
+  admin_assistant: "/admin",
   supervisor: "/supervisor",
   technician: "/technician",
   // The Accountant Panel belongs to "Collection Executive" (below); the old "accountant" role has no

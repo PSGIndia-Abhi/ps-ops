@@ -319,6 +319,8 @@ function stateFromContent(content, master) {
     quotationDate: content.quotationDate || "",
     validDays: String(content.validDays || 30),
     contractMonths: String(content.contractMonths || 12),
+    oneTimeService: !!content.oneTimeService,
+    contractPeriodText: content.contractPeriodText || "One-time Service",
     discount: content.totals?.discount ? String(content.totals.discount) : "",
     mode: p.mode === "PACKAGE" ? "PACKAGE" : "PER_SERVICE",
     pkg: {
@@ -354,6 +356,9 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
   const [quotationDate, setQuotationDate] = useState(todayYmd());
   const [validDays, setValidDays] = useState("30");
   const [contractMonths, setContractMonths] = useState("12");
+  // One-time / fixed number of services: the PDF prints this text as the contract period, not the months.
+  const [oneTimeService, setOneTimeService] = useState(false);
+  const [contractPeriodText, setContractPeriodText] = useState("One-time Service");
   const [discount, setDiscount] = useState(""); // special discount in rupees, off the main total
   const [mode, setMode] = useState("PER_SERVICE");
   const [pkg, setPkg] = useState({ amount: "", billing: "MONTHLY", planLabel: "", description: "" });
@@ -387,6 +392,8 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
           setQuotationDate(editing && st.quotationDate ? st.quotationDate : todayYmd());
           setValidDays(st.validDays);
           setContractMonths(st.contractMonths);
+          setOneTimeService(st.oneTimeService);
+          setContractPeriodText(st.contractPeriodText);
           setDiscount(st.discount);
           setMode(st.mode);
           setPkg(st.pkg);
@@ -513,6 +520,7 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
         quotationDate: quotationDate || todayYmd(),
         validDays: Number(validDays) || 30,
         contractMonths: Number(contractMonths) || 12,
+        ...(oneTimeService ? { oneTimeService: true, contractPeriodText: contractPeriodText.trim() || "One-time Service" } : {}),
         discount: discountValue,
         services,
         pricing: priceMode === "PACKAGE"
@@ -756,8 +764,30 @@ export default function QuotationBuilder({ lead, from = null, mode: openMode = "
                 <input className="lm-input" inputMode="numeric" value={validDays} onChange={(e) => setValidDays(e.target.value.replace(/\D/g, "").slice(0, 3))} />
               </Field>
               <Field label="Contract period (months)">
-                <input className="lm-input" inputMode="numeric" value={contractMonths} onChange={(e) => setContractMonths(e.target.value.replace(/\D/g, "").slice(0, 2))} />
+                <input
+                  className="lm-input"
+                  inputMode="numeric"
+                  value={contractMonths}
+                  disabled={oneTimeService}
+                  style={oneTimeService ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                  onChange={(e) => setContractMonths(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                />
               </Field>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={oneTimeService} onChange={(e) => setOneTimeService(e.target.checked)} />
+                <span>One-time / fixed service (no contract months)</span>
+              </label>
+              {oneTimeService && (
+                <Field label="Contract period text (printed on the PDF)">
+                  <input
+                    className="lm-input"
+                    value={contractPeriodText}
+                    maxLength={30}
+                    placeholder="One-time Service"
+                    onChange={(e) => setContractPeriodText(e.target.value)}
+                  />
+                </Field>
+              )}
               <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={revised} onChange={(e) => setRevised(e.target.checked)} />
                 <span>This is a revised proposal</span>

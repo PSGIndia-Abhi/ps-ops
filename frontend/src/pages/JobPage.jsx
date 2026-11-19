@@ -39,8 +39,8 @@ export default function JobPage() {
   const isTechnician = role === "technician";
   // The Brigade Executive gets the same controls as admin; the backend limits them to Brigade jobs.
   const canAssign = !isTechnician && !isTemporaryWorker;
-  const canGenerateRecurring = ["admin", "branch_admin", "supervisor"].includes(role);
-  const canGenerateTemporaryAccess = ["admin", "branch_admin", "supervisor"].includes(role);
+  const canGenerateRecurring = ["admin", "branch_admin", "admin_assistant", "supervisor"].includes(role);
+  const canGenerateTemporaryAccess = ["admin", "branch_admin", "admin_assistant", "supervisor"].includes(role);
   const canManageJobSchedule = !isTechnician && !isTemporaryWorker;
   const canManageJobStatus = !isTechnician && !isTemporaryWorker;
   const canScheduleVisits = !isTechnician && !isTemporaryWorker;

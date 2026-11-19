@@ -178,7 +178,7 @@ function documentHtml(q, meta, logoSrc) {
   const particulars = [
     ...(meta.number ? [["Quotation No", meta.number]] : []),
     ["Valid Until", longDate(validUntil)],
-    ["Contract Period", `${q.contractMonths || 12} Month${(q.contractMonths || 12) > 1 ? "s" : ""}`],
+    ["Contract Period", q.oneTimeService ? q.contractPeriodText || "One-time Service" : `${q.contractMonths || 12} Month${(q.contractMonths || 12) > 1 ? "s" : ""}`],
     ...(meta.leadNumber ? [["Reference", meta.leadNumber]] : []),
   ];
   out.push(`

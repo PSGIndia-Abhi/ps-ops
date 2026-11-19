@@ -73,7 +73,7 @@ async function listInvoices(req, res) {
               (SELECT MAX(p.payment_date) FROM payment_allocations pa
                  JOIN payments p ON p.id = pa.payment_id AND p.status = 'POSTED'
                 WHERE pa.invoice_id = i.id) AS last_payment_date,
-              t.tds_applicable, t.tds_rate, t.expected_tds, t.deducted_tds, t.pending_tds, t.status AS tds_status,
+              t.tds_applicable, t.tds_rate, t.tds_basis, t.expected_tds, t.deducted_tds, t.pending_tds, t.status AS tds_status,
               -- Group: the customer's own group, else the group of the company the site belongs to.
               COALESCE(g.name, sg.name) AS group_name
        FROM invoices i
@@ -154,6 +154,8 @@ async function getInvoice(req, res) {
 async function createInvoice(req, res) {
   const { role, id: userId } = req.user;
   const { customer_id, site_id, invoice_number, invoice_date, due_date, invoice_amount, remarks } = req.body;
+  // Optional: the amount before GST, used when the customer's TDS is on the taxable value.
+  const taxable_amount = req.body.taxable_amount == null || req.body.taxable_amount === "" ? null : Number(req.body.taxable_amount);
 
   if (!customer_id || !invoice_number || !invoice_date || !invoice_amount) {
     return res.status(400).json({ error: "customer_id, invoice_number, invoice_date and invoice_amount are required" });
@@ -161,10 +163,13 @@ async function createInvoice(req, res) {
   if (Number(invoice_amount) <= 0) {
     return res.status(400).json({ error: "invoice_amount must be greater than 0" });
   }
+  if (taxable_amount !== null && !(taxable_amount > 0 && taxable_amount <= Number(invoice_amount))) {
+    return res.status(400).json({ error: "taxable_amount must be greater than 0 and not more than invoice_amount" });
+  }
 
   const connection = await pool.getConnection();
   try {
-    const [[customer]] = await connection.query("SELECT id, tds_applicable, tds_rate FROM companies WHERE id = ?", [customer_id]);
+    const [[customer]] = await connection.query("SELECT id, tds_applicable, tds_rate, tds_basis FROM companies WHERE id = ?", [customer_id]);
     if (!customer) throw withStatus("Invalid customer", 400);
 
     let resolvedSiteId = site_id || null;
@@ -186,11 +191,11 @@ async function createInvoice(req, res) {
     await connection.beginTransaction();
     await connection.query(
       `INSERT INTO invoices
-       (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, pending_amount, status, remarks, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
-      [id, invoice_number, customer_id, resolvedSiteId, invoice_date, due_date || null, invoice_amount, invoice_amount, remarks || null, userId]
+       (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, taxable_amount, pending_amount, status, remarks, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+      [id, invoice_number, customer_id, resolvedSiteId, invoice_date, due_date || null, invoice_amount, taxable_amount, invoice_amount, remarks || null, userId]
     );
-    await insertInvoiceTds(connection, id, customer, invoice_amount);
+    await insertInvoiceTds(connection, id, customer, invoice_amount, taxable_amount);
     await logAudit(connection, req, {
       module: "INVOICE",
       action: "INVOICE_CREATED",
@@ -205,6 +210,8 @@ async function createInvoice(req, res) {
         invoice_amount: Number(invoice_amount),
         site_id: resolvedSiteId,
         tds_rate: customer.tds_applicable ? Number(customer.tds_rate) : null,
+        tds_basis: customer.tds_applicable ? customer.tds_basis : null,
+        taxable_amount,
       },
     });
     await connection.commit();

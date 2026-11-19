@@ -69,9 +69,12 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
                  FROM crm_lead_quotations q JOIN crm_lead_quotation_documents d ON d.quotation_id = q.id
                 WHERE q.lead_id = l.id AND q.status <> 'CANCELLED'
                   AND JSON_UNQUOTE(JSON_EXTRACT(d.content, '$.contractType')) IN ('ONE_TIME', 'AMC')
-                ORDER BY q.created_at DESC LIMIT 1)) AS contract_type
+                ORDER BY q.created_at DESC LIMIT 1)) AS contract_type,
+              -- The day it became a customer (may be backdated by the MD / PA); null when not converted
+              DATE_FORMAT(cv.converted_at, '%Y-%m-%d') AS converted_on
          FROM crm_leads l
          LEFT JOIN crm_lead_loss_reasons lr ON lr.id = l.loss_reason_id
+         LEFT JOIN crm_lead_conversions cv ON cv.lead_id = l.id
         WHERE ${where.join(" AND ")}
         ORDER BY l.created_at DESC
         LIMIT ${LEAD_LIMIT}`,
@@ -146,6 +149,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       services_requested: l.services_requested ? String(l.services_requested).split(",").filter(Boolean) : [],
       services_requested_names: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")) : [],
       contract_type: l.contract_type || null,
+      converted_on: l.converted_on || null,
       created_at: l.created_at,
       updated_at: l.updated_at,
     }));

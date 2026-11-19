@@ -23,6 +23,7 @@ import {
   UsersIcon,
 } from '../../components/icons';
 import { GlossyBadge } from '../../components/GlossyBadge';
+import { useAuth } from '../../auth/AuthContext';
 import { formatINR } from '../../crm/format';
 import { whatsappUrl } from '../../crm/leadHelpers';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
@@ -66,7 +67,7 @@ const factory = (t: CrmTheme) => ({
 
   // Who, how much, where it stands
   hero: { borderLeftWidth: 5, borderLeftColor: t.primary, ...t.raisedShadow },
-  heroTop: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md },
+  heroTop: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: spacing.md },
   heroTagged: { paddingTop: spacing.lg + spacing.lg }, // the corner tag sits above the name row
   // The corner tag: One-time or AMC, from the latest quotation
   contractTag: {
@@ -95,7 +96,8 @@ const factory = (t: CrmTheme) => ({
     justifyContent: 'center' as const,
   },
   heroText: { flex: 1 },
-  company: { ...typography.title, color: t.textPrimary },
+  // A little smaller than a title, so long company names wrap at whole words beside the call buttons.
+  company: { ...typography.title, fontSize: 19, lineHeight: 25, color: t.textPrimary },
   contactRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, marginTop: 3 },
   contact: { ...typography.body, color: t.textSecondary, flex: 1 },
   quoteRow: {
@@ -336,6 +338,8 @@ const HISTORY_META: Record<string, { title: string; tone: Tone; icon: IconFn }> 
   CONVERTED: { title: 'Converted to customer', tone: 'success', icon: (c) => <UsersIcon size={15} color={c} /> },
   AGREEMENT_CREATED: { title: 'Agreement created', tone: 'accent', icon: (c) => <DocumentIcon size={15} color={c} /> },
   CONTRACT_TYPE_SET: { title: 'One-time / AMC set', tone: 'success', icon: (c) => <TagIcon size={15} color={c} /> },
+  CONVERSION_DATE_CHANGED: { title: 'Conversion date changed', tone: 'success', icon: (c) => <CalendarIcon size={15} color={c} /> },
+  CONVERSION_CREDIT_CHANGED: { title: 'Conversion counted for someone else', tone: 'success', icon: (c) => <UsersIcon size={15} color={c} /> },
   AGREEMENT_SIGNED: { title: 'Signed agreement uploaded', tone: 'success', icon: (c) => <UploadIcon size={15} color={c} /> },
   MARK_LOST: { title: 'Marked lost', tone: 'danger', icon: (c) => <CloseIcon size={15} color={c} /> },
   FEEDBACK_SENT: { title: 'Feedback sent to provider', tone: 'neutral', icon: (c) => <SendIcon size={15} color={c} /> },
@@ -364,6 +368,7 @@ export function LeadWorkScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<LeadStackParamList>>();
   const { leadId } = useRoute<RouteProp<LeadStackParamList, 'LeadWork'>>().params;
   const { myId, myIdNum, persona } = useMe();
+  const { user } = useAuth();
   const { styles, theme } = useCrmStyles(factory);
   const [busy, setBusy] = useState<LeadAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -467,6 +472,12 @@ export function LeadWorkScreen() {
       },
     ], { tone: 'success', Icon: CheckCircleIcon });
   };
+  // The saved conversion: its date (backdated by the MD / PA when the customer converted before the
+  // app) and who it counts for. The MD / PA change the date; the heads of sales the person.
+  const conversion = data?.conversion ?? null;
+  const convertedOn = conversion?.convertedAt ? conversion.convertedAt.slice(0, 10) : '';
+  const backdated = !!conversion?.recordedAt && !!convertedOn && conversion.recordedAt.slice(0, 10) !== convertedOn;
+  const canEditConversion = !!conversion && (api.canSetConversionDate(user?.role) || persona === 'sales_manager');
   const openMeeting = data?.openMeeting ?? null;
   const baseActions = lead ? leadActions(lead, persona, myId) : [];
   // An open meeting is always reachable from here (as "View meeting"), whoever runs the visit.
@@ -529,6 +540,7 @@ export function LeadWorkScreen() {
                   <BriefcaseIcon size={26} color={theme.primary} />
                 </View>
                 <View style={styles.heroText}>
+                  {/* Up to 2 lines at a slightly smaller size; anything longer ends in "...". */}
                   <Text style={styles.company} numberOfLines={2}>
                     {lead.companyName}
                   </Text>
@@ -684,6 +696,40 @@ export function LeadWorkScreen() {
                   ))}
                 </View>
               </View>
+            )}
+
+            {/* The conversion: when, and who it counts for - editable by the MD / PA / heads of sales */}
+            {!!conversion && lead.stage === 'CONVERTED' && (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate('LeadEditConversion', {
+                    leadId,
+                    name: lead.companyName || lead.contactPerson || '',
+                    convertedOn,
+                    creditedTo: conversion.creditedTo,
+                    creditedToName: conversion.creditedToName,
+                  })
+                }
+                disabled={!canEditConversion}
+                accessibilityRole={canEditConversion ? 'button' : undefined}
+                accessibilityLabel={`Converted on ${fmtDateShort(convertedOn || null)}`}
+                style={({ pressed }) => [styles.agBtn, pressed && canEditConversion && styles.qPressed]}
+              >
+                <GlossyBadge color={theme.success} size={44} icon={<CheckCircleIcon size={20} color="#fff" />} />
+                <View style={styles.agBtnText}>
+                  <Text style={styles.agBtnTitle}>Converted on {fmtDateShort(convertedOn || null)}</Text>
+                  <Text style={styles.agBtnSub} numberOfLines={2}>
+                    {[
+                      conversion.creditedToName ? `Counts for ${conversion.creditedToName}` : '',
+                      backdated ? `entered ${fmtDateShort(conversion.recordedAt.slice(0, 10))}` : '',
+                      canEditConversion ? 'tap to edit' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'Customer created'}
+                  </Text>
+                </View>
+                {canEditConversion && <ChevronRightIcon size={18} color={theme.textMuted} />}
+              </Pressable>
             )}
 
             {/* A customer's agreements: one button to their own page */}

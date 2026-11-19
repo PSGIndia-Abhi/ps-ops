@@ -31,7 +31,7 @@ export default function BookingsPage() {
   // The job being deleted (admin / branch admin), and a counter that reloads the list after it.
   const [deleting, setDeleting] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const canDelete = ["admin", "branch_admin"].includes(role);
+  const canDelete = ["admin", "branch_admin", "admin_assistant"].includes(role);
 
   useEffect(() => {
     let isMounted = true;
