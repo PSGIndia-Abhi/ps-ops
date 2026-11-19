@@ -199,11 +199,8 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
       setMsg({ error: `Row ${blank + 1}: choose the service.` });
       return;
     }
-    const copies = Number(form.print_copies);
-    if (!Number.isInteger(copies) || copies < 1 || copies > 4) {
-      setMsg({ error: "Invoice print copies must be from 1 to 4." });
-      return;
-    }
+    // Print copies is no longer edited here; keep the plan's existing value (default 1).
+    const copies = Number(form.print_copies) || 1;
     const markDay = Number(form.shortfall_highlight_day);
     if (!Number.isInteger(markDay) || markDay < 1 || markDay > 31) {
       setMsg({ error: "“Mark short from day” must be a day from 1 to 31." });
@@ -310,12 +307,6 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
           {/* 2. Settings */}
           <div className="sp-section">
             <div className="sp-section-title">Settings</div>
-            <div className="sp-row">
-              <label htmlFor="sp-copies">Invoice print copies</label>
-              {readOnly ? <b>{form.print_copies}</b> : (
-                <Stepper id="sp-copies" label="Invoice print copies" value={form.print_copies} min={1} max={4} onChange={(v) => set({ print_copies: v })} />
-              )}
-            </div>
             <div className="sp-row">
               <label htmlFor="sp-from">Plan starts from</label>
               <input id="sp-from" type="month" className="ac-input" min={minMonth} disabled={readOnly} value={form.effective_from.slice(0, 7)} onChange={(e) => e.target.value && set({ effective_from: `${e.target.value}-01` })} />
