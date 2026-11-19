@@ -3,6 +3,7 @@ import { FiCheckCircle } from "react-icons/fi";
 import { DataError, EmptyRow, Pager } from "./ui";
 import { fetchTdsSettings, nameKey, saveTdsSettingsForRow, useAccountantData, usePaged } from "./data";
 import { money } from "./format";
+import { inBusiness } from "./business";
 import "./accountant.css";
 
 // What TDS is worked out on (companies.tds_basis):
@@ -35,7 +36,7 @@ export default function TdsSettings() {
   const [removing, setRemoving] = useState(null); // the customer row the "Remove TDS?" dialog is open for
 
   // TDS still to be collected per customer record, from their invoices (cancelled invoices are left out).
-  const { invoices, loading: invoicesLoading, reload: reloadInvoices } = useAccountantData();
+  const { invoices, business, loading: invoicesLoading, reload: reloadInvoices } = useAccountantData();
   const pendingTds = useMemo(() => {
     const totals = new Map();
     for (const i of invoices) {
@@ -64,6 +65,7 @@ export default function TdsSettings() {
   const groups = useMemo(() => {
     const map = new Map();
     for (const r of rows) {
+      if (!inBusiness(business, r.name)) continue; // only the business chosen in the header
       const key = nameKey(r.name);
       if (!map.has(key)) map.set(key, { key, name: String(r.name || "").trim(), members: [] });
       map.get(key).members.push(r);
@@ -79,7 +81,7 @@ export default function TdsSettings() {
         bases: [...new Set(on.map((m) => m.tds_basis || "INVOICE"))],
       };
     });
-  }, [rows]);
+  }, [rows, business]);
 
   const needle = search.trim().toLowerCase();
   const shown = groups.filter((g) => `${g.name} ${g.codes.join(" ")}`.toLowerCase().includes(needle));
