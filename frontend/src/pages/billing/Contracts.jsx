@@ -6,7 +6,9 @@ import { dmy, thisMonth } from "./format";
 import { Msg, StatusBadge, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
 
-// Contracts & Price Lists: how each customer is billed (type, frequency, timing, PO) and its prices.
+// Contracts & Price Lists: how each customer is billed (type, frequency, timing, PO) and its prices,
+// and whether the customer's billing details (Bill To, GSTIN, state) are filled in - they are edited
+// on the contract page.
 
 export default function Contracts() {
   const { me } = useOutletContext();
@@ -15,9 +17,13 @@ export default function Contracts() {
   const [type, setType] = useState("");
   const [status, setStatus] = useState("ACTIVE");
   const [dueOnly, setDueOnly] = useState(false);
+  const [missingOnly, setMissingOnly] = useState(false);
   const q = useDebounced(search);
   const { data, error, loading } = useBilling(`/contracts${qs({ q, type, status, due_month: dueOnly ? thisMonth() : "" })}`);
-  const rows = data || [];
+  // Billing details status of each customer (GET /customers: profile_complete).
+  const { data: customers } = useBilling("/customers");
+  const complete = new Map((customers || []).map((c) => [c.company_id, Boolean(c.profile_complete)]));
+  const rows = (data || []).filter((c) => !missingOnly || (customers && complete.get(c.company_id) === false));
 
   return (
     <div className="ac-page">
@@ -34,7 +40,7 @@ export default function Contracts() {
       </div>
 
       <div className="ac-card">
-        <div className="ac-filters" style={{ marginBottom: 12 }}>
+        <div className="ac-filters-5" style={{ marginBottom: 12 }}>
           <input className="ac-input" placeholder="Search customer or contract code…" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select className="ac-select" value={type} onChange={(e) => setType(e.target.value)} aria-label="Type">
             <option value="">All types</option>
@@ -52,25 +58,29 @@ export default function Contracts() {
           <label className="bl-toggle" style={{ paddingTop: 0 }}>
             <input type="checkbox" checked={dueOnly} onChange={(e) => setDueOnly(e.target.checked)} /> Due this month
           </label>
+          <label className="bl-toggle" style={{ paddingTop: 0 }}>
+            <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> Billing details missing
+          </label>
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack">
             <thead>
-              <tr><th>Contract</th><th>Customer</th><th>Type</th><th>Next period from</th><th>Timing</th><th>PO</th><th>Status</th><th>Last invoice</th></tr>
+              <tr><th>Contract</th><th>Customer</th><th>Type</th><th>Next period from</th><th>Bill date</th><th>PO</th><th>Billing details</th><th>Status</th><th>Last invoice</th></tr>
             </thead>
             <tbody>
               {loading || !rows.length ? (
-                <EmptyRow cols={8} loading={loading} text="No contracts yet." />
+                <EmptyRow cols={9} loading={loading} text={missingOnly ? "Every contract's customer has its billing details." : "No contracts yet."} />
               ) : (
                 rows.map((c) => (
                   <tr key={c.id} className="bl-click" onClick={() => navigate(`/billing/contracts/${c.id}`)}>
-                    <td><b>{c.contract_code}</b></td>
+                    <td className="bl-nowrap"><b>{c.contract_code}</b></td>
                     <td>{c.customer}</td>
                     <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} /></td>
                     <td>{dmy(c.next_period_start)}</td>
-                    <td>{c.bill_timing === "ADVANCE" ? "In advance" : "In arrears"}</td>
+                    <td>{c.bill_timing === "ADVANCE" ? "Start of the month" : "End of the month"}</td>
                     <td>{c.po_required ? <span className="ac-badge b-blue">Required</span> : <span className="ac-sub">—</span>}</td>
+                    <td>{!customers ? <span className="ac-sub">…</span> : complete.get(c.company_id) ? <span className="ac-badge b-green">Complete</span> : <span className="ac-badge b-red">Missing</span>}</td>
                     <td><StatusBadge value={c.status} /></td>
                     <td>{c.last_invoice_number || <span className="ac-sub">—</span>}</td>
                   </tr>

@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
+import BillingProfileCard from "./BillingProfileCard";
 import DescriptionPicker from "./DescriptionPicker";
+import FrequencySelect from "./FrequencySelect";
 import { amount, dmy, monthLabel, nextBilling, today } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -31,7 +33,7 @@ export default function ContractForm() {
   const canEdit = me.can("MANAGE_BILLING_MASTERS");
   const navigate = useNavigate();
   const { data: contract, error, reload } = useBilling(isNew ? null : `/contracts/${id}`);
-  const { data: customers } = useBilling(isNew ? "/customers" : null);
+  const { data: customers } = useBilling("/customers");
   const [edits, setEdits] = useState(null);
   const [newLines, setNewLines] = useState([emptyLine()]);
   const [tab, setTab] = useState("prices");
@@ -58,7 +60,8 @@ export default function ContractForm() {
   // When this contract is next billed, and whether its customer can be billed at all (Bill To profile).
   const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : contract?.next_period_start);
   const thisMonthKey = today().slice(0, 7);
-  const { data: profile, error: profileError, loading: profileLoading } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
+  const { data: profile, error: profileError, loading: profileLoading, reload: reloadProfile } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
+  const customerRow = (customers || []).find((c) => c.company_id === companyId) || null;
   const profileMissing = Boolean(companyId) && !profileLoading && !profile && /no billing profile/i.test(profileError || "");
   const poLabel = (p) => `${p.po_number} · ${p.is_open_po ? "Open PO" : `till ${dmy(p.expiry_date)}`}${p.kind === "ADVANCE" ? " · Advance" : ""}${p.po_amount === null ? "" : ` · ₹${amount(p.po_amount)}`}`;
 
@@ -78,7 +81,7 @@ export default function ContractForm() {
       gst_rate: form.gst_applicable === false ? 18 : Number(form.gst_rate ?? 18),
       ...(needsPo ? { po_ids: form.po_ids } : {}),
       shortfall_billing: form.shortfall_billing,
-      description_template: form.description_template || undefined,
+      description_template: form.description_template?.trim() || undefined,
       notes: form.notes || null,
     };
   }
@@ -94,8 +97,12 @@ export default function ContractForm() {
       setMsg({ error: `GST rate must be one of ${GST_RATES.join(", ")} %.` });
       return;
     }
-    if (!form.description_template) {
-      setMsg({ error: "Choose the description on invoice (the list is in Masters › Invoice Descriptions)." });
+    if (form.billing_type !== "ONE_TIME" && !form.frequency_months) {
+      setMsg({ error: "Choose the billing frequency." });
+      return;
+    }
+    if (!form.description_template?.trim()) {
+      setMsg({ error: "Type or choose the description on invoice." });
       return;
     }
     if (form.billing_type === "TERMITE" && !form.po_ids.length) {
@@ -164,15 +171,20 @@ export default function ContractForm() {
       <Msg {...msg} />
       {next && (
         <div className="ac-info" style={{ marginBottom: 12 }}>
-          ⓘ {isNew ? "First" : "Next"} invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, billed {next.advance ? "at the start" : "at the end"} of the period,
-          {" "}so it appears in the <b>Bill Run for {monthLabel(next.billMonth)}</b>
-          {next.billMonth < thisMonthKey ? " (already due: open this month's Bill Run)" : next.billMonth === thisMonthKey ? " (this month)" : ""}.
+          {/* one span: the box is a flex row, so loose text and <b> would each become a narrow column */}
+          <span>
+            ⓘ {isNew ? "First" : "Next"} invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, billed {next.advance ? "at the start" : "at the end"} of the period,
+            {" "}so it appears in the <b>Bill Run for {monthLabel(next.billMonth)}</b>
+            {next.billMonth < thisMonthKey ? " (already due: open this month's Bill Run)" : next.billMonth === thisMonthKey ? " (this month)" : ""}.
+          </span>
         </div>
       )}
       {profileMissing && (
         <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
-          ⚠ This customer has no billing profile (Bill To address and GST state), so the Bill Run cannot make its invoice.
-          {" "}<Link to="/billing/customers">Add it in Billing Customers</Link>.
+          <span>
+            ⚠ This customer has no billing details (Bill To address and GST state), so the Bill Run cannot make its invoice.
+            {" "}<a href="#billing-details">Fill them in under Billing details</a>.
+          </span>
         </div>
       )}
 
@@ -187,7 +199,7 @@ export default function ContractForm() {
               </select>
             ) : <input className="ac-input" readOnly value={contract.customer} />}
           </Field>
-          <Field label="Billing type" required>
+          <Field label="Billing type" required className="bl-span2">
             <div className="ac-pills" style={{ width: "100%" }}>
               {TYPES.map(([v, l]) => (
                 <button key={v} type="button" disabled={!isNew} className={`ac-pill ${typeIs(v) ? "active" : ""}`} style={{ whiteSpace: "nowrap", padding: "7px 10px" }}
@@ -200,15 +212,12 @@ export default function ContractForm() {
             </div>
           </Field>
           <Field label="Billing frequency" required={typeIs("AMC")}>
-            <select className="ac-select" value={form.frequency_months || ""} disabled={readOnly || typeIs("ONE_TIME")} onChange={(e) => set({ frequency_months: Number(e.target.value) })}>
-              {typeIs("ONE_TIME") && <option value="">Once</option>}
-              {[1, 3, 4, 6, 12].map((n) => <option key={n} value={n}>Every {n} month{n > 1 ? "s" : ""}</option>)}
-            </select>
+            <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
           </Field>
-          <Field label="Bill timing" required>
+          <Field label="Bill date" required>
             <select className="ac-select" value={form.bill_timing} disabled={readOnly} onChange={(e) => set({ bill_timing: e.target.value })}>
-              <option value="ARREARS">In arrears (end of period)</option>
-              <option value="ADVANCE">In advance (start of period)</option>
+              <option value="ADVANCE">Start of the month</option>
+              <option value="ARREARS">End of the month</option>
             </select>
           </Field>
           <Field label="Term start date" required>
@@ -225,12 +234,12 @@ export default function ContractForm() {
           </Field>
           <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "The full amount every period, even if a service is missed" : "Billed for the services actually done (amount ÷ planned × done)"}>
             <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
-              <option value="FULL">Fixed amount based</option>
+              <option value="FULL">Fixed amount</option>
               <option value="PRO_RATA">Service based</option>
             </select>
           </Field>
-          <Field label="Description on invoice" required className="bl-span2" hint="Choose one; ✎ Edit changes the wording, + New adds one">
-            <DescriptionPicker value={form.description_template || ""} canEdit={canEdit} disabled={readOnly} onChange={(text) => set({ description_template: text })} onListChanged={reload} />
+          <Field label="Description on invoice" required className="bl-span2" hint="Type it, or choose a saved one. {month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time.">
+            <DescriptionPicker value={form.description_template || ""} disabled={readOnly} onChange={(text) => set({ description_template: text })} />
           </Field>
           <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : `${gstHint(form.gst_rate ?? 18, profile?.state_code)}. A change applies to new drafts only.`}>
             <div className="nc-gst">
@@ -271,6 +280,8 @@ export default function ContractForm() {
           </Field>
         </div>
       </div>
+
+      {!isNew && customerRow && <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />}
 
       <div className="ac-card">
         <div className="ac-tabs bl-tabs">

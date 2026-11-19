@@ -4,6 +4,7 @@ import { ApiError, billingGet, billingPost, billingPut, qs, useBilling } from ".
 import { GST_RATES, gstHint } from "./calc";
 import { CATEGORY_LABEL, amount, dmy, monthLabel, nextBilling, today } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
+import FrequencySelect from "./FrequencySelect";
 import { STATES } from "./states";
 import { Field, Msg } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -48,7 +49,7 @@ export default function NewContract() {
   // 2. contract terms
   const [terms, setTerms] = useState({
     billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", start_date: today(), end_date: "",
-    shortfall_billing: "PRO_RATA", gst_applicable: true, gst_rate: 18, po_required: false, description_template: "", notes: "",
+    shortfall_billing: "PRO_RATA", gst_applicable: true, gst_rate: 18, po_required: false, description_template: null, notes: "",
   });
   const setT = (patch) => setTerms((t) => ({ ...t, ...patch }));
   const termite = terms.billing_type === "TERMITE";
@@ -100,14 +101,14 @@ export default function NewContract() {
   const at = steps.findIndex((s) => s.n === step);
   const next = nextBilling(terms, terms.start_date);
 
-  // Description on invoice: required, picked from the master list. Until one is picked, the wording
+  // Description on invoice: required, typed or picked from the master list. Until it is touched, the wording
   // that fits the billing type is suggested (as the server used to default it), when it is in the list.
   const { data: descriptions } = useBilling("/descriptions?active=true");
   const suggested = (() => {
     const want = terms.billing_type === "ONE_TIME" ? "{period}" : Number(terms.frequency_months) > 1 ? "{from_month}" : "{month}";
     return (descriptions || []).find((d) => d.text.includes(want))?.text || "";
   })();
-  const description = terms.description_template || suggested;
+  const description = (terms.description_template ?? suggested).trim();
 
   // Load the customer's billing profile, or start a new one from the customer's details.
   useEffect(() => {
@@ -140,6 +141,10 @@ export default function NewContract() {
     setMsg({});
   }
 
+  // Step 1 shows the billing fields from the start: empty and locked until a customer is chosen.
+  const shown = profile || { billing_name: "", gst_number: "", billing_address: "", state_code: "29", payment_terms_days: 30 };
+  const locked = !customer?.category || !profile;
+
   // ---- step checks and Next --------------------------------------------------------------------
   function problems() {
     if (step === 1) {
@@ -154,10 +159,11 @@ export default function NewContract() {
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
     }
     if (step === 2) {
+      if (terms.billing_type !== "ONE_TIME" && !terms.frequency_months) return "Choose the billing frequency.";
       if (!terms.start_date) return "Choose the start date.";
       if (terms.end_date && terms.end_date < terms.start_date) return "The term end date cannot be before the term start date.";
       if (gstOn && !GST_RATES.includes(Number(terms.gst_rate))) return `GST rate must be one of ${GST_RATES.join(", ")} %.`;
-      if (!description) return "Choose the description on invoice (the list is in Masters › Invoice Descriptions).";
+      if (!description) return "Type or choose the description on invoice.";
     }
     if (step === 3) {
       if (addingPo) {
@@ -343,42 +349,41 @@ export default function NewContract() {
             {customer && !customer.category && (
               <div className="ac-info error" style={{ marginTop: 10 }}>⚠ This customer&apos;s type (Corporate / Individual / RWA) is not set, so it cannot be billed yet. Set it on the customer in Companies, then come back.</div>
             )}
-            {customer?.category && (
-              <>
-                <div className="nc-chip-row">
-                  <span className={`ac-badge ${residential ? "b-purple" : "b-blue"}`}>{CATEGORY_LABEL[customer.category]}</span>
-                  <span className="ac-sub">{residential ? "Billed without GST" : "Billed with GST"} · {profileSaved ? "Billing details found; check and continue" : "No billing details yet; fill them in"}</span>
-                </div>
-                {!profile ? <div className="ac-sub">Loading…</div> : (
-                  <div className="bl-grid g2" style={{ marginTop: 6 }}>
-                    <Field label="Billing name" required>
-                      <input className="ac-input" value={profile.billing_name} maxLength={255} onChange={(e) => setProfile({ ...profile, billing_name: e.target.value })} />
-                    </Field>
-                    {!residential ? (
-                      <Field label="GSTIN" required hint={customer.gst_number && profile.gst_number === customer.gst_number ? "From the customer record; the state follows its first 2 digits" : "15 characters; the state follows its first 2 digits"}>
-                        <input className="ac-input" value={profile.gst_number} maxLength={15} placeholder="e.g. 29ABCDE1234F1Z5" style={{ textTransform: "uppercase" }}
-                          onChange={(e) => {
-                            const g = e.target.value.replace(/\s+/g, "").toUpperCase();
-                            const code = g.slice(0, 2);
-                            setProfile({ ...profile, gst_number: g, ...(STATES.some(([c]) => c === code) ? { state_code: code } : {}) });
-                          }} />
-                      </Field>
-                    ) : <div />}
-                    <Field label="Billing address" required className="bl-span2">
-                      <textarea className="ac-textarea" rows={3} value={profile.billing_address} maxLength={1000} placeholder="As printed under Bill To" onChange={(e) => setProfile({ ...profile, billing_address: e.target.value })} />
-                    </Field>
-                    <Field label="State (GST)" required hint={profile.state_code === "29" ? "Karnataka: CGST + SGST" : "Outside Karnataka: IGST"}>
-                      <select className="ac-select" value={profile.state_code} onChange={(e) => setProfile({ ...profile, state_code: e.target.value })}>
-                        {STATES.map(([code, name]) => <option key={code} value={code}>{code} – {name}</option>)}
-                      </select>
-                    </Field>
-                    <Field label="Payment terms (days)">
-                      <input type="number" min="0" max="365" className="ac-input" value={profile.payment_terms_days} onChange={(e) => setProfile({ ...profile, payment_terms_days: e.target.value })} />
-                    </Field>
-                  </div>
-                )}
-              </>
+            {/* The billing fields show from the start; they open for typing once a customer is chosen. */}
+            {customer?.category ? (
+              <div className="nc-chip-row">
+                <span className={`ac-badge ${residential ? "b-purple" : "b-blue"}`}>{CATEGORY_LABEL[customer.category]}</span>
+                <span className="ac-sub">{residential ? "Billed without GST" : "Billed with GST"} · {!profile ? "Loading the billing details…" : profileSaved ? "Billing details found; check and continue" : "No billing details yet; fill them in"}</span>
+              </div>
+            ) : (
+              <div className="nc-chip-row"><span className="ac-sub">{customer ? "Set the customer type first; the billing details open after that." : "Choose the customer; its billing details are filled in below."}</span></div>
             )}
+            <div className="bl-grid g2" style={{ marginTop: 6 }}>
+              <Field label="Billing name" required>
+                <input className="ac-input" disabled={locked} value={shown.billing_name} maxLength={255} onChange={(e) => setProfile({ ...shown, billing_name: e.target.value })} />
+              </Field>
+              {!residential ? (
+                <Field label="GSTIN" required hint={customer?.gst_number && shown.gst_number === customer.gst_number ? "From the customer record; the state follows its first 2 digits" : "15 characters; the state follows its first 2 digits"}>
+                  <input className="ac-input" disabled={locked} value={shown.gst_number} maxLength={15} placeholder="e.g. 29ABCDE1234F1Z5" style={{ textTransform: "uppercase" }}
+                    onChange={(e) => {
+                      const g = e.target.value.replace(/\s+/g, "").toUpperCase();
+                      const code = g.slice(0, 2);
+                      setProfile({ ...shown, gst_number: g, ...(STATES.some(([c]) => c === code) ? { state_code: code } : {}) });
+                    }} />
+                </Field>
+              ) : <div />}
+              <Field label="Billing address" required className="bl-span2">
+                <textarea className="ac-textarea" rows={3} disabled={locked} value={shown.billing_address} maxLength={1000} placeholder="As printed under Bill To" onChange={(e) => setProfile({ ...shown, billing_address: e.target.value })} />
+              </Field>
+              <Field label="State (GST)" required hint={shown.state_code === "29" ? "Karnataka: CGST + SGST" : "Outside Karnataka: IGST"}>
+                <select className="ac-select" disabled={locked} value={shown.state_code} onChange={(e) => setProfile({ ...shown, state_code: e.target.value })}>
+                  {STATES.map(([code, name]) => <option key={code} value={code}>{code} – {name}</option>)}
+                </select>
+              </Field>
+              <Field label="Payment terms (days)">
+                <input type="number" min="0" max="365" className="ac-input" disabled={locked} value={shown.payment_terms_days} onChange={(e) => setProfile({ ...shown, payment_terms_days: e.target.value })} />
+              </Field>
+            </div>
           </>
         )}
 
@@ -398,15 +403,12 @@ export default function NewContract() {
             </Field>
             <div className="bl-grid g2" style={{ marginTop: 12 }}>
               <Field label="Billing frequency" required>
-                <select className="ac-select" value={terms.frequency_months || ""} disabled={terms.billing_type === "ONE_TIME"} onChange={(e) => setT({ frequency_months: Number(e.target.value) })}>
-                  {terms.billing_type === "ONE_TIME" && <option value="">Once</option>}
-                  {[1, 3, 4, 6, 12].map((n) => <option key={n} value={n}>Every {n} month{n > 1 ? "s" : ""}</option>)}
-                </select>
+                <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
               </Field>
-              <Field label="Bill timing" required>
+              <Field label="Bill date" required>
                 <select className="ac-select" value={terms.bill_timing} onChange={(e) => setT({ bill_timing: e.target.value })}>
-                  <option value="ARREARS">In arrears (end of period)</option>
-                  <option value="ADVANCE">In advance (start of period)</option>
+                  <option value="ADVANCE">Start of the month</option>
+                  <option value="ARREARS">End of the month</option>
                 </select>
               </Field>
               <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
@@ -427,7 +429,7 @@ export default function NewContract() {
               </Field>
               <Field label="Bill structure" hint={terms.shortfall_billing === "FULL" ? "The full amount every period, even if a service is missed" : "Billed for the services actually done (amount ÷ planned × done)"}>
                 <select className="ac-select" value={terms.shortfall_billing} onChange={(e) => setT({ shortfall_billing: e.target.value })}>
-                  <option value="FULL">Fixed amount based</option>
+                  <option value="FULL">Fixed amount</option>
                   <option value="PRO_RATA">Service based</option>
                 </select>
               </Field>
@@ -437,14 +439,14 @@ export default function NewContract() {
                   {PO_TYPES.includes(terms.billing_type) ? "Always needed for this type" : "This customer needs a PO on its invoices"}
                 </label>
               </Field>
-              <Field label="Description on invoice" required hint={description ? `On the invoice: “${descriptionPreview(description, next)}”` : "Choose one, or add a wording with + New"}>
-                <DescriptionPicker value={description} canEdit={me.can("MANAGE_BILLING_MASTERS")} onChange={(text) => setT({ description_template: text })} />
+              <Field label="Description on invoice" required hint={description ? `On the invoice: “${descriptionPreview(description, next)}”` : "Type it, or choose a saved one. {month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time."}>
+                <DescriptionPicker value={terms.description_template ?? suggested} onChange={(text) => setT({ description_template: text })} />
               </Field>
               <Field label="Notes" className="bl-span2"><input className="ac-input" value={terms.notes} maxLength={1000} onChange={(e) => setT({ notes: e.target.value })} /></Field>
             </div>
             {next && (
               <div className="ac-info" style={{ marginTop: 12 }}>
-                ⓘ First invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, in the <b>Bill Run for {monthLabel(next.billMonth)}</b>.
+                <span>ⓘ First invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, in the <b>Bill Run for {monthLabel(next.billMonth)}</b>.</span>
               </div>
             )}
           </>
@@ -452,14 +454,21 @@ export default function NewContract() {
 
         {step === 3 && (
           <>
-            <h3 className="nc-title">Purchase order</h3>
-            {/* Existing POs: a dropdown (picking one fills the details below), with + Add new PO beside it.
-                No POs yet: just the + Add PO button, which opens the form. */}
-            <div className="nc-po-pick">
-              {poRows.length > 0 && (
-                <Field label="Existing purchase order">
-                  <select className="ac-select" value={poId} onChange={(e) => choosePo(e.target.value)}>
-                    <option value="">Choose a PO…</option>
+            {/* Title with + Add PO at the top right (Cancel while a new PO is being typed). */}
+            <div className="nc-title-row">
+              <h3 className="nc-title">Purchase order</h3>
+              {addingPo ? (
+                <button type="button" className="ac-btn" onClick={cancelNewPo}>✕ Cancel new PO</button>
+              ) : (
+                <button type="button" className="ac-btn ac-btn-primary" onClick={startNewPo}>+ Add PO</button>
+              )}
+            </div>
+            {/* The customer's purchase orders: picking one fills in its details below. No PO yet: + Add PO. */}
+            {!addingPo && (
+              <div className="nc-po-pick">
+                <Field label="Existing purchase order" hint={poData && !poRows.length ? "This customer has no purchase order yet. Use + Add PO to add one." : ""}>
+                  <select className="ac-select" value={poId} disabled={!poRows.length} onChange={(e) => choosePo(e.target.value)}>
+                    <option value="">{!poData ? "Loading…" : poRows.length ? "Choose a PO…" : "No purchase orders yet"}</option>
                     {poRows.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.po_number} · {p.is_open_po ? "Open PO" : p.expiry_date ? `till ${dmy(p.expiry_date)}` : `from ${dmy(p.po_date)}`}{p.kind === "ADVANCE" ? " · Advance" : ""}{p.po_amount !== null ? ` · ₹${amount(p.po_amount)}` : ""}
@@ -467,40 +476,30 @@ export default function NewContract() {
                     ))}
                   </select>
                 </Field>
-              )}
-              {poData && !poRows.length && !addingPo && <p className="ac-sub" style={{ margin: 0 }}>This customer has no purchase order yet.</p>}
-              {/* Opened by mistake: Cancel closes the new-PO form again (nothing is saved until Next). */}
-              {addingPo ? (
-                <button type="button" className="ac-btn" onClick={cancelNewPo}>✕ Cancel new PO</button>
-              ) : (
-                <button type="button" className="ac-btn ac-btn-primary" onClick={startNewPo}>{poRows.length ? "+ Add new PO" : "+ Add PO"}</button>
-              )}
-            </div>
-
-            {(poId || addingPo) && (
-              <>
-                <div className="nc-po-state">{poId ? "Details of the chosen PO (change them in Purchase Orders)" : "New purchase order"}</div>
-                <div className="bl-grid g2">
-                  <Field label="PO number" required><input className="ac-input" value={po.po_number} disabled={Boolean(poId)} maxLength={100} onChange={(e) => setP({ po_number: e.target.value })} /></Field>
-                  <Field label="PO date" required><input type="date" className="ac-input" value={po.po_date} disabled={Boolean(poId)} onChange={(e) => setP({ po_date: e.target.value })} /></Field>
-                  <Field label="Valid from"><input type="date" className="ac-input" value={po.valid_from} disabled={Boolean(poId)} onChange={(e) => setP({ valid_from: e.target.value })} /></Field>
-                  <Field label="Expiry date">
-                    <input type="date" className="ac-input" value={po.open ? "" : po.expiry_date} disabled={Boolean(poId) || po.open} onChange={(e) => setP({ expiry_date: e.target.value })} />
-                    <label className="bl-toggle" style={{ paddingTop: 4 }}><input type="checkbox" checked={po.open} disabled={Boolean(poId)} onChange={(e) => setP({ open: e.target.checked })} /> Open PO (no end date)</label>
-                  </Field>
-                  <Field label="PO amount (₹, incl. GST)" required={po.kind === "ADVANCE"} hint={poId ? "" : po.kind === "ADVANCE" ? "" : "Leave empty for no limit"}>
-                    <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={Boolean(poId)} onChange={(e) => setP({ po_amount: e.target.value })} />
-                  </Field>
-                  <Field label="Type">
-                    <select className="ac-select" value={po.kind} disabled={Boolean(poId)} onChange={(e) => setP({ kind: e.target.value })}>
-                      <option value="STANDARD">Standard</option>
-                      <option value="ADVANCE">Advance (paid before the work)</option>
-                    </select>
-                  </Field>
-                  <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={Boolean(poId)} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
-                </div>
-              </>
+              </div>
             )}
+
+            {/* Shown all the time: the chosen PO's details (read-only), or a new PO while + Add PO is open. */}
+            <div className="nc-po-state">{poId ? "Details of the chosen PO (change them in Purchase Orders)" : addingPo ? "New purchase order" : "Purchase order details (choose a PO above, or + Add PO)"}</div>
+            <div className="bl-grid g2">
+              <Field label="PO number" required><input className="ac-input" value={po.po_number} disabled={!addingPo} maxLength={100} onChange={(e) => setP({ po_number: e.target.value })} /></Field>
+              <Field label="PO date" required><input type="date" className="ac-input" value={po.po_date} disabled={!addingPo} onChange={(e) => setP({ po_date: e.target.value })} /></Field>
+              <Field label="Valid from"><input type="date" className="ac-input" value={po.valid_from} disabled={!addingPo} onChange={(e) => setP({ valid_from: e.target.value })} /></Field>
+              <Field label="Expiry date">
+                <input type="date" className="ac-input" value={po.open ? "" : po.expiry_date} disabled={!addingPo || po.open} onChange={(e) => setP({ expiry_date: e.target.value })} />
+                <label className="bl-toggle" style={{ paddingTop: 4 }}><input type="checkbox" checked={po.open} disabled={!addingPo} onChange={(e) => setP({ open: e.target.checked })} /> Open PO (no end date)</label>
+              </Field>
+              <Field label="PO amount (₹, incl. GST)" required={po.kind === "ADVANCE"} hint={addingPo && po.kind !== "ADVANCE" ? "Leave empty for no limit" : ""}>
+                <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={!addingPo} onChange={(e) => setP({ po_amount: e.target.value })} />
+              </Field>
+              <Field label="Type">
+                <select className="ac-select" value={po.kind} disabled={!addingPo} onChange={(e) => setP({ kind: e.target.value })}>
+                  <option value="STANDARD">Standard</option>
+                  <option value="ADVANCE">Advance (paid before the work)</option>
+                </select>
+              </Field>
+              <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={!addingPo} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
+            </div>
           </>
         )}
 
@@ -553,7 +552,7 @@ export default function NewContract() {
               <dt>Customer</dt><dd>{customer?.name} <span className="ac-sub">({CATEGORY_LABEL[customer?.category]})</span></dd>
               <dt>Bill To</dt><dd>{profile?.billing_name}{profile?.gst_number ? ` · GSTIN ${profile.gst_number}` : ""}</dd>
               <dt>Contract</dt>
-              <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, every ${terms.frequency_months} month${terms.frequency_months > 1 ? "s" : ""}` : ""}, billed {terms.bill_timing === "ADVANCE" ? "in advance" : "in arrears"}, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
+              <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, every ${terms.frequency_months} month${terms.frequency_months > 1 ? "s" : ""}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
               <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
               <dt>Description</dt><dd>{descriptionPreview(description, next)}</dd>
               {needsPo && <><dt>Purchase order</dt><dd>{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</dd></>}

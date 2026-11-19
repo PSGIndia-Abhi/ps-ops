@@ -7,6 +7,7 @@ const C = require("../../services/billing/common");
 const calc = require("../../services/billing/calc");
 const { logAudit } = require("../../services/Audit.service");
 const { assertDescription } = require("./descriptions.controller");
+const { assertFrequency } = require("./frequencies.controller");
 
 // GST state codes (for the place of supply and IGST outside Karnataka).
 const GST_STATES = {
@@ -254,11 +255,10 @@ async function insertContractLine(conn, contractId, line, sortOrder, userId) {
 function readContractHeader(b, sites, billingType, startDate) {
   let frequency = null;
   if (billingType === "AMC") {
-    frequency = C.num(b.frequency_months, "frequency_months", { required: true, integer: true });
-    if (![1, 3, 4, 6, 12].includes(frequency)) throw C.bad("frequency_months must be 1, 3, 4, 6 or 12 for AMC contracts");
+    // 1 to 12 months; it must also be in Masters > Billing Frequencies (checked on save).
+    frequency = C.num(b.frequency_months, "Billing frequency", { required: true, integer: true, min: 1, max: 12 });
   } else if (billingType !== "ONE_TIME") {
-    frequency = C.num(b.frequency_months, "frequency_months", { integer: true }) ?? 1;
-    if (![1, 3, 4, 6, 12].includes(frequency)) throw C.bad("frequency_months must be 1, 3, 4, 6 or 12");
+    frequency = C.num(b.frequency_months, "Billing frequency", { integer: true, min: 1, max: 12 }) ?? 1;
   }
   const siteId = C.str(b.site_id, "site_id", { max: 20 });
   if (siteId && !sites.has(siteId)) throw C.bad("site_id must be an outlet of this customer");
@@ -370,8 +370,10 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     if (!calc.categoryOf(company.type)) throw C.bad("Customer type is not set - set it on the customer before adding a contract");
     const sites = await siteIdsOf(conn, companyId);
     // The description on invoice is required and picked from the master (Masters > Invoice Descriptions).
-    await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }));
+    await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }), null, req.user.id);
     const header = readContractHeader(b, sites, billingType, startDate);
+    // The billing frequency is picked from the master (Masters > Billing Frequencies).
+    await assertFrequency(conn, header.frequency_months);
     const lines = (Array.isArray(b.lines) ? b.lines : []).map((l, i) => readContractLine(l, i, sites, startDate));
 
     await conn.query("INSERT IGNORE INTO sequences (name, value) VALUES ('billing_contract', 0)");
@@ -422,8 +424,10 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     const sites = await siteIdsOf(conn, current.company_id);
     const merged = { ...current, ...b };
     // A listed, active description - or the one the contract already has, even if switched off since.
-    await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template);
+    await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template, req.user.id);
     const header = readContractHeader(merged, sites, current.billing_type, current.start_date);
+    // A listed, active frequency - or the one the contract already has, even if switched off since.
+    await assertFrequency(conn, header.frequency_months, current.frequency_months);
     await conn.query(
       `UPDATE billing_contracts
           SET frequency_months = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,

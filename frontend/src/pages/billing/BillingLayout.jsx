@@ -15,6 +15,7 @@ import {
   FiPlayCircle,
   FiShoppingBag,
   FiAlignLeft,
+  FiRepeat,
   FiUsers,
   FiCalendar,
 } from "react-icons/fi";
@@ -45,8 +46,8 @@ const PAGE_PERMISSION = {
   invoices: "VIEW_BILLING",
   contracts: "VIEW_BILLING",
   pos: "VIEW_BILLING",
-  customers: "VIEW_BILLING",
   descriptions: "VIEW_BILLING",
+  frequencies: "VIEW_BILLING",
 };
 
 function navFor(can, drafts) {
@@ -82,8 +83,8 @@ function navFor(can, drafts) {
         tracker && { label: "Service Plans", path: `${BILLING_HOME}/plans`, icon: FiCalendar },
         { label: "Contracts & Price Lists", path: `${BILLING_HOME}/contracts`, icon: FiClipboard },
         { label: "Purchase Orders", path: `${BILLING_HOME}/pos`, icon: FiShoppingBag },
-        { label: "Billing Customers", path: `${BILLING_HOME}/customers`, icon: FiUsers },
         accounts && { label: "Invoice Descriptions", path: `${BILLING_HOME}/descriptions`, icon: FiAlignLeft },
+        accounts && { label: "Billing Frequencies", path: `${BILLING_HOME}/frequencies`, icon: FiRepeat },
       ].filter(Boolean),
     },
   ];
@@ -209,7 +210,7 @@ export default function BillingLayout() {
   );
 
   return (
-    <div className="app-shell acc-square">
+    <div className="app-shell acc-square bl-app">
       <header className="app-header">
         <button type="button" className="header-left header-left-btn" onClick={() => navigate(BILLING_HOME)}>
           <img src={logo} alt="BestServe" className="logo" />

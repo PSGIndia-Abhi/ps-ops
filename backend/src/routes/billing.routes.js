@@ -15,6 +15,7 @@ const pos = require("../controllers/billing/pos.controller");
 const invoices = require("../controllers/billing/invoices.controller");
 const share = require("../controllers/billing/share.controller");
 const descriptions = require("../controllers/billing/descriptions.controller");
+const frequencies = require("../controllers/billing/frequencies.controller");
 
 const can = (permission) => [auth, requirePermission(permission)];
 
@@ -61,6 +62,10 @@ router.get("/descriptions", can(P.VIEW_BILLING), descriptions.list);
 router.post("/descriptions", can(P.MANAGE_BILLING_MASTERS), descriptions.create);
 router.put("/descriptions/:id", can(P.MANAGE_BILLING_MASTERS), descriptions.update);
 
+// Billing frequencies master (a contract's "every N months" is picked from it).
+router.get("/frequencies", can(P.VIEW_BILLING), frequencies.list);
+router.post("/frequencies", can(P.MANAGE_BILLING_MASTERS), frequencies.create);
+router.put("/frequencies/:months", can(P.MANAGE_BILLING_MASTERS), frequencies.update);
 router.get("/contracts", can(P.VIEW_BILLING), masters.listContracts);
 router.post("/contracts", can(P.MANAGE_BILLING_MASTERS), masters.createContract);
 router.get("/contracts/:id", can(P.VIEW_BILLING), masters.getContract);

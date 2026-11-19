@@ -132,8 +132,8 @@ import BillingContracts from "./pages/billing/Contracts";
 import BillingContractForm from "./pages/billing/ContractForm";
 import BillingNewContract from "./pages/billing/NewContract";
 import BillingInvoiceDescriptions from "./pages/billing/InvoiceDescriptions";
+import BillingFrequencies from "./pages/billing/BillingFrequencies";
 import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
-import BillingCustomers from "./pages/billing/BillingCustomers";
 import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
 if (typeof window !== "undefined") {
@@ -468,8 +468,10 @@ const router = createBrowserRouter([
       { path: "contracts/new", element: <BillingNewContract /> },
       { path: "contracts/:id", element: <BillingContractForm /> },
       { path: "pos", element: <BillingPurchaseOrders /> },
-      { path: "customers", element: <BillingCustomers /> },
+      // Billing details are edited on the contract page now (Contracts & Price Lists); old links land there.
+      { path: "customers", element: <Navigate to="/billing/contracts" replace /> },
       { path: "descriptions", element: <BillingInvoiceDescriptions /> },
+      { path: "frequencies", element: <BillingFrequencies /> },
     ],
   },
 

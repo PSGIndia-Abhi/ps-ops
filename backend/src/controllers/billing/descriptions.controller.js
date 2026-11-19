@@ -83,15 +83,26 @@ const update = C.handle("Failed to save the invoice description", async (req, re
 });
 
 /**
- * Checks a contract's description against the master: it must be an active entry, or (when a
- * contract is edited) the description it already has, even if that entry was switched off since.
+ * Checks a contract's description and keeps the master in step: a contract may pick a wording from
+ * the list or type its own. A typed wording (only known {placeholders}) is added to the master so it
+ * can be picked next time; a wording that was switched off is switched on again. A contract keeping
+ * the description it already has is always fine.
  */
-async function assertDescription(db, text, currentText = null) {
-  if (!text) throw C.bad("Choose the description on invoice");
+async function assertDescription(db, text, currentText = null, userId = null) {
+  if (!text) throw C.bad("Type or choose the description on invoice");
   if (currentText && text === currentText) return;
-  const [[row]] = await db.query("SELECT is_active FROM billing_invoice_descriptions WHERE text = ?", [text]);
-  if (!row) throw C.bad("Choose the description on invoice from the list (Masters > Invoice Descriptions)");
-  if (!row.is_active) throw C.bad("That invoice description is switched off; choose another one");
+  const unknown = (text.match(/\{[^}]*\}/g) || []).filter((p) => !PLACEHOLDERS.includes(p));
+  if (unknown.length) throw C.bad(`Unknown placeholder ${unknown[0]} in the description. Use ${PLACEHOLDERS.join(", ")}.`);
+  const [[row]] = await db.query("SELECT id, is_active FROM billing_invoice_descriptions WHERE text = ?", [text]);
+  if (!row) {
+    const [[{ next }]] = await db.query("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM billing_invoice_descriptions");
+    await db.query(
+      "INSERT IGNORE INTO billing_invoice_descriptions (id, text, sort_order, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
+      [uuid(), text, next, userId, userId]
+    );
+  } else if (!row.is_active) {
+    await db.query("UPDATE billing_invoice_descriptions SET is_active = 1, updated_by = ? WHERE id = ?", [userId, row.id]);
+  }
 }
 
 module.exports = { list, create, update, assertDescription, PLACEHOLDERS };

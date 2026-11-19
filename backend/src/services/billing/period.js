@@ -1,6 +1,6 @@
 // Billing periods of a contract.
 //
-//   AMC        every frequency_months (1, 3, 4, 6, 12) from next_period_start:
+//   AMC        every frequency_months (1-12, from Masters > Billing Frequencies) from next_period_start:
 //              cycle_start_day 21 + monthly -> 21 Sep - 20 Oct, 21 Oct - 20 Nov, ...
 //   TERMITE /  monthly unless frequency_months says otherwise
 //   CHEMICAL

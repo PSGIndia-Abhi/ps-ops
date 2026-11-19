@@ -183,7 +183,7 @@ export default function DraftEditor() {
         )}
       </div>
       {inv.status !== "DRAFT" && (
-        <div className="ac-info">ⓘ This invoice is {inv.status.toLowerCase()} and can no longer be edited. <Link to="/billing/invoices">Go to Issued Invoices</Link></div>
+        <div className="ac-info"><span>ⓘ This invoice is {inv.status.toLowerCase()} and can no longer be edited. <Link to="/billing/invoices">Go to Issued Invoices</Link></span></div>
       )}
       <Msg {...msg} />
 

@@ -90,8 +90,8 @@ export default function IssuedInvoices() {
                   const paidSomething = ["PAID", "PARTIAL"].includes(r.receivable_status) && !(r.advance_adjusted > 0);
                   return (
                     <tr key={r.id} className={cancelled ? "bl-muted" : ""}>
-                      <td><b>{r.invoice_number}</b></td>
-                      <td>{dmy(r.invoice_date)}</td>
+                      <td className="bl-nowrap"><b>{r.invoice_number}</b></td>
+                      <td className="bl-nowrap">{dmy(r.invoice_date)}</td>
                       <td>{r.customer}{r.po_numbers.length > 0 && <div className="bl-sub">PO {r.po_numbers.join(", ")}</div>}</td>
                       <td><TypeBadge type={r.billing_type} /></td>
                       <td>{periodLabel(r.period_start, r.period_end)}</td>
