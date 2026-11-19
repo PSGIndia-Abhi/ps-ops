@@ -207,7 +207,12 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (!ctx.category) warn("CUSTOMER_TYPE_MISSING", "Customer type not set", true);
     if (!ctx.profile) warn("PROFILE_MISSING", "Billing profile missing", true);
     if (!cl.length) warn("NO_PRICE_LINES", "No price lines in force", true);
-    if (cl.some((l) => l.plan_sub_service) && !plan) warn("NO_SERVICE_PLAN", "No service plan for this period", true);
+    // Without a service plan a service-based contract cannot work out what to bill; a fixed-amount
+    // one bills the same amount anyway, so it only loses the services count.
+    if (cl.some((l) => l.plan_sub_service) && !plan) {
+      if (contract.shortfall_billing === "FULL") warn("NO_SERVICE_PLAN", "No service plan: services not tracked (fixed amount billed)");
+      else warn("NO_SERVICE_PLAN", "No service plan for this period", true);
+    }
     if (contract.po_required) {
       const pos = await validPos(db, contract, period);
       if (!pos.length) {
@@ -304,9 +309,10 @@ async function draftContract(conn, contractId, month, runId, userId) {
     groups.get(key).push(l);
   }
 
-  const today = C.todayIst();
-  const ruleDate = contract.bill_timing === "ADVANCE" ? period.start : period.end;
-  const invoiceDate = ruleDate < today ? ruleDate : today;
+  // The invoice is dated the day it is made (it can be changed on the draft). Dating it back to the
+  // period end could put it in a GST month whose return is already filed; the description and the
+  // period on the invoice still say which months it bills.
+  const invoiceDate = C.todayIst();
   const dueDate = C.addDays(invoiceDate, Number(ctx.profile.payment_terms_days) || 0);
   const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code, contract.gst_applicable !== 0);
   const pos = contract.po_required ? await validPos(conn, contract, period) : [];
@@ -677,6 +683,12 @@ async function checkInvoice(db, id) {
   }
   if (inv.total <= 0) errors.push("The invoice total must be more than zero");
   check("FY", inv.invoice_date <= today, inv.invoice_date <= today ? `Invoice date ${C.dmy(inv.invoice_date)}` : "The invoice date cannot be in the future");
+  if (inv.invoice_date < today) {
+    warnings.push(
+      `The invoice is dated ${C.dmy(inv.invoice_date)}, before today. Change the date to today on the draft unless it must be back-dated - ` +
+        `the GST return for ${C.monthName(inv.invoice_date)} may already be filed.`
+    );
+  }
 
   if (inv.services && inv.services.done < inv.services.planned) {
     const shortLines = inv.lines.filter((l) => l.services_planned && l.services_done < l.services_planned);

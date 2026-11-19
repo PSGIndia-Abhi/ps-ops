@@ -58,7 +58,9 @@ export default function ContractForm() {
   const { data: poData, error: poError } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
   const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" || form.po_ids.includes(p.id));
   // When this contract is next billed, and whether its customer can be billed at all (Bill To profile).
-  const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : contract?.next_period_start);
+  const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : form.next_period_start || contract?.next_period_start);
+  // The next billing date can be moved only while nothing is drafted or issued on the contract.
+  const nextEditable = !isNew && Boolean(contract?.next_period_editable) && !readOnly;
   const thisMonthKey = today().slice(0, 7);
   const { data: profile, error: profileError, loading: profileLoading, reload: reloadProfile } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
   const customerRow = (customers || []).find((c) => c.company_id === companyId) || null;
@@ -74,6 +76,7 @@ export default function ContractForm() {
       bill_timing: form.bill_timing,
       start_date: form.start_date,
       end_date: form.end_date || null,
+      ...(nextEditable && form.next_period_start && form.next_period_start !== contract.next_period_start ? { next_period_start: form.next_period_start } : {}),
       invoice_grouping: form.invoice_grouping,
       site_id: form.site_id || null,
       po_required: PO_TYPES.includes(form.billing_type) ? true : Boolean(form.po_required),
@@ -226,6 +229,12 @@ export default function ContractForm() {
           <Field label="Term end date">
             <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />
           </Field>
+          {!isNew && (
+            <Field label="Next bill from" hint={nextEditable ? "Billed in Vyapar until a date? Set the first date not billed yet." : "Follows on from the last invoice"}>
+              <input type="date" className="ac-input" value={form.next_period_start || ""} disabled={!nextEditable}
+                min={form.start_date || undefined} max={form.end_date || undefined} onChange={(e) => set({ next_period_start: e.target.value })} />
+            </Field>
+          )}
           <Field label="Invoice grouping">
             <select className="ac-select" value={form.invoice_grouping} disabled={readOnly} onChange={(e) => set({ invoice_grouping: e.target.value })}>
               <option value="PER_CUSTOMER">One invoice for the customer</option>

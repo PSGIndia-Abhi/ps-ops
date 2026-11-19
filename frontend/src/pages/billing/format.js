@@ -44,18 +44,26 @@ function addDaysYmd(date, n) {
   const t = new Date(Date.UTC(y, m - 1, d + n));
   return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
 }
-function addMonthsYmd(date, n) {
-  const [y, m, d] = date.split("-").map(Number);
-  const total = y * 12 + (m - 1) + n;
-  const ny = Math.floor(total / 12);
-  const nm = (total % 12) + 1;
-  return `${ny}-${pad2(nm)}-${pad2(Math.min(d, new Date(Date.UTC(ny, nm, 0)).getUTCDate()))}`;
+/** The date in month number `index` (year * 12 + month - 1) on `day`, or that month's last day. */
+function onCycleDay(index, day) {
+  const y = Math.floor(index / 12);
+  const m = (index % 12) + 1;
+  return `${y}-${pad2(m)}-${pad2(Math.min(day, new Date(Date.UTC(y, m, 0)).getUTCDate()))}`;
+}
+
+/** Where the period after one starting `from` begins: the next cycle day, then `months - 1` cycles more. */
+function nextCycleStart(from, months, cycleDay) {
+  const [y, m] = from.split("-").map(Number);
+  let index = y * 12 + (m - 1);
+  if (onCycleDay(index, cycleDay) <= from) index += 1;
+  return onCycleDay(index + months - 1, cycleDay);
 }
 
 /**
  * The next period a contract bills and the month whose Bill Run lists it (as period.js decides):
- * in arrears once the period has ended, in advance once it has started.
- * contract: { billing_type, frequency_months, bill_timing, end_date }, from: the period start.
+ * in arrears once the period has ended, in advance once it has started. Periods start on the
+ * contract's cycle day (cycle_start_day, else the day of its start date).
+ * contract: { billing_type, frequency_months, bill_timing, end_date, cycle_start_day, start_date }, from: the period start.
  */
 export function nextBilling(contract, from) {
   if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
@@ -63,7 +71,10 @@ export function nextBilling(contract, from) {
   let end;
   if (contract.billing_type === "ONE_TIME") end = contract.end_date && contract.end_date >= from ? contract.end_date : from;
   else {
-    end = addDaysYmd(addMonthsYmd(from, Number(contract.frequency_months) || 1), -1);
+    const stored = Number(contract.cycle_start_day);
+    const startDay = Number(String(contract.start_date || from).slice(8, 10)) || 1;
+    const cycleDay = stored >= 1 && stored <= 31 ? stored : startDay;
+    end = addDaysYmd(nextCycleStart(from, Number(contract.frequency_months) || 1, cycleDay), -1);
     if (contract.end_date && end > contract.end_date) end = contract.end_date;
   }
   const advance = contract.bill_timing === "ADVANCE";

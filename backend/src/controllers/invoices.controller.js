@@ -10,6 +10,32 @@ function withStatus(message, status = 400) {
   return err;
 }
 
+// An invoice issued from Billing (Invoice Generation) has its amount and date printed on the issued
+// invoice, so they are changed there (cancel + issue again), not here. Returns the billing invoice
+// behind this receivable, or null. Before the Billing tables exist (migration not run) it is null.
+async function issuedFromBilling(connection, invoiceId) {
+  try {
+    const [[row]] = await connection.query(
+      "SELECT invoice_number FROM billing_invoices WHERE receivable_invoice_id = ? AND status = 'ISSUED'",
+      [invoiceId]
+    );
+    return row || null;
+  } catch (err) {
+    if (err.code === "ER_NO_SUCH_TABLE" || err.code === "ER_BAD_FIELD_ERROR") return null;
+    throw err;
+  }
+}
+
+/** A DATE value (Date or string) as "YYYY-MM-DD" for comparing. */
+function dateKey(value) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${value.getFullYear()}-${p(value.getMonth() + 1)}-${p(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
+}
+
 async function getUserBranchId(connection, userId) {
   const [[row]] = await connection.query("SELECT branch_id FROM users WHERE id = ?", [userId]);
   return row?.branch_id || null;
@@ -246,6 +272,18 @@ async function updateInvoice(req, res) {
       if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(403).json({ error: "Forbidden" });
     }
 
+    const billing = await issuedFromBilling(connection, id);
+    if (billing) {
+      const amountChanged = invoice_amount !== undefined && Number(invoice_amount) !== Number(invoice.invoice_amount);
+      const dateChanged = Boolean(invoice_date) && dateKey(invoice_date) !== dateKey(invoice.invoice_date);
+      if (amountChanged || dateChanged) {
+        return res.status(400).json({
+          error: `${invoice.invoice_number} was issued from Billing, so its amount and invoice date cannot be changed here. ` +
+            "Cancel it in Billing > Issued Invoices and issue a corrected one. The due date and remarks can still be changed here.",
+        });
+      }
+    }
+
     const newAmount = invoice_amount !== undefined ? Number(invoice_amount) : Number(invoice.invoice_amount);
     if (newAmount <= 0) return res.status(400).json({ error: "invoice_amount must be greater than 0" });
     if (newAmount < Number(invoice.paid_amount)) {
@@ -312,6 +350,12 @@ async function cancelInvoice(req, res) {
     if (role !== "admin") {
       const branchId = await getUserBranchId(connection, userId);
       if (!(await invoiceInBranch(connection, invoice, branchId))) return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (await issuedFromBilling(connection, id)) {
+      return res.status(400).json({
+        error: `${invoice.invoice_number} was issued from Billing. Cancel it in Billing > Issued Invoices - that also cancels it here.`,
+      });
     }
 
     const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";

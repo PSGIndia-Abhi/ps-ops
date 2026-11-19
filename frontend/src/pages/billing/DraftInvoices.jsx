@@ -128,7 +128,6 @@ export default function DraftInvoices() {
       {issuing && (
         <IssueDialog
           drafts={issuing}
-          warnings={issuing.some((d) => d.service_shortfall) ? ["Some invoices have services short this period; they bill the services done."] : []}
           onDone={() => { setSelected(new Set()); reload(); }}
           onClose={() => setIssuing(null)}
         />

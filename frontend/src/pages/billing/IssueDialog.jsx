@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { billingPost } from "./billingApi";
 import { rupees } from "./format";
 import ShareDialog from "./ShareDialog";
@@ -6,13 +6,47 @@ import { Modal, Msg } from "./ui";
 
 // Confirms issuing one or more drafts (final, numbered), shows what was issued and what failed,
 // and opens Share and Print for an issued invoice.
+// `warnings` is given by a caller that has just checked the draft (the draft editor). Without it
+// (several drafts from Draft Invoices) every draft is checked here first, so each warning is
+// seen before it is confirmed - issuing confirms all of them.
 
-export default function IssueDialog({ drafts, warnings = [], onClose, onDone }) {
+export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [shareId, setShareId] = useState(null);
+  const [checks, setChecks] = useState(null); // [{ id, customer, warnings, errors }] when checked here
   const total = drafts.reduce((t, d) => t + (Number(d.total) || 0), 0);
+  const checkHere = warnings === undefined;
+
+  useEffect(() => {
+    if (!checkHere) return undefined;
+    let live = true;
+    (async () => {
+      const out = [];
+      try {
+        // A few at a time: up to 200 drafts can be issued together.
+        for (let i = 0; i < drafts.length; i += 5) {
+          const batch = drafts.slice(i, i + 5);
+          const done = await Promise.all(batch.map((d) => billingPost(`/invoices/${d.id}/check`, {})
+            .then((r) => ({ id: d.id, customer: d.customer, warnings: r.warnings || [], errors: r.errors || [] }))
+            .catch((err) => ({ id: d.id, customer: d.customer, warnings: [], errors: [err.message] }))));
+          out.push(...done);
+        }
+        if (live) setChecks(out);
+      } catch (err) {
+        if (live) setError(err.message);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const checking = checkHere && !checks && !error;
+  const withWarnings = (checks || []).filter((c) => c.warnings.length);
+  const withErrors = (checks || []).filter((c) => c.errors.length);
 
   async function issue() {
     setBusy(true);
@@ -42,10 +76,25 @@ export default function IssueDialog({ drafts, warnings = [], onClose, onDone }) 
       </div>
       <div className="bl-m-body">
         <Msg error={error} />
-        {!result && warnings.length > 0 && (
+        {!result && !checkHere && warnings.length > 0 && (
           <div>
             <div className="bl-m-sec">Please confirm</div>
             {warnings.map((w) => <div key={w} className="bl-chk"><span className="bl-dot a" /><span>{w}</span></div>)}
+          </div>
+        )}
+        {!result && checking && <div className="ac-sub">Checking {drafts.length} draft{drafts.length === 1 ? "" : "s"}…</div>}
+        {!result && withErrors.length > 0 && (
+          <div>
+            <div className="bl-m-sec">Will not be issued</div>
+            {withErrors.map((c) => <div key={c.id} className="bl-chk"><span className="bl-dot r" /><span><b>{c.customer}</b>: {c.errors.join("; ")}</span></div>)}
+          </div>
+        )}
+        {!result && withWarnings.length > 0 && (
+          <div>
+            <div className="bl-m-sec">Please confirm</div>
+            {withWarnings.map((c) => c.warnings.map((w) => (
+              <div key={`${c.id}-${w}`} className="bl-chk"><span className="bl-dot a" /><span><b>{c.customer}</b>: {w}</span></div>
+            )))}
           </div>
         )}
         {result && (
@@ -77,7 +126,9 @@ export default function IssueDialog({ drafts, warnings = [], onClose, onDone }) 
           ) : (
             <>
               <button type="button" className="ac-btn" onClick={onClose} disabled={busy}>Cancel</button>
-              <button type="button" className="ac-btn green" onClick={issue} disabled={busy}>{busy ? "Issuing…" : "Issue"}</button>
+              <button type="button" className="ac-btn green" onClick={issue} disabled={busy || checking || (checkHere && checks && withErrors.length === checks.length)}>
+                {busy ? "Issuing…" : checking ? "Checking…" : withWarnings.length ? "Confirm and issue" : "Issue"}
+              </button>
             </>
           )}
         </div>

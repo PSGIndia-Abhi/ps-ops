@@ -72,7 +72,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
        JOIN billing_contracts bc ON bc.id = bi.contract_id
        LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
       WHERE ${where}
-      ORDER BY bi.invoice_date DESC, bi.invoice_number DESC, c.name
+      ORDER BY bi.invoice_date DESC, bi.fy DESC, bi.seq DESC, c.name
       LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );

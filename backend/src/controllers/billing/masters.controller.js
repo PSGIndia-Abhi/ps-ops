@@ -286,6 +286,15 @@ function readContractHeader(b, sites, billingType, startDate) {
 
 const PO_TYPES = ["CHEMICAL", "TERMITE"];
 
+/** "First bill from" / next billing date: optional, on or after the start date, not after the end date. */
+function readFirstBill(raw, startDate, endDate, field) {
+  const value = C.date(raw, field);
+  if (!value) return null;
+  if (startDate && value < startDate) throw C.bad("The first billing date cannot be before the contract start date");
+  if (endDate && value > endDate) throw C.bad("The first billing date cannot be after the contract end date");
+  return value;
+}
+
 function readGstRate(raw) {
   if (raw === undefined || raw === null || raw === "") return 18;
   const rate = Number(raw);
@@ -346,7 +355,10 @@ async function contractDetail(db, id) {
       WHERE l.contract_id = ? ORDER BY l.sort_order, l.effective_from`,
     [id]
   );
-  const [[inv]] = await db.query("SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND status = 'ISSUED'", [id]);
+  const [[inv]] = await db.query(
+    "SELECT SUM(status = 'ISSUED') AS n, SUM(status <> 'CANCELLED') AS open FROM billing_invoices WHERE contract_id = ?",
+    [id]
+  );
   const [pos] = await db.query(
     `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status FROM customer_pos WHERE contract_id = ? ORDER BY po_date DESC`,
     [id]
@@ -354,7 +366,9 @@ async function contractDetail(db, id) {
   const today = C.todayIst();
   const current = lines.filter((l) => !l.effective_to || C.ymd(l.effective_to) >= today);
   const history = lines.filter((l) => l.effective_to && C.ymd(l.effective_to) < today);
-  return { ...contractOut(c), category: calc.categoryOf(c.customer_type), lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n),
+  return { ...contractOut(c), category: calc.categoryOf(c.customer_type), lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n || 0),
+    // No draft or issued invoice yet: the next billing date can still be moved (e.g. billed elsewhere until then).
+    next_period_editable: !Number(inv.open || 0) && c.status !== "ENDED",
     pos: pos.map((p) => ({ id: p.id, po_number: p.po_number, po_date: C.ymd(p.po_date), expiry_date: C.ymd(p.expiry_date), po_amount: p.po_amount === null ? null : Number(p.po_amount), po_kind: p.po_kind, status: p.status })),
   };
 }
@@ -372,6 +386,9 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     // The description on invoice is required and picked from the master (Masters > Invoice Descriptions).
     await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }), null, req.user.id);
     const header = readContractHeader(b, sites, billingType, startDate);
+    // First bill from: a customer already billed elsewhere (e.g. Vyapar) up to a date starts billing
+    // here from the day after, instead of from the contract start date.
+    const firstBill = readFirstBill(b.first_bill_from, startDate, header.end_date, "first_bill_from") || startDate;
     // The billing frequency is picked from the master (Masters > Billing Frequencies).
     await assertFrequency(conn, header.frequency_months);
     const lines = (Array.isArray(b.lines) ? b.lines : []).map((l, i) => readContractLine(l, i, sites, startDate));
@@ -389,7 +406,7 @@ const createContract = C.handle("Failed to create the contract", async (req, res
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id, code, companyId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
-        startDate, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
+        firstBill, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.notes, req.user.id, req.user.id,
       ]
     );
@@ -402,9 +419,9 @@ const createContract = C.handle("Failed to create the contract", async (req, res
       entity_id: id,
       entity_label: code,
       customer_id: companyId,
-      summary: `Contract ${code} (${billingType}) created for ${company.name}`,
+      summary: `Contract ${code} (${billingType}) created for ${company.name}${firstBill !== startDate ? `, first bill from ${C.dmy(firstBill)}` : ""}`,
     });
-    return { id, contract_code: code, next_period_start: startDate };
+    return { id, contract_code: code, next_period_start: firstBill };
   });
   res.status(201).json(result);
 });
@@ -428,14 +445,23 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     const header = readContractHeader(merged, sites, current.billing_type, current.start_date);
     // A listed, active frequency - or the one the contract already has, even if switched off since.
     await assertFrequency(conn, header.frequency_months, current.frequency_months);
+    // The next billing date can be moved only while nothing is drafted or issued on the contract
+    // (once invoices exist, the periods follow on from them).
+    let nextStart = current.next_period_start;
+    if (b.next_period_start !== undefined && b.next_period_start !== current.next_period_start) {
+      if (!current.next_period_editable) throw C.bad("The next billing date cannot be changed once an invoice is drafted or issued on this contract");
+      nextStart = readFirstBill(b.next_period_start, current.start_date, header.end_date, "next_period_start") || current.start_date;
+    }
     await conn.query(
       `UPDATE billing_contracts
           SET frequency_months = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
-              po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?, notes = ?, updated_by = ?
+              po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?, notes = ?,
+              next_period_start = ?, updated_by = ?
         WHERE id = ?`,
       [
         header.frequency_months, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
-        header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template, header.notes, req.user.id, req.params.id,
+        header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template, header.notes,
+        nextStart, req.user.id, req.params.id,
       ]
     );
     if (b.po_ids !== undefined) await linkContractPos(conn, req.params.id, current.company_id, b.po_ids, current.billing_type);

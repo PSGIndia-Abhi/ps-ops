@@ -48,7 +48,7 @@ export default function NewContract() {
 
   // 2. contract terms
   const [terms, setTerms] = useState({
-    billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", start_date: today(), end_date: "",
+    billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", start_date: today(), end_date: "", first_bill_from: "",
     shortfall_billing: "PRO_RATA", gst_applicable: true, gst_rate: 18, po_required: false, description_template: null, notes: "",
   });
   const setT = (patch) => setTerms((t) => ({ ...t, ...patch }));
@@ -99,7 +99,8 @@ export default function NewContract() {
     { n: 5, title: "Review" },
   ];
   const at = steps.findIndex((s) => s.n === step);
-  const next = nextBilling(terms, terms.start_date);
+  // The first invoice starts at "First bill from" when given (billed elsewhere until then), else at the start date.
+  const next = nextBilling(terms, terms.first_bill_from || terms.start_date);
 
   // Description on invoice: required, typed or picked from the master list. Until it is touched, the wording
   // that fits the billing type is suggested (as the server used to default it), when it is in the list.
@@ -162,6 +163,8 @@ export default function NewContract() {
       if (terms.billing_type !== "ONE_TIME" && !terms.frequency_months) return "Choose the billing frequency.";
       if (!terms.start_date) return "Choose the start date.";
       if (terms.end_date && terms.end_date < terms.start_date) return "The term end date cannot be before the term start date.";
+      if (terms.first_bill_from && terms.first_bill_from < terms.start_date) return "First bill from cannot be before the term start date.";
+      if (terms.first_bill_from && terms.end_date && terms.first_bill_from > terms.end_date) return "First bill from cannot be after the term end date.";
       if (gstOn && !GST_RATES.includes(Number(terms.gst_rate))) return `GST rate must be one of ${GST_RATES.join(", ")} %.`;
       if (!description) return "Type or choose the description on invoice.";
     }
@@ -241,6 +244,7 @@ export default function NewContract() {
         bill_timing: terms.bill_timing,
         start_date: terms.start_date,
         end_date: terms.end_date || null,
+        first_bill_from: terms.first_bill_from || null,
         invoice_grouping: "PER_CUSTOMER",
         site_id: null,
         po_required: needsPo,
@@ -413,6 +417,9 @@ export default function NewContract() {
               </Field>
               <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
               <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
+              <Field label="First bill from" hint="Already billed in Vyapar? Enter the first date not billed yet. Leave empty to bill from the start date.">
+                <input type="date" className="ac-input" value={terms.first_bill_from} min={terms.start_date || undefined} max={terms.end_date || undefined} onChange={(e) => setT({ first_bill_from: e.target.value })} />
+              </Field>
               <Field label="GST" hint={residential ? "Residential customer: never charged GST" : gstOn ? gstHint(terms.gst_rate, profile?.state_code) : "Invoices go out without GST"}>
                 <div className="nc-gst">
                   <select className="ac-select" value={gstOn ? "YES" : "NO"} disabled={residential} onChange={(e) => setT({ gst_applicable: e.target.value === "YES" })}>
@@ -553,6 +560,7 @@ export default function NewContract() {
               <dt>Bill To</dt><dd>{profile?.billing_name}{profile?.gst_number ? ` · GSTIN ${profile.gst_number}` : ""}</dd>
               <dt>Contract</dt>
               <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, every ${terms.frequency_months} month${terms.frequency_months > 1 ? "s" : ""}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
+              {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)} <span className="ac-sub">(billed elsewhere before this date)</span></dd></>}
               <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
               <dt>Description</dt><dd>{descriptionPreview(description, next)}</dd>
               {needsPo && <><dt>Purchase order</dt><dd>{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</dd></>}
