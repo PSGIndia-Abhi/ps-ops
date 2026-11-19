@@ -302,3 +302,57 @@
 .bl-kv dd { margin: 0; color: #0f172a; min-width: 0; overflow-wrap: anywhere; }
 .bl-addr { white-space: pre-line; color: #475569; margin-top: 2px; }
 @media (max-width: 640px) { .bl-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; } .bl-kv dd { margin-bottom: 8px; } }
+
+/* Services and prices: optional invoice line summary for 2+ services (one printed line, their total). */
+.nc-summary { margin-top: 14px; padding: 12px 14px; border: 1.5px dashed #bfdbfe; background: #f8fbff; border-radius: 10px; display: grid; gap: 6px; }
+.nc-summary-row { display: flex; align-items: center; gap: 10px; }
+.nc-summary-row .ac-input { flex: 1 1 auto; min-width: 0; }
+.nc-summary-amt { flex: 0 0 auto; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+
+/* Services and prices: Services / Chemicals switches, sections, tick boxes and invoice line summaries. */
+.nc-kinds { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.nc-kind { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1.5px solid #e2e8f0; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: #475569; cursor: pointer; background: #fff; }
+.nc-kind.on { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+.nc-kind input { accent-color: #2563eb; }
+.nc-sec { margin-bottom: 14px; }
+.nc-sec-title { font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 8px; }
+.nc-line-wrap { display: grid; gap: 3px; }
+.nc-pickcell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.nc-pickcell .ac-select, .nc-pickcell .ac-input { flex: 1 1 auto; min-width: 0; height: 38px; }
+.nc-in-group { font-size: 12px; color: #1d4ed8; padding-left: 26px; }
+.nc-summary-row .ac-btn { flex: 0 0 auto; }
+.nc-groups { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.nc-groups li { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #dbeafe; border-radius: 10px; padding: 8px 10px; flex-wrap: wrap; }
+.nc-group-main { flex: 1 1 220px; min-width: 0; display: grid; gap: 2px; }
+.nc-group-main .ac-sub { font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .nc-line > .nc-pickcell { grid-column: 1 / -1; }
+  .nc-summary-row { flex-wrap: wrap; }
+  .nc-summary-row .ac-input { flex-basis: 100%; }
+}
+
+/* Service Plans › Services this month: assigned and completed per service (typed). */
+.sp-month { width: 160px; height: 32px; font-size: 13px; padding: 4px 8px; }
+.sp-month-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 12px; align-items: center; }
+.sp-month-row { display: contents; }
+.sp-month-head { font-size: 11.5px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.sp-month-name { display: grid; gap: 2px; min-width: 0; }
+.sp-month-name .ac-sub { font-size: 12px; }
+.sp-month-total { margin-top: 10px; font-size: 13px; color: #334155; font-weight: 600; text-align: right; }
+@media (max-width: 480px) {
+  .sp-month-grid { grid-template-columns: minmax(0, 1fr) auto; }
+  .sp-month-head:nth-child(2), .sp-month-head:nth-child(3) { display: none; }
+  .sp-month-name { grid-column: 1 / -1; }
+}
+
+/* Services and prices: quantity x rate = amount (services from the Service Plan, chemicals typed). */
+.nc-lines.priced .nc-line { grid-template-columns: minmax(0, 1fr) 100px 150px 120px 32px; }
+.nc-num { text-align: right; font-variant-numeric: tabular-nums; }
+.nc-qty { font-weight: 700; color: #0f172a; padding-right: 6px; }
+.nc-amt { font-weight: 700; color: #0f172a; }
+.nc-svc-name { font-weight: 600; color: #0f172a; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .nc-lines.priced .nc-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .nc-lines.priced .nc-line > .nc-pickcell { grid-column: 1 / -1; }
+  .nc-lines.priced .nc-line > span:empty { display: none; }
+}

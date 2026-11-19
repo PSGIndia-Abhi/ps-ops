@@ -45,6 +45,118 @@ function Stepper({ id, label, value, min, max, onChange }) {
   );
 }
 
+/**
+ * Services assigned and completed in a month, typed by the Service Coordinator for each planned
+ * service. The Service Tracker and the invoices use these numbers; an invoice for a month without
+ * "completed" cannot be issued.
+ */
+function MonthEntry({ companyId, canEdit, reloadKey }) {
+  const [month, setMonth] = useState(thisMonth());
+  const [data, setData] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [msg, setMsg] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    setRows(null);
+    setMsg({});
+    billingGet(`/service-plans/${encodeURIComponent(companyId)}/months${qs({ month })}`)
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        setRows(d.rows.map((r) => ({ ...r, completed: r.completed ?? "" })));
+      })
+      .catch((err) => live && setMsg({ error: err.message }));
+    return () => {
+      live = false;
+    };
+  }, [companyId, month, reloadKey]);
+
+  const setRow = (name, patch) => setRows((rs) => rs.map((r) => (r.sub_service === name ? { ...r, ...patch } : r)));
+  const notEntered = (rows || []).filter((r) => r.completed === "" || r.completed === null).length;
+  const assignedTotal = (rows || []).reduce((t, r) => t + (Number(r.assigned) || 0), 0);
+  const completedTotal = (rows || []).reduce((t, r) => t + (Number(r.completed) || 0), 0);
+
+  async function save() {
+    const bad = rows.find((r) => !Number.isInteger(Number(r.assigned)) || Number(r.assigned) < 0 || (r.completed !== "" && (!Number.isInteger(Number(r.completed)) || Number(r.completed) < 0)));
+    if (bad) {
+      setMsg({ error: `${bad.sub_service}: assigned and completed must be whole numbers (0 or more).` });
+      return;
+    }
+    setBusy(true);
+    setMsg({});
+    try {
+      await billingPut(`/service-plans/${encodeURIComponent(companyId)}/months`, {
+        month,
+        rows: rows.map((r) => ({ sub_service: r.sub_service, assigned: Number(r.assigned), completed: r.completed === "" ? null : Number(r.completed) })),
+      });
+      setMsg({ ok: `Saved for ${monthLabel(month)}.${notEntered ? ` ${notEntered} service${notEntered === 1 ? "" : "s"} still without "completed": their invoice waits for it.` : ""}` });
+      setData((d) => ({ ...d, rows: d.rows.map((r) => ({ ...r, saved: true })) }));
+    } catch (err) {
+      setMsg({ error: err.message, errors: err.errors });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sp-section">
+      <div className="sp-section-title">
+        Services this month
+        <input type="month" className="ac-input sp-month" max={thisMonth()} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Month" />
+      </div>
+      <p className="sp-help">Type how many services were assigned and completed in {monthLabel(month)}. The Service Tracker and the invoice use these numbers; an invoice cannot be issued until “completed” is entered.</p>
+      {!rows ? (
+        <div className="ac-sub">{msg.error ? "" : "Loading…"}</div>
+      ) : !rows.length ? (
+        <div className="sp-help">No services in the plan for {monthLabel(month)}. Add them above and save the plan first.</div>
+      ) : (
+        <>
+          <div className="sp-month-grid">
+            <span className="sp-month-head">Service</span>
+            <span className="sp-month-head">Assigned</span>
+            <span className="sp-month-head">Completed</span>
+            {rows.map((r) => (
+              <div className="sp-month-row" key={r.sub_service}>
+                <div className="sp-month-name">
+                  <b>{r.sub_service}</b>
+                  <span className="ac-sub">
+                    Plan {r.plan_per_month} / month · {r.jobs_done} completed job{r.jobs_done === 1 ? "" : "s"}
+                    {(r.completed === "" || r.completed === null) && <> · <span className="bl-warn" style={{ display: "inline" }}>not entered</span></>}
+                  </span>
+                </div>
+                {canEdit ? (
+                  <>
+                    <Stepper label={`${r.sub_service}: assigned in ${monthLabel(month)}`} value={r.assigned} min={0} max={999} onChange={(v) => setRow(r.sub_service, { assigned: v })} />
+                    <Stepper label={`${r.sub_service}: completed in ${monthLabel(month)}`} value={r.completed} min={0} max={999} onChange={(v) => setRow(r.sub_service, { completed: v })} />
+                  </>
+                ) : (
+                  <>
+                    <b className="bl-num">{r.assigned}</b>
+                    <b className="bl-num">{r.completed === "" ? "—" : r.completed}</b>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="sp-month-total">
+            Total: {completedTotal} completed of {assignedTotal} assigned
+            {notEntered > 0 && <span className="bl-warn" style={{ display: "inline", marginLeft: 8 }}>· {notEntered} not entered</span>}
+          </div>
+        </>
+      )}
+      <Msg {...msg} />
+      {canEdit && rows && rows.length > 0 && (
+        <div className="sp-foot" style={{ borderTop: 0, marginTop: 4, paddingTop: 4 }}>
+          <button type="button" className="ac-btn ac-btn-primary" disabled={busy || !data} onClick={save}>{busy ? "Saving…" : `Save ${monthLabel(month)}`}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ServicePlans() {
   const { me } = useOutletContext();
   const canEdit = me.can("MANAGE_SERVICE_PLANS");
@@ -303,6 +415,9 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
               <button type="button" className="sp-add" onClick={() => set({ lines: [...form.lines, { key: Date.now(), sub_service: "", visits_per_month: 1 }] })}>+ Add service</button>
             )}
           </div>
+
+          {/* 1b. Services assigned / completed this month (typed; saved separately from the plan) */}
+          {plan && <MonthEntry companyId={companyId} canEdit={canEdit} reloadKey={reloadKey} />}
 
           {/* 2. Settings */}
           <div className="sp-section">
