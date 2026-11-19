@@ -23,10 +23,24 @@ const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"],
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const SQM = "sq.m";
-const monthStart = (ymd) => `${String(ymd).slice(0, 7)}-01`;
 
 let lineKey = 0;
-const newLine = (termite) => ({ key: (lineKey += 1), item_name: termite ? "Termite Post-Construction Treatment" : "", rate: "", area: "", visits: 1 });
+// kind: SERVICE (from the service list) or CHEMICAL (typed; remembered for other customers).
+// group: optional invoice line summary - lines with the same summary print as ONE invoice line.
+// qty: services per month (from the Service Plan) for a service, typed for a chemical.
+const newLine = (termite, kind = "SERVICE") => ({ key: (lineKey += 1), kind, item_name: termite && kind === "SERVICE" ? "Termite Post-Construction Treatment" : "", rate: "", area: "", qty: kind === "CHEMICAL" ? 1 : "", group: "", picked: false });
+const lineTotal = (l, termite) => Number(l.rate) * (termite && l.kind === "SERVICE" ? Number(l.area) || 0 : Number(l.qty) || 0);
+const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+/** The plan's services, one per name, with how many per month: [{ name, qty }]. */
+function planServicesOf(plan) {
+  const out = [];
+  for (const l of plan?.lines || []) {
+    const hit = out.find((x) => sameName(x.name, l.sub_service));
+    if (hit) hit.qty += Number(l.visits_per_month) || 0;
+    else if (l.sub_service) out.push({ name: l.sub_service, qty: Number(l.visits_per_month) || 0 });
+  }
+  return out;
+}
 
 export default function NewContract() {
   const { me } = useOutletContext();
@@ -87,6 +101,32 @@ export default function NewContract() {
   // 4. services and prices
   const [lines, setLines] = useState([newLine(false)]);
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  // Services and / or chemicals: lines of a kind that is switched off are kept but not saved.
+  const [kinds, setKinds] = useState({ SERVICE: true, CHEMICAL: false });
+  const { data: chemicals } = useBilling("/chemicals");
+  // Services come from the customer's Service Plan (set by the Service Coordinator): one row per
+  // planned service, quantity = services per month; Accounts types the rate per service.
+  const planWanted = Boolean(companyId) && terms.billing_type !== "TERMITE";
+  const { data: servicePlan, loading: planLoading } = useBilling(planWanted ? `/service-plans/${encodeURIComponent(companyId)}` : null);
+  const planServices = useMemo(() => planServicesOf(servicePlan), [servicePlan]);
+  useEffect(() => {
+    if (!planWanted || !servicePlan) return;
+    setLines((ls) => {
+      const old = ls.filter((l) => l.kind === "SERVICE");
+      const rows = planServicesOf(servicePlan).map((p) => {
+        const had = old.find((x) => sameName(x.item_name, p.name));
+        return { ...(had || newLine(false, "SERVICE")), item_name: p.name, qty: p.qty };
+      });
+      return [...rows, ...ls.filter((l) => l.kind !== "SERVICE")];
+    });
+  }, [servicePlan, planWanted]);
+  const [groupText, setGroupText] = useState("");
+  function toggleKind(kind) {
+    const next = { ...kinds, [kind]: !kinds[kind] };
+    if (!next.SERVICE && !next.CHEMICAL) return; // at least one
+    setKinds(next);
+    if (next[kind] && !lines.some((l) => l.kind === kind)) setLines((ls) => [...ls, newLine(false, kind)]);
+  }
   const { data: options } = useBilling(companyId ? `/service-options${qs({ company_id: companyId })}` : null);
   const sites = options?.sites || [];
   const serviceGroups = useMemo(() => groupsFor(options), [options]);
@@ -173,14 +213,22 @@ export default function NewContract() {
       } else if (!poId) return "Choose a purchase order, or add a new one.";
     }
     if (step === 4) {
-      const filled = lines.filter((l) => l.item_name || l.rate !== "");
-      if (!filled.length) return "Add at least one service with its amount.";
-      const bad = filled.findIndex((l) => !l.item_name || l.rate === "" || Number(l.rate) < 0 || (termite && !(Number(l.area) > 0)));
-      if (bad >= 0) return `Service ${bad + 1}: choose the service and type the ${termite ? "rate and the area" : "amount"}.`;
-      const names = filled.map((l) => l.item_name.toLowerCase());
-      if (new Set(names).size !== names.length) return "The same service is listed twice.";
-      if (canPlan && !termite && filled.some((l) => !(Number.isInteger(Number(l.visits)) && Number(l.visits) >= 1 && Number(l.visits) <= 31))) {
-        return "Per month must be from 1 to 31.";
+      const filled = lines.filter((l) => kinds[l.kind] && (l.item_name || l.rate !== ""));
+      if (!filled.length) return "Add at least one service or chemical with its amount.";
+      if (kinds.SERVICE && !termite) {
+        if (!planServices.length) return "This customer has no Service Plan yet. The Service Coordinator sets the services in Service Plans; or untick Services.";
+        const noRate = lines.find((l) => l.kind === "SERVICE" && (l.rate === "" || Number(l.rate) < 0));
+        if (noRate) return `Type the rate per service for ${noRate.item_name}.`;
+      }
+      const badQty = filled.find((l) => l.kind === "CHEMICAL" && !(Number(l.qty) > 0));
+      if (badQty) return `Type the quantity for ${badQty.item_name || "the chemical"}.`;
+      for (const kind of termite ? ["SERVICE", "CHEMICAL"] : ["CHEMICAL"]) {
+        const own = filled.filter((l) => l.kind === kind);
+        const word = kind === "SERVICE" ? "Service" : "Chemical";
+        const bad = own.findIndex((l) => !l.item_name.trim() || l.rate === "" || Number(l.rate) < 0 || (termite && kind === "SERVICE" && !(Number(l.area) > 0)));
+        if (bad >= 0) return `${word} ${bad + 1}: ${kind === "SERVICE" ? "choose the service" : "type the chemical"} and the ${termite && kind === "SERVICE" ? "rate and the area" : "amount"}.`;
+        const names = own.map((l) => l.item_name.trim().toLowerCase());
+        if (new Set(names).size !== names.length) return `The same ${word.toLowerCase()} is listed twice.`;
       }
     }
     return "";
@@ -227,7 +275,7 @@ export default function NewContract() {
   }
 
   // ---- create ---------------------------------------------------------------------------------
-  const filledLines = lines.filter((l) => l.item_name && l.rate !== "");
+  const filledLines = lines.filter((l) => kinds[l.kind] && l.item_name && l.rate !== "");
   const oneSite = sites.length === 1 ? sites[0].site_id : null;
 
   async function create() {
@@ -250,53 +298,31 @@ export default function NewContract() {
         shortfall_billing: terms.shortfall_billing,
         description_template: description,
         notes: terms.notes || null,
-        lines: filledLines.map((l) => (termite
-          ? { site_id: oneSite, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_UNIT", unit: SQM, rate: l.rate, default_qty: l.area }
-          : {
-            site_id: oneSite, item_name: l.item_name, sac_code: "998531", pricing_basis: "FIXED", unit: "Nos", rate: l.rate, default_qty: 1,
-            // the service name links the price to the service plan, so the invoice follows the services done
-            plan_service_type: null, plan_sub_service: l.item_name,
-          })),
+        lines: filledLines.map((l) => {
+          const common = { site_id: oneSite, item_kind: l.kind, invoice_group: (l.group || "").trim() || null };
+          if (l.kind === "CHEMICAL") {
+            // a typed chemical: a fixed amount each period, not part of the service plan
+            return { ...common, item_name: l.item_name.trim(), sac_code: null, pricing_basis: "PER_UNIT", unit: "Nos", rate: l.rate, default_qty: Number(l.qty), plan_service_type: null, plan_sub_service: null };
+          }
+          return termite
+            ? { ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_UNIT", unit: SQM, rate: l.rate, default_qty: l.area }
+            : {
+              // rate per service x services: the invoice bills the services completed that month
+              // (typed by the Service Coordinator); the plan's number per month is the default quantity
+              ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_SERVICE", unit: "Service", rate: l.rate, default_qty: Number(l.qty) || null,
+              plan_service_type: null, plan_sub_service: l.item_name,
+            };
+        }),
       };
       const created = await billingPost("/contracts", body);
 
-      // How many services per month: added to the customer's service plan (other services kept).
-      let planNote = "";
-      if (canPlan && !termite) {
-        try {
-          planNote = await savePlan();
-        } catch (err) {
-          planNote = `The contract is saved, but the service plan was not: ${err.message} Set it in Service Plans.`;
-        }
-      } else if (!termite) {
-        planNote = "How many services per month is set by the Service Coordinator in Service Plans.";
-      }
+      const planNote = termite ? "" : "Services and how many per month come from the customer's Service Plan; each invoice bills the services completed that month.";
       setDone({ id: created.id, code: created.contract_code, planNote });
     } catch (err) {
       setMsg({ error: err.message, errors: err.errors });
     } finally {
       setBusy(false);
     }
-  }
-
-  async function savePlan() {
-    const current = await billingGet(`/service-plans/${encodeURIComponent(companyId)}`)
-      .catch((err) => (err instanceof ApiError && err.status === 404 ? null : Promise.reject(err)));
-    const ours = new Map(filledLines.map((l) => [l.item_name.toLowerCase(), Number(l.visits)]));
-    const kept = (current?.lines || [])
-      .filter((l) => l.site_id || l.service_type || !ours.has(String(l.sub_service || "").toLowerCase()))
-      .map((l) => ({ site_id: l.site_id || null, service_type: l.service_type || null, sub_service: l.sub_service, visits_per_month: l.visits_per_month }));
-    const added = filledLines.map((l) => ({ site_id: null, service_type: null, sub_service: l.item_name, visits_per_month: Number(l.visits) }));
-    const thisMonth = monthStart(today());
-    const from = monthStart(terms.start_date) > thisMonth ? monthStart(terms.start_date) : thisMonth;
-    await billingPut(`/service-plans/${encodeURIComponent(companyId)}`, {
-      effective_from: from,
-      print_copies: current?.print_copies || 1,
-      invoice_split: "ALL_OUTLETS",
-      shortfall_highlight_day: current?.shortfall_highlight_day || 25,
-      lines: [...kept, ...added],
-    });
-    return `Service plan saved from ${monthLabel(from)}: ${added.map((l) => `${l.sub_service} ${l.visits_per_month}/month`).join(", ")}.`;
   }
 
   // ---- screens --------------------------------------------------------------------------------
@@ -317,7 +343,23 @@ export default function NewContract() {
     );
   }
 
-  const total = filledLines.reduce((t, l) => t + Number(l.rate) * (termite ? Number(l.area) || 0 : 1), 0);
+  const total = filledLines.reduce((t, l) => t + lineTotal(l, termite), 0);
+  // Invoice line summaries: ticked lines get one summary; each summary prints as one invoice line.
+  const picked = filledLines.filter((l) => l.picked);
+  const pickedTotal = picked.reduce((t, l) => t + lineTotal(l, termite), 0);
+  const groups = [...filledLines.reduce((m, l) => {
+    const g = (l.group || "").trim();
+    if (g) m.set(g, [...(m.get(g) || []), l]);
+    return m;
+  }, new Map())];
+  function applyGroup() {
+    const text = groupText.replace(/\s+/g, " ").trim();
+    if (!text || !picked.length) return;
+    const keys = new Set(picked.map((l) => l.key));
+    setLines((ls) => ls.map((l) => (keys.has(l.key) ? { ...l, group: text, picked: false } : l)));
+    setGroupText("");
+  }
+  const removeGroup = (name) => setLines((ls) => ls.map((l) => ((l.group || "").trim() === name ? { ...l, group: "" } : l)));
 
   return (
     <div className="ac-page nc-page">
@@ -507,41 +549,164 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Services and prices</h3>
             <p className="ac-sub" style={{ margin: "-6px 0 14px" }}>
-              {termite ? "Rate per sq. m and the treated area; amount = rate × area." : "The amount billed for each service every period"}
+              {termite ? "Rate per sq. m and the treated area; amount = rate × area" : "Amount = quantity × rate"}
               {residential || terms.gst_applicable === false ? ", no GST." : ", excluding GST (added on the invoice)."}
-              {canPlan && !termite ? " Per month: how many times it is done; the Service Tracker checks it." : ""}
+              {!termite && " Services and how many per month come from the customer's Service Plan; the invoice bills the services completed each month."}
             </p>
-            <div className={`nc-lines ${termite ? "termite" : canPlan ? "plan" : ""}`}>
-              <div className="nc-line nc-head">
-                <span>Service</span>
-                {termite ? <><span>Rate / sq. m (₹)</span><span>Area (sq. m)</span></> : <span>Amount (₹)</span>}
-                {canPlan && !termite && <span>Per month</span>}
-                <span />
-              </div>
-              {lines.map((l) => (
-                <div className="nc-line" key={l.key}>
-                  <select className="ac-select" value={l.item_name} onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Service">
-                    <option value="">Choose the service…</option>
-                    {serviceGroups.map(([label, names]) => (
-                      <optgroup key={label} label={label}>{names.map((n) => <option key={n} value={n}>{n}</option>)}</optgroup>
-                    ))}
-                    {l.item_name && !serviceGroups.some(([, names]) => names.includes(l.item_name)) && <option value={l.item_name}>{l.item_name}</option>}
-                  </select>
-                  <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={termite ? "Rate per square metre" : "Amount"} />
-                  {termite && <input type="number" min="0" step="0.01" className="ac-input" value={l.area} placeholder="sq. m" onChange={(e) => setLine(l.key, { area: e.target.value })} aria-label="Area in square metres" />}
-                  {canPlan && !termite && (
-                    <div className="bl-stp sp-stp">
-                      <button type="button" onClick={() => setLine(l.key, { visits: Math.max(1, (Number(l.visits) || 1) - 1) })} aria-label="Fewer per month">−</button>
-                      <input type="number" min="1" max="31" value={l.visits} onChange={(e) => setLine(l.key, { visits: e.target.value })} aria-label="Per month" />
-                      <button type="button" onClick={() => setLine(l.key, { visits: Math.min(31, (Number(l.visits) || 0) + 1) })} aria-label="More per month">+</button>
-                    </div>
-                  )}
-                  <button type="button" className="bl-x" disabled={lines.length === 1} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="Remove service">✕</button>
-                </div>
+            {/* What is billed: services from the service list, chemicals (typed), or both. */}
+            <div className="nc-kinds" role="group" aria-label="What is billed">
+              {[["SERVICE", "Services"], ["CHEMICAL", "Chemicals"]].map(([k, label]) => (
+                <label key={k} className={`nc-kind ${kinds[k] ? "on" : ""}`}>
+                  <input type="checkbox" checked={kinds[k]} onChange={() => toggleKind(k)} /> {label}
+                </label>
               ))}
             </div>
-            <button type="button" className="sp-add" style={{ marginTop: 8 }} onClick={() => setLines([...lines, newLine(termite)])}>+ Add service</button>
+
+            {kinds.SERVICE && (
+              <section className="nc-sec">
+                <div className="nc-sec-title">Services</div>
+                {!termite ? (
+                  <>
+                    {planLoading && <div className="ac-sub">Loading the Service Plan…</div>}
+                    {!planLoading && !planServices.length && (
+                      <div className="bl-msg err">This customer has no Service Plan yet. The Service Coordinator sets the services and how many per month in Service Plans; they then appear here for their rate.</div>
+                    )}
+                    {planServices.length > 0 && (
+                      <div className="nc-lines priced">
+                        <div className="nc-line nc-head">
+                          <span>Service (from the Service Plan)</span>
+                          <span className="nc-num">Qty / month</span>
+                          <span className="nc-num">Rate per service (₹)</span>
+                          <span className="nc-num">Amount (₹)</span>
+                          <span />
+                        </div>
+                        {lines.filter((l) => l.kind === "SERVICE").map((l) => (
+                          <div key={l.key} className="nc-line-wrap">
+                            <div className="nc-line">
+                              <div className="nc-pickcell">
+                                <input type="checkbox" className="bl-cb" checked={l.picked} disabled={l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
+                                <span className="nc-svc-name">{l.item_name}</span>
+                              </div>
+                              <span className="nc-num nc-qty">{l.qty}</span>
+                              <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={`Rate per service for ${l.item_name}`} />
+                              <span className="nc-num nc-amt">{l.rate === "" ? "—" : amount(lineTotal(l, termite))}</span>
+                              <span />
+                            </div>
+                            {l.group && <div className="nc-in-group">In invoice line “{l.group}”</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                <>
+                <div className={`nc-lines ${termite ? "termite" : ""}`}>
+                  <div className="nc-line nc-head">
+                    <span>Service</span>
+                    {termite ? <><span>Rate / sq. m (₹)</span><span>Area (sq. m)</span></> : <span>Amount (₹)</span>}
+                    {canPlan && !termite && <span>Per month</span>}
+                    <span />
+                  </div>
+                  {lines.filter((l) => l.kind === "SERVICE").map((l) => (
+                    <div key={l.key} className="nc-line-wrap">
+                      <div className="nc-line">
+                        <div className="nc-pickcell">
+                          <input type="checkbox" className="bl-cb" checked={l.picked} disabled={!l.item_name || l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
+                          <select className="ac-select" value={l.item_name} onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Service">
+                            <option value="">Choose the service…</option>
+                            {serviceGroups.map(([label, names]) => (
+                              <optgroup key={label} label={label}>{names.map((n) => <option key={n} value={n}>{n}</option>)}</optgroup>
+                            ))}
+                            {l.item_name && !serviceGroups.some(([, names]) => names.includes(l.item_name)) && <option value={l.item_name}>{l.item_name}</option>}
+                          </select>
+                        </div>
+                        <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={termite ? "Rate per square metre" : "Amount"} />
+                        {termite && <input type="number" min="0" step="0.01" className="ac-input" value={l.area} placeholder="sq. m" onChange={(e) => setLine(l.key, { area: e.target.value })} aria-label="Area in square metres" />}
+                        {canPlan && !termite && (
+                          <div className="bl-stp sp-stp">
+                            <button type="button" onClick={() => setLine(l.key, { visits: Math.max(1, (Number(l.visits) || 1) - 1) })} aria-label="Fewer per month">−</button>
+                            <input type="number" min="1" max="31" value={l.visits} onChange={(e) => setLine(l.key, { visits: e.target.value })} aria-label="Per month" />
+                            <button type="button" onClick={() => setLine(l.key, { visits: Math.min(31, (Number(l.visits) || 0) + 1) })} aria-label="More per month">+</button>
+                          </div>
+                        )}
+                        <button type="button" className="bl-x" disabled={lines.filter((x) => x.kind === "SERVICE").length === 1 && !kinds.CHEMICAL} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="Remove service">✕</button>
+                      </div>
+                      {l.group && <div className="nc-in-group">In invoice line “{l.group}”</div>}
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="sp-add" style={{ marginTop: 8 }} onClick={() => setLines([...lines, newLine(termite, "SERVICE")])}>+ Add service</button>
+                </>
+                )}
+              </section>
+            )}
+
+            {kinds.CHEMICAL && (
+              <section className="nc-sec">
+                <div className="nc-sec-title">Chemicals</div>
+                <datalist id="nc-chemicals">{(chemicals || []).map((c) => <option key={c} value={c} />)}</datalist>
+                <div className="nc-lines priced">
+                  <div className="nc-line nc-head">
+                    <span>Chemical</span>
+                    <span className="nc-num">Qty</span>
+                    <span className="nc-num">Rate (₹)</span>
+                    <span className="nc-num">Amount (₹)</span>
+                    <span />
+                  </div>
+                  {lines.filter((l) => l.kind === "CHEMICAL").map((l) => (
+                    <div key={l.key} className="nc-line-wrap">
+                      <div className="nc-line">
+                        <div className="nc-pickcell">
+                          <input type="checkbox" className="bl-cb" checked={l.picked} disabled={!l.item_name.trim() || l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
+                          <input className="ac-input" list="nc-chemicals" value={l.item_name} maxLength={255} placeholder="Type or choose the chemical" onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Chemical" />
+                        </div>
+                        <input type="number" min="0" step="0.001" className="ac-input" value={l.qty} placeholder="Qty" onChange={(e) => setLine(l.key, { qty: e.target.value })} aria-label="Chemical quantity" />
+                        <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Chemical rate" />
+                        <span className="nc-num nc-amt">{l.rate === "" ? "—" : amount(lineTotal(l, termite))}</span>
+                        <button type="button" className="bl-x" disabled={lines.filter((x) => x.kind === "CHEMICAL").length === 1 && !kinds.SERVICE} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="Remove chemical">✕</button>
+                      </div>
+                      {l.group && <div className="nc-in-group">In invoice line “{l.group}”</div>}
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="sp-add" style={{ marginTop: 8 }} onClick={() => setLines([...lines, newLine(false, "CHEMICAL")])}>+ Add chemical</button>
+                <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>A new chemical is saved for other customers too. Each period bills quantity × rate.</div>
+              </section>
+            )}
+
             <div className="nc-total">Total per period: <b>₹{amount(total)}</b>{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</div>
+
+            {/* Invoice line summaries: ticked lines print as ONE invoice line (summary + their total).
+                Lines not in a summary print one by one. */}
+            {filledLines.length > 1 && (
+              <div className="nc-summary">
+                <div className="nc-sec-title" style={{ margin: 0 }}>Invoice line summaries (optional)</div>
+                {picked.length ? (
+                  <div className="nc-summary-row">
+                    <input className="ac-input" value={groupText} maxLength={255} autoFocus placeholder={`Summary for the ${picked.length} ticked, e.g. Pest control services`} onChange={(e) => setGroupText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyGroup()} aria-label="Invoice line summary" />
+                    <span className="nc-summary-amt">₹{amount(pickedTotal)}</span>
+                    <button type="button" className="ac-btn ac-btn-primary" disabled={!groupText.trim()} onClick={applyGroup}>Add summary</button>
+                  </div>
+                ) : (
+                  <div className="ac-sub" style={{ fontSize: 12.5 }}>Tick the services or chemicals to print as one invoice line, then type their summary. Lines not ticked print one by one.</div>
+                )}
+                {picked.length > 0 && <div className="ac-sub" style={{ fontSize: 12 }}>Ticked: {picked.map((l) => l.item_name).join(", ")}</div>}
+                {groups.length > 0 && (
+                  <ul className="nc-groups">
+                    {groups.map(([name, ls]) => (
+                      <li key={name}>
+                        <div className="nc-group-main">
+                          <b>{name}</b>
+                          <span className="ac-sub">{ls.map((l) => l.item_name).join(", ")}</span>
+                        </div>
+                        <span className="nc-summary-amt">₹{amount(ls.reduce((t, l) => t + lineTotal(l, termite), 0))}</span>
+                        <button type="button" className="ac-btn sm" onClick={() => removeGroup(name)}>Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -558,7 +723,7 @@ export default function NewContract() {
               {needsPo && <><dt>Purchase order</dt><dd>{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</dd></>}
               <dt>Services</dt>
               <dd>{filledLines.map((l) => (
-                <div key={l.key}>{l.item_name}: ₹{amount(Number(l.rate) * (termite ? Number(l.area) || 0 : 1))}{canPlan && !termite ? ` · ${l.visits} per month` : ""}</div>
+                <div key={l.key}>{l.item_name}: {termite && l.kind === "SERVICE" ? `${l.area} sq. m` : `${l.qty}${l.kind === "SERVICE" ? " / month" : ""}`} × ₹{amount(Number(l.rate))} = ₹{amount(lineTotal(l, termite))}</div>
               ))}</dd>
               {next && <><dt>First invoice</dt><dd>{dmy(next.start)} to {dmy(next.end)}, Bill Run for {monthLabel(next.billMonth)}</dd></>}
             </dl>
@@ -567,7 +732,7 @@ export default function NewContract() {
               <li className="ok">Billing details saved</li>
               {needsPo && <li className={poId ? "ok" : "bad"}>Purchase order {poId ? "chosen" : "missing"}</li>}
               <li className={filledLines.length ? "ok" : "bad"}>{filledLines.length} service{filledLines.length === 1 ? "" : "s"} priced</li>
-              {!termite && <li className={canPlan ? "ok" : "info"}>{canPlan ? "Service plan will be saved" : "Service plan: set by the Service Coordinator"}</li>}
+              {!termite && kinds.SERVICE && <li className="info">Services per month: from the Service Plan (set by the Service Coordinator)</li>}
             </ul>
           </>
         )}
