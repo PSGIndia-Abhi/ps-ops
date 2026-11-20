@@ -46,7 +46,7 @@ const BANK = [
 ];
 
 const TERMS = [
-  "All Payments should be made in the name of Bestserve pest management Pvt ltd.",
+  "All Payments should be made in the name of BESTSERVE PEST MANAGEMENT PVT LTD.",
   '"Thanks for your Business. As we are raise the invoice after providing the service we request you to clear the payment Immediately"',
 ];
 

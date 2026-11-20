@@ -360,6 +360,15 @@ async function linkContractPos(conn, contractId, companyId, rawIds, billingType)
   if (ids.length) await conn.query("UPDATE customer_pos SET contract_id = ? WHERE id IN (?)", [contractId, ids]);
 }
 
+/** A PO shared by several contracts: the customer's, active and not linked to one contract. */
+async function assertSharedPo(conn, poId, companyId) {
+  const [[po]] = await conn.query("SELECT id, po_number, company_id, contract_id, status FROM customer_pos WHERE id = ? FOR UPDATE", [poId]);
+  if (!po) throw C.bad("The chosen purchase order was not found");
+  if (po.company_id !== companyId) throw C.bad(`PO ${po.po_number} belongs to another customer`);
+  if (po.status !== "ACTIVE") throw C.bad(`PO ${po.po_number} is closed`);
+  if (po.contract_id) throw C.bad(`PO ${po.po_number} is already linked to one contract, so it cannot be shared`);
+}
+
 // GET /contracts?company_id&type&status&due_month
 const listContracts = C.handle("Failed to load contracts", async (req, res) => {
   const companyId = C.str(req.query.company_id, "company_id", { max: 20 });

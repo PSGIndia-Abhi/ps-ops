@@ -81,7 +81,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const c1 = L + Math.round(W * 0.335);
   const c2 = L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  font("B", 8.4).text("Ship To", c1 + PAD, y + 5, { lineBreak: false });
+  font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
@@ -103,8 +103,10 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   let shy = y + 6;
   const shipW = c2 - c1 - PAD * 2;
-  const shipTo = content.ship_to || [];
-  if (!shipTo.length) font("R", 8).text("Same as Bill To", c1 + PAD, shy, { width: shipW });
+  // No outlet chosen: show the Bill To customer's name and address here instead.
+  const shipTo = (content.ship_to || []).length
+    ? content.ship_to
+    : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
   for (const entry of shipTo) {
     if (entry.name) {
       font("B", 8).text(entry.name, c1 + PAD, shy, { width: shipW });
@@ -269,7 +271,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const b2 = L + Math.round(W * 0.67);
   const bankTop = y;
   font("B", 8.4).text("Bank Details", L + PAD + 4, y + 6, { lineBreak: false });
-  font("B", 8.4).text("Terms and Conditions", b1 + PAD, y + 6, { lineBreak: false });
+  font("B", 8.4).text("TERMS AND CONDITIONS", b1 + PAD, y + 6, { lineBreak: false });
   font("R", 8).text(`For : ${SELLER.name}`, b2 + PAD, y + 12, { width: R - b2 - PAD * 2, align: "center" });
 
   const bankX = L + PAD + 4;
