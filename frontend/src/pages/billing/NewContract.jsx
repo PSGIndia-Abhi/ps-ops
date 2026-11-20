@@ -50,8 +50,14 @@ const newLine = (termite, kind = "SERVICE", site = "") => ({ key: (lineKey += 1)
 // (or the company name when it has none / several), quantity = services per month, rate = bill value.
 // the short code when a service has one: "General Pest Control (GPC)" -> "GPC"
 const tagOf = (svc) => /\(([^()]+)\)\s*$/.exec(svc || "")?.[1] || svc || "";
-// Group based: the item name on the invoice is the company name.
-const companyLine = (c) => ({ ...newLine(false, "SERVICE"), company: c.company_id, site: c.sites?.length === 1 ? c.sites[0].site_id : "", item_name: c.name, base: c.name });
+// Group based: one line per outlet of a ticked company (outlets in `off` are left out). The item name on
+// the invoice is the company name, with the outlet when the company has several.
+const outletUnits = (c, off = []) => {
+  const sites = c.sites || [];
+  if (sites.length <= 1) return [{ company: c, site: sites[0]?.site_id || "", outlet: sites[0]?.name || "", name: c.name }];
+  return sites.filter((s) => !off.includes(s.site_id)).map((s) => ({ company: c, site: s.site_id, outlet: s.name, name: `${c.name} - ${s.name}` }));
+};
+const companyLine = (u) => ({ ...newLine(false, "SERVICE"), company: u.company.company_id, site: u.site, item_name: u.name, base: u.name });
 const lineTotal = (l, termite) => Number(l.rate) * (termite && l.kind === "SERVICE" ? Number(l.area) || 0 : Number(l.qty) || 0);
 
 export default function NewContract() {
@@ -75,11 +81,13 @@ export default function NewContract() {
   const { data: contractGroups, error: groupsError, reload: reloadGroups } = useBilling(groupMode ? "/contract-groups" : null);
   const [groupId, setGroupId] = useState("");
   const [groupCompanyIds, setGroupCompanyIds] = useState([]);
+  const [groupSitesOff, setGroupSitesOff] = useState([]); // outlets of the ticked companies left out of the contract
   const group = (contractGroups || []).find((g) => g.id === groupId) || null;
   const [profile, setProfile] = useState(null); // the form; null while loading
   const [profileSaved, setProfileSaved] = useState(false);
   const customer = (customers || []).find((c) => c.company_id === companyId) || null;
   const pickedCompanies = (group?.companies || []).filter((c) => groupCompanyIds.includes(c.company_id));
+  const groupUnits = pickedCompanies.flatMap((c) => outletUnits(c, groupSitesOff));
   // The main company follows the ticks (the first ticked one, in the group's order).
   useEffect(() => {
     if (!groupMode) return;
@@ -156,7 +164,7 @@ export default function NewContract() {
   const groupLines = groupMode && !termite;
   // which companies have a line now: when it does not match the ticks (a restored draft, a reload),
   // the lines are made again below
-  const companySig = lines.filter((l) => l.company).map((l) => l.company).join(",");
+  const companySig = lines.filter((l) => l.company).map((l) => `${l.company}|${l.site || ""}`).join(",");
   useEffect(() => {
     if (!groupMode || !group) return;
     setLines((ls) => {
@@ -166,18 +174,18 @@ export default function NewContract() {
         const kept = ls.filter((l) => !l.company);
         return kept.some((l) => l.kind === "SERVICE") ? kept : [newLine(true, "SERVICE"), ...kept];
       }
-      // one line per ticked company (typed values kept), then the chemicals
-      const rows = pickedCompanies.map((c) => {
-        const l = ls.find((x) => x.company === c.company_id && !x.extra) || companyLine(c);
-        // a name not typed by hand is the company name (also for lines kept from an earlier draft)
-        return !l.edited && (l.item_name !== c.name || l.base !== c.name) ? { ...l, item_name: c.name, base: c.name } : l;
+      // one line per ticked outlet (typed values kept), then the chemicals
+      const rows = groupUnits.map((u) => {
+        const l = ls.find((x) => x.company === u.company.company_id && (x.site || "") === u.site && !x.extra) || companyLine(u);
+        // a name not typed by hand is the company (+ outlet) name (also for lines kept from an earlier draft)
+        return !l.edited && (l.item_name !== u.name || l.base !== u.name) ? { ...l, item_name: u.name, base: u.name } : l;
       });
       const next = [...rows, ...ls.filter((l) => !l.company && l.kind !== "SERVICE")];
       return next.length === ls.length && next.every((l, i) => l === ls[i]) ? ls : next;
     });
     // pickedCompanies follows group + groupCompanyIds; companySig follows the lines
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupMode, group, groupCompanyIds, termite, companySig]);
+  }, [groupMode, group, groupCompanyIds, groupSitesOff, termite, companySig]);
   // The services' amounts added up go into every company line not typed by hand (new lines too).
   useEffect(() => {
     if (!groupMode || !svcRated) return;
@@ -228,7 +236,7 @@ export default function NewContract() {
         const now = Date.now();
         localStorage.setItem(draftKey, JSON.stringify({
           v: 1, savedAt: now, step, companyId, customerName: customer?.name || "", stepsTotal: steps.length,
-          terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupMain,
+          terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupSitesOff, groupMain,
         }));
         setSavedAt(now);
       } catch { /* storage full or blocked: the form still works */ }
@@ -236,7 +244,7 @@ export default function NewContract() {
     return () => clearTimeout(id);
     // steps / customer are derived from the saved fields
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resume, done, companyId, step, terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupMain]);
+  }, [resume, done, companyId, step, terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupSitesOff, groupMain]);
   function continueDraft() {
     const d = resume;
     lineKey = Math.max(lineKey, ...d.lines.map((l) => Number(l.key) || 0));
@@ -254,6 +262,7 @@ export default function NewContract() {
     if (groupMode) {
       setGroupId(d.groupId || "");
       setGroupCompanyIds(d.groupCompanyIds || []);
+      setGroupSitesOff(d.groupSitesOff || []);
       const svcs = (d.groupMain?.services || [d.groupMain?.service || d.groupSvcs?.[0]?.service || d.groupService || ""])
         .map((s) => (typeof s === "string" ? { name: s, rate: "" } : s));
       setGroupMain({ services: svcs.length ? svcs : [{ name: "", rate: "" }] });
@@ -329,6 +338,7 @@ export default function NewContract() {
   function chooseGroup(id) {
     setGroupId(id);
     setGroupCompanyIds([]);
+    setGroupSitesOff([]);
     setProfile(null);
     setProfileSaved(false);
     setPoId("");
@@ -337,6 +347,30 @@ export default function NewContract() {
     setMsg({});
   }
   const toggleCompany = (id) => setGroupCompanyIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  // One card per outlet (a company with one or no outlet: one card). An outlet card ticks its company with
+  // just that outlet; unticking its last outlet unticks the company.
+  const outletCards = (group?.companies || []).flatMap((c) => ((c.sites || []).length > 1
+    ? c.sites.map((s) => ({ key: `${c.company_id}|${s.site_id}`, company: c, site: s }))
+    : [{ key: c.company_id, company: c, site: null }]));
+  const cardOn = (k) => groupCompanyIds.includes(k.company.company_id) && (!k.site || !groupSitesOff.includes(k.site.site_id));
+  function toggleCard(k) {
+    const id = k.company.company_id;
+    if (!k.site) return toggleCompany(id);
+    const others = k.company.sites.filter((s) => s.site_id !== k.site.site_id).map((s) => s.site_id);
+    if (!groupCompanyIds.includes(id)) {
+      setGroupCompanyIds((ids) => [...ids, id]);
+      setGroupSitesOff((off) => [...off.filter((x) => x !== k.site.site_id), ...others.filter((x) => !off.includes(x))]);
+    } else if (groupSitesOff.includes(k.site.site_id)) {
+      setGroupSitesOff((off) => off.filter((x) => x !== k.site.site_id));
+    } else if (others.every((x) => groupSitesOff.includes(x))) {
+      // its last outlet: the company is unticked (and its outlets reset)
+      setGroupCompanyIds((ids) => ids.filter((x) => x !== id));
+      setGroupSitesOff((off) => off.filter((x) => !others.includes(x)));
+    } else {
+      setGroupSitesOff((off) => [...off, k.site.site_id]);
+    }
+    return undefined;
+  }
 
   function chooseCustomer(id) {
     setCompanyId(id);
@@ -357,6 +391,8 @@ export default function NewContract() {
     if (step === 1 && groupMode) {
       if (!groupId) return "Choose the group.";
       if (!pickedCompanies.length) return "Tick at least one company of the group.";
+      const noOutlet = pickedCompanies.find((c) => !outletUnits(c, groupSitesOff).length);
+      if (noOutlet) return `${noOutlet.name}: tick at least one of its outlets (or untick the company).`;
       const untyped = pickedCompanies.find((c) => !c.category);
       if (untyped) return `${untyped.name}: the customer type is not set. Set it on the customer in Companies first.`;
       if (new Set(pickedCompanies.map((c) => c.category)).size > 1) return "The ticked companies must all be Commercial or all Residential (it decides GST).";
@@ -679,21 +715,25 @@ export default function NewContract() {
                 <div className="nc-group-cos-head">
                   <span className="nc-sec-title" style={{ margin: 0 }}>Companies in {group.name}</span>
                   <span className="ac-actions" style={{ gap: 6 }}>
-                    <span className="ac-sub" style={{ fontSize: 12.5 }}>{pickedCompanies.length} of {group.companies.length} ticked</span>
-                    <button type="button" className="ac-btn sm" onClick={() => setGroupCompanyIds(group.companies.map((c) => c.company_id))}>Select all</button>
-                    <button type="button" className="ac-btn sm" disabled={!groupCompanyIds.length} onClick={() => setGroupCompanyIds([])}>Clear</button>
+                    <span className="ac-sub" style={{ fontSize: 12.5 }}>{outletCards.filter(cardOn).length} of {outletCards.length} ticked</span>
+                    <button type="button" className="ac-btn sm" onClick={() => { setGroupCompanyIds(group.companies.map((c) => c.company_id)); setGroupSitesOff([]); }}>Select all</button>
+                    <button type="button" className="ac-btn sm" disabled={!groupCompanyIds.length} onClick={() => { setGroupCompanyIds([]); setGroupSitesOff([]); }}>Clear</button>
                   </span>
                 </div>
                 <div className="nc-group-list">
-                  {group.companies.map((c) => (
-                    <label key={c.company_id} className={`nc-group-co ${groupCompanyIds.includes(c.company_id) ? "on" : ""}`}>
-                      <input type="checkbox" className="bl-cb" checked={groupCompanyIds.includes(c.company_id)} onChange={() => toggleCompany(c.company_id)} />
-                      <span className="nc-group-co-text">
-                        <b>{c.name}</b>
-                        <span className="ac-sub">{[c.category ? CATEGORY_LABEL[c.category] : "Customer type not set", c.outlets].filter(Boolean).join(" · ")}</span>
-                      </span>
-                    </label>
-                  ))}
+                  {outletCards.map((k) => {
+                    const c = k.company;
+                    const on = cardOn(k);
+                    return (
+                      <label key={k.key} className={`nc-group-co ${on ? "on" : ""}`}>
+                        <input type="checkbox" className="bl-cb" checked={on} onChange={() => toggleCard(k)} />
+                        <span className="nc-group-co-text">
+                          <b>{c.name}</b>
+                          <span className="ac-sub">{[c.category ? CATEGORY_LABEL[c.category] : "Customer type not set", k.site ? k.site.name : c.outlets].filter(Boolean).join(" · ")}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -990,13 +1030,7 @@ export default function NewContract() {
                                 <input type="checkbox" className="bl-cb" checked={l.picked} disabled={!l.item_name || l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
                                 <div className="nc-grp-item">
                                   <input className="ac-input" value={l.item_name} maxLength={255} onChange={(e) => setLine(l.key, { item_name: e.target.value, edited: true })} aria-label={`Item name for ${co.name}`} />
-                                  <span className="ac-sub">{co.name}</span>
-                                  {co?.sites?.length > 1 && (
-                                    <select className="ac-select" value={l.site} onChange={(e) => setLine(l.key, { site: e.target.value })} aria-label="Outlet">
-                                      <option value="">All outlets</option>
-                                      {co.sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
-                                    </select>
-                                  )}
+                                  <span className="ac-sub">{[co.name, (co.sites || []).find((s) => s.site_id === l.site)?.name].filter(Boolean).join(" · ")}</span>
                                 </div>
                               </div>
                               <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value, rateEdited: true })} aria-label="Bill value" />
@@ -1015,7 +1049,7 @@ export default function NewContract() {
                     {!pickedCompanies.length && (
                       <div className="ac-info" style={{ marginTop: 8 }}>{group ? "No company is ticked. Go back to step 1 and tick the companies of the group." : "Loading the group’s companies…"}</div>
                     )}
-                    <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>One line per ticked company, all on one invoice to the group. To add or remove a company, go back to step 1.</div>
+                    <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>One line per outlet of the ticked companies, all on one invoice to the group. To add or remove a company or outlet, go back to step 1.</div>
                   </>
                 ) : !termite ? (
                   <>
@@ -1233,7 +1267,7 @@ export default function NewContract() {
                   <tbody>
                     {filledLines.map((l) => {
                       const sub = l.company
-                        ? pickedCompanies.find((c) => c.company_id === l.company)?.name
+                        ? (() => { const co = pickedCompanies.find((c) => c.company_id === l.company); return [co?.name, (co?.sites || []).find((s) => s.site_id === l.site)?.name].filter(Boolean).join(" · "); })()
                         : l.kind === "CHEMICAL" ? "Chemical"
                           : multiOutlet && !termite ? (l.site === ALL ? "All outlets" : sites.find((s) => s.site_id === l.site)?.name) : "";
                       return (

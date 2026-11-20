@@ -86,11 +86,18 @@ export default function SosEntry() {
   if (loading || !data) return <div className="ac-page"><div className="ac-card">Loading…</div></div>;
 
   // Cards: each outlet that has agreed services or extras, plus "All outlets" for whole-customer lines.
+  // A group based contract is one table: one row per company (its outlet under the name), priced as on the invoice.
+  const grp = Boolean(data.billing_group);
   const outletIds = [...new Set([...agreed.map((l) => l.site_id || ALL), ...extras.map((x) => x.site_id)])];
-  const cards = [
+  const cards = grp ? [{ id: ALL, name: "Companies in this contract", all: true }] : [
     ...data.outlets.filter((o) => outletIds.includes(o.site_id)).map((o) => ({ id: o.site_id, name: o.name })),
     ...(outletIds.includes(ALL) ? [{ id: ALL, name: data.outlets.length ? "All outlets (whole customer)" : data.customer }] : []),
   ];
+  const outletName = (siteId) => (siteId ? data.outlets.find((o) => o.site_id === siteId)?.name || "Outlet" : "All outlets");
+  // What the invoice bills for a row: Fixed amount bills the assigned number, Service based the completed number.
+  const billOf = (rate, qty) => ({ qty, amount: qty === null || rate === null || rate === undefined ? null : qty * Number(rate) });
+  const lineBill = (l, n) => billOf(l.rate, (l.structure || data.structures[0]) === "FIXED" ? l.assigned : n);
+  const money = (v) => (v === null || v === undefined ? "—" : rupees(v));
   const freeOutlets = data.outlets.filter((o) => !outletIds.includes(o.site_id));
   const num = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
   const totals = {
@@ -206,24 +213,47 @@ export default function SosEntry() {
       })()}
 
       {data.invoiced?.length > 0 && <div className="ac-info" style={{ marginBottom: 12 }}><span><FiLock /> Invoiced ({data.invoiced.join(", ")}). This SOS is locked.</span></div>}
+      {data.status === "SUBMITTED" && !data.invoiced?.length && agreed.some((l) => l.added_later) && (
+        <div className="ac-info" style={{ marginBottom: 12 }}>
+          <span><FiInfo /> {agreed.filter((l) => l.added_later).map((l) => l.service).join(", ")}: added to the contract after this SOS was submitted, so nothing is entered for it. {canFill ? "Reopen" : "Send back"} the SOS to enter it.</span>
+        </div>
+      )}
       {data.status === "DRAFT" && data.reopen_reason && (
         <div className="ac-info error" style={{ marginBottom: 12 }}><span><FiRotateCcw /> Sent back by <b>{data.reopened_by}</b> on {when(data.reopened_at)}: “{data.reopen_reason}”</span></div>
       )}
       {!data.has_agreement && <div className="ac-info error" style={{ marginBottom: 12 }}><span>This customer has no services billed per service for {monthLabel(month)} in its billing profile.</span></div>}
 
       {cards.map((card) => {
-        const lines = agreed.filter((l) => (l.site_id || ALL) === card.id);
-        const cardExtras = editable ? extras.filter((x) => x.site_id === card.id) : data.lines.filter((x) => x.is_extra && (x.site_id || ALL) === card.id);
+        const lines = card.all ? agreed : agreed.filter((l) => (l.site_id || ALL) === card.id);
+        const cardExtras = editable
+          ? extras.filter((x) => card.all || x.site_id === card.id)
+          : data.lines.filter((x) => x.is_extra && (card.all || (x.site_id || ALL) === card.id));
         const a = lines.reduce((t, l) => t + l.assigned, 0);
         const c = lines.reduce((t, l) => t + (num(editable ? done[l.contract_line_id] : l.completed) || 0), 0);
         const canFillCard = editable && lines.some((l) => num(done[l.contract_line_id]) !== l.assigned);
+        // what will be billed from this table (as on the invoice)
+        const doneOf = (l) => num(editable ? done[l.contract_line_id] : l.completed);
+        const bills = [
+          ...lines.map((l) => lineBill(l, doneOf(l))),
+          ...cardExtras.map((x) => billOf(editable ? rateOf(x.site_id, x.service) : x.rate, Number(x.completed) || 0)),
+        ];
+        const billQty = bills.reduce((t, b) => t + (b.qty || 0), 0);
+        // rows without a rate yet (an extra priced by Accounts) are left out of the amount and flagged
+        const billAmt = bills.reduce((t, b) => t + (b.amount || 0), 0);
+        const unpriced = bills.filter((b) => b.amount === null && b.qty).length;
+        const fixedCard = (lines[0]?.structure || data.structures[0]) === "FIXED";
+        // Service based: the amount when every assigned service is done
+        const fullAmt = lines.reduce((t, l) => t + (l.rate === null || l.rate === undefined ? 0 : l.assigned * Number(l.rate)), 0)
+          + bills.slice(lines.length).reduce((t, b) => t + (b.amount || 0), 0);
+        const anyEntered = lines.some((l) => doneOf(l) !== null);
         return (
-          <div key={card.id || "all"} className="sos-card">
+          <div key={card.id || "all"} className={`sos-card priced${grp ? " grp" : ""}`}>
             <div className="sos-card-head">
               <h3>{card.name}</h3>
-              <span className="ac-sub">{lines.length} service{lines.length === 1 ? "" : "s"}</span>
-              {cards.length > 1 && lines.length > 0 && <span className={c < a ? "sos-amber" : "sos-green"}><b>{c}</b> / {a}</span>}
+              <span className="ac-sub">{grp ? `${lines.length} outlet${lines.length === 1 ? "" : "s"}` : `${lines.length} service${lines.length === 1 ? "" : "s"}`}</span>
+              {(cards.length > 1 || grp) && lines.length > 0 && <span className={c < a ? "sos-amber" : "sos-green"}><b>{c}</b> / {a}</span>}
               <span className="sos-card-right">
+                {lines.length > 0 && <span className="sos-bill-note">{fixedCard ? "Fixed amount: assigned services are billed" : "Service based: completed services are billed"}</span>}
                 {canFillCard && <button type="button" className="bl-link" onClick={() => fillLines(lines)}><FiClipboard /> Fill as assigned</button>}
                 {editable && <button type="button" className="ac-btn sos-addbtn" onClick={() => addExtra(card.id)}><FiPlusCircle /> Add extra service</button>}
               </span>
@@ -231,12 +261,13 @@ export default function SosEntry() {
 
             <div className="sos-list">
               {(lines.length > 0 || cardExtras.length > 0) && (
-                <div className="sos-item sos-thead"><span>Service</span><span>Assigned</span><span>Completed</span><span>Status</span><span>Remark</span></div>
+                <div className="sos-item sos-thead"><span>{grp ? "Company · outlet" : "Service"}</span><span>Assigned</span><span>Completed</span><span>Status</span><span className="sos-money">Rate</span><span className="sos-money">Billed</span><span className="sos-money">Amount</span><span /></div>
               )}
               {cardExtras.map((x) => {
                 const id = `x${x.key || `${x.service}-${x.site_id}`}`;
                 const rate = editable ? rateOf(x.site_id, x.service) : x.rate;
                 const remarkOpen = openRemarks.has(id);
+                const xb = billOf(rate, Number(x.completed) || 0);
                 return (
                   <div key={id} className="sos-item extra">
                     <div className="sos-item-main">
@@ -245,7 +276,8 @@ export default function SosEntry() {
                       ) : <b>{x.service}</b>}
                       <span className="sos-item-sub">
                         <span className="sos-extra-lbl">Extra</span>
-                        {(x.service || !editable) && <span>{rate !== null && rate !== undefined ? `${rupees(rate)} per service` : "Rate set by Accounts"}</span>}
+                        {grp && <span>{outletName(x.site_id)}</span>}
+                        {(x.service || !editable) && <span className="sos-grp-calc">{rate !== null && rate !== undefined ? <>{xb.qty} × {money(rate)} = <b>{money(xb.amount)}</b></> : "Rate set by Accounts"}</span>}
                         {!remarkOpen && x.remarks && <span className="sos-remark">“{x.remarks}”</span>}
                       </span>
                       {remarkOpen && editable && (
@@ -256,6 +288,7 @@ export default function SosEntry() {
                     <Counter editable={editable} value={x.completed} min={1}
                       onChange={(v) => setExtra(x.key, { completed: v })} label={`Extra ${x.service || "service"} done`} />
                     <span className="sos-state purple"><FiPlusCircle /> Extra</span>
+                    <span className="sos-money">{rate !== null && rate !== undefined ? rupees(rate) : <span className="ac-sub">By Accounts</span>}</span><span className="sos-money">{xb.qty}</span><span className="sos-money">{xb.amount === null ? <span className="sos-muted">—</span> : <b>{money(xb.amount)}</b>}</span>
                     <span className="sos-acts">
                       {editable && <button type="button" className={`sos-iconbtn ${x.remarks ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
                       {editable && <button type="button" className="sos-iconbtn red" onClick={() => { setExtras((xs) => xs.filter((y) => y.key !== x.key)); setDirty(true); }} title="Remove" aria-label="Remove extra"><FiX /></button>}
@@ -272,11 +305,16 @@ export default function SosEntry() {
                 const remarkOpen = openRemarks.has(id);
                 const st = n === null ? ["grey", FiMinusCircle, "Not entered"] : n < l.assigned ? ["amber", FiAlertTriangle, `${l.assigned - n} short`] : n > l.assigned ? ["blue", FiArrowUp, `${n - l.assigned} more`] : ["green", FiCheckCircle, "Done"];
                 const StIcon = st[1];
+                const lb = lineBill(l, n);
                 return (
                   <div key={id} className="sos-item">
                     <div className="sos-item-main">
                       <b>{l.service}</b>
-                      {!remarkOpen && remark && <span className="sos-item-sub"><span className="sos-remark">“{remark}”</span></span>}
+                      <span className="sos-item-sub">
+                        {grp && <span>{l.site || "All outlets"}</span>}
+                        <span className="sos-grp-calc">{lb.qty === null ? <>{l.assigned} assigned · {money(l.rate)} each</> : <>{lb.qty} × {money(l.rate)} = <b>{money(lb.amount)}</b></>}</span>
+                        {!remarkOpen && remark && <span className="sos-remark">“{remark}”</span>}
+                      </span>
                       {remarkOpen && editable && (
                         <input className="sos-remarkinput" autoFocus value={remarks[l.contract_line_id] || ""} placeholder="Add a remark (optional)"
                           onChange={(e) => { setRemarks((r) => ({ ...r, [l.contract_line_id]: e.target.value })); setDirty(true); }} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
@@ -285,13 +323,42 @@ export default function SosEntry() {
                     <span className="sos-num">{l.assigned}</span>
                     <Counter editable={editable} value={v} min={0} onChange={(val) => setDoneFor(l.contract_line_id, val)} label={`Completed ${l.service}`} />
                     <span className={`sos-state ${st[0]}`}><StIcon /> {st[2]}</span>
+                    <span className="sos-money">{money(l.rate)}</span>
+                    <span className="sos-money">{lb.qty ?? <span className="sos-muted">—</span>}</span>
+                    <span className="sos-money">{lb.amount === null ? <span className="sos-muted">—</span> : <b>{money(lb.amount)}</b>}</span>
                     <span className="sos-acts">
                       {editable && <button type="button" className={`sos-iconbtn ${remark ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
                     </span>
                   </div>
                 );
               })}
-              {!lines.length && !cardExtras.length && <div className="sos-empty">No services here yet.</div>}
+              {(lines.length > 0 || cardExtras.length > 0) && (() => {
+                const note = fixedCard ? "Fixed: assigned billed" : anyEntered ? "Completed billed" : "Nothing entered yet";
+                const ifAll = !fixedCard && fullAmt > billAmt ? `if all done ${money(fullAmt)}` : "";
+                return (
+                  <div className="sos-item sos-grp-tot">
+                    <span className="sos-grp-totlbl">
+                      Total to bill
+                      <span className="sos-grp-calc">
+                        {anyEntered || fixedCard ? <>{billQty} service{billQty === 1 ? "" : "s"} · <b>{money(billAmt)}</b></> : note}
+                        {ifAll ? ` · ${ifAll}` : ""}{unpriced > 0 ? ` + ${unpriced} extra, rate by Accounts` : ""}
+                      </span>
+                    </span>
+                    <span className="sos-num">{a}</span>
+                    <span className="sos-num">{anyEntered ? c : <span className="sos-muted">—</span>}</span>
+                    <span className="sos-grp-note">{note}</span>
+                    <span />
+                    <span className="sos-money"><b>{billQty}</b></span>
+                    <span className="sos-money">
+                      <b>{money(billAmt)}</b>
+                      {ifAll && <span className="sos-grp-ifall">{ifAll}</span>}
+                      {unpriced > 0 && <span className="sos-grp-pending">+ {unpriced} extra, rate by Accounts</span>}
+                    </span>
+                    <span />
+                  </div>
+                );
+              })()}
+              {!lines.length && !cardExtras.length && <div className="sos-empty">{grp ? "No companies here yet." : "No services here yet."}</div>}
             </div>
           </div>
         );
