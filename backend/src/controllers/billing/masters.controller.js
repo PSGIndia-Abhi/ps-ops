@@ -337,6 +337,15 @@ async function linkContractPos(conn, contractId, companyId, rawIds, billingType)
   if (ids.length) await conn.query("UPDATE customer_pos SET contract_id = ? WHERE id IN (?)", [contractId, ids]);
 }
 
+/** A PO shared by several contracts: the customer's, active and not linked to one contract. */
+async function assertSharedPo(conn, poId, companyId) {
+  const [[po]] = await conn.query("SELECT id, po_number, company_id, contract_id, status FROM customer_pos WHERE id = ? FOR UPDATE", [poId]);
+  if (!po) throw C.bad("The chosen purchase order was not found");
+  if (po.company_id !== companyId) throw C.bad(`PO ${po.po_number} belongs to another customer`);
+  if (po.status !== "ACTIVE") throw C.bad(`PO ${po.po_number} is closed`);
+  if (po.contract_id) throw C.bad(`PO ${po.po_number} is already linked to one contract, so it cannot be shared`);
+}
+
 // GET /contracts?company_id&type&status&due_month
 const listContracts = C.handle("Failed to load contracts", async (req, res) => {
   const companyId = C.str(req.query.company_id, "company_id", { max: 20 });
@@ -428,7 +437,12 @@ const createContract = C.handle("Failed to create the contract", async (req, res
       ]
     );
     for (const [i, line] of lines.entries()) await insertContractLine(conn, id, line, i, req.user.id);
-    if (billingType === "TERMITE" || b.po_ids !== undefined) await linkContractPos(conn, id, companyId, b.po_ids ?? [], billingType);
+    // shared_po_id: one PO used by two contracts of the customer (New Contract: pest control and
+    // chemicals billed separately). It is checked but left unlinked (contract_id NULL), so the Bill
+    // Run of either contract can use it. Otherwise the chosen POs are linked to this contract.
+    const sharedPoId = C.str(b.shared_po_id, "shared_po_id", { max: 36 });
+    if (sharedPoId) await assertSharedPo(conn, sharedPoId, companyId);
+    else if (billingType === "TERMITE" || b.po_ids !== undefined) await linkContractPos(conn, id, companyId, b.po_ids ?? [], billingType);
     await logAudit(conn, req, {
       module: "BILLING",
       action: "CONTRACT_CREATED",
