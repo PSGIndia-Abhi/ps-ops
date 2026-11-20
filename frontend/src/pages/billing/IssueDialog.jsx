@@ -102,7 +102,14 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
             {result.issued.map((i) => (
               <div key={i.id} className="bl-chk" style={{ alignItems: "center" }}>
                 <span className="bl-dot" style={{ marginTop: 0 }} />
-                <span style={{ flex: 1 }}><b>{i.invoice_number}</b> · {i.customer} · {rupees(i.total)}{i.advance_adjusted ? ` (${rupees(i.advance_adjusted)} from advance)` : ""}</span>
+                <span style={{ flex: 1 }}>
+                  <b>{i.invoice_number}</b> · {i.customer} · {rupees(i.total)}{i.advance_adjusted ? ` (${rupees(i.advance_adjusted)} from advance)` : ""}
+                  {i.email && (
+                    <span className={`bl-tag ${i.email.status === "SENT" ? "ok" : i.email.status === "FAILED" ? "err" : ""}`} style={{ marginLeft: 6 }}>
+                      {i.email.status === "SENT" ? `Emailed to ${i.email.to.join(", ")}` : i.email.status === "FAILED" ? "Email failed - share again" : i.email.status === "OFF" ? "Auto-email off for this customer" : "No email in profile"}
+                    </span>
+                  )}
+                </span>
                 <button type="button" className="ac-btn sm share" onClick={() => setShareId(i.id)}>Print / Share</button>
               </div>
             ))}

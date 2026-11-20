@@ -7,7 +7,7 @@ const { amountInWords, SELLER, BANK, TERMS, LOGO, STAMP, FONT_DIR, FONTS } = req
 // Brigade tax invoice (utils/brigadeInvoiceDocument.js), with what generated invoices need:
 //   * Bill To / Ship To from the customer's billing profile and outlet
 //   * CGST + SGST, IGST (outside Karnataka) or no tax rows (Residential, titled "Invoice")
-//   * a Round off row, any number of PO numbers, the due date
+//   * a Round off row, any number of PO numbers (no due date is printed)
 //   * copies: one set of pages per copy, labelled "ORIGINAL FOR RECIPIENT", ...
 //   * PREVIEW (draft) and CANCELLED watermarks
 // Drawn only from `content` (billing_invoices.content, frozen on issue), so a re-download or
@@ -121,7 +121,6 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const details = [
     `Invoice No. : ${content.invoice_number || "(given when issued)"}`,
     `Date : ${dmy(content.invoice_date)}`,
-    ...(content.due_date ? [`Due Date : ${dmy(content.due_date)}`] : []),
     `Place of supply: ${content.place_of_supply || ""}`,
     ...(pos.length
       ? [`PO Date : ${pos.map((p) => dmy(p.po_date) || "-").join(" / ")}`, `PO Number : ${pos.map((p) => p.po_number).join(" / ")}`]
@@ -318,6 +317,26 @@ function renderBillingInvoicePdf(content, stream, { copies = 1, preview = false,
   doc.end();
 }
 
+/**
+ * Several invoices in ONE PDF (Download all / Print all): items = [{ content, copies, cancelled }].
+ * Each invoice starts on a new page; with copies > 1 every copy is labelled.
+ */
+function renderBillingInvoicesPdf(items, stream, { title = "Invoices" } = {}) {
+  const doc = new PDFDocument({ size: "A4", margin: 0, info: { Title: title } });
+  for (const [name, file] of Object.entries(FONTS)) doc.registerFont(name, path.join(FONT_DIR, file));
+  doc.pipe(stream);
+  let first = true;
+  for (const it of items) {
+    const count = Math.min(Math.max(Number(it.copies) || 1, 1), COPY_LABELS.length);
+    for (let i = 0; i < count; i += 1) {
+      if (!first) doc.addPage();
+      first = false;
+      drawCopy(doc, it.content, { label: count > 1 ? COPY_LABELS[i] : "", watermarkText: it.cancelled ? "CANCELLED" : "" });
+    }
+  }
+  doc.end();
+}
+
 /** The PDF as a Buffer (for email attachments). */
 function billingInvoicePdfBuffer(content, options) {
   return new Promise((resolve, reject) => {
@@ -335,4 +354,4 @@ function billingInvoicePdfBuffer(content, options) {
   });
 }
 
-module.exports = { renderBillingInvoicePdf, billingInvoicePdfBuffer, COPY_LABELS };
+module.exports = { renderBillingInvoicePdf, renderBillingInvoicesPdf, billingInvoicePdfBuffer, COPY_LABELS };

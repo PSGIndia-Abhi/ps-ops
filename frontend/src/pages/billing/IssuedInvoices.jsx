@@ -1,12 +1,17 @@
 import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { FiDownload, FiExternalLink, FiFileText, FiLink, FiMail, FiMessageCircle, FiPrinter, FiSearch, FiShare2, FiXCircle } from "react-icons/fi";
 import { EmptyRow, Pager } from "../accountant/ui";
 import { exportCsv } from "../accountant/exportCsv";
-import { billingPost, openPdf, qs, useBilling } from "./billingApi";
+import { downloadFile, openPdf, printPdf, qs, useBilling, useCustomerOptions } from "./billingApi";
 import { amount, dmy, periodLabel, thisMonth, typeLabel } from "./format";
 import ShareDialog from "./ShareDialog";
+import CancelDialog from "./CancelDialog";
 import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
+import CustomerFilter from "./CustomerFilter";
+
+const SHARED_AS = { EMAIL: ["Emailed", FiMail], WHATSAPP: ["WhatsApp", FiMessageCircle], LINK: ["Link sent", FiLink], PRINT: ["Printed", FiPrinter], OTHER: ["Shared", FiShare2] };
 
 // Issued Invoices: numbered invoices with their collection status (from the receivables in the
 // Accountant Panel), PDF, Print / Share and Cancel.
@@ -15,19 +20,70 @@ const PAGE_SIZE = 25;
 
 export default function IssuedInvoices() {
   const { me } = useOutletContext();
+  const navigate = useNavigate();
+  const customerOptions = useCustomerOptions();
+  const [picked, setPicked] = useState([]); // customer filter: [] = all
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState(thisMonth());
   const [type, setType] = useState("");
   const [status, setStatus] = useState("ISSUED,CANCELLED");
   const [page, setPage] = useState(0);
   const q = useDebounced(search);
-  const { data, error, loading, reload } = useBilling(`/invoices${qs({ status, month, type, q, page: page + 1, page_size: PAGE_SIZE })}`);
+  const { data, error, loading, reload } = useBilling(`/invoices${qs({ status, month, type, q, company_ids: picked.join(","), page: page + 1, page_size: PAGE_SIZE })}`);
   const [shareId, setShareId] = useState(null);
   const [cancelling, setCancelling] = useState(null);
   const [msg, setMsg] = useState({});
   const rows = data?.rows || [];
+  // Ticked invoices (kept across pages, cleared when the filters change). Cancelled ones are not printed.
+  const [sel, setSel] = useState(() => new Set());
+  const filterKey = `${status}|${month}|${type}|${q}|${picked.join(",")}`;
+  const [selKey, setSelKey] = useState(filterKey);
+  if (selKey !== filterKey) {
+    setSelKey(filterKey);
+    setSel(new Set());
+  }
+  const pickable = rows.filter((r) => r.status !== "CANCELLED");
+  const allOn = pickable.length > 0 && pickable.every((r) => sel.has(r.id));
+  const toggle = (id) => setSel((cur) => {
+    const next = new Set(cur);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const toggleAll = () => setSel((cur) => {
+    const next = new Set(cur);
+    pickable.forEach((r) => (allOn ? next.delete(r.id) : next.add(r.id)));
+    return next;
+  });
 
   const pdf = (id) => openPdf(`/invoices/${id}/pdf`).catch((err) => setMsg({ error: err.message }));
+  const [downloading, setDownloading] = useState("");
+  // Selected invoices when any are ticked, otherwise every issued invoice of the month.
+  const scope = () => (sel.size ? { ids: [...sel].join(",") } : { month });
+  async function downloadAll() {
+    setDownloading("original");
+    setMsg({});
+    try {
+      const r = await downloadFile(`/invoices/download${qs({ ...scope(), copies: "original" })}`, sel.size ? "Invoices selected.pdf" : `Invoices ${month}.pdf`);
+      setMsg({ ok: `Downloaded ${r.count ? `${r.count} invoice(s) - ` : ""}${r.name}` });
+    } catch (err) {
+      setMsg({ error: err.message });
+    } finally {
+      setDownloading("");
+    }
+  }
+  // Opens the browser's print window directly, with every copy set in the customer profiles.
+  async function printAll() {
+    setDownloading("print");
+    setMsg({});
+    try {
+      await printPdf(`/invoices/download${qs({ ...scope(), copies: "print" })}`);
+    } catch (err) {
+      setMsg({ error: err.message });
+    } finally {
+      setDownloading("");
+    }
+  }
   const exportRows = () =>
     exportCsv(`issued-invoices-${month || "all"}.csv`, [
       { header: "Invoice No", value: (r) => r.invoice_number },
@@ -49,15 +105,26 @@ export default function IssuedInvoices() {
           <p className="ac-sub">Final, numbered invoices. They also flow to the Accountant Panel (Invoice List, Outstanding, Payments) for collection.</p>
         </div>
         <div className="ac-actions">
-          <button type="button" className="ac-btn" disabled={!rows.length} onClick={exportRows}>Export</button>
+          <button type="button" className="ac-btn bl-ibtn csv" disabled={!rows.length} onClick={exportRows} title="Export this list to Excel (CSV)"><FiFileText /> Export CSV</button>
+          {/* All issued invoices of the month in one PDF: originals, or every print copy from the profiles. */}
+          <button type="button" className="ac-btn bl-ibtn dl" disabled={(!sel.size && (!month || !data?.total)) || Boolean(downloading)} onClick={downloadAll} title={sel.size || month ? "" : "Choose a month or tick invoices"}>
+            <FiDownload /> {downloading === "original" ? "Downloading…" : sel.size ? `Download selected (${sel.size})` : "Download all"}
+          </button>
+          <button type="button" className="ac-btn bl-ibtn print" disabled={(!sel.size && (!month || !data?.total)) || Boolean(downloading)} onClick={printAll} title="Opens the print window - every copy as set in the customer profiles">
+            <FiPrinter /> {downloading === "print" ? "Preparing…" : sel.size ? `Print selected (${sel.size})` : "Print all"}
+          </button>
         </div>
       </div>
       <Msg {...msg} />
 
       <div className="ac-card">
-        <div className="ac-filters-5" style={{ marginBottom: 12 }}>
-          <input className="ac-input" placeholder="Search invoice no. or customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-          <input type="month" className="ac-input" value={month} onChange={(e) => { setMonth(e.target.value); setPage(0); }} aria-label="Month" title="Clear for all months" />
+        <div className="bl-filterbar">
+          <div className="bl-search">
+            <FiSearch aria-hidden="true" />
+            <input className="ac-input" placeholder="Search invoice no. or customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} aria-label="Search" />
+          </div>
+          <CustomerFilter options={customerOptions} value={picked} onChange={(v) => { setPicked(v); setPage(0); }} />
+          <input type="month" className="ac-input" style={{ width: 170 }} value={month} onChange={(e) => { setMonth(e.target.value); setPage(0); }} aria-label="Month" title="Clear for all months" />
           <select className="ac-select" value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} aria-label="Type">
             <option value="">All types</option>
             <option value="AMC">AMC</option>
@@ -70,26 +137,35 @@ export default function IssuedInvoices() {
             <option value="ISSUED">Issued</option>
             <option value="CANCELLED">Cancelled</option>
           </select>
-          <div />
         </div>
         <Msg error={error} />
+        {sel.size > 0 && (
+          <div className="bl-selbar">
+            <span><b>{sel.size}</b> invoice{sel.size === 1 ? "" : "s"} selected</span>
+            <button type="button" className="bl-link" onClick={() => setSel(new Set())}>Clear selection</button>
+          </div>
+        )}
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack">
             <thead>
               <tr>
+                <th><input type="checkbox" className="bl-cb" checked={allOn} disabled={!pickable.length} onChange={toggleAll} aria-label="Select all on this page" /></th>
                 <th>Invoice no.</th><th>Date</th><th>Customer</th><th>Type</th><th>Period</th>
-                <th className="ac-num">Total (₹)</th><th className="ac-num">Advance adjusted (₹)</th><th>Receivable</th><th>Actions</th>
+                <th className="ac-num">Total (₹)</th><th className="ac-num">Advance adjusted (₹)</th><th>Receivable</th><th>Sent</th><th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {loading || !rows.length ? (
-                <EmptyRow cols={9} loading={loading} text="No issued invoices for these filters." />
+                <EmptyRow cols={11} loading={loading} text="No issued invoices for these filters." />
               ) : (
                 rows.map((r) => {
                   const cancelled = r.status === "CANCELLED";
                   const paidSomething = ["PAID", "PARTIAL"].includes(r.receivable_status) && !(r.advance_adjusted > 0);
                   return (
-                    <tr key={r.id} className={cancelled ? "bl-muted" : ""}>
+                    <tr key={r.id} className={`bl-rowlink ${cancelled ? "bl-muted" : ""} ${sel.has(r.id) ? "bl-sel" : ""}`} onClick={() => navigate(`/billing/invoices/${r.id}`)}>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" className="bl-cb" checked={sel.has(r.id)} disabled={cancelled} onChange={() => toggle(r.id)} aria-label={`Select invoice ${r.invoice_number}`} title={cancelled ? "Cancelled invoices are not printed" : ""} />
+                      </td>
                       <td className="bl-nowrap"><b>{r.invoice_number}</b></td>
                       <td className="bl-nowrap">{dmy(r.invoice_date)}</td>
                       <td>{r.customer}{r.po_numbers.length > 0 && <div className="bl-sub">PO {r.po_numbers.join(", ")}</div>}</td>
@@ -98,17 +174,18 @@ export default function IssuedInvoices() {
                       <td className="bl-num">{cancelled ? <s>{amount(r.total)}</s> : amount(r.total)}</td>
                       <td className="bl-num">{r.advance_adjusted ? amount(r.advance_adjusted) : "—"}</td>
                       <td>{cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={r.receivable_status || "PENDING"} />}</td>
+                      <td>{r.last_shared ? (() => { const [label, Icon] = SHARED_AS[r.last_shared.channel] || SHARED_AS.OTHER; return <span className="bl-sent"><span className="bl-sent-ic"><Icon /></span><span><b>{label}</b><span className="bl-sub">{r.last_shared.by || "—"}{r.last_shared.at ? ` · ${new Date(r.last_shared.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` : ""}</span></span></span>; })() : <span className="ac-sub">Not sent</span>}</td>
                       <td>
-                        <div className="ac-actions">
-                          <button type="button" className="ac-btn sm" onClick={() => pdf(r.id)}>PDF</button>
-                          {!cancelled && me.can("SHARE_INVOICE") && <button type="button" className="ac-btn sm share" onClick={() => setShareId(r.id)}>Share</button>}
+                        <div className="bl-actgroup" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" className="bl-actg" onClick={() => pdf(r.id)} title="View PDF" aria-label="View PDF"><FiExternalLink /></button>
+                          {!cancelled && me.can("SHARE_INVOICE") && <button type="button" className="bl-actg blue" onClick={() => setShareId(r.id)} title="Print / share" aria-label="Print or share"><FiShare2 /></button>}
                           {!cancelled && me.can("CANCEL_INVOICE") && (
-                            <button type="button" className="ac-btn sm danger-text" disabled={paidSomething} title={paidSomething ? "A payment has been received against this invoice" : undefined} onClick={() => setCancelling(r)}>
-                              Cancel
+                            <button type="button" className="bl-actg red" disabled={paidSomething} title={paidSomething ? "A payment has been received against this invoice" : "Cancel invoice"} aria-label="Cancel invoice" onClick={() => setCancelling(r)}>
+                              <FiXCircle />
                             </button>
                           )}
                         </div>
-                        {r.last_shared && <div className="bl-sub">Last {r.last_shared.channel.toLowerCase()} by {r.last_shared.by || "—"}</div>}
+                        
                       </td>
                     </tr>
                   );
@@ -133,47 +210,5 @@ export default function IssuedInvoices() {
         />
       )}
     </div>
-  );
-}
-
-function CancelDialog({ invoice, onClose, onDone }) {
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function submit() {
-    setBusy(true);
-    setError("");
-    try {
-      await billingPost(`/invoices/${invoice.id}/cancel`, { reason });
-      onDone();
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal onClose={onClose} narrow label="Cancel invoice">
-      <div className="bl-m-head">
-        <div><h3>Cancel invoice {invoice.invoice_number}?</h3><div className="ac-sub">{invoice.customer} · ₹{amount(invoice.total)}</div></div>
-        <button type="button" className="bl-x" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      <div className="bl-m-body">
-        <div className="ac-info">ⓘ The receivable is cancelled too, any advance used goes back to the PO, and shared links stop working. The period can be billed again from the Bill Run.</div>
-        <div className="ac-field">
-          <label>Reason <span className="bl-req">*</span></label>
-          <textarea className="ac-textarea" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Wrong quantity – will re-issue" />
-        </div>
-        <Msg error={error} />
-      </div>
-      <div className="bl-m-foot">
-        <span />
-        <div className="ac-actions">
-          <button type="button" className="ac-btn" onClick={onClose}>Keep invoice</button>
-          <button type="button" className="ac-btn ac-btn-primary" style={{ background: "#dc2626", borderColor: "#dc2626" }} disabled={busy || !reason.trim()} onClick={submit}>
-            {busy ? "Cancelling…" : "Cancel invoice"}
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }

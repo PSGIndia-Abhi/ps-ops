@@ -16,6 +16,9 @@ const invoices = require("../controllers/billing/invoices.controller");
 const share = require("../controllers/billing/share.controller");
 const descriptions = require("../controllers/billing/descriptions.controller");
 const frequencies = require("../controllers/billing/frequencies.controller");
+const customers = require("../controllers/billing/customers.controller");
+const sos = require("../controllers/billing/sos.controller");
+const dashboardCtl = require("../controllers/billing/dashboard.controller");
 
 const can = (permission) => [auth, requirePermission(permission)];
 
@@ -39,6 +42,23 @@ router.get("/me", auth, (req, res) => {
   const all = req.user.role === "admin";
   res.json({ user_id: req.user.id, role: req.user.role, permissions: BILLING_PERMISSIONS.filter((p) => all || req.user.permissions?.includes(p)) });
 });
+
+// Accounts dashboard (SOS received, ready / waiting / late, drafts, issued, collections, trend)
+router.get("/dashboard", can(P.VIEW_BILLING), dashboardCtl.dashboard);
+
+// Monthly SOS (Statement of Service): the Service Coordinator reports services completed per outlet;
+// Accounts reads it and can send it back. Billing of counted services waits for it.
+router.get("/sos", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.overview);
+router.get("/sos/:companyId", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.get);
+router.put("/sos/:companyId", can(P.MANAGE_SERVICE_PLANS), sos.save);
+router.post("/sos/:companyId/submit", can(P.MANAGE_SERVICE_PLANS), sos.submit);
+router.post("/sos/:companyId/reopen", canAny(P.MANAGE_SERVICE_PLANS, P.GENERATE_INVOICE), sos.reopen);
+
+// Customer Billing Profile (one screen per customer: details, outlets, services, POs, invoice settings)
+router.get("/customer-options", can(P.VIEW_BILLING), customers.listOptions);
+router.get("/customer-profiles", can(P.VIEW_BILLING), customers.listProfiles);
+router.get("/customer-profiles/:companyId", can(P.VIEW_BILLING), customers.getCustomerProfile);
+router.put("/customer-profiles/:companyId/settings", can(P.MANAGE_BILLING_MASTERS), customers.saveCustomerSettings);
 
 // Customers and billing profiles
 // The Service Coordinator picks the customer for a new service plan from this list too.
@@ -94,6 +114,7 @@ router.get("/due", can(P.VIEW_BILLING), invoices.due);
 router.post("/runs", can(P.GENERATE_INVOICE), invoices.run);
 router.get("/invoices", can(P.VIEW_BILLING), invoices.list);
 router.post("/invoices/issue", can(P.ISSUE_INVOICE), invoices.issue);
+router.get("/invoices/download", can(P.VIEW_BILLING), invoices.download);
 router.get("/invoices/:id", can(P.VIEW_BILLING), invoices.get);
 router.put("/invoices/:id", can(P.GENERATE_INVOICE), invoices.save);
 router.delete("/invoices/:id", can(P.GENERATE_INVOICE), invoices.remove);

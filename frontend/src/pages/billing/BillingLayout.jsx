@@ -1,23 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  FiBarChart2,
-  FiChevronDown,
-  FiChevronUp,
+  FiCheckSquare,
   FiClipboard,
-  FiEdit2,
+  FiEdit3,
   FiFileText,
-  FiFolder,
   FiGrid,
+  FiLayers,
   FiLogOut,
   FiMenu,
   FiMessageSquare,
   FiPlayCircle,
-  FiShoppingBag,
-  FiAlignLeft,
-  FiRepeat,
   FiUsers,
-  FiCalendar,
 } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
@@ -38,56 +32,65 @@ import "./billing.css";
 // billing permissions (GET /api/billing/me).
 
 // The permission each page needs (the API checks it again on every call).
+// A list = any one of them.
 const PAGE_PERMISSION = {
-  tracker: "VIEW_SERVICE_TRACKER",
-  plans: "VIEW_SERVICE_TRACKER",
+  dashboard: "VIEW_BILLING",
+  coordinator: "VIEW_SERVICE_TRACKER",
+  sos: ["VIEW_SERVICE_TRACKER", "VIEW_BILLING"],
   run: "VIEW_BILLING",
   drafts: "VIEW_BILLING",
   invoices: "VIEW_BILLING",
+  customers: "VIEW_BILLING",
+  masters: "VIEW_BILLING",
   contracts: "VIEW_BILLING",
   pos: "VIEW_BILLING",
   descriptions: "VIEW_BILLING",
   frequencies: "VIEW_BILLING",
 };
 
+// Pages that belong to a menu item without being in the menu (opened from Masters / Customers).
+const MENU_OF = { contracts: "masters", pos: "masters", descriptions: "masters", frequencies: "masters" };
+
+/**
+ * The menu: flat sections, every item one click away. Accounts (VIEW_BILLING) bill; the Service
+ * Coordinator (MANAGE_SERVICE_PLANS) plans services. Someone with both (admin) sees both sections.
+ */
 function navFor(can, drafts) {
   const accounts = can("VIEW_BILLING");
-  const tracker = can("VIEW_SERVICE_TRACKER");
-  if (!accounts) {
-    return [
+  const coordinator = can("MANAGE_SERVICE_PLANS") || (!accounts && can("VIEW_SERVICE_TRACKER"));
+  const sections = [];
+  if (accounts) {
+    sections.push(
       {
-        label: "Service Planning",
-        icon: FiUsers,
-        children: [
-          { label: "Service Plans", path: `${BILLING_HOME}/plans`, icon: FiCalendar },
-          tracker && { label: "Service Tracker", path: `${BILLING_HOME}/tracker`, icon: FiBarChart2 },
-        ].filter(Boolean),
+        heading: "Billing",
+        items: [
+          { key: "dashboard", label: "Dashboard", icon: FiGrid },
+          { key: "sos", label: "Monthly SOS", icon: FiCheckSquare },
+          { key: "run", label: "Bill Run", icon: FiPlayCircle },
+          { key: "drafts", label: "Draft Invoices", icon: FiEdit3, badge: drafts },
+          { key: "invoices", label: "Issued Invoices", icon: FiFileText },
+        ],
       },
-    ];
+      {
+        heading: "Setup",
+        items: [
+          { key: "customers", label: "Customers", icon: FiUsers },
+          { key: "masters", label: "Masters", icon: FiLayers },
+        ],
+      }
+    );
   }
-  return [
-    {
-      label: "Billing",
-      icon: FiFileText,
-      children: [
-        tracker && { label: "Service Tracker", path: `${BILLING_HOME}/tracker`, icon: FiBarChart2 },
-        { label: "Bill Run", path: `${BILLING_HOME}/run`, icon: FiPlayCircle },
-        { label: "Draft Invoices", path: `${BILLING_HOME}/drafts`, icon: FiEdit2, badge: drafts },
-        { label: "Issued Invoices", path: `${BILLING_HOME}/invoices`, icon: FiFileText },
-      ].filter(Boolean),
-    },
-    {
-      label: "Masters",
-      icon: FiFolder,
-      children: [
-        tracker && { label: "Service Plans", path: `${BILLING_HOME}/plans`, icon: FiCalendar },
-        { label: "Contracts & Price Lists", path: `${BILLING_HOME}/contracts`, icon: FiClipboard },
-        { label: "Purchase Orders", path: `${BILLING_HOME}/pos`, icon: FiShoppingBag },
-        accounts && { label: "Invoice Descriptions", path: `${BILLING_HOME}/descriptions`, icon: FiAlignLeft },
-        accounts && { label: "Billing Frequencies", path: `${BILLING_HOME}/frequencies`, icon: FiRepeat },
-      ].filter(Boolean),
-    },
-  ];
+  // The Service Coordinator: a dashboard and the monthly SOS (Accounts reach the SOS from Billing).
+  if (coordinator) {
+    sections.push({
+      heading: "Service Coordinator",
+      items: [
+        { key: "coordinator", label: "Dashboard", icon: FiGrid },
+        ...(accounts ? [] : [{ key: "sos", label: "Monthly SOS", icon: FiCheckSquare }]),
+      ],
+    });
+  }
+  return sections;
 }
 
 export default function BillingLayout() {
@@ -102,7 +105,6 @@ export default function BillingLayout() {
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState({});
   const [drafts, setDrafts] = useState(0);
 
   useEffect(() => {
@@ -130,12 +132,11 @@ export default function BillingLayout() {
   // A page the user's permissions do not cover (e.g. typed into the address bar) opens their home instead.
   const section = location.pathname.slice(BILLING_HOME.length + 1).split("/")[0];
   const needed = PAGE_PERMISSION[section];
-  if (me.ready && needed && !me.can(needed)) return <Navigate to={BILLING_HOME} replace />;
+  const allowed = !needed || (Array.isArray(needed) ? needed.some((p) => me.can(p)) : me.can(needed));
+  if (me.ready && !allowed) return <Navigate to={BILLING_HOME} replace />;
 
   const nav = navFor(me.can, drafts);
-  const isActive = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
-  const groupActive = (g) => g.children.some((c) => isActive(c.path));
-  const groupOpen = (g) => openGroups[g.label] ?? true;
+  const current = MENU_OF[section] || section;
 
   function go(path) {
     setMenuOpen(false);
@@ -149,39 +150,23 @@ export default function BillingLayout() {
   }
 
   const navEl = (
-    <nav className="acc-nav">
-      {nav.map((group) => {
-        const Icon = group.icon;
-        const open = groupOpen(group);
-        return (
-          <div key={group.label}>
-            <button
-              type="button"
-              className={`acc-parent ${groupActive(group) ? "active" : ""}`}
-              onClick={() => setOpenGroups((prev) => ({ ...prev, [group.label]: !open }))}
-              aria-expanded={open}
-            >
-              <Icon className="acc-icon" />
-              <span className="acc-label">{group.label}</span>
-              {open ? <FiChevronUp className="acc-chevron" /> : <FiChevronDown className="acc-chevron" />}
-            </button>
-            {open && (
-              <div className="acc-children">
-                {group.children.map((child) => {
-                  const ChildIcon = child.icon;
-                  return (
-                    <button key={child.path} type="button" className={`acc-child ${isActive(child.path) ? "active" : ""}`} onClick={() => go(child.path)}>
-                      <ChildIcon className="acc-icon" />
-                      <span className="acc-label">{child.label}</span>
-                      {child.badge > 0 && <span className="bl-nav-badge">{child.badge}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <nav className="acc-nav bl-nav">
+      {nav.map((sec) => (
+        <div key={sec.heading} className="bl-nav-sec">
+          <div className="bl-nav-heading">{sec.heading}</div>
+          {sec.items.map((item) => {
+            const Icon = item.icon;
+            const active = current === item.key;
+            return (
+              <button key={item.key} type="button" className={`bl-nav-item ${active ? "active" : ""}`} onClick={() => go(`${BILLING_HOME}/${item.key}`)} aria-current={active ? "page" : undefined}>
+                <Icon className="acc-icon" />
+                <span className="acc-label">{item.label}</span>
+                {item.badge > 0 && <span className="bl-nav-badge">{item.badge}</span>}
+              </button>
+            );
+          })}
+        </div>
+      ))}
       <div className="acc-foot">
         {role === "admin" && (
           <button type="button" className="acc-item" onClick={() => go("/admin")}>
@@ -215,7 +200,6 @@ export default function BillingLayout() {
         <button type="button" className="header-left header-left-btn" onClick={() => navigate(BILLING_HOME)}>
           <img src={logo} alt="BestServe" className="logo" />
           <span className="header-title">{me.ready && !accounts ? "Service Coordinator" : "Accounts Department"}</span>
-          <span className="bl-hdr-tag">{me.ready && !accounts ? "Service Planning" : "Billing"}</span>
         </button>
         <div className="header-right">
           <NotificationsMenu iconOnly />

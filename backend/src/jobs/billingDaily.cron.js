@@ -60,10 +60,50 @@ async function poExpiryAlerts() {
   }
 }
 
+// 09:30 - customers past their bill-by day (billing profile) with an invoice still not issued this
+// month: one notification per customer per month to Accounts. Uses the Bill Run's due list.
+async function lateBillingAlerts() {
+  try {
+    const { dueList } = require("../services/billing/draft.service");
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const month = today.slice(0, 7);
+    const day = Number(today.slice(8, 10));
+    const [profiles] = await pool.query("SELECT company_id, bill_by_day FROM billing_profiles WHERE bill_by_day IS NOT NULL AND bill_by_day < ?", [day]);
+    if (!profiles.length) return;
+    const by = new Map(profiles.map((p) => [p.company_id, Number(p.bill_by_day)]));
+    const due = (await dueList(pool, month)).rows.filter((r) => by.has(r.company_id));
+    if (!due.length) return;
+    const [users] = await pool.query(
+      "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name IN (?) AND (u.is_active IS NULL OR u.is_active = 1)",
+      [ACCOUNTS_ROLES]
+    );
+    const perCustomer = new Map();
+    for (const r of due) {
+      if (!perCustomer.has(r.company_id)) perCustomer.set(r.company_id, []);
+      perCustomer.get(r.company_id).push(r);
+    }
+    for (const [companyId, rows] of perCustomer) {
+      const [claimed] = await pool.query("INSERT IGNORE INTO billing_late_alerts (company_id, month) VALUES (?, ?)", [companyId, `${month}-01`]);
+      if (!claimed.affectedRows) continue; // already alerted this month
+      const waiting = rows.some((r) => r.sos === "PENDING");
+      await notifyUsers(users.map((u) => u.id), {
+        type: "BILLING_LATE",
+        title: `Invoice overdue: ${rows[0].customer}`,
+        message: `Bill by day ${by.get(companyId)} has passed and ${rows.map((r) => r.contract_code).join(", ")} ${rows.length > 1 ? "are" : "is"} not invoiced${waiting ? " (waiting for the Service Coordinator's SOS)" : ""}.`,
+        entityType: "billing_contract",
+        entityId: rows[0].contract_id,
+      });
+    }
+  } catch (err) {
+    if (!missingTables(err)) console.error("Billing late alerts job failed:", err);
+  }
+}
+
 function startBillingDailyCron() {
   activateServicePlans(); // also on start, so a restart after midnight catches up
   cron.schedule("5 0 * * *", activateServicePlans, { timezone: "Asia/Kolkata" });
   cron.schedule("0 7 * * *", poExpiryAlerts, { timezone: "Asia/Kolkata" });
+  cron.schedule("30 9 * * *", lateBillingAlerts, { timezone: "Asia/Kolkata" });
 }
 
-module.exports = { startBillingDailyCron, activateServicePlans, poExpiryAlerts };
+module.exports = { startBillingDailyCron, activateServicePlans, poExpiryAlerts, lateBillingAlerts };

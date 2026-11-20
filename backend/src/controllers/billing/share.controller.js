@@ -13,6 +13,7 @@ const C = require("../../services/billing/common");
 const { renderBillingInvoicePdf, billingInvoicePdfBuffer, COPY_LABELS } = require("../../utils/billingInvoiceDocument");
 const { sendBillingInvoiceEmail } = require("../../utils/mailer");
 const { sendPdf, pdfName } = require("./invoices.controller");
+const { recipientsFor } = require("../../services/billing/delivery.service");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,7 +23,7 @@ const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 /** The issued invoice with its frozen content (404 / 400 otherwise). */
 async function issuedInvoice(db, id, { allowCancelled = false } = {}) {
   const [[row]] = await db.query(
-    `SELECT bi.id, bi.invoice_number, bi.status, bi.total, bi.print_copies, bi.company_id, bi.content,
+    `SELECT bi.id, bi.invoice_number, bi.status, bi.total, bi.print_copies, bi.company_id, bi.site_id, bi.content,
             DATE_FORMAT(bi.due_date, '%Y-%m-%d') AS due_date, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start,
             bi.description, c.name AS customer
        FROM billing_invoices bi JOIN companies c ON c.id = bi.company_id
@@ -90,8 +91,8 @@ function defaults(inv) {
     subject: `Invoice ${inv.invoice_number} - Pest control${month ? `, ${month}` : ""}`,
     message:
       `Dear Sir/Madam,\n\nPlease find attached our invoice ${inv.invoice_number} for pest control services${month ? ` for ${month}` : ""} ` +
-      `(${amount}${inv.due_date ? `, due ${C.dmy(inv.due_date)}` : ""}). Kindly arrange payment.\n\nRegards,\nAccounts - BestServe Pest Management Pvt Ltd`,
-    whatsapp: `Invoice ${inv.invoice_number} for ${amount}${inv.due_date ? ` (due ${C.dmy(inv.due_date)})` : ""}. View: {link}`,
+      `(${amount}). Kindly arrange payment.\n\nRegards,\nAccounts - BestServe Pest Management Pvt Ltd`,
+    whatsapp: `Invoice ${inv.invoice_number} for ${amount}. View: {link}`,
   };
 }
 
@@ -113,8 +114,12 @@ const shareOptions = C.handle("Failed to load the share options", async (req, re
     [inv.company_id]
   );
   const d = defaults(inv);
+  // The customer profile's addresses (outlet first, else the customer's), as for the automatic email.
+  // With these the Email button sends directly; without, it opens Gmail to the payment contacts.
+  const profileEmails = await recipientsFor(pool, inv);
   res.json({
     invoice_number: inv.invoice_number,
+    profile_emails: profileEmails,
     customer: inv.customer,
     total: inv.total,
     due_date: inv.due_date,

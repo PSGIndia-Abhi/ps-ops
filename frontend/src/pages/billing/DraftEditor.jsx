@@ -196,7 +196,6 @@ export default function DraftEditor() {
               <Field label="Invoice date" required>
                 <input type="date" className="ac-input" value={form.invoice_date || ""} disabled={!editable} onChange={(e) => set({ invoice_date: e.target.value })} />
               </Field>
-              <Field label="Due date"><input className="ac-input" readOnly value={dirty ? "Updated on save" : dmy(inv.due_date)} /></Field>
               <Field label="Bill To" className="bl-span2">
                 <input className="ac-input" readOnly value={[inv.bill_to.name, inv.bill_to.address.replace(/\n/g, ", "), inv.bill_to.state].filter(Boolean).join(", ")} />
               </Field>

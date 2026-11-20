@@ -120,3 +120,6 @@ export function typeLabel(type, frequency) {
 export const typeClass = (type) => ({ AMC: "b-blue", ONE_TIME: "b-teal", TERMITE: "b-orange", CHEMICAL: "b-purple" })[type] || "b-grey";
 
 export const CATEGORY_LABEL = { COMMERCIAL: "Commercial", RESIDENTIAL: "Residential" };
+
+/** "Chai days Jayanagar" -> "CJ" (for the round initials avatar). */
+export const initials = (name) => String(name || "?").split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).slice(0, 2).map((w) => w.replace(/[^A-Za-z0-9]/g, "")[0] || "").join("").toUpperCase() || "?";

@@ -49,6 +49,28 @@ function resolveNotificationPath(notification, role) {
     return `/feedback-desk/calls/${notification.entity_id}`;
   }
 
+  // Billing: an SOS (received / sent back / reopened) opens that customer's SOS for that month;
+  // older SOS notifications without the customer and month open the Monthly SOS list.
+  if (notification.entity_type === "billing_sos") {
+    const [companyId, month] = String(notification.entity_id || "").split(":");
+    return companyId && /^\d{4}-\d{2}$/.test(month || "")
+      ? `/billing/sos/${encodeURIComponent(companyId)}?month=${month}`
+      : "/billing/sos";
+  }
+  // Billing late alert: the contract that is late.
+  if (notification.entity_type === "billing_contract" && notification.entity_id) {
+    return `/billing/contracts/${encodeURIComponent(notification.entity_id)}`;
+  }
+  // PO expiring: Purchase Orders.
+  if (notification.entity_type === "customer_po") {
+    return "/billing/pos";
+  }
+  // Older service-shortfall alert (Service Tracker, now Monthly SOS) for that month.
+  if (notification.entity_type === "billing_service_tracker") {
+    const month = String(notification.entity_id || "");
+    return /^\d{4}-\d{2}$/.test(month) ? `/billing/sos?month=${month}` : "/billing/sos";
+  }
+
   if (notification.entity_type === "job" && notification.entity_id) {
     return role === "client"
       ? `/client/jobs/${notification.entity_id}`

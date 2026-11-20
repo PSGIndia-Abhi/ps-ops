@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
+import { FiSearch } from "react-icons/fi";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { EmptyRow, Pager } from "../accountant/ui";
-import { billingDelete, qs, useBilling } from "./billingApi";
+import { billingDelete, billingGet, qs, useBilling, useCustomerOptions } from "./billingApi";
 import { amount, periodLabel } from "./format";
 import IssueDialog from "./IssueDialog";
 import { Msg, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
+import CustomerFilter from "./CustomerFilter";
 
 // Draft Invoices: drafts from the Bill Run. Open one to edit it, or issue several at once.
 
@@ -23,8 +25,10 @@ export default function DraftInvoices() {
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [page, setPage] = useState(0);
+  const [customers, setCustomers] = useState([]); // customer filter: [] = all
+  const customerOptions = useCustomerOptions();
   const q = useDebounced(search);
-  const { data, error, loading, reload } = useBilling(`/invoices${qs({ status: "DRAFT", q, type, page: page + 1, page_size: PAGE_SIZE })}`);
+  const { data, error, loading, reload } = useBilling(`/invoices${qs({ status: "DRAFT", q, type, company_ids: customers.join(","), page: page + 1, page_size: PAGE_SIZE })}`);
   const [selected, setSelected] = useState(new Set());
   const [issuing, setIssuing] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -33,6 +37,21 @@ export default function DraftInvoices() {
   const issuable = rows.filter((r) => r.check !== "ERRORS");
   const picked = rows.filter((r) => selected.has(r.id));
   const allOn = issuable.length > 0 && issuable.every((r) => selected.has(r.id));
+  const [loadingAll, setLoadingAll] = useState(false);
+  async function issueAll() {
+    setLoadingAll(true);
+    setMsg({});
+    try {
+      const all = await billingGet(`/invoices${qs({ status: "DRAFT", page_size: 200, company_ids: customers.join(",") })}`);
+      const ok = all.rows.filter((r) => r.check !== "ERRORS");
+      if (!ok.length) setMsg({ error: "Every draft still needs input (quantities or rates). Open them first." });
+      else setIssuing(ok);
+    } catch (err) {
+      setMsg({ error: err.message });
+    } finally {
+      setLoadingAll(false);
+    }
+  }
 
   const toggle = (id) => {
     const next = new Set(selected);
@@ -62,17 +81,27 @@ export default function DraftInvoices() {
         </div>
         <div className="ac-actions">
           {me.can("ISSUE_INVOICE") && (
-            <button type="button" className="ac-btn green" disabled={!picked.length} onClick={() => setIssuing(picked)}>
-              Issue selected ({picked.length})
-            </button>
+            <>
+              <button type="button" className="ac-btn" disabled={!picked.length} onClick={() => setIssuing(picked)}>
+                Issue selected ({picked.length})
+              </button>
+              {/* One click: every draft (all pages, up to 200) without errors; all are checked again in the dialog. */}
+              <button type="button" className="ac-btn green" disabled={!data?.total || loadingAll} onClick={issueAll}>
+                {loadingAll ? "Loading…" : `Issue all (${data?.total ?? 0})`}
+              </button>
+            </>
           )}
         </div>
       </div>
       <Msg {...msg} />
 
       <div className="ac-card">
-        <div className="ac-filters" style={{ marginBottom: 12 }}>
-          <input className="ac-input" placeholder="Search customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
+        <div className="bl-filterbar">
+          <div className="bl-search">
+            <FiSearch aria-hidden="true" />
+            <input className="ac-input" placeholder="Search customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} aria-label="Search" />
+          </div>
+          <CustomerFilter options={customerOptions} value={customers} onChange={(v) => { setCustomers(v); setPage(0); }} />
           <select className="ac-select" value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} aria-label="Billing type">
             <option value="">All billing types</option>
             <option value="AMC">AMC</option>
@@ -80,8 +109,6 @@ export default function DraftInvoices() {
             <option value="TERMITE">Termite</option>
             <option value="CHEMICAL">Chemical</option>
           </select>
-          <div />
-          <div />
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
