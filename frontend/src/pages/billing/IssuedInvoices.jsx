@@ -160,7 +160,7 @@ export default function IssuedInvoices() {
               ) : (
                 rows.map((r) => {
                   const cancelled = r.status === "CANCELLED";
-                  const paidSomething = ["PAID", "PARTIAL"].includes(r.receivable_status) && !(r.advance_adjusted > 0);
+                  const paidSomething = (r.paid_amount || 0) - (r.advance_adjusted || 0) > 0.005; // a payment recorded in Billing
                   return (
                     <tr key={r.id} className={`bl-rowlink ${cancelled ? "bl-muted" : ""} ${sel.has(r.id) ? "bl-sel" : ""}`} onClick={() => navigate(`/billing/invoices/${r.id}`)}>
                       <td onClick={(e) => e.stopPropagation()}>
@@ -180,7 +180,7 @@ export default function IssuedInvoices() {
                           <button type="button" className="bl-actg" onClick={() => pdf(r.id)} title="View PDF" aria-label="View PDF"><FiExternalLink /></button>
                           {!cancelled && me.can("SHARE_INVOICE") && <button type="button" className="bl-actg blue" onClick={() => setShareId(r.id)} title="Print / share" aria-label="Print or share"><FiShare2 /></button>}
                           {!cancelled && me.can("CANCEL_INVOICE") && (
-                            <button type="button" className="bl-actg red" disabled={paidSomething} title={paidSomething ? "A payment has been received against this invoice" : "Cancel invoice"} aria-label="Cancel invoice" onClick={() => setCancelling(r)}>
+                            <button type="button" className="bl-actg red" disabled={paidSomething} title={paidSomething ? "A payment is recorded - remove it on the invoice page first" : "Cancel invoice"} aria-label="Cancel invoice" onClick={() => setCancelling(r)}>
                               <FiXCircle />
                             </button>
                           )}

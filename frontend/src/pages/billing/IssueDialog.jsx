@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { billingPost } from "./billingApi";
+import { billingPost, printPdf, qs } from "./billingApi";
 import { rupees } from "./format";
 import ShareDialog from "./ShareDialog";
 import { Modal, Msg } from "./ui";
 
 // Confirms issuing one or more drafts (final, numbered), shows what was issued and what failed,
-// and opens Share and Print for an issued invoice.
+// and opens Share and Print for an issued invoice. The print window opens by itself right after
+// issuing, with every invoice just issued (copies as set in each customer profile).
 // `warnings` is given by a caller that has just checked the draft (the draft editor). Without it
 // (several drafts from Draft Invoices) every draft is checked here first, so each warning is
 // seen before it is confirmed - issuing confirms all of them.
@@ -15,6 +16,8 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [shareId, setShareId] = useState(null);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
   const [checks, setChecks] = useState(null); // [{ id, customer, warnings, errors }] when checked here
   const total = drafts.reduce((t, d) => t + (Number(d.total) || 0), 0);
   const checkHere = warnings === undefined;
@@ -48,6 +51,19 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
   const withWarnings = (checks || []).filter((c) => c.warnings.length);
   const withErrors = (checks || []).filter((c) => c.errors.length);
 
+  async function printIssued(issued) {
+    if (!issued?.length) return;
+    setPrinting(true);
+    setPrintError("");
+    try {
+      await printPdf(`/invoices/download${qs({ ids: issued.map((i) => i.id).join(","), copies: "print" })}`);
+    } catch (err) {
+      setPrintError(`Issued, but the print could not open (${err.message}). Use Print again.`);
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   async function issue() {
     setBusy(true);
     setError("");
@@ -55,6 +71,8 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
       const r = await billingPost("/invoices/issue", { ids: drafts.map((d) => d.id), confirm_warnings: true });
       setResult(r);
       onDone?.(r);
+      // Print straight away (no separate Print click), then Share for a single invoice as before.
+      await printIssued(r.issued);
       if (r.issued.length === 1 && !r.failed.length) setShareId(r.issued[0].id);
     } catch (err) {
       setError(err.message);
@@ -75,7 +93,8 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
         <button type="button" className="bl-x" onClick={onClose} aria-label="Close" disabled={busy}>✕</button>
       </div>
       <div className="bl-m-body">
-        <Msg error={error} />
+        <Msg error={error || printError} />
+        {result && result.issued.length > 0 && <div className="ac-sub">{printing ? "Opening the print window…" : `The print window opened with ${result.issued.length} invoice${result.issued.length === 1 ? "" : "s"}.`}</div>}
         {!result && !checkHere && warnings.length > 0 && (
           <div>
             <div className="bl-m-sec">Please confirm</div>
@@ -129,12 +148,15 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
         <span />
         <div className="ac-actions">
           {result ? (
-            <button type="button" className="ac-btn ac-btn-primary" onClick={onClose}>Done</button>
+            <>
+              {result.issued.length > 0 && <button type="button" className="ac-btn" onClick={() => printIssued(result.issued)} disabled={printing}>{printing ? "Opening print…" : "Print again"}</button>}
+              <button type="button" className="ac-btn ac-btn-primary" onClick={onClose}>Done</button>
+            </>
           ) : (
             <>
               <button type="button" className="ac-btn" onClick={onClose} disabled={busy}>Cancel</button>
               <button type="button" className="ac-btn green" onClick={issue} disabled={busy || checking || (checkHere && checks && withErrors.length === checks.length)}>
-                {busy ? "Issuing…" : checking ? "Checking…" : withWarnings.length ? "Confirm and issue" : "Issue"}
+                {busy ? (printing ? "Opening print…" : "Issuing…") : checking ? "Checking…" : withWarnings.length ? "Confirm and issue" : "Issue"}
               </button>
             </>
           )}

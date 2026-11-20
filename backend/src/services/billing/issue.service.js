@@ -12,6 +12,7 @@ const { v4: uuid } = require("uuid");
 const C = require("./common");
 const calc = require("./calc");
 const D = require("./draft.service");
+const PAY = require("./payment.service");
 const { nextInvoiceNumber } = require("./numbering");
 const { insertInvoiceTds } = require("../Tds.service");
 const { syncInvoiceStatusesSafely } = require("../InvoiceStatus.service");
@@ -97,26 +98,33 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
     // 2. the next number in the main series, carrying on from Vyapar's last invoice (numbering.js)
     const { fy, seq, number } = await nextInvoiceNumber(conn, inv.invoice_date);
 
-    // 3. receivable in the existing invoices table + TDS snapshot. TDS follows the customer's TDS
-    // setting (on the invoice amount or on the taxable value), so the taxable value (the subtotal,
-    // before GST) is saved on the receivable and passed on: never guessed back from the total.
-    const [[company]] = await conn.query("SELECT id, tds_applicable, tds_rate, tds_basis FROM companies WHERE id = ?", [inv.customer.company_id]);
-    const receivableId = uuid();
-    await conn.query(
-      `INSERT INTO invoices
-         (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, taxable_amount, paid_amount, pending_amount, status, remarks, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'PENDING', ?, ?)`,
-      [
-        receivableId, number, inv.customer.company_id, inv.site_id || inv.ship_to_site_id || null, inv.invoice_date, inv.due_date,
-        inv.total, inv.subtotal, inv.total, `Generated - ${inv.contract.contract_code} (${C.dmy(inv.period_start)} to ${C.dmy(inv.period_end)})`, userId,
-      ]
-    );
-    await insertInvoiceTds(conn, receivableId, company, inv.total, inv.subtotal);
+    // 3. Not connected to the Accountant Panel for now: payments are recorded in Billing
+    // (payment.service.js). Only an invoice paid from a termite advance - a payment that lives in the
+    // Accountant Panel - still gets its receivable there, so the advance is used up and never twice.
+    const adv = await D.advanceFor(conn, inv.po_ids, { lock: true });
+    const usesAdvance = Boolean(adv && adv.payments.some((p) => p.remaining > EPS));
+    let receivableId = null;
+    if (usesAdvance) {
+      // Receivable in the existing invoices table + TDS snapshot. TDS follows the customer's TDS
+      // setting (on the invoice amount or on the taxable value), so the taxable value (the subtotal,
+      // before GST) is saved on the receivable and passed on: never guessed back from the total.
+      const [[company]] = await conn.query("SELECT id, tds_applicable, tds_rate, tds_basis FROM companies WHERE id = ?", [inv.customer.company_id]);
+      receivableId = uuid();
+      await conn.query(
+        `INSERT INTO invoices
+           (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, taxable_amount, paid_amount, pending_amount, status, remarks, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'PENDING', ?, ?)`,
+        [
+          receivableId, number, inv.customer.company_id, inv.site_id || inv.ship_to_site_id || null, inv.invoice_date, inv.due_date,
+          inv.total, inv.subtotal, inv.total, `Generated - ${inv.contract.contract_code} (${C.dmy(inv.period_start)} to ${C.dmy(inv.period_end)})`, userId,
+        ]
+      );
+      await insertInvoiceTds(conn, receivableId, company, inv.total, inv.subtotal);
+    }
 
     // 4. Termite advance
     let advanceAdjusted = 0;
-    const adv = await D.advanceFor(conn, inv.po_ids, { lock: true });
-    if (adv) {
+    if (usesAdvance) {
       let left = inv.total;
       for (const p of adv.payments) {
         if (left <= EPS) break;
@@ -213,6 +221,9 @@ async function cancelIssued(pool, id, req, reason) {
   await C.inTransaction(pool, async (conn) => {
     const inv = await D.loadInvoice(conn, id, { lock: true });
     if (inv.status !== "ISSUED") throw C.bad(inv.status === "DRAFT" ? "This is a draft - delete it instead" : "This invoice is already cancelled");
+    if (await PAY.hasPayments(conn, id)) {
+      throw C.bad(`A payment is recorded against ${inv.invoice_number}. Remove the payment on the invoice page before cancelling.`);
+    }
 
     if (inv.receivable_invoice_id) {
       const [[paid]] = await conn.query(

@@ -459,7 +459,12 @@ async function loadInvoice(db, id, { lock = false } = {}) {
             COALESCE(gp.state_code, bp.state_code) AS state_code, COALESCE(gp.state_name, bp.state_name) AS state_name,
             bc.contract_kind, bc.group_id AS contract_group_id,
             ss.name AS ship_to_site, ss.address AS ship_to_address, ss.city AS ship_to_city,
-            iu.name AS issued_by_name, inv.status AS receivable_status
+            iu.name AS issued_by_name,
+            IF(bi.status = 'ISSUED', (CASE WHEN bi.advance_adjusted + (SELECT COALESCE(SUM(bp.amount + bp.tds_amount), 0) FROM billing_invoice_payments bp
+                                                                        WHERE bp.billing_invoice_id = bi.id AND bp.deleted_at IS NULL) >= bi.total - 0.005 THEN 'PAID'
+                                          WHEN bi.advance_adjusted + (SELECT COALESCE(SUM(bp.amount + bp.tds_amount), 0) FROM billing_invoice_payments bp
+                                                                        WHERE bp.billing_invoice_id = bi.id AND bp.deleted_at IS NULL) > 0.005 THEN 'PARTIAL'
+                                          ELSE 'PENDING' END), NULL) AS receivable_status
        FROM billing_invoices bi
        JOIN billing_contracts bc ON bc.id = bi.contract_id
        JOIN companies c ON c.id = bi.company_id
@@ -468,7 +473,6 @@ async function loadInvoice(db, id, { lock = false } = {}) {
        LEFT JOIN billing_group_profiles gp ON gp.group_id = bc.group_id AND bc.contract_kind = 'GROUP'
        LEFT JOIN sites ss ON ss.id = bi.ship_to_site_id
        LEFT JOIN users iu ON iu.id = bi.issued_by
-       LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
       WHERE bi.id = ?`,
     [id]
   );

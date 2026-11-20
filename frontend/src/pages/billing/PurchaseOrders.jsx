@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
+import { FiPaperclip, FiUploadCloud, FiX } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, billingUpload, openPdf, qs, useBilling } from "./billingApi";
 import { amount, dmy, rupees, rupeesShort } from "./format";
@@ -35,6 +36,7 @@ export default function PurchaseOrders() {
   const { data, error, loading, reload } = useBilling(`/pos${qs({ ...filterParams(filter), q })}`);
   const [editing, setEditing] = useState(null); // {} = new, po = edit
   const [openId, setOpenId] = useState(null);
+  const [notice, setNotice] = useState("");
   const s = data?.summary;
   const rows = data?.rows || [];
 
@@ -48,6 +50,7 @@ export default function PurchaseOrders() {
         {canEdit && <div className="ac-actions"><button type="button" className="ac-btn ac-btn-primary" onClick={() => setEditing({})}>+ Add PO</button></div>}
       </div>
 
+      {notice && <Msg error={notice} />}
       <div className="ac-kpis bl-kpis-4">
         <Kpi color="blue" label="Active POs" value={s?.active ?? "—"} note={s ? `incl. ${s.open_po} Open POs` : ""} onClick={() => setFilter("all")} active={filter === "all"} />
         <Kpi color="orange" label="Expiring in 30 days" value={s?.expiring_30_days ?? "—"} note="renewal needed" onClick={() => setFilter("expiring")} active={filter === "expiring"} />
@@ -105,7 +108,7 @@ export default function PurchaseOrders() {
         </div>
       </div>
 
-      {editing && <PoForm po={editing.id ? editing : null} onClose={() => setEditing(null)} onSaved={(id) => { setEditing(null); reload(); setOpenId(id); }} />}
+      {editing && <PoForm po={editing.id ? editing : null} onClose={() => setEditing(null)} onSaved={(id, warning) => { setEditing(null); setNotice(warning || ""); reload(); setOpenId(id); }} />}
       {openId && !editing && <PoDetail id={openId} canEdit={canEdit} onClose={() => setOpenId(null)} onEdit={(po) => setEditing(po)} onChanged={reload} />}
     </div>
   );
@@ -118,7 +121,19 @@ function PoForm({ po, onClose, onSaved }) {
   const { data: contracts } = useBilling(form.company_id ? `/contracts${qs({ company_id: form.company_id })}` : null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [file, setFile] = useState(null);
   const set = (patch) => setForm({ ...form, ...patch });
+
+  // The PO copy is checked here and uploaded right after the PO is saved (POST /pos/:id/file).
+  function pickFile(e) {
+    const picked = e.target.files?.[0] || null;
+    e.target.value = "";
+    if (!picked) return;
+    if (!["application/pdf", "image/png", "image/jpeg"].includes(picked.type)) { setError("The PO copy must be a PDF, JPG or PNG"); return; }
+    if (picked.size > 3 * 1024 * 1024) { setError("The PO copy is too large (max 3 MB)"); return; }
+    setError("");
+    setFile(picked);
+  }
 
   async function save() {
     setBusy(true);
@@ -131,7 +146,18 @@ function PoForm({ po, onClose, onSaved }) {
     };
     try {
       const r = po ? await billingPut(`/pos/${po.id}`, body) : await billingPost("/pos", body);
-      onSaved(r.id);
+      const poId = r.id || po?.id;
+      let warning = "";
+      if (file) {
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          await billingUpload(`/pos/${poId}/file`, fd);
+        } catch (err) {
+          warning = `PO saved, but the copy didn't upload (${err.message}). Upload it from the PO.`;
+        }
+      }
+      onSaved(poId, warning);
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -182,10 +208,17 @@ function PoForm({ po, onClose, onSaved }) {
             </Field>
           )}
           <Field label="Remarks" className={po ? "" : "bl-span2"}><input className="ac-input" value={form.remarks} maxLength={1000} onChange={(e) => set({ remarks: e.target.value })} /></Field>
+          <Field label="PO copy" className="bl-span2" hint={po?.file && !file ? `Current: ${po.file.name} - choose a file to replace it (the old copy is kept)` : "PDF, JPG or PNG, up to 3 MB (optional)"}>
+            {file ? (
+              <div className="pd-file"><FiPaperclip /><span>{file.name}</span><small>{Math.max(1, Math.round(file.size / 1024))} KB</small><button type="button" className="sos-rm" onClick={() => setFile(null)} aria-label="Remove file"><FiX /></button></div>
+            ) : (
+              <label className="pd-drop"><FiUploadCloud /><span>{po?.file ? "Replace the PO copy" : "Choose the PO copy"}</span><input type="file" accept="application/pdf,image/png,image/jpeg" onChange={pickFile} /></label>
+            )}
+          </Field>
         </div>
         <Msg error={error} />
       </div>
-      <div className="bl-m-foot"><span /><div className="ac-actions"><button type="button" className="ac-btn" onClick={onClose}>Cancel</button><button type="button" className="ac-btn ac-btn-primary" disabled={busy || !form.company_id || !form.po_number || !form.po_date} onClick={save}>{busy ? "Saving…" : "Save PO"}</button></div></div>
+      <div className="bl-m-foot"><span /><div className="ac-actions"><button type="button" className="ac-btn" onClick={onClose}>Cancel</button><button type="button" className="ac-btn ac-btn-primary" disabled={busy || !form.company_id || !form.po_number || !form.po_date} onClick={save}>{busy ? (file ? "Saving and uploading…" : "Saving…") : "Save PO"}</button></div></div>
     </Modal>
   );
 }

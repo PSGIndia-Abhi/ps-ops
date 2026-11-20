@@ -20,6 +20,7 @@ const customers = require("../controllers/billing/customers.controller");
 const groupContracts = require("../controllers/billing/groupContracts.controller");
 const sos = require("../controllers/billing/sos.controller");
 const dashboardCtl = require("../controllers/billing/dashboard.controller");
+const payments = require("../controllers/billing/payments.controller");
 
 const can = (permission) => [auth, requirePermission(permission)];
 
@@ -127,6 +128,12 @@ router.post("/invoices/:id/check", can(P.GENERATE_INVOICE), invoices.check);
 router.get("/invoices/:id/preview", can(P.GENERATE_INVOICE), invoices.preview);
 router.get("/invoices/:id/pdf", can(P.VIEW_BILLING), invoices.pdf);
 router.post("/invoices/:id/cancel", can(P.CANCEL_INVOICE), invoices.cancel);
+
+// Payments received against an issued invoice, recorded in Billing (not the Accountant Panel, for now).
+router.get("/invoices/:id/payments", can(P.VIEW_BILLING), payments.list);
+router.post("/invoices/:id/payments", can(P.ISSUE_INVOICE), payments.acceptProof, payments.create);
+router.get("/invoice-payments/:id/proof", can(P.VIEW_BILLING), payments.proof);
+router.delete("/invoice-payments/:id", can(P.ISSUE_INVOICE), payments.remove);
 
 // Print and share
 router.get("/invoices/:id/print", can(P.SHARE_INVOICE), share.print);

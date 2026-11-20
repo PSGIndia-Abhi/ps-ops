@@ -20,8 +20,22 @@ import { deepCleaningServices, pestServices } from "../../components/CreateBooki
 // are useful on their own; the contract is created only at the last step.
 // The customer type (Commercial / Residential) stays on the customer (Companies screen).
 
-const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"], ["CHEMICAL", "Chemical"]];
+// Chemical is not a billing type here: an AMC / One-time / Termite contract bills services,
+// chemicals or both ("What is billed" below). Older CHEMICAL contracts keep working as they are.
+const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"]];
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
+
+// The description suggested for a bill of services (SERVICE) or of chemicals (CHEMICAL), by billing type.
+// Never one combined wording: services and chemicals each have their own. It is only a default:
+// the user can pick another saved wording or type their own.
+function suggestDescription(billingType, frequencyMonths, kind) {
+  const once = billingType === "ONE_TIME";
+  const when = once ? "for {period}" : Number(frequencyMonths) > 1 ? "for {from_month} to {to_month}" : "for the month of {month}";
+  if (kind === "CHEMICAL") return `Towards charges for the chemical charges ${when}`;
+  if (billingType === "TERMITE") return "Termite Treatment";
+  if (once) return "Pest control service carried out on {period}";
+  return `Towards charges for the Pest control service carried out ${when}`;
+}
 const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 5: "Review" };
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const SQM = "sq.m";
@@ -78,6 +92,7 @@ export default function NewContract() {
   const [terms, setTerms] = useState({
     billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", start_date: today(), end_date: "", first_bill_from: "",
     shortfall_billing: "PRO_RATA", gst_applicable: true, gst_rate: 18, po_required: false, description_template: null, notes: "",
+    separate_bills: null, chemical_description_template: null,
   });
   const setT = (patch) => setTerms((t) => ({ ...t, ...patch }));
   const termite = terms.billing_type === "TERMITE";
@@ -227,9 +242,11 @@ export default function NewContract() {
     lineKey = Math.max(lineKey, ...d.lines.map((l) => Number(l.key) || 0));
     setCompanyId(d.companyId);
     setProfile(null);
-    setTerms(d.terms);
+    // A draft saved when "Chemical" was still a billing type: AMC billing chemicals.
+    const oldChemical = d.terms?.billing_type === "CHEMICAL";
+    setTerms(oldChemical ? { ...d.terms, billing_type: "AMC" } : d.terms);
     setLines(d.lines);
-    setKinds(d.kinds);
+    setKinds(oldChemical ? { SERVICE: false, CHEMICAL: true } : d.kinds);
     setPoId(d.poId || "");
     setAddingPo(Boolean(d.addingPo));
     setPo(d.po);
@@ -254,13 +271,16 @@ export default function NewContract() {
   const next = nextBilling(terms, terms.first_bill_from || terms.start_date);
 
   // Description on invoice: required, typed or picked from the master list. Until it is touched, the wording
-  // that fits the billing type is suggested (as the server used to default it), when it is in the list.
-  const { data: descriptions } = useBilling("/descriptions?active=true");
-  const suggested = (() => {
-    const want = terms.billing_type === "ONE_TIME" ? "{period}" : Number(terms.frequency_months) > 1 ? "{from_month}" : "{month}";
-    return (descriptions || []).find((d) => d.text.includes(want))?.text || "";
-  })();
+  // that fits the billing type and what is billed (services / chemicals / both) is suggested.
+  // Both ticked: "Separate bills?" (terms.separate_bills, null until answered). Separate = two contracts
+  // made on Create, one for services and one for chemicals, each with its own description, same PO.
+  const both = kinds.SERVICE && kinds.CHEMICAL;
+  const separate = both && terms.separate_bills === true;
+  // The main description: services (or the only kind billed); a single bill for both uses the services wording.
+  const suggested = suggestDescription(terms.billing_type, terms.frequency_months, kinds.SERVICE ? "SERVICE" : "CHEMICAL");
   const description = (terms.description_template ?? suggested).trim();
+  const suggestedChemical = suggestDescription(terms.billing_type, terms.frequency_months, "CHEMICAL");
+  const chemicalDescription = (terms.chemical_description_template ?? suggestedChemical).trim();
 
   // Load the customer's billing profile, or start a new one from the customer's details.
   // (A group contract uses the group's Bill To instead, loaded below.)
@@ -367,7 +387,9 @@ export default function NewContract() {
       if (terms.first_bill_from && terms.first_bill_from < terms.start_date) return "First bill from cannot be before the term start date.";
       if (terms.first_bill_from && terms.end_date && terms.first_bill_from > terms.end_date) return "First bill from cannot be after the term end date.";
       if (gstOn && !GST_RATES.includes(Number(terms.gst_rate))) return `GST rate must be one of ${GST_RATES.join(", ")} %.`;
-      if (!description) return "Type or choose the description on invoice.";
+      if (both && typeof terms.separate_bills !== "boolean") return "Choose whether pest control and chemicals are billed separately.";
+      if (!description) return separate ? "Type or choose the description for the pest control bill." : "Type or choose the description on invoice.";
+      if (separate && !chemicalDescription) return "Type or choose the description for the chemical bill.";
     }
     if (step === 3) {
       if (addingPo) {
@@ -464,9 +486,13 @@ export default function NewContract() {
   const total = filledLines.reduce((t, l) => t + lineTotal(l, termite), 0);
   const oneSite = sites.length === 1 ? sites[0].site_id : null;
 
+  // Separate bills: the pest control contract made, while the chemical one failed (Create again makes only that).
+  const [madeServices, setMadeServices] = useState(null);
+
   async function create() {
     setBusy(true);
     setMsg({});
+    let first = madeServices;
     try {
       const body = {
         company_id: companyId,
@@ -510,13 +536,29 @@ export default function NewContract() {
             };
         }),
       };
-      const created = await billingPost("/contracts", body);
-
       const planNote = "";
+      if (!separate) {
+        const created = await billingPost("/contracts", body);
+        clearDraft();
+        setDone({ id: created.id, code: created.contract_code, planNote });
+        return;
+      }
+      // Separate bills: two contracts, one per kind, each with its own description. The PO is shared
+      // (left unlinked so both contracts' Bill Runs use it).
+      const { po_ids: _unused, ...shared } = body;
+      const po = needsPo && poId ? { shared_po_id: poId } : {};
+      const only = (kind) => body.lines.filter((l) => l.item_kind === kind);
+      if (!first) {
+        first = await billingPost("/contracts", { ...shared, ...po, description_template: description, lines: only("SERVICE") });
+        setMadeServices(first);
+      }
+      const second = await billingPost("/contracts", { ...shared, ...po, description_template: chemicalDescription, lines: only("CHEMICAL") });
       clearDraft();
-      setDone({ id: created.id, code: created.contract_code, planNote });
+      setDone({ id: first.id, code: `${first.contract_code} (pest control) and ${second.contract_code} (chemicals)`, planNote, plural: true });
     } catch (err) {
-      setMsg({ error: err.message, errors: err.errors });
+      setMsg(first
+        ? { error: `Contract ${first.contract_code} (pest control) was created, but the chemicals contract was not: ${err.message} Fix it and press Create again; only the chemicals contract will be made.`, errors: err.errors }
+        : { error: err.message, errors: err.errors });
     } finally {
       setBusy(false);
     }
@@ -530,7 +572,7 @@ export default function NewContract() {
           <div className="nc-success-hero">
             <div className="nc-success-mark"><FiCheck /></div>
             <div>
-              <h2>Contract {done.code} created</h2>
+              <h2>{done.plural ? "Contracts" : "Contract"} {done.code} created</h2>
               <p>{customer?.name}{next ? ` · first invoice ${dmy(next.start)} to ${dmy(next.end)}` : ""}</p>
             </div>
           </div>
@@ -788,9 +830,40 @@ export default function NewContract() {
                   {PO_TYPES.includes(terms.billing_type) ? "Always needed for this type" : "This customer needs a PO on its invoices"}
                 </label>
               </Field>
-              <Field label="Description on invoice" required hint={description ? `On the invoice: “${descriptionPreview(description, next)}”` : "Type it, or choose a saved one. {month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time."}>
+              <Field label={separate ? "Description – pest control bill" : "Description on invoice"} required hint={description ? `On the invoice: “${descriptionPreview(description, next)}”` : "Type it, or choose a saved one. {month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time."}>
                 <DescriptionPicker value={terms.description_template ?? suggested} onChange={(text) => setT({ description_template: text })} />
               </Field>
+              {/* What is billed: services, chemicals or both - beside the description it suggests; also sets the lines in step 4.
+                  Both: asks whether they are billed separately (two invoices) or on one bill. */}
+              <Field label="What is billed" required hint={both ? "" : "Choose one or both"}>
+                <div className="nc-kinds" role="group" aria-label="What is billed">
+                  {[["SERVICE", "Service"], ["CHEMICAL", "Chemical"]].map(([k, label]) => (
+                    <label key={k} className={`nc-kind ${kinds[k] ? "on" : ""}`}>
+                      <input type="checkbox" checked={kinds[k]} onChange={() => toggleKind(k)} /> {label}
+                    </label>
+                  ))}
+                </div>
+                {both && (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="ac-sub" style={{ marginBottom: 6 }}>
+                      Separate bills for pest control services and chemicals?<span className="bl-req"> *</span>
+                    </div>
+                    <div className="nc-kinds" role="radiogroup" aria-label="Separate bills" aria-required="true">
+                      {[[true, "Yes, separate bills"], [false, "No, one bill"]].map(([v, label]) => (
+                        <label key={String(v)} className={`nc-kind ${terms.separate_bills === v ? "on" : ""}`}>
+                          <input type="radio" name="nc-separate-bills" checked={terms.separate_bills === v} onChange={() => setT({ separate_bills: v })} /> {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Field>
+              {separate && (
+                <Field label="Description – chemical bill" required hint={chemicalDescription ? `On the invoice: “${descriptionPreview(chemicalDescription, next)}”` : "Type it, or choose a saved one."}>
+                  <DescriptionPicker value={terms.chemical_description_template ?? suggestedChemical} onChange={(text) => setT({ chemical_description_template: text })} />
+                </Field>
+              )}
+              {separate && <div />}
               <Field label="Notes" className="bl-span2"><input className="ac-input" value={terms.notes} maxLength={1000} onChange={(e) => setT({ notes: e.target.value })} /></Field>
             </div>
             {next && (
@@ -862,14 +935,7 @@ export default function NewContract() {
                 ? " Fixed amount: every month bills the services per month agreed here, even if fewer were done."
                 : " Service based: every month bills the services completed (from the Service Coordinator’s monthly SOS) × rate.")}
             </p>
-            {/* What is billed: services from the service list, chemicals (typed), or both. */}
-            <div className="nc-kinds" role="group" aria-label="What is billed">
-              {[["SERVICE", "Services"], ["CHEMICAL", "Chemicals"]].map(([k, label]) => (
-                <label key={k} className={`nc-kind ${kinds[k] ? "on" : ""}`}>
-                  <input type="checkbox" checked={kinds[k]} onChange={() => toggleKind(k)} /> {label}
-                </label>
-              ))}
-            </div>
+            {/* Services / chemicals were chosen in step 2 (What is billed). */}
 
             {kinds.SERVICE && (
               <section className="nc-sec">
@@ -1080,7 +1146,7 @@ export default function NewContract() {
                 Lines not in a summary print one by one. */}
             {filledLines.length > 1 && (
               <div className="nc-summary">
-                <div className="nc-sec-title" style={{ margin: 0 }}>Invoice line summaries (optional)</div>
+                <div className="nc-sec-title" style={{ margin: 0 }}>Item summary (optional)</div>
                 {picked.length ? (
                   <div className="nc-summary-row">
                     <input className="ac-input" value={groupText} maxLength={255} autoFocus placeholder={`Summary for the ${picked.length} ticked, e.g. Pest control services`} onChange={(e) => setGroupText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyGroup()} aria-label="Invoice line summary" />
@@ -1130,7 +1196,15 @@ export default function NewContract() {
               <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, every ${terms.frequency_months} month${terms.frequency_months > 1 ? "s" : ""}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
               {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)} <span className="ac-sub">(billed elsewhere before this date)</span></dd></>}
               <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
-              <dt>Description</dt><dd>{descriptionPreview(description, next)}</dd>
+              {separate ? (
+                <>
+                  <dt>Bills</dt><dd>Two separate bills (two contracts, same PO)</dd>
+                  <dt>Pest control bill</dt><dd>{descriptionPreview(description, next)}</dd>
+                  <dt>Chemical bill</dt><dd>{descriptionPreview(chemicalDescription, next)}</dd>
+                </>
+              ) : (
+                <><dt>Description</dt><dd>{descriptionPreview(description, next)}</dd></>
+              )}
               {needsPo && <><dt>Purchase order</dt><dd>{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</dd></>}
               {next && <><dt>First invoice</dt><dd>{dmy(next.start)} to {dmy(next.end)} <span className="ac-sub">· Bill Run for {monthLabel(next.billMonth)}</span></dd></>}
             </dl>
