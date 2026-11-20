@@ -25,7 +25,7 @@ async function request(method, path, body) {
 export const billingGet = (path) => request("GET", path);
 export const billingPost = (path, body) => request("POST", path, body ?? {});
 export const billingPut = (path, body) => request("PUT", path, body ?? {});
-export const billingDelete = (path) => request("DELETE", path);
+export const billingDelete = (path, body) => request("DELETE", path, body);
 export const billingUpload = (path, formData) => request("POST", path, formData);
 
 /** "?a=1&b=2" from an object, leaving out empty values. */

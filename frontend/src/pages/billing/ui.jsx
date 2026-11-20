@@ -94,7 +94,7 @@ const COLOR = {
   PARTIAL: "b-blue", OVERDUE: "b-red", EXPIRED: "b-red", SHORT: "b-red", FAILED: "b-red",
   CANCELLED: "b-grey", CLOSED: "b-grey", ENDED: "b-grey", PAUSED: "b-amber", EXTRA: "b-purple",
 };
-const LABEL = { PARTIAL: "Partial", EXPIRING: "Expiring soon" };
+const LABEL = { PARTIAL: "Partially paid", EXPIRING: "Expiring soon" };
 
 export function StatusBadge({ value, label }) {
   const key = String(value || "").toUpperCase();

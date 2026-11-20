@@ -3,6 +3,7 @@
 
 const { pool } = require("../../../db");
 const C = require("../../services/billing/common");
+const PAY = require("../../services/billing/payment.service");
 const D = require("../../services/billing/draft.service");
 const I = require("../../services/billing/issue.service");
 const { renderBillingInvoicePdf, renderBillingInvoicesPdf } = require("../../utils/billingInvoiceDocument");
@@ -62,7 +63,8 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
   const [rows] = await pool.query(
     `SELECT bi.id, bi.status, bi.invoice_number, DATE_FORMAT(bi.invoice_date, '%Y-%m-%d') AS invoice_date, bi.company_id, c.name AS customer,
             bc.contract_code, bi.billing_type, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start, DATE_FORMAT(bi.period_end, '%Y-%m-%d') AS period_end,
-            bi.subtotal, bi.total, bi.advance_adjusted, bi.print_copies, inv.status AS receivable_status,
+            bi.subtotal, bi.total, bi.advance_adjusted, bi.print_copies,
+            IF(bi.status = 'ISSUED', ${PAY.STATUS_SQL}, NULL) AS receivable_status, ${PAY.PAID_SQL} AS paid_amount,
             (SELECT COUNT(*) FROM billing_invoice_lines l WHERE l.invoice_id = bi.id AND l.pricing_basis <> 'FIXED' AND l.quantity = 0 AND l.adjustment_type <> 'MANUAL') AS lines_needing_input,
             (SELECT COALESCE(SUM(GREATEST(l.services_planned - l.services_done, 0)), 0) FROM billing_invoice_lines l
               WHERE l.invoice_id = bi.id AND l.services_planned IS NOT NULL) AS service_shortfall,
@@ -74,7 +76,6 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
        FROM billing_invoices bi
        JOIN companies c ON c.id = bi.company_id
        JOIN billing_contracts bc ON bc.id = bi.contract_id
-       LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
       WHERE ${where}
       ORDER BY bi.invoice_date DESC, bi.fy DESC, bi.seq DESC, c.name
       LIMIT ? OFFSET ?`,
@@ -86,6 +87,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
       subtotal: Number(r.subtotal),
       total: Number(r.total),
       advance_adjusted: Number(r.advance_adjusted),
+      paid_amount: Number(r.paid_amount),
       print_copies: Number(r.print_copies),
       lines_needing_input: Number(r.lines_needing_input),
       service_shortfall: Number(r.service_shortfall),
@@ -103,30 +105,14 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
 const get = C.handle("Failed to load the invoice", async (req, res) => {
   const inv = await D.loadInvoice(pool, req.params.id);
   delete inv.content;
-  // Collection, from the Accountant Panel: the receivable, payments received against it, and TDS.
-  inv.receivable = null;
-  inv.payments = [];
-  inv.tds = null;
-  if (inv.receivable_invoice_id) {
-    const [[r]] = await pool.query(
-      `SELECT invoice_amount, paid_amount, pending_amount, status, DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date
-         FROM invoices WHERE id = ?`,
-      [inv.receivable_invoice_id]
-    );
-    if (r) inv.receivable = { amount: Number(r.invoice_amount), paid: Number(r.paid_amount), pending: Number(r.pending_amount), status: r.status, due_date: r.due_date };
-    const [pays] = await pool.query(
-      `SELECT p.payment_number, DATE_FORMAT(p.payment_date, '%Y-%m-%d') AS payment_date, p.payment_mode, p.reference_number,
-              pa.allocated_amount, pa.tds_amount
-         FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id
-        WHERE pa.invoice_id = ? ORDER BY p.payment_date, p.created_at`,
-      [inv.receivable_invoice_id]
-    );
-    inv.payments = pays.map((p) => ({ ...p, allocated_amount: Number(p.allocated_amount), tds_amount: Number(p.tds_amount) }));
-    const [[t]] = await pool.query(
-      "SELECT tds_applicable, tds_rate, tds_basis, expected_tds, deducted_tds, pending_tds, status FROM invoice_tds WHERE invoice_id = ?",
-      [inv.receivable_invoice_id]
-    );
-    if (t) inv.tds = { applicable: Boolean(t.tds_applicable), rate: t.tds_rate === null ? null : Number(t.tds_rate), basis: t.tds_basis, expected: Number(t.expected_tds), deducted: Number(t.deducted_tds), pending: Number(t.pending_tds), status: t.status };
+  // Payments recorded in Billing (not connected to the Accountant Panel for now).
+  if (inv.status !== "DRAFT") {
+    const pay = await PAY.forInvoice(pool, inv.id);
+    inv.collection = pay.summary;
+    inv.payments = pay.payments;
+  } else {
+    inv.collection = null;
+    inv.payments = [];
   }
   res.json(inv);
 });
