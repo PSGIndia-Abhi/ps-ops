@@ -117,15 +117,26 @@ async function buildLines(db, contract, period, contractLines) {
   const counted = contractLines.some(isCounted);
   const sos = counted ? await S.submittedFor(db, contract.company_id, monthList) : new Map();
   const sosMissing = counted ? monthList.filter((m) => !sos.has(m)) : [];
-  const sosLines = [...sos.values()].flat();
+  const sosLines = [...sos.values()].flat().filter((l) => l.kind !== "AREA");
   const fixed = contract.shortfall_billing === "FULL";
+
+  // Termite: the treated area of this period comes from the SOS of the month that bills it.
+  const hasArea = contractLines.some((cl) => S.isAreaLine(contract, cl));
+  const areaMonth = hasArea ? `${S.billMonthOf(contract, period)}-01` : null;
+  const areaSos = hasArea ? await S.submittedFor(db, contract.company_id, [areaMonth]) : new Map();
+  if (hasArea && !areaSos.has(areaMonth) && !sosMissing.includes(areaMonth)) sosMissing.push(areaMonth);
 
   const lines = contractLines.map((cl, i) => {
     let quantity = cl.default_qty === null ? null : Number(cl.default_qty);
     let planned = null;
     let done = null;
     let needsInput = false;
-    if (isCounted(cl)) {
+    if (S.isAreaLine(contract, cl)) {
+      // quantity = the area the Service Coordinator entered for this period; none yet: entered on the draft
+      const row = (areaSos.get(areaMonth) || []).find((x) => x.kind === "AREA" && x.contract_line_id === cl.id && C.ymd(x.period_start) === period.start);
+      quantity = row && row.area !== null ? Number(row.area) : 0;
+      if (!row || row.area === null) needsInput = true;
+    } else if (isCounted(cl)) {
       // Each month: the SOS line for this agreed service (assigned as agreed if it is missing).
       planned = 0;
       done = 0;
@@ -204,6 +215,32 @@ async function buildLines(db, contract, period, contractLines) {
 
 // ---- Bill Run: due list --------------------------------------------------------------------
 
+/**
+ * The periods of a contract to bill in the month ending `monthEnd`.
+ *   monthly            its next period, when due (as always)
+ *   weekly / daily     every period due by the month end that has no invoice yet (drafted or issued;
+ *   (Termite)          a cancelled one is billed again) - one invoice each
+ * Returns { periods: [...to draft], drafted: periods already drafted (not issued) }.
+ */
+async function periodsToBill(db, contract, monthEnd) {
+  if (!P.isShortPeriod(contract)) {
+    const period = P.nextPeriod(contract);
+    return { periods: P.isDue(contract, period, monthEnd) ? [period] : [], drafted: [] };
+  }
+  const due = P.duePeriods(contract, monthEnd);
+  if (!due.length) return { periods: [], drafted: [] };
+  const [rows] = await db.query(
+    `SELECT DATE_FORMAT(period_start, '%Y-%m-%d') AS period_start, status FROM billing_invoices
+      WHERE contract_id = ? AND status <> 'CANCELLED' AND period_start IN (?)`,
+    [contract.id, due.map((p) => p.start)]
+  );
+  const taken = new Map(rows.map((r) => [r.period_start, r.status]));
+  return {
+    periods: due.filter((p) => !taken.has(p.start)),
+    drafted: due.filter((p) => taken.get(p.start) === "DRAFT"),
+  };
+}
+
 /** Contracts due in `month` with their period, services, estimate and warnings. */
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
   const range = C.monthRange(month);
@@ -221,19 +258,52 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
   const rows = [];
   for (const raw of contracts) {
     const contract = contractRow(raw);
-    const period = P.nextPeriod(contract);
-    if (!P.isDue(contract, period, range.end)) continue;
+    const short = P.isShortPeriod(contract);
+    let period;
+    let toBill = [];
+    let existingDrafts = 0;
+    if (short) {
+      // weekly / daily Termite: one row for all its periods due this month (one invoice each)
+      const { periods, drafted } = await periodsToBill(db, contract, range.end);
+      if (!periods.length && !drafted.length) continue;
+      const all = [...periods, ...drafted].sort((a, b) => (a.start < b.start ? -1 : 1));
+      period = { start: all[0].start, end: all[all.length - 1].end };
+      toBill = periods;
+      existingDrafts = periods.length ? 0 : drafted.length;
+    } else {
+      period = P.nextPeriod(contract);
+      if (!P.isDue(contract, period, range.end)) continue;
+    }
     const ctx = await customerContext(db, contract.company_id, contract);
     if (category && ctx.category !== category) continue;
 
-    const [[existing]] = await db.query(
-      "SELECT COUNT(*) AS drafts FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT'",
-      [contract.id, period.start]
-    );
+    if (!short) {
+      const [[existing]] = await db.query(
+        "SELECT COUNT(*) AS drafts FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT'",
+        [contract.id, period.start]
+      );
+      existingDrafts = Number(existing.drafts);
+    }
     const cl = await linesInForce(db, contract.id, period.start);
-    const { lines, sosMissing } = await buildLines(db, contract, period, cl);
     const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code, contract.gst_applicable !== 0);
-    const totals = calc.totalsFor(lines, taxMode, contract.gst_rate);
+    let lines;
+    let sosMissing;
+    let totals;
+    if (short && toBill.length > 1) {
+      // the estimate is every period's invoice added up
+      lines = [];
+      sosMissing = [];
+      totals = { total: 0 };
+      for (const p of toBill) {
+        const built = await buildLines(db, contract, p, await linesInForce(db, contract.id, p.start));
+        lines.push(...built.lines);
+        sosMissing.push(...built.sosMissing.filter((m) => !sosMissing.includes(m)));
+        totals.total = calc.round2(totals.total + calc.totalsFor(built.lines, taxMode, contract.gst_rate).total);
+      }
+    } else {
+      ({ lines, sosMissing } = await buildLines(db, contract, toBill[0] || period, cl));
+      totals = calc.totalsFor(lines, taxMode, contract.gst_rate);
+    }
     const linked = lines.filter((l) => l.services_planned !== null);
     const planned = linked.reduce((t, l) => t + l.services_planned, 0);
     const done = linked.reduce((t, l) => t + Math.min(l.services_done || 0, l.services_planned), 0);
@@ -271,14 +341,18 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       category: ctx.category,
       billing_type: contract.billing_type,
       frequency_months: contract.frequency_months,
+      frequency_unit: P.unitOf(contract),
       period_start: period.start,
       period_end: period.end,
+      // weekly / daily Termite: how many invoices (one per week / day) this row drafts
+      periods: short ? toBill.length : 1,
       services: linked.length ? { planned, done, short: Math.max(planned - done, 0) } : null,
-      structure: contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
+      // Termite: priced per sq. ft / sq. m of treated area (PER_SQFT / PER_SQM)
+      structure: contract.billing_type === "TERMITE" ? (/ft/i.test(cl.find((x) => S.isAreaLine(contract, x))?.unit || "") ? "PER_SQFT" : "PER_SQM") : contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
       sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,
       estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
       needs_input: lines.some((l) => l.needs_input),
-      already_drafted: Number(existing.drafts) > 0,
+      already_drafted: existingDrafts > 0,
       warnings,
       blocking: warnings.some((w) => w.blocking),
     });
@@ -315,24 +389,37 @@ async function insertLines(conn, invoiceId, lines) {
   }
 }
 
-/** Generates the drafts of one contract's next period (one per outlet when the invoice is split). */
+/**
+ * Generates the drafts of one contract for the month: its next period (one draft per outlet when
+ * the invoice is split), or - weekly / daily Termite - every period due in the month that has no
+ * invoice yet, one draft each.
+ */
 async function draftContract(conn, contractId, month, runId, userId) {
   const contract = await loadContract(conn, contractId, { lock: true });
   if (!contract) throw C.bad("Contract not found");
   if (contract.status !== "ACTIVE") throw C.bad(`Contract is ${contract.status.toLowerCase()}`);
-  const period = P.nextPeriod(contract);
-  if (!P.isDue(contract, period, C.monthRange(month).end)) throw C.bad("Nothing is due on this contract for the month");
+  const { periods } = await periodsToBill(conn, contract, C.monthRange(month).end);
+  if (!periods.length) {
+    throw P.isShortPeriod(contract) ? C.conflict(`Every ${P.unitOf(contract) === "WEEK" ? "week" : "day"} due this month is already drafted for ${contract.contract_code}`) : C.bad("Nothing is due on this contract for the month");
+  }
 
   const ctx = await customerContext(conn, contract.company_id, contract);
   if (!ctx.company) throw C.bad("Customer not found");
   if (!ctx.category) throw C.bad("Customer type is not set");
   if (!ctx.profile) throw C.bad(contract.contract_kind === "GROUP" ? "The group's billing details (Bill To) are missing" : "Billing profile is missing");
 
+  const drafts = [];
+  for (const period of periods) drafts.push(...(await draftPeriod(conn, contract, ctx, period, runId, userId)));
+  return drafts;
+}
+
+/** The drafts of one period of a contract (one per outlet when the invoice is split). */
+async function draftPeriod(conn, contract, ctx, period, runId, userId) {
   const [[existing]] = await conn.query(
     "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED'",
     [contract.id, period.start]
   );
-  if (Number(existing.n)) throw C.conflict(`${C.monthName(period.start)} is already drafted for ${contract.contract_code}`);
+  if (Number(existing.n)) throw C.conflict(`${P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start)} is already drafted for ${contract.contract_code}`);
 
   const cl = await linesInForce(conn, contract.id, period.start);
   if (!cl.length) throw C.bad("The contract has no price lines in force for this period");
@@ -344,9 +431,14 @@ async function draftContract(conn, contractId, month, runId, userId) {
   // per outlet, else the profile's.
   const [outletCopies] = await conn.query("SELECT site_id, print_copies FROM billing_outlet_settings WHERE company_id = ?", [contract.company_id]);
   const copiesFor = (siteId) => Number(outletCopies.find((o) => o.site_id === siteId)?.print_copies || ctx.profile.print_copies || 1);
+  // Separate bills: the service lines and the chemical lines go on two invoices, each with its own
+  // description. A line's kind comes from its contract line; SOS extra services are services.
+  const byKind = Boolean(contract.separate_bills);
+  const kindOf = new Map(cl.map((c) => [c.id, c.item_kind || "SERVICE"]));
+  const lineKind = (l) => (l.contract_line_id && kindOf.get(l.contract_line_id)) || "SERVICE";
   const groups = new Map();
   for (const l of lines) {
-    const key = split ? l.site_id || "" : "";
+    const key = `${split ? l.site_id || "" : ""}|${byKind ? lineKind(l) : ""}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(l);
   }
@@ -361,8 +453,10 @@ async function draftContract(conn, contractId, month, runId, userId) {
   const poIds = contract.billing_type === "CHEMICAL" ? pos.map((p) => p.id) : pos.slice(0, 1).map((p) => p.id);
 
   const drafts = [];
-  for (const [siteKey, groupLines] of groups) {
+  for (const [groupKey, groupLines] of groups) {
+    const [siteKey, lineKindKey] = groupKey.split("|");
     const siteId = split && siteKey ? siteKey : contract.invoice_grouping === "PER_SITE" ? contract.site_id : null;
+    const template = lineKindKey === "CHEMICAL" && contract.chemical_description_template ? contract.chemical_description_template : contract.description_template;
     // The contract's GST rate is copied onto the draft: changing the contract later leaves it alone.
     const gstRate = calc.gstRateOf(contract.gst_rate);
     const totals = calc.totalsFor(groupLines, taxMode, gstRate);
@@ -377,7 +471,7 @@ async function draftContract(conn, contractId, month, runId, userId) {
         id, contract.id, contract.company_id, siteId, runId, contract.billing_type, ctx.category, taxMode, gstRate,
         `${ctx.profile.state_code}-${ctx.profile.state_name}`, siteId || contract.site_id || groupLines.find((l) => l.site_id)?.site_id || null,
         period.start, period.end, invoiceDate, dueDate, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.round_off, totals.total,
-        copiesFor(siteId), describe(contract.description_template, period), userId, userId,
+        copiesFor(siteId), describe(template, period), userId, userId,
       ]
     );
     await insertLines(conn, id, groupLines);
@@ -453,7 +547,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
   if (lock) await db.query("SELECT id FROM billing_invoices WHERE id = ? FOR UPDATE", [id]);
   const [[inv]] = await db.query(
     `SELECT bi.*, DATE_FORMAT(bi.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key,
-            bc.contract_code, bc.frequency_months, bc.po_required, bc.bill_timing, bc.shortfall_billing,
+            bc.contract_code, bc.frequency_months, bc.frequency_unit, bc.po_required, bc.bill_timing, bc.shortfall_billing,
             c.name AS customer_name, IF(gp.group_id IS NULL, c.gst_number, gp.gst_number) AS gst_number, c.type AS customer_type,
             COALESCE(gp.billing_name, bp.billing_name) AS billing_name, COALESCE(gp.billing_address, bp.billing_address) AS billing_address,
             COALESCE(gp.state_code, bp.state_code) AS state_code, COALESCE(gp.state_name, bp.state_name) AS state_name,
@@ -518,7 +612,8 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     // Changes on every save (line ids are new each time): send it back on PUT to detect edits made meanwhile.
     version: crypto.createHash("sha1").update(`${inv.updated_at_key}|${inv.status}|${lines.map((l) => l.id).join(",")}`).digest("hex").slice(0, 16),
     contract: {
-      id: inv.contract_id, contract_code: inv.contract_code, billing_type: inv.billing_type, frequency_months: C.n2(inv.frequency_months), po_required: Boolean(inv.po_required),
+      id: inv.contract_id, contract_code: inv.contract_code, billing_type: inv.billing_type, frequency_months: C.n2(inv.frequency_months),
+      frequency_unit: P.unitOf({ billing_type: inv.billing_type, frequency_unit: inv.frequency_unit }), po_required: Boolean(inv.po_required),
       shortfall_billing: inv.shortfall_billing, contract_kind: inv.contract_kind || "SERVICE", group_id: inv.contract_group_id || null,
     },
     customer: { company_id: inv.company_id, name: inv.customer_name, category: inv.customer_category, gst_number: inv.gst_number, state_code: inv.state_code, state_name: inv.state_name },

@@ -124,8 +124,8 @@ export default function Contracts() {
                       <b>{c.customer}</b>
                     </div>
                   </td>
-                  <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} /></td>
-                  <td><span className="bl-soft">{c.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
+                  <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} unit={c.frequency_unit} /></td>
+                  <td><span className="bl-soft">{c.billing_type === "TERMITE" ? `Per ${c.area_unit === "sq.ft" ? "sq. ft" : "sq. m"}` : c.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
                   <td><span className="bl-date">{dmy(c.next_period_start)}</span></td>
                   <td><span className="bl-soft">{c.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
                   <td>{c.po_required ? <StatusBadge value="PARTIAL" label="Required" /> : <span className="ac-sub">—</span>}</td>

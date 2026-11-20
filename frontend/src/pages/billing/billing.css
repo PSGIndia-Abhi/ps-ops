@@ -1305,6 +1305,12 @@
 .sos-page .sos-thead + .sos-item { border-top: 0; }
 .sos-num { text-align: center; font-size: 15px; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
 .sos-num.muted { color: #cbd5e1; }
+/* Termite area on the SOS: decimal area input with its unit */
+.sos-area { display: flex; align-items: center; gap: 6px; }
+.sos-area .ac-input { width: 100%; min-width: 0; height: 36px; text-align: right; }
+.sos-area > span { font-size: 12px; color: #64748b; white-space: nowrap; }
+.sos-area-val { text-align: center; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
+.sos-num.sos-rate { font-size: 13px; font-weight: 500; color: #64748b; }
 .sos-page .sos-count { justify-self: center; height: 36px; }
 .sos-page .sos-count button { width: 28px; height: 28px; }
 .sos-page .sos-count.ro { justify-self: center; }

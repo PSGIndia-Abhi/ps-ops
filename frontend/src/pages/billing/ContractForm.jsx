@@ -11,7 +11,7 @@ import { GST_RATES, gstHint } from "./calc";
 import BillingProfileCard from "./BillingProfileCard";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
-import { TYPE_LABEL, amount, dmy, initials, monthLabel, nextBilling, rupees, shortDate, today } from "./format";
+import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
@@ -22,11 +22,14 @@ const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"],
 
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
 const SQM = "sq.m";
+const SQFT = "sq.ft";
+// Termite bill structure: priced per square metre or per square foot of treated area (the line's unit)
+const AREA_UNITS = [[SQM, "Square metre (sq. m)"], [SQFT, "Square feet (sq. ft)"]];
 
 const emptyLine = (siteId = "", type = "", kind = "SERVICE") => ({
   key: `n${Date.now()}${Math.random()}`, site_id: siteId, sac_code: kind === "CHEMICAL" ? "" : "998531", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "",
   item_kind: kind, invoice_group: "",
-  // Termite work is priced per square metre: area (sq. m) x rate per sq. m, set for each customer.
+  // Termite work is priced per square metre or square foot (Bill structure): area x rate, set for each customer.
   ...(type === "TERMITE" && kind === "SERVICE" ? { item_name: "Termite Post-Construction Treatment", pricing_basis: "PER_UNIT", unit: SQM } : { item_name: "", pricing_basis: "FIXED", unit: "Nos", default_qty: 1 }),
 });
 const isSqm = (l) => l.pricing_basis === "PER_UNIT" && /^sq/i.test(l.unit || "");
@@ -78,6 +81,7 @@ export default function ContractForm() {
       company_id: form.company_id,
       billing_type: form.billing_type,
       frequency_months: form.billing_type === "ONE_TIME" ? null : Number(form.frequency_months) || 1,
+      frequency_unit: unitOf(form),
       cycle_start_day: form.cycle_start_day || undefined,
       bill_timing: form.bill_timing,
       start_date: form.start_date,
@@ -91,6 +95,9 @@ export default function ContractForm() {
       ...(needsPo ? { po_ids: form.po_ids } : {}),
       shortfall_billing: form.shortfall_billing,
       description_template: form.description_template?.trim() || undefined,
+      // services and chemicals on two invoices each period; the chemical one has its own description
+      separate_bills: Boolean(form.separate_bills),
+      chemical_description_template: form.separate_bills ? form.chemical_description_template?.trim() || null : null,
       notes: form.notes || null,
     };
   }
@@ -113,6 +120,10 @@ export default function ContractForm() {
     }
     if (!form.description_template?.trim()) {
       setMsg({ error: "Type or choose the description on invoice." });
+      return;
+    }
+    if (form.separate_bills && !form.chemical_description_template?.trim()) {
+      setMsg({ error: "Type or choose the description for the chemical bill." });
       return;
     }
     if (form.billing_type === "TERMITE" && !form.po_ids.length) {
@@ -160,14 +171,23 @@ export default function ContractForm() {
   const linesShown = isNew ? newLines : contract.lines;
   const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
   const cols = sqmMode ? 7 : 5;
+  // Termite bill structure: per square metre or per square foot (the unit of its area lines). A saved
+  // contract keeps the unit of its price lines; new lines added to it use the same unit.
+  const areaUnit = isNew ? (form.area_unit === SQFT ? SQFT : SQM) : linesShown.find(isSqm)?.unit === SQFT ? SQFT : SQM;
+  const areaLabel = areaUnit === SQFT ? "sq. ft" : "sq. m";
+  const mkLine = (...args) => {
+    const l = emptyLine(...args);
+    return isSqm(l) ? { ...l, unit: areaUnit } : l;
+  };
 
   // Summary figures (current price lines only).
   const currentLines = isNew ? newLines.filter((l) => l.item_name && l.rate !== "") : contract.lines.filter((l) => !l.effective_to);
+  const hasKind = (kind) => currentLines.some((l) => (l.item_kind || "SERVICE") === kind);
   const lineValue = (l) => (isSqm(l) ? lineTotal(l) ?? 0 : Number(l.rate) * (Number(l.default_qty) || 1));
   const billValue = currentLines.reduce((t, l) => t + (Number(lineValue(l)) || 0), 0);
   const outletCount = new Set(currentLines.map((l) => l.site_id || "all")).size;
   const noGst = residential || form.gst_applicable === false;
-  const freq = form.billing_type === "ONE_TIME" ? "One-time" : `Every ${Number(form.frequency_months) || 1} month${Number(form.frequency_months) > 1 ? "s" : ""}`;
+  const freq = frequencyText(form);
   const dirty = isNew || Boolean(edits);
   const customerName = isNew ? customerRow?.name || "New contract" : contract.customer;
   const TABS = [
@@ -188,7 +208,7 @@ export default function ContractForm() {
             {!isNew && <span><FiHash /> {contract.contract_code}</span>}
             {!isNew && <StatusBadge value={contract.status} />}
             <span><FiRepeat /> {TYPE_LABEL[form.billing_type] || form.billing_type} · {freq.toLowerCase()}</span>
-            <span><FiLayers /> {form.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span>
+            <span><FiLayers /> {typeIs("TERMITE") ? `Per ${areaLabel}` : form.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span>
             {!isNew && contract.last_invoice_number && <span><FiFileText /> Last {contract.last_invoice_number}</span>}
           </div>
         </div>
@@ -255,7 +275,7 @@ export default function ContractForm() {
             <div className="bl-grid g2">
               {isNew && (
                 <Field label="Customer" required className="bl-span2">
-                  <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "", po_ids: [] }); setNewLines([emptyLine("", form.billing_type)]); }}>
+                  <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "", po_ids: [] }); setNewLines([mkLine("", form.billing_type)]); }}>
                     <option value="">Choose a customer…</option>
                     {(customers || []).map((c) => <option key={c.company_id} value={c.company_id} disabled={!c.category}>{c.name}{!c.category ? " (customer type not set)" : !c.profile_complete ? " (no billing profile)" : ""}</option>)}
                   </select>
@@ -266,15 +286,29 @@ export default function ContractForm() {
                   {TYPES.map(([v, l]) => (
                     <button key={v} type="button" disabled={!isNew} className={typeIs(v) ? "active" : ""} aria-pressed={typeIs(v)}
                       onClick={() => {
-                        set({ billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required });
-                        // Untouched lines follow the type (termite: per square metre).
-                        if (newLines.every((l2) => l2.rate === "" && l2.default_qty === "")) setNewLines(newLines.map((l2) => ({ ...emptyLine(l2.site_id, v), key: l2.key })));
+                        set({
+                          billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required,
+                          ...(v !== "TERMITE" ? { frequency_unit: "MONTH" } : {}), // daily / weekly is for Termite only
+                        });
+                        // Untouched lines follow the type (termite: per sq. m / sq. ft, as the Bill structure).
+                        if (newLines.every((l2) => l2.rate === "" && l2.default_qty === "")) setNewLines(newLines.map((l2) => ({ ...mkLine(l2.site_id, v), key: l2.key })));
                       }}>{l}</button>
                   ))}
                 </div>
               </Field>
-              <Field label="Billing frequency" required={typeIs("AMC")}>
-                <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
+              <Field
+                label="Billing frequency"
+                required={typeIs("AMC") || typeIs("TERMITE")}
+                hint={typeIs("TERMITE") && !isNew && !contract?.next_period_editable ? "Fixed once an invoice is drafted or issued" : typeIs("TERMITE") && unitOf(form) !== "MONTH" ? `One invoice per ${unitOf(form) === "DAY" ? "day" : "week"}` : ""}
+              >
+                {typeIs("TERMITE") ? (
+                  // Termite: billed every day, week or month
+                  <select className="ac-select" value={unitOf(form)} disabled={readOnly || (!isNew && !contract?.next_period_editable)} onChange={(e) => set({ frequency_unit: e.target.value, frequency_months: 1 })}>
+                    {TERMITE_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                ) : (
+                  <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
+                )}
               </Field>
               <Field label="Bill date" required>
                 <select className="ac-select" value={form.bill_timing} disabled={readOnly} onChange={(e) => set({ bill_timing: e.target.value })}>
@@ -306,15 +340,48 @@ export default function ContractForm() {
                   <option value="PER_SITE">One invoice per outlet</option>
                 </select>
               </Field>
-              <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "Full amount every period, even if a service is missed" : "Billed for the services actually done"}>
-                <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
-                  <option value="FULL">Fixed amount</option>
-                  <option value="PRO_RATA">Service based</option>
-                </select>
-              </Field>
-              <Field label="Description on invoice" required className="bl-span2" hint="{month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time.">
+              {typeIs("TERMITE") ? (
+                // Termite is billed on the treated area: rate per square metre or per square foot × area
+                <Field label="Bill structure" required hint={isNew ? `Rate per ${areaLabel} × treated area` : "Set by the contract's price lines"}>
+                  <select
+                    className="ac-select"
+                    value={areaUnit}
+                    disabled={readOnly || !isNew}
+                    onChange={(e) => {
+                      const unit = e.target.value;
+                      set({ area_unit: unit });
+                      setNewLines(newLines.map((l) => (isSqm(l) ? { ...l, unit } : l)));
+                    }}
+                  >
+                    {AREA_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </Field>
+              ) : (
+                <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "Full amount every period, even if a service is missed" : "Billed for the services actually done"}>
+                  <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
+                    <option value="FULL">Fixed amount</option>
+                    <option value="PRO_RATA">Service based</option>
+                  </select>
+                </Field>
+              )}
+              {/* Separate bills: offered when the contract bills both services and chemicals (or already has it on). */}
+              {(form.separate_bills || (hasKind("SERVICE") && hasKind("CHEMICAL"))) && (
+                <Field label="Separate bills" className="bl-span2" hint={form.separate_bills ? "Each period: one invoice for pest control services, one for chemicals (same PO)" : "Pest control services and chemicals on one invoice"}>
+                  <label className="bl-toggle">
+                    <input type="checkbox" checked={Boolean(form.separate_bills)} disabled={readOnly}
+                      onChange={(e) => set({ separate_bills: e.target.checked, ...(e.target.checked && !form.chemical_description_template ? { chemical_description_template: "Towards charges for the chemical charges for the month of {month}" } : {}) })} />
+                    Separate bills for pest control services and chemicals
+                  </label>
+                </Field>
+              )}
+              <Field label={form.separate_bills ? "Description – pest control bill" : "Description on invoice"} required className="bl-span2" hint="{month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time.">
                 <DescriptionPicker value={form.description_template || ""} disabled={readOnly} onChange={(text) => set({ description_template: text })} />
               </Field>
+              {form.separate_bills && (
+                <Field label="Description – chemical bill" required className="bl-span2">
+                  <DescriptionPicker value={form.chemical_description_template || ""} disabled={readOnly} onChange={(text) => set({ chemical_description_template: text })} />
+                </Field>
+              )}
               <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : "A change applies to new drafts only"}>
                 <div className="nc-gst">
                   <select className="ac-select" value={noGst ? "NO" : "YES"} disabled={readOnly || residential}
@@ -364,16 +431,16 @@ export default function ContractForm() {
         <div className="ac-card ct-prices">
           <div className="ct-prices-head">
             <span className="ac-sub">
-              {typeIs("TERMITE") ? "Rate per sq. m × treated area. Excluding GST." : `Amount for each service. ${noGst ? "No GST is added." : `Excluding GST (${form.gst_rate ?? 18}% is added on the invoice).`}`}
+              {typeIs("TERMITE") ? `Rate per ${areaLabel} × treated area. Excluding GST.` : `Amount for each service. ${noGst ? "No GST is added." : `Excluding GST (${form.gst_rate ?? 18}% is added on the invoice).`}`}
             </span>
             {!readOnly && companyId && (
               <div className="ac-actions">
                 <button type="button" className="ac-btn sm" onClick={() => (isNew
-                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
-                  : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}><FiDroplet /> Add chemical</button>
+                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), mkLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
+                  : setLineEdit(mkLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}><FiDroplet /> Add chemical</button>
                 <button type="button" className="ac-btn sm ct-addbtn" onClick={() => (isNew
-                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => emptyLine(x.site_id, form.billing_type)) : [emptyLine(sites[0]?.site_id || "", form.billing_type)])])
-                  : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}><FiPlusCircle /> Add service</button>
+                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => mkLine(x.site_id, form.billing_type)) : [mkLine(sites[0]?.site_id || "", form.billing_type)])])
+                  : setLineEdit(mkLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}><FiPlusCircle /> Add service</button>
               </div>
             )}
           </div>
@@ -392,8 +459,8 @@ export default function ContractForm() {
                 <tr>
                   <th>Outlet</th>
                   <th>Service / chemical</th>
-                  {sqmMode && <th className="ac-num">Rate per sq. m (₹)</th>}
-                  {sqmMode && <th className="ac-num">Area (sq. m)</th>}
+                  {sqmMode && <th className="ac-num">Rate per {areaLabel} (₹)</th>}
+                  {sqmMode && <th className="ac-num">Area ({areaLabel})</th>}
                   <th className="ac-num">Amount (₹)</th>
                   <th>Valid from</th>
                   <th aria-label="Actions" />
@@ -534,10 +601,10 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
         {/* Lines with the same summary print as ONE invoice line (this text, their total). */}
         <input className="bl-cell-input" style={{ marginTop: 6 }} value={line.invoice_group || ""} maxLength={255} placeholder="Invoice line summary (optional)" title="Lines with the same summary print as one invoice line" onChange={(e) => onChange({ invoice_group: e.target.value })} aria-label="Invoice line summary" />
       </td>
-      {sqmMode && <td>{sqm ? rateInput("Rate per square metre") : <span className="ac-sub">—</span>}</td>}
+      {sqmMode && <td>{sqm ? rateInput(line.unit === SQFT ? "Rate per square foot" : "Rate per square metre") : <span className="ac-sub">—</span>}</td>}
       {sqmMode && (
         <td>
-          {sqm ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.default_qty ?? ""} placeholder="sq. m" onChange={(e) => onChange({ default_qty: e.target.value })} aria-label="Area in square metres" />
+          {sqm ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.default_qty ?? ""} placeholder={line.unit === SQFT ? "sq. ft" : "sq. m"} onChange={(e) => onChange({ default_qty: e.target.value })} aria-label={line.unit === SQFT ? "Area in square feet" : "Area in square metres"} />
             : <span className="ac-sub">—</span>}
         </td>
       )}

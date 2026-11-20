@@ -139,7 +139,9 @@ async function profileDetail(db, companyId) {
     [companyId]
   );
   const [contracts] = await db.query(
-    `SELECT bc.*, (SELECT bi.invoice_number FROM billing_invoices bi WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED'
+    `SELECT bc.*, (SELECT l.unit FROM billing_contract_lines l WHERE l.contract_id = bc.id AND l.pricing_basis = 'PER_UNIT' AND l.unit LIKE 'sq%'
+                    ORDER BY l.is_active DESC, l.sort_order LIMIT 1) AS area_unit,
+                  (SELECT bi.invoice_number FROM billing_invoices bi WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED'
                     ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice
        FROM billing_contracts bc WHERE bc.company_id = ? ORDER BY (bc.status = 'ACTIVE') DESC, bc.created_at DESC`,
     [companyId]
@@ -193,8 +195,10 @@ async function profileDetail(db, companyId) {
       contract_code: bc.contract_code,
       billing_type: bc.billing_type,
       frequency_months: bc.frequency_months === null ? null : Number(bc.frequency_months),
+      frequency_unit: bc.billing_type === "TERMITE" && (bc.frequency_unit === "WEEK" || bc.frequency_unit === "DAY") ? bc.frequency_unit : "MONTH",
       bill_timing: bc.bill_timing,
-      structure: bc.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
+      // Termite: priced per sq. ft / sq. m of treated area (PER_SQFT / PER_SQM)
+      structure: bc.billing_type === "TERMITE" ? (/ft/i.test(bc.area_unit || "") ? "PER_SQFT" : "PER_SQM") : bc.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
       invoice_grouping: bc.invoice_grouping,
       gst_applicable: Boolean(bc.gst_applicable),
       gst_rate: Number(bc.gst_rate),

@@ -169,7 +169,7 @@ export default function DraftEditor() {
             </span>
           </h1>
           <p className="ac-sub">
-            {inv.contract.contract_code} · {typeLabel(inv.contract.billing_type, inv.contract.frequency_months)} · Period {dmy(inv.period_start)} to {dmy(inv.period_end)}
+            {inv.contract.contract_code} · {typeLabel(inv.contract.billing_type, inv.contract.frequency_months, inv.contract.frequency_unit)} · Period {dmy(inv.period_start)} to {dmy(inv.period_end)}
             {inv.services ? ` · Services ${inv.services.done} of ${inv.services.planned}` : ""} · Print copies: {inv.print_copies}
           </p>
         </div>

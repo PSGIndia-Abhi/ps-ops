@@ -91,7 +91,7 @@ export default function InvoiceView() {
             <div className="iv-hero-top">
               <h1>{inv.invoice_number}</h1>
               {cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={col?.status || "PENDING"} />}
-              <TypeBadge type={inv.contract.billing_type} frequency={inv.contract.frequency_months} />
+              <TypeBadge type={inv.contract.billing_type} frequency={inv.contract.frequency_months} unit={inv.contract.frequency_unit} />
             </div>
             <div className="iv-hero-sub">
               <b>{inv.customer.name}</b> · {dmy(inv.invoice_date)} · {periodLabel(inv.period_start, inv.period_end)} · {inv.contract.contract_code}
