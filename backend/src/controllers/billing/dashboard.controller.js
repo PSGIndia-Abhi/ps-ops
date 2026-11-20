@@ -5,6 +5,7 @@
 
 const { pool } = require("../../../db");
 const C = require("../../services/billing/common");
+const PAY = require("../../services/billing/payment.service");
 const D = require("../../services/billing/draft.service");
 const S = require("../../services/billing/sos.service");
 
@@ -66,11 +67,11 @@ const dashboard = C.handle("Failed to load the dashboard", async (req, res) => {
   );
   const [[issued]] = await pool.query(
     `SELECT COUNT(*) AS n, COALESCE(SUM(bi.total), 0) AS value,
-            COALESCE(SUM(inv.paid_amount), 0) AS collected, COALESCE(SUM(inv.pending_amount), 0) AS pending,
-            COALESCE(SUM(CASE WHEN inv.status = 'OVERDUE' THEN inv.pending_amount ELSE 0 END), 0) AS overdue,
-            SUM(inv.status = 'PAID') AS paid_count
+            COALESCE(SUM(LEAST(${PAY.PAID_SQL}, bi.total)), 0) AS collected,
+            COALESCE(SUM(GREATEST(bi.total - ${PAY.PAID_SQL}, 0)), 0) AS pending,
+            0 AS overdue,
+            SUM(${PAY.STATUS_SQL} = 'PAID') AS paid_count
        FROM billing_invoices bi JOIN companies c ON c.id = bi.company_id
-       LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
       WHERE bi.status = 'ISSUED' AND bi.invoice_date >= ? AND bi.invoice_date < ? ${groupSql} ${qSql}`,
     [range.start, range.next, ...extra]
   );
@@ -81,9 +82,9 @@ const dashboard = C.handle("Failed to load the dashboard", async (req, res) => {
   );
   const [recent] = await pool.query(
     `SELECT bi.id, bi.invoice_number, DATE_FORMAT(bi.invoice_date, '%Y-%m-%d') AS invoice_date, bi.total, c.name AS customer,
-            inv.status AS receivable_status,
+            ${PAY.STATUS_SQL} AS receivable_status,
             (SELECT s.status FROM billing_invoice_shares s WHERE s.billing_invoice_id = bi.id AND s.channel = 'EMAIL' ORDER BY s.created_at DESC LIMIT 1) AS email_status
-       FROM billing_invoices bi JOIN companies c ON c.id = bi.company_id LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
+       FROM billing_invoices bi JOIN companies c ON c.id = bi.company_id
       WHERE bi.status = 'ISSUED' AND bi.invoice_date >= ? AND bi.invoice_date < ? ${groupSql} ${qSql}
       ORDER BY bi.issued_at DESC LIMIT 8`,
     [range.start, range.next, ...extra]

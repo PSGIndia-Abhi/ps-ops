@@ -171,8 +171,7 @@ export default function AccountsDashboard() {
             emptyText="Nothing invoiced"
             segments={[
               { key: "collected", label: "Collected", value: k?.collected || 0, display: rupeesShort(k?.collected || 0), color: "#0d9488" },
-              { key: "pending", label: "Pending", value: Math.max(0, (k?.pending || 0) - (k?.overdue || 0)), display: rupeesShort(Math.max(0, (k?.pending || 0) - (k?.overdue || 0))), color: "#6d5ce8" },
-              { key: "overdue", label: "Overdue", value: k?.overdue || 0, display: rupeesShort(k?.overdue || 0), color: "#e0457b" },
+              { key: "pending", label: "Pending", value: k?.pending || 0, display: rupeesShort(k?.pending || 0), color: "#6d5ce8" },
             ]}
           />
         </section>
