@@ -176,7 +176,8 @@ export default function SosEntry() {
       <div className="sos-top">
         <button type="button" className="sos-back" onClick={() => navigate(`${BILLING_HOME}/sos?month=${month}`)} aria-label="Back to Monthly SOS" title="Monthly SOS"><FiArrowLeft /></button>
         <div className="sos-top-main">
-          <h1>{data.customer}</h1>
+          <h1>{data.billing_group ? data.billing_group.group : data.customer}</h1>
+          {data.billing_group && <div className="ac-sub" style={{ marginTop: 2 }}>Group contract · {data.billing_group.companies.join(", ")}</div>}
           <div className="bl-meta">
             <span className={`bl-status ${STATUS_TONE[statusCls] || "grey"}`}><span className="bl-status-dot" />{statusLabel}</span>
             {data.structures.map((st) => <span key={st}><FiLayers /> {st === "FIXED" ? "Fixed amount" : "Service based"}</span>)}

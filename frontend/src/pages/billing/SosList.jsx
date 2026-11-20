@@ -108,7 +108,14 @@ export default function SosList() {
                 const short = r.completed !== null && r.completed < r.assigned;
                 return (
                   <tr key={r.company_id} className="bl-rowlink" onClick={() => open(r)}>
-                    <td><b>{r.customer}</b></td>
+                    <td>
+                      {r.billing_group ? (
+                        <>
+                          <b>{r.billing_group.group}</b>
+                          <div className="bl-sub">Group contract · {r.billing_group.companies.join(", ")}</div>
+                        </>
+                      ) : <b>{r.customer}</b>}
+                    </td>
                     <td>{r.group ? <span className="bl-group"><FiLayers />{r.group}</span> : <span className="ac-sub">—</span>}</td>
                     <td className="bl-num">{r.outlets || "—"}</td>
                     <td className="bl-num">{r.assigned}</td>

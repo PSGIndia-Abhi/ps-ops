@@ -116,10 +116,13 @@ export default function InvoiceView() {
                 {inv.bill_to.gst_number && <div className="iv-meta">GSTIN {inv.bill_to.gst_number}</div>}
                 {inv.bill_to.state && <div className="iv-meta">State {inv.bill_to.state}</div>}
               </div>
-              <div>
-                <div className="iv-label">Ship to</div>
-                {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
-              </div>
+              {/* a group based invoice bills the group: no Ship to */}
+              {inv.contract?.contract_kind !== "GROUP" && (
+                <div>
+                  <div className="iv-label">Ship to</div>
+                  {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
+                </div>
+              )}
               <div className="iv-facts">
                 <div><span>Invoice date</span><b>{dmy(inv.invoice_date)}</b></div>
                 <div><span>Period</span><b>{dmy(inv.period_start)} – {dmy(inv.period_end)}</b></div>

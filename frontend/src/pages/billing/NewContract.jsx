@@ -154,6 +154,9 @@ export default function NewContract() {
   })();
   const svcOf = () => groupSvcText;
   const groupLines = groupMode && !termite;
+  // which companies have a line now: when it does not match the ticks (a restored draft, a reload),
+  // the lines are made again below
+  const companySig = lines.filter((l) => l.company).map((l) => l.company).join(",");
   useEffect(() => {
     if (!groupMode || !group) return;
     setLines((ls) => {
@@ -172,9 +175,9 @@ export default function NewContract() {
       const next = [...rows, ...ls.filter((l) => !l.company && l.kind !== "SERVICE")];
       return next.length === ls.length && next.every((l, i) => l === ls[i]) ? ls : next;
     });
-    // pickedCompanies follows group + groupCompanyIds
+    // pickedCompanies follows group + groupCompanyIds; companySig follows the lines
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupMode, group, groupCompanyIds, termite]);
+  }, [groupMode, group, groupCompanyIds, termite, companySig]);
   // The services' amounts added up go into every company line not typed by hand (new lines too).
   useEffect(() => {
     if (!groupMode || !svcRated) return;
@@ -1009,6 +1012,9 @@ export default function NewContract() {
                         );
                       })}
                     </div>
+                    {!pickedCompanies.length && (
+                      <div className="ac-info" style={{ marginTop: 8 }}>{group ? "No company is ticked. Go back to step 1 and tick the companies of the group." : "Loading the group’s companies…"}</div>
+                    )}
                     <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>One line per ticked company, all on one invoice to the group. To add or remove a company, go back to step 1.</div>
                   </>
                 ) : !termite ? (
@@ -1235,6 +1241,8 @@ export default function NewContract() {
                           <td>
                             <div className="nc-rv-item">{l.item_name}</div>
                             {sub && sub !== l.item_name && <div className="ac-sub">{sub}</div>}
+                            {/* phones: quantity × rate here instead of their own columns */}
+                            <div className="ac-sub nc-rv-calc">{termite && l.kind === "SERVICE" ? `${l.area} sq. m` : l.qty} × ₹{amount(Number(l.rate))}</div>
                           </td>
                           <td className="num">{termite && l.kind === "SERVICE" ? `${l.area} sq. m` : l.qty}</td>
                           <td className="num">₹{amount(Number(l.rate))}</td>

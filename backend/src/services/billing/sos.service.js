@@ -104,6 +104,31 @@ function monthsIn(start, end) {
 }
 
 /** The SOS screen for a customer and month: agreed services per outlet with what was entered. */
+/**
+ * Group based contracts billed under these companies (the contract's main company holds the SOS of
+ * all its ticked companies): company_id -> { group, companies: [names] }.
+ */
+async function groupBillingFor(db, companyIds) {
+  const out = new Map();
+  if (!companyIds.length) return out;
+  const [rows] = await db.query(
+    `SELECT bc.company_id, TRIM(g.name) AS group_name, TRIM(co.name) AS company
+       FROM billing_contracts bc
+       JOIN group_name g ON g.id = bc.group_id
+       JOIN billing_contract_companies cc ON cc.contract_id = bc.id
+       JOIN companies co ON co.id = cc.company_id
+      WHERE bc.contract_kind = 'GROUP' AND bc.status = 'ACTIVE' AND bc.company_id IN (?)
+      ORDER BY co.name`,
+    [companyIds]
+  );
+  for (const r of rows) {
+    const e = out.get(r.company_id) || { group: r.group_name, companies: [] };
+    if (!e.companies.includes(r.company)) e.companies.push(r.company);
+    out.set(r.company_id, e);
+  }
+  return out;
+}
+
 async function sosView(db, companyId, month) {
   const m = monthStart(month);
   const [[company]] = await db.query(
@@ -143,13 +168,19 @@ async function sosView(db, companyId, month) {
     }
   }
 
-  const [sites] = await db.query("SELECT id, name FROM sites WHERE company_id = ? ORDER BY name", [companyId]);
+  const [sites] = await db.query(`SELECT id, name FROM sites
+      WHERE company_id = ?
+         OR company_id IN (SELECT cc.company_id FROM billing_contract_companies cc JOIN billing_contracts bc ON bc.id = cc.contract_id
+                            WHERE bc.company_id = ? AND bc.status = 'ACTIVE') ORDER BY name`, [companyId, companyId]);
   const invoiced = so ? await invoicedFor(db, companyId, m) : [];
+  const billingGroup = (await groupBillingFor(db, [companyId])).get(companyId) || null;
   const agreedLinesCount = lines.filter((l) => !l.is_extra).length;
   return {
     company_id: company.id,
     customer: company.name,
     group: company.group_name || null,
+    // group based contract: shown as the group, its companies are the lines
+    billing_group: billingGroup,
     bill_by_day: company.bill_by_day === null ? null : Number(company.bill_by_day),
     month: m,
     status: so ? so.status : "NOT_STARTED",
@@ -198,7 +229,10 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
 
   const agreed = await agreedLines(conn, companyId, m);
   if (!agreed.length) throw C.bad(`${company.name} has no services billed per service for ${C.monthName(m)} in its billing profile`);
-  const [siteRows] = await conn.query("SELECT id FROM sites WHERE company_id = ?", [companyId]);
+  const [siteRows] = await conn.query(`SELECT id, name FROM sites
+      WHERE company_id = ?
+         OR company_id IN (SELECT cc.company_id FROM billing_contract_companies cc JOIN billing_contracts bc ON bc.id = cc.contract_id
+                            WHERE bc.company_id = ? AND bc.status = 'ACTIVE')`, [companyId, companyId]);
   const sites = new Set(siteRows.map((s) => s.id));
 
   const given = new Map((Array.isArray(body.lines) ? body.lines : []).map((l) => [String(l?.contract_line_id || ""), l]));
@@ -393,10 +427,12 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
       ORDER BY c.name`,
     [m, end, m, end, m, groupId, groupId, ...(companyIds.length ? [companyIds] : []), q, q, q]
   );
+  const groups = await groupBillingFor(db, rows.map((r) => r.company_id));
   const list = rows.map((r) => ({
     company_id: r.company_id,
     customer: r.name,
     group: r.group_name || null,
+    billing_group: groups.get(r.company_id) || null,
     bill_by_day: r.bill_by_day === null ? null : Number(r.bill_by_day),
     services: Number(r.services),
     outlets: Number(r.outlets),
