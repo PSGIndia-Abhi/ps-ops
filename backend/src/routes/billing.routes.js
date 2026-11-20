@@ -17,6 +17,7 @@ const share = require("../controllers/billing/share.controller");
 const descriptions = require("../controllers/billing/descriptions.controller");
 const frequencies = require("../controllers/billing/frequencies.controller");
 const customers = require("../controllers/billing/customers.controller");
+const groupContracts = require("../controllers/billing/groupContracts.controller");
 const sos = require("../controllers/billing/sos.controller");
 const dashboardCtl = require("../controllers/billing/dashboard.controller");
 
@@ -56,6 +57,10 @@ router.post("/sos/:companyId/reopen", canAny(P.MANAGE_SERVICE_PLANS, P.GENERATE_
 
 // Customer Billing Profile (one screen per customer: details, outlets, services, POs, invoice settings)
 router.get("/customer-options", can(P.VIEW_BILLING), customers.listOptions);
+// Group based contracts: the groups with their companies, and the group's Bill To.
+router.get("/contract-groups", can(P.VIEW_BILLING), groupContracts.listGroups);
+router.get("/group-profiles/:groupId", can(P.VIEW_BILLING), groupContracts.getGroupProfile);
+router.put("/group-profiles/:groupId", can(P.MANAGE_BILLING_MASTERS), groupContracts.saveGroupProfile);
 router.get("/customer-profiles", can(P.VIEW_BILLING), customers.listProfiles);
 router.get("/customer-profiles/:companyId", can(P.VIEW_BILLING), customers.getCustomerProfile);
 router.put("/customer-profiles/:companyId/settings", can(P.MANAGE_BILLING_MASTERS), customers.saveCustomerSettings);

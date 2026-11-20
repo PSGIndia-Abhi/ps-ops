@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronRight, FiPauseCircle, FiPlus, FiSearch, FiXCircle } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronRight, FiPauseCircle, FiPlus, FiSearch, FiUser, FiUsers, FiXCircle } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { qs, useBilling, useCustomerOptions } from "./billingApi";
 import { dmy, thisMonth, initials } from "./format";
-import { Kpi, Msg, StatusBadge, TypeBadge } from "./ui";
+import { Kpi, Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
 import CustomerFilter from "./CustomerFilter";
 
@@ -16,6 +16,7 @@ const STATUS = [["ACTIVE", "Active"], ["PAUSED", "Paused"], ["ENDED", "Ended"], 
 export default function Contracts() {
   const { me } = useOutletContext();
   const navigate = useNavigate();
+  const [choosing, setChoosing] = useState(false); // New contract: group based or service based
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState("ACTIVE");
@@ -43,10 +44,35 @@ export default function Contracts() {
         </div>
         {me.can("MANAGE_BILLING_MASTERS") && (
           <div className="ac-actions">
-            <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/billing/contracts/new")}><FiPlus /> New contract</button>
+            <button type="button" className="ac-btn ac-btn-primary" onClick={() => setChoosing(true)}><FiPlus /> New contract</button>
           </div>
         )}
       </div>
+
+      {/* New contract: first choose the kind. Service based = the existing steps for one customer;
+          group based = companies of a group, one Bill To for the group. */}
+      {choosing && (
+        <Modal onClose={() => setChoosing(false)} narrow label="New contract">
+          <div className="bl-m-head">
+            <div><h3>New contract</h3><div className="ac-sub">What kind of contract is it?</div></div>
+            <button type="button" className="bl-x" onClick={() => setChoosing(false)} aria-label="Close">✕</button>
+          </div>
+          <div className="bl-m-body">
+            <div className="nc-kind-pick">
+              <button type="button" className="nc-kind-card" onClick={() => navigate("/billing/contracts/new?type=group")}>
+                <span className="nc-kind-ic"><FiUsers /></span>
+                <b>Group based contract</b>
+                <span className="ac-sub">Choose a group, tick its companies, one Bill To for the group</span>
+              </button>
+              <button type="button" className="nc-kind-card" onClick={() => navigate("/billing/contracts/new")}>
+                <span className="nc-kind-ic"><FiUser /></span>
+                <b>Service based contract</b>
+                <span className="ac-sub">One customer and its services</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <div className="ac-kpis">
         <Kpi color="green" icon={FiCheckCircle} label="Active" value={data ? count("ACTIVE") : "—"} note="billing every period" onClick={() => { setStatus("ACTIVE"); setMissingOnly(false); }} active={status === "ACTIVE" && !missingOnly} />
