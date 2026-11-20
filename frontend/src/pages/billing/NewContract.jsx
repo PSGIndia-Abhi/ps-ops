@@ -842,8 +842,10 @@ export default function NewContract() {
                 </div>
                 {both && (
                   <div style={{ marginTop: 10 }}>
-                    <div className="ac-sub" style={{ marginBottom: 6 }}>Separate bills for pest control services and chemicals?</div>
-                    <div className="nc-kinds" role="radiogroup" aria-label="Separate bills">
+                    <div className="ac-sub" style={{ marginBottom: 6 }}>
+                      Separate bills for pest control services and chemicals?<span className="bl-req"> *</span>
+                    </div>
+                    <div className="nc-kinds" role="radiogroup" aria-label="Separate bills" aria-required="true">
                       {[[true, "Yes, separate bills"], [false, "No, one bill"]].map(([v, label]) => (
                         <label key={String(v)} className={`nc-kind ${terms.separate_bills === v ? "on" : ""}`}>
                           <input type="radio" name="nc-separate-bills" checked={terms.separate_bills === v} onChange={() => setT({ separate_bills: v })} /> {label}
@@ -1138,7 +1140,7 @@ export default function NewContract() {
                 Lines not in a summary print one by one. */}
             {filledLines.length > 1 && (
               <div className="nc-summary">
-                <div className="nc-sec-title" style={{ margin: 0 }}>Invoice line summaries (optional)</div>
+                <div className="nc-sec-title" style={{ margin: 0 }}>Item summary (optional)</div>
                 {picked.length ? (
                   <div className="nc-summary-row">
                     <input className="ac-input" value={groupText} maxLength={255} autoFocus placeholder={`Summary for the ${picked.length} ticked, e.g. Pest control services`} onChange={(e) => setGroupText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applyGroup()} aria-label="Invoice line summary" />
