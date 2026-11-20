@@ -940,3 +940,23 @@ a.ac-contact-call:hover { background: #dcfce7; }
 /* Expanded rows (Payment List, Customer Outstanding): the inner invoice table scrolls inside its
    box on small screens instead of pushing the page wider. */
 .ac-expand-box { overflow-x: auto; }
+
+/* ---- TDS basis: Taxable TDS / Invoice TDS (TDS Settings) ---- */
+.ac-badge.tds-taxable { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.ac-badge.tds-invoice { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.tds-basis-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tds-basis-option { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 10px; cursor: pointer; background: #fff; }
+.tds-basis-option input { margin-top: 3px; accent-color: #2563eb; }
+.tds-basis-option strong { display: block; font-size: 14px; color: #0f172a; }
+.tds-basis-option small { display: block; font-size: 12px; color: #64748b; margin-top: 2px; }
+.tds-basis-option.selected { border-color: #2563eb; background: #f5f8ff; }
+.tds-basis-option.disabled { opacity: 0.55; cursor: not-allowed; }
+.tds-example { margin-top: 12px; padding: 10px 12px; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; font-size: 13px; color: #334155; }
+.tds-example-title { font-weight: 600; margin-bottom: 4px; }
+.tds-example-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.tds-example-row.strong { font-weight: 700; color: #1d4ed8; }
+.tds-example-row.muted { color: #94a3b8; }
+.tds-example-note { margin-top: 6px; font-size: 12px; color: #64748b; }
+@media (max-width: 520px) {
+  .tds-basis-options { grid-template-columns: 1fr; }
+}

@@ -91,6 +91,8 @@ export interface Lead {
 export type NewLeadInput = Omit<Lead, 'id' | 'createdAt' | 'pendingSync' | 'syncError' | 'localPhotos'> & {
   /** Sales manager only, new commercial leads: who the lead is given to (a sales executive, a telecaller, themselves). */
   assignTo?: number;
+  /** MD / PA / sales manager / admin, new commercial leads: an earlier lead date ("YYYY-MM-DD"); not set = today. */
+  leadDate?: string;
 };
 
 export const isCommercial = (lead: Pick<Lead, 'leadType'>): boolean => lead.leadType === 'commercial';

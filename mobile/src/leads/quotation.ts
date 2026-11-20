@@ -36,6 +36,9 @@ export type QuotationContent = {
   quotationDate?: string;
   validDays: number;
   contractMonths: number;
+  /** One-time / fixed number of services: the PDF prints contractPeriodText instead of the months. */
+  oneTimeService?: boolean;
+  contractPeriodText?: string;
   discount: number;
   services: { name: string; plan: string; billing: Billing; price: number | null; rows: TreatmentRow[] }[];
   pricing: { mode: 'PER_SERVICE' } | { mode: 'PACKAGE'; amount: number; billing: Billing; planLabel: string; description: string };

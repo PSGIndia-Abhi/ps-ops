@@ -31,6 +31,7 @@ import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard }
 import { useToast } from "./hooks";
 import { Button, Field, Modal, Note, StageBadge } from "./ui";
 import { assigneeRole, assignLead, fetchAssignees, getActiveQuoteMaster, leadSalesOwner, MANAGER_ROLES } from "./leadsApi";
+import { canSetConversionDate, canSetLeadDate, todayYmd, updateConversion } from "./leadsApi";
 import { useViewer } from "./viewer";
 
 /** The reasons offered when a lead is closed: the server's list, or ours if it could not be read. */
@@ -196,6 +197,11 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     };
   }, [canAssign]);
   const [values, setValues] = useState({ ...BLANK_LEAD, source: fixedSource || "" });
+  // The lead date: today, unless the MD / PA / sales manager / admin picks the day the lead really
+  // came in (leads from before the app was in use). Not on the lead provider's form.
+  const askLeadDate = viewer.persona !== "lead_provider" && canSetLeadDate();
+  const today = todayYmd();
+  const [leadDate, setLeadDate] = useState(today);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const set = (key) => (e) => {
@@ -221,6 +227,7 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     // The quote must be more than 0.
     if (!(Number(values.quote) > 0)) found.quote = "Enter the approximate quote (more than 0).";
     if (values.requirement.trim().length < 5) found.requirement = "Describe what the customer needs.";
+    if (askLeadDate && (!leadDate || leadDate > today)) found.leadDate = "Choose the lead date - it cannot be in the future.";
     setErrors(found);
     return Object.keys(found).length === 0;
   }
@@ -235,9 +242,13 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
     if (busy || !validate()) return;
     setBusy(true);
     try {
-      const lead = await submitLead({ ...values, assignTo: canAssign ? assignTo : undefined }, viewer.me);
+      const lead = await submitLead(
+        { ...values, assignTo: canAssign ? assignTo : undefined, leadDate: askLeadDate && leadDate !== today ? leadDate : undefined },
+        viewer.me
+      );
       toast(`Lead ${lead.number} submitted`);
       setValues({ ...BLANK_LEAD, source: fixedSource || "" });
+      setLeadDate(today);
       onSaved?.(lead);
     } catch (err) {
       toast(err.message || "Could not submit the lead.", true);
@@ -308,6 +319,11 @@ export function LeadForm({ onSaved, onCancel, submitLabel = "Submit Lead", fixed
                   </option>
                 ))}
             </select>
+          </Field>
+        )}
+        {askLeadDate && (
+          <Field label="Lead Date" required error={errors.leadDate} hint="Today by default - pick an earlier day for a lead that came in before.">
+            <input className={cls("leadDate")} type="date" value={leadDate} max={today} onChange={(e) => setLeadDate(e.target.value)} />
           </Field>
         )}
         <Field label="Approximate Quote (₹)" required error={errors.quote}>
@@ -652,6 +668,11 @@ export function CloseLeadModal({ lead, won, onClose }) {
   const [creditTo, setCreditTo] = useState(() => (askCredit ? String(owner.id) : ""));
   // One-time service or AMC - asked here, when the deal is won.
   const [contractType, setContractType] = useState("");
+  // The conversion date: today, unless the Managing Director / Personal Assistant picks the day the
+  // customer really converted (customers converted before the app was in use).
+  const askDate = won && canSetConversionDate();
+  const today = todayYmd();
+  const [convertedOn, setConvertedOn] = useState(today);
 
   async function save(close) {
     if (busy) return;
@@ -659,9 +680,17 @@ export function CloseLeadModal({ lead, won, onClose }) {
       toast("Choose One-time or AMC.", true);
       return;
     }
+    if (askDate && (!convertedOn || convertedOn > today)) {
+      toast("Choose a conversion date - it cannot be in the future.", true);
+      return;
+    }
     setBusy(true);
     try {
-      await closeLead(lead.id, { won, reason, notes, contractType, creditTo: askCredit ? creditTo : undefined }, viewer.me);
+      await closeLead(
+        lead.id,
+        { won, reason, notes, contractType, creditTo: askCredit ? creditTo : undefined, convertedOn: askDate && convertedOn !== today ? convertedOn : undefined },
+        viewer.me
+      );
       toast(won ? `${lead.company} converted to a customer` : "Lead marked as lost");
       close();
     } catch (err) {
@@ -698,6 +727,11 @@ export function CloseLeadModal({ lead, won, onClose }) {
               { value: "AMC", label: "AMC", sub: "Annual maintenance contract", tone: "info" },
             ]}
           />
+        </Field>
+      )}
+      {askDate && (
+        <Field label="Conversion date" required hint="Today by default - pick an earlier day if the customer converted before.">
+          <input className="lm-input" type="date" value={convertedOn} max={today} onChange={(e) => setConvertedOn(e.target.value)} />
         </Field>
       )}
       {won && askCredit && (
@@ -1418,6 +1452,111 @@ export function ProviderUpdateModal({ lead, onClose }) {
       <Field label="Update" required hint={`${message.length}/300`}>
         <textarea className="lm-textarea" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={300} placeholder="e.g. Site visit done - the customer is reviewing our quotation." />
       </Field>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------ edit conversion */
+
+/**
+ * Corrects a conversion that is already saved: the conversion date (Managing Director / Personal
+ * Assistant only - e.g. a customer converted before the app was in use) and who it counts for (the
+ * heads of sales). `conversion` is what getConversion returned. The server checks the same rules.
+ */
+export function EditConversionModal({ lead, conversion, canDate, canPerson, onClose, onSaved }) {
+  const toast = useToast();
+  const today = todayYmd();
+  const startDate = (conversion.convertedAt || "").slice(0, 10);
+  const [date, setDate] = useState(startDate);
+  const [person, setPerson] = useState(conversion.creditedTo || "");
+  const [people, setPeople] = useState(canPerson ? null : []);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!canPerson) return undefined;
+    let alive = true;
+    fetchAssignees()
+      .then((list) => alive && setPeople(list.filter((p) => String(p.role).toLowerCase() !== "telecaller")))
+      .catch((err) => {
+        if (!alive) return;
+        setPeople([]);
+        setError(err.message || "Could not load the sales team.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [canPerson]);
+
+  const dateChanged = canDate && date && date !== startDate;
+  const personChanged = canPerson && person && person !== (conversion.creditedTo || "");
+
+  async function save(close) {
+    if (busy) return;
+    if (canDate && (!date || date > today)) return setError("Choose a conversion date - it cannot be in the future.");
+    if (!dateChanged && !personChanged) return setError("Nothing has changed.");
+    setBusy(true);
+    setError("");
+    try {
+      await updateConversion(lead.id, { convertedOn: dateChanged ? date : undefined, creditTo: personChanged ? person : undefined });
+      toast("Conversion updated");
+      onSaved?.();
+      close();
+    } catch (err) {
+      setError(err.message || "Could not update the conversion.");
+      setBusy(false);
+    }
+  }
+
+  // The current person stays in the list even if they are no longer on the team list.
+  const options = people ? [...people] : [];
+  if (conversion.creditedTo && !options.some((p) => p.id === conversion.creditedTo)) {
+    options.unshift({ id: conversion.creditedTo, name: conversion.creditedToName || "Current person", role: "" });
+  }
+
+  return (
+    <Modal
+      title="Edit conversion"
+      sub={lead.company}
+      onClose={onClose}
+      footer={(close) => (
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button busy={busy} icon={<FiSave />} onClick={() => save(close)}>
+            Save
+          </Button>
+        </>
+      )}
+    >
+      <LeadBar lead={lead} />
+      {canDate && (
+        <Field label="Conversion date" required hint="The day the customer really converted. It cannot be in the future.">
+          <input className="lm-input" type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+      )}
+      {canPerson && (
+        <Field label="Counts for" required hint="The sales person whose target and Converted count this goes to.">
+          {people === null ? (
+            <select className="lm-select" disabled>
+              <option>Loading…</option>
+            </select>
+          ) : (
+            <select className="lm-select" value={person} onChange={(e) => setPerson(e.target.value)}>
+              {!person && <option value="">Select a person</option>}
+              {options.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.role ? ` - ${assigneeRole(p.role)}` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+      <Note tone="info">Targets, the Converted count and reports move to the new date and person. The change is kept in the lead&apos;s history.</Note>
+      {error && <Note tone="warn">{error}</Note>}
     </Modal>
   );
 }

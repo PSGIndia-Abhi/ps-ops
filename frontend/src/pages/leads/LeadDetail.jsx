@@ -35,6 +35,7 @@ import {
   CallVerifyModal,
   CancelQuotationModal,
   CloseLeadModal,
+  EditConversionModal,
   EditLeadModal,
   FollowUpModal,
   MeetingChangeModal,
@@ -42,7 +43,7 @@ import {
   ScheduleMeetingModal,
   VisitModal,
 } from "./dialogs";
-import { fetchQuotationPdf, getConversion, getQuotationContent, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
+import { canSetConversionDate, fetchQuotationPdf, getConversion, getQuotationContent, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
 import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
 import { downloadQuotationWord } from "./quotationWord";
 import { AgreementsTab } from "./Agreements";
@@ -51,7 +52,7 @@ import { download, shareFile } from "./shareFile";
 import { downloadCompanyProfile, gmailCompose, proposalEmail } from "./proposalEmail";
 import useMe from "../../hooks/useMe";
 import { useToast } from "./hooks";
-import { dateTime, money, stageOf } from "./format";
+import { dateTime, dayLabel, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads } from "./viewer";
 import { ReminderPopup } from "./Reminders";
@@ -93,13 +94,20 @@ function stepTimes(lead, timeline) {
   if (lead.milestones) return lead.milestones;
   const first = (test) => timeline.find(test);
   const at = (a) => (a ? { at: a.at, by: a.by } : undefined);
+  // Converted: the conversion date (the MD / PA may have backdated it), not when it was entered.
+  // Entered on another day -> only that day is shown (no time of day is known for it).
+  const won = at(first((a) => a.type === "WON"));
+  const closed =
+    lead.stage === "WON" && lead.convertedOn && (!won?.at || String(won.at).slice(0, 10) !== lead.convertedOn)
+      ? { at: `${lead.convertedOn}T12:00:00`, by: won?.by, dayOnly: true }
+      : at(first((a) => a.type === "WON" || a.type === "LOST"));
   return {
     submitted: at(first((a) => a.type === "CREATED")) || { at: lead.createdAt },
     verified: at(first((a) => a.type === "QUALIFIED" || a.type === "REJECTED")),
     meeting: at(first((a) => a.type === "MEETING")),
     visit: at(first((a) => a.type === "VISIT" && a.text.startsWith("Site visit completed"))),
     quotation: at(first((a) => a.type === "QUOTATION")),
-    closed: at(first((a) => a.type === "WON" || a.type === "LOST")),
+    closed,
   };
 }
 
@@ -130,7 +138,7 @@ function Journey({ lead, timeline, showWho }) {
     if (st === "fail") return lead.stage === "NOT_GENUINE" ? "Not genuine" : "Lost";
     if (st === "now") return i === 1 ? NOW_TEXT[lead.stage] || "In progress" : NEXT_TEXT[step.key];
     const t = when(step.key);
-    if (st === "done" && t?.at) return `${dateTime(t.at)}${showWho && t.by ? ` · ${t.by}` : ""}`;
+    if (st === "done" && t?.at) return `${t.dayOnly ? dayLabel(t.at) : dateTime(t.at)}${showWho && t.by ? ` · ${t.by}` : ""}`;
     if (st === "done") return i === 1 ? "Genuine" : "Done";
     return "";
   };
@@ -412,8 +420,13 @@ function SetContractType({ lead }) {
   );
 }
 
-function ConversionCard({ leadId, isAdmin }) {
+function ConversionCard({ lead, isAdmin, canPerson }) {
+  const leadId = lead.id;
   const [state, setState] = useState({ leadId: null, data: null, error: "" });
+  const [editing, setEditing] = useState(false);
+  const [reload, setReload] = useState(0);
+  // The Managing Director / Personal Assistant change the date; the heads of sales the person.
+  const canDate = canSetConversionDate();
 
   useEffect(() => {
     let alive = true;
@@ -423,10 +436,12 @@ function ConversionCard({ leadId, isAdmin }) {
     return () => {
       alive = false;
     };
-  }, [leadId]);
+  }, [leadId, reload]);
 
   if (state.leadId !== leadId || (!state.data && !state.error)) return null;
   const c = state.data;
+  // Entered on another day than the conversion date = backdated.
+  const backdated = c && c.recordedAt && c.convertedAt && c.recordedAt.slice(0, 10) !== c.convertedAt.slice(0, 10);
 
   return (
     <div className="lm-stop">
@@ -437,7 +452,8 @@ function ConversionCard({ leadId, isAdmin }) {
         <span>
           Customer created: <b>{c.companyName}</b> ({c.companyId})
           {c.convertedBy ? ` by ${c.convertedBy}` : ""}
-          {c.convertedAt ? `, ${dateTime(c.convertedAt)}` : ""}
+          {c.convertedAt ? (backdated ? `, converted on ${dayLabel(c.convertedAt)} (entered ${dateTime(c.recordedAt)})` : `, ${dateTime(c.convertedAt)}`) : ""}
+          {c.creditedToName ? ` - counts for ${c.creditedToName}` : ""}
           {c.notes ? ` - ${c.notes}` : ""}
           {isAdmin && (
             <>
@@ -447,7 +463,29 @@ function ConversionCard({ leadId, isAdmin }) {
               </Link>
             </>
           )}
+          {(canDate || canPerson) && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                style={{ border: 0, background: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", font: "inherit", fontWeight: 700 }}
+              >
+                Edit conversion
+              </button>
+            </>
+          )}
         </span>
+      )}
+      {editing && c && (
+        <EditConversionModal
+          lead={lead}
+          conversion={c}
+          canDate={canDate}
+          canPerson={canPerson}
+          onClose={() => setEditing(false)}
+          onSaved={() => setReload((n) => n + 1)}
+        />
       )}
     </div>
   );
@@ -749,7 +787,7 @@ export default function LeadDetail() {
           </div>
         )}
 
-        {lead.stage === "WON" && !provider && <ConversionCard leadId={lead.id} isAdmin={viewer.canPick} />}
+        {lead.stage === "WON" && !provider && <ConversionCard lead={lead} isAdmin={viewer.canPick} canPerson={isHead} />}
         {lead.stage === "WON" && !lead.contractType && seesAgreements && <SetContractType lead={lead} />}
       </section>
 

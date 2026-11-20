@@ -1,12 +1,17 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
+import {
+  FiAlertCircle, FiCalendar, FiCheck, FiClock, FiDroplet, FiEdit2, FiFileText, FiHash, FiLayers, FiList, FiPause, FiPercent,
+  FiPlay, FiPlusCircle, FiRepeat, FiSliders, FiTrendingUp, FiXCircle,
+} from "react-icons/fi";
+import { LuIndianRupee } from "react-icons/lu";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
 import BillingProfileCard from "./BillingProfileCard";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
-import { amount, dmy, monthLabel, nextBilling, today } from "./format";
+import { TYPE_LABEL, amount, dmy, initials, monthLabel, nextBilling, rupees, shortDate, today } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
@@ -37,7 +42,7 @@ export default function ContractForm() {
   const { data: customers } = useBilling("/customers");
   const [edits, setEdits] = useState(null);
   const [newLines, setNewLines] = useState([emptyLine()]);
-  const [tab, setTab] = useState("prices");
+  const [tab, setTab] = useState("details");
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
   const [statusAction, setStatusAction] = useState(null);
@@ -59,7 +64,9 @@ export default function ContractForm() {
   const { data: poData, error: poError } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
   const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" || form.po_ids.includes(p.id));
   // When this contract is next billed, and whether its customer can be billed at all (Bill To profile).
-  const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : contract?.next_period_start);
+  const next = form.status === "ENDED" || form.status === "PAUSED" ? null : nextBilling(form, isNew ? form.start_date : form.next_period_start || contract?.next_period_start);
+  // The next billing date can be moved only while nothing is drafted or issued on the contract.
+  const nextEditable = !isNew && Boolean(contract?.next_period_editable) && !readOnly;
   const thisMonthKey = today().slice(0, 7);
   const { data: profile, error: profileError, loading: profileLoading, reload: reloadProfile } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
   const customerRow = (customers || []).find((c) => c.company_id === companyId) || null;
@@ -75,6 +82,7 @@ export default function ContractForm() {
       bill_timing: form.bill_timing,
       start_date: form.start_date,
       end_date: form.end_date || null,
+      ...(nextEditable && form.next_period_start && form.next_period_start !== contract.next_period_start ? { next_period_start: form.next_period_start } : {}),
       invoice_grouping: form.invoice_grouping,
       site_id: form.site_id || null,
       po_required: PO_TYPES.includes(form.billing_type) ? true : Boolean(form.po_required),
@@ -153,237 +161,311 @@ export default function ContractForm() {
   const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
   const cols = sqmMode ? 7 : 5;
 
+  // Summary figures (current price lines only).
+  const currentLines = isNew ? newLines.filter((l) => l.item_name && l.rate !== "") : contract.lines.filter((l) => !l.effective_to);
+  const lineValue = (l) => (isSqm(l) ? lineTotal(l) ?? 0 : Number(l.rate) * (Number(l.default_qty) || 1));
+  const billValue = currentLines.reduce((t, l) => t + (Number(lineValue(l)) || 0), 0);
+  const outletCount = new Set(currentLines.map((l) => l.site_id || "all")).size;
+  const noGst = residential || form.gst_applicable === false;
+  const freq = form.billing_type === "ONE_TIME" ? "One-time" : `Every ${Number(form.frequency_months) || 1} month${Number(form.frequency_months) > 1 ? "s" : ""}`;
+  const dirty = isNew || Boolean(edits);
+  const customerName = isNew ? customerRow?.name || "New contract" : contract.customer;
+  const TABS = [
+    ["details", "Details", <FiSliders key="i" />, null],
+    ["prices", "Services & prices", <FiList key="i" />, linesShown.filter((l) => !l.effective_to && (l.item_name || !isNew)).length],
+    ...(!isNew ? [["billing", "Billing details", <FiFileText key="i" />, null], ["history", "Price history", <FiClock key="i" />, contract.price_history.length]] : []),
+  ];
+
   return (
-    <div className="ac-page">
-      <div className="ac-head">
-        <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / {isNew ? "New" : contract.contract_code}</div>
-          <h1 className="ac-title">{isNew ? "New Contract" : "Edit Contract"} {!isNew && <StatusBadge value={contract.status} />}</h1>
-          {!isNew && <p className="ac-sub">{contract.customer} · Next period from {dmy(contract.next_period_start)}{contract.last_invoice_number ? ` · Last invoice ${contract.last_invoice_number}` : ""}</p>}
+    <div className="ac-page ct-page">
+      <div className="ac-crumb" style={{ marginBottom: 8 }}><button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / {isNew ? "New" : contract.contract_code}</div>
+
+      <div className="ct-hero">
+        <span className="ct-avatar">{initials(customerName)}</span>
+        <div className="ct-hero-main">
+          <h1>{customerName}</h1>
+          <div className="bl-meta">
+            {!isNew && <span><FiHash /> {contract.contract_code}</span>}
+            {!isNew && <StatusBadge value={contract.status} />}
+            <span><FiRepeat /> {TYPE_LABEL[form.billing_type] || form.billing_type} · {freq.toLowerCase()}</span>
+            <span><FiLayers /> {form.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span>
+            {!isNew && contract.last_invoice_number && <span><FiFileText /> Last {contract.last_invoice_number}</span>}
+          </div>
         </div>
-        {canEdit && (
-          <div className="ac-actions">
-            {!isNew && contract.status === "ACTIVE" && <button type="button" className="ac-btn" onClick={() => setStatusAction("PAUSED")}>Pause</button>}
-            {!isNew && contract.status === "PAUSED" && <button type="button" className="ac-btn" onClick={() => setStatusAction("ACTIVE")}>Resume</button>}
-            {!isNew && contract.status !== "ENDED" && <button type="button" className="ac-btn" onClick={() => setStatusAction("ENDED")}>End contract</button>}
-            {!readOnly && <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (!isNew && !edits)} onClick={save}>{busy ? "Saving…" : isNew ? "Create contract" : "Save contract"}</button>}
+        {canEdit && !isNew && (
+          <div className="ct-hero-side">
+            {contract.status === "ACTIVE" && <button type="button" className="ac-btn" onClick={() => setStatusAction("PAUSED")}><FiPause /> Pause</button>}
+            {contract.status === "PAUSED" && <button type="button" className="ac-btn" onClick={() => setStatusAction("ACTIVE")}><FiPlay /> Resume</button>}
+            {contract.status !== "ENDED" && <button type="button" className="ac-btn danger-text" onClick={() => setStatusAction("ENDED")}><FiXCircle /> End contract</button>}
           </div>
         )}
       </div>
-      <Msg {...msg} />
-      {next && (
-        <div className="ac-info" style={{ marginBottom: 12 }}>
-          {/* one span: the box is a flex row, so loose text and <b> would each become a narrow column */}
-          <span>
-            ⓘ {isNew ? "First" : "Next"} invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, billed {next.advance ? "at the start" : "at the end"} of the period,
-            {" "}so it appears in the <b>Bill Run for {monthLabel(next.billMonth)}</b>
-            {next.billMonth < thisMonthKey ? " (already due: open this month's Bill Run)" : next.billMonth === thisMonthKey ? " (this month)" : ""}.
-          </span>
+
+      <div className="ct-sum">
+        <div className="ct-sumcard blue">
+          <span className="ct-sum-ic"><LuIndianRupee /></span>
+          <div><span>Value per bill</span><b>{rupees(billValue)}</b><small>{noGst ? "no GST" : "excl. GST"} · {freq.toLowerCase()}</small></div>
         </div>
-      )}
+        <div className="ct-sumcard purple">
+          <span className="ct-sum-ic"><FiList /></span>
+          <div><span>Services</span><b>{currentLines.length} line{currentLines.length === 1 ? "" : "s"}</b><small>{outletCount ? `${outletCount} outlet${outletCount === 1 ? "" : "s"}` : "none priced yet"}</small></div>
+        </div>
+        <div className={`ct-sumcard ${next && next.billMonth <= thisMonthKey ? "amber" : "green"}`}>
+          <span className="ct-sum-ic"><FiCalendar /></span>
+          <div>
+            <span>{isNew ? "First invoice" : "Next invoice"}</span>
+            <b>{next ? `${shortDate(next.start)} – ${shortDate(next.end)}` : "—"}</b>
+            <small>{next ? `Bill Run ${monthLabel(next.billMonth)}${next.billMonth < thisMonthKey ? " · already due" : next.billMonth === thisMonthKey ? " · this month" : ""}` : form.status === "PAUSED" ? "Paused - not billed" : "Not billed"}</small>
+          </div>
+        </div>
+        <div className="ct-sumcard teal">
+          <span className="ct-sum-ic"><FiPercent /></span>
+          <div>
+            <span>GST</span>
+            <b>{noGst ? "No GST" : `${form.gst_rate ?? 18}%`}</b>
+            <small>{residential ? "Residential customer" : noGst ? "Invoices without GST" : gstHint(form.gst_rate ?? 18, profile?.state_code)}</small>
+          </div>
+        </div>
+      </div>
+
+      <Msg {...msg} />
       {profileMissing && (
         <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
           <span>
             ⚠ This customer has no billing details (Bill To address and GST state), so the Bill Run cannot make its invoice.
-            {" "}<a href="#billing-details">Fill them in under Billing details</a>.
+            {!isNew && <>{" "}<button type="button" className="bl-link" onClick={() => setTab("billing")}>Fill them in under Billing details</button>.</>}
           </span>
         </div>
       )}
 
-      <div className="ac-card">
-        <h3 className="ac-card-title">Contract details</h3>
-        <div className="bl-grid g4">
-          <Field label="Customer" required>
-            {isNew ? (
-              <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "", po_ids: [] }); setNewLines([emptyLine("", form.billing_type)]); }}>
-                <option value="">Choose a customer…</option>
-                {(customers || []).map((c) => <option key={c.company_id} value={c.company_id} disabled={!c.category}>{c.name}{!c.category ? " (customer type not set)" : !c.profile_complete ? " (no billing profile)" : ""}</option>)}
-              </select>
-            ) : <input className="ac-input" readOnly value={contract.customer} />}
-          </Field>
-          <Field label="Billing type" required className="bl-span2">
-            <div className="ac-pills" style={{ width: "100%" }}>
-              {TYPES.map(([v, l]) => (
-                <button key={v} type="button" disabled={!isNew} className={`ac-pill ${typeIs(v) ? "active" : ""}`} style={{ whiteSpace: "nowrap", padding: "7px 10px" }}
-                  onClick={() => {
-                    set({ billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required });
-                    // Untouched lines follow the type (termite: per square metre).
-                    if (newLines.every((l) => l.rate === "" && l.default_qty === "")) setNewLines(newLines.map((l) => ({ ...emptyLine(l.site_id, v), key: l.key })));
-                  }}>{l}</button>
-              ))}
-            </div>
-          </Field>
-          <Field label="Billing frequency" required={typeIs("AMC")}>
-            <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
-          </Field>
-          <Field label="Bill date" required>
-            <select className="ac-select" value={form.bill_timing} disabled={readOnly} onChange={(e) => set({ bill_timing: e.target.value })}>
-              <option value="ADVANCE">Start of the month</option>
-              <option value="ARREARS">End of the month</option>
-            </select>
-          </Field>
-          <Field label="Term start date" required>
-            <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew} onChange={(e) => set({ start_date: e.target.value })} />
-          </Field>
-          <Field label="Term end date">
-            <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />
-          </Field>
-          <Field label="Invoice grouping">
-            <select className="ac-select" value={form.invoice_grouping} disabled={readOnly} onChange={(e) => set({ invoice_grouping: e.target.value })}>
-              <option value="PER_CUSTOMER">One invoice for the customer</option>
-              <option value="PER_SITE">One invoice per outlet</option>
-            </select>
-          </Field>
-          <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "The full amount every period, even if a service is missed" : "Billed for the services actually done (amount ÷ planned × done)"}>
-            <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
-              <option value="FULL">Fixed amount</option>
-              <option value="PRO_RATA">Service based</option>
-            </select>
-          </Field>
-          <Field label="Description on invoice" required className="bl-span2" hint="Type it, or choose a saved one. {month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time.">
-            <DescriptionPicker value={form.description_template || ""} disabled={readOnly} onChange={(text) => set({ description_template: text })} />
-          </Field>
-          <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : `${gstHint(form.gst_rate ?? 18, profile?.state_code)}. A change applies to new drafts only.`}>
-            <div className="nc-gst">
-              <select className="ac-select" value={residential || form.gst_applicable === false ? "NO" : "YES"} disabled={readOnly || residential}
-                onChange={(e) => set({ gst_applicable: e.target.value === "YES" })}>
-                <option value="YES">Apply GST</option>
-                <option value="NO">No GST</option>
-              </select>
-              {!residential && form.gst_applicable !== false && (
-                <span className="nc-rate">
-                  <input type="number" min="5" max="28" step="1" className="ac-input" value={form.gst_rate ?? 18} disabled={readOnly} onChange={(e) => set({ gst_rate: e.target.value })} aria-label="GST rate in percent" />
-                  <b>%</b>
-                </span>
-              )}
-            </div>
-          </Field>
-          <Field label="PO required">
-            <label className="bl-toggle">
-              <input type="checkbox" checked={PO_TYPES.includes(form.billing_type) || Boolean(form.po_required)} disabled={readOnly || PO_TYPES.includes(form.billing_type)} onChange={(e) => set({ po_required: e.target.checked })} />
-              {typeIs("CHEMICAL") ? "Always for chemical supply" : typeIs("TERMITE") ? "Always for termite work" : form.po_required ? "Yes" : "No"}
-            </label>
-          </Field>
-          {needsPo && (
-            <Field label="Purchase order" required={typeIs("TERMITE")} className="bl-span2"
-              hint={!companyId ? "Choose the customer first" : poError ? poError : poData && !poRows.length ? "No purchase orders for this customer. Add one in Purchase Orders." : ""}>
-              <select className="ac-select" value={form.po_ids[0] || ""} disabled={readOnly || !companyId}
-                onChange={(e) => set({ po_ids: e.target.value ? [e.target.value] : [] })}>
-                <option value="">{!companyId ? "Choose the customer first" : !poData ? "Loading…" : "Choose a purchase order…"}</option>
-                {poRows.map((p) => {
-                  const other = p.contract_id && p.contract_id !== id;
-                  return <option key={p.id} value={p.id} disabled={Boolean(other)}>{poLabel(p)}{other ? ` (used by ${p.contract_code})` : ""}</option>;
-                })}
-              </select>
-            </Field>
-          )}
-          <Field label="Notes" className={needsPo ? "bl-span2" : "bl-span4"}>
-            <input className="ac-input" value={form.notes || ""} disabled={readOnly} maxLength={1000} onChange={(e) => set({ notes: e.target.value })} />
-          </Field>
-        </div>
+      <div className="bl-utabs bl-segtabs" role="tablist">
+        {TABS.map(([k, l, icon, n]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={`bl-utab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
+            <span className="bl-utab-ic" aria-hidden="true">{icon}</span>
+            {l}
+            {n !== null && <span className="bl-count">{n}</span>}
+          </button>
+        ))}
       </div>
 
-      {!isNew && customerRow && <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />}
-
-      <div className="ac-card">
-        <div className="ac-tabs bl-tabs">
-          <button type="button" className={`ac-tab ${tab === "prices" ? "active" : ""}`} onClick={() => setTab("prices")}>Price list</button>
-          {!isNew && <button type="button" className={`ac-tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>Price history ({contract.price_history.length})</button>}
-        </div>
-
-        {tab === "prices" && (
-          <>
-            <div className="ac-card-head">
-              <span className="ac-sub" style={{ fontSize: 13 }}>
-                {typeIs("TERMITE") ? "Set this customer's rate per sq. m and the treated area. Amount = rate × area. Excluding GST." : `Set this customer's amount for each service. ${residential || form.gst_applicable === false ? "No GST is added." : "Excluding GST (18% is added on the invoice)."}`}
-              </span>
-              {!readOnly && companyId && (
-                <div className="ac-actions">
-                  <button type="button" className="ac-btn sm ac-btn-primary" onClick={() => (isNew
-                    ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => emptyLine(x.site_id, form.billing_type)) : [emptyLine(sites[0]?.site_id || "", form.billing_type)])])
-                    : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}>+ Add service</button>
-                  <button type="button" className="ac-btn sm" onClick={() => (isNew
-                    ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
-                    : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}>+ Add chemical</button>
-                </div>
+      {tab === "details" && (
+        <div className="ct-secs">
+          <section className="ct-sec">
+            <h3><span className="ct-sec-ic blue"><FiCalendar /></span>Billing schedule</h3>
+            <div className="bl-grid g2">
+              {isNew && (
+                <Field label="Customer" required className="bl-span2">
+                  <select className="ac-select" value={form.company_id} onChange={(e) => { set({ company_id: e.target.value, site_id: "", po_ids: [] }); setNewLines([emptyLine("", form.billing_type)]); }}>
+                    <option value="">Choose a customer…</option>
+                    {(customers || []).map((c) => <option key={c.company_id} value={c.company_id} disabled={!c.category}>{c.name}{!c.category ? " (customer type not set)" : !c.profile_complete ? " (no billing profile)" : ""}</option>)}
+                  </select>
+                </Field>
               )}
-            </div>
-            <div className="ac-table-wrap">
-              <table className="ac-table ac-stack bl-prices">
-                <colgroup>
-                  <col style={{ width: "22%" }} />
-                  <col />
-                  {sqmMode && <col style={{ width: 150 }} />}
-                  {sqmMode && <col style={{ width: 150 }} />}
-                  <col style={{ width: 170 }} />
-                  <col style={{ width: 130 }} />
-                  <col style={{ width: 190 }} />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Outlet</th>
-                    <th>Service / chemical</th>
-                    {sqmMode && <th className="ac-num">Rate per sq. m (₹)</th>}
-                    {sqmMode && <th className="ac-num">Area (sq. m)</th>}
-                    <th className="ac-num">Amount (₹)</th>
-                    <th>Valid from</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {!companyId && <EmptyRow cols={cols} text="Choose the customer first" />}
-                  {companyId && !linesShown.length && <EmptyRow cols={cols} text="No services priced yet. Use + Add service." />}
-                  {companyId && isNew && newLines.map((l) => (
-                    <LineRow key={l.key} line={l} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setNewLines(newLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))} onRemove={newLines.length > 1 ? () => setNewLines(newLines.filter((x) => x.key !== l.key)) : null} />
+              <Field label="Billing type" required className="bl-span2" hint={!isNew ? "Set when the contract was created" : ""}>
+                <div className="ct-seg" role="group" aria-label="Billing type">
+                  {TYPES.map(([v, l]) => (
+                    <button key={v} type="button" disabled={!isNew} className={typeIs(v) ? "active" : ""} aria-pressed={typeIs(v)}
+                      onClick={() => {
+                        set({ billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required });
+                        // Untouched lines follow the type (termite: per square metre).
+                        if (newLines.every((l2) => l2.rate === "" && l2.default_qty === "")) setNewLines(newLines.map((l2) => ({ ...emptyLine(l2.site_id, v), key: l2.key })));
+                      }}>{l}</button>
                   ))}
-                  {!isNew && contract.lines.map((l) => (lineEdit?.id === l.id ? (
-                    <LineRow key={l.id} line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} fixedRate onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
-                  ) : (
-                    <tr key={l.id}>
-                      <td>{l.site || "All outlets"}</td>
-                      <td>
-                        {l.item_name}
-                        {l.item_kind === "CHEMICAL" && <> <span className="ac-badge b-teal">Chemical</span></>}
-                        {l.invoice_group && <div className="bl-sub">Printed as “{l.invoice_group}”</div>}
-                      </td>
-                      {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
-                      {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
-                      <td className="bl-num"><b>{amount(isSqm(l) ? lineTotal(l) ?? 0 : Number(l.rate) * (Number(l.default_qty) || 1))}</b></td>
-                      <td>
-                        {dmy(l.effective_from)}
-                        {l.effective_from > today() && <div><span className="ac-badge b-amber">Upcoming</span></div>}
-                        {l.effective_to && <div className="bl-sub">till {dmy(l.effective_to)}</div>}
-                      </td>
-                      <td>
-                        {!readOnly && !l.effective_to && (
-                          <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
-                            <button type="button" className="ac-btn sm" onClick={() => setLineEdit({ ...l, default_qty: l.default_qty ?? "" })}>Edit</button>
-                            <button type="button" className="ac-btn sm" onClick={() => setRepricing(l)}>Change price</button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )))}
-                  {!isNew && lineEdit && !lineEdit.id && (
-                    <LineRow line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
-                  )}
-                </tbody>
-              </table>
+                </div>
+              </Field>
+              <Field label="Billing frequency" required={typeIs("AMC")}>
+                <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
+              </Field>
+              <Field label="Bill date" required>
+                <select className="ac-select" value={form.bill_timing} disabled={readOnly} onChange={(e) => set({ bill_timing: e.target.value })}>
+                  <option value="ADVANCE">Start of the month</option>
+                  <option value="ARREARS">End of the month</option>
+                </select>
+              </Field>
+              <Field label="Term start date" required>
+                <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew} onChange={(e) => set({ start_date: e.target.value })} />
+              </Field>
+              <Field label="Term end date" hint="Leave empty for an open-ended contract">
+                <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />
+              </Field>
+              {!isNew && (
+                <Field label="Next bill from" className="bl-span2" hint={nextEditable ? "Billed in Vyapar until a date? Set the first date not billed yet." : "Follows on from the last invoice"}>
+                  <input type="date" className="ac-input" value={form.next_period_start || ""} disabled={!nextEditable}
+                    min={form.start_date || undefined} max={form.end_date || undefined} onChange={(e) => set({ next_period_start: e.target.value })} />
+                </Field>
+              )}
             </div>
-          </>
-        )}
+          </section>
 
-        {tab === "history" && !isNew && (
-          <table className="ac-table ac-stack">
-            <thead><tr><th>Outlet</th><th>Item</th><th className="ac-num">Rate (₹)</th><th>From</th><th>To</th></tr></thead>
-            <tbody>
-              {!contract.price_history.length ? <EmptyRow cols={5} text="No earlier prices" /> : contract.price_history.map((l) => (
-                <tr key={l.id}><td>{l.site || "—"}</td><td>{l.item_name}</td><td className="bl-num">{amount(l.rate)}</td><td>{dmy(l.effective_from)}</td><td>{dmy(l.effective_to)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+          <section className="ct-sec">
+            <h3><span className="ct-sec-ic purple"><FiFileText /></span>Invoice</h3>
+            <div className="bl-grid g2">
+              <Field label="Invoice grouping">
+                <select className="ac-select" value={form.invoice_grouping} disabled={readOnly} onChange={(e) => set({ invoice_grouping: e.target.value })}>
+                  <option value="PER_CUSTOMER">One invoice for the customer</option>
+                  <option value="PER_SITE">One invoice per outlet</option>
+                </select>
+              </Field>
+              <Field label="Bill structure" hint={form.shortfall_billing === "FULL" ? "Full amount every period, even if a service is missed" : "Billed for the services actually done"}>
+                <select className="ac-select" value={form.shortfall_billing} disabled={readOnly} onChange={(e) => set({ shortfall_billing: e.target.value })}>
+                  <option value="FULL">Fixed amount</option>
+                  <option value="PRO_RATA">Service based</option>
+                </select>
+              </Field>
+              <Field label="Description on invoice" required className="bl-span2" hint="{month}, {period}, {from_month}, {to_month} are filled in. A new wording is saved for next time.">
+                <DescriptionPicker value={form.description_template || ""} disabled={readOnly} onChange={(text) => set({ description_template: text })} />
+              </Field>
+              <Field label="GST" hint={residential ? "Residential customer: never charged GST" : form.gst_applicable === false ? "Invoices go out without GST" : "A change applies to new drafts only"}>
+                <div className="nc-gst">
+                  <select className="ac-select" value={noGst ? "NO" : "YES"} disabled={readOnly || residential}
+                    onChange={(e) => set({ gst_applicable: e.target.value === "YES" })}>
+                    <option value="YES">Apply GST</option>
+                    <option value="NO">No GST</option>
+                  </select>
+                  {!noGst && (
+                    <span className="ct-suffix">
+                      <input type="number" min="5" max="28" step="1" className="ac-input" value={form.gst_rate ?? 18} disabled={readOnly} onChange={(e) => set({ gst_rate: e.target.value })} aria-label="GST rate in percent" />
+                      <i>%</i>
+                    </span>
+                  )}
+                </div>
+              </Field>
+              <Field label="PO required">
+                <label className={`ct-switch ${PO_TYPES.includes(form.billing_type) || form.po_required ? "on" : ""}`}>
+                  <input type="checkbox" checked={PO_TYPES.includes(form.billing_type) || Boolean(form.po_required)} disabled={readOnly || PO_TYPES.includes(form.billing_type)} onChange={(e) => set({ po_required: e.target.checked })} />
+                  <span className="ct-switch-track"><span /></span>
+                  {typeIs("CHEMICAL") ? "Always for chemical supply" : typeIs("TERMITE") ? "Always for termite work" : form.po_required ? "Yes - bill against a PO" : "No"}
+                </label>
+              </Field>
+              {needsPo && (
+                <Field label="Purchase order" required={typeIs("TERMITE")} className="bl-span2"
+                  hint={!companyId ? "Choose the customer first" : poError ? poError : poData && !poRows.length ? "No purchase orders for this customer. Add one in Purchase Orders." : ""}>
+                  <select className="ac-select" value={form.po_ids[0] || ""} disabled={readOnly || !companyId}
+                    onChange={(e) => set({ po_ids: e.target.value ? [e.target.value] : [] })}>
+                    <option value="">{!companyId ? "Choose the customer first" : !poData ? "Loading…" : "Choose a purchase order…"}</option>
+                    {poRows.map((p) => {
+                      const other = p.contract_id && p.contract_id !== id;
+                      return <option key={p.id} value={p.id} disabled={Boolean(other)}>{poLabel(p)}{other ? ` (used by ${p.contract_code})` : ""}</option>;
+                    })}
+                  </select>
+                </Field>
+              )}
+              <Field label="Notes" className="bl-span2">
+                <input className="ac-input" value={form.notes || ""} disabled={readOnly} maxLength={1000} placeholder="Internal notes (not printed)" onChange={(e) => set({ notes: e.target.value })} />
+              </Field>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === "billing" && !isNew && customerRow && <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />}
+
+      {tab === "prices" && (
+        <div className="ac-card ct-prices">
+          <div className="ct-prices-head">
+            <span className="ac-sub">
+              {typeIs("TERMITE") ? "Rate per sq. m × treated area. Excluding GST." : `Amount for each service. ${noGst ? "No GST is added." : `Excluding GST (${form.gst_rate ?? 18}% is added on the invoice).`}`}
+            </span>
+            {!readOnly && companyId && (
+              <div className="ac-actions">
+                <button type="button" className="ac-btn sm" onClick={() => (isNew
+                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
+                  : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}><FiDroplet /> Add chemical</button>
+                <button type="button" className="ac-btn sm ct-addbtn" onClick={() => (isNew
+                  ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), ...(sites.length > 1 ? sites.map((x) => emptyLine(x.site_id, form.billing_type)) : [emptyLine(sites[0]?.site_id || "", form.billing_type)])])
+                  : setLineEdit(emptyLine(sites.length === 1 ? sites[0].site_id : "", form.billing_type)))}><FiPlusCircle /> Add service</button>
+              </div>
+            )}
+          </div>
+          <div className="ac-table-wrap">
+            <table className="ac-table ac-stack bl-prices">
+              <colgroup>
+                <col style={{ width: "22%" }} />
+                <col />
+                {sqmMode && <col style={{ width: 150 }} />}
+                {sqmMode && <col style={{ width: 150 }} />}
+                <col style={{ width: 170 }} />
+                <col style={{ width: 130 }} />
+                <col style={{ width: 110 }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Outlet</th>
+                  <th>Service / chemical</th>
+                  {sqmMode && <th className="ac-num">Rate per sq. m (₹)</th>}
+                  {sqmMode && <th className="ac-num">Area (sq. m)</th>}
+                  <th className="ac-num">Amount (₹)</th>
+                  <th>Valid from</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {!companyId && <EmptyRow cols={cols} text="Choose the customer first" />}
+                {companyId && !linesShown.length && <EmptyRow cols={cols} text="No services priced yet. Use Add service." />}
+                {companyId && isNew && newLines.map((l) => (
+                  <LineRow key={l.key} line={l} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setNewLines(newLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))} onRemove={newLines.length > 1 ? () => setNewLines(newLines.filter((x) => x.key !== l.key)) : null} />
+                ))}
+                {!isNew && contract.lines.map((l) => (lineEdit?.id === l.id ? (
+                  <LineRow key={l.id} line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} fixedRate onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
+                ) : (
+                  <tr key={l.id}>
+                    <td>{l.site || <span className="ac-sub">All outlets</span>}</td>
+                    <td>
+                      <b className="ct-item">{l.item_name}</b>
+                      {l.item_kind === "CHEMICAL" && <span className="ct-kind"><FiDroplet /> Chemical</span>}
+                      {l.invoice_group && <div className="bl-sub">Printed as “{l.invoice_group}”</div>}
+                    </td>
+                    {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
+                    {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
+                    <td className="bl-num"><b>{amount(lineValue(l))}</b></td>
+                    <td>
+                      {dmy(l.effective_from)}
+                      {l.effective_from > today() && <div className="sos-amber">Upcoming</div>}
+                      {l.effective_to && <div className="bl-sub">till {dmy(l.effective_to)}</div>}
+                    </td>
+                    <td>
+                      {!readOnly && !l.effective_to && (
+                        <div className="bl-actgroup" style={{ float: "right" }}>
+                          <button type="button" className="bl-actg" onClick={() => setLineEdit({ ...l, default_qty: l.default_qty ?? "" })} title="Edit (correct this line)" aria-label="Edit"><FiEdit2 /></button>
+                          <button type="button" className="bl-actg blue" onClick={() => setRepricing(l)} title="Change price from a date" aria-label="Change price"><FiTrendingUp /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )))}
+                {!isNew && lineEdit && !lineEdit.id && (
+                  <LineRow line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "history" && !isNew && (
+        <div className="ac-card">
+          <div className="ac-table-wrap">
+            <table className="ac-table ac-stack">
+              <thead><tr><th>Outlet</th><th>Item</th><th className="ac-num">Rate (₹)</th><th>From</th><th>To</th></tr></thead>
+              <tbody>
+                {!contract.price_history.length ? <EmptyRow cols={5} text="No earlier prices" /> : contract.price_history.map((l) => (
+                  <tr key={l.id}><td>{l.site || "—"}</td><td>{l.item_name}</td><td className="bl-num">{amount(l.rate)}</td><td>{dmy(l.effective_from)}</td><td>{dmy(l.effective_to)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!readOnly && dirty && (
+        <div className="ct-savebar">
+          <span className="sos-state amber"><FiAlertCircle /> {isNew ? "New contract - not saved yet" : "Unsaved changes"}</span>
+          <div className="ac-actions">
+            {!isNew && <button type="button" className="ac-btn" disabled={busy} onClick={() => { setEdits(null); setMsg({}); }}>Discard</button>}
+            <button type="button" className="ac-btn ac-btn-primary" disabled={busy} onClick={save}><FiCheck /> {busy ? "Saving…" : isNew ? "Create contract" : "Save contract"}</button>
+          </div>
+        </div>
+      )}
 
       {repricing && <RepriceDialog line={repricing} contractId={id} onClose={() => setRepricing(null)} onDone={() => { setRepricing(null); setMsg({ ok: "New price saved. The old price stays on earlier invoices." }); reload(); }} />}
       {statusAction && <StatusDialog contract={contract} status={statusAction} onClose={() => setStatusAction(null)} onDone={() => { setStatusAction(null); reload(); }} />}

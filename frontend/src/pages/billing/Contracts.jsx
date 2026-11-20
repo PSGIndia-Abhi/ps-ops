@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronRight, FiPauseCircle, FiPlus, FiSearch, FiXCircle } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
-import { qs, useBilling } from "./billingApi";
-import { dmy, thisMonth } from "./format";
-import { Msg, StatusBadge, TypeBadge } from "./ui";
+import { qs, useBilling, useCustomerOptions } from "./billingApi";
+import { dmy, thisMonth, initials } from "./format";
+import { Kpi, Msg, StatusBadge, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
+import CustomerFilter from "./CustomerFilter";
 
-// Contracts & Price Lists: how each customer is billed (type, frequency, timing, PO) and its prices,
-// and whether the customer's billing details (Bill To, GSTIN, state) are filled in - they are edited
-// on the contract page.
+// Contracts & Price Lists: how each customer is billed (type, frequency, timing, PO), whether its
+// billing details (Bill To, GSTIN, state) are complete, and what comes next.
+
+const STATUS = [["ACTIVE", "Active"], ["PAUSED", "Paused"], ["ENDED", "Ended"], ["", "All"]];
 
 export default function Contracts() {
   const { me } = useOutletContext();
@@ -18,12 +21,18 @@ export default function Contracts() {
   const [status, setStatus] = useState("ACTIVE");
   const [dueOnly, setDueOnly] = useState(false);
   const [missingOnly, setMissingOnly] = useState(false);
+  const [picked, setPicked] = useState([]); // customer filter: [] = all
+  const customerOptions = useCustomerOptions();
   const q = useDebounced(search);
-  const { data, error, loading } = useBilling(`/contracts${qs({ q, type, status, due_month: dueOnly ? thisMonth() : "" })}`);
-  // Billing details status of each customer (GET /customers: profile_complete).
+  // Every status is loaded (for the cards); the status filter is applied here.
+  const { data, error, loading } = useBilling(`/contracts${qs({ q, type, due_month: dueOnly ? thisMonth() : "" })}`);
   const { data: customers } = useBilling("/customers");
-  const complete = new Map((customers || []).map((c) => [c.company_id, Boolean(c.profile_complete)]));
-  const rows = (data || []).filter((c) => !missingOnly || (customers && complete.get(c.company_id) === false));
+  const complete = useMemo(() => new Map((customers || []).map((c) => [c.company_id, Boolean(c.profile_complete)])), [customers]);
+  const all = (data || []).filter((c) => !picked.length || picked.includes(c.company_id));
+  const count = (st) => all.filter((c) => c.status === st).length;
+  const missing = all.filter((c) => customers && complete.get(c.company_id) === false);
+  const rows = all.filter((c) => (!status || c.status === status) && (!missingOnly || (customers && complete.get(c.company_id) === false)));
+  const open = (c) => navigate(`/billing/contracts/${c.id}`);
 
   return (
     <div className="ac-page">
@@ -34,14 +43,25 @@ export default function Contracts() {
         </div>
         {me.can("MANAGE_BILLING_MASTERS") && (
           <div className="ac-actions">
-            <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/billing/contracts/new")}>+ New contract</button>
+            <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/billing/contracts/new")}><FiPlus /> New contract</button>
           </div>
         )}
       </div>
 
+      <div className="ac-kpis">
+        <Kpi color="green" icon={FiCheckCircle} label="Active" value={data ? count("ACTIVE") : "—"} note="billing every period" onClick={() => { setStatus("ACTIVE"); setMissingOnly(false); }} active={status === "ACTIVE" && !missingOnly} />
+        <Kpi color="orange" icon={FiPauseCircle} label="Paused" value={data ? count("PAUSED") : "—"} note="not billed while paused" onClick={() => { setStatus("PAUSED"); setMissingOnly(false); }} active={status === "PAUSED" && !missingOnly} />
+        <Kpi color="purple" icon={FiXCircle} label="Ended" value={data ? count("ENDED") : "—"} note="no more invoices" onClick={() => { setStatus("ENDED"); setMissingOnly(false); }} active={status === "ENDED" && !missingOnly} />
+        <Kpi color="red" icon={FiAlertTriangle} label="Billing details missing" value={data && customers ? missing.length : "—"} note="cannot be invoiced yet" onClick={() => { setStatus(""); setMissingOnly(true); }} active={missingOnly} />
+      </div>
+
       <div className="ac-card">
-        <div className="ac-filters-5" style={{ marginBottom: 12 }}>
-          <input className="ac-input" placeholder="Search customer or contract code…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="bl-filterbar">
+          <div className="bl-search">
+            <FiSearch aria-hidden="true" />
+            <input className="ac-input" placeholder="Search customer or contract code…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
+          </div>
+          <CustomerFilter options={customerOptions} value={picked} onChange={setPicked} />
           <select className="ac-select" value={type} onChange={(e) => setType(e.target.value)} aria-label="Type">
             <option value="">All types</option>
             <option value="AMC">AMC</option>
@@ -49,43 +69,50 @@ export default function Contracts() {
             <option value="TERMITE">Termite</option>
             <option value="CHEMICAL">Chemical</option>
           </select>
-          <select className="ac-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
-            <option value="">All statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="PAUSED">Paused</option>
-            <option value="ENDED">Ended</option>
-          </select>
-          <label className="bl-toggle" style={{ paddingTop: 0 }}>
-            <input type="checkbox" checked={dueOnly} onChange={(e) => setDueOnly(e.target.checked)} /> Due this month
-          </label>
-          <label className="bl-toggle" style={{ paddingTop: 0 }}>
-            <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> Billing details missing
-          </label>
+          <div className="bl-seg2" role="group" aria-label="Status">
+            {STATUS.map(([v, l]) => (
+              <button key={v} type="button" className={status === v ? "active" : ""} aria-pressed={status === v} onClick={() => setStatus(v)}>
+                {l}<span className="bl-seg2-n">{data ? (v ? count(v) : all.length) : "…"}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className={`bl-chiptoggle ${dueOnly ? "on" : ""}`} aria-pressed={dueOnly} onClick={() => setDueOnly((x) => !x)}><FiCalendar /> Due this month</button>
+          <button type="button" className={`bl-chiptoggle warn ${missingOnly ? "on" : ""}`} aria-pressed={missingOnly} onClick={() => setMissingOnly((x) => !x)}><FiAlertTriangle /> Details missing</button>
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-ctable">
             <thead>
-              <tr><th>Contract</th><th>Customer</th><th>Type</th><th>Next period from</th><th>Bill date</th><th>PO</th><th>Billing details</th><th>Status</th><th>Last invoice</th></tr>
+              <tr><th>Customer</th><th>Type</th><th>Structure</th><th>Next period</th><th>Bill date</th><th>PO</th><th>Billing details</th><th>Status</th><th>Last invoice</th><th aria-label="Open" /></tr>
             </thead>
             <tbody>
-              {loading || !rows.length ? (
-                <EmptyRow cols={9} loading={loading} text={missingOnly ? "Every contract's customer has its billing details." : "No contracts yet."} />
-              ) : (
-                rows.map((c) => (
-                  <tr key={c.id} className="bl-click" onClick={() => navigate(`/billing/contracts/${c.id}`)}>
-                    <td className="bl-nowrap"><b>{c.contract_code}</b></td>
-                    <td>{c.customer}</td>
-                    <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} /></td>
-                    <td>{dmy(c.next_period_start)}</td>
-                    <td>{c.bill_timing === "ADVANCE" ? "Start of the month" : "End of the month"}</td>
-                    <td>{c.po_required ? <span className="ac-badge b-blue">Required</span> : <span className="ac-sub">—</span>}</td>
-                    <td>{!customers ? <span className="ac-sub">…</span> : complete.get(c.company_id) ? <span className="ac-badge b-green">Complete</span> : <span className="ac-badge b-red">Missing</span>}</td>
-                    <td><StatusBadge value={c.status} /></td>
-                    <td>{c.last_invoice_number || <span className="ac-sub">—</span>}</td>
-                  </tr>
-                ))
-              )}
+              {loading && !data ? (
+                <EmptyRow cols={10} loading text="" />
+              ) : !rows.length ? (
+                <EmptyRow cols={10} text={missingOnly ? "Every contract's customer has its billing details." : "No contracts match."} />
+              ) : rows.map((c) => (
+                <tr key={c.id} className="bl-rowlink" onClick={() => open(c)}>
+                  <td>
+                    <div className="bl-cell2" title={c.contract_code}>
+                      <span className="bl-avatar-sm">{initials(c.customer)}</span>
+                      <b>{c.customer}</b>
+                    </div>
+                  </td>
+                  <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} /></td>
+                  <td><span className="bl-soft">{c.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
+                  <td><span className="bl-date">{dmy(c.next_period_start)}</span></td>
+                  <td><span className="bl-soft">{c.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
+                  <td>{c.po_required ? <StatusBadge value="PARTIAL" label="Required" /> : <span className="ac-sub">—</span>}</td>
+                  <td>
+                    {!customers ? <span className="ac-sub">…</span> : complete.get(c.company_id)
+                      ? <span className="bl-okline"><FiCheckCircle /> Complete</span>
+                      : <span className="bl-okline bad"><FiAlertTriangle /> Missing</span>}
+                  </td>
+                  <td><StatusBadge value={c.status} /></td>
+                  <td>{c.last_invoice_number ? <span className="bl-mono">{c.last_invoice_number}</span> : <span className="ac-sub">—</span>}</td>
+                  <td><FiChevronRight style={{ color: "#94a3b8" }} /></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

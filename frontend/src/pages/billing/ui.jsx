@@ -1,22 +1,67 @@
-import { useEffect } from "react";
-import { typeClass, typeLabel } from "./format";
+import { useEffect, useState } from "react";
+import { FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
+import { typeLabel } from "./format";
 
 // Small shared pieces for the Billing screens.
 
-/** A coloured summary card (blue, green, orange, red, purple). */
-export function Kpi({ color = "blue", label, value, note, onClick, active }) {
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+const NUM_RE = /\d[\d,]*(\.\d+)?/g;
+
+/**
+ * Text whose numbers count up from 0 (e.g. "11 / 11", "₹1.2L", "42") when it first shows or changes.
+ * Non-text values (elements) and reduced-motion users get the value as it is.
+ */
+export function CountUp({ value, duration = 900 }) {
+  const text = typeof value === "number" ? String(value) : typeof value === "string" ? value : null;
+  const animates = text !== null && /\d/.test(text) && !reducedMotion();
+  // Progress belongs to one text: a new text starts again from 0 (no flash of the final value).
+  const [anim, setAnim] = useState({ text: null, p: 1 });
+  const p = !animates ? 1 : anim.text === text ? anim.p : 0;
+  useEffect(() => {
+    if (!animates) return undefined;
+    let raf;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      setAnim({ text, p: 1 - (1 - t) ** 3 }); // ease-out
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [text, duration, animates]);
+  if (text === null) return value;
+  if (p >= 1) return text;
+  return text.replace(NUM_RE, (m) => {
+    const decimals = (m.split(".")[1] || "").length;
+    const n = Number(m.replace(/,/g, "")) * p;
+    const s = n.toFixed(decimals);
+    return m.includes(",") ? Number(s).toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : s;
+  });
+}
+
+/**
+ * A summary card: white card, tinted icon badge in the accent colour (blue, green, orange, red,
+ * purple, teal), label, big number, note, and an optional mini progress bar (0-100).
+ * Clickable cards lift on hover; `active` (the filter it stands for is on) gets an accent ring.
+ */
+export function Kpi({ color = "blue", label, value, note, onClick, active, icon: Icon, progress }) {
+  const pct = progress === undefined || progress === null ? null : Math.max(0, Math.min(100, Number(progress) || 0));
   return (
     <div
-      className={`ac-kpi ${color}${onClick ? " clickable" : ""}`}
+      className={`bl-kpi ${color}${onClick ? " clickable" : ""}${active ? " active" : ""}`}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
+      aria-pressed={onClick && active !== undefined ? Boolean(active) : undefined}
       onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-      style={active ? { boxShadow: "0 0 0 3px rgba(15,23,42,.25)" } : undefined}
     >
-      <div className="ac-kpi-label">{label}</div>
-      <div className="ac-kpi-value">{value}</div>
-      {note && <div className="ac-kpi-note">{note}</div>}
+      <div className="bl-kpi-top">
+        <span className="bl-kpi-label">{label}</span>
+        {Icon ? <span className="bl-kpi-icon"><Icon /></span> : <span className="bl-kpi-dot" />}
+      </div>
+      <div className="bl-kpi-value"><CountUp value={value} /></div>
+      {pct !== null && <div className="bl-kpi-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></div>}
+      {note && <div className="bl-kpi-note">{note}</div>}
     </div>
   );
 }
@@ -28,8 +73,19 @@ export function ServicesChip({ done, planned }) {
   return <span className={`bl-svc ${cls}`}>{done} / {planned}{done < planned ? " ⚠" : ""}</span>;
 }
 
+const TYPE_ICON = { AMC: FiRepeat, ONE_TIME: FiZap, TERMITE: FiShield, CHEMICAL: FiDroplet };
+const TYPE_TONE = { AMC: "blue", ONE_TIME: "teal", TERMITE: "orange", CHEMICAL: "purple" };
+
+/** Billing type chip: tinted icon, the type, and the frequency (e.g. AMC · Monthly). */
 export function TypeBadge({ type, frequency }) {
-  return <span className={`ac-badge ${typeClass(type)}`}>{typeLabel(type, frequency)}</span>;
+  const Icon = TYPE_ICON[type] || FiRepeat;
+  const [main, ...rest] = typeLabel(type, frequency).split(" · ");
+  return (
+    <span className={`bl-type ${TYPE_TONE[type] || "blue"}`} title={typeLabel(type, frequency)}>
+      <span className="bl-type-ic"><Icon /></span>
+      <b>{main}</b>{rest.length > 0 && <span className="bl-type-sub">{rest.join(" · ")}</span>}
+    </span>
+  );
 }
 
 const COLOR = {
@@ -43,7 +99,7 @@ const LABEL = { PARTIAL: "Partial", EXPIRING: "Expiring soon" };
 export function StatusBadge({ value, label }) {
   const key = String(value || "").toUpperCase();
   const text = label || LABEL[key] || (key ? key.charAt(0) + key.slice(1).toLowerCase() : "—");
-  return <span className={`ac-badge ${COLOR[key] || "b-grey"}`}>{text}</span>;
+  return <span className={`bl-status ${(COLOR[key] || "b-grey").slice(2)}`}><span className="bl-status-dot" />{text}</span>;
 }
 
 /** Error (with the server's list of problems) or success message. */

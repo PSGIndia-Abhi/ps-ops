@@ -70,8 +70,9 @@ function buildFilter(query) {
   if (q) {
     const like = `%${q}%`;
     where.push(`(a.entity_label LIKE ? OR a.summary LIKE ? OR a.customer_id LIKE ? OR a.user_name LIKE ?
-                OR COALESCE(co.display_name, co.name) LIKE ?)`);
-    params.push(like, like, like, like, like);
+                OR COALESCE(co.display_name, co.name) LIKE ?
+                OR CAST(a.details AS CHAR) LIKE ?)`); // details holds UTR/reference no. and every allocated invoice no.
+    params.push(like, like, like, like, like, like);
   }
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }

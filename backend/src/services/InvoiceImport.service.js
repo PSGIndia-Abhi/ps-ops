@@ -29,6 +29,13 @@ const COLUMNS = {
   invoice_date: { label: "Invoice Date", required: true, aliases: ["invoicedate", "date"] },
   due_date: { label: "Due Date", required: false, aliases: ["duedate"] },
   amount: { label: "Amount", required: true, aliases: ["amount", "invoiceamount", "total"] },
+  // Optional: the amount before GST, for customers whose TDS is on the taxable value
+  // ("Taxable TDS"). Left blank, it is worked out as Amount / 1.18 (see Tds.service.js).
+  taxable: {
+    label: "Taxable Value",
+    required: false,
+    aliases: ["taxablevalue", "taxableamount", "taxable", "amountbeforegst", "basicamount", "basicvalue"],
+  },
   remarks: { label: "Remarks", required: false, aliases: ["remarks", "notes"] },
 };
 
@@ -213,7 +220,10 @@ async function validateRows(rows, user) {
 
   return rows.map((row) => {
     const errors = [];
-    const result = { ...row, matched_customer_id: null, matched_site_id: null, parsed_invoice_date: null, parsed_due_date: null, parsed_amount: null };
+    const result = {
+      ...row, matched_customer_id: null, matched_site_id: null,
+      parsed_invoice_date: null, parsed_due_date: null, parsed_amount: null, parsed_taxable: null,
+    };
 
     // required fields and formats
     if (!row.invoice_number) errors.push("Invoice number is required");
@@ -231,6 +241,15 @@ async function validateRows(rows, user) {
       else if (amount === 0) errors.push("Amount is 0, not uploaded");
       else if (amount > MAX_AMOUNT) errors.push("Invoice amount is too large");
       else result.parsed_amount = amount;
+    }
+
+    // Taxable value (optional). Ignored on a blank-amount row (that one is saved as Cancelled).
+    if (row.taxable && row.amount) {
+      const taxable = parseAmount(row.taxable);
+      if (Number.isNaN(taxable)) errors.push("Taxable value is not a valid number");
+      else if (taxable <= 0) errors.push("Taxable value must be greater than 0");
+      else if (result.parsed_amount > 0 && taxable > result.parsed_amount) errors.push("Taxable value cannot be more than the invoice amount");
+      else result.parsed_taxable = taxable;
     }
 
     if (!row.invoice_date) errors.push("Invoice date is required");
@@ -309,6 +328,7 @@ async function createPreview(file, user) {
       invoiceDate: r.invoice_date || "",
       dueDate: r.due_date || "",
       amount: r.amount ? r.parsed_amount ?? r.amount : "", // blank stays blank (it is saved as Cancelled), not ₹0
+      taxable: r.taxable ? r.parsed_taxable ?? r.taxable : "", // blank: worked out from the amount when needed
       remarks: r.remarks || "",
       status: r.errors.length === 0 ? "valid" : "error",
       imported: false,
@@ -317,7 +337,7 @@ async function createPreview(file, user) {
       // row can be re-checked from scratch rather than trusting anything the browser sends.
       raw: {
         invoice_number: r.invoice_number, customer: r.customer, site: r.site,
-        invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks,
+        invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, taxable: r.taxable, remarks: r.remarks,
       },
     })),
   };
@@ -350,6 +370,7 @@ async function getImport(importId, user) {
       invoiceDate: raw.invoice_date || "",
       dueDate: raw.due_date || "",
       amount: r.invoice_amount == null || !raw.amount ? raw.amount || "" : Number(r.invoice_amount),
+      taxable: raw.taxable || "",
       remarks: raw.remarks || "",
       status: r.is_valid ? "valid" : "error",
       imported: Boolean(r.created_invoice_id),
@@ -425,7 +446,7 @@ async function confirmImport(fileName, submittedRows, user, req = null) {
     // The customers' TDS settings, copied onto each new invoice.
     const customerIds = [...new Set(validated.map((r) => r.matched_customer_id).filter(Boolean))];
     const [companies] = customerIds.length
-      ? await connection.query("SELECT id, tds_applicable, tds_rate FROM companies WHERE id IN (?)", [customerIds])
+      ? await connection.query("SELECT id, tds_applicable, tds_rate, tds_basis FROM companies WHERE id IN (?)", [customerIds])
       : [[]];
     const companyById = new Map(companies.map((c) => [c.id, c]));
 
@@ -440,15 +461,15 @@ async function confirmImport(fileName, submittedRows, user, req = null) {
         try {
           await connection.query(
             `INSERT INTO invoices
-             (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, pending_amount, status, remarks, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, taxable_amount, pending_amount, status, remarks, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               invoiceId, r.invoice_number, r.matched_customer_id, r.matched_site_id, r.parsed_invoice_date, r.parsed_due_date,
               // A blank amount in the file is saved as a cancelled invoice (0 never gets here).
-              r.parsed_amount, r.parsed_amount, r.parsed_amount > 0 ? "PENDING" : "CANCELLED", r.remarks || null, user.id,
+              r.parsed_amount, r.parsed_taxable, r.parsed_amount, r.parsed_amount > 0 ? "PENDING" : "CANCELLED", r.remarks || null, user.id,
             ]
           );
-          await insertInvoiceTds(connection, invoiceId, companyById.get(r.matched_customer_id), r.parsed_amount);
+          await insertInvoiceTds(connection, invoiceId, companyById.get(r.matched_customer_id), r.parsed_amount, r.parsed_taxable);
           createdInvoiceId = invoiceId;
           imported += 1;
         } catch (err) {
@@ -466,7 +487,7 @@ async function confirmImport(fileName, submittedRows, user, req = null) {
           invoice_number: r.invoice_number,
           customer: r.customer_display, customer_id: r.customer,
           site: r.site_display, site_id: r.site,
-          invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, remarks: r.remarks,
+          invoice_date: r.invoice_date, due_date: r.due_date, amount: r.amount, taxable: r.taxable, remarks: r.remarks,
         }),
         r.customer_display || null, r.matched_customer_id, r.site_display || null, r.matched_site_id,
         r.invoice_number || null, r.parsed_invoice_date, r.parsed_due_date, r.parsed_amount,
@@ -537,11 +558,18 @@ const csvCell = (v) => {
 async function buildErrorRowsCsv(importId, user) {
   const data = await getImport(importId, user);
   const hasSite = data.rows.some((r) => r.site); // the Site column only appears when the file had one
-  const header = ["Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount", "Error Reason"];
+  const hasTaxable = data.rows.some((r) => r.taxable); // likewise the Taxable Value column
+  const header = [
+    "Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount",
+    ...(hasTaxable ? ["Taxable Value"] : []), "Error Reason",
+  ];
   const lines = [header.map(csvCell).join(",")];
   for (const r of data.rows.filter((row) => row.status === "error")) {
     lines.push(
-      [r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
+      [
+        r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount,
+        ...(hasTaxable ? [r.taxable] : []), r.errors.join("; "),
+      ]
         .map(csvCell)
         .join(",")
     );

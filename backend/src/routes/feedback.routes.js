@@ -5,7 +5,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   HttpError, sendError, inTransaction, hasPerm, hasAnyPerm,
   listQuestions, saveQuestions, listTemplates, saveTemplates, getSettings, saveSettings,
-  callList, openCall, getCall, recordCallAttempt, saveCallFeedback, raiseTicketFromCall, finishCall,
+  callList, completedSites, completedSiteFeedback, openCall, getCall, recordCallAttempt, saveCallFeedback, raiseTicketFromCall, finishCall,
   listTickets, getTicket, sendWhatsapp, sendFormLink, updateTicket, closeTicket, cancelTicket, reopenTicket, reassignCall, recordFollowUp, deleteTicket, addCallContact, updateCallContact,
   myFeedbackAccess, feedbackPeople, feedbackCustomers, siteDetails, revisitOptions,
   listEmailTemplates, saveEmailTemplates, feedbackBadges,
@@ -230,6 +230,26 @@ router.get("/calls", async (req, res) => {
     res.json(await callList(req));
   } catch (err) {
     sendError(res, err, "Failed to load the call list");
+  }
+});
+
+// The Dashboard's Completed view: completed calls grouped by site (same query as GET /calls).
+router.get("/calls/completed", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    res.json(await completedSites(req));
+  } catch (err) {
+    sendError(res, err, "Failed to load the completed feedback");
+  }
+});
+
+// Every completed call of one site (same query as GET /calls): answers, who gave it, tickets raised.
+router.get("/calls/completed/:siteId", async (req, res) => {
+  try {
+    requireAny(req, ANY_FEEDBACK);
+    res.json(await completedSiteFeedback(req, req.params.siteId));
+  } catch (err) {
+    sendError(res, err, "Failed to load the customer's feedback");
   }
 });
 

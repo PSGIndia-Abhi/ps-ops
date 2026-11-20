@@ -136,6 +136,33 @@ export async function downloadInvoice(invoice) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+/* ---- Bulk import from the Excel tracker ---- */
+
+function importForm(file, mapping) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mapping", JSON.stringify(mapping || {}));
+  return form;
+}
+
+/** POST /api/brigade/import/check - the report for the file (nothing saved). */
+export function checkImportFile(file, mapping) {
+  return brigadeRequest("/api/brigade/import/check", { method: "POST", body: importForm(file, mapping) });
+}
+
+/** POST /api/brigade/import - starts the import; resolves to { import_id }. */
+export function startImportFile(file, mapping) {
+  return brigadeRequest("/api/brigade/import", { method: "POST", body: importForm(file, mapping) });
+}
+
+export function listImports() {
+  return brigadeRequest("/api/brigade/import/history");
+}
+
+export function undoImport(id) {
+  return brigadeRequest(`/api/brigade/import/${id}/undo`, { method: "POST" });
+}
+
 // fetch + JSON + error message in one place.
 export async function brigadeRequest(endpoint, options) {
   const res = await apiFetch(endpoint, options);

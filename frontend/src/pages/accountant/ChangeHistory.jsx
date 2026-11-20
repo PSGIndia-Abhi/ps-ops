@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FiClock } from "react-icons/fi";
 import { getJson } from "./data";
+import { money } from "./format";
 import { actionLabel, fieldLabel, moduleBadge, moduleLabel, showValue, showWhen } from "./auditLabels";
 
 // "Change History" card on Invoice Details: every recorded change to this one invoice,
@@ -11,15 +12,15 @@ function describe(entry, invoiceId) {
   const d = entry.details || {};
   const tds = (d.invoices || []).find((i) => i.invoice_id === invoiceId);
   if (tds) {
-    return <>TDS <span className="ac-audit-old">₹{tds.tds_before}</span> → <span className="ac-audit-new">₹{tds.tds_after}</span></>;
+    return <>TDS <span className="ac-audit-old">{money(tds.tds_before)}</span> → <span className="ac-audit-new">{money(tds.tds_after)}</span></>;
   }
   const alloc = (d.allocations || []).find((a) => a.invoice_id === invoiceId);
   if (alloc) {
     return (
       <>
-        {entry.entity_label} · ₹{alloc.cash} cash{alloc.tds ? ` + ₹${alloc.tds} TDS` : ""}
+        {entry.entity_label} · {money(alloc.cash)} cash{alloc.tds ? ` + ${money(alloc.tds)} TDS` : ""}
         {d.payment_mode ? ` · ${d.payment_mode}` : ""}{d.reference_number ? ` · UTR ${d.reference_number}` : ""}
-        {" · pending "}<span className="ac-audit-old">₹{alloc.pending_before}</span> → <span className="ac-audit-new">₹{alloc.pending_after}</span>
+        {" · pending "}<span className="ac-audit-old">{money(alloc.pending_before)}</span> → <span className="ac-audit-new">{money(alloc.pending_after)}</span>
       </>
     );
   }

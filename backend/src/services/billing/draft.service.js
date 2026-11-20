@@ -7,6 +7,7 @@ const C = require("./common");
 const calc = require("./calc");
 const P = require("./period");
 const T = require("./tracker.service");
+const S = require("./sos.service");
 
 const BASES = ["FIXED", "PER_SERVICE", "PER_UNIT"];
 const norm = (v) => String(v || "").trim().toLowerCase();
@@ -77,81 +78,55 @@ function describe(template, period) {
 
 // ---- building lines ---------------------------------------------------------------------------
 
+/** A counted service: billed per service, numbers from the Service Coordinator's monthly SOS. */
+const isCounted = (cl) => (cl.item_kind || "SERVICE") === "SERVICE" && cl.pricing_basis === "PER_SERVICE";
+
 /**
- * Draft lines for a contract and period. A price line linked to a service-plan line
- * (site + plan_sub_service, or a whole-customer plan line for that service) gets the planned
- * and done counts:
- *   FIXED        billed in full; short services -> SERVICES adjustment (rate x done / planned)
- *                when the contract bills pro-rata
- *   PER_SERVICE  quantity = services done
- *   PER_UNIT     quantity = default quantity, entered on the draft when there is none
+ * Draft lines for a contract and period, from the customer's billing profile and the submitted SOS
+ * of the calendar months the period uses (a monthly period uses the month it starts in; a
+ * quarterly one its three months).
+ *   counted service (PER_SERVICE)  assigned = services per month agreed (as on the SOS),
+ *                                  completed = the SOS number;
+ *                                  quantity  = assigned on a Fixed amount contract,
+ *                                              completed on a Service based contract
+ *   extra services (SOS)           one line per outlet + service at the profile rate (no rate =
+ *                                  0, entered by Accounts on the draft before issuing)
+ *   FIXED                          the amount as it is
+ *   PER_UNIT                       quantity = default quantity (chemicals, termite area), entered
+ *                                  on the draft when there is none
+ * Returns { lines, sosMissing: [months without a submitted SOS], counted: true when the contract
+ * has counted services }.
  */
 async function buildLines(db, contract, period, contractLines) {
   const months = T.monthsCount(period.start, period.end);
-  const plan = await T.planFor(db, contract.company_id, period.start);
-  const siteIds = contractLines.map((l) => l.site_id).filter(Boolean);
-  const wholeCustomer = Boolean(plan && plan.lines.some((pl) => !pl.site_id)) || contractLines.some((l) => !l.site_id && l.plan_sub_service);
-  const stats = await T.visitStats(db, siteIds, period.start, T.addDayExclusive(period.end), wholeCustomer ? [contract.company_id] : []);
-  // Assigned / completed typed by the Service Coordinator for the period's calendar months.
-  const monthList = T.monthStarts(period.start, months);
-  const typed = await T.typedMonths(db, [contract.company_id], monthList);
-
-  // The plan line for a price line: the one for its own outlet, otherwise a whole-customer line
-  // (no outlet, any job type) for the same service.
-  const sameService = (pl, cl) => norm(pl.sub_service) === norm(cl.plan_sub_service)
-    && (!cl.plan_service_type || !pl.service_type || norm(pl.service_type) === norm(cl.plan_service_type));
-  const planLineFor = (cl) => (plan
-    ? (cl.site_id && plan.lines.find((pl) => pl.site_id && pl.site_id === cl.site_id && sameService(pl, cl)))
-      || plan.lines.find((pl) => !pl.site_id && sameService(pl, cl))
-      || null
-    : null);
-  // How many price lines share each whole-customer plan line (one per outlet, say).
-  const sharing = new Map();
-  for (const cl of contractLines) {
-    const pl = cl.plan_sub_service ? planLineFor(cl) : null;
-    if (pl && !pl.site_id) sharing.set(pl, (sharing.get(pl) || 0) + 1);
-  }
+  const monthList = S.monthStarts(period.start, months);
+  const counted = contractLines.some(isCounted);
+  const sos = counted ? await S.submittedFor(db, contract.company_id, monthList) : new Map();
+  const sosMissing = counted ? monthList.filter((m) => !sos.has(m)) : [];
+  const sosLines = [...sos.values()].flat();
+  const fixed = contract.shortfall_billing === "FULL";
 
   const lines = contractLines.map((cl, i) => {
-    // Linked to the plan by service name; a price line with no outlet covers the whole customer.
-    const linked = Boolean(cl.plan_sub_service);
-    const planLine = linked ? planLineFor(cl) : null;
-    // A whole-customer plan line counts jobs at every outlet. When several outlet price lines
-    // share it, each counts its own outlet only, so services done are not billed twice, and the
-    // plan's total is not applied to any one of them (that would make every outlet look short and
-    // cut a pro-rata bill); the shortfall shows on the Service Tracker instead.
-    const shared = Boolean(cl.site_id && planLine && !planLine.site_id && sharing.get(planLine) > 1);
-    const customerWide = !cl.site_id || Boolean(planLine && !planLine.site_id && !shared);
-    const s = !linked ? null
-      : customerWide ? T.statsFor(stats, null, null, cl.plan_sub_service, contract.company_id)
-        : T.statsFor(stats, cl.site_id, cl.plan_service_type, cl.plan_sub_service);
-    let planned = planLine && !shared ? Number(planLine.visits_per_month) * months : null;
-    let done = s ? s.done : null;
-    // The typed numbers replace the plan's number and the job count (completed not entered = 0;
-    // the issue check stops the invoice until it is entered).
-    if (linked && planLine && !shared) {
-      const t = T.typedFor(typed, contract.company_id, planLine.sub_service, monthList, planLine.visits_per_month);
-      planned = t.planned;
-      done = t.done;
-    }
-
     let quantity = cl.default_qty === null ? null : Number(cl.default_qty);
-    let adjustment = "NONE";
+    let planned = null;
+    let done = null;
     let needsInput = false;
-    if (cl.pricing_basis === "FIXED") {
-      quantity = quantity || 1;
-      if (planned && done < planned && contract.shortfall_billing === "PRO_RATA") adjustment = "SERVICES";
-    } else if (cl.pricing_basis === "PER_SERVICE") {
-      if (linked) quantity = done;
-      if (quantity === null) {
-        quantity = 0;
-        needsInput = true;
+    if (isCounted(cl)) {
+      // Each month: the SOS line for this agreed service (assigned as agreed if it is missing).
+      planned = 0;
+      done = 0;
+      for (const m of monthList) {
+        const s = (sos.get(m) || []).find((x) => x.contract_line_id === cl.id);
+        planned += s ? Number(s.assigned) : Number(cl.default_qty) || 0;
+        done += s && s.completed !== null ? Number(s.completed) : 0;
       }
+      quantity = fixed ? planned : done;
+    } else if (cl.pricing_basis === "FIXED") {
+      quantity = quantity || 1;
     } else if (quantity === null || quantity === 0) {
       quantity = 0;
       needsInput = true;
     }
-
     const line = {
       contract_line_id: cl.id,
       site_id: cl.site_id,
@@ -163,18 +138,54 @@ async function buildLines(db, contract, period, contractLines) {
       pricing_basis: cl.pricing_basis,
       rate: Number(cl.rate),
       quantity,
-      adjustment_type: adjustment,
+      adjustment_type: "NONE",
       services_planned: planned,
       services_done: done,
-      missed_dates: s ? s.missed_dates : null,
-      job_ids: s ? s.job_ids : null,
+      missed_dates: null,
+      job_ids: null,
       needs_input: needsInput,
       sort_order: i,
     };
     line.amount = calc.lineAmount(line);
     return line;
   });
-  return { lines, plan };
+
+  // Extra services from the SOS that this contract bills, one line per outlet + service + rate.
+  const extras = new Map();
+  for (const x of sosLines.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
+    const rate = x.rate === null ? null : Number(x.rate);
+    const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}`;
+    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0 };
+    e.quantity += Number(x.completed) || 0;
+    extras.set(key, e);
+  }
+  const [siteNames] = extras.size
+    ? await db.query("SELECT id, name FROM sites WHERE id IN (?)", [[...new Set([...extras.values()].map((e) => e.site_id).filter(Boolean)), "-"]])
+    : [[]];
+  for (const e of extras.values()) {
+    const line = {
+      contract_line_id: null,
+      site_id: e.site_id,
+      site: siteNames.find((s) => s.id === e.site_id)?.name || null,
+      item_name: `${e.service} (additional services)`,
+      invoice_group: null,
+      sac_code: "998531",
+      unit: "Service",
+      pricing_basis: "PER_SERVICE",
+      rate: e.rate ?? 0,
+      quantity: e.quantity,
+      adjustment_type: "NONE",
+      services_planned: null,
+      services_done: null,
+      missed_dates: null,
+      job_ids: null,
+      needs_input: e.rate === null,
+      sort_order: lines.length,
+    };
+    line.amount = calc.lineAmount(line);
+    lines.push(line);
+  }
+  return { lines, sosMissing, counted };
 }
 
 // ---- Bill Run: due list --------------------------------------------------------------------
@@ -206,7 +217,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       [contract.id, period.start]
     );
     const cl = await linesInForce(db, contract.id, period.start);
-    const { lines, plan } = await buildLines(db, contract, period, cl);
+    const { lines, sosMissing } = await buildLines(db, contract, period, cl);
     const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code, contract.gst_applicable !== 0);
     const totals = calc.totalsFor(lines, taxMode, contract.gst_rate);
     const linked = lines.filter((l) => l.services_planned !== null);
@@ -218,7 +229,11 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (!ctx.category) warn("CUSTOMER_TYPE_MISSING", "Customer type not set", true);
     if (!ctx.profile) warn("PROFILE_MISSING", "Billing profile missing", true);
     if (!cl.length) warn("NO_PRICE_LINES", "No price lines in force", true);
-    if (cl.some((l) => l.plan_sub_service) && !plan) warn("NO_SERVICE_PLAN", "No service plan for this period", true);
+    // Counted services are billed from the Service Coordinator's submitted SOS: wait for it.
+    if (sosMissing.length) warn("SOS_PENDING", `Waiting for SOS: ${sosMissing.map((m) => C.monthName(m)).join(", ")}`, true);
+    const extraLines = lines.filter((l) => !l.contract_line_id);
+    if (extraLines.length) warn("EXTRA_SERVICES", `${extraLines.reduce((t, l) => t + l.quantity, 0)} extra service(s) on the SOS`);
+    if (extraLines.some((l) => l.needs_input)) warn("EXTRA_NO_RATE", "Extra service without a rate in the profile: enter it on the draft");
     if (contract.po_required) {
       const pos = await validPos(db, contract, period);
       if (!pos.length) {
@@ -245,7 +260,9 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       period_start: period.start,
       period_end: period.end,
       services: linked.length ? { planned, done, short: Math.max(planned - done, 0) } : null,
-      estimated_total: lines.some((l) => l.needs_input) ? null : totals.total,
+      structure: contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
+      sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,
+      estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
       needs_input: lines.some((l) => l.needs_input),
       already_drafted: Number(existing.drafts) > 0,
       warnings,
@@ -305,9 +322,14 @@ async function draftContract(conn, contractId, month, runId, userId) {
 
   const cl = await linesInForce(conn, contract.id, period.start);
   if (!cl.length) throw C.bad("The contract has no price lines in force for this period");
-  const { lines, plan } = await buildLines(conn, contract, period, cl);
+  const { lines, sosMissing } = await buildLines(conn, contract, period, cl);
+  if (sosMissing.length) throw C.bad(`Waiting for the Service Coordinator's SOS for ${sosMissing.map((m) => C.monthName(m)).join(", ")}`);
 
-  const split = contract.invoice_grouping === "PER_SITE" || plan?.invoice_split === "PER_OUTLET";
+  const split = contract.invoice_grouping === "PER_SITE";
+  // Print copies from the customer's billing profile: the outlet's own setting for an invoice made
+  // per outlet, else the profile's.
+  const [outletCopies] = await conn.query("SELECT site_id, print_copies FROM billing_outlet_settings WHERE company_id = ?", [contract.company_id]);
+  const copiesFor = (siteId) => Number(outletCopies.find((o) => o.site_id === siteId)?.print_copies || ctx.profile.print_copies || 1);
   const groups = new Map();
   for (const l of lines) {
     const key = split ? l.site_id || "" : "";
@@ -315,9 +337,10 @@ async function draftContract(conn, contractId, month, runId, userId) {
     groups.get(key).push(l);
   }
 
-  const today = C.todayIst();
-  const ruleDate = contract.bill_timing === "ADVANCE" ? period.start : period.end;
-  const invoiceDate = ruleDate < today ? ruleDate : today;
+  // The invoice is dated the day it is made (it can be changed on the draft). Dating it back to the
+  // period end could put it in a GST month whose return is already filed; the description and the
+  // period on the invoice still say which months it bills.
+  const invoiceDate = C.todayIst();
   const dueDate = C.addDays(invoiceDate, Number(ctx.profile.payment_terms_days) || 0);
   const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code, contract.gst_applicable !== 0);
   const pos = contract.po_required ? await validPos(conn, contract, period) : [];
@@ -340,7 +363,7 @@ async function draftContract(conn, contractId, month, runId, userId) {
         id, contract.id, contract.company_id, siteId, runId, contract.billing_type, ctx.category, taxMode, gstRate,
         `${ctx.profile.state_code}-${ctx.profile.state_name}`, siteId || contract.site_id || groupLines.find((l) => l.site_id)?.site_id || null,
         period.start, period.end, invoiceDate, dueDate, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.round_off, totals.total,
-        plan ? Number(plan.print_copies) : 1, describe(contract.description_template, period), userId, userId,
+        copiesFor(siteId), describe(contract.description_template, period), userId, userId,
       ]
     );
     await insertLines(conn, id, groupLines);
@@ -446,9 +469,11 @@ async function loadInvoice(db, id, { lock = false } = {}) {
   const period = { start: C.ymd(inv.period_start), end: C.ymd(inv.period_end) };
   const contractish = { id: inv.contract_id, company_id: inv.company_id };
   const available = inv.status === "DRAFT" ? await validPos(db, contractish, period) : [];
-  const [[plan]] = await db.query(
-    "SELECT print_copies FROM billing_service_plans WHERE company_id = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
-    [inv.company_id, period.start]
+  // Print copies as set in the customer's billing profile (the outlet's own, else the profile's).
+  const [[copies]] = await db.query(
+    `SELECT COALESCE((SELECT os.print_copies FROM billing_outlet_settings os WHERE os.company_id = ? AND os.site_id = ?),
+                     (SELECT bp.print_copies FROM billing_profiles bp WHERE bp.company_id = ?)) AS n`,
+    [inv.company_id, inv.site_id || "-", inv.company_id]
   );
   const linked = lines.filter((l) => l.services_planned !== null);
 
@@ -482,7 +507,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     due_date: C.ymd(inv.due_date),
     description: inv.description,
     place_of_supply: inv.place_of_supply,
-    service_plan: { print_copies: plan ? Number(plan.print_copies) : Number(inv.print_copies) },
+    service_plan: { print_copies: copies?.n ? Number(copies.n) : Number(inv.print_copies) },
     services: linked.length
       ? { planned: linked.reduce((t, l) => t + Number(l.services_planned), 0), done: linked.reduce((t, l) => t + Math.min(Number(l.services_done || 0), Number(l.services_planned)), 0) }
       : null,
@@ -686,33 +711,35 @@ async function checkInvoice(db, id) {
   check("PERIOD", !Number(dup.n), Number(dup.n) ? "This period is already invoiced" : "Period not billed before");
   check("LINES", inv.lines.length > 0, inv.lines.length ? "Invoice has lines" : "Add at least one line");
   for (const l of inv.lines) {
-    if (l.pricing_basis !== "FIXED" && Number(l.quantity) === 0 && l.adjustment_type !== "MANUAL") errors.push(`Enter the quantity for ${l.item_name}`);
+    const counted = l.services_planned !== null && l.services_planned !== undefined; // from the SOS: 0 completed bills 0
+    if (!counted && l.pricing_basis !== "FIXED" && Number(l.quantity) === 0 && l.adjustment_type !== "MANUAL") errors.push(`Enter the quantity for ${l.item_name}`);
+    if (!l.contract_line_id && l.pricing_basis === "PER_SERVICE" && Number(l.rate) === 0) errors.push(`Enter the rate for ${l.item_name} (not priced in the customer's profile)`);
   }
   if (inv.total <= 0) errors.push("The invoice total must be more than zero");
-  // Services completed are typed by the Service Coordinator per month: block until entered.
-  const linkedIds = inv.lines.filter((l) => l.services_planned !== null && l.contract_line_id).map((l) => l.contract_line_id);
-  if (linkedIds.length) {
-    const [cls] = await db.query("SELECT DISTINCT plan_sub_service FROM billing_contract_lines WHERE id IN (?) AND plan_sub_service IS NOT NULL", [linkedIds]);
-    const monthList = T.monthStarts(inv.period_start, T.monthsCount(inv.period_start, inv.period_end));
-    const typed = await T.typedMonths(db, [inv.customer.company_id], monthList);
-    const missing = [];
-    for (const { plan_sub_service: sub } of cls) {
-      const t = T.typedFor(typed, inv.customer.company_id, sub, monthList, 0);
-      for (const m of t.missing) missing.push(`${sub} (${C.monthName(m)})`);
-    }
+  // Counted services come from the Service Coordinator's SOS: every month of the period must be
+  // submitted (a reopened SOS removes its drafts, so a draft always matches the submitted numbers).
+  if (inv.lines.some((l) => l.services_planned !== null && l.services_planned !== undefined)) {
+    const monthList = S.monthStarts(inv.period_start, T.monthsCount(inv.period_start, inv.period_end));
+    const sos = await S.submittedFor(db, inv.customer.company_id, monthList);
+    const missing = monthList.filter((m) => !sos.has(m));
     check(
-      "COMPLETED",
+      "SOS",
       !missing.length,
-      missing.length
-        ? `Services completed not entered yet for ${missing.join(", ")}. The Service Coordinator enters them in Service Plans.`
-        : "Services completed entered for the period"
+      missing.length ? `SOS not submitted for ${missing.map((m) => C.monthName(m)).join(", ")}. The Service Coordinator submits it in Monthly SOS.` : "SOS submitted for the period"
     );
   }
   check("FY", inv.invoice_date <= today, inv.invoice_date <= today ? `Invoice date ${C.dmy(inv.invoice_date)}` : "The invoice date cannot be in the future");
+  if (inv.invoice_date < today) {
+    warnings.push(
+      `The invoice is dated ${C.dmy(inv.invoice_date)}, before today. Change the date to today on the draft unless it must be back-dated - ` +
+        `the GST return for ${C.monthName(inv.invoice_date)} may already be filed.`
+    );
+  }
 
   if (inv.services && inv.services.done < inv.services.planned) {
     const shortLines = inv.lines.filter((l) => l.services_planned && l.services_done < l.services_planned);
-    const billedFull = shortLines.every((l) => l.adjustment_type === "FULL_DESPITE_SHORTFALL");
+    // Fixed amount contracts bill the agreed services anyway; Service based bill the completed ones.
+    const billedFull = inv.contract.shortfall_billing === "FULL" || shortLines.every((l) => l.adjustment_type === "FULL_DESPITE_SHORTFALL");
     check(
       "SERVICES",
       false,

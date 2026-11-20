@@ -99,6 +99,17 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("../../db");
 const { touchDailyActivity } = require("../utils/userActivity");
 
+// Roles whose DATA SCOPE follows another role. The routes decide which jobs, bookings, sites and
+// contacts someone sees by role name (admin = all, branch_admin = own branch, ...), so a role listed
+// here is given that role name in req.user.role and gets exactly the same data rules.
+// What the person may DO is still only their own role's permissions (Team Management > Roles).
+//   admin_assistant: Admin Panel with only Dashboard, Bookings, Companies, Contacts and Group
+//   Management (the menu is limited in frontend/src/layouts/AdminLayout.jsx); own branch only,
+//   like a Branch Admin. Needs a branch set on the user.
+const DATA_SCOPE_ROLE = {
+  admin_assistant: "branch_admin",
+};
+
 async function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
 
@@ -200,7 +211,10 @@ async function authMiddleware(req, res, next) {
 
     req.user = {
       id: user.id,
-      role: user.role_name,
+      // Data scope by role name: some roles follow another role's rules (see DATA_SCOPE_ROLE).
+      role: DATA_SCOPE_ROLE[user.role_name] || user.role_name,
+      // The user's real role name, for anything that must tell them apart.
+      role_name: user.role_name,
       role_id: user.role_id,
       permissions: permissions.map(p => p.name),
       scopes: normalizedScopes

@@ -112,6 +112,7 @@ function toLead(row, closingNote) {
     services: Array.isArray(row.services_requested) ? row.services_requested : [], // Quotation Master service ids
     serviceNames: Array.isArray(row.services_requested_names) ? row.services_requested_names : [],
     contractType: row.contract_type || null, // "ONE_TIME" | "AMC" from the latest quotation
+    convertedOn: row.converted_on || null, // "YYYY-MM-DD" - the day it became a customer
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,
@@ -218,6 +219,9 @@ function toActivity(row) {
       return { ...base, type: "AGREEMENT", text: `Agreement ${note.split(":")[0]} created${who}`, note: note.split(": ").slice(1).join(": ") };
     case "CONTRACT_TYPE_SET":
       return { ...base, type: "WON", text: `${note || "Service type set"}${who}` };
+    case "CONVERSION_DATE_CHANGED":
+    case "CONVERSION_CREDIT_CHANGED":
+      return { ...base, type: "WON", text: `${note || "Conversion updated"}${who}` };
     case "AGREEMENT_SIGNED":
       return { ...base, type: "AGREEMENT", text: `Signed agreement ${note.split(":")[0]} uploaded${who}` };
     default:
@@ -540,6 +544,8 @@ export async function submitLead(input, actor) {
         services_requested: input.services || [],
         // Sales manager: who the lead goes to (a sales executive, or themselves).
         assign_to: input.assignTo || undefined,
+        // MD / PA / sales manager / admin: an earlier lead date (not sent = today).
+        ...(input.leadDate ? { lead_date: input.leadDate } : {}),
         ...competitorBody(input),
       },
     });
@@ -779,13 +785,18 @@ export function leadSalesOwner(lead) {
  * `creditTo`: who a conversion counts for (the sales manager converting a sales executive's lead).
  * `contractType`: "ONE_TIME" | "AMC", chosen at conversion.
  */
-export async function closeLead(leadId, { won, reason, notes, contractType, creditTo }) {
+export async function closeLead(leadId, { won, reason, notes, contractType, creditTo, convertedOn }) {
   if (!won && !reason) throw new Error("Choose why this lead was lost.");
   const extra = notes?.trim();
   if (won) {
     await request(`/api/crm/leads/${leadId}/convert-to-customer`, {
       method: "POST",
-      body: { notes: extra || "", contract_type: contractType || undefined, ...(creditTo ? { credit_to: Number(creditTo) } : {}) },
+      body: {
+        notes: extra || "",
+        contract_type: contractType || undefined,
+        ...(creditTo ? { credit_to: Number(creditTo) } : {}),
+        ...(convertedOn ? { converted_on: convertedOn } : {}),
+      },
     });
   }
   else {
@@ -938,12 +949,41 @@ export async function getConversion(leadId) {
       companyName: row.company_name || "",
       convertedBy: row.converted_by_name || "",
       convertedAt: wall(row.converted_at),
+      // When it was really entered; differs from convertedAt when the date was backdated.
+      recordedAt: wall(row.recorded_at),
+      creditedTo: row.credited_to === null || row.credited_to === undefined ? "" : String(row.credited_to),
+      creditedToName: row.credited_to_name || "",
       notes: row.notes || "",
     };
   } catch (err) {
     if (err.status === 404) return null;
     throw err;
   }
+}
+
+/** The Managing Director, Personal Assistant, sales manager and admin may give a new lead an earlier date. */
+export const canSetLeadDate = () => ["Managing Director", "Personal Assistant", "sales_manager", "admin"].includes(localStorage.getItem("role") || "");
+
+/** Only the Managing Director / Personal Assistant (and admin) choose or change a conversion date. */
+export const canSetConversionDate = () => ["Managing Director", "Personal Assistant", "admin"].includes(localStorage.getItem("role") || "");
+
+/** Today as "YYYY-MM-DD" in the user's own time zone - the latest conversion date allowed. */
+export const todayYmd = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/**
+ * PUT /leads/{id}/conversion - corrects a saved conversion: `convertedOn` ("YYYY-MM-DD", MD / PA)
+ * and / or `creditTo` (who it counts for, heads of sales). Only the fields given are sent.
+ */
+export async function updateConversion(leadId, { convertedOn, creditTo }) {
+  await request(`/api/crm/leads/${leadId}/conversion`, {
+    method: "PUT",
+    body: { ...(convertedOn ? { converted_on: convertedOn } : {}), ...(creditTo ? { credit_to: Number(creditTo) } : {}) },
+  });
+  await loadWorkspace();
 }
 
 /** GET /my-tasks/today - the signed-in person's open lead tasks (follow-up calls, visits) due today. */

@@ -37,6 +37,8 @@ export type LeadStackParamList = {
   LeadResidentialConvert: { leadId: string; name: string; amount: number };
   LeadClose: { leadId: string; name: string; mode: 'reject' | 'lost' };
   LeadConvert: { leadId: string; name: string };
+  /** Correct a saved conversion: its date (MD / PA) and who it counts for (heads of sales). */
+  LeadEditConversion: { leadId: string; name: string; convertedOn: string; creditedTo: number | null; creditedToName: string };
   /** `amount` pre-fills the total with the lead's approximate quote. */
   LeadQuote: { leadId: string; name: string; amount: number };
   /** Build a quotation from the quotation master (services, plans, prices, terms) - the PDF is made by the server. */

@@ -147,7 +147,96 @@ const MODULES = [
       ];
     },
   },
+  {
+    key: "site_audits",
+    name: "Site Audits",
+    description: "Site audits: auditors start, fill and submit audits; reports go to the client.",
+    // Audit access is granted per role in role_permissions, so the roles are read from there.
+    permissions: ["VIEW_AUDIT", "CREATE_AUDIT", "UPDATE_AUDIT", "SUBMIT_AUDIT", "AMEND_AUDIT"],
+    async work(range) {
+      const c = within("created_at", range);
+      const sub = within("submitted_at", range);
+      // An auditor worked in these days if they started or submitted an audit in them.
+      const worked = range.from
+        ? { sql: ` AND ((created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)) OR (submitted_at >= ? AND submitted_at < DATE_ADD(?, INTERVAL 1 DAY)))`, params: [range.from, range.to, range.from, range.to] }
+        : { sql: "", params: [] };
+      return [
+        { scope: "period", label: "Auditors working", value: await count(`SELECT COUNT(DISTINCT COALESCE(auditor_user_id, created_by)) n FROM audits WHERE status <> 'CANCELLED'${worked.sql}`, worked.params) },
+        { scope: "period", label: "Audits started", value: await count(`SELECT COUNT(*) n FROM audits WHERE status <> 'CANCELLED'${c.sql}`, c.params) },
+        { scope: "now", label: "In progress now", value: await count("SELECT COUNT(*) n FROM audits WHERE status IN ('IN_PROGRESS','AMENDING')"), tone: "warn" },
+        { scope: "period", label: "Submitted", value: await count(`SELECT COUNT(*) n FROM audits WHERE status = 'SUBMITTED'${sub.sql}`, sub.params), tone: "ok" },
+      ];
+    },
+  },
+  {
+    key: "customer_feedback",
+    name: "Customer Feedback",
+    description: "Monthly feedback calls to customers and the issue tickets raised from them.",
+    // Feedback access is granted per role in role_permissions (feedback.routes.js), read from there.
+    permissions: ["FEEDBACK_COLLECT", "FEEDBACK_VIEW", "FEEDBACK_MANAGE", "FEEDBACK_ADMIN", "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"],
+    async work(range) {
+      const called = within("called_at", range);
+      const c = within("created_at", range);
+      return [
+        { scope: "period", label: "People who called", value: await count(`SELECT COUNT(DISTINCT called_by_user_id) n FROM feedback_call_attempts WHERE called_by_user_id IS NOT NULL${called.sql}`, called.params) },
+        { scope: "period", label: "Ticket raisers", value: await count(`SELECT COUNT(DISTINCT raised_by) n FROM feedback_tickets WHERE raised_by IS NOT NULL${c.sql}`, c.params) },
+        { scope: "period", label: "Calls made", value: await count(`SELECT COUNT(*) n FROM feedback_call_attempts WHERE 1=1${called.sql}`, called.params) },
+        { scope: "period", label: "Tickets raised", value: await count(`SELECT COUNT(*) n FROM feedback_tickets WHERE 1=1${c.sql}`, c.params) },
+        { scope: "now", label: "To call", value: await count("SELECT COUNT(*) n FROM feedback_requests WHERE status IN ('TO_CALL','NOT_ANSWERED','FORM_SENT')"), tone: "warn" },
+        { scope: "now", label: "Open issues", value: await count("SELECT COUNT(*) n FROM feedback_tickets WHERE status = 'ACTION_PENDING'"), tone: "bad" },
+      ];
+    },
+  },
+  {
+    key: "helpdesk",
+    name: "Helpdesk",
+    description: "Support tickets: every user raises them, the technical team answers.",
+    roles: ["Technical Lead", "Technical Team"],
+    async work(range) {
+      const c = within("created_at", range);
+      const res = within("resolved_at", range);
+      const msg = within("m.created_at", range);
+      return [
+        { scope: "period", label: "Ticket raisers", value: await count(`SELECT COUNT(DISTINCT raised_by) n FROM helpdesk_tickets WHERE raised_by IS NOT NULL${c.sql}`, c.params) },
+        // Team side: anyone other than the person who raised the ticket who replied or left a note.
+        {
+          scope: "period",
+          label: "Team who replied",
+          value: await count(
+            `SELECT COUNT(DISTINCT m.sender_id) n FROM helpdesk_messages m JOIN helpdesk_tickets t ON t.id = m.ticket_id
+              WHERE m.kind IN ('MESSAGE','NOTE') AND m.sender_id IS NOT NULL AND m.sender_id <> t.raised_by${msg.sql}`,
+            msg.params
+          ),
+        },
+        { scope: "period", label: "Tickets raised", value: await count(`SELECT COUNT(*) n FROM helpdesk_tickets WHERE 1=1${c.sql}`, c.params) },
+        { scope: "now", label: "Open now", value: await count("SELECT COUNT(*) n FROM helpdesk_tickets WHERE status IN ('OPEN','IN_PROGRESS','WAITING_USER')"), tone: "warn" },
+        { scope: "period", label: "Resolved", value: await count(`SELECT COUNT(*) n FROM helpdesk_tickets WHERE resolved_at IS NOT NULL${res.sql}`, res.params), tone: "ok" },
+      ];
+    },
+  },
 ];
+
+// Admins pass every permission check in code and are not counted in this report.
+const ADMIN_ROLES = ["admin", "super_admin", "superadmin"];
+
+/** The roles granted any of these permissions in role_permissions (admins left out); [] if not set up. */
+async function rolesWithPermission(permissions) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT r.name
+         FROM role_permissions rp
+         JOIN permissions p ON p.id = rp.permission_id
+         JOIN roles r ON r.id = rp.role_id
+        WHERE p.name IN (?) AND LOWER(r.name) NOT IN (?)
+        ORDER BY r.name`,
+      [permissions, ADMIN_ROLES]
+    );
+    return rows.map((r) => r.name);
+  } catch (err) {
+    if (err?.code === "ER_NO_SUCH_TABLE" || err?.code === "ER_BAD_FIELD_ERROR") return [];
+    throw err;
+  }
+}
 
 // ---- the chosen days -------------------------------------------------------
 
@@ -186,6 +275,7 @@ function readRange(query) {
  * used it within the chosen days.
  */
 async function usersIn(roles, range) {
+  if (!roles.length) return []; // no role has this module's access yet
   const activeSql = range.from
     ? "MAX(CASE WHEN a.activity_date BETWEEN ? AND ? THEN 1 ELSE 0 END)"
     : "MAX(CASE WHEN a.activity_date IS NOT NULL THEN 1 ELSE 0 END)";
@@ -219,13 +309,14 @@ async function buildModuleReport(query) {
   const range = readRange(query);
   const modules = [];
   for (const m of MODULES) {
-    const users = await usersIn(m.roles, range);
+    const roles = m.permissions ? await rolesWithPermission(m.permissions) : m.roles;
+    const users = await usersIn(roles, range);
     const work = await m.work(range);
     modules.push({
       key: m.key,
       name: m.name,
       description: m.description,
-      roles: m.roles,
+      roles,
       set_up: work.some((w) => w.value !== null),
       users: { with_access: users.length, active: users.filter((u) => u.active).length, list: users },
       work,

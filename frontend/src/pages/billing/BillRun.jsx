@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
+import { FiAlertTriangle, FiCalendar, FiEdit3, FiPlayCircle, FiSearch, FiTrendingUp } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
-import { billingPost, qs, useBilling } from "./billingApi";
+import { billingPost, qs, useBilling, useCustomerOptions } from "./billingApi";
 import { CATEGORY_LABEL, amount, periodLabel, rupeesShort, thisMonth } from "./format";
 import { Kpi, Modal, Msg, ServicesChip, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
+import CustomerFilter from "./CustomerFilter";
 
 // Bill Run: contracts due in the month, with their services and warnings. Select and generate
 // drafts; drafts are checked and issued from Draft Invoices. When nothing was skipped and no
@@ -24,7 +26,9 @@ export default function BillRun() {
   const [result, setResult] = useState(null);
   const [runError, setRunError] = useState("");
 
-  const rows = useMemo(() => data?.rows || [], [data]);
+  const customerOptions = useCustomerOptions();
+  const [customers, setCustomers] = useState([]); // customer filter: [] = all
+  const rows = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id)), [data, customers]);
   const selectable = (r) => !r.blocking && !r.already_drafted;
   const selected = picked ?? new Set(rows.filter(selectable).map((r) => r.contract_id));
   const toggle = (id) => {
@@ -35,7 +39,14 @@ export default function BillRun() {
   };
   const allSelectable = rows.filter(selectable);
   const allOn = allSelectable.length > 0 && allSelectable.every((r) => selected.has(r.contract_id));
-  const s = data?.summary;
+  // The cards follow the customer filter.
+  const s = data ? {
+    due: rows.length,
+    ready: rows.filter((r) => !r.warnings.length && !r.already_drafted).length,
+    with_warnings: rows.filter((r) => r.warnings.length).length,
+    already_drafted: rows.filter((r) => r.already_drafted).length,
+    estimated_total: rows.reduce((t, r) => t + (r.estimated_total || 0), 0),
+  } : null;
   const canGenerate = me.can("GENERATE_INVOICE");
 
   async function generate() {
@@ -79,16 +90,20 @@ export default function BillRun() {
       <Msg error={runError} />
 
       <div className="ac-kpis bl-kpis-5">
-        <Kpi color="blue" label="Due this month" value={s?.due ?? "—"} note="contracts" />
-        <Kpi color="green" label="Ready to generate" value={s?.ready ?? "—"} note="no warnings" />
-        <Kpi color="orange" label="With warnings" value={s?.with_warnings ?? "—"} note="PO, profile or service shortfall" />
-        <Kpi color="purple" label="Already drafted" value={s?.already_drafted ?? "—"} note="awaiting issue" />
-        <Kpi color="red" label="Estimated value" value={s ? rupeesShort(s.estimated_total) : "—"} note="incl. GST" />
+        <Kpi color="blue" label="Due this month" icon={FiCalendar} value={s?.due ?? "—"} note="contracts" />
+        <Kpi color="green" label="Ready to generate" icon={FiPlayCircle} value={s?.ready ?? "—"} note="no warnings" />
+        <Kpi color="orange" label="With warnings" icon={FiAlertTriangle} value={s?.with_warnings ?? "—"} note="PO, profile or service shortfall" />
+        <Kpi color="purple" label="Already drafted" icon={FiEdit3} value={s?.already_drafted ?? "—"} note="awaiting issue" />
+        <Kpi color="teal" label="Estimated value" icon={FiTrendingUp} value={s ? rupeesShort(s.estimated_total) : "—"} note="incl. GST" />
       </div>
 
       <div className="ac-card">
-        <div className="ac-filters" style={{ marginBottom: 12 }}>
-          <input className="ac-input" placeholder="Search customer or contract code…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="bl-filterbar">
+          <div className="bl-search">
+            <FiSearch aria-hidden="true" />
+            <input className="ac-input" placeholder="Search customer or contract code…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
+          </div>
+          <CustomerFilter options={customerOptions} value={customers} onChange={(v) => { setCustomers(v); setPicked(null); }} />
           <select className="ac-select" value={type} onChange={(e) => setType(e.target.value)} aria-label="Billing type">
             <option value="">All billing types</option>
             <option value="AMC">AMC</option>
@@ -101,7 +116,6 @@ export default function BillRun() {
             <option value="COMMERCIAL">Commercial</option>
             <option value="RESIDENTIAL">Residential</option>
           </select>
-          <div />
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
@@ -140,6 +154,12 @@ export default function BillRun() {
                           <span key={w.code} className={`bl-warn ${w.blocking ? "err" : ""}`}>{w.blocking ? "✕" : "⚠"} {w.message}</span>
                         ))}
                         {!r.already_drafted && !r.warnings.length && <span className="ac-sub">—</span>}
+                        {r.sos && (
+                          <button type="button" className="bl-link" style={{ display: "block", marginTop: 4 }}
+                            onClick={() => navigate(`/billing/sos/${encodeURIComponent(r.company_id)}?month=${String(r.period_start).slice(0, 7)}`)}>
+                            {r.sos === "SUBMITTED" ? "✓ SOS submitted - view" : "Open SOS"}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

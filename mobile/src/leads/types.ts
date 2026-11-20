@@ -120,6 +120,11 @@ export interface Conversion {
   companyName: string;
   convertedBy: string;
   convertedAt: string;
+  /** When it was really entered; another day than convertedAt = the date was backdated. */
+  recordedAt: string;
+  /** Who the conversion counts for (the lead's sales person). */
+  creditedTo: number | null;
+  creditedToName: string;
   /** One-time or AMC, chosen at conversion (null for customers converted before it was asked). */
   contractType: 'ONE_TIME' | 'AMC' | null;
 }

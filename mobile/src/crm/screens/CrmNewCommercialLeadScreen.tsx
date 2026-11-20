@@ -32,7 +32,7 @@ import { getCurrentLocation } from '../../utils/location';
 import { reverseGeocode } from '../../utils/reverseGeocode';
 import { useAuth } from '../../auth/AuthContext';
 import { loadLastChoices, saveLastChoices } from '../draft';
-import { leadAssignees, roleName } from '../../leads/api';
+import { canSetLeadDate, leadAssignees, roleName, todayYmd } from '../../leads/api';
 import { fmtDateShort } from '../../tasks/format';
 import { DateSheet } from '../../tasks/ui/sheets';
 import type { Person } from '../../leads/types';
@@ -375,7 +375,7 @@ export function CrmNewCommercialLeadScreen({
   const route = useRoute<RouteProp<CrmStackParamList, 'CrmNewCommercialLead'>>();
   const { addLead, updateLead, getLead, showNotice } = useLeads();
   const { styles, theme } = useCrmStyles(factory);
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const scope = session?.userId ?? 'anon';
 
   // The lead being edited, as it was when the form opened (it does not change under the rep's hands).
@@ -428,6 +428,12 @@ export function CrmNewCommercialLeadScreen({
     notes: editLead?.competitorNotes ?? '',
   }));
   const [contractSheet, setContractSheet] = useState(false);
+  // The lead date (new commercial leads only): today, unless the MD / PA / sales manager / admin
+  // picks the day the lead really came in (leads from before the app was in use).
+  const askLeadDate = !editing && canSetLeadDate(user?.role);
+  const today = todayYmd();
+  const [leadDate, setLeadDate] = useState(today);
+  const [leadDateSheet, setLeadDateSheet] = useState(false);
   const setCompetitorField = (key: 'name' | 'amount' | 'notes', value: string) =>
     setCompetitor(prev => ({ ...prev, [key]: key === 'amount' ? value.replace(/\D/g, '').slice(0, 9) : value }));
   const hasCompetitor = !!(competitor.name.trim() || competitor.amount || competitor.contractEnd || competitor.notes.trim());
@@ -674,6 +680,7 @@ export function CrmNewCommercialLeadScreen({
       paymentStatus: 'pending',
       leadStatus,
       assignTo: assign && !editing && assignTo ? Number(assignTo) : undefined,
+      leadDate: askLeadDate && leadDate < today ? leadDate : undefined,
       competitorName: competitor.name.trim(),
       competitorAmount: competitor.amount ? Number(competitor.amount) : null,
       competitorContractEnd: competitor.contractEnd,
@@ -823,6 +830,9 @@ export function CrmNewCommercialLeadScreen({
               />
               <ReviewRow label="Approximate Quote" value={formatINR(amountNumber)} strong />
               {!!assign && !editing && <ReviewRow label="Assigned To" value={assignLabel} />}
+              {askLeadDate && (
+                <ReviewRow label="Lead Date" value={`${fmtDateShort(leadDate)}${leadDate === today ? ' (today)' : ''}`} />
+              )}
               {editing && <ReviewRow label="Lead Status" value={optionLabel(LEAD_STATUSES, leadStatus)} />}
               <ReviewRow label="Notes" value={values.notes.trim()} />
             </ReviewSection>
@@ -1063,6 +1073,35 @@ export function CrmNewCommercialLeadScreen({
                   value={assignTo}
                   onChange={value => setAssignTo(value)}
                 />
+              )}
+              {askLeadDate && (
+                <>
+                  <Text style={styles.fieldLabel}>Lead Date *</Text>
+                  <Pressable
+                    onPress={() => setLeadDateSheet(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Lead date: ${fmtDateShort(leadDate)}`}
+                    style={({ pressed }) => [styles.dateField, pressed && styles.dateFieldPressed]}
+                    testID="commercial-lead-date"
+                  >
+                    <CalendarIcon size={18} color={theme.textMuted} />
+                    <Text style={styles.dateFieldText}>
+                      {fmtDateShort(leadDate)}
+                      {leadDate === today ? ' (today)' : ''}
+                    </Text>
+                  </Pressable>
+                  <DateSheet
+                    visible={leadDateSheet}
+                    onClose={() => setLeadDateSheet(false)}
+                    value={leadDate}
+                    maxDate={today}
+                    title="Lead date"
+                    onPick={d => {
+                      setLeadDate(d);
+                      setLeadDateSheet(false);
+                    }}
+                  />
+                </>
               )}
               {!!leadSources.error && !leadSources.sources && (
                 <CrmErrorBanner message={leadSources.error} onRetry={leadSources.retry} />

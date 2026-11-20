@@ -159,6 +159,7 @@ export async function createLead(input: NewLeadInput, clientRef?: string): Promi
     client_ref: clientRef,
     ...toApiBody(input),
     assign_to: input.assignTo || undefined,
+    ...(input.leadDate ? { lead_date: input.leadDate } : {}),
   });
   return toLead(data);
 }

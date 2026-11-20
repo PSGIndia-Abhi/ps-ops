@@ -103,6 +103,7 @@ import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
+import BrigadeImport from "./pages/brigade/BrigadeImport";
 // Customer Feedback desk + the customer's form — see pages/feedback/
 import FeedbackLayout from "./pages/feedback/FeedbackLayout";
 import FeedbackCallList from "./pages/feedback/CallList";
@@ -122,18 +123,24 @@ import { FEEDBACK_HOME } from "./pages/feedback/access";
 // Billing (Invoice Generation) — Accounts department and Service Coordinator, see pages/billing/
 import BillingLayout from "./pages/billing/BillingLayout";
 import BillingHome from "./pages/billing/BillingHome";
-import BillingServiceTracker from "./pages/billing/ServiceTracker";
 import BillingBillRun from "./pages/billing/BillRun";
 import BillingDraftInvoices from "./pages/billing/DraftInvoices";
 import BillingDraftEditor from "./pages/billing/DraftEditor";
 import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
-import BillingServicePlans from "./pages/billing/ServicePlans";
+import BillingInvoiceView from "./pages/billing/InvoiceView";
+import BillingSosList from "./pages/billing/SosList";
+import BillingSosEntry from "./pages/billing/SosEntry";
+import BillingCoordinatorDashboard from "./pages/billing/CoordinatorDashboard";
+import BillingAccountsDashboard from "./pages/billing/AccountsDashboard";
 import BillingContracts from "./pages/billing/Contracts";
 import BillingContractForm from "./pages/billing/ContractForm";
 import BillingNewContract from "./pages/billing/NewContract";
 import BillingInvoiceDescriptions from "./pages/billing/InvoiceDescriptions";
 import BillingFrequencies from "./pages/billing/BillingFrequencies";
 import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
+import BillingCustomers from "./pages/billing/Customers";
+import BillingCustomerProfile from "./pages/billing/CustomerProfile";
+import BillingMasters from "./pages/billing/MastersPage";
 import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
 if (typeof window !== "undefined") {
@@ -166,7 +173,7 @@ const router = createBrowserRouter([
   {
     path: "/admin",
     element: (
-      <ProtectedRoute allowedRoles={["admin", "branch_admin"]}>
+      <ProtectedRoute allowedRoles={["admin", "branch_admin", "admin_assistant"]}>
         <AdminLayout />
       </ProtectedRoute>
     ),
@@ -224,6 +231,7 @@ const router = createBrowserRouter([
       { path: "masters", element: <BrigadeMasters /> },
       { path: "pos", element: <BrigadePos /> },
       { path: "billing", element: <BrigadeBilling /> },
+      { path: "import", element: <BrigadeImport /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "profile", element: <ProfilePage /> },
     ],
@@ -457,19 +465,31 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <BillingHome /> },
-      { path: "tracker", element: <BillingServiceTracker /> },
+      // Service Coordinator: dashboard and the monthly SOS (Accounts read the SOS too).
+      { path: "coordinator", element: <BillingCoordinatorDashboard /> },
+      // Accounts: the billing dashboard (one-click generate / issue / download, late alerts).
+      { path: "dashboard", element: <BillingAccountsDashboard /> },
+      { path: "sos", element: <BillingSosList /> },
+      { path: "sos/:companyId", element: <BillingSosEntry /> },
+      // Old Service Tracker / Service Plans pages: replaced by the monthly SOS.
+      { path: "tracker", element: <Navigate to="/billing/sos" replace /> },
       { path: "run", element: <BillingBillRun /> },
       { path: "drafts", element: <BillingDraftInvoices /> },
       { path: "drafts/:id", element: <BillingDraftEditor /> },
       { path: "invoices", element: <BillingIssuedInvoices /> },
-      { path: "plans", element: <BillingServicePlans /> },
+      // One issued invoice: details, money (payments, TDS), prints / shares, actions.
+      { path: "invoices/:id", element: <BillingInvoiceView /> },
+      { path: "plans", element: <Navigate to="/billing/sos" replace /> },
       { path: "contracts", element: <BillingContracts /> },
       // A new contract is made step by step (customer, terms, PO, services, review); an existing one is edited on ContractForm.
       { path: "contracts/new", element: <BillingNewContract /> },
       { path: "contracts/:id", element: <BillingContractForm /> },
       { path: "pos", element: <BillingPurchaseOrders /> },
-      // Billing details are edited on the contract page now (Contracts & Price Lists); old links land there.
-      { path: "customers", element: <Navigate to="/billing/contracts" replace /> },
+      // Customer Billing Profile: the list, and one customer's profile (details, outlets, services, POs, delivery).
+      { path: "customers", element: <BillingCustomers /> },
+      { path: "customers/:companyId", element: <BillingCustomerProfile /> },
+      // Masters: one page of cards (Contracts, POs, Invoice Descriptions, Billing Frequencies).
+      { path: "masters", element: <BillingMasters /> },
       { path: "descriptions", element: <BillingInvoiceDescriptions /> },
       { path: "frequencies", element: <BillingFrequencies /> },
     ],

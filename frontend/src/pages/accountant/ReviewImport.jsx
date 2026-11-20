@@ -32,11 +32,18 @@ function csvCell(v) {
 
 function downloadDraftErrorsCsv(review) {
   const hasSite = review.rows.some((r) => r.site);
-  const header = ["Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount", "Error Reason"];
+  const hasTaxable = review.rows.some((r) => r.taxable);
+  const header = [
+    "Row", "Invoice No", "Customer", ...(hasSite ? ["Site"] : []), "Invoice Date", "Due Date", "Amount",
+    ...(hasTaxable ? ["Taxable Value"] : []), "Error Reason",
+  ];
   const lines = [header.map(csvCell).join(",")];
   for (const r of review.rows.filter((row) => row.status === "error")) {
     lines.push(
-      [r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount, r.errors.join("; ")]
+      [
+        r.rowNumber, r.invoiceNo, r.customer, ...(hasSite ? [r.site] : []), r.invoiceDate, r.dueDate, r.amount,
+        ...(hasTaxable ? [r.taxable] : []), r.errors.join("; "),
+      ]
         .map(csvCell)
         .join(",")
     );
@@ -239,6 +246,8 @@ export default function ReviewImport() {
   const visible = rows.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
   // Files no longer carry a site; the column only shows when this file still had one.
   const hasSite = review.rows.some((r) => r.site);
+  // The optional Taxable Value column (for Taxable TDS) only shows when the file filled it in.
+  const hasTaxable = review.rows.some((r) => r.taxable);
   const imported = review.status === "CONFIRMED";
   const tabs = [
     ["all", `All (${review.total})`, <FiList />],
@@ -347,6 +356,7 @@ export default function ReviewImport() {
             <thead>
               <tr>
                 <th>#</th><th>Invoice No</th><th>Customer</th>{hasSite && <th>Site</th>}<th className="ac-num">Amount</th>
+                {hasTaxable && <th className="ac-num">Taxable Value</th>}
                 <th>Status</th><th>Error Reason</th>
               </tr>
             </thead>
@@ -363,6 +373,9 @@ export default function ReviewImport() {
                       : r.status === "valid" ? <span className="ac-badge void">Cancelled</span> /* blank amount: saved as Cancelled */
                       : "—"}
                   </td>
+                  {hasTaxable && (
+                    <td className="ac-num">{typeof r.taxable === "number" ? money(r.taxable) : r.taxable || "—"}</td>
+                  )}
                   <td>
                     {r.status === "valid"
                       ? <span className="rv-pill valid"><FiCheckCircle /> Valid</span>
@@ -371,7 +384,7 @@ export default function ReviewImport() {
                   <td><Reasons errors={r.errors} big={tab === "error"} /></td>
                 </tr>
               )) : (
-                <tr><td className="rv-empty" colSpan={hasSite ? 7 : 6}>
+                <tr><td className="rv-empty" colSpan={6 + (hasSite ? 1 : 0) + (hasTaxable ? 1 : 0)}>
                   {q ? "No rows match your search" : tab === "error" ? "No errors found" : tab === "valid" ? "No valid records" : "No records"}
                 </td></tr>
               )}

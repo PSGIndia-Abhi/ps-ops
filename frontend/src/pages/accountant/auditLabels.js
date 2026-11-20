@@ -47,13 +47,16 @@ const FIELD_LABELS = {
   remarks: "Remarks",
   tds_applicable: "TDS",
   tds_rate: "TDS rate",
+  tds_basis: "TDS on",
+  taxable_amount: "Taxable value",
   name: "Name",
   phone: "Phone",
   email: "Email",
   is_primary: "Primary",
 };
 
-const MONEY_FIELDS = new Set(["invoice_amount", "pending_amount"]);
+const MONEY_FIELDS = new Set(["invoice_amount", "pending_amount", "taxable_amount"]);
+const TDS_BASIS_LABEL = { TAXABLE: "Taxable TDS", INVOICE: "Invoice TDS" };
 
 export const actionLabel = (action) => AUDIT_ACTIONS[action] || String(action || "").replace(/_/g, " ").toLowerCase();
 export const moduleLabel = (m) => AUDIT_MODULES.find((x) => x.value === m)?.label || m;
@@ -69,7 +72,8 @@ export function showValue(field, v) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return field === "tds_applicable" ? (v ? "On" : "Off") : v ? "Yes" : "No";
   if (field === "tds_rate") return `${v}%`;
-  if (MONEY_FIELDS.has(field)) return `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  if (field === "tds_basis") return TDS_BASIS_LABEL[v] || String(v);
+  if (MONEY_FIELDS.has(field)) return `₹${(Math.round(Number(v)) || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
   return showDay(v) || String(v);
 }
 

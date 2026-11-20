@@ -36,15 +36,36 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
   const print = () => run(() => openPdf(`/invoices/${invoiceId}/print?copies=${opt.print_copies}`));
   const download = () => run(() => openPdf(`/invoices/${invoiceId}/pdf`));
 
-  // Opens the user's own mail app with the payment contacts, subject and message (with the link) filled in.
-  const openEmail = () =>
+  // Email: when the customer profile has an email, it is sent straight away from the server with the
+  // PDF attached (all addresses in To). Otherwise Gmail opens in a new tab with the payment contacts,
+  // subject and message (with a secure link) filled in.
+  const [sending, setSending] = useState(false);
+  const profileEmails = opt?.profile_emails || [];
+  const sendEmail = () =>
     run(async () => {
-      const url = await secureLink();
-      const to = opt.default_email.to.join(",");
-      const body = `${opt.default_email.message}\n\nView / download the invoice: ${url}`;
-      window.location.href = `mailto:${to}?subject=${encodeURIComponent(opt.default_email.subject)}&body=${encodeURIComponent(body)}`;
-      await logOpened("Opened in the mail app");
-      setMsg({ ok: "Mail app opened with the invoice link." });
+      if (profileEmails.length) {
+        setSending(true);
+        try {
+          await billingPost(`/invoices/${invoiceId}/share/email`, { to: profileEmails, subject: opt.default_email.subject, message: opt.default_email.message, attach: "ORIGINAL" });
+          setMsg({ ok: `✓ Emailed to ${profileEmails.join(", ")}` });
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
+      const tabRef = window.open("", "_blank"); // opened before the await so the popup is not blocked
+      try {
+        const url = await secureLink();
+        const body = `${opt.default_email.message}\n\nView / download the invoice: ${url}`;
+        const gmail = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(opt.default_email.to.join(","))}&su=${encodeURIComponent(opt.default_email.subject)}&body=${encodeURIComponent(body)}`;
+        if (tabRef) tabRef.location.href = gmail;
+        else window.open(gmail, "_blank");
+        await logOpened("Opened in Gmail (no email in the customer profile)");
+        setMsg({ ok: "No email in this customer's profile - Gmail opened with the invoice link. Add the email in the customer profile to send directly next time." });
+      } catch (err) {
+        tabRef?.close();
+        throw err;
+      }
     });
 
   // Opens WhatsApp with the message ready; the user picks the chat there (no number needed).
@@ -95,7 +116,7 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
         <div className="bl-m-ok">✓</div>
         <div style={{ flex: 1 }}>
           <h3>Invoice {opt?.invoice_number || ""} {justIssued ? "issued" : ""}</h3>
-          <div className="ac-sub">{opt ? `${opt.customer} · ${rupees(opt.total)}${opt.due_date ? ` · due ${opt.due_date.split("-").reverse().join("-")}` : ""}` : "Loading…"}</div>
+          <div className="ac-sub">{opt ? `${opt.customer} · ${rupees(opt.total)}` : "Loading…"}</div>
         </div>
         <button type="button" className="bl-x" onClick={onClose} aria-label="Close">✕</button>
       </div>
@@ -126,7 +147,9 @@ export default function ShareDialog({ invoiceId, justIssued = false, onClose }) 
             <div>
               <div className="bl-m-sec">Share</div>
               <div className="bl-tiles">
-                <button type="button" className="bl-tile" disabled={busy} onClick={openEmail}><span className="ic" style={{ background: "#2563eb" }}><FiMail /></span>Email</button>
+                <button type="button" className="bl-tile" disabled={busy} onClick={sendEmail} title={profileEmails.length ? `Send now to ${profileEmails.join(", ")}` : "No email in the customer profile - opens Gmail"}>
+                  <span className="ic" style={{ background: "#2563eb" }}><FiMail /></span>{sending ? "Sending…" : "Email"}
+                </button>
                 <button type="button" className="bl-tile" disabled={busy} onClick={openWhatsapp}><span className="ic" style={{ background: "#16a34a" }}><FaWhatsapp /></span>WhatsApp</button>
                 <button type="button" className="bl-tile" disabled={busy} onClick={copyLink}><span className="ic" style={{ background: "#64748b" }}><FiCopy /></span>Copy link</button>
                 <button type="button" className="bl-tile" disabled={busy} onClick={shareOther}><span className="ic" style={{ background: "#7c3aed" }}><FiMoreHorizontal /></span>More apps</button>

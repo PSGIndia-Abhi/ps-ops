@@ -2,7 +2,7 @@
 //
 // Issue (one transaction per invoice; lock order: invoice -> number counter -> advance payments):
 //   1. re-run the checks; stop on errors, or on warnings that were not confirmed
-//   2. take the next number from the shared series (brigade_invoice_sequences, same as Brigade)
+//   2. take the next number in the main series, continued from Vyapar (numbering.js)
 //   3. add the receivable to the existing `invoices` table (+ its TDS snapshot), so the invoice
 //      shows in the Accountant Panel for collection
 //   4. Termite advance POs: allocate the advance payments to it, oldest first
@@ -12,7 +12,7 @@ const { v4: uuid } = require("uuid");
 const C = require("./common");
 const calc = require("./calc");
 const D = require("./draft.service");
-const { financialYear, invoiceNumber, nextSeq } = require("../../controllers/brigadeInvoices.controller");
+const { nextInvoiceNumber } = require("./numbering");
 const { insertInvoiceTds } = require("../Tds.service");
 const { syncInvoiceStatusesSafely } = require("../InvoiceStatus.service");
 const { logAudit } = require("../Audit.service");
@@ -92,24 +92,24 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
     }
     const inv = chk.invoice;
 
-    // 2. number from the shared series
-    const fy = financialYear(inv.invoice_date);
-    const seq = await nextSeq(conn, fy);
-    const number = invoiceNumber(fy, seq);
+    // 2. the next number in the main series, carrying on from Vyapar's last invoice (numbering.js)
+    const { fy, seq, number } = await nextInvoiceNumber(conn, inv.invoice_date);
 
-    // 3. receivable in the existing invoices table + TDS snapshot
-    const [[company]] = await conn.query("SELECT id, tds_applicable, tds_rate FROM companies WHERE id = ?", [inv.customer.company_id]);
+    // 3. receivable in the existing invoices table + TDS snapshot. TDS follows the customer's TDS
+    // setting (on the invoice amount or on the taxable value), so the taxable value (the subtotal,
+    // before GST) is saved on the receivable and passed on: never guessed back from the total.
+    const [[company]] = await conn.query("SELECT id, tds_applicable, tds_rate, tds_basis FROM companies WHERE id = ?", [inv.customer.company_id]);
     const receivableId = uuid();
     await conn.query(
       `INSERT INTO invoices
-         (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, paid_amount, pending_amount, status, remarks, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'PENDING', ?, ?)`,
+         (id, invoice_number, customer_id, site_id, invoice_date, due_date, invoice_amount, taxable_amount, paid_amount, pending_amount, status, remarks, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'PENDING', ?, ?)`,
       [
         receivableId, number, inv.customer.company_id, inv.site_id || inv.ship_to_site_id || null, inv.invoice_date, inv.due_date,
-        inv.total, inv.total, `Generated - ${inv.contract.contract_code} (${C.dmy(inv.period_start)} to ${C.dmy(inv.period_end)})`, userId,
+        inv.total, inv.subtotal, inv.total, `Generated - ${inv.contract.contract_code} (${C.dmy(inv.period_start)} to ${C.dmy(inv.period_end)})`, userId,
       ]
     );
-    await insertInvoiceTds(conn, receivableId, company, inv.total);
+    await insertInvoiceTds(conn, receivableId, company, inv.total, inv.subtotal);
 
     // 4. Termite advance
     let advanceAdjusted = 0;
