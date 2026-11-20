@@ -28,10 +28,12 @@ const TABS = [
 ];
 const COPIES = [1, 2, 3, 4];
 const DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
-const STRUCTURE_LABEL = { FIXED: "Fixed amount", SERVICE_BASED: "Service based" };
+const STRUCTURE_LABEL = { FIXED: "Fixed amount", SERVICE_BASED: "Service based", PER_SQFT: "Per sq. ft", PER_SQM: "Per sq. m" };
 const STRUCTURE_HINT = {
   FIXED: "Billed for the agreed services every month, even if fewer were done.",
   SERVICE_BASED: "Billed for the services completed in the month (from the Service Coordinator’s SOS).",
+  PER_SQFT: "Termite: the treated area from the Service Coordinator’s SOS × the rate per sq. ft.",
+  PER_SQM: "Termite: the treated area from the Service Coordinator’s SOS × the rate per sq. m.",
 };
 
 export default function CustomerProfile() {
@@ -166,7 +168,7 @@ export default function CustomerProfile() {
             <div key={k.id} className="bl-ccard">
               <div className="bl-ccard-head">
                 <h3>{k.contract_code}</h3>
-                <TypeBadge type={k.billing_type} frequency={k.frequency_months} />
+                <TypeBadge type={k.billing_type} frequency={k.frequency_months} unit={k.frequency_unit} />
                 <span className="bl-status blue" title={STRUCTURE_HINT[k.structure]}><span className="bl-status-dot" />{STRUCTURE_LABEL[k.structure]}</span>
                 <span className={`bl-status ${k.status === "ACTIVE" ? "green" : k.status === "PAUSED" ? "amber" : "grey"}`}><span className="bl-status-dot" />{k.status === "ACTIVE" ? "Active" : k.status === "PAUSED" ? "Paused" : "Ended"}</span>
                 <span className="bl-ccard-meta">

@@ -143,9 +143,12 @@ export default function BillRun() {
                       </td>
                       <td><b>{r.customer}</b><div className="bl-sub">{CATEGORY_LABEL[r.category] || "Customer type not set"}</div></td>
                       <td>{r.contract_code}</td>
-                      <td><TypeBadge type={r.billing_type} frequency={r.frequency_months} /></td>
+                      <td><TypeBadge type={r.billing_type} frequency={r.frequency_months} unit={r.frequency_unit} /></td>
                       <td>{r.services ? <ServicesChip done={r.services.done} planned={r.services.planned} /> : <span className="bl-svc none">—</span>}</td>
-                      <td>{periodLabel(r.period_start, r.period_end)}</td>
+                      <td>
+                        {periodLabel(r.period_start, r.period_end)}
+                        {r.periods > 1 && <div className="ac-sub" style={{ fontSize: 12 }}>{r.periods} invoices · one per {r.frequency_unit === "DAY" ? "day" : "week"}</div>}
+                      </td>
                       <td className="bl-num">{r.estimated_total === null ? "—" : amount(r.estimated_total)}</td>
                       <td>{r.needs_input ? <span className="ac-badge b-amber">{r.billing_type === "CHEMICAL" ? "Quantities" : "Quantity"}</span> : <span className="ac-sub">No</span>}</td>
                       <td>

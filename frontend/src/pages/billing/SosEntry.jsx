@@ -5,7 +5,7 @@ import {
   FiArrowDown, FiLayers, FiLock, FiMessageSquare, FiMinus, FiMinusCircle, FiPlus, FiPlusCircle, FiRotateCcw, FiSend, FiUsers, FiX,
 } from "react-icons/fi";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
-import { monthLabel, rupees, thisMonth } from "./format";
+import { amount, monthLabel, periodLabel, rupees, thisMonth } from "./format";
 import { LuClipboardCheck, LuClipboardList, LuListPlus, LuScale, LuTrendingDown, LuTrendingUp } from "react-icons/lu";
 import { CountUp, Modal, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";
@@ -25,6 +25,9 @@ const shiftMonth = (m, n) => {
   const d = new Date(Date.UTC(y, mm - 1 + n, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 };
+// Termite area rows: one per contract line and billing period
+const areaKey = (a) => `${a.contract_line_id}|${a.period_start}`;
+const unitLabel = (u) => (/ft/i.test(u || "") ? "sq. ft" : "sq. m");
 const when = (v) => (v ? new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
 export default function SosEntry() {
@@ -41,6 +44,8 @@ export default function SosEntry() {
   const [done, setDone] = useState({}); // contract_line_id -> completed (string for the input)
   const [remarks, setRemarks] = useState({});
   const [extras, setExtras] = useState([]);
+  const [areas, setAreas] = useState({}); // termite: areaKey -> treated area (string for the input)
+  const [areaRemarks, setAreaRemarks] = useState({});
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState({});
@@ -70,6 +75,14 @@ export default function SosEntry() {
     setDone(d);
     setRemarks(r);
     setExtras(data.lines.filter((x) => x.is_extra).map((x) => ({ key: (extraKey += 1), site_id: x.site_id || ALL, service: x.service, completed: String(x.completed ?? 1), remarks: x.remarks || "" })));
+    const ar = {};
+    const arr = {};
+    for (const a of data.area_lines || []) {
+      ar[areaKey(a)] = a.area === null || a.area === undefined ? "" : String(a.area);
+      arr[areaKey(a)] = a.remarks || "";
+    }
+    setAreas(ar);
+    setAreaRemarks(arr);
     setNotes(data.notes || "");
     setDirty(false);
     setMsg({});
@@ -99,6 +112,10 @@ export default function SosEntry() {
     extra: (editable ? extras : data.lines.filter((x) => x.is_extra)).reduce((t, x) => t + (Number(x.completed) || 0), 0),
     missing: editable ? agreed.filter((l) => num(done[l.contract_line_id]) === null).length : 0,
   };
+  const areaRows = data.area_lines || [];
+  const areaOf = (a) => num(editable ? areas[areaKey(a)] : a.area);
+  const areasMissing = editable ? areaRows.filter((a) => areaOf(a) === null).length : 0;
+  const nothingToReport = !agreed.length && !areaRows.length;
   const rateOf = (siteId, service) => {
     const same = agreed.filter((a) => norm(a.service) === norm(service));
     const hit = same.find((a) => (a.site_id || ALL) === siteId) || same.find((a) => !a.site_id) || same[0];
@@ -118,6 +135,7 @@ export default function SosEntry() {
       notes,
       lines: agreed.map((l) => ({ contract_line_id: l.contract_line_id, completed: num(done[l.contract_line_id]), remarks: remarks[l.contract_line_id] || null })),
       extras: extras.filter((x) => x.service.trim()).map((x) => ({ site_id: x.site_id || null, service: x.service.trim(), completed: Number(x.completed) || 0, remarks: x.remarks || null })),
+      areas: areaRows.map((a) => ({ contract_line_id: a.contract_line_id, period_start: a.period_start, area: num(areas[areaKey(a)]), remarks: areaRemarks[areaKey(a)] || null })),
     };
   }
 
@@ -176,7 +194,8 @@ export default function SosEntry() {
       <div className="sos-top">
         <button type="button" className="sos-back" onClick={() => navigate(`${BILLING_HOME}/sos?month=${month}`)} aria-label="Back to Monthly SOS" title="Monthly SOS"><FiArrowLeft /></button>
         <div className="sos-top-main">
-          <h1>{data.customer}</h1>
+          <h1>{data.billing_group ? data.billing_group.group : data.customer}</h1>
+          {data.billing_group && <div className="ac-sub" style={{ marginTop: 2 }}>Group contract · {data.billing_group.companies.join(", ")}</div>}
           <div className="bl-meta">
             <span className={`bl-status ${STATUS_TONE[statusCls] || "grey"}`}><span className="bl-status-dot" />{statusLabel}</span>
             {data.structures.map((st) => <span key={st}><FiLayers /> {st === "FIXED" ? "Fixed amount" : "Service based"}</span>)}
@@ -209,6 +228,60 @@ export default function SosEntry() {
         <div className="ac-info error" style={{ marginBottom: 12 }}><span><FiRotateCcw /> Sent back by <b>{data.reopened_by}</b> on {when(data.reopened_at)}: “{data.reopen_reason}”</span></div>
       )}
       {!data.has_agreement && <div className="ac-info error" style={{ marginBottom: 12 }}><span>This customer has no services billed per service for {monthLabel(month)} in its billing profile.</span></div>}
+
+      {/* Termite: the treated area completed in each billing period (week / day / month) this month bills.
+          Accounts bill each period: this area × the contract's rate. */}
+      {areaRows.length > 0 && (
+        <div className="sos-card">
+          <div className="sos-card-head">
+            <h3>Termite treatment - area completed</h3>
+            <span className="ac-sub">{areaRows.length} period{areaRows.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="sos-list">
+            <div className="sos-item sos-thead"><span>Item · period</span><span>Rate</span><span>Area completed</span><span>Amount</span><span>Remark</span></div>
+            {areaRows.map((a) => {
+              const k = areaKey(a);
+              const id = `a${k}`;
+              const n = areaOf(a);
+              const remark = editable ? areaRemarks[k] : a.remarks;
+              const remarkOpen = openRemarks.has(id);
+              const u = unitLabel(a.unit);
+              return (
+                <div key={k} className="sos-item">
+                  <div className="sos-item-main">
+                    <b>{a.service}</b>
+                    <span className="sos-item-sub">
+                      <span>{periodLabel(a.period_start, a.period_end)}</span>
+                      {a.contract_code && <span>{a.contract_code}</span>}
+                      {!remarkOpen && remark && <span className="sos-remark">“{remark}”</span>}
+                    </span>
+                    {remarkOpen && editable && (
+                      <input className="sos-remarkinput" autoFocus value={areaRemarks[k] || ""} placeholder="Add a remark (optional)"
+                        onChange={(e) => { setAreaRemarks((r) => ({ ...r, [k]: e.target.value })); setDirty(true); }} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
+                    )}
+                  </div>
+                  <span className="sos-num sos-rate">{a.rate === null ? "—" : `${rupees(a.rate)} / ${u}`}</span>
+                  {editable ? (
+                    <span className="sos-area">
+                      <input type="number" min="0" step="0.01" className="ac-input" value={areas[k] ?? ""} placeholder="0"
+                        onChange={(e) => { setAreas((s) => ({ ...s, [k]: e.target.value })); setDirty(true); }} aria-label={`Area completed for ${a.service}, ${periodLabel(a.period_start, a.period_end)}`} />
+                      <span>{u}</span>
+                    </span>
+                  ) : (
+                    <span className="sos-area-val">{n === null ? "—" : `${n} ${u}`}</span>
+                  )}
+                  <span className={`sos-state ${n === null ? "grey" : "green"}`}>
+                    {n === null ? <><FiMinusCircle /> Not entered</> : a.rate === null ? <><FiCheckCircle /> Entered</> : <><FiCheckCircle /> ₹{amount(n * a.rate)}</>}
+                  </span>
+                  <span className="sos-acts">
+                    {editable && <button type="button" className={`sos-iconbtn ${remark ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {cards.map((card) => {
         const lines = agreed.filter((l) => (l.site_id || ALL) === card.id);
@@ -327,17 +400,21 @@ export default function SosEntry() {
             <span className="sos-state green"><FiCheckCircle /> Submitted by {data.submitted_by} on {when(data.submitted_at)}</span>
           ) : !editable ? (
             <span className="sos-state grey"><FiClock /> Waiting for the Service Coordinator</span>
-          ) : !agreed.length ? (
+          ) : nothingToReport ? (
             <span className="sos-state grey"><FiInfo /> No agreed services to report</span>
           ) : totals.missing > 0 ? (
             <span className="sos-state amber"><FiAlertTriangle /> {totals.missing} service{totals.missing === 1 ? "" : "s"} not entered</span>
+          ) : areasMissing > 0 ? (
+            <span className="sos-state amber"><FiAlertTriangle /> Termite area not entered for {areasMissing} period{areasMissing === 1 ? "" : "s"}</span>
+          ) : !agreed.length ? (
+            <span className="sos-state green"><FiCheckCircle /> Termite area entered - ready to submit</span>
           ) : (
             <span className="sos-state green"><FiCheckCircle /> All services entered - ready to submit{totals.extra > 0 ? ` · ${totals.extra} extra` : ""}</span>
           )}
         </div>
         <div className="ac-actions">
           {editable && <button type="button" className="ac-btn" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save draft"}</button>}
-          {editable && <button type="button" className="ac-btn ac-btn-primary" disabled={busy || totals.missing > 0 || !agreed.length} onClick={() => setConfirm(true)}><FiSend /> Submit to Accounts</button>}
+          {editable && <button type="button" className="ac-btn ac-btn-primary" disabled={busy || totals.missing > 0 || areasMissing > 0 || nothingToReport} onClick={() => setConfirm(true)}><FiSend /> Submit to Accounts</button>}
           {data.status === "SUBMITTED" && !data.invoiced?.length && canFill && <button type="button" className="ac-btn" onClick={() => setReopening(true)}><FiRotateCcw /> Reopen to correct</button>}
           {data.status === "SUBMITTED" && !data.invoiced?.length && !canFill && canSendBack && <button type="button" className="ac-btn" onClick={() => setReopening(true)}><FiRotateCcw /> Send back</button>}
         </div>
@@ -347,7 +424,8 @@ export default function SosEntry() {
         <Modal onClose={() => !busy && setConfirm(false)} narrow label="Submit SOS">
           <div className="bl-m-head"><div><h3>Submit {monthLabel(month)} SOS?</h3><div className="ac-sub">{data.customer}</div></div><button type="button" className="bl-x" onClick={() => setConfirm(false)} aria-label="Close">✕</button></div>
           <div className="bl-m-body">
-            <div className="bl-chk"><span className="bl-dot" /><span><b>{totals.completed}</b> of <b>{totals.assigned}</b> assigned services completed</span></div>
+            {agreed.length > 0 && <div className="bl-chk"><span className="bl-dot" /><span><b>{totals.completed}</b> of <b>{totals.assigned}</b> assigned services completed</span></div>}
+            {areaRows.length > 0 && <div className="bl-chk"><span className="bl-dot" /><span>Termite area completed for <b>{areaRows.length}</b> period{areaRows.length === 1 ? "" : "s"}, billed area × rate</span></div>}
             {totals.extra > 0 && <div className="bl-chk"><span className="bl-dot a" /><span><b>{totals.extra}</b> extra service(s), billed on top</span></div>}
             <div className="ac-sub">Accounts are notified and bill from these numbers. After submitting, reopen it to make a change.</div>
           </div>

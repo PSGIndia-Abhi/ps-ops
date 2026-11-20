@@ -252,6 +252,8 @@
 .nc-rv-table th { background: #f8fafc; color: #64748b; font-weight: 600; font-size: 12px; text-align: left; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
 .nc-rv-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #0f172a; }
 .nc-rv-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* the number columns hug their content (side by side on the right); the item name takes the rest */
+.nc-rv-table th.num, .nc-rv-table td.num { width: 1%; padding-left: 28px; }
 .nc-rv-table .ac-sub { font-size: 12px; margin-top: 2px; }
 .nc-rv-item { font-weight: 600; overflow-wrap: break-word; }
 .nc-rv-table td:first-child { min-width: 112px; }
@@ -259,9 +261,15 @@
 .nc-rv-table tfoot tr:first-child td { border-top: 1px solid #e5e7eb; }
 .nc-rv-table tfoot tr.gst td { color: #64748b; font-weight: 500; }
 .nc-rv-table tfoot tr.grand td { background: #f8fafc; font-size: 14.5px; font-weight: 700; }
+.nc-rv-calc { display: none; }
 @media (max-width: 480px) {
-  .nc-rv-table th, .nc-rv-table td { padding: 8px 6px; }
-  .nc-rv-table th { font-size: 11px; white-space: normal; }
+  .nc-rv-table th, .nc-rv-table td { padding: 8px 10px; }
+  .nc-rv-table th.num, .nc-rv-table td.num { padding-left: 10px; }
+  /* phones: item (with quantity × rate under it) | amount */
+  .nc-rv-table thead th:nth-child(2), .nc-rv-table thead th:nth-child(3),
+  .nc-rv-table tbody td:nth-child(2), .nc-rv-table tbody td:nth-child(3) { width: 0; padding: 0; font-size: 0; }
+  .nc-rv-calc { display: block; }
+  .nc-rv-table td:first-child { min-width: 0; }
 }
 .nc-check { list-style: none; padding: 12px 14px; margin: 0; background: #f8fafc; border-radius: 10px; display: grid; gap: 6px; font-size: 13.5px; }
 .nc-check li::before { display: inline-block; width: 20px; font-weight: 700; }
@@ -315,9 +323,11 @@
 .bl-app .ac-table .ac-badge,
 .bl-app .ac-table .ac-btn,
 .bl-app .ac-table .bl-nowrap { white-space: nowrap; }
-/* The New contract steps use more of a wide screen (two columns of fields stay readable). */
+/* The New contract steps use the width of a wide screen (no empty band on the right); the summary
+   gets a little wider too. */
 @media (min-width: 1500px) {
-  .bl-app .nc-page { max-width: 1180px; }
+  .bl-app .nc-page { max-width: 1560px; }
+  .bl-app .nc-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; }
 }
 
 /* New contract › Purchase order: title on the left, + Add PO at the top right of the card. */
@@ -796,9 +806,10 @@
 .nc-card .ac-pills { background: #f1f5f9; border-radius: 12px; padding: 4px; gap: 4px; display: inline-flex; flex-wrap: wrap; }
 .nc-card .ac-pills .ac-pill { border: 0; border-radius: 9px; padding: 9px 18px; background: transparent; font-weight: 500; color: #475569; }
 .nc-card .ac-pills .ac-pill.active { background: #fff; color: #1d4ed8; font-weight: 600; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
-/* Footer with Back / Next: at the end of the card, in the normal flow (it used to be sticky, but then
-   the fields below - Notes, First invoice - scrolled underneath it and were hidden). */
-.nc-card .nc-foot { position: static; margin: 18px -26px 0; padding: 14px 26px; background: #fff; border-top: 1px solid #eef2f7; border-radius: 0 0 18px 18px; }
+/* Sticky footer with Back / Next */
+/* Back / Next at the end of the card. Not sticky: a sticky bar stops above the scroll area padding
+   (it differs per layout) and the content showed through the gap under it. */
+.nc-card .nc-foot { margin: 18px -26px 0; padding: 14px 26px; background: #fff; border-top: 1px solid #eef2f7; border-radius: 0 0 18px 18px; }
 
 /* Step tracker: circles joined by a line that fills as you go */
 .nc-track { display: flex; list-style: none; margin: 4px 0 20px; padding: 0; counter-reset: s; }
@@ -832,8 +843,9 @@
 .nc-sum-total span:first-child { font-size: 12px; color: #64748b; }
 .nc-sum-total b { font-size: 22px; color: #0f172a; font-variant-numeric: tabular-nums; }
 .nc-saved { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #15803d; padding: 0 4px; }
-@media (max-width: 1000px) {
-  .nc-layout { grid-template-columns: 1fr; }
+/* the form keeps a comfortable width: below 1180px (sidebar included) the summary moves under it */
+@media (max-width: 1180px) {
+  .nc-layout { grid-template-columns: minmax(0, 1fr); }
   .nc-aside { position: static; }
 }
 @media (max-width: 640px) { .nc-lbl { display: none; } .nc-card { padding: 18px 16px 0; } .nc-card .nc-foot { margin: 14px -16px 0; padding: 12px 16px; } }
@@ -1293,6 +1305,12 @@
 .sos-page .sos-thead + .sos-item { border-top: 0; }
 .sos-num { text-align: center; font-size: 15px; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
 .sos-num.muted { color: #cbd5e1; }
+/* Termite area on the SOS: decimal area input with its unit */
+.sos-area { display: flex; align-items: center; gap: 6px; }
+.sos-area .ac-input { width: 100%; min-width: 0; height: 36px; text-align: right; }
+.sos-area > span { font-size: 12px; color: #64748b; white-space: nowrap; }
+.sos-area-val { text-align: center; font-weight: 600; color: #334155; font-variant-numeric: tabular-nums; }
+.sos-num.sos-rate { font-size: 13px; font-weight: 500; color: #64748b; }
 .sos-page .sos-count { justify-self: center; height: 36px; }
 .sos-page .sos-count button { width: 28px; height: 28px; }
 .sos-page .sos-count.ro { justify-self: center; }

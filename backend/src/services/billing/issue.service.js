@@ -18,6 +18,24 @@ const { insertInvoiceTds } = require("../Tds.service");
 const { syncInvoiceStatusesSafely } = require("../InvoiceStatus.service");
 const { logAudit } = require("../Audit.service");
 
+/**
+ * Weekly / daily Termite contracts can have their periods issued out of order. Once the next period is
+ * issued, move next_period_start on past every period that is already issued (no gap left behind).
+ */
+async function skipIssuedPeriods(conn, contractId, userId) {
+  for (let i = 0; i < 400; i += 1) {
+    const [[row]] = await conn.query(
+      `SELECT DATE_FORMAT(MAX(bi.period_end), '%Y-%m-%d') AS period_end
+         FROM billing_contracts bc
+         JOIN billing_invoices bi ON bi.contract_id = bc.id AND bi.period_start = bc.next_period_start AND bi.status = 'ISSUED'
+        WHERE bc.id = ?`,
+      [contractId]
+    );
+    if (!row?.period_end) return;
+    await conn.query("UPDATE billing_contracts SET next_period_start = ?, updated_by = ? WHERE id = ?", [C.addDays(row.period_end, 1), userId, contractId]);
+  }
+}
+
 const EPS = 0.005;
 
 /** What the PDF prints, frozen on issue. */
@@ -66,6 +84,8 @@ function buildContent(inv, number) {
     category: inv.customer.category,
     bill_to: { name: inv.bill_to.name, lines: address, gstin: inv.bill_to.gst_number || null, state: inv.bill_to.state },
     ship_to: inv.ship_to ? [{ name: inv.ship_to.name, addresses: inv.ship_to.address ? [inv.ship_to.address] : [] }] : [],
+    // a group based contract bills the group (its companies are the lines): no Ship To column
+    hide_ship_to: inv.contract.contract_kind === "GROUP",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
     lines: printed,
     tax_mode: inv.tax_mode,
@@ -168,6 +188,8 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
           WHERE id = ? AND next_period_start = ?`,
         [C.addDays(inv.period_end, 1), userId, inv.contract.id, inv.period_start]
       );
+      // Weekly / daily Termite: later weeks may already be issued (issued out of order): move on past them.
+      if (inv.contract.frequency_unit && inv.contract.frequency_unit !== "MONTH") await skipIssuedPeriods(conn, inv.contract.id, userId);
     }
 
     await logAudit(conn, req, {
@@ -256,11 +278,14 @@ async function cancelIssued(pool, id, req, reason) {
       [inv.contract.id, inv.period_start]
     );
     if (!Number(other.n)) {
+      const short = inv.contract.frequency_unit && inv.contract.frequency_unit !== "MONTH";
+      // Monthly: only the latest billed period opens again. Weekly / daily Termite: any earlier week
+      // or day - the Bill Run skips the ones still issued after it.
       await conn.query(
         `UPDATE billing_contracts
             SET next_period_start = ?, status = IF(billing_type = 'ONE_TIME' AND status = 'ENDED', 'ACTIVE', status), updated_by = ?
-          WHERE id = ? AND next_period_start = ?`,
-        [inv.period_start, userId, inv.contract.id, C.addDays(inv.period_end, 1)]
+          WHERE id = ? AND ${short ? "next_period_start > ?" : "next_period_start = ?"}`,
+        [inv.period_start, userId, inv.contract.id, short ? inv.period_start : C.addDays(inv.period_end, 1)]
       );
     }
 

@@ -78,8 +78,10 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- Bill To / Ship To / Invoice Details ---------------------------------------
-  const c1 = L + Math.round(W * 0.335);
-  const c2 = L + Math.round(W * 0.67);
+  // Group based invoices have no Ship To: Bill To and Invoice Details share the width half and half.
+  const noShip = Boolean(content.hide_ship_to);
+  const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
+  const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
@@ -135,7 +137,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   }
   y = Math.max(by, dy, shy) + 8;
   vline(c1, partyHead, y);
-  vline(c2, partyHead, y);
+  if (!noShip) vline(c2, partyHead, y);
   hline(y);
 
   // ---- items -----------------------------------------------------------------------

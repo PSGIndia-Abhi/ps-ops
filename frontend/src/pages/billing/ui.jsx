@@ -77,11 +77,11 @@ const TYPE_ICON = { AMC: FiRepeat, ONE_TIME: FiZap, TERMITE: FiShield, CHEMICAL:
 const TYPE_TONE = { AMC: "blue", ONE_TIME: "teal", TERMITE: "orange", CHEMICAL: "purple" };
 
 /** Billing type chip: tinted icon, the type, and the frequency (e.g. AMC · Monthly). */
-export function TypeBadge({ type, frequency }) {
+export function TypeBadge({ type, frequency, unit }) {
   const Icon = TYPE_ICON[type] || FiRepeat;
-  const [main, ...rest] = typeLabel(type, frequency).split(" · ");
+  const [main, ...rest] = typeLabel(type, frequency, unit).split(" · ");
   return (
-    <span className={`bl-type ${TYPE_TONE[type] || "blue"}`} title={typeLabel(type, frequency)}>
+    <span className={`bl-type ${TYPE_TONE[type] || "blue"}`} title={typeLabel(type, frequency, unit)}>
       <span className="bl-type-ic"><Icon /></span>
       <b>{main}</b>{rest.length > 0 && <span className="bl-type-sub">{rest.join(" · ")}</span>}
     </span>

@@ -8,8 +8,10 @@
 //              31 Mar - 29 Apr, ... (it never drifts to the 28th for good).
 //              A first period that does not start on the cycle day (e.g. "first bill from" a date in
 //              the middle of a cycle) runs to the next cycle day, then the periods are regular.
-//   TERMITE /  monthly unless frequency_months says otherwise
-//   CHEMICAL
+//   TERMITE /  monthly unless frequency_months says otherwise. A Termite contract can also be billed
+//   CHEMICAL   weekly (frequency_unit WEEK: 7-day periods from the first bill date) or daily (DAY:
+//              one-day periods); each such period is its own invoice, and the month's Bill Run
+//              drafts every one of them that is due (see duePeriods).
 //   ONE_TIME   one period: start_date to end_date (or the start date alone)
 //
 // A period is due for a month when it can be billed by the month end:
@@ -30,6 +32,13 @@ function onCycleDay(index, day) {
 
 const frequencyOf = (contract) => (contract.billing_type === "ONE_TIME" ? null : Number(contract.frequency_months) || 1);
 
+/** MONTH, WEEK or DAY. Weekly / daily billing is for Termite contracts only; anything else is MONTH. */
+const unitOf = (contract) =>
+  contract.billing_type === "TERMITE" && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
+
+/** Several invoices per month (one per week / day)? */
+const isShortPeriod = (contract) => unitOf(contract) !== "MONTH";
+
 /** The contract's cycle day (1-31): cycle_start_day, else the day of its start date. */
 function cycleDayOf(contract, start) {
   const day = Number(contract.cycle_start_day);
@@ -48,16 +57,39 @@ function nextCycleStart(start, months, cycleDay) {
 
 /** The contract's next period { start, end }, or null when the contract has nothing left to bill. */
 function nextPeriod(contract) {
-  const start = contract.next_period_start;
+  return periodFrom(contract, contract.next_period_start);
+}
+
+/** The period starting on `start` { start, end }, or null when it is past the contract end. */
+function periodFrom(contract, start) {
   if (!start) return null;
   if (contract.end_date && start > contract.end_date) return null;
   if (contract.billing_type === "ONE_TIME") {
     const end = contract.end_date && contract.end_date >= start ? contract.end_date : start;
     return { start, end };
   }
-  let end = addDays(nextCycleStart(start, frequencyOf(contract), cycleDayOf(contract, start)), -1);
+  const unit = unitOf(contract);
+  let end =
+    unit === "DAY" ? start
+      : unit === "WEEK" ? addDays(start, 6)
+        : addDays(nextCycleStart(start, frequencyOf(contract), cycleDayOf(contract, start)), -1);
   if (contract.end_date && end > contract.end_date) end = contract.end_date;
   return { start, end };
+}
+
+/**
+ * Every period of a weekly / daily contract due by `monthEnd`, from its next period on (at most
+ * `limit`). A monthly contract has one: its next period, if due.
+ */
+function duePeriods(contract, monthEnd, limit = 62) {
+  const out = [];
+  let period = nextPeriod(contract);
+  while (period && isDue(contract, period, monthEnd) && out.length < limit) {
+    out.push(period);
+    if (!isShortPeriod(contract)) break;
+    period = periodFrom(contract, periodAfter(contract, period));
+  }
+  return out;
 }
 
 /** The start of the period after `period` (what next_period_start becomes once it is billed). */
@@ -71,4 +103,4 @@ function isDue(contract, period, monthEnd) {
   return contract.bill_timing === "ADVANCE" ? period.start <= monthEnd : period.end <= monthEnd;
 }
 
-module.exports = { frequencyOf, cycleDayOf, nextPeriod, periodAfter, isDue };
+module.exports = { frequencyOf, unitOf, isShortPeriod, cycleDayOf, nextPeriod, periodFrom, duePeriods, periodAfter, isDue };

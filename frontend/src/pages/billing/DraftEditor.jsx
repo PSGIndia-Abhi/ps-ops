@@ -169,7 +169,7 @@ export default function DraftEditor() {
             </span>
           </h1>
           <p className="ac-sub">
-            {inv.contract.contract_code} · {typeLabel(inv.contract.billing_type, inv.contract.frequency_months)} · Period {dmy(inv.period_start)} to {dmy(inv.period_end)}
+            {inv.contract.contract_code} · {typeLabel(inv.contract.billing_type, inv.contract.frequency_months, inv.contract.frequency_unit)} · Period {dmy(inv.period_start)} to {dmy(inv.period_end)}
             {inv.services ? ` · Services ${inv.services.done} of ${inv.services.planned}` : ""} · Print copies: {inv.print_copies}
           </p>
         </div>
@@ -199,13 +199,16 @@ export default function DraftEditor() {
               <Field label="Bill To" className="bl-span2">
                 <input className="ac-input" readOnly value={[inv.bill_to.name, inv.bill_to.address.replace(/\n/g, ", "), inv.bill_to.state].filter(Boolean).join(", ")} />
               </Field>
-              <Field label="Ship To">
-                <select className="ac-select" value={form.ship_to_site_id} disabled={!editable} onChange={(e) => set({ ship_to_site_id: e.target.value })}>
-                  <option value="">Same as Bill To</option>
-                  {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
-                  {form.ship_to_site_id && !sites.some((s) => s.site_id === form.ship_to_site_id) && <option value={form.ship_to_site_id}>{inv.ship_to?.name || form.ship_to_site_id}</option>}
-                </select>
-              </Field>
+              {/* a group based invoice bills the group (its companies are the lines): no Ship To */}
+              {inv.contract.contract_kind !== "GROUP" && (
+                <Field label="Ship To">
+                  <select className="ac-select" value={form.ship_to_site_id} disabled={!editable} onChange={(e) => set({ ship_to_site_id: e.target.value })}>
+                    <option value="">Same as Bill To</option>
+                    {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
+                    {form.ship_to_site_id && !sites.some((s) => s.site_id === form.ship_to_site_id) && <option value={form.ship_to_site_id}>{inv.ship_to?.name || form.ship_to_site_id}</option>}
+                  </select>
+                </Field>
+              )}
               <Field label={`Purchase order${inv.contract.po_required ? " (required)" : ""}`}>
                 {pos.length ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 4 }}>
@@ -244,9 +247,11 @@ export default function DraftEditor() {
                 <tbody>
                   {form.lines.map((l) => {
                     const short = l.services_planned !== null && l.services_planned !== undefined && l.services_done < l.services_planned;
+                    // Fixed amount contracts bill the agreed number even when fewer were done: no red row
+                    const fixedBilled = short && inv.contract?.shortfall_billing === "FULL";
                     const options = Object.keys(ADJ).filter((k) => (k === "SERVICES" ? l.services_planned : k === "FULL_DESPITE_SHORTFALL" ? short : true));
                     return (
-                      <tr key={l.key} className={short && l.adjustment_type !== "FULL_DESPITE_SHORTFALL" ? "bl-short" : ""}>
+                      <tr key={l.key} className={short && !fixedBilled && l.adjustment_type !== "FULL_DESPITE_SHORTFALL" ? "bl-short" : ""}>
                         <td style={{ minWidth: 200 }}>
                           {editable ? <input className="bl-cell-input" value={l.item_name} onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Item" /> : <b>{l.item_name}</b>}
                           <div className="bl-sub">{[l.site, l.sac_code && `SAC ${l.sac_code}`, l.unit && `per ${l.unit}`].filter(Boolean).join(" · ")}</div>
@@ -257,6 +262,7 @@ export default function DraftEditor() {
                         </td>
                         <td>
                           <ServicesChip done={l.services_done} planned={l.services_planned} />
+                          {fixedBilled && <div className="bl-sub">Fixed amount: billed for {l.services_planned} (agreed)</div>}
                           {l.missed_dates?.length > 0 && <div className="bl-err" style={{ marginTop: 4 }}>Not done: {l.missed_dates.map(dmy).join(", ")}</div>}
                         </td>
                         <td className="bl-num" style={{ width: 120 }}>
@@ -302,7 +308,7 @@ export default function DraftEditor() {
               </table>
             </div>
             <div className="ac-info" style={{ marginTop: 12 }}>
-              ⓘ Services done come from completed jobs against the Service Plan set by the Service Coordinator ({monthLabel(inv.period_start)}). Rates come from the contract price list; changing a rate here applies to this invoice only.
+              ⓘ Services done / plan come from the Service Coordinator’s monthly SOS ({monthLabel(inv.period_start)}). {inv.contract?.shortfall_billing === "FULL" ? "Fixed amount: the agreed number is billed, even when fewer were done." : "Service based: the completed number is billed."} Rates come from the contract price list; changing a rate here applies to this invoice only.
             </div>
           </div>
         </div>

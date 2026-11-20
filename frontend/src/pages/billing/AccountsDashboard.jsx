@@ -213,7 +213,7 @@ export default function AccountsDashboard() {
             <div className="cd-list">
               {data.ready.slice(0, 8).map((r) => (
                 <div key={r.contract_id} className="cd-item static">
-                  <span className="cd-item-main"><b>{r.customer}</b><span className="ac-sub">{r.contract_code} · {periodLabel(r.period_start, r.period_end)} · {r.structure === "FIXED" ? "Fixed amount" : "Service based"}</span></span>
+                  <span className="cd-item-main"><b>{r.customer}</b><span className="ac-sub">{r.contract_code} · {periodLabel(r.period_start, r.period_end)} · {{ FIXED: "Fixed amount", PER_SQFT: "Per sq. ft", PER_SQM: "Per sq. m" }[r.structure] || "Service based"}</span></span>
                   <b className="bl-num">{r.estimated_total === null ? "—" : rupees(r.estimated_total)}</b>
                 </div>
               ))}

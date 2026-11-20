@@ -69,8 +69,13 @@ export function nextBilling(contract, from) {
   if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) return null;
   if (contract.end_date && from > contract.end_date) return null;
   let end;
+  const unit = unitOf(contract);
   if (contract.billing_type === "ONE_TIME") end = contract.end_date && contract.end_date >= from ? contract.end_date : from;
-  else {
+  else if (unit !== "MONTH") {
+    // Termite billed daily (one-day periods) or weekly (7-day periods from the first bill date)
+    end = unit === "DAY" ? from : addDaysYmd(from, 6);
+    if (contract.end_date && end > contract.end_date) end = contract.end_date;
+  } else {
     const stored = Number(contract.cycle_start_day);
     const startDay = Number(String(contract.start_date || from).slice(8, 10)) || 1;
     const cycleDay = stored >= 1 && stored <= 31 ? stored : startDay;
@@ -111,9 +116,27 @@ export function nextMonthStart(month = thisMonth()) {
 export const TYPE_LABEL = { AMC: "AMC", ONE_TIME: "One-time", TERMITE: "Termite", CHEMICAL: "Chemical" };
 const FREQ = { 1: "Monthly", 3: "Quarterly", 4: "4-monthly", 6: "Half-yearly", 12: "Yearly" };
 
-/** "AMC · Monthly", "Termite", ... */
-export function typeLabel(type, frequency) {
+/** Termite billing: every day, week or month (one invoice per day / week). */
+export const TERMITE_UNITS = [["DAY", "Daily"], ["WEEK", "Weekly"], ["MONTH", "Monthly"]];
+
+/** MONTH, or WEEK / DAY for a Termite contract billed weekly / daily (as period.js decides). */
+export const unitOf = (contract) =>
+  contract?.billing_type === "TERMITE" && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
+
+/** "Every 3 months", "Every week", "Every day", "One-time". */
+export function frequencyText(contract) {
+  if (contract.billing_type === "ONE_TIME") return "One-time";
+  const unit = unitOf(contract);
+  if (unit === "WEEK") return "Every week";
+  if (unit === "DAY") return "Every day";
+  const m = Number(contract.frequency_months) || 1;
+  return `Every ${m} month${m > 1 ? "s" : ""}`;
+}
+
+/** "AMC · Monthly", "Termite", "Termite · Weekly", ... */
+export function typeLabel(type, frequency, unit) {
   if (type === "AMC" && frequency) return `AMC · ${FREQ[frequency] || `${frequency} months`}`;
+  if (type === "TERMITE") return `Termite · ${unit === "WEEK" ? "Weekly" : unit === "DAY" ? "Daily" : "Monthly"}`;
   return TYPE_LABEL[type] || type || "—";
 }
 

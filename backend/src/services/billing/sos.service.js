@@ -9,6 +9,7 @@
 
 const { v4: uuid } = require("uuid");
 const C = require("./common");
+const P = require("./period");
 const { logAudit } = require("../Audit.service");
 const { notifyUsers } = require("../notifications.service");
 
@@ -55,6 +56,90 @@ async function agreedLines(db, companyId, month) {
     per_month: Number(r.default_qty) || 0,
     rate: Number(r.rate),
   }));
+}
+
+// ---- Termite: treated area per billing period ------------------------------------------------
+
+/** A Termite area line (rate per sq. m / sq. ft): its area comes from the SOS. */
+const isAreaLine = (contract, cl) =>
+  contract.billing_type === "TERMITE" && (cl.item_kind || "SERVICE") === "SERVICE" && cl.pricing_basis === "PER_UNIT" && /^sq/i.test(cl.unit || "");
+
+/** The month ("YYYY-MM") whose Bill Run - and SOS - bills a period: in advance its start, else its end. */
+const billMonthOf = (contract, period) => (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
+
+const dayNo = (ymd) => Math.round(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10))) / 86400000);
+
+/**
+ * The periods of a Termite contract that the month `key` ("YYYY-MM") bills: each week / day of a
+ * weekly / daily contract, the month of a monthly one. Periods follow on from next_period_start; one
+ * before it is listed only while it has an invoice (it was billed here, not elsewhere).
+ */
+function periodsBilledIn(contract, key, invoicedStarts) {
+  const from = contract.next_period_start;
+  if (!from) return [];
+  const monthFirst = `${key}-01`;
+  const monthEnd = C.monthRange(key).end;
+  const unit = P.unitOf(contract);
+  let start;
+  if (unit === "MONTH") start = from;
+  else {
+    // the first period (on the contract's 7-day / 1-day steps) that can end in this month
+    const step = unit === "WEEK" ? 7 : 1;
+    const lo = C.addDays(monthFirst, -step);
+    const k = Math.ceil((dayNo(lo) - dayNo(from)) / step);
+    start = C.addDays(from, k * step);
+  }
+  const out = [];
+  for (let guard = 0; guard < 80; guard += 1) {
+    const period = P.periodFrom(contract, start);
+    if (!period || period.start > monthEnd) break;
+    const bm = billMonthOf(contract, period);
+    if (bm > key) break;
+    const known = period.start >= from || invoicedStarts.has(period.start);
+    if (bm === key && period.start >= contract.start_date && known) out.push(period);
+    start = P.periodAfter(contract, period);
+  }
+  return out;
+}
+
+/** The Termite area rows of a customer's SOS for a month: one per area line and period billed. */
+async function areaLines(db, companyId, month) {
+  const m = monthStart(month);
+  const key = m.slice(0, 7);
+  const end = C.monthRange(key).end;
+  const [rows] = await db.query(
+    `SELECT l.id AS contract_line_id, l.contract_id, l.item_name, l.item_kind, l.pricing_basis, l.unit, l.rate, l.site_id, s.name AS site,
+            bc.contract_code, bc.billing_type, bc.frequency_months, bc.frequency_unit, bc.cycle_start_day, bc.bill_timing,
+            DATE_FORMAT(bc.start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(bc.end_date, '%Y-%m-%d') AS end_date,
+            DATE_FORMAT(bc.next_period_start, '%Y-%m-%d') AS next_period_start
+       FROM billing_contract_lines l
+       JOIN billing_contracts bc ON bc.id = l.contract_id
+       LEFT JOIN sites s ON s.id = l.site_id
+      WHERE bc.company_id = ? AND bc.status = 'ACTIVE' AND bc.billing_type = 'TERMITE' AND bc.start_date <= ?
+        AND l.is_active = 1 AND l.item_kind = 'SERVICE' AND l.pricing_basis = 'PER_UNIT' AND l.unit LIKE 'sq%'
+        AND l.effective_from <= ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
+      ORDER BY bc.contract_code, l.sort_order`,
+    [companyId, end, end, m]
+  );
+  if (!rows.length) return [];
+  const [inv] = await db.query(
+    `SELECT contract_id, DATE_FORMAT(period_start, '%Y-%m-%d') AS ps FROM billing_invoices
+      WHERE contract_id IN (?) AND status <> 'CANCELLED' AND period_start IS NOT NULL`,
+    [[...new Set(rows.map((r) => r.contract_id))]]
+  );
+  const out = [];
+  for (const r of rows) {
+    const contract = { ...r, frequency_months: r.frequency_months === null ? null : Number(r.frequency_months), cycle_start_day: Number(r.cycle_start_day) };
+    const invoiced = new Set(inv.filter((i) => i.contract_id === r.contract_id).map((i) => i.ps));
+    for (const p of periodsBilledIn(contract, key, invoiced)) {
+      out.push({
+        kind: "AREA", contract_line_id: r.contract_line_id, contract_id: r.contract_id, contract_code: r.contract_code,
+        service: r.item_name, site_id: r.site_id, site: r.site || null, unit: r.unit, rate: Number(r.rate),
+        frequency_unit: P.unitOf(contract), period_start: p.start, period_end: p.end,
+      });
+    }
+  }
+  return out;
 }
 
 async function sosRow(db, companyId, month, { lock = false } = {}) {
@@ -104,6 +189,31 @@ function monthsIn(start, end) {
 }
 
 /** The SOS screen for a customer and month: agreed services per outlet with what was entered. */
+/**
+ * Group based contracts billed under these companies (the contract's main company holds the SOS of
+ * all its ticked companies): company_id -> { group, companies: [names] }.
+ */
+async function groupBillingFor(db, companyIds) {
+  const out = new Map();
+  if (!companyIds.length) return out;
+  const [rows] = await db.query(
+    `SELECT bc.company_id, TRIM(g.name) AS group_name, TRIM(co.name) AS company
+       FROM billing_contracts bc
+       JOIN group_name g ON g.id = bc.group_id
+       JOIN billing_contract_companies cc ON cc.contract_id = bc.id
+       JOIN companies co ON co.id = cc.company_id
+      WHERE bc.contract_kind = 'GROUP' AND bc.status = 'ACTIVE' AND bc.company_id IN (?)
+      ORDER BY co.name`,
+    [companyIds]
+  );
+  for (const r of rows) {
+    const e = out.get(r.company_id) || { group: r.group_name, companies: [] };
+    if (!e.companies.includes(r.company)) e.companies.push(r.company);
+    out.set(r.company_id, e);
+  }
+  return out;
+}
+
 async function sosView(db, companyId, month) {
   const m = monthStart(month);
   const [[company]] = await db.query(
@@ -113,9 +223,23 @@ async function sosView(db, companyId, month) {
   );
   if (!company) throw C.notFound("Customer not found");
   const so = await sosRow(db, companyId, m);
-  const saved = await savedLines(db, so?.id);
+  const allSaved = await savedLines(db, so?.id);
+  const saved = allSaved.filter((l) => l.kind !== "AREA");
+  const savedAreas = allSaved.filter((l) => l.kind === "AREA");
   const agreed = await agreedLines(db, companyId, m);
+  const areasDue = await areaLines(db, companyId, m);
   const submitted = so?.status === "SUBMITTED";
+
+  // Termite: treated area per billing period (submitted: exactly what was sent).
+  const areaOut = (a, s) => ({
+    contract_line_id: a.contract_line_id, contract_id: a.contract_id, contract_code: a.contract_code || null, service: a.service,
+    site_id: a.site_id, site: a.site || null, unit: a.unit, rate: a.rate === null || a.rate === undefined ? null : Number(a.rate),
+    frequency_unit: a.frequency_unit || null, period_start: C.ymd(a.period_start), period_end: C.ymd(a.period_end),
+    area: s && s.area !== null && s.area !== undefined ? Number(s.area) : null, remarks: s?.remarks || "",
+  });
+  const areas = submitted
+    ? savedAreas.map((s) => areaOut({ ...s, rate: areasDue.find((a) => a.contract_line_id === s.contract_line_id)?.rate ?? null }, s))
+    : areasDue.map((a) => areaOut(a, savedAreas.find((s) => s.contract_line_id === a.contract_line_id && C.ymd(s.period_start) === a.period_start)));
 
   // Submitted: exactly what was sent. Otherwise: the agreement with anything typed so far.
   let lines;
@@ -143,13 +267,19 @@ async function sosView(db, companyId, month) {
     }
   }
 
-  const [sites] = await db.query("SELECT id, name FROM sites WHERE company_id = ? ORDER BY name", [companyId]);
+  const [sites] = await db.query(`SELECT id, name FROM sites
+      WHERE company_id = ?
+         OR company_id IN (SELECT cc.company_id FROM billing_contract_companies cc JOIN billing_contracts bc ON bc.id = cc.contract_id
+                            WHERE bc.company_id = ? AND bc.status = 'ACTIVE') ORDER BY name`, [companyId, companyId]);
   const invoiced = so ? await invoicedFor(db, companyId, m) : [];
+  const billingGroup = (await groupBillingFor(db, [companyId])).get(companyId) || null;
   const agreedLinesCount = lines.filter((l) => !l.is_extra).length;
   return {
     company_id: company.id,
     customer: company.name,
     group: company.group_name || null,
+    // group based contract: shown as the group, its companies are the lines
+    billing_group: billingGroup,
     bill_by_day: company.bill_by_day === null ? null : Number(company.bill_by_day),
     month: m,
     status: so ? so.status : "NOT_STARTED",
@@ -160,10 +290,12 @@ async function sosView(db, companyId, month) {
     reopened_by: so?.reopened_by_name || null,
     reopen_reason: so?.reopen_reason || null,
     invoiced,
-    has_agreement: agreed.length > 0 || submitted,
+    has_agreement: agreed.length > 0 || areas.length > 0 || submitted,
     structures: [...new Set(agreed.map((a) => a.structure))],
     outlets: sites.map((s) => ({ site_id: s.id, name: s.name })),
     lines,
+    // Termite: one row per billing period of the month - the treated area completed
+    area_lines: areas,
     totals: {
       assigned: lines.filter((l) => !l.is_extra).reduce((t, l) => t + l.assigned, 0),
       completed: lines.filter((l) => !l.is_extra).reduce((t, l) => t + (l.completed || 0), 0),
@@ -197,8 +329,12 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
   if (so?.status === "SUBMITTED") throw C.bad("This SOS is submitted. Reopen it to change it.");
 
   const agreed = await agreedLines(conn, companyId, m);
-  if (!agreed.length) throw C.bad(`${company.name} has no services billed per service for ${C.monthName(m)} in its billing profile`);
-  const [siteRows] = await conn.query("SELECT id FROM sites WHERE company_id = ?", [companyId]);
+  const areasDue = await areaLines(conn, companyId, m);
+  if (!agreed.length && !areasDue.length) throw C.bad(`${company.name} has no services billed per service for ${C.monthName(m)} in its billing profile`);
+  const [siteRows] = await conn.query(`SELECT id, name FROM sites
+      WHERE company_id = ?
+         OR company_id IN (SELECT cc.company_id FROM billing_contract_companies cc JOIN billing_contracts bc ON bc.id = cc.contract_id
+                            WHERE bc.company_id = ? AND bc.status = 'ACTIVE')`, [companyId, companyId]);
   const sites = new Set(siteRows.map((s) => s.id));
 
   const given = new Map((Array.isArray(body.lines) ? body.lines : []).map((l) => [String(l?.contract_line_id || ""), l]));
@@ -222,6 +358,19 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
       is_extra: 1, rate: priced.rate, remarks: C.str(x?.remarks, "remarks", { max: 255 }), sort_order: 1000 + i,
     };
   });
+  // Termite: the treated area completed in each billing period (sq. m / sq. ft, decimals allowed).
+  const givenAreas = new Map((Array.isArray(body.areas) ? body.areas : []).map((a) => [`${a?.contract_line_id || ""}|${a?.period_start || ""}`, a]));
+  const areaRows = areasDue.map((a, i) => {
+    const g = givenAreas.get(`${a.contract_line_id}|${a.period_start}`) || {};
+    const when = a.period_start === a.period_end ? C.dmy(a.period_start) : `${C.dmy(a.period_start)} to ${C.dmy(a.period_end)}`;
+    const area = C.num(g.area, `${a.service} (${when}): area`, { min: 0, max: 9999999.99 });
+    if (submit && area === null) throw C.bad(`Enter the area completed for ${a.service} (${when})`);
+    return {
+      kind: "AREA", contract_line_id: a.contract_line_id, contract_id: a.contract_id, site_id: a.site_id, service: a.service,
+      period_start: a.period_start, period_end: a.period_end, area, unit: a.unit,
+      assigned: 0, completed: null, is_extra: 0, rate: null, remarks: C.str(g.remarks, "remarks", { max: 255 }), sort_order: 500 + i,
+    };
+  });
   const notes = C.str(body.notes, "notes", { max: 1000 });
 
   if (!so) {
@@ -232,11 +381,15 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
     await conn.query("UPDATE billing_sos SET notes = ?, updated_by = ? WHERE id = ?", [notes, req.user.id, so.id]);
   }
   await conn.query("DELETE FROM billing_sos_lines WHERE sos_id = ?", [so.id]);
-  for (const r of [...rows, ...extras]) {
+  for (const r of [...rows, ...extras, ...areaRows]) {
     await conn.query(
-      `INSERT INTO billing_sos_lines (id, sos_id, contract_line_id, contract_id, site_id, service, assigned, completed, is_extra, rate, remarks, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [uuid(), so.id, r.contract_line_id, r.contract_id, r.site_id, r.service, r.assigned, r.completed, r.is_extra, r.rate, r.remarks, r.sort_order]
+      `INSERT INTO billing_sos_lines
+         (id, sos_id, kind, contract_line_id, contract_id, site_id, service, period_start, period_end, assigned, completed, area, unit, is_extra, rate, remarks, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uuid(), so.id, r.kind || "SERVICE", r.contract_line_id, r.contract_id, r.site_id, r.service, r.period_start || null, r.period_end || null,
+        r.assigned, r.completed, r.area ?? null, r.unit || null, r.is_extra, r.rate, r.remarks, r.sort_order,
+      ]
     );
   }
   if (submit) {
@@ -244,12 +397,13 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
     const done = rows.reduce((t, r) => t + r.completed, 0);
     const assigned = rows.reduce((t, r) => t + r.assigned, 0);
     const extra = extras.reduce((t, r) => t + r.completed, 0);
+    const areaText = areaRows.length ? `${areaRows.length} termite period${areaRows.length === 1 ? "" : "s"} with the area completed` : "";
     await logAudit(conn, req, {
       module: "BILLING", action: "SOS_SUBMITTED", entity_type: "BILLING_SOS", entity_id: so.id,
       entity_label: `${company.name} ${C.monthName(m)}`, customer_id: companyId,
-      summary: `SOS ${C.monthName(m)} submitted: ${done} of ${assigned} completed${extra ? `, ${extra} extra` : ""}`,
+      summary: `SOS ${C.monthName(m)} submitted: ${[rows.length ? `${done} of ${assigned} completed${extra ? `, ${extra} extra` : ""}` : "", areaText].filter(Boolean).join("; ")}`,
     });
-    return { id: so.id, submitted: true, summary: { assigned, completed: done, extra }, customer: company.name, company_id: company.id, month: m };
+    return { id: so.id, submitted: true, summary: { assigned, completed: done, extra, areas: areaRows.length }, customer: company.name, company_id: company.id, month: m };
   }
   return { id: so.id, submitted: false };
 }
@@ -266,7 +420,10 @@ async function notifyAccounts(db, result) {
     await notifyUsers(users.map((u) => u.id), {
       type: "SOS_SUBMITTED",
       title: `SOS received: ${result.customer}`,
-      message: `${C.monthName(result.month)}: ${s.completed} of ${s.assigned} services completed${s.extra ? `, ${s.extra} extra` : ""}. Ready for the Bill Run.`,
+      message: `${C.monthName(result.month)}: ${[
+        s.assigned || s.completed || s.extra ? `${s.completed} of ${s.assigned} services completed${s.extra ? `, ${s.extra} extra` : ""}` : "",
+        s.areas ? `termite area entered for ${s.areas} period${s.areas === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join("; ")}. Ready for the Bill Run.`,
       entityType: "billing_sos",
       entityId: result.company_id ? `${result.company_id}:${String(result.month).slice(0, 7)}` : result.id,
     });
@@ -371,7 +528,7 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
   const end = C.monthRange(m.slice(0, 7)).end;
   const [rows] = await db.query(
     `SELECT c.id AS company_id, c.name, g.name AS group_name, bp.bill_by_day,
-            COUNT(DISTINCT l.id) AS services, COUNT(DISTINCT l.site_id) AS outlets, COALESCE(SUM(l.default_qty), 0) AS assigned,
+            COUNT(DISTINCT l.id) AS services, COUNT(DISTINCT l.site_id) AS outlets, COALESCE(SUM(IF(l.pricing_basis = 'PER_SERVICE', l.default_qty, 0)), 0) AS assigned,
             so.id AS sos_id, so.status, so.submitted_at, su.name AS submitted_by,
             (SELECT GROUP_CONCAT(s2.name ORDER BY s2.name SEPARATOR ', ') FROM sites s2 WHERE s2.company_id = c.id) AS outlet_names,
             (SELECT COALESCE(SUM(sl.completed), 0) FROM billing_sos_lines sl WHERE sl.sos_id = so.id AND sl.is_extra = 0) AS completed,
@@ -384,7 +541,8 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
        LEFT JOIN billing_sos so ON so.company_id = c.id AND so.month = ?
        LEFT JOIN users su ON su.id = so.submitted_by
       WHERE bc.status = 'ACTIVE' AND bc.start_date <= ? AND (bc.end_date IS NULL OR bc.end_date >= ?)
-        AND l.is_active = 1 AND l.item_kind = 'SERVICE' AND l.pricing_basis = 'PER_SERVICE'
+        AND l.is_active = 1 AND l.item_kind = 'SERVICE'
+        AND (l.pricing_basis = 'PER_SERVICE' OR (bc.billing_type = 'TERMITE' AND l.pricing_basis = 'PER_UNIT' AND l.unit LIKE 'sq%'))
         AND l.effective_from <= ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
         AND (? IS NULL OR c.group_id = ?)
         ${companyIds.length ? "AND c.id IN (?)" : ""}
@@ -393,10 +551,12 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
       ORDER BY c.name`,
     [m, end, m, end, m, groupId, groupId, ...(companyIds.length ? [companyIds] : []), q, q, q]
   );
+  const groups = await groupBillingFor(db, rows.map((r) => r.company_id));
   const list = rows.map((r) => ({
     company_id: r.company_id,
     customer: r.name,
     group: r.group_name || null,
+    billing_group: groups.get(r.company_id) || null,
     bill_by_day: r.bill_by_day === null ? null : Number(r.bill_by_day),
     services: Number(r.services),
     outlets: Number(r.outlets),
@@ -425,6 +585,6 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
 }
 
 module.exports = {
-  monthStart, monthStarts, monthsIn, agreedLines, sosView, saveSos, notifyAccounts, reopenSos, notifySentBack, notifyReopened,
+  monthStart, monthStarts, monthsIn, agreedLines, areaLines, isAreaLine, billMonthOf, sosView, saveSos, notifyAccounts, reopenSos, notifySentBack, notifyReopened,
   submittedFor, monthOverview, invoicedFor,
 };

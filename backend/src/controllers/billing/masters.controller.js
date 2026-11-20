@@ -181,6 +181,10 @@ const serviceOptions = C.handle("Failed to load the service options", async (req
 
 // ---- contracts --------------------------------------------------------------------------------
 
+/** SELECT column: a Termite contract's area unit (sq.ft / sq.m), from its area price line. */
+const AREA_UNIT_SQL = `(SELECT l.unit FROM billing_contract_lines l WHERE l.contract_id = bc.id AND l.pricing_basis = 'PER_UNIT' AND l.unit LIKE 'sq%'
+    ORDER BY l.is_active DESC, l.sort_order LIMIT 1) AS area_unit`;
+
 function contractOut(c) {
   return {
     id: c.id,
@@ -192,6 +196,8 @@ function contractOut(c) {
     customer: c.customer || undefined,
     billing_type: c.billing_type,
     frequency_months: C.n2(c.frequency_months),
+    // MONTH, or (Termite only) WEEK / DAY: one invoice per week / day
+    frequency_unit: c.billing_type === "TERMITE" && (c.frequency_unit === "WEEK" || c.frequency_unit === "DAY") ? c.frequency_unit : "MONTH",
     cycle_start_day: Number(c.cycle_start_day),
     bill_timing: c.bill_timing,
     start_date: C.ymd(c.start_date),
@@ -203,7 +209,12 @@ function contractOut(c) {
     gst_applicable: c.gst_applicable === undefined ? true : Boolean(c.gst_applicable),
     gst_rate: c.gst_rate === undefined || c.gst_rate === null ? 18 : Number(c.gst_rate),
     shortfall_billing: c.shortfall_billing,
+    // Termite: the unit its area is priced in (sq.ft / sq.m), from its price line
+    area_unit: c.billing_type === "TERMITE" ? (/ft/i.test(c.area_unit || "") ? "sq.ft" : "sq.m") : null,
     description_template: c.description_template,
+    // services and chemicals on two invoices each period (chemical invoice: its own description)
+    separate_bills: Boolean(c.separate_bills),
+    chemical_description_template: c.chemical_description_template || null,
     status: c.status,
     status_reason: c.status_reason,
     notes: c.notes,
@@ -300,6 +311,10 @@ function readContractHeader(b, sites, billingType, startDate) {
   } else if (billingType !== "ONE_TIME") {
     frequency = C.num(b.frequency_months, "Billing frequency", { integer: true, min: 1, max: 12 }) ?? 1;
   }
+  // Termite only: billed every day (DAY), every week (WEEK) or every month (MONTH). A day / week is
+  // one period, so frequency_months is 1. Every other type is MONTH.
+  const unit = billingType === "TERMITE" ? C.oneOf(b.frequency_unit, "Billing frequency", ["MONTH", "WEEK", "DAY"], { fallback: "MONTH" }) : "MONTH";
+  if (unit !== "MONTH") frequency = 1;
   const siteId = C.str(b.site_id, "site_id", { max: 20 });
   if (siteId && !sites.has(siteId)) throw C.bad("site_id must be an outlet of this customer");
   const grouping = C.oneOf(b.invoice_grouping, "invoice_grouping", ["PER_CUSTOMER", "PER_SITE"], { fallback: "PER_CUSTOMER" });
@@ -307,6 +322,7 @@ function readContractHeader(b, sites, billingType, startDate) {
   if (endDate && startDate && endDate < startDate) throw C.bad("end_date cannot be before start_date");
   return {
     frequency_months: frequency,
+    frequency_unit: unit,
     cycle_start_day: C.num(b.cycle_start_day, "cycle_start_day", { min: 1, max: 31, integer: true }) ?? (startDate ? Number(startDate.slice(8, 10)) : 1),
     bill_timing: C.oneOf(b.bill_timing, "bill_timing", ["ARREARS", "ADVANCE"], { fallback: "ARREARS" }),
     end_date: endDate,
@@ -321,7 +337,35 @@ function readContractHeader(b, sites, billingType, startDate) {
     shortfall_billing: C.oneOf(b.shortfall_billing, "shortfall_billing", ["PRO_RATA", "FULL"], { fallback: "PRO_RATA" }),
     description_template: C.str(b.description_template, "description_template", { max: 500 }) || defaultDescription(billingType, frequency),
     notes: C.str(b.notes, "notes", { max: 1000 }),
+    ...readSeparateBills(b),
   };
+}
+
+/** Separate bills: services and chemicals invoiced separately, the chemical invoice with its own description. */
+function readSeparateBills(b) {
+  const separate = C.bool(b.separate_bills);
+  const chemical = C.str(b.chemical_description_template, "chemical_description_template", { max: 500 });
+  if (separate && !chemical) throw C.bad("Type or choose the description for the chemical bill");
+  return { separate_bills: separate ? 1 : 0, chemical_description_template: separate ? chemical : null };
+}
+
+/**
+ * One contract per customer, whatever the type: refuses when any of `companyIds` already has a
+ * contract that is not ended (its own, or a group contract it is part of).
+ */
+async function assertNoOtherContract(conn, companyIds) {
+  const [[other]] = await conn.query(
+    `SELECT bc.contract_code, TRIM(co.name) AS customer
+       FROM billing_contracts bc
+       JOIN companies co ON co.id IN (?)
+      WHERE bc.status <> 'ENDED'
+        AND (bc.company_id = co.id OR EXISTS (SELECT 1 FROM billing_contract_companies cc WHERE cc.contract_id = bc.id AND cc.company_id = co.id))
+      ORDER BY bc.created_at LIMIT 1`,
+    [companyIds]
+  );
+  if (other) {
+    throw C.conflict(`${other.customer} already has contract ${other.contract_code}. A customer can have only one contract - open it to make changes, or end it first.`);
+  }
 }
 
 const PO_TYPES = ["CHEMICAL", "TERMITE"];
@@ -360,15 +404,6 @@ async function linkContractPos(conn, contractId, companyId, rawIds, billingType)
   if (ids.length) await conn.query("UPDATE customer_pos SET contract_id = ? WHERE id IN (?)", [contractId, ids]);
 }
 
-/** A PO shared by several contracts: the customer's, active and not linked to one contract. */
-async function assertSharedPo(conn, poId, companyId) {
-  const [[po]] = await conn.query("SELECT id, po_number, company_id, contract_id, status FROM customer_pos WHERE id = ? FOR UPDATE", [poId]);
-  if (!po) throw C.bad("The chosen purchase order was not found");
-  if (po.company_id !== companyId) throw C.bad(`PO ${po.po_number} belongs to another customer`);
-  if (po.status !== "ACTIVE") throw C.bad(`PO ${po.po_number} is closed`);
-  if (po.contract_id) throw C.bad(`PO ${po.po_number} is already linked to one contract, so it cannot be shared`);
-}
-
 // GET /contracts?company_id&type&status&due_month
 const listContracts = C.handle("Failed to load contracts", async (req, res) => {
   const companyId = C.str(req.query.company_id, "company_id", { max: 20 });
@@ -377,7 +412,7 @@ const listContracts = C.handle("Failed to load contracts", async (req, res) => {
   const dueMonth = C.month(req.query.due_month, "due_month", { required: false });
   const q = C.str(req.query.q, "q", { max: 100 });
   const [rows] = await pool.query(
-    `SELECT bc.*, c.name AS customer,
+    `SELECT bc.*, c.name AS customer, ${AREA_UNIT_SQL},
             (SELECT bi.invoice_number FROM billing_invoices bi
               WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number
        FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id
@@ -392,7 +427,7 @@ const listContracts = C.handle("Failed to load contracts", async (req, res) => {
 
 async function contractDetail(db, id) {
   const [[c]] = await db.query(
-    `SELECT bc.*, c.name AS customer, c.type AS customer_type, DATE_FORMAT(bc.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key,
+    `SELECT bc.*, c.name AS customer, c.type AS customer_type, DATE_FORMAT(bc.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key, ${AREA_UNIT_SQL},
             (SELECT bi.invoice_number FROM billing_invoices bi
               WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number
        FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id WHERE bc.id = ?`,
@@ -448,6 +483,8 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     if (kind === "GROUP" && !groupCompanies.includes(companyId)) throw C.bad("company_id must be one of the ticked companies");
     const company = await companyOrThrow(conn, companyId);
     if (!calc.categoryOf(company.type)) throw C.bad("Customer type is not set - set it on the customer before adding a contract");
+    // One contract per customer (a group contract counts for every company it covers).
+    await assertNoOtherContract(conn, kind === "GROUP" ? groupCompanies : [companyId]);
     const sites = await siteIdsOf(conn, companyId);
     const siteCompany = new Map();
     if (kind === "GROUP") {
@@ -460,11 +497,13 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     // The description on invoice is required and picked from the master (Masters > Invoice Descriptions).
     await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }), null, req.user.id);
     const header = readContractHeader(b, sites, billingType, startDate);
+    if (header.separate_bills) await assertDescription(conn, header.chemical_description_template, null, req.user.id);
     // First bill from: a customer already billed elsewhere (e.g. Vyapar) up to a date starts billing
     // here from the day after, instead of from the contract start date.
     const firstBill = readFirstBill(b.first_bill_from, startDate, header.end_date, "first_bill_from") || startDate;
-    // The billing frequency is picked from the master (Masters > Billing Frequencies).
-    await assertFrequency(conn, header.frequency_months);
+    // The billing frequency is picked from the master (Masters > Billing Frequencies); daily / weekly
+    // Termite billing is not in that list of months.
+    if (header.frequency_unit === "MONTH") await assertFrequency(conn, header.frequency_months);
     const lines = (Array.isArray(b.lines) ? b.lines : []).map((l, i) => readContractLine(l, i, sites, startDate));
     for (const [i, l] of lines.entries()) {
       if (kind !== "GROUP") l.company_id = null;
@@ -480,13 +519,14 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     const id = uuid();
     await conn.query(
       `INSERT INTO billing_contracts
-         (id, contract_code, contract_kind, company_id, group_id, billing_type, frequency_months, cycle_start_day, bill_timing, start_date, end_date,
-          next_period_start, invoice_grouping, site_id, po_required, gst_applicable, gst_rate, shortfall_billing, description_template, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, contract_code, contract_kind, company_id, group_id, billing_type, frequency_months, frequency_unit, cycle_start_day, bill_timing, start_date, end_date,
+          next_period_start, invoice_grouping, site_id, po_required, gst_applicable, gst_rate, shortfall_billing, description_template,
+          separate_bills, chemical_description_template, notes, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, code, kind, companyId, groupId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
+        id, code, kind, companyId, groupId, billingType, header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
         firstBill, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
-        header.notes, req.user.id, req.user.id,
+        header.separate_bills, header.chemical_description_template, header.notes, req.user.id, req.user.id,
       ]
     );
     for (const [i, line] of lines.entries()) await insertContractLine(conn, id, line, i, req.user.id);
@@ -523,8 +563,13 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     // A listed, active description - or the one the contract already has, even if switched off since.
     await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template, req.user.id);
     const header = readContractHeader(merged, sites, current.billing_type, current.start_date);
+    if (header.separate_bills) await assertDescription(conn, header.chemical_description_template, current.chemical_description_template, req.user.id);
     // A listed, active frequency - or the one the contract already has, even if switched off since.
-    await assertFrequency(conn, header.frequency_months, current.frequency_months);
+    if (header.frequency_unit === "MONTH") await assertFrequency(conn, header.frequency_months, current.frequency_months);
+    // Weekly / daily periods follow on from the invoices already made: the unit is fixed once any exist.
+    if (header.frequency_unit !== current.frequency_unit && !current.next_period_editable) {
+      throw C.bad("Daily / weekly / monthly cannot be changed once an invoice is drafted or issued on this contract");
+    }
     // The next billing date can be moved only while nothing is drafted or issued on the contract
     // (once invoices exist, the periods follow on from them).
     let nextStart = current.next_period_start;
@@ -534,13 +579,15 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     }
     await conn.query(
       `UPDATE billing_contracts
-          SET frequency_months = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
-              po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?, notes = ?,
+          SET frequency_months = ?, frequency_unit = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
+              po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?,
+              separate_bills = ?, chemical_description_template = ?, notes = ?,
               next_period_start = ?, updated_by = ?
         WHERE id = ?`,
       [
-        header.frequency_months, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
-        header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template, header.notes,
+        header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
+        header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
+        header.separate_bills, header.chemical_description_template, header.notes,
         nextStart, req.user.id, req.params.id,
       ]
     );

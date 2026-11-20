@@ -91,7 +91,7 @@ export default function InvoiceView() {
             <div className="iv-hero-top">
               <h1>{inv.invoice_number}</h1>
               {cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={col?.status || "PENDING"} />}
-              <TypeBadge type={inv.contract.billing_type} frequency={inv.contract.frequency_months} />
+              <TypeBadge type={inv.contract.billing_type} frequency={inv.contract.frequency_months} unit={inv.contract.frequency_unit} />
             </div>
             <div className="iv-hero-sub">
               <b>{inv.customer.name}</b> · {dmy(inv.invoice_date)} · {periodLabel(inv.period_start, inv.period_end)} · {inv.contract.contract_code}
@@ -137,10 +137,13 @@ export default function InvoiceView() {
                 {inv.bill_to.gst_number && <div className="iv-meta">GSTIN {inv.bill_to.gst_number}</div>}
                 {inv.bill_to.state && <div className="iv-meta">State {inv.bill_to.state}</div>}
               </div>
-              <div>
-                <div className="iv-label">Ship to</div>
-                {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
-              </div>
+              {/* a group based invoice bills the group: no Ship to */}
+              {inv.contract?.contract_kind !== "GROUP" && (
+                <div>
+                  <div className="iv-label">Ship to</div>
+                  {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
+                </div>
+              )}
               <div className="iv-facts">
                 <div><span>Invoice date</span><b>{dmy(inv.invoice_date)}</b></div>
                 <div><span>Period</span><b>{dmy(inv.period_start)} – {dmy(inv.period_end)}</b></div>
