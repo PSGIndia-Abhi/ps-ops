@@ -65,6 +65,8 @@ function buildContent(inv, number) {
     category: inv.customer.category,
     bill_to: { name: inv.bill_to.name, lines: address, gstin: inv.bill_to.gst_number || null, state: inv.bill_to.state },
     ship_to: inv.ship_to ? [{ name: inv.ship_to.name, addresses: inv.ship_to.address ? [inv.ship_to.address] : [] }] : [],
+    // a group based contract bills the group (its companies are the lines): no Ship To column
+    hide_ship_to: inv.contract.contract_kind === "GROUP",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
     lines: printed,
     tax_mode: inv.tax_mode,

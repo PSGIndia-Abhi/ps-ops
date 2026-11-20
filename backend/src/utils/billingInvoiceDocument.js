@@ -78,10 +78,12 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- Bill To / Ship To / Invoice Details ---------------------------------------
-  const c1 = L + Math.round(W * 0.335);
-  const c2 = L + Math.round(W * 0.67);
+  // Group based invoices have no Ship To: Bill To and Invoice Details share the width half and half.
+  const noShip = Boolean(content.hide_ship_to);
+  const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
+  const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  font("B", 8.4).text("Ship To", c1 + PAD, y + 5, { lineBreak: false });
+  if (!noShip) font("B", 8.4).text("Ship To", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
@@ -103,8 +105,8 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   let shy = y + 6;
   const shipW = c2 - c1 - PAD * 2;
-  const shipTo = content.ship_to || [];
-  if (!shipTo.length) font("R", 8).text("Same as Bill To", c1 + PAD, shy, { width: shipW });
+  const shipTo = noShip ? [] : content.ship_to || [];
+  if (!shipTo.length && !noShip) font("R", 8).text("Same as Bill To", c1 + PAD, shy, { width: shipW });
   for (const entry of shipTo) {
     if (entry.name) {
       font("B", 8).text(entry.name, c1 + PAD, shy, { width: shipW });
@@ -133,7 +135,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   }
   y = Math.max(by, dy, shy) + 8;
   vline(c1, partyHead, y);
-  vline(c2, partyHead, y);
+  if (!noShip) vline(c2, partyHead, y);
   hline(y);
 
   // ---- items -----------------------------------------------------------------------

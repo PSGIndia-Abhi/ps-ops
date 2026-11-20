@@ -45,10 +45,24 @@ async function linesInForce(db, contractId, onDate) {
   return rows;
 }
 
-/** The customer, its billing profile and its category (COMMERCIAL / RESIDENTIAL / null). */
-async function customerContext(db, companyId) {
+/**
+ * The customer, its billing profile and its category (COMMERCIAL / RESIDENTIAL / null).
+ * A group based contract is billed to the group's Bill To (billing name, address, GSTIN, state,
+ * payment terms); the main company still gives the category and the print copies.
+ */
+async function customerContext(db, companyId, contract = null) {
   const [[company]] = await db.query("SELECT id, name, type, gst_number, tds_applicable, tds_rate FROM companies WHERE id = ?", [companyId]);
   const [[profile]] = await db.query("SELECT * FROM billing_profiles WHERE company_id = ?", [companyId]);
+  if (contract && contract.contract_kind === "GROUP" && contract.group_id) {
+    const [[gp]] = await db.query("SELECT * FROM billing_group_profiles WHERE group_id = ? AND is_active = 1", [contract.group_id]);
+    const billTo = gp
+      ? {
+        ...(profile || {}), billing_name: gp.billing_name, billing_address: gp.billing_address, state_code: gp.state_code, state_name: gp.state_name,
+        payment_terms_days: gp.payment_terms_days, is_active: 1, print_copies: profile?.print_copies || 1,
+      }
+      : null;
+    return { company: company ? { ...company, gst_number: gp ? gp.gst_number : company.gst_number } : null, profile: billTo, category: calc.categoryOf(company?.type) };
+  }
   return { company: company || null, profile: profile && profile.is_active ? profile : null, category: calc.categoryOf(company?.type) };
 }
 
@@ -209,7 +223,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     const contract = contractRow(raw);
     const period = P.nextPeriod(contract);
     if (!P.isDue(contract, period, range.end)) continue;
-    const ctx = await customerContext(db, contract.company_id);
+    const ctx = await customerContext(db, contract.company_id, contract);
     if (category && ctx.category !== category) continue;
 
     const [[existing]] = await db.query(
@@ -309,10 +323,10 @@ async function draftContract(conn, contractId, month, runId, userId) {
   const period = P.nextPeriod(contract);
   if (!P.isDue(contract, period, C.monthRange(month).end)) throw C.bad("Nothing is due on this contract for the month");
 
-  const ctx = await customerContext(conn, contract.company_id);
+  const ctx = await customerContext(conn, contract.company_id, contract);
   if (!ctx.company) throw C.bad("Customer not found");
   if (!ctx.category) throw C.bad("Customer type is not set");
-  if (!ctx.profile) throw C.bad("Billing profile is missing");
+  if (!ctx.profile) throw C.bad(contract.contract_kind === "GROUP" ? "The group's billing details (Bill To) are missing" : "Billing profile is missing");
 
   const [[existing]] = await conn.query(
     "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED'",
@@ -440,14 +454,18 @@ async function loadInvoice(db, id, { lock = false } = {}) {
   const [[inv]] = await db.query(
     `SELECT bi.*, DATE_FORMAT(bi.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key,
             bc.contract_code, bc.frequency_months, bc.po_required, bc.bill_timing, bc.shortfall_billing,
-            c.name AS customer_name, c.gst_number, c.type AS customer_type,
-            bp.billing_name, bp.billing_address, bp.state_code, bp.state_name,
+            c.name AS customer_name, IF(gp.group_id IS NULL, c.gst_number, gp.gst_number) AS gst_number, c.type AS customer_type,
+            COALESCE(gp.billing_name, bp.billing_name) AS billing_name, COALESCE(gp.billing_address, bp.billing_address) AS billing_address,
+            COALESCE(gp.state_code, bp.state_code) AS state_code, COALESCE(gp.state_name, bp.state_name) AS state_name,
+            bc.contract_kind, bc.group_id AS contract_group_id,
             ss.name AS ship_to_site, ss.address AS ship_to_address, ss.city AS ship_to_city,
             iu.name AS issued_by_name, inv.status AS receivable_status
        FROM billing_invoices bi
        JOIN billing_contracts bc ON bc.id = bi.contract_id
        JOIN companies c ON c.id = bi.company_id
        LEFT JOIN billing_profiles bp ON bp.company_id = bi.company_id
+       -- a group based contract is billed to the group's Bill To
+       LEFT JOIN billing_group_profiles gp ON gp.group_id = bc.group_id AND bc.contract_kind = 'GROUP'
        LEFT JOIN sites ss ON ss.id = bi.ship_to_site_id
        LEFT JOIN users iu ON iu.id = bi.issued_by
        LEFT JOIN invoices inv ON inv.id = bi.receivable_invoice_id
@@ -495,7 +513,10 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     updated_at: inv.updated_at_key,
     // Changes on every save (line ids are new each time): send it back on PUT to detect edits made meanwhile.
     version: crypto.createHash("sha1").update(`${inv.updated_at_key}|${inv.status}|${lines.map((l) => l.id).join(",")}`).digest("hex").slice(0, 16),
-    contract: { id: inv.contract_id, contract_code: inv.contract_code, billing_type: inv.billing_type, frequency_months: C.n2(inv.frequency_months), po_required: Boolean(inv.po_required), shortfall_billing: inv.shortfall_billing },
+    contract: {
+      id: inv.contract_id, contract_code: inv.contract_code, billing_type: inv.billing_type, frequency_months: C.n2(inv.frequency_months), po_required: Boolean(inv.po_required),
+      shortfall_billing: inv.shortfall_billing, contract_kind: inv.contract_kind || "SERVICE", group_id: inv.contract_group_id || null,
+    },
     customer: { company_id: inv.company_id, name: inv.customer_name, category: inv.customer_category, gst_number: inv.gst_number, state_code: inv.state_code, state_name: inv.state_name },
     bill_to: { name: inv.billing_name || inv.customer_name, address: inv.billing_address || "", gst_number: inv.gst_number, state: inv.state_code ? `${inv.state_code}-${inv.state_name}` : null },
     site_id: inv.site_id,
@@ -621,7 +642,10 @@ async function saveDraft(pool, id, body, userId) {
 
     const [contractLineIds] = await conn.query("SELECT id FROM billing_contract_lines WHERE contract_id = ?", [contract.id]);
     const known = new Set(contractLineIds.map((r) => r.id));
-    const [siteRows] = await conn.query("SELECT id FROM sites WHERE company_id = ?", [inv.customer.company_id]);
+    const [siteRows] = await conn.query(
+      "SELECT id FROM sites WHERE company_id = ? OR company_id IN (SELECT company_id FROM billing_contract_companies WHERE contract_id = ?)",
+      [inv.customer.company_id, inv.contract.id]
+    );
     const sites = new Set(siteRows.map((r) => r.id));
     lines.forEach((l, i) => {
       if (l.contract_line_id && !known.has(l.contract_line_id)) throw C.bad(`Line ${i + 1}: the price line is not on this contract`);
@@ -632,7 +656,14 @@ async function saveDraft(pool, id, body, userId) {
     const shipTo = body.ship_to_site_id === undefined ? inv.ship_to_site_id : C.str(body.ship_to_site_id, "ship_to_site_id", { max: 20 });
     if (shipTo && !sites.has(shipTo)) throw C.bad("Ship To must be an outlet of this customer");
     const description = body.description === undefined ? inv.description : C.str(body.description, "description", { required: true, max: 1000 });
-    const [[profile]] = await conn.query("SELECT payment_terms_days FROM billing_profiles WHERE company_id = ?", [inv.customer.company_id]);
+    const [[profile]] = await conn.query(
+      `SELECT COALESCE(gp.payment_terms_days, bp.payment_terms_days) AS payment_terms_days
+       FROM billing_contracts bc
+       LEFT JOIN billing_group_profiles gp ON gp.group_id = bc.group_id AND bc.contract_kind = 'GROUP'
+       LEFT JOIN billing_profiles bp ON bp.company_id = ?
+      WHERE bc.id = ?`,
+      [inv.customer.company_id, inv.contract.id]
+    );
     const dueDate = C.addDays(invoiceDate, Number(profile?.payment_terms_days) || 0);
 
     let poIds = inv.po_ids;
@@ -699,8 +730,22 @@ async function checkInvoice(db, id) {
   const today = C.todayIst();
 
   if (inv.status !== "DRAFT") errors.push(`This invoice is ${inv.status.toLowerCase()}, only drafts can be issued`);
-  const [[profile]] = await db.query("SELECT billing_address, is_active FROM billing_profiles WHERE company_id = ?", [inv.customer.company_id]);
-  check("PROFILE", Boolean(profile?.is_active && profile.billing_address), profile ? "Billing profile complete" : `Billing profile is missing for ${inv.customer.name}`);
+  const [[profile]] = await db.query(
+    `SELECT COALESCE(gp.billing_address, bp.billing_address) AS billing_address,
+            IF(gp.group_id IS NULL, bp.is_active, gp.is_active) AS is_active, gp.group_id AS group_bill_to
+       FROM billing_contracts bc
+       LEFT JOIN billing_group_profiles gp ON gp.group_id = bc.group_id AND bc.contract_kind = 'GROUP'
+       LEFT JOIN billing_profiles bp ON bp.company_id = ?
+      WHERE bc.id = ?`,
+    [inv.customer.company_id, inv.contract.id]
+  );
+  check(
+    "PROFILE",
+    Boolean(profile?.is_active && profile.billing_address),
+    profile?.billing_address
+      ? profile.group_bill_to ? "Group Bill To complete" : "Billing profile complete"
+      : inv.contract.contract_kind === "GROUP" ? "The group's billing details (Bill To) are missing" : `Billing profile is missing for ${inv.customer.name}`
+  );
   if (inv.customer.category === "COMMERCIAL" && inv.tax_mode !== "NONE") {
     check("GSTIN", Boolean(inv.customer.gst_number), inv.customer.gst_number ? `GSTIN ${inv.customer.gst_number} present` : `GSTIN is missing for ${inv.customer.name}`, "WARNING");
   }
