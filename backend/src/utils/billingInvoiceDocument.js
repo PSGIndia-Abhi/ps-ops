@@ -105,8 +105,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   let shy = y + 6;
   const shipW = c2 - c1 - PAD * 2;
-  // No outlet chosen: show the Bill To customer's name and address here instead.
-  const shipTo = (content.ship_to || []).length
+  // Group based invoices (hide_ship_to) have no middle column. Otherwise, no outlet chosen: show the
+  // Bill To customer's name and address here instead.
+  const shipTo = noShip ? [] : (content.ship_to || []).length
     ? content.ship_to
     : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
   for (const entry of shipTo) {

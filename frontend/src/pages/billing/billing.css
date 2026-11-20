@@ -806,10 +806,9 @@
 .nc-card .ac-pills { background: #f1f5f9; border-radius: 12px; padding: 4px; gap: 4px; display: inline-flex; flex-wrap: wrap; }
 .nc-card .ac-pills .ac-pill { border: 0; border-radius: 9px; padding: 9px 18px; background: transparent; font-weight: 500; color: #475569; }
 .nc-card .ac-pills .ac-pill.active { background: #fff; color: #1d4ed8; font-weight: 600; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
-/* Sticky footer with Back / Next */
-/* Back / Next at the end of the card. Not sticky: a sticky bar stops above the scroll area padding
-   (it differs per layout) and the content showed through the gap under it. */
-.nc-card .nc-foot { margin: 18px -26px 0; padding: 14px 26px; background: #fff; border-top: 1px solid #eef2f7; border-radius: 0 0 18px 18px; }
+/* Footer with Back / Next: at the end of the card, in the normal flow (it used to be sticky, but then
+   the fields below - Notes, First invoice - scrolled underneath it and were hidden). */
+.nc-card .nc-foot { position: static; margin: 18px -26px 0; padding: 14px 26px; background: #fff; border-top: 1px solid #eef2f7; border-radius: 0 0 18px 18px; }
 
 /* Step tracker: circles joined by a line that fills as you go */
 .nc-track { display: flex; list-style: none; margin: 4px 0 20px; padding: 0; counter-reset: s; }
@@ -1541,10 +1540,52 @@
 /* New contract > Group based: the group's companies with tick boxes */
 .nc-group-cos { margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #fbfcfe; }
 .nc-group-cos-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.nc-group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 320px; overflow-y: auto; }
+.nc-group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: start; max-height: 440px; overflow-y: auto; }
 .nc-group-co { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; }
 .nc-group-co.on { border-color: #2563eb; background: #f5f8ff; }
 .nc-group-co .bl-cb { margin-top: 2px; flex: 0 0 auto; }
 .nc-group-co-text { display: grid; gap: 2px; min-width: 0; }
 .nc-group-co-text .ac-sub { font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .nc-group-list { grid-template-columns: minmax(0, 1fr); } }
+/* ===== SOS: group based contract = one table (company · outlet, priced as on the invoice) ===== */
+.sos-page .sos-card.priced { container-type: inline-size; }
+.sos-page .sos-card.priced .sos-item { grid-template-columns: minmax(0, 1fr) 84px 140px 112px 96px 64px 112px 64px; gap: 12px; }
+.sos-page .sos-card.priced .sos-item > .sos-money { color: #334155; font-weight: 500; }
+.sos-page .sos-card.priced .sos-item > .sos-money b { color: #0f172a; font-weight: 700; }
+.sos-page .sos-card.priced .sos-thead > .sos-money { color: #64748b; font-weight: 600; }
+.sos-page .sos-card.priced .sos-thead > span:nth-child(4) { text-align: left; }
+.sos-page .sos-card.priced .sos-thead > span:last-child { text-align: right; }
+.sos-money { text-align: right; font-size: 14px; color: #334155; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sos-money b { color: #0f172a; font-weight: 700; }
+.sos-page .sos-thead > .sos-money { text-align: right; font-size: 11px; color: #64748b; }
+.sos-grp-calc { display: none; }
+.sos-grp-calc b { color: #0f172a; }
+.sos-page .sos-item.sos-grp-tot { background: #f8fafc; border-top: 1px solid #e5e7eb; padding-top: 12px; padding-bottom: 12px; }
+.sos-page .sos-item.sos-grp-tot:hover { background: #f8fafc; }
+.sos-grp-totlbl { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: .04em; }
+.sos-grp-totlbl .sos-grp-calc { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.sos-grp-note { font-size: 12px; color: #64748b; white-space: nowrap; }
+.sos-grp-pending { display: block; font-size: 11.5px; font-weight: 500; color: #b45309; }
+.sos-grp-ifall { display: block; font-size: 12px; font-weight: 500; color: #64748b; white-space: nowrap; }
+.sos-muted { color: #cbd5e1; font-weight: 600; }
+.sos-bill-note { font-size: 12.5px; color: #64748b; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+@container (max-width: 900px) { .sos-page .sos-card.priced .sos-bill-note { display: none; } }
+@media (max-width: 760px) { .sos-page .sos-bill-note { display: none; } }
+@container (max-width: 900px) {
+  .sos-page .sos-card.priced .sos-thead { display: none; }
+  .sos-page .sos-card.priced .sos-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px 14px; }
+  .sos-page .sos-card.priced .sos-item .sos-num,
+  .sos-page .sos-card.priced .sos-item .sos-money,
+  .sos-page .sos-card.priced .sos-item > span:empty,
+  .sos-page .sos-card.priced .sos-grp-note { display: none; }
+  .sos-page .sos-card.priced .sos-item .sos-count,
+  .sos-page .sos-card.priced .sos-item .sos-step { grid-column: 1; grid-row: 2; justify-self: start; }
+  .sos-page .sos-card.priced .sos-item .sos-state { grid-column: 2; grid-row: 2; justify-self: end; }
+  .sos-page .sos-card.priced .sos-item .sos-acts { grid-column: 2; grid-row: 1; }
+  .sos-page .sos-card.priced .sos-grp-calc { display: inline; }
+  .sos-page .sos-card.priced .sos-item.sos-grp-tot { grid-template-columns: minmax(0, 1fr); }
+}
+/* phones: the month picker goes under the name so the name is not squeezed */
+@media (max-width: 560px) {
+  .sos-top-main { flex-basis: calc(100% - 60px); }
+}

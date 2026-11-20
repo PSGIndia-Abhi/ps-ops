@@ -244,11 +244,23 @@ async function sosView(db, companyId, month) {
   // Submitted: exactly what was sent. Otherwise: the agreement with anything typed so far.
   let lines;
   if (submitted) {
-    lines = saved.map((l) => ({
-      contract_line_id: l.contract_line_id, contract_id: l.contract_id, site_id: l.site_id, site: l.site || null, service: l.service,
-      assigned: Number(l.assigned), completed: l.completed === null ? null : Number(l.completed), is_extra: Boolean(l.is_extra),
-      rate: l.rate === null ? null : Number(l.rate), remarks: l.remarks || "",
-    }));
+    lines = saved.map((l) => {
+      // agreed lines keep no rate on the SOS: the price and billing type come from the agreement
+      const a = l.is_extra ? null : agreed.find((x) => x.contract_line_id === l.contract_line_id);
+      return {
+        contract_line_id: l.contract_line_id, contract_id: l.contract_id, site_id: l.site_id, site: l.site || null, service: l.service,
+        assigned: Number(l.assigned), completed: l.completed === null ? null : Number(l.completed), is_extra: Boolean(l.is_extra),
+        rate: l.rate !== null ? Number(l.rate) : a ? a.rate : null, remarks: l.remarks || "", structure: a ? a.structure : null,
+      };
+    });
+    // Lines added to the agreement after the SOS was submitted: shown as not entered (the Bill Run
+    // takes them as assigned, nothing completed) until the SOS is reopened and they are filled in.
+    for (const a of agreed.filter((x) => !saved.some((s) => s.contract_line_id === x.contract_line_id))) {
+      lines.push({
+        contract_line_id: a.contract_line_id, contract_id: a.contract_id, site_id: a.site_id, site: a.site, service: a.service,
+        assigned: a.per_month, completed: null, is_extra: false, rate: a.rate, remarks: "", structure: a.structure, added_later: true,
+      });
+    }
   } else {
     lines = agreed.map((a) => {
       const s = saved.find((x) => x.contract_line_id === a.contract_line_id);

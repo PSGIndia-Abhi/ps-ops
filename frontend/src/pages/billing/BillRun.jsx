@@ -28,7 +28,7 @@ export default function BillRun() {
 
   const customerOptions = useCustomerOptions();
   const [customers, setCustomers] = useState([]); // customer filter: [] = all
-  const rows = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id)), [data, customers]);
+  const rows = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers]);
   const selectable = (r) => !r.blocking && !r.already_drafted;
   const selected = picked ?? new Set(rows.filter(selectable).map((r) => r.contract_id));
   const toggle = (id) => {
@@ -141,7 +141,16 @@ export default function BillRun() {
                       <td>
                         <input type="checkbox" className="bl-cb" checked={selected.has(r.contract_id)} disabled={!selectable(r)} onChange={() => toggle(r.contract_id)} aria-label={`Select ${r.customer}`} />
                       </td>
-                      <td><b>{r.customer}</b><div className="bl-sub">{CATEGORY_LABEL[r.category] || "Customer type not set"}</div></td>
+                      <td>
+                        {r.billing_group ? (
+                          <>
+                            <b>{r.billing_group.group}</b>
+                            <div className="bl-sub">Group contract · {r.billing_group.companies.map((c) => c.name).join(", ") || r.customer}</div>
+                          </>
+                        ) : (
+                          <><b>{r.customer}</b><div className="bl-sub">{CATEGORY_LABEL[r.category] || "Customer type not set"}</div></>
+                        )}
+                      </td>
                       <td>{r.contract_code}</td>
                       <td><TypeBadge type={r.billing_type} frequency={r.frequency_months} unit={r.frequency_unit} /></td>
                       <td>{r.services ? <ServicesChip done={r.services.done} planned={r.services.planned} /> : <span className="bl-svc none">—</span>}</td>

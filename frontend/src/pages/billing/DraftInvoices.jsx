@@ -129,7 +129,7 @@ export default function DraftInvoices() {
                     <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" className="bl-cb" checked={selected.has(r.id)} disabled={r.check === "ERRORS"} onChange={() => toggle(r.id)} aria-label={`Select ${r.customer}`} />
                     </td>
-                    <td><b>{r.customer}</b></td>
+                    <td><b>{r.customer}</b>{r.is_group && <div className="bl-sub">Group contract</div>}</td>
                     <td>{r.contract_code}</td>
                     <td><TypeBadge type={r.billing_type} /></td>
                     <td>{periodLabel(r.period_start, r.period_end)}</td>

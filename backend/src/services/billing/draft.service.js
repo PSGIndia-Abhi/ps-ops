@@ -245,15 +245,31 @@ async function periodsToBill(db, contract, monthEnd) {
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
   const range = C.monthRange(month);
   const [contracts] = await db.query(
-    `SELECT bc.*, c.name AS customer
+    `SELECT bc.*, c.name AS customer, IF(bc.contract_kind = 'GROUP', TRIM(g.name), NULL) AS billing_group
        FROM billing_contracts bc
        JOIN companies c ON c.id = bc.company_id
+       LEFT JOIN group_name g ON g.id = bc.group_id
       WHERE bc.status = 'ACTIVE' AND bc.next_period_start <= ?
         AND (? IS NULL OR bc.billing_type = ?)
-        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%'))
-      ORDER BY c.name, bc.contract_code`,
-    [range.end, type, type, q, q, q]
+        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%')
+             OR (bc.contract_kind = 'GROUP' AND g.name LIKE CONCAT('%', ?, '%')))
+      ORDER BY COALESCE(IF(bc.contract_kind = 'GROUP', g.name, NULL), c.name), bc.contract_code`,
+    [range.end, type, type, q, q, q, q]
   );
+  // Group based contracts: the ticked companies (shown under the group name, matched by the customer filter).
+  const groupIds = contracts.filter((c) => c.contract_kind === "GROUP").map((c) => c.id);
+  const groupCompanies = new Map();
+  if (groupIds.length) {
+    const [gc] = await db.query(
+      `SELECT cc.contract_id, cc.company_id, TRIM(co.name) AS name FROM billing_contract_companies cc
+         JOIN companies co ON co.id = cc.company_id WHERE cc.contract_id IN (?) ORDER BY co.name`,
+      [groupIds]
+    );
+    for (const r of gc) {
+      if (!groupCompanies.has(r.contract_id)) groupCompanies.set(r.contract_id, []);
+      groupCompanies.get(r.contract_id).push({ company_id: r.company_id, name: r.name });
+    }
+  }
 
   const rows = [];
   for (const raw of contracts) {
@@ -338,6 +354,8 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       contract_code: contract.contract_code,
       company_id: contract.company_id,
       customer: raw.customer,
+      // group based contract: billed in the group's name, its companies are the invoice lines
+      billing_group: raw.billing_group ? { group: raw.billing_group, companies: groupCompanies.get(contract.id) || [] } : null,
       category: ctx.category,
       billing_type: contract.billing_type,
       frequency_months: contract.frequency_months,
