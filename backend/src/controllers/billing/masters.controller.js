@@ -41,6 +41,23 @@ async function siteIdsOf(db, companyId) {
   return new Set(rows.map((r) => r.id));
 }
 
+/** The outlets a contract's lines may use: its company's, plus (group based) the ticked companies'. */
+async function contractSiteIdsOf(db, contractId, companyId) {
+  const [rows] = await db.query(
+    `SELECT id FROM sites WHERE company_id = ?
+        OR company_id IN (SELECT company_id FROM billing_contract_companies WHERE contract_id = ?)`,
+    [companyId, contractId]
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
+/** A line's company (group based contracts: the line is for one ticked company) must be on the contract. */
+async function assertLineCompany(db, contractId, line) {
+  if (!line.company_id) return;
+  const [[hit]] = await db.query("SELECT 1 AS ok FROM billing_contract_companies WHERE contract_id = ? AND company_id = ?", [contractId, line.company_id]);
+  if (!hit) throw C.bad("The line's company is not on this contract");
+}
+
 // ---- customers and profiles ----------------------------------------------------------------
 
 // GET /customers?category=COMMERCIAL&missing_profile=true&q=
@@ -168,6 +185,9 @@ function contractOut(c) {
   return {
     id: c.id,
     contract_code: c.contract_code,
+    // SERVICE (one customer) or GROUP (several companies of a group, one Bill To, one invoice)
+    contract_kind: c.contract_kind || "SERVICE",
+    group_id: c.group_id || null,
     company_id: c.company_id,
     customer: c.customer || undefined,
     billing_type: c.billing_type,
@@ -195,6 +215,8 @@ function contractOut(c) {
 function lineOut(l) {
   return {
     id: l.id,
+    // group based contracts: the ticked company the line is for (one invoice line per company)
+    company_id: l.company_id || null,
     site_id: l.site_id,
     site: l.site || null,
     item_name: l.item_name,
@@ -221,6 +243,7 @@ function readContractLine(raw, i, sites, fallbackFrom) {
   const siteId = C.str(raw.site_id, `${at}: site_id`, { max: 20 });
   if (siteId && !sites.has(siteId)) throw C.bad(`${at}: the outlet does not belong to this customer`);
   const line = {
+    company_id: C.str(raw.company_id, `${at}: company_id`, { max: 20 }),
     site_id: siteId,
     item_name: C.str(raw.item_name, `${at}: item name`, { required: true }),
     // SERVICE (from the service list) or CHEMICAL (typed; kept in billing_chemicals for other customers)
@@ -256,11 +279,11 @@ async function insertContractLine(conn, contractId, line, sortOrder, userId) {
   const id = uuid();
   await conn.query(
     `INSERT INTO billing_contract_lines
-       (id, contract_id, site_id, item_name, item_kind, invoice_group, sac_code, service_id, plan_service_type, plan_sub_service, pricing_basis,
+       (id, contract_id, company_id, site_id, item_name, item_kind, invoice_group, sac_code, service_id, plan_service_type, plan_sub_service, pricing_basis,
         unit, rate, default_qty, effective_from, sort_order, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      id, contractId, line.site_id, line.item_name, line.item_kind, line.invoice_group, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service,
+      id, contractId, line.company_id || null, line.site_id, line.item_name, line.item_kind, line.invoice_group, line.sac_code, line.service_id, line.plan_service_type, line.plan_sub_service,
       line.pricing_basis, line.unit, line.rate, line.default_qty, line.effective_from, sortOrder, userId, userId,
     ]
   );
@@ -380,10 +403,21 @@ async function contractDetail(db, id) {
     `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status FROM customer_pos WHERE contract_id = ? ORDER BY po_date DESC`,
     [id]
   );
+  const [companies] = c.contract_kind === "GROUP"
+    ? await db.query(
+      `SELECT cc.company_id, TRIM(co.name) AS name, TRIM(g.name) AS group_name
+         FROM billing_contract_companies cc JOIN companies co ON co.id = cc.company_id
+         LEFT JOIN group_name g ON g.id = co.group_id
+        WHERE cc.contract_id = ? ORDER BY co.name`,
+      [id]
+    )
+    : [[]];
   const today = C.todayIst();
   const current = lines.filter((l) => !l.effective_to || C.ymd(l.effective_to) >= today);
   const history = lines.filter((l) => l.effective_to && C.ymd(l.effective_to) < today);
-  return { ...contractOut(c), category: calc.categoryOf(c.customer_type), lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n || 0),
+  return { ...contractOut(c), category: calc.categoryOf(c.customer_type),
+    companies: companies.map((x) => ({ company_id: x.company_id, name: x.name })), group: companies[0]?.group_name || null,
+    lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n || 0),
     // No draft or issued invoice yet: the next billing date can still be moved (e.g. billed elsewhere until then).
     next_period_editable: !Number(inv.open || 0) && c.status !== "ENDED",
     pos: pos.map((p) => ({ id: p.id, po_number: p.po_number, po_date: C.ymd(p.po_date), expiry_date: C.ymd(p.expiry_date), po_amount: p.po_amount === null ? null : Number(p.po_amount), po_kind: p.po_kind, status: p.status })),
@@ -396,10 +430,24 @@ const createContract = C.handle("Failed to create the contract", async (req, res
   const companyId = C.str(b.company_id, "company_id", { required: true, max: 20 });
   const billingType = C.oneOf(b.billing_type, "billing_type", TYPES);
   const startDate = C.date(b.start_date, "start_date", { required: true });
+  // Group based: several companies of one group, billed to the group's Bill To. company_id is the
+  // first of them (it keeps every existing screen working).
+  const kind = b.contract_kind === "GROUP" ? "GROUP" : "SERVICE";
+  const groupId = kind === "GROUP" ? C.str(b.group_id, "group_id", { required: true, max: 36 }) : null;
   const result = await C.inTransaction(pool, async (conn) => {
+    const groupCompanies = kind === "GROUP" ? await require("./groupContracts.controller").readGroupCompanies(conn, groupId, b.company_ids) : [];
+    if (kind === "GROUP" && !groupCompanies.includes(companyId)) throw C.bad("company_id must be one of the ticked companies");
     const company = await companyOrThrow(conn, companyId);
     if (!calc.categoryOf(company.type)) throw C.bad("Customer type is not set - set it on the customer before adding a contract");
     const sites = await siteIdsOf(conn, companyId);
+    const siteCompany = new Map();
+    if (kind === "GROUP") {
+      const [rows] = await conn.query("SELECT id, company_id FROM sites WHERE company_id IN (?)", [groupCompanies]);
+      for (const r of rows) {
+        sites.add(r.id);
+        siteCompany.set(r.id, r.company_id);
+      }
+    }
     // The description on invoice is required and picked from the master (Masters > Invoice Descriptions).
     await assertDescription(conn, C.str(b.description_template, "description_template", { max: 500 }), null, req.user.id);
     const header = readContractHeader(b, sites, billingType, startDate);
@@ -409,6 +457,11 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     // The billing frequency is picked from the master (Masters > Billing Frequencies).
     await assertFrequency(conn, header.frequency_months);
     const lines = (Array.isArray(b.lines) ? b.lines : []).map((l, i) => readContractLine(l, i, sites, startDate));
+    for (const [i, l] of lines.entries()) {
+      if (kind !== "GROUP") l.company_id = null;
+      else if (l.company_id && !groupCompanies.includes(l.company_id)) throw C.bad(`Line ${i + 1}: the company is not one of the ticked companies`);
+      else if (l.company_id && l.site_id && siteCompany.get(l.site_id) !== l.company_id) throw C.bad(`Line ${i + 1}: the outlet is not that company's`);
+    }
 
     await conn.query("INSERT IGNORE INTO sequences (name, value) VALUES ('billing_contract', 0)");
     await conn.query("UPDATE sequences SET value = LAST_INSERT_ID(value + 1) WHERE name = 'billing_contract'");
@@ -418,16 +471,17 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     const id = uuid();
     await conn.query(
       `INSERT INTO billing_contracts
-         (id, contract_code, company_id, billing_type, frequency_months, cycle_start_day, bill_timing, start_date, end_date,
+         (id, contract_code, contract_kind, company_id, group_id, billing_type, frequency_months, cycle_start_day, bill_timing, start_date, end_date,
           next_period_start, invoice_grouping, site_id, po_required, gst_applicable, gst_rate, shortfall_billing, description_template, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, code, companyId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
+        id, code, kind, companyId, groupId, billingType, header.frequency_months, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
         firstBill, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.notes, req.user.id, req.user.id,
       ]
     );
     for (const [i, line] of lines.entries()) await insertContractLine(conn, id, line, i, req.user.id);
+    for (const cid of groupCompanies) await conn.query("INSERT INTO billing_contract_companies (contract_id, company_id) VALUES (?, ?)", [id, cid]);
     if (billingType === "TERMITE" || b.po_ids !== undefined) await linkContractPos(conn, id, companyId, b.po_ids ?? [], billingType);
     await logAudit(conn, req, {
       module: "BILLING",
@@ -436,7 +490,7 @@ const createContract = C.handle("Failed to create the contract", async (req, res
       entity_id: id,
       entity_label: code,
       customer_id: companyId,
-      summary: `Contract ${code} (${billingType}) created for ${company.name}${firstBill !== startDate ? `, first bill from ${C.dmy(firstBill)}` : ""}`,
+      summary: `Contract ${code} (${billingType}) created for ${kind === "GROUP" ? `${groupCompanies.length} companies of a group` : company.name}${firstBill !== startDate ? `, first bill from ${C.dmy(firstBill)}` : ""}`,
     });
     return { id, contract_code: code, next_period_start: firstBill };
   });
@@ -455,7 +509,7 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     const current = await contractDetail(conn, req.params.id);
     if (b.updated_at && String(b.updated_at) !== current.updated_at) throw C.conflict("This contract was changed by someone else. Reload and try again.");
     if (current.status === "ENDED") throw C.bad("An ended contract cannot be changed");
-    const sites = await siteIdsOf(conn, current.company_id);
+    const sites = await contractSiteIdsOf(conn, current.id, current.company_id);
     const merged = { ...current, ...b };
     // A listed, active description - or the one the contract already has, even if switched off since.
     await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template, req.user.id);
@@ -518,8 +572,9 @@ const setContractStatus = C.handle("Failed to change the contract status", async
 // POST /contracts/:id/lines  (one line)
 const addContractLine = C.handle("Failed to add the price line", async (req, res) => {
   const contract = await contractDetail(pool, req.params.id);
-  const sites = await siteIdsOf(pool, contract.company_id);
+  const sites = await contractSiteIdsOf(pool, contract.id, contract.company_id);
   const line = readContractLine(req.body, 0, sites, C.todayIst() > contract.start_date ? C.todayIst() : contract.start_date);
+  await assertLineCompany(pool, contract.id, line);
   const id = await insertContractLine(pool, req.params.id, line, contract.lines.length, req.user.id);
   const [[row]] = await pool.query("SELECT l.*, s.name AS site FROM billing_contract_lines l LEFT JOIN sites s ON s.id = l.site_id WHERE l.id = ?", [id]);
   res.status(201).json(lineOut(row));
@@ -535,9 +590,10 @@ const updateContractLine = C.handle("Failed to update the price line", async (re
     if (!old) throw C.notFound("Price line not found");
     if (old.effective_to) throw C.bad("This price line has already ended");
     const [[contract]] = await conn.query("SELECT company_id FROM billing_contracts WHERE id = ?", [req.params.id]);
-    const sites = await siteIdsOf(conn, contract.company_id);
+    const sites = await contractSiteIdsOf(conn, req.params.id, contract.company_id);
     const merged = { ...lineOut(old), ...b, effective_from: b.effective_from || C.ymd(old.effective_from) };
     const line = readContractLine(merged, 0, sites, C.ymd(old.effective_from));
+    await assertLineCompany(conn, req.params.id, line);
 
     if (b.rate !== undefined && Number(b.rate) !== Number(old.rate)) {
       const from = C.date(b.effective_from, "effective_from", { required: true });

@@ -241,6 +241,28 @@
 .nc-review { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 14px; margin: 0 0 14px; font-size: 14px; }
 .nc-review dt { color: #64748b; font-weight: 600; }
 .nc-review dd { margin: 0; color: #0f172a; }
+/* Review: tags (companies, services) and the table of what is billed */
+.nc-rv-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.nc-rv-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 12.5px; font-weight: 500; }
+.nc-rv-tag.svc { background: #eff6ff; color: #1e40af; }
+.nc-rv-tag b { color: #0f172a; font-weight: 700; }
+.nc-rv-sec { margin: 4px 0 14px; padding-top: 14px; border-top: 1px solid #eef2f7; }
+.nc-rv-wrap { border: 1px solid #e5e7eb; border-radius: 10px; overflow-x: auto; }
+.nc-rv-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.nc-rv-table th { background: #f8fafc; color: #64748b; font-weight: 600; font-size: 12px; text-align: left; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+.nc-rv-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #0f172a; }
+.nc-rv-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nc-rv-table .ac-sub { font-size: 12px; margin-top: 2px; }
+.nc-rv-item { font-weight: 600; overflow-wrap: break-word; }
+.nc-rv-table td:first-child { min-width: 112px; }
+.nc-rv-table tfoot td { border-bottom: 0; padding: 7px 12px; font-weight: 600; text-align: right; }
+.nc-rv-table tfoot tr:first-child td { border-top: 1px solid #e5e7eb; }
+.nc-rv-table tfoot tr.gst td { color: #64748b; font-weight: 500; }
+.nc-rv-table tfoot tr.grand td { background: #f8fafc; font-size: 14.5px; font-weight: 700; }
+@media (max-width: 480px) {
+  .nc-rv-table th, .nc-rv-table td { padding: 8px 6px; }
+  .nc-rv-table th { font-size: 11px; white-space: normal; }
+}
 .nc-check { list-style: none; padding: 12px 14px; margin: 0; background: #f8fafc; border-radius: 10px; display: grid; gap: 6px; font-size: 13.5px; }
 .nc-check li::before { display: inline-block; width: 20px; font-weight: 700; }
 .nc-check li.ok::before { content: "✓"; color: #15803d; }
@@ -356,6 +378,49 @@
   .nc-lines.priced .nc-line > .nc-pickcell { grid-column: 1 / -1; }
   .nc-lines.priced .nc-line > span:empty { display: none; }
 }
+
+/* Group based contract, step 4: one line per ticked company - item name | bill value | quantity | amount. */
+/* the services done at the outlets: service | amount per outlet | ✕, "+ Add service" and the total under them */
+.nc-grp-svcs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.nc-grp-svcrow { display: grid; grid-template-columns: minmax(0, 1fr) 160px 32px; gap: 8px; align-items: center; }
+.nc-grp-svcrow .ac-select, .nc-grp-svcrow .ac-input { min-width: 0; height: 40px; }
+.nc-grp-svchead { font-size: 13px; font-weight: 600; color: #334155; }
+.nc-grp-svcfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.nc-grp-svcsum { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #475569; }
+.nc-grp-svcsum b { color: #0f172a; }
+.nc-grp-addsvc { background: none; border: 0; color: #2563eb; font-weight: 600; font-size: 12.5px; padding: 2px 0; cursor: pointer; }
+.nc-grp-addsvc:hover { text-decoration: underline; }
+@media (max-width: 480px) {
+  .nc-grp-svcrow { grid-template-columns: minmax(0, 1fr) 104px 28px; gap: 6px; }
+}
+/* Sized by the card, not the screen: narrow = item name on its own line, then bill value |
+   quantity | amount; wide (640px+) = one row per company. */
+.nc-lines.priced.grp { container-type: inline-size; }
+.nc-lines.priced.grp .nc-line { grid-template-columns: minmax(0, 1fr) auto minmax(72px, auto); column-gap: 10px; row-gap: 6px; }
+.nc-lines.priced.grp .nc-line > .nc-pickcell,
+.nc-lines.priced.grp .nc-head > span:first-child { grid-column: 1 / -1; }
+.nc-lines.priced.grp .nc-line > .ac-input { min-width: 0; height: 38px; }
+.nc-lines.priced.grp .sp-stp { justify-self: start; width: auto; }
+.nc-lines.priced.grp .nc-head > span:nth-child(2) { text-align: left; }
+.nc-lines.priced.grp .nc-head > span:nth-child(3) { text-align: left; }
+@container (min-width: 640px) {
+  .nc-lines.priced.grp .nc-line { grid-template-columns: minmax(0, 1fr) 140px 132px 110px; }
+  .nc-lines.priced.grp .nc-line > .nc-pickcell,
+  .nc-lines.priced.grp .nc-head > span:first-child { grid-column: auto; }
+  .nc-lines.priced.grp .nc-head > span:nth-child(3) { text-align: center; }
+  .nc-lines.priced.grp .sp-stp { justify-self: center; }
+}
+.nc-lines.priced.grp .nc-line-wrap { padding: 10px 0; border-bottom: 1px solid #eef2f7; }
+.nc-lines.priced.grp .nc-line:not(.nc-head) { align-items: start; }
+.nc-lines.priced.grp .nc-pickcell { align-items: flex-start; }
+.nc-lines.priced.grp .nc-pickcell > .bl-cb { margin-top: 11px; }
+.nc-lines.priced.grp .nc-line > .nc-amt { line-height: 38px; }
+.nc-lines.priced.grp .nc-grp-item .ac-input { height: 38px; }
+.nc-lines.priced.grp .nc-line-wrap:last-child { border-bottom: 0; }
+.nc-grp-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: 1 1 auto; min-width: 0; }
+.nc-grp-item .ac-input { flex: 1 1 100%; min-width: 0; font-weight: 600; }
+.nc-grp-item .ac-sub { font-size: 12px; }
+.nc-grp-item .ac-select { flex: 1 1 100%; height: 34px; }
 
 /* Service Tracker: one row per customer (click to show its services). */
 .st-caret { display: inline-block; width: 14px; color: #64748b; }
@@ -1434,3 +1499,22 @@
 /* New contract: full width like the other billing pages, wider summary panel */
 .bl-app .nc-page, .nc-page { max-width: none; }
 @media (min-width: 1101px) { .nc-layout { grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; } }
+
+/* New contract: Group based / Service based choice */
+.nc-kind-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.nc-kind-card { display: grid; gap: 6px; justify-items: start; text-align: left; padding: 16px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; cursor: pointer; font: inherit; color: #0f172a; }
+.nc-kind-card:hover, .nc-kind-card:focus-visible { border-color: #2563eb; background: #f8fbff; box-shadow: 0 0 0 3px #dbeafe; outline: none; }
+.nc-kind-card .ac-sub { font-size: 12.5px; line-height: 1.4; }
+.nc-kind-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: #eff6ff; color: #1d4ed8; font-size: 18px; }
+@media (max-width: 520px) { .nc-kind-pick { grid-template-columns: minmax(0, 1fr); } }
+
+/* New contract > Group based: the group's companies with tick boxes */
+.nc-group-cos { margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #fbfcfe; }
+.nc-group-cos-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.nc-group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 320px; overflow-y: auto; }
+.nc-group-co { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; }
+.nc-group-co.on { border-color: #2563eb; background: #f5f8ff; }
+.nc-group-co .bl-cb { margin-top: 2px; flex: 0 0 auto; }
+.nc-group-co-text { display: grid; gap: 2px; min-width: 0; }
+.nc-group-co-text .ac-sub { font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .nc-group-list { grid-template-columns: minmax(0, 1fr); } }
