@@ -136,6 +136,10 @@ function PoForm({ po, onClose, onSaved }) {
   }
 
   async function save() {
+    if (form.po_amount === "" || Number(form.po_amount) <= 0) {
+      setError("Type the PO amount.");
+      return;
+    }
     setBusy(true);
     setError("");
     const body = {
@@ -190,7 +194,7 @@ function PoForm({ po, onClose, onSaved }) {
             <input type="date" className="ac-input" value={openPo ? "" : form.expiry_date || ""} disabled={openPo} onChange={(e) => set({ expiry_date: e.target.value })} />
             <label className="bl-toggle" style={{ paddingTop: 4 }}><input type="checkbox" checked={openPo} onChange={(e) => setOpenPo(e.target.checked)} /> Open PO (no end date)</label>
           </Field>
-          <Field label="PO amount (₹, incl. GST)" required={form.kind === "ADVANCE"} hint={form.kind === "ADVANCE" ? "" : "Leave empty for no limit"}>
+          <Field label="PO amount (₹, incl. GST)" required>
             <input type="number" min="0" step="0.01" className="ac-input" value={form.po_amount} onChange={(e) => set({ po_amount: e.target.value })} />
           </Field>
           <Field label="Type">

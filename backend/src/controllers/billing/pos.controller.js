@@ -108,7 +108,8 @@ async function readPo(db, b, { existing = null } = {}) {
     remarks: C.str(merged.remarks, "remarks", { max: 1000 }),
   };
   if (po.expiry_date && po.expiry_date < (po.valid_from || po.po_date)) throw C.bad("expiry_date cannot be before the PO starts");
-  if (po.po_kind === "ADVANCE" && po.po_amount === null) throw C.bad("An advance PO needs the PO amount");
+  // The PO amount is required on every PO (an advance PO always needed it).
+  if (po.po_amount === null || po.po_amount <= 0) throw C.bad(po.po_kind === "ADVANCE" ? "An advance PO needs the PO amount" : "Enter the PO amount");
   return po;
 }
 

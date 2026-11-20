@@ -417,7 +417,7 @@ export default function NewContract() {
       if (addingPo) {
         if (!po.po_number.trim()) return "Type the PO number.";
         if (!po.po_date) return "Choose the PO date.";
-        if (po.kind === "ADVANCE" && po.po_amount === "") return "An advance PO needs its amount.";
+        if (po.po_amount === "" || Number(po.po_amount) <= 0) return "Type the PO amount.";
       } else if (!poId) return "Choose a purchase order, or add a new one.";
     }
     if (step === 4) {
@@ -949,7 +949,7 @@ export default function NewContract() {
                 <input type="date" className="ac-input" value={po.open ? "" : po.expiry_date} disabled={!addingPo || po.open} onChange={(e) => setP({ expiry_date: e.target.value })} />
                 <label className="bl-toggle" style={{ paddingTop: 4 }}><input type="checkbox" checked={po.open} disabled={!addingPo} onChange={(e) => setP({ open: e.target.checked })} /> Open PO (no end date)</label>
               </Field>
-              <Field label="PO amount (₹, incl. GST)" required={po.kind === "ADVANCE"} hint={addingPo && po.kind !== "ADVANCE" ? "Leave empty for no limit" : ""}>
+              <Field label="PO amount (₹, incl. GST)" required>
                 <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={!addingPo} onChange={(e) => setP({ po_amount: e.target.value })} />
               </Field>
               <Field label="Type">

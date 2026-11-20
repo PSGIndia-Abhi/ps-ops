@@ -79,11 +79,13 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   // ---- Bill To / Ship To / Invoice Details ---------------------------------------
   // Group based invoices have no Ship To: Bill To and Invoice Details share the width half and half.
-  const noShip = Boolean(content.hide_ship_to);
+  // Termite invoices: Bill To and Invoice Details only - no "Service Offered By" column.
+  const termite = Boolean(content.termite);
+  const noShip = Boolean(content.hide_ship_to) || termite;
   const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
   const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
+  if (!termite) font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
@@ -109,7 +111,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const shipTo = (content.ship_to || []).length
     ? content.ship_to
     : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
-  for (const entry of shipTo) {
+  for (const entry of termite ? [] : shipTo) {
     if (entry.name) {
       font("B", 8).text(entry.name, c1 + PAD, shy, { width: shipW });
       shy += textH(entry.name, shipW, 8, "B") + 2;
@@ -141,13 +143,23 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- items -----------------------------------------------------------------------
-  const cols = [
-    { label: "#", w: 0.06, align: "left" },
-    { label: "Item name", w: 0.46, align: "left" },
-    { label: "Bill Value", w: 0.18, align: "right" },
-    { label: "Quantity", w: 0.15, align: "right" },
-    { label: "Amount", w: 0.15, align: "right" },
-  ];
+  // Termite: no Bill Value column (item name, quantity = treated area, amount).
+  const cols = termite
+    ? [
+      { label: "#", w: 0.06, align: "left" },
+      { label: "Item name", w: 0.64, align: "left" },
+      { label: "Quantity", w: 0.15, align: "right" },
+      { label: "Amount", w: 0.15, align: "right" },
+    ]
+    : [
+      { label: "#", w: 0.06, align: "left" },
+      { label: "Item name", w: 0.46, align: "left" },
+      { label: "Bill Value", w: 0.18, align: "right" },
+      { label: "Quantity", w: 0.15, align: "right" },
+      { label: "Amount", w: 0.15, align: "right" },
+    ];
+  const QTY = termite ? 2 : 3;
+  const AMT = termite ? 3 : 4;
   const colX = [];
   let cx = L;
   for (const c of cols) {
@@ -184,9 +196,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
     }
     font("R", 8).text(String(i + 1), colX[0] + PAD, y + 5, { width: colW(0) - PAD * 2 });
     font("B", 8).text(line.name, colX[1] + PAD, y + 5, { width: colW(1) - PAD * 2 });
-    moneyAt(line.bill_value, colX[2] + PAD, y + 5, colW(2) - PAD * 2);
-    font("R", 8).text(qtyText(line.qty), colX[3] + PAD, y + 5, { width: colW(3) - PAD * 2, align: "right" });
-    moneyAt(line.amount, colX[4] + PAD, y + 5, colW(4) - PAD * 2);
+    if (!termite) moneyAt(line.bill_value, colX[2] + PAD, y + 5, colW(2) - PAD * 2);
+    font("R", 8).text(qtyText(line.qty), colX[QTY] + PAD, y + 5, { width: colW(QTY) - PAD * 2, align: "right" });
+    moneyAt(line.amount, colX[AMT] + PAD, y + 5, colW(AMT) - PAD * 2);
     y += rowH;
   });
   if (y + FOOTER_H > PAGE_H - 30) {
@@ -205,7 +217,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   font("B", 8).text("Total", colX[1] + PAD, y + 5, { lineBreak: false });
-  moneyAt(content.subtotal, colX[4] + PAD, y + 5, colW(4) - PAD * 2, { bold: true });
+  moneyAt(content.subtotal, colX[AMT] + PAD, y + 5, colW(AMT) - PAD * 2, { bold: true });
   const totalRowEnd = y + 19;
   cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, totalRowEnd));
   y = totalRowEnd;

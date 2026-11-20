@@ -529,6 +529,7 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
   const [rows] = await db.query(
     `SELECT c.id AS company_id, c.name, g.name AS group_name, bp.bill_by_day,
             COUNT(DISTINCT l.id) AS services, COUNT(DISTINCT l.site_id) AS outlets, COALESCE(SUM(IF(l.pricing_basis = 'PER_SERVICE', l.default_qty, 0)), 0) AS assigned,
+            SUM(l.pricing_basis = 'PER_SERVICE') AS counted_lines,
             so.id AS sos_id, so.status, so.submitted_at, su.name AS submitted_by,
             (SELECT GROUP_CONCAT(s2.name ORDER BY s2.name SEPARATOR ', ') FROM sites s2 WHERE s2.company_id = c.id) AS outlet_names,
             (SELECT COALESCE(SUM(sl.completed), 0) FROM billing_sos_lines sl WHERE sl.sos_id = so.id AND sl.is_extra = 0) AS completed,
@@ -562,6 +563,8 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
     outlets: Number(r.outlets),
     outlet_names: r.outlet_names || "",
     assigned: Number(r.assigned),
+    // only Termite (area) lines: nothing is counted, so Assigned / Completed do not apply
+    area_only: Number(r.counted_lines) === 0,
     completed: r.sos_id ? Number(r.completed) : null,
     extra: r.sos_id ? Number(r.extra) : 0,
     status: r.sos_id ? r.status : "NOT_STARTED",

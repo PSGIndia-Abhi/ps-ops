@@ -118,8 +118,8 @@ export default function SosList() {
                     </td>
                     <td>{r.group ? <span className="bl-group"><FiLayers />{r.group}</span> : <span className="ac-sub">—</span>}</td>
                     <td className="bl-num">{r.outlets || "—"}</td>
-                    <td className="bl-num">{r.assigned}</td>
-                    <td className="bl-num">{r.completed === null ? "—" : <span style={{ color: short ? "#b45309" : "#15803d", fontWeight: 600 }}>{r.completed}</span>}</td>
+                    <td className="bl-num">{r.area_only ? "—" : r.assigned}</td>
+                    <td className="bl-num">{r.area_only || r.completed === null ? "—" : <span style={{ color: short ? "#b45309" : "#15803d", fontWeight: 600 }}>{r.completed}</span>}</td>
                     <td className="bl-num">{r.extra || "—"}</td>
                     <td>{r.bill_by_day ? `Day ${r.bill_by_day}` : <span className="ac-sub">—</span>}</td>
                     <td>
