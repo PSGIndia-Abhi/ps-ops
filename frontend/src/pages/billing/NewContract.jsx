@@ -6,6 +6,8 @@ import { GST_RATES, gstHint } from "./calc";
 import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, monthLabel, nextBilling, today, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
+import { DeliveryFields } from "./InvoiceDelivery";
+import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
 import { Field, Msg } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -15,6 +17,8 @@ import { deepCleaningServices, pestServices } from "../../components/CreateBooki
 //   2 Contract      - billing type, frequency, timing, dates, GST, shortfall rule, description
 //   3 Purchase order - only when one is needed: pick one or add a new one here
 //   4 Services      - the service, its amount and (Service Plan permission) how many per month
+//   6 Print & email - print copies, invoice emails, auto-email, bill-by day (per outlet if needed);
+//                     saved on Next (the customer's, used by all its invoices). Not for a group contract.
 //   5 Review        - the checklist, then Create
 // The billing profile (step 1) and a new PO (step 3) are saved when Next is pressed, since they
 // are useful on their own; the contract is created only at the last step.
@@ -36,7 +40,7 @@ function suggestDescription(billingType, frequencyMonths, kind) {
   if (once) return "Pest control service carried out on {period}";
   return `Towards charges for the Pest control service carried out ${when}`;
 }
-const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 5: "Review" };
+const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 6: "Print & email", 5: "Review" };
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const SQM = "sq.m";
 const SQFT = "sq.ft";
@@ -88,6 +92,9 @@ export default function NewContract() {
   const group = (contractGroups || []).find((g) => g.id === groupId) || null;
   const [profile, setProfile] = useState(null); // the form; null while loading
   const [profileSaved, setProfileSaved] = useState(false);
+  // Invoice delivery (print copies, email): loaded with the customer, saved with the Bill To on Next.
+  const [delivery, setDelivery] = useState(null);
+  const [deliveryOutlets, setDeliveryOutlets] = useState([]);
   const customer = (customers || []).find((c) => c.company_id === companyId) || null;
   const pickedCompanies = (group?.companies || []).filter((c) => groupCompanyIds.includes(c.company_id));
   const groupUnits = pickedCompanies.flatMap((c) => outletUnits(c, groupSitesOff));
@@ -232,6 +239,7 @@ export default function NewContract() {
     { n: 2, title: "Contract" },
     ...(needsPo ? [{ n: 3, title: "Purchase order" }] : []),
     { n: 4, title: "Services & prices" },
+    ...(groupMode ? [] : [{ n: 6, title: "Print & email" }]),
     { n: 5, title: "Review" },
   ];
   const at = steps.findIndex((s) => s.n === step);
@@ -333,6 +341,24 @@ export default function NewContract() {
     // customer is looked up from companyId; reloading on its identity alone would refetch needlessly
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
+
+  // The customer's invoice delivery settings (defaults when it has none yet).
+  useEffect(() => {
+    setDelivery(null);
+    setDeliveryOutlets([]);
+    if (!companyId || groupMode) return undefined;
+    let live = true;
+    billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
+      .then((d) => {
+        if (!live) return;
+        setDelivery(deliveryFrom(d));
+        setDeliveryOutlets(d.outlets || []);
+      })
+      .catch(() => live && setDelivery(deliveryFrom(null)));
+    return () => {
+      live = false;
+    };
+  }, [companyId, groupMode]);
 
   // The group's Bill To: loaded when the group is chosen, or started from the group's name.
   useEffect(() => {
@@ -438,6 +464,11 @@ export default function NewContract() {
       if (g && !GSTIN_RE.test(g)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
     }
+    if (step === 6) {
+      if (!delivery) return "Loading the print and email settings…";
+      const d = deliveryProblem(delivery);
+      if (d) return d;
+    }
     if (step === 2) {
       if (terms.billing_type !== "ONE_TIME" && !terms.frequency_months) return "Choose the billing frequency.";
       if (!terms.start_date) return "Choose the start date.";
@@ -516,6 +547,10 @@ export default function NewContract() {
           payment_terms_days: Number(profile.payment_terms_days) || 0, is_active: true, gst_number: profile.gst_number.trim().toUpperCase(),
         });
         setProfileSaved(true);
+      }
+      if (step === 6) {
+        // Print copies and email: the customer's, saved now (the Bill To was saved at step 1).
+        await billingPut(`/customer-profiles/${encodeURIComponent(companyId)}/settings`, deliveryBody(delivery));
       }
       if (step === 3 && addingPo) {
         const created = await billingPost("/pos", {
@@ -637,14 +672,13 @@ export default function NewContract() {
                 {!termite && kinds.SERVICE && <li><b>Service Coordinator</b><span>Fills the Monthly SOS{next ? ` for ${monthLabel(next.start.slice(0, 7))}` : ""}: services completed at each outlet.</span></li>}
                 {termite && <li><b>Service Coordinator</b><span>Enters the treated area completed on the Monthly SOS{next ? ` for ${monthLabel(next.billMonth)}` : ""} (each {unitOf(terms) === "DAY" ? "day" : unitOf(terms) === "WEEK" ? "week" : "month"} billed).</span></li>}
                 <li><b>Bill Run{next ? ` · ${monthLabel(next.billMonth)}` : ""}</b><span>The contract shows as ready once the SOS is in; generate the draft in one click.</span></li>
-                <li><b>Issue &amp; send</b><span>Issued with the next number, printed and emailed as set in the customer’s profile.</span></li>
+                <li><b>Issue &amp; send</b><span>Issued with the next number, printed and emailed as set in Print & email.</span></li>
               </ol>
             </div>
           </div>
 
           <div className="nc-success-actions">
             <button type="button" className="ac-btn" onClick={() => navigate("/billing/contracts")}>All contracts</button>
-            <button type="button" className="ac-btn" onClick={() => navigate(`/billing/customers/${encodeURIComponent(companyId)}`)}>Customer profile</button>
             <button type="button" className="ac-btn" onClick={() => window.location.reload()}><FiPlus /> Another contract</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/contracts/${done.id}`, { replace: true })}>Open contract</button>
           </div>
@@ -1272,6 +1306,21 @@ export default function NewContract() {
           </>
         )}
 
+        {step === 6 && (
+          <>
+            <h3 className="nc-title">Print &amp; email</h3>
+            <p className="ac-sub" style={{ margin: "-6px 0 16px" }}>
+              How many copies print when an invoice of {customer?.name?.trim() || "this customer"} is issued, and who gets it by email.
+              It applies to every invoice of the customer and can be changed later on the contract (Bill To &amp; delivery).
+            </p>
+            {delivery ? (
+              <DeliveryFields form={delivery} setForm={setDelivery} outlets={deliveryOutlets} />
+            ) : (
+              <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
+            )}
+          </>
+        )}
+
         {step === 5 && (
           <>
             <h3 className="nc-title">Review</h3>
@@ -1292,6 +1341,9 @@ export default function NewContract() {
               <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
               {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)} <span className="ac-sub">(billed elsewhere before this date)</span></dd></>}
               <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
+              {!groupMode && delivery && (
+                <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.invoice_emails.trim() ? ` · ${delivery.auto_email ? "emailed automatically to" : "email"} ${delivery.invoice_emails}` : " · no email"}{" "}<button type="button" className="bl-link" onClick={() => setStep(6)}>Change</button></dd></>
+              )}
               {separate ? (
                 <>
                   <dt>Bills</dt><dd>Two separate invoices every period - pest control and chemicals (one contract, same PO)</dd>
@@ -1395,6 +1447,7 @@ export default function NewContract() {
             <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
             {next && <><dt>First invoice</dt><dd>{dmy(next.start)} – {dmy(next.end)}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
             <dt>Services</dt><dd>{filledLines.length ? `${filledLines.length} line${filledLines.length === 1 ? "" : "s"}` : <span className="ac-sub">None yet</span>}</dd>
+            {!groupMode && delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
           </dl>
           {termite ? (
             <div className="nc-sum-total"><span>Rate per {areaLabel}</span><b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>

@@ -11,6 +11,7 @@ import { GST_RATES, gstHint } from "./calc";
 import BillingProfileCard from "./BillingProfileCard";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
+import InvoiceDelivery from "./InvoiceDelivery";
 import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -193,7 +194,7 @@ export default function ContractForm() {
   const TABS = [
     ["details", "Details", <FiSliders key="i" />, null],
     ["prices", "Services & prices", <FiList key="i" />, linesShown.filter((l) => !l.effective_to && (l.item_name || !isNew)).length],
-    ...(!isNew ? [["billing", "Billing details", <FiFileText key="i" />, null], ["history", "Price history", <FiClock key="i" />, contract.price_history.length]] : []),
+    ...(!isNew ? [["billing", "Bill To & delivery", <FiFileText key="i" />, null], ["history", "Price history", <FiClock key="i" />, contract.price_history.length]] : []),
   ];
 
   return (
@@ -253,7 +254,7 @@ export default function ContractForm() {
         <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
           <span>
             ⚠ This customer has no billing details (Bill To address and GST state), so the Bill Run cannot make its invoice.
-            {!isNew && <>{" "}<button type="button" className="bl-link" onClick={() => setTab("billing")}>Fill them in under Billing details</button>.</>}
+            {!isNew && <>{" "}<button type="button" className="bl-link" onClick={() => setTab("billing")}>Fill them in under Bill To &amp; delivery</button>.</>}
           </span>
         </div>
       )}
@@ -425,7 +426,14 @@ export default function ContractForm() {
         </div>
       )}
 
-      {tab === "billing" && !isNew && customerRow && <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />}
+      {/* Bill To and invoice delivery (print copies, email) - the customer's, used by every contract of it.
+          A group based contract bills the group: its Bill To is the group's (set on New Contract). */}
+      {tab === "billing" && !isNew && customerRow && (
+        <div className="bl-stack">
+          <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />
+          {contract.contract_kind !== "GROUP" && <InvoiceDelivery companyId={companyId} canEdit={canEdit} />}
+        </div>
+      )}
 
       {tab === "prices" && (
         <div className="ac-card ct-prices">

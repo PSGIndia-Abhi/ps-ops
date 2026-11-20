@@ -65,7 +65,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
        LEFT JOIN group_name g ON g.id = bc.group_id AND bc.contract_kind = 'GROUP'`;
   const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM billing_invoices bi ${joins} WHERE ${where}`, params);
   const [rows] = await pool.query(
-    `SELECT bi.id, bi.status, bi.invoice_number, DATE_FORMAT(bi.invoice_date, '%Y-%m-%d') AS invoice_date, bi.company_id, COALESCE(TRIM(g.name), c.name) AS customer, c.name AS company_name, g.id IS NOT NULL AS is_group,
+    `SELECT bi.id, bi.status, bi.invoice_number, DATE_FORMAT(bi.invoice_date, '%Y-%m-%d') AS invoice_date, bi.company_id, COALESCE(TRIM(g.name), c.name) AS customer, c.name AS company_name, g.id IS NOT NULL AS is_group, bi.is_manual,
             bc.contract_code, bi.billing_type, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start, DATE_FORMAT(bi.period_end, '%Y-%m-%d') AS period_end,
             bi.subtotal, bi.total, bi.advance_adjusted, bi.print_copies,
             IF(bi.status = 'ISSUED', ${PAY.STATUS_SQL}, NULL) AS receivable_status, ${PAY.PAID_SQL} AS paid_amount,
@@ -93,6 +93,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
       paid_amount: Number(r.paid_amount),
       print_copies: Number(r.print_copies),
       is_group: Boolean(Number(r.is_group)),
+      is_manual: Boolean(Number(r.is_manual)),
       lines_needing_input: Number(r.lines_needing_input),
       service_shortfall: Number(r.service_shortfall),
       po_numbers: r.po_numbers ? r.po_numbers.split(", ") : [],
@@ -164,6 +165,23 @@ const issue = C.handle("Failed to issue the invoices", async (req, res) => {
   res.json(result);
 });
 
+// POST /invoices/manual { contract_id, invoice_date, description, lines: [{ contract_line_id, quantity }] }
+// A manual (extra, one-off) invoice: made from the contract's prices and issued at once - no draft step.
+// Warnings (back-dated, over the PO amount, ...) do not stop it; errors (no valid PO when one is
+// required, ...) do, and then nothing is kept.
+const manual = C.handle("Failed to generate the invoice", async (req, res) => {
+  const id = await D.createManual(pool, req.body || {}, req.user.id);
+  let issued;
+  try {
+    issued = await I.issueOne(pool, id, req, { confirmWarnings: true });
+  } catch (err) {
+    await pool.query("DELETE FROM billing_invoices WHERE id = ? AND status = 'DRAFT'", [id]);
+    throw err;
+  }
+  issued.email = await delivery.emailIssued(pool, issued.id, req.user.id);
+  res.status(201).json({ issued: [issued], failed: [] });
+});
+
 // GET /invoices/download?month=2026-11&status=ISSUED&copies=original|print&company_id=&ids=a,b
 // All the invoices in ONE PDF: original only, or every print copy set in the profile (print all).
 const download = C.handle("Failed to download the invoices", async (req, res) => {
@@ -208,4 +226,4 @@ const cancel = C.handle("Failed to cancel the invoice", async (req, res) => {
   res.json(await I.cancelIssued(pool, req.params.id, req, reason));
 });
 
-module.exports = { due, run, list, get, save, remove, check, preview, issue, download, pdf, cancel, sendPdf, pdfName };
+module.exports = { due, run, list, get, save, remove, check, preview, issue, manual, download, pdf, cancel, sendPdf, pdfName };

@@ -11,7 +11,7 @@ import {
   FiMenu,
   FiMessageSquare,
   FiPlayCircle,
-  FiUsers,
+  FiZap,
 } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
@@ -38,9 +38,9 @@ const PAGE_PERMISSION = {
   coordinator: "VIEW_SERVICE_TRACKER",
   sos: ["VIEW_SERVICE_TRACKER", "VIEW_BILLING"],
   run: "VIEW_BILLING",
+  generate: "GENERATE_INVOICE",
   drafts: "VIEW_BILLING",
   invoices: "VIEW_BILLING",
-  customers: "VIEW_BILLING",
   masters: "VIEW_BILLING",
   contracts: "VIEW_BILLING",
   pos: "VIEW_BILLING",
@@ -48,7 +48,7 @@ const PAGE_PERMISSION = {
   frequencies: "VIEW_BILLING",
 };
 
-// Pages that belong to a menu item without being in the menu (opened from Masters / Customers).
+// Pages that belong to a menu item without being in the menu (opened from Masters).
 const MENU_OF = { contracts: "masters", pos: "masters", descriptions: "masters", frequencies: "masters" };
 
 /**
@@ -65,18 +65,17 @@ function navFor(can, drafts) {
         heading: "Billing",
         items: [
           { key: "dashboard", label: "Dashboard", icon: FiGrid },
-          { key: "sos", label: "Monthly SOS", icon: FiCheckSquare },
+          // Generate Invoice: a manual (extra) invoice, made and issued in one go - needs both permissions
+          ...(can("GENERATE_INVOICE") && can("ISSUE_INVOICE") ? [{ key: "generate", label: "Generate Invoice", icon: FiZap }] : []),
           { key: "run", label: "Bill Run", icon: FiPlayCircle },
           { key: "drafts", label: "Draft Invoices", icon: FiEdit3, badge: drafts },
           { key: "invoices", label: "Issued Invoices", icon: FiFileText },
+          { key: "sos", label: "Monthly SOS", icon: FiCheckSquare },
         ],
       },
       {
         heading: "Setup",
-        items: [
-          { key: "customers", label: "Customers", icon: FiUsers },
-          { key: "masters", label: "Masters", icon: FiLayers },
-        ],
+        items: [{ key: "masters", label: "Masters", icon: FiLayers }],
       }
     );
   }

@@ -83,7 +83,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
   const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
+  if (!noShip) font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
