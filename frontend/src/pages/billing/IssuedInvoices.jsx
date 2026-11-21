@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { FiDownload, FiExternalLink, FiFileText, FiLink, FiMail, FiMessageCircle, FiPrinter, FiSearch, FiShare2, FiXCircle } from "react-icons/fi";
+import { FiAlertCircle, FiDownload, FiExternalLink, FiFileText, FiLink, FiMail, FiMessageCircle, FiPrinter, FiSearch, FiShare2, FiXCircle } from "react-icons/fi";
 import { EmptyRow, Pager } from "../accountant/ui";
 import { exportCsv } from "../accountant/exportCsv";
 import { downloadFile, openPdf, printPdf, qs, useBilling, useCustomerOptions } from "./billingApi";
@@ -174,7 +174,11 @@ export default function IssuedInvoices() {
                       <td className="bl-num">{cancelled ? <s>{amount(r.total)}</s> : amount(r.total)}</td>
                       <td className="bl-num">{r.advance_adjusted ? amount(r.advance_adjusted) : "—"}</td>
                       <td>{cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={r.receivable_status || "PENDING"} />}</td>
-                      <td>{r.last_shared ? (() => { const [label, Icon] = SHARED_AS[r.last_shared.channel] || SHARED_AS.OTHER; return <span className="bl-sent"><span className="bl-sent-ic"><Icon /></span><span><b>{label}</b><span className="bl-sub">{r.last_shared.by || "—"}{r.last_shared.at ? ` · ${new Date(r.last_shared.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` : ""}</span></span></span>; })() : <span className="ac-sub">Not sent</span>}</td>
+                      <td>{r.last_shared ? (() => {
+                        // a failed attempt (e.g. the email server refused) shows as failed, with the reason on hover
+                        const failed = r.last_shared.status === "FAILED";
+                        const [label, Icon] = failed ? [r.last_shared.channel === "EMAIL" ? "Email failed" : "Sending failed", FiAlertCircle] : SHARED_AS[r.last_shared.channel] || SHARED_AS.OTHER;
+                        return <span className={`bl-sent ${failed ? "failed" : ""}`} title={failed && r.last_shared.error ? r.last_shared.error : undefined}><span className="bl-sent-ic"><Icon /></span><span><b>{label}</b><span className="bl-sub">{r.last_shared.by || "—"}{r.last_shared.at ? ` · ${new Date(r.last_shared.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` : ""}</span></span></span>; })() : <span className="ac-sub">Not sent</span>}</td>
                       <td>
                         <div className="bl-actgroup" onClick={(e) => e.stopPropagation()}>
                           <button type="button" className="bl-actg" onClick={() => pdf(r.id)} title="View PDF" aria-label="View PDF"><FiExternalLink /></button>
