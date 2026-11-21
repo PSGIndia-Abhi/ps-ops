@@ -1,26 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { billingPost, printPdf, qs } from "./billingApi";
 import { rupees } from "./format";
-import ShareDialog from "./ShareDialog";
+import { FiAlertCircle, FiCheck, FiMail, FiMinusCircle, FiPrinter } from "react-icons/fi";
 import { Modal, Msg } from "./ui";
 
 // Confirms issuing one or more drafts (final, numbered), shows what was issued and what failed,
-// and opens Share and Print for an issued invoice. The print window opens by itself right after
-// issuing, with every invoice just issued (copies as set in each customer profile).
+// with a success message. Right after issuing, the print window opens by itself with every invoice
+// just issued (copies as set in each customer profile), and each one is emailed when the customer has
+// "Email invoices automatically" on (done by the server on issue; the result says what happened).
+// issuedResult: the caller has already issued (draft editor, nothing to confirm) - the dialog opens
+// on the success message and prints.
 // `warnings` is given by a caller that has just checked the draft (the draft editor). Without it
 // (several drafts from Draft Invoices) every draft is checked here first, so each warning is
 // seen before it is confirmed - issuing confirms all of them.
 
-export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
+export default function IssueDialog({ drafts, warnings, onClose, onDone, issuedResult = null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
-  const [shareId, setShareId] = useState(null);
+  const [result, setResult] = useState(issuedResult);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
   const [checks, setChecks] = useState(null); // [{ id, customer, warnings, errors }] when checked here
   const total = drafts.reduce((t, d) => t + (Number(d.total) || 0), 0);
-  const checkHere = warnings === undefined;
+  const checkHere = warnings === undefined && !issuedResult;
 
   useEffect(() => {
     if (!checkHere) return undefined;
@@ -71,9 +73,8 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
       const r = await billingPost("/invoices/issue", { ids: drafts.map((d) => d.id), confirm_warnings: true });
       setResult(r);
       onDone?.(r);
-      // Print straight away (no separate Print click), then Share for a single invoice as before.
+      // Print straight away (no separate Print click); the email went out on issue.
       await printIssued(r.issued);
-      if (r.issued.length === 1 && !r.failed.length) setShareId(r.issued[0].id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -81,20 +82,43 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
     }
   }
 
-  if (shareId) return <ShareDialog invoiceId={shareId} justIssued onClose={() => (result?.issued.length > 1 ? setShareId(null) : onClose())} />;
+  // Already issued by the caller: print once on opening.
+  const printedOnce = useRef(false);
+  useEffect(() => {
+    if (!issuedResult || printedOnce.current) return;
+    printedOnce.current = true;
+    printIssued(issuedResult.issued);
+  }, [issuedResult]);
+
+  const ok = result?.issued || [];
+  const emailLine = (e) => {
+    if (!e) return null;
+    if (e.status === "SENT") return { cls: "ok", icon: <FiMail />, text: `Email sent to ${e.to.join(", ")}` };
+    if (e.status === "FAILED") return { cls: "err", icon: <FiAlertCircle />, text: "Email could not be sent - use Email on the invoice to try again" };
+    if (e.status === "OFF") return { cls: "", icon: <FiMinusCircle />, text: "Not emailed - automatic email is off for this customer" };
+    return { cls: "", icon: <FiMinusCircle />, text: "Not emailed - no invoice email saved for this customer" };
+  };
 
   return (
     <Modal onClose={busy ? undefined : onClose} narrow label="Issue invoices">
       <div className="bl-m-head">
         <div>
-          <h3>{result ? "Issue result" : `Issue ${drafts.length} invoice${drafts.length === 1 ? "" : "s"}?`}</h3>
+          <h3>{result ? (ok.length ? (ok.length === 1 ? `Invoice ${ok[0].invoice_number} issued` : `${ok.length} invoices issued`) : "Not issued") : `Issue ${drafts.length} invoice${drafts.length === 1 ? "" : "s"}?`}</h3>
           {!result && <div className="ac-sub">Total {rupees(total)}. Issued invoices get the next number and cannot be edited.</div>}
         </div>
         <button type="button" className="bl-x" onClick={onClose} aria-label="Close" disabled={busy}>✕</button>
       </div>
       <div className="bl-m-body">
         <Msg error={error || printError} />
-        {result && result.issued.length > 0 && <div className="ac-sub">{printing ? "Opening the print window…" : `The print window opened with ${result.issued.length} invoice${result.issued.length === 1 ? "" : "s"}.`}</div>}
+        {ok.length > 0 && (
+          <div className="is-ok">
+            <span className="is-ok-mark"><FiCheck /></span>
+            <div>
+              <b>{ok.length === 1 ? "Issued successfully" : `${ok.length} invoices issued successfully`}</b>
+              <span><FiPrinter aria-hidden="true" /> {printing ? "Opening the print window…" : printError ? "Print did not open - use Print again" : `Print window opened (${ok.length === 1 ? `${ok[0].print_copies || 1} cop${(ok[0].print_copies || 1) === 1 ? "y" : "ies"}` : `${ok.length} invoices`})`}</span>
+            </div>
+          </div>
+        )}
         {!result && !checkHere && warnings.length > 0 && (
           <div>
             <div className="bl-m-sec">Please confirm</div>
@@ -118,20 +142,20 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone }) {
         )}
         {result && (
           <>
-            {result.issued.map((i) => (
-              <div key={i.id} className="bl-chk" style={{ alignItems: "center" }}>
-                <span className="bl-dot" style={{ marginTop: 0 }} />
-                <span style={{ flex: 1 }}>
-                  <b>{i.invoice_number}</b> · {i.customer} · {rupees(i.total)}{i.advance_adjusted ? ` (${rupees(i.advance_adjusted)} from advance)` : ""}
-                  {i.email && (
-                    <span className={`bl-tag ${i.email.status === "SENT" ? "ok" : i.email.status === "FAILED" ? "err" : ""}`} style={{ marginLeft: 6 }}>
-                      {i.email.status === "SENT" ? `Emailed to ${i.email.to.join(", ")}` : i.email.status === "FAILED" ? "Email failed - share again" : i.email.status === "OFF" ? "Auto-email off for this customer" : "No email in profile"}
-                    </span>
-                  )}
-                </span>
-                <button type="button" className="ac-btn sm share" onClick={() => setShareId(i.id)}>Print / Share</button>
-              </div>
-            ))}
+            {result.issued.map((i) => {
+              const e = emailLine(i.email);
+              return (
+                <div key={i.id} className="is-row">
+                  <div className="is-row-top">
+                    <b>{i.invoice_number}</b>
+                    <span className="ac-sub">{i.customer}</span>
+                    <b className="is-amt">{rupees(i.total)}</b>
+                  </div>
+                  {i.advance_adjusted ? <div className="ac-sub">{rupees(i.advance_adjusted)} adjusted from the advance</div> : null}
+                  {e && <div className={`is-mail ${e.cls}`}>{e.icon}<span>{e.text}</span></div>}
+                </div>
+              );
+            })}
             {result.failed.map((f) => {
               const d = drafts.find((x) => x.id === f.id);
               return (

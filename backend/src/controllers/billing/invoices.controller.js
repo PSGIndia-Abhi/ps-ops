@@ -17,7 +17,8 @@ function sendPdf(res, content, fileName, options) {
   renderBillingInvoicePdf(content, res, options);
 }
 
-const pdfName = (inv) => `${inv.content?.title || "Tax Invoice"} ${String(inv.invoice_number || "draft").replace(/\//g, "-")}.pdf`;
+// The file is named by the invoice number alone ("/" cannot be in a file name): BSPMPL26-27-1199.pdf
+const pdfName = (inv) => `${String(inv.invoice_number || "Invoice draft").replace(/\//g, "-")}.pdf`;
 
 // GET /due?month=2026-11&type=&category=&q=
 const due = C.handle("Failed to load the bill run", async (req, res) => {
@@ -204,7 +205,10 @@ const download = C.handle("Failed to download the invoices", async (req, res) =>
   if (!rows.length) throw C.notFound("No issued invoices to download for this selection");
   if (rows.length > 500) throw C.bad("More than 500 invoices - pick a month or a customer");
   const items = rows.map((r) => ({ content: C.json(r.content, null), copies: withCopies ? Number(r.print_copies) || 1 : 1, cancelled: r.status === "CANCELLED" }));
-  const name = `Invoices ${month ? C.monthName(range.start) : "selected"}${withCopies ? " (print copies)" : ""}.pdf`;
+  // one invoice: named by its number; several: one combined file for the month / selection
+  const name = rows.length === 1
+    ? pdfName(rows[0])
+    : `Invoices ${month ? C.monthName(range.start) : "selected"}${withCopies ? " (print copies)" : ""}.pdf`;
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.setHeader("X-Invoice-Count", String(rows.length));

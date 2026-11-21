@@ -15,6 +15,7 @@ import InvoiceDelivery from "./InvoiceDelivery";
 import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
 import { Field, Modal, Msg, StatusBadge } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
+import { PageSkeleton } from "./Skeletons";
 
 // A contract and its price list. New: header + lines in one save. Existing: the header is saved on
 // its own; price lines are added, corrected, or re-priced from a date (the old price is kept as history).
@@ -166,7 +167,7 @@ export default function ContractForm() {
     }
   }
 
-  if (!isNew && !contract) return error ? <Msg error={error} /> : <div className="ac-card">Loading…</div>;
+  if (!isNew && !contract) return error ? <Msg error={error} /> : <PageSkeleton />;
 
   const typeIs = (t) => form.billing_type === t;
   const linesShown = isNew ? newLines : contract.lines;

@@ -23,6 +23,7 @@ import { FEEDBACK_HOME } from "../feedback/access";
 import { TASKPRO_HOME, TASKPRO_ROLES } from "../taskpro/access";
 import { billingGet } from "./billingApi";
 import { BILLING_HOME, useBillingMe } from "./access";
+import { CenterSpinner } from "./Skeletons";
 import "../../layouts/AccountantLayout.css";
 import "../accountant/accountant.css";
 import "./billing.css";
@@ -217,7 +218,7 @@ export default function BillingLayout() {
               {menuOpen && <div className="acc-mobile-panel">{navEl}</div>}
             </>
           )}
-          {me.ready ? <Outlet context={{ me }} /> : <div className="ac-card">Loading…</div>}
+          {me.ready ? <Outlet context={{ me }} /> : <CenterSpinner label="Loading billing" />}
         </main>
       </div>
     </div>

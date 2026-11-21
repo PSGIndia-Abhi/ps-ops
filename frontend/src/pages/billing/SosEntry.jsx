@@ -10,6 +10,7 @@ import { LuClipboardCheck, LuClipboardList, LuListPlus, LuScale, LuTrendingDown,
 import { CountUp, Modal, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";
 import { BILLING_HOME } from "./access";
+import { PageSkeleton } from "./Skeletons";
 
 // SOS entry: one customer, one month. The services agreed in the customer's billing profile come up
 // per outlet with "assigned"; the Service Coordinator enters "completed" (filled with the assigned
@@ -96,7 +97,7 @@ export default function SosEntry() {
   }, [options, agreed]);
 
   if (error) return <div className="ac-page"><Msg error={error} /></div>;
-  if (loading || !data) return <div className="ac-page"><div className="ac-card">Loading…</div></div>;
+  if (loading || !data) return <PageSkeleton rows={6} />;
 
   // Cards: each outlet that has agreed services or extras, plus "All outlets" for whole-customer lines.
   // A group based contract is one table: one row per company (its outlet under the name), priced as on the invoice.

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import {
-  FiCheck, FiCheckCircle, FiChevronDown, FiFileText, FiLock, FiMinus, FiPlus, FiPrinter, FiSearch, FiShare2, FiX, FiZap,
+  FiCheck, FiCheckCircle, FiChevronDown, FiFileText, FiLock, FiMinus, FiPlus, FiPrinter, FiMail, FiSearch, FiX, FiZap,
 } from "react-icons/fi";
 import { billingPost, printPdf, qs, useBilling } from "./billingApi";
 import { amountInWords, gstRateOf, lineAmount, totalsFor } from "./calc";
 import { CATEGORY_LABEL, amount, dmy, initials, monthLabel, rupees, thisMonth, today, typeLabel } from "./format";
-import ShareDialog from "./ShareDialog";
+import { emailInvoice } from "./emailInvoice";
 import { Field, Msg } from "./ui";
 
 // Generate Invoice (manual): an extra, one-off bill for a customer, outside the monthly Bill Run.
@@ -136,7 +136,8 @@ export default function ManualInvoice() {
   const [msg, setMsg] = useState({});
   const [done, setDone] = useState(null); // the issued invoice
   const [printNote, setPrintNote] = useState("");
-  const [sharing, setSharing] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [emailNote, setEmailNote] = useState({});
 
   // Lines in force on the invoice date (the server checks again).
   const lines = useMemo(() => (contract?.lines || []).filter((l) => !l.effective_from || l.effective_from <= invoiceDate), [contract, invoiceDate]);
@@ -220,6 +221,7 @@ export default function ManualInvoice() {
   function another() {
     setDone(null);
     setPrintNote("");
+    setEmailNote({});
     setQty({});
     setDescription(null);
     setContractId("");
@@ -235,15 +237,19 @@ export default function ManualInvoice() {
           <div className="mi-done-mark"><FiCheck /></div>
           <h2>Invoice {done.invoice_number} issued</h2>
           <p className="ac-sub">{done.customer} · {rupees(done.total)}</p>
-          <p className="mi-done-note"><FiPrinter aria-hidden="true" /> {printNote}{done.email?.status === "SENT" ? ` · Emailed to ${done.email.to.join(", ")}.` : ""}</p>
+          <p className="mi-done-note"><FiPrinter aria-hidden="true" /> {printNote}{done.email?.status === "SENT" ? ` · Email sent to ${done.email.to.join(", ")}.` : ""}</p>
+          <Msg {...emailNote} />
           <div className="mi-done-actions">
             <button type="button" className="ac-btn" onClick={() => print(done)}><FiPrinter /> Print again</button>
-            <button type="button" className="ac-btn" onClick={() => setSharing(true)}><FiShare2 /> Share</button>
+            <button type="button" className="ac-btn" disabled={emailing} onClick={async () => {
+              setEmailing(true);
+              setEmailNote({});
+              try { setEmailNote({ ok: await emailInvoice(done.id) }); } catch (err) { setEmailNote({ error: err.message }); } finally { setEmailing(false); }
+            }}><FiMail /> {emailing ? "Sending…" : "Email"}</button>
             <button type="button" className="ac-btn" onClick={() => navigate(`/billing/invoices/${done.id}`)}><FiFileText /> View invoice</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={another}><FiZap /> Generate another</button>
           </div>
         </div>
-        {sharing && <ShareDialog invoiceId={done.id} onClose={() => setSharing(false)} />}
       </div>
     );
   }

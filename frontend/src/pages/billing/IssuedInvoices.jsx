@@ -5,13 +5,13 @@ import { EmptyRow, Pager } from "../accountant/ui";
 import { exportCsv } from "../accountant/exportCsv";
 import { downloadFile, openPdf, printPdf, qs, useBilling, useCustomerOptions } from "./billingApi";
 import { amount, dmy, periodLabel, thisMonth, typeLabel } from "./format";
-import ShareDialog from "./ShareDialog";
+import { emailInvoice } from "./emailInvoice";
 import CancelDialog from "./CancelDialog";
 import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import useDebounced from "./useDebounced";
 import CustomerFilter from "./CustomerFilter";
 
-const SHARED_AS = { EMAIL: ["Emailed", FiMail], WHATSAPP: ["WhatsApp", FiMessageCircle], LINK: ["Link sent", FiLink], PRINT: ["Printed", FiPrinter], OTHER: ["Shared", FiShare2] };
+const SHARED_AS = { EMAIL: ["Email sent", FiMail], WHATSAPP: ["WhatsApp", FiMessageCircle], LINK: ["Link sent", FiLink], PRINT: ["Printed", FiPrinter], OTHER: ["Shared", FiShare2] };
 
 // Issued Invoices: numbered invoices with their collection status (from the receivables in the
 // Accountant Panel), PDF, Print / Share and Cancel.
@@ -30,7 +30,7 @@ export default function IssuedInvoices() {
   const [page, setPage] = useState(0);
   const q = useDebounced(search);
   const { data, error, loading, reload } = useBilling(`/invoices${qs({ status, month, type, q, company_ids: picked.join(","), page: page + 1, page_size: PAGE_SIZE })}`);
-  const [shareId, setShareId] = useState(null);
+  const [emailing, setEmailing] = useState(null); // the invoice being emailed
   const [cancelling, setCancelling] = useState(null);
   const [msg, setMsg] = useState({});
   const rows = data?.rows || [];
@@ -182,7 +182,16 @@ export default function IssuedInvoices() {
                       <td>
                         <div className="bl-actgroup" onClick={(e) => e.stopPropagation()}>
                           <button type="button" className="bl-actg" onClick={() => pdf(r.id)} title="View PDF" aria-label="View PDF"><FiExternalLink /></button>
-                          {!cancelled && me.can("SHARE_INVOICE") && <button type="button" className="bl-actg blue" onClick={() => setShareId(r.id)} title="Print / share" aria-label="Print or share"><FiShare2 /></button>}
+                          {!cancelled && me.can("SHARE_INVOICE") && (
+                            <button type="button" className="bl-actg blue" disabled={emailing === r.id} title="Email to the customer" aria-label={`Email ${r.invoice_number} to the customer`}
+                              onClick={async () => {
+                                setEmailing(r.id);
+                                setMsg({});
+                                try { setMsg({ ok: await emailInvoice(r.id) }); } catch (err) { setMsg({ error: err.message }); } finally { setEmailing(null); reload(); }
+                              }}>
+                              {emailing === r.id ? <span className="sk-spin sm" aria-hidden="true" /> : <FiMail />}
+                            </button>
+                          )}
                           {!cancelled && me.can("CANCEL_INVOICE") && (
                             <button type="button" className="bl-actg red" disabled={paidSomething} title={paidSomething ? "A payment is recorded - remove it on the invoice page first" : "Cancel invoice"} aria-label="Cancel invoice" onClick={() => setCancelling(r)}>
                               <FiXCircle />
@@ -201,7 +210,6 @@ export default function IssuedInvoices() {
         {data && <Pager total={data.total} pageSize={PAGE_SIZE} page={page} onPage={setPage} />}
       </div>
 
-      {shareId && <ShareDialog invoiceId={shareId} onClose={() => { setShareId(null); reload(); }} />}
       {cancelling && (
         <CancelDialog
           invoice={cancelling}

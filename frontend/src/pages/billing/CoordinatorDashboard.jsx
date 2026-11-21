@@ -8,6 +8,7 @@ import { Kpi, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";
 import CustomerFilter from "./CustomerFilter";
 import { BILLING_HOME } from "./access";
+import { RowsSkeleton } from "./Skeletons";
 
 // Service Coordinator dashboard: this month's SOS progress, what is still to do (most urgent first,
 // by the day Accounts must bill), recent submissions, and last month's leftovers.
@@ -90,7 +91,7 @@ export default function CoordinatorDashboard() {
       <div className="cd-grid">
         <div className="ac-card">
           <div className="bl-panel-title"><h3 className="ac-card-title" style={{ margin: 0 }}><FiClock /> To do</h3><span className="ac-sub">most urgent first</span></div>
-          {loading ? <div className="ac-sub">Loading…</div> : !pending.length ? (
+          {loading ? <RowsSkeleton rows={4} avatar /> : !pending.length ? (
             <div className="cd-empty"><FiCheckCircle /> All SOS for {monthLabel(month)} are submitted.</div>
           ) : (
             <div className="cd-list">
