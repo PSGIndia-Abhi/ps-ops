@@ -24,7 +24,8 @@ function readEmails(raw, field) {
   return out || null;
 }
 
-const copiesOf = (raw, field) => C.num(raw, field, { min: 1, max: 4, integer: true }) ?? 1;
+// Any number of print copies; 127 is only the TINYINT column's limit.
+const copiesOf = (raw, field) => C.num(raw, field, { min: 1, max: 127, integer: true }) ?? 1;
 const emailList = (s) => String(s || "").split(",").map((e) => e.trim()).filter(Boolean);
 
 // Price lines in force today, with what a month comes to.

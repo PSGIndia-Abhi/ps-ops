@@ -434,11 +434,17 @@ async function draftContract(conn, contractId, month, runId, userId) {
 
 /** The drafts of one period of a contract (one per outlet when the invoice is split). */
 async function draftPeriod(conn, contract, ctx, period, runId, userId) {
-  const [[existing]] = await conn.query(
-    "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED' AND is_manual = 0",
+  const periodName = P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start);
+  const byKind = Boolean(contract.separate_bills);
+  // The period's regular invoices already made. One invoice for the whole contract (bill_kind '')
+  // covers the period; with separate bills each half (SERVICE / CHEMICAL) is checked on its own below.
+  const [existingRows] = await conn.query(
+    "SELECT site_id, bill_kind FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED' AND is_manual = 0",
     [contract.id, period.start]
   );
-  if (Number(existing.n)) throw C.conflict(`${P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start)} is already drafted for ${contract.contract_code}`);
+  if (existingRows.length && (!byKind || existingRows.some((r) => !r.bill_kind))) {
+    throw C.conflict(`${periodName} is already drafted for ${contract.contract_code}`);
+  }
 
   const cl = await linesInForce(conn, contract.id, period.start);
   if (!cl.length) throw C.bad("The contract has no price lines in force for this period");
@@ -452,7 +458,6 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId) {
   const copiesFor = (siteId) => Number(outletCopies.find((o) => o.site_id === siteId)?.print_copies || ctx.profile.print_copies || 1);
   // Separate bills: the service lines and the chemical lines go on two invoices, each with its own
   // description. A line's kind comes from its contract line; SOS extra services are services.
-  const byKind = Boolean(contract.separate_bills);
   const kindOf = new Map(cl.map((c) => [c.id, c.item_kind || "SERVICE"]));
   const lineKind = (l) => (l.contract_line_id && kindOf.get(l.contract_line_id)) || "SERVICE";
   const groups = new Map();
@@ -460,6 +465,15 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId) {
     const key = `${split ? l.site_id || "" : ""}|${byKind ? lineKind(l) : ""}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(l);
+  }
+  // Separate bills: a half already made for this period (same outlet and kind) is not made again.
+  if (byKind && existingRows.length) {
+    for (const key of [...groups.keys()]) {
+      const [siteKey, kindKey] = key.split("|");
+      const siteId = split && siteKey ? siteKey : contract.invoice_grouping === "PER_SITE" ? contract.site_id : null;
+      if (existingRows.some((r) => r.bill_kind === kindKey && String(r.site_id ?? "") === String(siteId ?? ""))) groups.delete(key);
+    }
+    if (!groups.size) throw C.conflict(`${periodName} is already drafted for ${contract.contract_code} (both bills)`);
   }
 
   // The invoice is dated the day it is made (it can be changed on the draft). Dating it back to the
@@ -484,13 +498,14 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId) {
       `INSERT INTO billing_invoices
          (id, contract_id, company_id, site_id, bill_run_id, billing_type, customer_category, tax_mode, gst_rate, place_of_supply,
           ship_to_site_id, period_start, period_end, invoice_date, due_date, subtotal, cgst, sgst, igst, round_off, total,
-          print_copies, description, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
+          print_copies, description, bill_kind, status, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
       [
         id, contract.id, contract.company_id, siteId, runId, contract.billing_type, ctx.category, taxMode, gstRate,
         `${ctx.profile.state_code}-${ctx.profile.state_name}`, siteId || contract.site_id || groupLines.find((l) => l.site_id)?.site_id || null,
         period.start, period.end, invoiceDate, dueDate, totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.round_off, totals.total,
-        copiesFor(siteId), describe(template, period), userId, userId,
+        // bill_kind: '' = the whole contract; SERVICE / CHEMICAL = that half of a "separate bills" contract
+        copiesFor(siteId), describe(template, period), byKind ? lineKindKey : "", userId, userId,
       ]
     );
     await insertLines(conn, id, groupLines);
@@ -526,7 +541,14 @@ async function generateDrafts(pool, month, contractIds, userId) {
         "SELECT bc.contract_code, c.name AS customer FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id WHERE bc.id = ?",
         [contractId]
       );
-      skipped.push({ contract_id: contractId, contract_code: c?.contract_code || null, customer: c?.customer || null, reason: err.code === "ER_DUP_ENTRY" ? "Already drafted for this period" : err.message });
+      // ER_DUP_ENTRY: the database refused a second invoice for the same contract + outlet + period
+      // (+ bill kind). Say so plainly; for "separate bills" it usually means the migration
+      // 20261130_billing_invoice_bill_kind.sql has not been run yet.
+      if (err?.code === "ER_DUP_ENTRY") console.error("Bill Run duplicate invoice:", c?.contract_code, err.sqlMessage || err.message);
+      skipped.push({
+        contract_id: contractId, contract_code: c?.contract_code || null, customer: c?.customer || null,
+        reason: err.code === "ER_DUP_ENTRY" ? "An invoice for this period already exists (or, for separate bills, the database update 20261130 is not run yet)" : err.message,
+      });
     }
   }
   await pool.query("UPDATE billing_runs SET drafts_created = ?, skipped = ? WHERE id = ?", [drafts.length, JSON.stringify(skipped), runId]);

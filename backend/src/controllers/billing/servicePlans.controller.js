@@ -8,7 +8,9 @@ const T = require("../../services/billing/tracker.service");
 const { notifyUsers } = require("../../services/notifications.service");
 const { logAudit } = require("../../services/Audit.service");
 
+// Any number of copies: the 4th and every later copy is an "Extra copy".
 const COPY_LABELS = ["Original for Recipient", "Duplicate for Transporter", "Triplicate for Supplier", "Extra copy"];
+const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), 127) }, (_, i) => COPY_LABELS[Math.min(i, COPY_LABELS.length - 1)]);
 
 function planOut(plan, extra = {}) {
   const lines = (plan.lines || []).map((l) => ({
@@ -26,7 +28,7 @@ function planOut(plan, extra = {}) {
     effective_from: C.ymd(plan.effective_from),
     status: plan.status,
     print_copies: Number(plan.print_copies),
-    copy_labels: COPY_LABELS.slice(0, Number(plan.print_copies)),
+    copy_labels: copyLabels(plan.print_copies),
     invoices_per_month: Number(plan.invoices_per_month),
     invoice_split: plan.invoice_split,
     shortfall_highlight_day: Number(plan.shortfall_highlight_day),
@@ -138,7 +140,7 @@ const savePlan = C.handle("Failed to save the service plan", async (req, res) =>
     throw C.bad("effective_from must be the first day of a month and not in the past");
   }
   const printCopies = C.num(b.print_copies, "print_copies", { required: true, integer: true });
-  if (printCopies < 1 || printCopies > 4) throw C.bad("print_copies must be between 1 and 4");
+  if (printCopies < 1 || printCopies > 127) throw C.bad("print_copies must be from 1 to 127");
   const split = C.oneOf(b.invoice_split, "invoice_split", ["ALL_OUTLETS", "PER_OUTLET"], { fallback: "ALL_OUTLETS" });
   const highlightDay = C.num(b.shortfall_highlight_day, "shortfall_highlight_day", { min: 1, max: 31, integer: true }) ?? 25;
   if (!Array.isArray(b.lines) || !b.lines.length) throw C.bad("Add at least one service to the plan");

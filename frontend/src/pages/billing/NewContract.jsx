@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiArrowRight, FiCheck, FiCheckCircle, FiClock, FiFileText, FiPlus, FiRefreshCw } from "react-icons/fi";
+import { FiArrowRight, FiBookmark, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiEdit2, FiFileText, FiMail, FiPlus, FiRefreshCw, FiPrinter } from "react-icons/fi";
 import { ApiError, billingGet, billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
-import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
+import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, initials, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import { DeliveryFields } from "./InvoiceDelivery";
@@ -40,6 +40,11 @@ function suggestDescription(billingType, frequencyMonths, kind) {
   if (once) return "Pest control service carried out on {period}";
   return `Towards charges for the Pest control service carried out ${when}`;
 }
+/** Review: a small "✎ Edit" button that goes back to a step. */
+const EditStep = ({ onClick, label }) => (
+  <button type="button" className="nc-rv-edit" onClick={onClick} aria-label={`Edit ${label}`}><FiEdit2 aria-hidden="true" /> Edit</button>
+);
+const ordinalDay = (d) => `${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
 const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 6: "Print & email", 5: "Review" };
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const SQM = "sq.m";
@@ -305,6 +310,38 @@ export default function NewContract() {
     setResume(null);
   }
   const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* ignore */ } };
+  // An unfinished contract for the chosen customer blocks starting another one for it: continue
+  // it or discard it first. Checks this kind's draft (while "Continue?" is still open) and the
+  // other kind's draft (service based <-> group based).
+  const otherDraftKey = `bl-new-contract${groupMode ? "" : "-group"}:${localStorage.getItem("userId") || "me"}`;
+  const [otherDraft, setOtherDraft] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem(otherDraftKey) || "null");
+      return d && d.v === 1 && Date.now() - d.savedAt < 30 * 86400000 && d.companyId ? d : null;
+    } catch {
+      return null;
+    }
+  });
+  const sameCustomer = (d) => Boolean(d && companyId && String(d.companyId) === String(companyId));
+  // Service based form only (the group form picks a group, not one customer).
+  const blockingDraft = groupMode ? null : sameCustomer(resume) ? { ...resume, other: false } : sameCustomer(otherDraft) ? { ...otherDraft, other: true } : null;
+  function continueBlockingDraft() {
+    if (!blockingDraft.other) { continueDraft(); return; }
+    // The other kind's form: a full load so it starts from that draft.
+    window.location.assign(`/billing/contracts/new?${groupMode ? "" : "type=group&"}resume=1`);
+  }
+  function discardBlockingDraft() {
+    if (!blockingDraft.other) { startOver(); return; }
+    try { localStorage.removeItem(otherDraftKey); } catch { /* ignore */ }
+    setOtherDraft(null);
+  }
+  const savedOn = (t) => new Date(t).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  // Opened from the Contracts list's Draft row (?resume=1): continue the draft straight away.
+  useEffect(() => {
+    if (searchParams.get("resume") === "1" && resume) continueDraft();
+    // once, on open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The first invoice starts at "First bill from" when given (billed elsewhere until then), else at the start date.
   const next = nextBilling(terms, terms.first_bill_from || terms.start_date);
 
@@ -343,7 +380,9 @@ export default function NewContract() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
-  // The customer's invoice delivery settings (defaults when it has none yet).
+  // The customer's invoice delivery settings (defaults when it has none yet). A new contract
+  // starts with the late alert on (bill by the 25th) unless the customer already has a day.
+  const withBillByDefault = (f) => ({ ...f, bill_by_day: f.bill_by_day || 25 });
   useEffect(() => {
     setDelivery(null);
     setDeliveryOutlets([]);
@@ -352,10 +391,10 @@ export default function NewContract() {
     billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
       .then((d) => {
         if (!live) return;
-        setDelivery(deliveryFrom(d));
+        setDelivery(withBillByDefault(deliveryFrom(d)));
         setDeliveryOutlets(d.outlets || []);
       })
-      .catch(() => live && setDelivery(deliveryFrom(null)));
+      .catch(() => live && setDelivery(withBillByDefault(deliveryFrom(null))));
     return () => {
       live = false;
     };
@@ -454,6 +493,7 @@ export default function NewContract() {
       if (gg && gg.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${gg.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
       return "";
     }
+    if (step === 1 && blockingDraft) return `${blockingDraft.customerName || "This customer"} has an unfinished contract. Continue it or discard it first.`;
     if (step === 1) {
       if (!companyId) return "Choose the customer.";
       if (existingContract) return `${customer?.name?.trim() || "This customer"} already has contract ${existingContract.contract_code}. A customer can have only one contract - open it to make changes.`;
@@ -486,7 +526,7 @@ export default function NewContract() {
       if (addingPo) {
         if (!po.po_number.trim()) return "Type the PO number.";
         if (!po.po_date) return "Choose the PO date.";
-        if (po.kind === "ADVANCE" && po.po_amount === "") return "An advance PO needs its amount.";
+        if (po.po_amount === "" || Number(po.po_amount) <= 0) return "Type the PO amount.";
       } else if (!poId) return "Choose a purchase order, or add a new one.";
     }
     if (step === 4) {
@@ -710,7 +750,7 @@ export default function NewContract() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div>
+          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div>
           <h1 className="ac-title">New Contract</h1>
         </div>
       </div>
@@ -838,6 +878,15 @@ export default function NewContract() {
                     <button type="button" className="ac-btn" onClick={() => { chooseCustomer(""); setTimeout(() => customerSelect.current?.focus(), 0); }}><FiRefreshCw /> Choose another customer</button>
                   </div>
                 </div>
+              </div>
+            )}
+            {blockingDraft && !existingContract && (
+              <div className="ac-info error" style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <span>⚠ {customer?.name?.trim() || blockingDraft.customerName || "This customer"} has an unfinished {blockingDraft.other ? (groupMode ? "service based " : "group ") : ""}contract (saved {savedOn(blockingDraft.savedAt)}). Continue it or discard it first.</span>
+                <span className="ac-actions">
+                  <button type="button" className="ac-btn" onClick={discardBlockingDraft}>Discard</button>
+                  <button type="button" className="ac-btn ac-btn-primary" onClick={continueBlockingDraft}>Continue draft</button>
+                </span>
               </div>
             )}
             {/* The billing fields show from the start; they open for typing once a customer is chosen. */}
@@ -1038,14 +1087,8 @@ export default function NewContract() {
                 <input type="date" className="ac-input" value={po.open ? "" : po.expiry_date} disabled={!addingPo || po.open} onChange={(e) => setP({ expiry_date: e.target.value })} />
                 <label className="bl-toggle" style={{ paddingTop: 4 }}><input type="checkbox" checked={po.open} disabled={!addingPo} onChange={(e) => setP({ open: e.target.checked })} /> Open PO (no end date)</label>
               </Field>
-              <Field label="PO amount (₹, incl. GST)" required={po.kind === "ADVANCE"} hint={addingPo && po.kind !== "ADVANCE" ? "Leave empty for no limit" : ""}>
+              <Field label="PO amount (₹, incl. GST)" required>
                 <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={!addingPo} onChange={(e) => setP({ po_amount: e.target.value })} />
-              </Field>
-              <Field label="Type">
-                <select className="ac-select" value={po.kind} disabled={!addingPo} onChange={(e) => setP({ kind: e.target.value })}>
-                  <option value="STANDARD">Standard</option>
-                  <option value="ADVANCE">Advance (paid before the work)</option>
-                </select>
               </Field>
               <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={!addingPo} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
             </div>
@@ -1267,7 +1310,12 @@ export default function NewContract() {
                           <input type="checkbox" className="bl-cb" checked={l.picked} disabled={!l.item_name.trim() || l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
                           <input className="ac-input" list="nc-chemicals" value={l.item_name} maxLength={255} placeholder="Type or choose the chemical" onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Chemical" />
                         </div>
-                        <input type="number" min="0" step="0.001" className="ac-input" value={l.qty} placeholder="Qty" onChange={(e) => setLine(l.key, { qty: e.target.value })} aria-label="Chemical quantity" />
+                        {/* − qty + : whole steps from the buttons (never below 1), decimals can still be typed */}
+                        <div className="bl-stp sp-stp">
+                          <button type="button" disabled={!(Number(l.qty) > 1)} onClick={() => setLine(l.key, { qty: Number((Number(l.qty) - 1).toFixed(3)) })} aria-label="Less quantity">−</button>
+                          <input type="number" min="0" step="0.001" value={l.qty} placeholder="Qty" onChange={(e) => setLine(l.key, { qty: e.target.value })} aria-label="Chemical quantity" />
+                          <button type="button" onClick={() => setLine(l.key, { qty: Number(((Number(l.qty) || 0) + 1).toFixed(3)) })} aria-label="More quantity">+</button>
+                        </div>
                         <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Chemical rate" />
                         <span className="nc-num nc-amt">{l.rate === "" ? "—" : amount(lineTotal(l, termite))}</span>
                         <button type="button" className="bl-x" disabled={lines.filter((x) => x.kind === "CHEMICAL").length === 1 && !kinds.SERVICE} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="Remove chemical">✕</button>
@@ -1324,10 +1372,6 @@ export default function NewContract() {
         {step === 6 && (
           <>
             <h3 className="nc-title">Print &amp; email</h3>
-            <p className="ac-sub" style={{ margin: "-6px 0 16px" }}>
-              How many copies print when an invoice of {customer?.name?.trim() || "this customer"} is issued, and who gets it by email.
-              It applies to every invoice of the customer and can be changed later on the contract (Bill To &amp; delivery).
-            </p>
             {delivery ? (
               <DeliveryFields form={delivery} setForm={setDelivery} outlets={deliveryOutlets} />
             ) : (
@@ -1339,38 +1383,77 @@ export default function NewContract() {
         {step === 5 && (
           <>
             <h3 className="nc-title">Review</h3>
-            <dl className="nc-review">
-              {groupMode ? (
-                <>
-                  <dt>Group</dt><dd><b>{group?.name}</b></dd>
-                  <dt>Companies</dt>
-                  <dd>
-                    <div className="nc-rv-tags">{pickedCompanies.map((c) => <span key={c.company_id} className="nc-rv-tag">{c.name}</span>)}</div>
-                  </dd>
-                </>
-              ) : (
-                <><dt>Customer</dt><dd>{customer?.name} <span className="ac-sub">({CATEGORY_LABEL[customer?.category]})</span></dd></>
-              )}
-              <dt>Bill To</dt><dd>{profile?.billing_name}{profile?.gst_number ? ` · GSTIN ${profile.gst_number}` : ""}</dd>
-              <dt>Contract</dt>
-              <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
-              {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)} <span className="ac-sub">(billed elsewhere before this date)</span></dd></>}
-              <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
+            {/* Every detail, shown with icons, coloured tags (text colour only) and a small timeline.
+                Each box's Edit goes back to the step it came from. */}
+            <div className="nc-rv-boxes">
+              <div className="nc-rv-box">
+                <div className="nc-rv-box-h">{groupMode ? "Group" : "Customer"} <EditStep label={groupMode ? "group" : "customer"} onClick={() => setStep(1)} /></div>
+                <div className="nc-rv-who">
+                  <span className="nc-rv-av">{initials(groupMode ? group?.name || "?" : customer?.name || "?")}</span>
+                  <div>
+                    <b>{groupMode ? group?.name : customer?.name}</b>
+                    <div className="nc-rv-tagline">
+                      {groupMode ? <span className="nc-rv-t blue">{pickedCompanies.length} companies</span> : customer?.category && <span className="nc-rv-t blue">{CATEGORY_LABEL[customer.category]}</span>}
+                    </div>
+                  </div>
+                </div>
+                {groupMode && <div className="nc-rv-tags">{pickedCompanies.map((c) => <span key={c.company_id} className="nc-rv-tag">{c.name}</span>)}</div>}
+                <div className="nc-rv-line"><FiFileText aria-hidden="true" /><span>Bill To <b>{profile?.billing_name}</b></span></div>
+                {profile?.gst_number && <div className="nc-rv-line"><FiCreditCard aria-hidden="true" /><span className="nc-rv-mono" title="GSTIN">{profile.gst_number}</span></div>}
+                {needsPo && (
+                  <div className="nc-rv-line"><FiBookmark aria-hidden="true" /><span>PO <b className="nc-rv-mono">{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</b></span><EditStep label="purchase order" onClick={() => setStep(3)} /></div>
+                )}
+              </div>
+              <div className="nc-rv-box">
+                <div className="nc-rv-box-h">Contract <EditStep label="contract" onClick={() => setStep(2)} /></div>
+                <div className="nc-rv-tagline">
+                  <span className="nc-rv-t blue">{TYPES.find(([v]) => v === terms.billing_type)?.[1]}</span>
+                  {terms.billing_type !== "ONE_TIME" && <span className="nc-rv-t">{frequencyText(terms)}</span>}
+                  <span className="nc-rv-t">{terms.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span>
+                  <span className="nc-rv-t green">{gstOn ? `GST ${terms.gst_rate}%` : "No GST"}</span>
+                </div>
+                <ol className="nc-rv-time">
+                  <li><i /><span>Starts</span><b>{dmy(terms.start_date)}{terms.end_date ? ` → ${dmy(terms.end_date)}` : ""}</b></li>
+                  {terms.first_bill_from && terms.first_bill_from !== terms.start_date && (
+                    <li><i /><span>First bill from</span><b>{dmy(terms.first_bill_from)}</b><small>billed elsewhere before this date</small></li>
+                  )}
+                  {next && <li className="now"><i /><span>First invoice</span><b>{dmy(next.start)} → {dmy(next.end)}</b><small>Bill Run · {monthLabel(next.billMonth)}</small></li>}
+                </ol>
+              </div>
               {!groupMode && delivery && (
-                <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.invoice_emails.trim() ? ` · ${delivery.auto_email ? "emailed automatically to" : "email"} ${delivery.invoice_emails}` : " · no email"}{" "}<button type="button" className="bl-link" onClick={() => setStep(6)}>Change</button></dd></>
+                <div className="nc-rv-box">
+                  <div className="nc-rv-box-h">Print &amp; email <EditStep label="print and email" onClick={() => setStep(6)} /></div>
+                  <div className="nc-rv-stats">
+                    <div className="nc-rv-stat"><FiPrinter aria-hidden="true" /><b>{delivery.print_copies}</b><span>cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}</span></div>
+                    <div className="nc-rv-stat"><FiClock aria-hidden="true" /><b>{delivery.bill_by_day ? ordinalDay(Number(delivery.bill_by_day)) : "Off"}</b><span>late alert</span></div>
+                  </div>
+                  <div className="nc-rv-line"><FiMail aria-hidden="true" /><span>{delivery.invoice_emails.trim() || "No email"}</span></div>
+                  {delivery.invoice_emails.trim() && (
+                    <div className="nc-rv-tagline"><span className={`nc-rv-t ${delivery.auto_email ? "green" : ""}`}>● {delivery.auto_email ? "Auto email on issue" : "Not emailed automatically"}</span></div>
+                  )}
+                </div>
               )}
-              {separate ? (
-                <>
-                  <dt>Bills</dt><dd>Two separate invoices every period - pest control and chemicals (one contract, same PO)</dd>
-                  <dt>Pest control bill</dt><dd>{descriptionPreview(description, next)}</dd>
-                  <dt>Chemical bill</dt><dd>{descriptionPreview(chemicalDescription, next)}</dd>
-                </>
-              ) : (
-                <><dt>Description</dt><dd>{descriptionPreview(description, next)}</dd></>
-              )}
-              {needsPo && <><dt>Purchase order</dt><dd>{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</dd></>}
-              {next && <><dt>First invoice</dt><dd>{dmy(next.start)} to {dmy(next.end)} <span className="ac-sub">· Bill Run for {monthLabel(next.billMonth)}</span></dd></>}
-            </dl>
+            </div>
+            <div className="nc-rv-boxes one">
+              <div className="nc-rv-box">
+                <div className="nc-rv-box-h">
+                  <span>{separate ? <>Bills · 2 invoices every period <em>(one contract, same PO)</em></> : "Invoice description"}</span>
+                  <EditStep label={separate ? "bills" : "invoice description"} onClick={() => setStep(2)} />
+                </div>
+                <div className={`nc-rv-bills ${separate ? "two" : ""}`}>
+                  <div className="nc-rv-bill">
+                    {separate && <span className="nc-rv-t blue">Pest control bill</span>}
+                    <p>“{descriptionPreview(description, next)}”</p>
+                  </div>
+                  {separate && (
+                    <div className="nc-rv-bill">
+                      <span className="nc-rv-t purple">Chemical bill</span>
+                      <p>“{descriptionPreview(chemicalDescription, next)}”</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
             {/* What is billed: the services (group: done at every outlet, with their amounts), then
                 one row per invoice line, the total per period and the GST. */}
@@ -1439,7 +1522,7 @@ export default function NewContract() {
           {step === 5 ? (
             <button type="button" className="ac-btn ac-btn-primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create contract"}</button>
           ) : (
-            <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (step === 1 && (!customer?.category || !profile || (!groupMode && Boolean(existingContract))))} onClick={goNext}>
+            <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (step === 1 && (!customer?.category || !profile || Boolean(blockingDraft) || (!groupMode && Boolean(existingContract))))} onClick={goNext}>
               {busy ? "Saving…" : step === 1 ? "Save and continue →" : step === 3 && addingPo ? "Save PO and continue →" : "Next →"}
             </button>
           )}

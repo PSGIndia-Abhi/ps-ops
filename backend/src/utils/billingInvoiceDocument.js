@@ -15,6 +15,11 @@ const { amountInWords, SELLER, BANK, TERMS, LOGO, STAMP, FONT_DIR, FONTS } = req
 // ---------------------------------------------------------------------------
 
 const COPY_LABELS = ["ORIGINAL FOR RECIPIENT", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR SUPPLIER", "EXTRA COPY"];
+// Any number of copies: the 4th and every later copy is an "EXTRA COPY".
+// 127 is only the print_copies column's limit (TINYINT).
+const MAX_COPIES = 127;
+const copyLabel = (i) => COPY_LABELS[Math.min(i, COPY_LABELS.length - 1)];
+const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), MAX_COPIES) }, (_, i) => copyLabel(i));
 
 const inr2 = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const round2 = (n) => Math.round(((Number(n) || 0) + Number.EPSILON) * 100) / 100;
@@ -79,11 +84,13 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   // ---- Bill To / Ship To / Invoice Details ---------------------------------------
   // Group based invoices have no Ship To: Bill To and Invoice Details share the width half and half.
-  const noShip = Boolean(content.hide_ship_to);
+  // Termite invoices: Bill To and Invoice Details only - no "Service Offered To" column.
+  const termite = Boolean(content.termite);
+  const noShip = Boolean(content.hide_ship_to) || termite;
   const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
   const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  if (!noShip) font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
+  if (!termite) if (!noShip) font("B", 8.4).text("Service Offered To", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
@@ -110,7 +117,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const shipTo = noShip ? [] : (content.ship_to || []).length
     ? content.ship_to
     : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
-  for (const entry of shipTo) {
+  for (const entry of termite ? [] : shipTo) {
     if (entry.name) {
       font("B", 8).text(entry.name, c1 + PAD, shy, { width: shipW });
       shy += textH(entry.name, shipW, 8, "B") + 2;
@@ -142,14 +149,24 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- items -----------------------------------------------------------------------
-  const cols = [
-    { label: "#", w: 0.06, align: "left" },
-    // Bill Value starts at the page middle, in line with the Bill To / Invoice Details and tax dividers
-    { label: "Item name", w: 0.44, align: "left" },
-    { label: "Bill Value", w: 0.2, align: "right" },
-    { label: "Quantity", w: 0.15, align: "right" },
-    { label: "Amount", w: 0.15, align: "right" },
-  ];
+  // Termite: no Bill Value column (item name, quantity = treated area, amount). Otherwise Bill Value
+  // starts at the page middle, in line with the Bill To / Invoice Details and tax dividers.
+  const cols = termite
+    ? [
+      { label: "#", w: 0.06, align: "left" },
+      { label: "Item name", w: 0.64, align: "left" },
+      { label: "Quantity", w: 0.15, align: "right" },
+      { label: "Amount", w: 0.15, align: "right" },
+    ]
+    : [
+      { label: "#", w: 0.06, align: "left" },
+      { label: "Item name", w: 0.44, align: "left" },
+      { label: "Bill Value", w: 0.2, align: "right" },
+      { label: "Quantity", w: 0.15, align: "right" },
+      { label: "Amount", w: 0.15, align: "right" },
+    ];
+  const QTY = termite ? 2 : 3;
+  const AMT = termite ? 3 : 4;
   const colX = [];
   let cx = L;
   for (const c of cols) {
@@ -187,9 +204,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
     }
     font("R", 8).text(String(i + 1), colX[0] + PAD, y + 5, { width: colW(0) - PAD * 2 });
     font("B", 8).text(line.name, colX[1] + PAD, y + 5, { width: colW(1) - PAD * 2 });
-    moneyAt(line.bill_value, colX[2] + PAD, y + 5, colW(2) - PAD * 2);
-    font("R", 8).text(qtyText(line.qty), colX[3] + PAD, y + 5, { width: colW(3) - PAD * 2, align: "right" });
-    moneyAt(line.amount, colX[4] + PAD, y + 5, colW(4) - PAD * 2);
+    if (!termite) moneyAt(line.bill_value, colX[2] + PAD, y + 5, colW(2) - PAD * 2);
+    font("R", 8).text(qtyText(line.qty), colX[QTY] + PAD, y + 5, { width: colW(QTY) - PAD * 2, align: "right" });
+    moneyAt(line.amount, colX[AMT] + PAD, y + 5, colW(AMT) - PAD * 2);
     y += rowH;
   });
   // ---- the block under the items: four parts (Total, tax/amounts, amount in words, bank/terms) ----
@@ -243,7 +260,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   font("B", 8).text("Total", colX[1] + PAD, y + 5, { lineBreak: false });
-  moneyAt(content.subtotal, colX[4] + PAD, y + 5, colW(4) - PAD * 2, { bold: true });
+  moneyAt(content.subtotal, colX[AMT] + PAD, y + 5, colW(AMT) - PAD * 2, { bold: true });
   const totalRowEnd = y + 19;
   cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, totalRowEnd));
   y = totalRowEnd;
@@ -349,11 +366,11 @@ function renderBillingInvoicePdf(content, stream, { copies = 1, preview = false,
   const doc = new PDFDocument({ size: "A4", margin: 0, info: { Title: `${content.title || "Tax Invoice"} ${content.invoice_number || ""}`.trim() } });
   for (const [name, file] of Object.entries(FONTS)) doc.registerFont(name, path.join(FONT_DIR, file));
   doc.pipe(stream);
-  const count = Math.min(Math.max(Number(copies) || 1, 1), COPY_LABELS.length);
+  const count = Math.min(Math.max(Number(copies) || 1, 1), MAX_COPIES);
   const watermarkText = preview ? "PREVIEW" : cancelled ? "CANCELLED" : "";
   for (let i = 0; i < count; i += 1) {
     if (i > 0) doc.addPage();
-    drawCopy(doc, content, { label: count > 1 || labelSingle ? COPY_LABELS[i] : "", watermarkText });
+    drawCopy(doc, content, { label: count > 1 || labelSingle ? copyLabel(i) : "", watermarkText });
   }
   doc.end();
 }
@@ -368,11 +385,11 @@ function renderBillingInvoicesPdf(items, stream, { title = "Invoices" } = {}) {
   doc.pipe(stream);
   let first = true;
   for (const it of items) {
-    const count = Math.min(Math.max(Number(it.copies) || 1, 1), COPY_LABELS.length);
+    const count = Math.min(Math.max(Number(it.copies) || 1, 1), MAX_COPIES);
     for (let i = 0; i < count; i += 1) {
       if (!first) doc.addPage();
       first = false;
-      drawCopy(doc, it.content, { label: count > 1 ? COPY_LABELS[i] : "", watermarkText: it.cancelled ? "CANCELLED" : "" });
+      drawCopy(doc, it.content, { label: count > 1 ? copyLabel(i) : "", watermarkText: it.cancelled ? "CANCELLED" : "" });
     }
   }
   doc.end();
@@ -395,4 +412,4 @@ function billingInvoicePdfBuffer(content, options) {
   });
 }
 
-module.exports = { renderBillingInvoicePdf, renderBillingInvoicesPdf, billingInvoicePdfBuffer, COPY_LABELS };
+module.exports = { renderBillingInvoicePdf, renderBillingInvoicesPdf, billingInvoicePdfBuffer, COPY_LABELS, copyLabels };

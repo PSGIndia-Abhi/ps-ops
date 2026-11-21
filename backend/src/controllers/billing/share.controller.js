@@ -10,7 +10,7 @@ const crypto = require("crypto");
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../../db");
 const C = require("../../services/billing/common");
-const { renderBillingInvoicePdf, billingInvoicePdfBuffer, COPY_LABELS } = require("../../utils/billingInvoiceDocument");
+const { renderBillingInvoicePdf, billingInvoicePdfBuffer, copyLabels } = require("../../utils/billingInvoiceDocument");
 const { sendBillingInvoiceEmail } = require("../../utils/mailer");
 const { sendPdf, pdfName } = require("./invoices.controller");
 const { recipientsFor } = require("../../services/billing/delivery.service");
@@ -99,7 +99,7 @@ function defaults(inv) {
 // GET /invoices/:id/print?copies=3  -> one PDF with every copy, each labelled
 const print = C.handle("Failed to print the invoice", async (req, res) => {
   const inv = await issuedInvoice(pool, req.params.id);
-  const copies = C.num(req.query.copies, "copies", { min: 1, max: 4, integer: true }) ?? inv.print_copies;
+  const copies = C.num(req.query.copies, "copies", { min: 1, max: 127, integer: true }) ?? inv.print_copies;
   await logShare(pool, inv.id, req.user.id, { channel: "PRINT", copies, status: "LOGGED" });
   sendPdf(res, inv.content, pdfName(inv), { copies, labelSingle: true });
 });
@@ -124,7 +124,7 @@ const shareOptions = C.handle("Failed to load the share options", async (req, re
     total: inv.total,
     due_date: inv.due_date,
     print_copies: inv.print_copies,
-    copy_labels: COPY_LABELS.slice(0, inv.print_copies),
+    copy_labels: copyLabels(inv.print_copies),
     contacts: contacts.map((c) => ({ ...c, is_primary: Boolean(c.is_primary), is_payment_contact: true })),
     default_email: { to: contacts.map((c) => c.email).filter(Boolean), subject: d.subject, message: d.message },
     default_whatsapp_text: d.whatsapp,
