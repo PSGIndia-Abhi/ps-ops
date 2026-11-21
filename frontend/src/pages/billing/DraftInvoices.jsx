@@ -80,17 +80,17 @@ export default function DraftInvoices() {
           <p className="ac-sub">Check each draft, fill in quantities where needed, then issue. Numbers are given when issued.</p>
         </div>
         <div className="ac-actions">
-          {me.can("ISSUE_INVOICE") && (
-            <>
-              <button type="button" className="ac-btn" disabled={!picked.length} onClick={() => setIssuing(picked)}>
-                Issue selected ({picked.length})
-              </button>
-              {/* One click: every draft (all pages, up to 200) without errors; all are checked again in the dialog. */}
-              <button type="button" className="ac-btn green" disabled={!data?.total || loadingAll} onClick={issueAll}>
-                {loadingAll ? "Loading…" : `Issue all (${data?.total ?? 0})`}
-              </button>
-            </>
-          )}
+          {/* One button: with drafts ticked it issues those (count = ticked); with none ticked it issues
+              every draft (all pages, up to 200) without errors. All are checked again in the dialog. */}
+          {me.can("ISSUE_INVOICE") && (picked.length ? (
+            <button type="button" className="ac-btn green" onClick={() => setIssuing(picked)}>
+              Issue selected ({picked.length})
+            </button>
+          ) : (
+            <button type="button" className="ac-btn green" disabled={!data?.total || loadingAll} onClick={issueAll}>
+              {loadingAll ? "Loading…" : "Issue all"}
+            </button>
+          ))}
         </div>
       </div>
       <Msg {...msg} />
@@ -129,7 +129,7 @@ export default function DraftInvoices() {
                     <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" className="bl-cb" checked={selected.has(r.id)} disabled={r.check === "ERRORS"} onChange={() => toggle(r.id)} aria-label={`Select ${r.customer}`} />
                     </td>
-                    <td><b>{r.customer}</b>{r.is_group && <div className="bl-sub">Group contract</div>}</td>
+                    <td><b>{r.customer}</b></td>
                     <td>{r.contract_code}</td>
                     <td><TypeBadge type={r.billing_type} /></td>
                     <td>{periodLabel(r.period_start, r.period_end)}</td>

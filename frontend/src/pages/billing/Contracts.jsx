@@ -30,10 +30,12 @@ export default function Contracts() {
   const { data, error, loading } = useBilling(`/contracts${qs({ q, type, due_month: dueOnly ? thisMonth() : "" })}`);
   const { data: customers } = useBilling("/customers");
   const complete = useMemo(() => new Map((customers || []).map((c) => [c.company_id, Boolean(c.profile_complete)])), [customers]);
+  // Billing details of a contract: a group based contract uses the group's Bill To (not its companies' profiles).
+  const detailsOk = (c) => (c.contract_kind === "GROUP" ? c.group_bill_to_complete : complete.get(c.company_id));
   const all = (data || []).filter((c) => !picked.length || picked.includes(c.company_id));
   const count = (st) => all.filter((c) => c.status === st).length;
-  const missing = all.filter((c) => customers && complete.get(c.company_id) === false);
-  const rows = all.filter((c) => (!status || c.status === status) && (!missingOnly || (customers && complete.get(c.company_id) === false)));
+  const missing = all.filter((c) => customers && detailsOk(c) === false);
+  const rows = all.filter((c) => (!status || c.status === status) && (!missingOnly || (customers && detailsOk(c) === false)));
   const open = (c) => navigate(`/billing/contracts/${c.id}`);
 
   return (
@@ -135,8 +137,8 @@ export default function Contracts() {
                 <tr key={c.id} className="bl-rowlink" onClick={() => open(c)}>
                   <td>
                     <div className="bl-cell2" title={c.contract_code}>
-                      <span className="bl-avatar-sm">{initials(c.customer)}</span>
-                      <b>{c.customer}</b>
+                      <span className="bl-avatar-sm">{initials(c.group_name || c.customer)}</span>
+                      <b>{c.group_name || c.customer}</b>
                     </div>
                   </td>
                   <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} unit={c.frequency_unit} /></td>
@@ -145,7 +147,7 @@ export default function Contracts() {
                   <td><span className="bl-soft">{c.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
                   <td>{c.po_required ? <StatusBadge value="PARTIAL" label="Required" /> : <span className="ac-sub">—</span>}</td>
                   <td>
-                    {!customers ? <span className="ac-sub">…</span> : complete.get(c.company_id)
+                    {!customers ? <span className="ac-sub">…</span> : detailsOk(c)
                       ? <span className="bl-okline"><FiCheckCircle /> Complete</span>
                       : <span className="bl-okline bad"><FiAlertTriangle /> Missing</span>}
                   </td>

@@ -112,7 +112,6 @@ export default function SosList() {
                       {r.billing_group ? (
                         <>
                           <b>{r.billing_group.group}</b>
-                          <div className="bl-sub">Group contract · {r.billing_group.companies.join(", ")}</div>
                         </>
                       ) : <b>{r.customer}</b>}
                     </td>

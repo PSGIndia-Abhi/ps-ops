@@ -1785,3 +1785,9 @@
 .nc-exists-body p { margin: 10px 0 12px; font-size: 13px; color: #78350f; line-height: 1.45; }
 .nc-exists-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .nc-exists-actions .ac-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* contract price line: quantity stepper */
+.ct-qty { height: 36px; }
+.ct-qty button { height: 100%; padding: 0 11px; font-size: 15px; }
+.ct-qty button:disabled { color: #cbd5e1; cursor: default; }
+.ct-qty input { width: 48px; height: 100%; }

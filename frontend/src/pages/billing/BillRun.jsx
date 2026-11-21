@@ -145,7 +145,6 @@ export default function BillRun() {
                         {r.billing_group ? (
                           <>
                             <b>{r.billing_group.group}</b>
-                            <div className="bl-sub">Group contract · {r.billing_group.companies.map((c) => c.name).join(", ") || r.customer}</div>
                           </>
                         ) : (
                           <><b>{r.customer}</b><div className="bl-sub">{CATEGORY_LABEL[r.category] || "Customer type not set"}</div></>

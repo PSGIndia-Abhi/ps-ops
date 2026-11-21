@@ -8,11 +8,14 @@ import { STATES } from "./states";
 // payment terms. Shown on the contract page; a customer without them cannot be invoiced. They belong
 // to the customer, so every contract of the customer uses the same details.
 // customer: a row of GET /customers (company_id, name, display_name, category, gst_number, active_contracts).
+// group: { group_id, name, companies } for a group based contract - the card then shows and saves the
+// group's Bill To (the same details as New Contract step 1), billed in the group's name.
 
 const blank = (customer) => ({ billing_name: customer.display_name || "", billing_address: "", state_code: "29", payment_terms_days: 30, is_active: true, gst_number: customer.gst_number || "", isNew: true });
 const stateName = (code) => STATES.find(([c]) => c === code)?.[1] || "";
 
-export default function BillingProfileCard({ customer, canEdit, onSaved }) {
+export default function BillingProfileCard({ customer, canEdit, onSaved, group = null }) {
+  const url = group ? `/group-profiles/${encodeURIComponent(group.group_id)}` : `/profiles/${encodeURIComponent(customer.company_id)}`;
   const [loaded, setLoaded] = useState(null);
   const [edits, setEdits] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -23,29 +26,29 @@ export default function BillingProfileCard({ customer, canEdit, onSaved }) {
     let live = true;
     setLoaded(null);
     setEdits(null);
-    billingGet(`/profiles/${encodeURIComponent(customer.company_id)}`)
+    billingGet(url)
       .catch((err) => (err instanceof ApiError && err.status === 404 ? null : Promise.reject(err)))
       .then((p) => {
         if (!live) return;
-        setLoaded(p || blank(customer));
+        setLoaded(p ? (group ? { ...p, billing_name: group.name } : p) : group ? { ...blank(customer), billing_name: group.name, gst_number: "" } : blank(customer));
         setEditing(!p); // missing: open the form straight away
       })
       .catch((err) => live && setMsg({ error: err.message }));
     return () => {
       live = false;
     };
-  }, [customer]);
+  }, [customer, url]);
 
   const form = edits || loaded;
   const set = (patch) => setEdits({ ...form, ...patch });
   const commercial = customer.category === "COMMERCIAL";
-  const others = Math.max(0, Number(customer.active_contracts || 0) - 1);
+  const others = group ? 0 : Math.max(0, Number(customer.active_contracts || 0) - 1);
 
   async function save() {
     setBusy(true);
     setMsg({});
     try {
-      const saved = await billingPut(`/profiles/${encodeURIComponent(customer.company_id)}`, {
+      const saved = await billingPut(url, {
         billing_name: form.billing_name, billing_address: form.billing_address, state_code: form.state_code,
         payment_terms_days: Number(form.payment_terms_days) || 0, is_active: form.is_active,
         gst_number: (form.gst_number || "").trim().toUpperCase(),
@@ -72,9 +75,10 @@ export default function BillingProfileCard({ customer, canEdit, onSaved }) {
     <div className="ac-card" id="billing-details">
       <div className="bl-panel-title">
         <div>
-          <h3 className="ac-card-title" style={{ margin: 0 }}>Billing details</h3>
+          <h3 className="ac-card-title" style={{ margin: 0 }}>{group ? "Group billing details" : "Billing details"}</h3>
           <div className="ac-sub" style={{ fontSize: 12.5 }}>
             {customer.category ? `${CATEGORY_LABEL[customer.category]} · ${commercial ? "billed with GST" : "billed without GST"}` : "Customer type not set"}
+            {group && ` · one Bill To for the group ${group.name}${group.companies ? ` (${group.companies} compan${group.companies === 1 ? "y" : "ies"})` : ""}`}
             {others > 0 && ` · shared by ${others + 1} contracts of this customer`}
           </div>
         </div>
@@ -108,10 +112,10 @@ export default function BillingProfileCard({ customer, canEdit, onSaved }) {
         </dl>
       ) : (
         <div className="bl-grid">
-          {form.isNew && <div className="bl-msg err">This customer has no billing details yet, so it cannot be invoiced. Fill them in and save.</div>}
+          {form.isNew && <div className="bl-msg err">{group ? "This group has no billing details yet, so its contract cannot be invoiced. Fill them in and save." : "This customer has no billing details yet, so it cannot be invoiced. Fill them in and save."}</div>}
           <div className="bl-grid g2">
-            <Field label="Billing name" required>
-              <input className="ac-input" value={form.billing_name} disabled={!canEdit} maxLength={255} placeholder="No display name set for this customer. Type the billing name" onChange={(e) => set({ billing_name: e.target.value })} />
+            <Field label="Billing name" required hint={group ? "The group name: a group contract is billed in the group's name" : undefined}>
+              <input className="ac-input" value={form.billing_name} disabled={!canEdit || Boolean(group)} maxLength={255} placeholder="No display name set for this customer. Type the billing name" onChange={(e) => set({ billing_name: e.target.value })} />
             </Field>
             <Field label="GSTIN" required={commercial} hint={customer.category === "RESIDENTIAL" ? "Residential customers are billed without GST; leave blank" : "15 characters, e.g. 29ABCDE1234F1Z5. The state follows its first 2 digits."}>
               <input
@@ -146,9 +150,12 @@ export default function BillingProfileCard({ customer, canEdit, onSaved }) {
               <input type="number" min="0" max="365" className="ac-input" value={form.payment_terms_days} disabled={!canEdit} onChange={(e) => set({ payment_terms_days: e.target.value })} />
             </Field>
           </div>
-          <label className="bl-toggle">
-            <input type="checkbox" checked={Boolean(form.is_active)} disabled={!canEdit} onChange={(e) => set({ is_active: e.target.checked })} /> Active (can be invoiced)
-          </label>
+          {!group && (
+            <label className="bl-toggle">
+              <input type="checkbox" checked={Boolean(form.is_active)} disabled={!canEdit} onChange={(e) => set({ is_active: e.target.checked })} /> Active (can be invoiced)
+            </label>
+          )}
+          {group && <div className="ac-sub" style={{ fontSize: 12.5 }}>These details are the group&apos;s: saving changes the Bill To of every contract of {group.name}. The companies&apos; own billing details are not used.</div>}
           {others > 0 && <div className="ac-sub" style={{ fontSize: 12.5 }}>These details are the customer&apos;s: saving changes them for all {others + 1} of its contracts.</div>}
           <Msg {...msg} />
           {canEdit && (

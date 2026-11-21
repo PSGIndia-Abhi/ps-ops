@@ -960,7 +960,22 @@ async function checkInvoice(db, id) {
       "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED' AND is_manual = 0 AND IFNULL(site_id, '-') = IFNULL(?, '-')",
       [inv.contract.id, inv.period_start, inv.site_id]
     );
-    check("PERIOD", !Number(dup.n), Number(dup.n) ? "This period is already invoiced" : "Period not billed before");
+    let clash = Number(dup.n) > 0;
+    if (clash) {
+      // Separate bills: the service invoice and the chemical invoice of one period are two drafts,
+      // issued one after the other. Only an issued invoice of the same kind (service / chemical) clashes.
+      const kinds = `SELECT DISTINCT COALESCE(cl.item_kind, 'SERVICE') AS k
+                       FROM billing_invoice_lines l LEFT JOIN billing_contract_lines cl ON cl.id = l.contract_line_id
+                      WHERE l.invoice_id `;
+      const [mine] = await db.query(`${kinds}= ?`, [inv.id]);
+      const [issued] = await db.query(
+        `${kinds}IN (SELECT id FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED' AND is_manual = 0 AND IFNULL(site_id, '-') = IFNULL(?, '-'))`,
+        [inv.contract.id, inv.period_start, inv.site_id]
+      );
+      const issuedKinds = new Set(issued.map((r) => r.k));
+      clash = !mine.length || mine.some((r) => issuedKinds.has(r.k));
+    }
+    check("PERIOD", !clash, clash ? "This period is already invoiced" : "Period not billed before");
   }
   check("LINES", inv.lines.length > 0, inv.lines.length ? "Invoice has lines" : "Add at least one line");
   for (const l of inv.lines) {

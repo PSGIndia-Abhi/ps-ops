@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import {
   FiAlertCircle, FiCalendar, FiCheck, FiClock, FiDroplet, FiEdit2, FiFileText, FiHash, FiLayers, FiList, FiPause, FiPercent,
-  FiPlay, FiPlusCircle, FiRepeat, FiSliders, FiTrendingUp, FiXCircle,
+  FiPlay, FiPlusCircle, FiRepeat, FiSliders, FiXCircle,
 } from "react-icons/fi";
 import { LuIndianRupee } from "react-icons/lu";
 import { EmptyRow } from "../accountant/ui";
@@ -51,8 +51,8 @@ export default function ContractForm() {
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
   const [statusAction, setStatusAction] = useState(null);
-  const [repricing, setRepricing] = useState(null);
-  const [lineEdit, setLineEdit] = useState(null); // line being corrected or added
+  const [lineEdit, setLineEdit] = useState(null); // line being added
+  const [bulk, setBulk] = useState(null); // Edit: every current line editable at once ({ [line id]: edited line })
 
   const base = contract || { billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", invoice_grouping: "PER_CUSTOMER", po_required: false, gst_applicable: true, shortfall_billing: "PRO_RATA", start_date: today(), description_template: "", company_id: "" };
   const form = edits || { ...base, po_ids: (contract?.pos || []).map((p) => p.id) };
@@ -75,7 +75,10 @@ export default function ContractForm() {
   const thisMonthKey = today().slice(0, 7);
   const { data: profile, error: profileError, loading: profileLoading, reload: reloadProfile } = useBilling(companyId ? `/profiles/${encodeURIComponent(companyId)}` : null);
   const customerRow = (customers || []).find((c) => c.company_id === companyId) || null;
-  const profileMissing = Boolean(companyId) && !profileLoading && !profile && /no billing profile/i.test(profileError || "");
+  // A group based contract is billed to the group's Bill To: its main company's own profile is not needed.
+  const groupContract = contract?.contract_kind === "GROUP";
+  const profileMissing = !groupContract && Boolean(companyId) && !profileLoading && !profile && /no billing profile/i.test(profileError || "");
+  const groupBillToMissing = groupContract && contract.group_bill_to_complete === false;
   const poLabel = (p) => `${p.po_number} · ${p.is_open_po ? "Open PO" : `till ${dmy(p.expiry_date)}`}${p.kind === "ADVANCE" ? " · Advance" : ""}${p.po_amount === null ? "" : ` · ₹${amount(p.po_amount)}`}`;
 
   function header() {
@@ -151,14 +154,53 @@ export default function ContractForm() {
     }
   }
 
+  const lineChanged = (orig, l) => l && (String(l.item_name || "").trim() !== orig.item_name
+    || Number(l.default_qty || 0) !== Number(orig.default_qty || 0) || Number(l.rate) !== Number(orig.rate));
+  function startEdit() {
+    setLineEdit(null);
+    setMsg({});
+    setBulk(Object.fromEntries(contract.lines.filter((l) => !l.effective_to).map((l) => [l.id, { ...l, default_qty: l.default_qty ?? "" }])));
+  }
+  async function saveAllLines() {
+    const changed = contract.lines.filter((o) => !o.effective_to && lineChanged(o, bulk[o.id])).map((o) => ({ orig: o, line: bulk[o.id] }));
+    if (!changed.length) { setBulk(null); return; }
+    const empty = changed.find(({ line }) => !String(line.item_name || "").trim() || line.rate === "");
+    if (empty) { setMsg({ error: "Each line needs its name and rate." }); return; }
+    const noDate = changed.find(({ orig, line }) => Number(line.rate) !== Number(orig.rate) && !line.price_from);
+    if (noDate) { setMsg({ error: `Choose the date the new rate starts from for ${noDate.line.item_name}.` }); return; }
+    setBusy(true);
+    setMsg({});
+    let done = 0;
+    try {
+      for (const { orig, line } of changed) {
+        const body = lineBody(line);
+        const repriced = Number(line.rate) !== Number(orig.rate);
+        await billingPut(`/contracts/${id}/lines/${orig.id}`, { ...body, effective_from: repriced ? line.price_from : body.effective_from });
+        done += 1;
+      }
+      setBulk(null);
+      setMsg({ ok: `${done} line${done === 1 ? "" : "s"} saved.${changed.some(({ orig, line }) => Number(line.rate) !== Number(orig.rate)) ? " New rates apply from their dates; earlier invoices keep the old rates." : ""}` });
+      reload();
+    } catch (err) {
+      setMsg({ error: done ? `${done} line(s) saved, then: ${err.message}` : err.message });
+      if (done) reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveLine(line) {
+    const orig = line.id ? contract.lines.find((x) => x.id === line.id) : null;
+    const repriced = Boolean(orig) && Number(line.rate) !== Number(orig.rate);
+    if (repriced && !line.price_from) { setMsg({ error: "Choose the date the new rate starts from." }); return; }
     setBusy(true);
     setMsg({});
     try {
-      if (line.id) await billingPut(`/contracts/${id}/lines/${line.id}`, lineBody(line));
-      else await billingPost(`/contracts/${id}/lines`, lineBody(line));
+      const body = lineBody(line);
+      if (line.id) await billingPut(`/contracts/${id}/lines/${line.id}`, { ...body, effective_from: repriced ? line.price_from : body.effective_from });
+      else await billingPost(`/contracts/${id}/lines`, body);
       setLineEdit(null);
-      setMsg({ ok: "Price list saved." });
+      setMsg({ ok: repriced ? `Saved. The new rate applies from ${dmy(line.price_from)}; earlier invoices keep the old rate.` : "Price list saved." });
       reload();
     } catch (err) {
       setMsg({ error: err.message });
@@ -172,7 +214,7 @@ export default function ContractForm() {
   const typeIs = (t) => form.billing_type === t;
   const linesShown = isNew ? newLines : contract.lines;
   const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
-  const cols = sqmMode ? 7 : 5;
+  const cols = 7;
   // Termite bill structure: per square metre or per square foot (the unit of its area lines). A saved
   // contract keeps the unit of its price lines; new lines added to it use the same unit.
   const areaUnit = isNew ? (form.area_unit === SQFT ? SQFT : SQM) : linesShown.find(isSqm)?.unit === SQFT ? SQFT : SQM;
@@ -191,7 +233,8 @@ export default function ContractForm() {
   const noGst = residential || form.gst_applicable === false;
   const freq = frequencyText(form);
   const dirty = isNew || Boolean(edits);
-  const customerName = isNew ? customerRow?.name || "New contract" : contract.customer;
+  // a group based contract is billed in the group's name
+  const customerName = isNew ? customerRow?.name || "New contract" : contract.group_name || contract.customer;
   const TABS = [
     ["details", "Details", <FiSliders key="i" />, null],
     ["prices", "Services & prices", <FiList key="i" />, linesShown.filter((l) => !l.effective_to && (l.item_name || !isNew)).length],
@@ -251,6 +294,11 @@ export default function ContractForm() {
       </div>
 
       <Msg {...msg} />
+      {groupBillToMissing && (
+        <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
+          <span>⚠ The group's billing details (Bill To) are missing, so the Bill Run cannot make its invoice. They are filled in on New Contract, step 1, when this group is chosen.</span>
+        </div>
+      )}
       {profileMissing && (
         <div className="ac-info error" role="alert" style={{ marginBottom: 12 }}>
           <span>
@@ -431,7 +479,12 @@ export default function ContractForm() {
           A group based contract bills the group: its Bill To is the group's (set on New Contract). */}
       {tab === "billing" && !isNew && customerRow && (
         <div className="bl-stack">
-          <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />
+          {contract.contract_kind === "GROUP" ? (
+            <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reload}
+              group={{ group_id: contract.group_id, name: contract.group_name || contract.group || "", companies: (contract.companies || []).length }} />
+          ) : (
+            <BillingProfileCard customer={customerRow} canEdit={canEdit} onSaved={reloadProfile} />
+          )}
           {contract.contract_kind !== "GROUP" && <InvoiceDelivery companyId={companyId} canEdit={canEdit} />}
         </div>
       )}
@@ -442,8 +495,17 @@ export default function ContractForm() {
             <span className="ac-sub">
               {typeIs("TERMITE") ? `Rate per ${areaLabel} × treated area. Excluding GST.` : `Amount for each service. ${noGst ? "No GST is added." : `Excluding GST (${form.gst_rate ?? 18}% is added on the invoice).`}`}
             </span>
-            {!readOnly && companyId && (
+            {!readOnly && companyId && bulk && (
               <div className="ac-actions">
+                <button type="button" className="ac-btn sm" disabled={busy} onClick={() => { setBulk(null); setMsg({}); }}>Cancel</button>
+                <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy} onClick={saveAllLines}><FiCheck /> {busy ? "Saving…" : "Save changes"}</button>
+              </div>
+            )}
+            {!readOnly && companyId && !bulk && (
+              <div className="ac-actions">
+                {!isNew && contract.lines.some((l) => !l.effective_to) && (
+                  <button type="button" className="ac-btn sm" disabled={Boolean(lineEdit)} onClick={startEdit} title="Edit the names, quantities and rates"><FiEdit2 /> Edit</button>
+                )}
                 <button type="button" className="ac-btn sm" onClick={() => (isNew
                   ? setNewLines([...newLines.filter((l) => l.item_name || l.rate !== ""), mkLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")])
                   : setLineEdit(mkLine(sites.length === 1 ? sites[0].site_id : "", "", "CHEMICAL")))}><FiDroplet /> Add chemical</button>
@@ -456,11 +518,13 @@ export default function ContractForm() {
           <div className="ac-table-wrap">
             <table className="ac-table ac-stack bl-prices">
               <colgroup>
-                <col style={{ width: "22%" }} />
+                <col style={{ width: "16%" }} />
                 <col />
                 {sqmMode && <col style={{ width: 150 }} />}
                 {sqmMode && <col style={{ width: 150 }} />}
-                <col style={{ width: 170 }} />
+                {!sqmMode && <col style={{ width: 140 }} />}
+                {!sqmMode && <col style={{ width: 124 }} />}
+                <col style={{ width: 130 }} />
                 <col style={{ width: 130 }} />
                 <col style={{ width: 110 }} />
               </colgroup>
@@ -470,6 +534,8 @@ export default function ContractForm() {
                   <th>Service / chemical</th>
                   {sqmMode && <th className="ac-num">Rate per {areaLabel} (₹)</th>}
                   {sqmMode && <th className="ac-num">Area ({areaLabel})</th>}
+                  {!sqmMode && <th className="ac-num">Qty / month</th>}
+                  {!sqmMode && <th className="ac-num">Rate (₹)</th>}
                   <th className="ac-num">Amount (₹)</th>
                   <th>Valid from</th>
                   <th aria-label="Actions" />
@@ -481,8 +547,9 @@ export default function ContractForm() {
                 {companyId && isNew && newLines.map((l) => (
                   <LineRow key={l.key} line={l} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setNewLines(newLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))} onRemove={newLines.length > 1 ? () => setNewLines(newLines.filter((x) => x.key !== l.key)) : null} />
                 ))}
-                {!isNew && contract.lines.map((l) => (lineEdit?.id === l.id ? (
-                  <LineRow key={l.id} line={lineEdit} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} onChange={(patch) => setLineEdit({ ...lineEdit, ...patch })} fixedRate onSave={() => saveLine(lineEdit)} onCancel={() => setLineEdit(null)} busy={busy} />
+                {!isNew && contract.lines.map((l) => (bulk?.[l.id] ? (
+                  <LineRow key={l.id} line={bulk[l.id]} sqmMode={sqmMode} sites={sites} groups={serviceGroups} catalog={catalog} original={l}
+                    onChange={(patch) => setBulk((b) => ({ ...b, [l.id]: { ...b[l.id], ...patch } }))} />
                 ) : (
                   <tr key={l.id}>
                     <td>{l.site || <span className="ac-sub">All outlets</span>}</td>
@@ -493,20 +560,15 @@ export default function ContractForm() {
                     </td>
                     {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
                     {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
+                    {!sqmMode && <td className="bl-num">{Number(l.default_qty) || 1}</td>}
+                    {!sqmMode && <td className="bl-num">{amount(l.rate)}</td>}
                     <td className="bl-num"><b>{amount(lineValue(l))}</b></td>
                     <td>
                       {dmy(l.effective_from)}
                       {l.effective_from > today() && <div className="sos-amber">Upcoming</div>}
                       {l.effective_to && <div className="bl-sub">till {dmy(l.effective_to)}</div>}
                     </td>
-                    <td>
-                      {!readOnly && !l.effective_to && (
-                        <div className="bl-actgroup" style={{ float: "right" }}>
-                          <button type="button" className="bl-actg" onClick={() => setLineEdit({ ...l, default_qty: l.default_qty ?? "" })} title="Edit (correct this line)" aria-label="Edit"><FiEdit2 /></button>
-                          <button type="button" className="bl-actg blue" onClick={() => setRepricing(l)} title="Change price from a date" aria-label="Change price"><FiTrendingUp /></button>
-                        </div>
-                      )}
-                    </td>
+                    <td />
                   </tr>
                 )))}
                 {!isNew && lineEdit && !lineEdit.id && (
@@ -543,7 +605,6 @@ export default function ContractForm() {
         </div>
       )}
 
-      {repricing && <RepriceDialog line={repricing} contractId={id} onClose={() => setRepricing(null)} onDone={() => { setRepricing(null); setMsg({ ok: "New price saved. The old price stays on earlier invoices." }); reload(); }} />}
       {statusAction && <StatusDialog contract={contract} status={statusAction} onClose={() => setStatusAction(null)} onDone={() => { setStatusAction(null); reload(); }} />}
     </div>
   );
@@ -565,7 +626,7 @@ function buildServiceGroups(jobServices, catalog) {
   ].filter(([, names]) => names.length);
 }
 
-function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, onSave, onCancel, busy, fixedRate = false }) {
+function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, onSave, onCancel, busy, original = null }) {
   const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
   const { data: chemicals } = useBilling(line.item_kind === "CHEMICAL" ? "/chemicals" : null);
   const sqm = isSqm(line);
@@ -582,16 +643,22 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
     onChange({ item_name: name, service_id: svc?.id || null, site_id: siteId || null, ...link(name) });
   }
   const total = sqm ? lineTotal(line) : line.rate === "" ? null : Number(line.rate) * (Number(line.default_qty) || 1);
-  const rateInput = (label) => (fixedRate
-    ? <span className="ac-sub" title="Use Change price to change the amount from a date">{amount(line.rate)}</span>
-    : <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.rate} placeholder="0.00" onChange={(e) => onChange({ rate: e.target.value })} aria-label={label} />);
+  const qtyMin = line.item_kind === "CHEMICAL" ? 0 : 1;
+  const rateInput = (label) => <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.rate} placeholder="0.00" onChange={(e) => onChange({ rate: e.target.value })} aria-label={label} />;
+  // a saved line whose rate is changed: the new rate starts from a date (the old one stays on earlier invoices)
+  const repriced = Boolean(original) && line.rate !== "" && Number(line.rate) !== Number(original.rate);
+  const fromDay = String(original?.effective_from || "").slice(0, 10);
+  const nextDay = /^\d{4}-\d{2}-\d{2}$/.test(fromDay) ? new Date(Date.parse(`${fromDay}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) : "";
   return (
     <tr className="bl-sel bl-price-edit">
       <td>
         <span className="bl-outlet">{outletName}</span>
       </td>
       <td>
-        {line.item_kind === "CHEMICAL" ? (
+        {original ? (
+          // editing a saved line: the name is typed, no list
+          <input className="bl-cell-input" value={line.item_name || ""} maxLength={255} placeholder={line.item_kind === "CHEMICAL" ? "Chemical name" : "Service name"} onChange={(e) => onChange({ item_name: e.target.value })} aria-label={line.item_kind === "CHEMICAL" ? "Chemical" : "Service"} />
+        ) : line.item_kind === "CHEMICAL" ? (
           <>
             <input className="bl-cell-input" list="cf-chemicals" value={line.item_name || ""} maxLength={255} placeholder="Type or choose the chemical" onChange={(e) => onChange({ item_name: e.target.value, plan_service_type: "", plan_sub_service: "" })} aria-label="Chemical" />
             <datalist id="cf-chemicals">{(chemicals || []).map((c) => <option key={c} value={c} />)}</datalist>
@@ -607,8 +674,6 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
             {line.item_name && !known && <option value={line.item_name}>{line.item_name}</option>}
           </select>
         )}
-        {/* Lines with the same summary print as ONE invoice line (this text, their total). */}
-        <input className="bl-cell-input" style={{ marginTop: 6 }} value={line.invoice_group || ""} maxLength={255} placeholder="Invoice line summary (optional)" title="Lines with the same summary print as one invoice line" onChange={(e) => onChange({ invoice_group: e.target.value })} aria-label="Invoice line summary" />
       </td>
       {sqmMode && <td>{sqm ? rateInput(line.unit === SQFT ? "Rate per square foot" : "Rate per square metre") : <span className="ac-sub">—</span>}</td>}
       {sqmMode && (
@@ -617,48 +682,34 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
             : <span className="ac-sub">—</span>}
         </td>
       )}
-      <td className="bl-num">{sqm ? <b>{total === null ? "—" : amount(total)}</b> : rateInput("Amount")}</td>
-      <td>{line.effective_from ? dmy(line.effective_from) : <span className="ac-sub">From start</span>}</td>
+      {!sqmMode && (
+        <td>
+          <div className="bl-stp sp-stp ct-qty">
+            <button type="button" onClick={() => onChange({ default_qty: String(Math.max(qtyMin, (Number(line.default_qty) || qtyMin) - 1)) })} disabled={(Number(line.default_qty) || qtyMin) <= qtyMin} aria-label="Less">−</button>
+            <input type="number" min={qtyMin} max="999" step={line.item_kind === "CHEMICAL" ? "0.01" : "1"} value={line.default_qty ?? ""} placeholder="1" onChange={(e) => onChange({ default_qty: e.target.value })} aria-label={line.item_kind === "CHEMICAL" ? "Quantity" : "Services per month"} />
+            <button type="button" onClick={() => onChange({ default_qty: String(Math.min(999, (Number(line.default_qty) || 0) + 1)) })} aria-label="More">+</button>
+          </div>
+        </td>
+      )}
+      {!sqmMode && <td>{rateInput("Rate")}</td>}
+      <td className="bl-num">{sqm || !sqmMode ? <b>{total === null ? "—" : amount(total)}</b> : rateInput("Amount")}</td>
+      <td>
+        {repriced ? (
+          <>
+            <input type="date" className="bl-cell-input" min={nextDay} value={line.price_from || ""} onChange={(e) => onChange({ price_from: e.target.value })} aria-label="New rate from" />
+            <div className="bl-sub">New rate from (was ₹{amount(original.rate)})</div>
+          </>
+        ) : line.effective_from ? dmy(line.effective_from) : <span className="ac-sub">From start</span>}
+      </td>
       <td>
         {onSave ? (
           <div className="ac-actions" style={{ justifyContent: "flex-end" }}>
-            <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy || !line.item_name || line.rate === "" || (sqm && !line.default_qty)} onClick={onSave}>Save</button>
+            <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy || !String(line.item_name || "").trim() || line.rate === "" || (sqm && !line.default_qty) || (repriced && !line.price_from)} onClick={onSave}>Save</button>
             <button type="button" className="ac-btn sm" onClick={onCancel}>Cancel</button>
           </div>
         ) : onRemove ? <div style={{ textAlign: "right" }}><button type="button" className="bl-x" style={{ fontSize: 15 }} onClick={onRemove} aria-label="Remove">✕</button></div> : null}
       </td>
     </tr>
-  );
-}
-
-function RepriceDialog({ line, contractId, onClose, onDone }) {
-  const [rate, setRate] = useState(line.rate);
-  const [from, setFrom] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit() {
-    setBusy(true);
-    setError("");
-    try {
-      await billingPut(`/contracts/${contractId}/lines/${line.id}`, { rate, effective_from: from });
-      onDone();
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal onClose={onClose} narrow label="Change price">
-      <div className="bl-m-head"><div><h3>Change price</h3><div className="ac-sub">{line.item_name}{line.site ? ` · ${line.site}` : ""} · now ₹{amount(line.rate)} from {dmy(line.effective_from)}</div></div><button type="button" className="bl-x" onClick={onClose} aria-label="Close">✕</button></div>
-      <div className="bl-m-body">
-        <div className="bl-grid g2">
-          <Field label="New rate (₹, excl. GST)" required><input type="number" min="0" step="0.01" className="ac-input" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
-          <Field label="Starts on" required hint="The current price ends the day before."><input type="date" className="ac-input" min={line.effective_from} value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
-        </div>
-        <Msg error={error} />
-      </div>
-      <div className="bl-m-foot"><span /><div className="ac-actions"><button type="button" className="ac-btn" onClick={onClose}>Cancel</button><button type="button" className="ac-btn ac-btn-primary" disabled={busy || !from || rate === "" || Number(rate) === Number(line.rate)} onClick={submit}>Save new price</button></div></div>
-    </Modal>
   );
 }
 
