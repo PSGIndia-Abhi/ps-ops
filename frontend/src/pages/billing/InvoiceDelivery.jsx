@@ -3,6 +3,7 @@ import { FiMail, FiPrinter } from "react-icons/fi";
 import { billingPut, useBilling } from "./billingApi";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { Field, Msg } from "./ui";
+import { RowsSkeleton } from "./Skeletons";
 
 // Invoice delivery: how many copies are printed and where the invoice is emailed, for the whole
 // customer and per outlet, plus the bill-by day. Asked on New Contract (step 1) and edited on the
@@ -105,7 +106,7 @@ export default function InvoiceDelivery({ companyId, canEdit }) {
         <h3 className="ac-card-title">Invoice delivery</h3>
         <span className="ac-sub" style={{ fontSize: 12 }}>For every invoice of this customer</span>
       </div>
-      {loading && !data && <div className="ac-sub">Loading…</div>}
+      {loading && !data && <RowsSkeleton rows={2} />}
       <Msg error={error} />
       {data && !data.profile && <div className="ac-info error"><span>Save the Bill To above first, then the print copies and email.</span></div>}
       {form && (

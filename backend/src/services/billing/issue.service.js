@@ -38,6 +38,12 @@ async function skipIssuedPeriods(conn, contractId, userId) {
 
 const EPS = 0.005;
 
+// BILLING_ACCOUNTS_LINK=true (backend .env): every issued invoice is also added to the Accountant
+// Panel (invoices table, + its TDS), so the Collection Executive can collect and record payments on it.
+// Off (not set): only an invoice paid from a termite advance goes there, as before. Keep it off on live
+// until billing is set up there.
+const accountsLinkOn = () => /^(1|true|on|yes)$/i.test(String(process.env.BILLING_ACCOUNTS_LINK || "").trim());
+
 /** What the PDF prints, frozen on issue. */
 function buildContent(inv, number) {
   const multiSite = new Set(inv.lines.map((l) => l.site_id).filter(Boolean)).size > 1;
@@ -116,13 +122,14 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
     // 2. the next number in the main series, carrying on from Vyapar's last invoice (numbering.js)
     const { fy, seq, number } = await nextInvoiceNumber(conn, inv.invoice_date);
 
-    // 3. Not connected to the Accountant Panel for now: payments are recorded in Billing
-    // (payment.service.js). Only an invoice paid from a termite advance - a payment that lives in the
-    // Accountant Panel - still gets its receivable there, so the advance is used up and never twice.
+    // 3. The Accountant Panel receivable: every invoice while BILLING_ACCOUNTS_LINK is on; otherwise
+    // only an invoice paid from a termite advance - a payment that lives in the Accountant Panel - so
+    // the advance is used up and never twice. Payments recorded in Billing are kept in step with it
+    // (payment.service.js).
     const adv = await D.advanceFor(conn, inv.po_ids, { lock: true });
     const usesAdvance = Boolean(adv && adv.payments.some((p) => p.remaining > EPS));
     let receivableId = null;
-    if (usesAdvance) {
+    if (usesAdvance || accountsLinkOn()) {
       // Receivable in the existing invoices table + TDS snapshot. TDS follows the customer's TDS
       // setting (on the invoice amount or on the taxable value), so the taxable value (the subtotal,
       // before GST) is saved on the receivable and passed on: never guessed back from the total.

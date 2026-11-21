@@ -2,22 +2,23 @@ import { Fragment, useState } from "react";
 import { Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import {
   FiArrowLeft, FiCheckCircle, FiClock, FiDownload, FiExternalLink, FiFileText, FiLink, FiMail, FiMapPin,
-  FiMessageCircle, FiPaperclip, FiPlusCircle, FiPrinter, FiSend, FiShare2, FiTrash2, FiXCircle,
+  FiMessageCircle, FiPaperclip, FiPlusCircle, FiPrinter, FiShare2, FiTrash2, FiXCircle,
 } from "react-icons/fi";
-import { billingDelete, downloadFile, openPdf, useBilling } from "./billingApi";
+import { billingDelete, downloadFile, openPdf, printPdf, useBilling } from "./billingApi";
 import { amount, dmy, periodLabel, rupees } from "./format";
-import ShareDialog from "./ShareDialog";
+import { emailInvoice } from "./emailInvoice";
 import CancelDialog from "./CancelDialog";
 import PaymentDialog from "./PaymentDialog";
 import { modeLabel } from "./payModes";
 import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import { BILLING_HOME } from "./access";
+import { InvoiceSkeleton } from "./Skeletons";
 
 // One issued invoice, everything an accountant needs: who it is for, what it bills, the tax, the
 // money (paid / pending, payments recorded in Billing with TDS and proof), and every print and share.
 
 const CHANNEL = {
-  EMAIL: { icon: FiMail, label: "Emailed" },
+  EMAIL: { icon: FiMail, label: "Email sent" },
   WHATSAPP: { icon: FiMessageCircle, label: "WhatsApp" },
   LINK: { icon: FiLink, label: "Link created" },
   PRINT: { icon: FiPrinter, label: "Printed" },
@@ -31,7 +32,8 @@ export default function InvoiceView() {
   const navigate = useNavigate();
   const { data: inv, error, loading, reload } = useBilling(`/invoices/${id}`);
   const { data: shares, reload: reloadShares } = useBilling(inv && inv.status !== "DRAFT" ? `/invoices/${id}/shares` : null);
-  const [sharing, setSharing] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState("");
@@ -40,13 +42,13 @@ export default function InvoiceView() {
   const [removeReason, setRemoveReason] = useState("");
 
   if (error) return <div className="ac-page"><Msg error={error} /></div>;
-  if (loading || !inv) return <div className="ac-page"><div className="ac-card">Loading…</div></div>;
+  if (loading || !inv) return <InvoiceSkeleton />;
   if (inv.status === "DRAFT") return <Navigate to={`${BILLING_HOME}/drafts/${id}`} replace />;
 
   const cancelled = inv.status === "CANCELLED";
   const col = inv.collection; // payments recorded in Billing
   const paidPct = col && col.total ? Math.min(100, Math.round((col.paid * 100) / col.total)) : 0;
-  const paidSomething = Boolean(col && col.received + col.tds > 0);
+  const paidSomething = Boolean(col && col.received + col.tds + (col.accounts || 0) > 0);
   const canRecord = !cancelled && me.can("ISSUE_INVOICE");
 
   async function removePayment() {
@@ -72,7 +74,7 @@ export default function InvoiceView() {
     setBusy("download");
     setMsg({});
     try {
-      await downloadFile(`/invoices/${id}/pdf`, `Tax Invoice ${String(inv.invoice_number).replace(/\//g, "-")}.pdf`);
+      await downloadFile(`/invoices/${id}/pdf`, `${String(inv.invoice_number).replace(/\//g, "-")}.pdf`);
     } catch (err) {
       setMsg({ error: err.message });
     } finally {
@@ -110,8 +112,17 @@ export default function InvoiceView() {
         <button type="button" className="iv-tool" disabled={busy === "download"} onClick={download}><FiDownload /> {busy === "download" ? "Downloading…" : "Download"}</button>
         {!cancelled && me.can("SHARE_INVOICE") && (
           <>
-            <button type="button" className="iv-tool" onClick={() => setSharing(true)}><FiPrinter /> Print</button>
-            <button type="button" className="iv-tool primary" onClick={() => setSharing(true)}><FiSend /> Share / Email</button>
+            <button type="button" className="iv-tool" disabled={printing} onClick={async () => {
+              // straight to the print window, every copy set for this customer
+              setPrinting(true);
+              setMsg({});
+              try { await printPdf(`/invoices/${id}/print?copies=${inv.print_copies || 1}`); } catch (err) { setMsg({ error: err.message }); } finally { setPrinting(false); reloadShares(); }
+            }}><FiPrinter /> {printing ? "Opening…" : `Print${(inv.print_copies || 1) > 1 ? ` (${inv.print_copies} copies)` : ""}`}</button>
+            <button type="button" className="iv-tool primary" disabled={emailing} onClick={async () => {
+              setEmailing(true);
+              setMsg({});
+              try { setMsg({ ok: await emailInvoice(id) }); } catch (err) { setMsg({ error: err.message }); } finally { setEmailing(false); reloadShares(); }
+            }}><FiMail /> {emailing ? "Sending…" : "Email"}</button>
           </>
         )}
         <span className="iv-tool-gap" />
@@ -205,12 +216,13 @@ export default function InvoiceView() {
             </div>
             {!col ? <div className="ac-sub">—</div> : (
               <>
-                <div className="iv-pay-head"><StatusBadge value={cancelled ? "CANCELLED" : col.status} label={!cancelled && col.status === "PARTIAL" ? "Partially paid" : undefined} /><span className="ac-sub">{paidPct}% received</span></div>
+                <div className="iv-pay-head"><StatusBadge value={cancelled ? "CANCELLED" : col.status} label={!cancelled && col.status === "PARTIAL" ? "Partially paid" : undefined} /><span className="ac-sub">{paidPct}% received</span>{col.connected && <span className="iv-linked" title="Payments the Collection Executive records in the Accountant Panel show here, and payments recorded here show there">Linked to Accountant Panel</span>}</div>
                 <div className="iv-paybar"><span style={{ width: `${paidPct}%` }} /></div>
                 <dl className="iv-sum compact">
                   <dt>Invoice total</dt><dd>{rupees(col.total)}</dd>
                   {col.advance > 0 && <><dt>From advance</dt><dd className="ok">{rupees(col.advance)}</dd></>}
                   <dt>Received</dt><dd className="ok">{rupees(col.received)}</dd>
+                  {col.accounts > 0 && <><dt>Recorded in Accountant Panel</dt><dd className="ok">{rupees(col.accounts)}</dd></>}
                   {col.tds > 0 && <><dt>TDS deducted</dt><dd className="ok">{rupees(col.tds)}</dd></>}
                   <dt>Balance</dt><dd className={col.balance > 0 ? "bad" : ""}><b>{rupees(col.balance)}</b></dd>
                 </dl>
@@ -265,7 +277,6 @@ export default function InvoiceView() {
         </aside>
       </div>
 
-      {sharing && <ShareDialog invoiceId={id} onClose={() => { setSharing(false); reloadShares(); }} />}
       {paying && col && (
         <PaymentDialog
           invoice={{ id, invoice_number: inv.invoice_number, customer: inv.customer.name }}

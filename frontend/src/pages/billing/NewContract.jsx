@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiCheck, FiCheckCircle, FiClock, FiFileText, FiPlus } from "react-icons/fi";
+import { FiArrowRight, FiCheck, FiCheckCircle, FiClock, FiFileText, FiPlus, FiRefreshCw } from "react-icons/fi";
 import { ApiError, billingGet, billingPost, billingPut, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
-import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, monthLabel, nextBilling, today, unitOf } from "./format";
+import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import { DeliveryFields } from "./InvoiceDelivery";
@@ -109,6 +109,7 @@ export default function NewContract() {
   // its contract is opened instead. (The server checks it too, also for group contracts.)
   const { data: customerContracts } = useBilling(!groupMode && companyId ? `/contracts${qs({ company_id: companyId })}` : null);
   const existingContract = (Array.isArray(customerContracts) ? customerContracts : []).find((c) => c.status !== "ENDED") || null;
+  const customerSelect = useRef(null);
 
   // 2. contract terms
   const [terms, setTerms] = useState({
@@ -431,7 +432,8 @@ export default function NewContract() {
 
   // Step 1 shows the billing fields from the start: empty and locked until a customer is chosen.
   const shown = profile || { billing_name: "", gst_number: "", billing_address: "", state_code: "29", payment_terms_days: 30 };
-  const locked = groupMode ? !groupId || !profile : !customer?.category || !profile;
+  // Company based: also locked while the chosen customer already has a contract (choose another).
+  const locked = groupMode ? !groupId || !profile : !customer?.category || !profile || Boolean(existingContract);
 
   // ---- step checks and Next --------------------------------------------------------------------
   function problems() {
@@ -810,7 +812,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Customer and billing details</h3>
             <Field label="Customer" required>
-              <select className="ac-select" value={companyId} onChange={(e) => chooseCustomer(e.target.value)}>
+              <select ref={customerSelect} className="ac-select" value={companyId} onChange={(e) => chooseCustomer(e.target.value)}>
                 <option value="">Choose a customer…</option>
                 {(customers || []).map((c) => <option key={c.company_id} value={c.company_id}>{c.name}{!c.category ? " (customer type not set)" : ""}</option>)}
               </select>
@@ -820,13 +822,26 @@ export default function NewContract() {
             )}
             {/* One contract per customer: this customer has one already - open it instead of making another. */}
             {existingContract && (
-              <div className="ac-info error" style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <span>⚠ {customer?.name?.trim() || "This customer"} already has contract <b>{existingContract.contract_code}</b>. A customer can have only one contract - open it to make changes.</span>
-                <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/contracts/${existingContract.id}`)}>Open contract</button>
+              <div className="nc-exists" role="alert">
+                <span className="nc-exists-ic"><FiFileText /></span>
+                <div className="nc-exists-body">
+                  <b>{customer?.name?.trim() || "This customer"} already has a contract</b>
+                  <div className="nc-exists-meta">
+                    <span className="code">{existingContract.contract_code}</span>
+                    <span>{typeLabel(existingContract.billing_type, existingContract.frequency_months, existingContract.frequency_unit)}</span>
+                    <span className={`st ${String(existingContract.status).toLowerCase()}`}>{existingContract.status === "PAUSED" ? "Paused" : "Active"}</span>
+                    {existingContract.start_date && <span>since {dmy(existingContract.start_date)}</span>}
+                  </div>
+                  <p>A customer can have only one contract. Open it to change services or prices, or choose another customer.</p>
+                  <div className="nc-exists-actions">
+                    <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/contracts/${existingContract.id}`)}>Open contract <FiArrowRight /></button>
+                    <button type="button" className="ac-btn" onClick={() => { chooseCustomer(""); setTimeout(() => customerSelect.current?.focus(), 0); }}><FiRefreshCw /> Choose another customer</button>
+                  </div>
+                </div>
               </div>
             )}
             {/* The billing fields show from the start; they open for typing once a customer is chosen. */}
-            {customer?.category ? (
+            {existingContract ? null : customer?.category ? (
               <div className="nc-chip-row">
                 <span className={`ac-badge ${residential ? "b-purple" : "b-blue"}`}>{CATEGORY_LABEL[customer.category]}</span>
                 <span className="ac-sub">{residential ? "Billed without GST" : "Billed with GST"} · {!profile ? "Loading the billing details…" : profileSaved ? "Billing details found; check and continue" : "No billing details yet; fill them in"}</span>
@@ -1424,7 +1439,7 @@ export default function NewContract() {
           {step === 5 ? (
             <button type="button" className="ac-btn ac-btn-primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create contract"}</button>
           ) : (
-            <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (step === 1 && (!customer?.category || !profile))} onClick={goNext}>
+            <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (step === 1 && (!customer?.category || !profile || (!groupMode && Boolean(existingContract))))} onClick={goNext}>
               {busy ? "Saving…" : step === 1 ? "Save and continue →" : step === 3 && addingPo ? "Save PO and continue →" : "Next →"}
             </button>
           )}

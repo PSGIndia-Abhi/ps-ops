@@ -15,7 +15,7 @@ const { sendBillingInvoiceEmail } = require("../../utils/mailer");
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const list = (s) => String(s || "").split(",").map((e) => e.trim()).filter(Boolean);
-const fileName = (content, number) => `${content?.title || "Tax Invoice"} ${String(number || "").replace(/\//g, "-")}.pdf`;
+const fileName = (content, number) => `${String(number || "Invoice").replace(/\//g, "-")}.pdf`; // the invoice number alone
 
 /** Where an issued invoice is emailed: [addresses] (outlet first, else the customer's). */
 async function recipientsFor(db, inv) {

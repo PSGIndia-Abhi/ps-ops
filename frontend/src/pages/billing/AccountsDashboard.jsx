@@ -9,13 +9,14 @@ import CustomerFilter from "./CustomerFilter";
 import { Kpi, Msg } from "./ui";
 import useDebounced from "./useDebounced";
 import { BILLING_HOME } from "./access";
+import { RowsSkeleton } from "./Skeletons";
 
 // Accounts dashboard: the month at a glance and the three one-click actions.
 //   Generate all ready  -> drafts for every contract whose SOS is in and nothing blocks it
 //   Issue all drafts    -> checks every draft, shows all warnings, issues (and emails per profile)
 //   Download all issued -> every issued invoice of the month in one PDF (or with print copies)
 
-const EMAIL_LABEL = { SENT: ["Emailed", "ok"], FAILED: ["Email failed", "err"] };
+const EMAIL_LABEL = { SENT: ["Email sent", "ok"], FAILED: ["Email failed", "err"] };
 
 export default function AccountsDashboard() {
   const { me } = useOutletContext();
@@ -195,7 +196,7 @@ export default function AccountsDashboard() {
 
         <section className="ac-card ad-panel ad-late">
           <div className="bl-panel-title"><h3 className="ac-card-title" style={{ margin: 0 }}><FiAlertTriangle /> Late - bill-by day passed</h3><span className="bl-tag err">{data?.late.length ?? 0}</span></div>
-          {loading && !data ? <div className="ac-sub">Loading…</div> : !data?.late.length ? <div className="ad-empty ok"><FiCheckCircle /> Nobody is late.</div> : (
+          {loading && !data ? <RowsSkeleton rows={3} avatar /> : !data?.late.length ? <div className="ad-empty ok"><FiCheckCircle /> Nobody is late.</div> : (
             <div className="cd-list">
               {data.late.slice(0, 8).map((r) => (
                 <button key={r.contract_id} type="button" className="cd-item" onClick={() => (r.sos === "PENDING" ? goSos(r) : goRun())}>

@@ -5,6 +5,7 @@ import { ApiError, billingGet, billingPut, qs, useBilling } from "./billingApi";
 import { dmy, monthLabel, nextMonthStart, thisMonth } from "./format";
 import { Field, Kpi, Msg } from "./ui";
 import useDebounced from "./useDebounced";
+import { RowsSkeleton } from "./Skeletons";
 
 // Service Plans (set by the Service Coordinator): for each customer, which services it gets and
 // how many each month (counted across all its outlets), and how many print copies. One invoice
@@ -370,7 +371,7 @@ function PlanPanel({ target, canEdit, onClose, onSaved }) {
         </div>
       )}
 
-      {companyId && plan === undefined && !msg.error && <div className="ac-sub">Loading…</div>}
+      {companyId && plan === undefined && !msg.error && <RowsSkeleton rows={3} />}
 
       {companyId && form && tab === "plan" && (
         <>

@@ -4,8 +4,8 @@ import { billingPost, billingPut, openPdf, qs, useBilling } from "./billingApi";
 import { amountInWords, gstRateOf, lineAmount, totalsFor } from "./calc";
 import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, typeLabel } from "./format";
 import IssueDialog from "./IssueDialog";
-import ShareDialog from "./ShareDialog";
 import { Field, Msg, ServicesChip } from "./ui";
+import { InvoiceSkeleton } from "./Skeletons";
 
 // Draft invoice: header, lines (with services done against the plan and the billing basis), totals,
 // the checks before issuing, preview and issue. The lines are locked - items, rates and the billing
@@ -44,7 +44,7 @@ export default function DraftEditor() {
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
   const [issuing, setIssuing] = useState(false);
-  const [shareId, setShareId] = useState(null); // the invoice just issued, for Print / Share
+  const [issuedNow, setIssuedNow] = useState(null); // issued with nothing to confirm: the success message
   const issued = useRef(false);
 
   const editable = inv?.status === "DRAFT" && me.can("GENERATE_INVOICE");
@@ -128,12 +128,13 @@ export default function DraftEditor() {
         setIssuing(true);
         return;
       }
-      // Nothing to confirm: issue now and open Print / Share. confirm_warnings stays false, so a
+      // Nothing to confirm: issue now, then the success message prints (the server emailed it when the
+      // customer has automatic email on). confirm_warnings stays false, so a
       // warning that appears in the meantime stops the issue instead of being accepted unseen.
       const res = await billingPost("/invoices/issue", { ids: [id], confirm_warnings: false });
       if (res.issued?.length) {
         issued.current = true;
-        setShareId(res.issued[0].id);
+        setIssuedNow(res);
       } else {
         setMsg({ error: "The invoice was not issued:", errors: res.failed?.[0]?.errors || [] });
       }
@@ -144,7 +145,7 @@ export default function DraftEditor() {
     }
   }
 
-  if (loading && !inv) return <div className="ac-card">Loading…</div>;
+  if (loading && !inv) return <InvoiceSkeleton />;
   if (error && !inv) return <Msg error={error} />;
   if (!inv) return null;
 
@@ -338,12 +339,12 @@ export default function DraftEditor() {
           }}
         />
       )}
-      {shareId && (
-        <ShareDialog
-          invoiceId={shareId}
-          justIssued
+      {issuedNow && (
+        <IssueDialog
+          drafts={[{ id: inv.id, customer: inv.customer.name, total: inv.total }]}
+          issuedResult={issuedNow}
           onClose={() => {
-            setShareId(null);
+            setIssuedNow(null);
             navigate("/billing/invoices");
           }}
         />

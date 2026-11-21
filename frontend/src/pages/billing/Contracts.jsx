@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronRight, FiPauseCircle, FiPlus, FiSearch, FiUser, FiUsers, FiXCircle } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronRight, FiPauseCircle, FiPlus, FiSearch, FiXCircle } from "react-icons/fi";
+import { LuArrowRight, LuBuilding2, LuNetwork } from "react-icons/lu";
 import { EmptyRow } from "../accountant/ui";
 import { qs, useBilling, useCustomerOptions } from "./billingApi";
 import { dmy, thisMonth, initials } from "./format";
@@ -49,7 +50,7 @@ export default function Contracts() {
         )}
       </div>
 
-      {/* New contract: first choose the kind. Service based = the existing steps for one customer;
+      {/* New contract: first choose the kind. Company based = the steps for one customer (company);
           group based = companies of a group, one Bill To for the group. */}
       {choosing && (
         <Modal onClose={() => setChoosing(false)} narrow label="New contract">
@@ -59,15 +60,29 @@ export default function Contracts() {
           </div>
           <div className="bl-m-body">
             <div className="nc-kind-pick">
-              <button type="button" className="nc-kind-card" onClick={() => navigate("/billing/contracts/new?type=group")}>
-                <span className="nc-kind-ic"><FiUsers /></span>
-                <b>Group based contract</b>
-                <span className="ac-sub">Choose a group, tick its companies, one Bill To for the group</span>
+              <button type="button" className="nc-kind-card blue" onClick={() => navigate("/billing/contracts/new")}>
+                <span className="nc-kind-ic"><LuBuilding2 /></span>
+                <span className="nc-kind-txt">
+                  <b>Company based</b>
+                  <span>One company, its outlets and services. Billed to the company.</span>
+                </span>
+                <ul className="nc-kind-points">
+                  <li>Bill To of the company</li>
+                  <li>Per outlet or whole company</li>
+                </ul>
+                <span className="nc-kind-go">Start <LuArrowRight /></span>
               </button>
-              <button type="button" className="nc-kind-card" onClick={() => navigate("/billing/contracts/new")}>
-                <span className="nc-kind-ic"><FiUser /></span>
-                <b>Service based contract</b>
-                <span className="ac-sub">One customer and its services</span>
+              <button type="button" className="nc-kind-card violet" onClick={() => navigate("/billing/contracts/new?type=group")}>
+                <span className="nc-kind-ic"><LuNetwork /></span>
+                <span className="nc-kind-txt">
+                  <b>Group based</b>
+                  <span>Several companies of one group on a single invoice.</span>
+                </span>
+                <ul className="nc-kind-points">
+                  <li>One Bill To for the group</li>
+                  <li>Tick the companies to include</li>
+                </ul>
+                <span className="nc-kind-go">Start <LuArrowRight /></span>
               </button>
             </div>
           </div>

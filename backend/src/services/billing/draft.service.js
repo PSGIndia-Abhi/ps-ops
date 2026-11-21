@@ -3,6 +3,7 @@
 
 const crypto = require("crypto");
 const { v4: uuid } = require("uuid");
+const PAY = require("./payment.service");
 const C = require("./common");
 const calc = require("./calc");
 const P = require("./period");
@@ -572,11 +573,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
             bc.contract_kind, bc.group_id AS contract_group_id,
             ss.name AS ship_to_site, ss.address AS ship_to_address, ss.city AS ship_to_city,
             iu.name AS issued_by_name,
-            IF(bi.status = 'ISSUED', (CASE WHEN bi.advance_adjusted + (SELECT COALESCE(SUM(bp.amount + bp.tds_amount), 0) FROM billing_invoice_payments bp
-                                                                        WHERE bp.billing_invoice_id = bi.id AND bp.deleted_at IS NULL) >= bi.total - 0.005 THEN 'PAID'
-                                          WHEN bi.advance_adjusted + (SELECT COALESCE(SUM(bp.amount + bp.tds_amount), 0) FROM billing_invoice_payments bp
-                                                                        WHERE bp.billing_invoice_id = bi.id AND bp.deleted_at IS NULL) > 0.005 THEN 'PARTIAL'
-                                          ELSE 'PENDING' END), NULL) AS receivable_status
+            IF(bi.status = 'ISSUED', ${PAY.STATUS_SQL}, NULL) AS receivable_status
        FROM billing_invoices bi
        JOIN billing_contracts bc ON bc.id = bi.contract_id
        JOIN companies c ON c.id = bi.company_id
