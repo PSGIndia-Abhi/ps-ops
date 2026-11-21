@@ -74,7 +74,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
               WHERE l.invoice_id = bi.id AND l.services_planned IS NOT NULL) AS service_shortfall,
             (SELECT GROUP_CONCAT(po.po_number ORDER BY po.po_date SEPARATOR ', ') FROM billing_invoice_pos bp JOIN customer_pos po ON po.id = bp.po_id
               WHERE bp.invoice_id = bi.id) AS po_numbers,
-            (SELECT JSON_OBJECT('channel', s.channel, 'at', DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%s'), 'by', u.name)
+            (SELECT JSON_OBJECT('channel', s.channel, 'status', s.status, 'error', s.error_message, 'at', DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%s'), 'by', u.name)
                FROM billing_invoice_shares s LEFT JOIN users u ON u.id = s.created_by
               WHERE s.billing_invoice_id = bi.id ORDER BY s.created_at DESC LIMIT 1) AS last_shared
        FROM billing_invoices bi
