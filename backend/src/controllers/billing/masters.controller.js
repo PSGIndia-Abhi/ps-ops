@@ -194,6 +194,9 @@ function contractOut(c) {
     group_id: c.group_id || null,
     company_id: c.company_id,
     customer: c.customer || undefined,
+    // group based: the group's name and whether its Bill To (the group's billing details) is complete
+    group_name: c.group_name || null,
+    group_bill_to_complete: c.contract_kind === "GROUP" ? Number(c.group_bill_to_ok) > 0 : null,
     billing_type: c.billing_type,
     frequency_months: C.n2(c.frequency_months),
     // MONTH, or (Termite only) WEEK / DAY: one invoice per week / day
@@ -414,13 +417,19 @@ const listContracts = C.handle("Failed to load contracts", async (req, res) => {
   const [rows] = await pool.query(
     `SELECT bc.*, c.name AS customer, ${AREA_UNIT_SQL},
             (SELECT bi.invoice_number FROM billing_invoices bi
-              WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number
+              WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number,
+            IF(bc.contract_kind = 'GROUP', TRIM(gn.name), NULL) AS group_name,
+            IF(bc.contract_kind = 'GROUP', (SELECT COUNT(*) FROM billing_group_profiles gp
+              WHERE gp.group_id = bc.group_id AND gp.is_active = 1 AND TRIM(gp.billing_name) <> ''
+                AND TRIM(gp.billing_address) <> '' AND gp.state_code IS NOT NULL AND gp.state_code <> ''), NULL) AS group_bill_to_ok
        FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id
+       LEFT JOIN group_name gn ON gn.id = bc.group_id
       WHERE (? IS NULL OR bc.company_id = ?) AND (? IS NULL OR bc.billing_type = ?) AND (? IS NULL OR bc.status = ?)
         AND (? IS NULL OR bc.next_period_start <= ?)
-        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%'))
-      ORDER BY c.name, bc.contract_code`,
-    [companyId, companyId, type, type, status, status, dueMonth, dueMonth ? C.monthRange(dueMonth).end : null, q, q, q]
+        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%')
+             OR (bc.contract_kind = 'GROUP' AND gn.name LIKE CONCAT('%', ?, '%')))
+      ORDER BY COALESCE(IF(bc.contract_kind = 'GROUP', gn.name, NULL), c.name), bc.contract_code`,
+    [companyId, companyId, type, type, status, status, dueMonth, dueMonth ? C.monthRange(dueMonth).end : null, q, q, q, q]
   );
   res.json(rows.map(contractOut));
 });
@@ -429,8 +438,13 @@ async function contractDetail(db, id) {
   const [[c]] = await db.query(
     `SELECT bc.*, c.name AS customer, c.type AS customer_type, DATE_FORMAT(bc.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at_key, ${AREA_UNIT_SQL},
             (SELECT bi.invoice_number FROM billing_invoices bi
-              WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number
-       FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id WHERE bc.id = ?`,
+              WHERE bi.contract_id = bc.id AND bi.status = 'ISSUED' ORDER BY bi.issued_at DESC LIMIT 1) AS last_invoice_number,
+            IF(bc.contract_kind = 'GROUP', TRIM(gn.name), NULL) AS group_name,
+            IF(bc.contract_kind = 'GROUP', (SELECT COUNT(*) FROM billing_group_profiles gp
+              WHERE gp.group_id = bc.group_id AND gp.is_active = 1 AND TRIM(gp.billing_name) <> ''
+                AND TRIM(gp.billing_address) <> '' AND gp.state_code IS NOT NULL AND gp.state_code <> ''), NULL) AS group_bill_to_ok
+       FROM billing_contracts bc JOIN companies c ON c.id = bc.company_id
+       LEFT JOIN group_name gn ON gn.id = bc.group_id WHERE bc.id = ?`,
     [id]
   );
   if (!c) throw C.notFound("Contract not found");

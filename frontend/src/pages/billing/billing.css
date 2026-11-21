@@ -1720,3 +1720,8 @@
 /* Issued Invoices: a failed email / share (reason on hover) */
 .bl-sent.failed .bl-sent-ic { background: #fef2f2; color: #dc2626; }
 .bl-sent.failed b { color: #b91c1c; }
+/* contract price line: quantity stepper */
+.ct-qty { height: 36px; }
+.ct-qty button { height: 100%; padding: 0 11px; font-size: 15px; }
+.ct-qty button:disabled { color: #cbd5e1; cursor: default; }
+.ct-qty input { width: 48px; height: 100%; }

@@ -144,19 +144,19 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   // ---- items -----------------------------------------------------------------------
   const cols = [
     { label: "#", w: 0.06, align: "left" },
-    { label: "Item name", w: 0.46, align: "left" },
-    { label: "Bill Value", w: 0.18, align: "right" },
+    // Bill Value starts at the page middle, in line with the Bill To / Invoice Details and tax dividers
+    { label: "Item name", w: 0.44, align: "left" },
+    { label: "Bill Value", w: 0.2, align: "right" },
     { label: "Quantity", w: 0.15, align: "right" },
     { label: "Amount", w: 0.15, align: "right" },
   ];
   const colX = [];
   let cx = L;
   for (const c of cols) {
-    colX.push(cx);
+    colX.push(Math.round(cx));
     cx += W * c.w;
   }
   const colW = (i) => (i + 1 < cols.length ? colX[i + 1] : R) - colX[i];
-  const FOOTER_H = 310;
 
   function itemHeader(yy) {
     cols.forEach((c, i) => font("B", 8).text(c.label, colX[i] + PAD, yy + 5, { width: colW(i) - PAD * 2, align: c.align, lineBreak: false }));
@@ -167,12 +167,13 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   y = itemHeader(y);
 
   const lines = content.lines || [];
-  const minBodyEnd = y + 160;
+  let minBodyEnd = y + 160; // a short invoice keeps some empty table body on its first page only
   const qtyText = (q) => (Number.isInteger(Number(q)) ? String(Number(q)) : String(Number(q)));
+  // Lines fill each page; only the totals block moves to the next page when it does not fit.
   lines.forEach((line, i) => {
     const nameH = textH(line.name, colW(1) - PAD * 2, 8, "B");
     const rowH = Math.max(18, nameH + 8);
-    if (y + rowH > PAGE_H - 40 - (i === lines.length - 1 ? FOOTER_H : 0)) {
+    if (y + rowH > PAGE_H - 40) {
       cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, y));
       box(L, frameTop, W, y - frameTop);
       doc.addPage();
@@ -182,6 +183,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
       tableTop = y;
       hline(y);
       y = itemHeader(y);
+      minBodyEnd = 0;
     }
     font("R", 8).text(String(i + 1), colX[0] + PAD, y + 5, { width: colW(0) - PAD * 2 });
     font("B", 8).text(line.name, colX[1] + PAD, y + 5, { width: colW(1) - PAD * 2 });
@@ -190,18 +192,53 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
     moneyAt(line.amount, colX[4] + PAD, y + 5, colW(4) - PAD * 2);
     y += rowH;
   });
-  if (y + FOOTER_H > PAGE_H - 30) {
-    // The totals do not fit under the last line: continue on a new page.
-    cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, y));
+  // ---- the block under the items: four parts (Total, tax/amounts, amount in words, bank/terms) ----
+  // As many parts as fit go on the current page; the rest continue on the next page.
+  const BOTTOM = PAGE_H - 30;
+  const mid = L + Math.round(W * 0.5);
+  // The invoice's GST rate (copied from its contract); invoices from before the rate was stored are 18 %.
+  const gstRate = [5, 12, 18, 28].includes(Number(content.gst_rate)) ? Number(content.gst_rate) : 18;
+  const halfRate = gstRate / 2;
+  const taxRows =
+    content.tax_mode === "IGST" ? [["IGST", content.igst, gstRate]] : content.tax_mode === "NONE" ? [] : [["SGST", content.sgst, halfRate], ["CGST", content.cgst, halfRate]];
+  const taxTotal = round2((content.cgst || 0) + (content.sgst || 0) + (content.igst || 0));
+  const amountRows = [["Sub Total", content.subtotal]];
+  if (taxRows.length) amountRows.push([`Tax (${gstRate}%)`, taxTotal]);
+  if (Number(content.round_off)) amountRows.push(["Round off", content.round_off]);
+  const words = content.amount_in_words || amountInWords(content.total);
+  const b1 = L + Math.round(W * 0.335);
+  const b2 = L + Math.round(W * 0.67);
+  const bankX = L + PAD + 4;
+  const labelW = 62;
+  const valueW = b1 - bankX - PAD - labelW;
+  const termW = b2 - b1 - PAD * 2;
+
+  const totalPartH = 19;
+  const taxPartH = Math.max(24 + Math.max(taxRows.length, 1) * 24 + 4, 24 + amountRows.length * 24 - 6 + 21);
+  const wordsPartH = 32 + Math.max(textH(words, mid - L - PAD * 2, 8), textH(content.description || "", R - mid - PAD * 2, 8));
+  const bankKH = BANK.reduce((h, [k, v]) => h + Math.max(textH(k, labelW - 6, 7.8, "B"), textH(v, valueW, 7.8)) + 6, 24);
+  const termsH = TERMS.reduce((h, t) => h + textH(t, termW, 7.6, "B") + 10, 24);
+  const bankPartH = Math.max(bankKH, termsH, 104) + 4;
+
+  // Continue on a new page when `h` does not fit under y.
+  function fitPart(h) {
+    if (y + h <= BOTTOM) return;
     box(L, frameTop, W, y - frameTop);
     doc.addPage();
     pageMarks();
     y = 30;
     frameTop = y;
-    tableTop = y;
     hline(y);
-  } else {
-    y = Math.max(y, minBodyEnd);
+  }
+
+  // A short invoice keeps some empty table body, as long as the whole block still fits on the page.
+  const allPartsH = totalPartH + taxPartH + wordsPartH + bankPartH;
+  if (y + allPartsH <= BOTTOM) y = Math.min(Math.max(y, minBodyEnd), BOTTOM - allPartsH);
+
+  if (y + totalPartH > BOTTOM) {
+    cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, y));
+    fitPart(totalPartH);
+    tableTop = y;
   }
   hline(y);
 
@@ -213,14 +250,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- tax table (left) and amounts (right) -------------------------------------------
-  const mid = L + Math.round(W * 0.5);
+  fitPart(taxPartH);
   const taxCols = [L + PAD, L + 70, L + 160, L + 205];
   const taxTop = y;
-  // The invoice's GST rate (copied from its contract); invoices from before the rate was stored are 18 %.
-  const gstRate = [5, 12, 18, 28].includes(Number(content.gst_rate)) ? Number(content.gst_rate) : 18;
-  const halfRate = gstRate / 2;
-  const taxRows =
-    content.tax_mode === "IGST" ? [["IGST", content.igst, gstRate]] : content.tax_mode === "NONE" ? [] : [["SGST", content.sgst, halfRate], ["CGST", content.cgst, halfRate]];
   font("B", 8).text("Tax type", taxCols[0], y + 5, { lineBreak: false });
   font("B", 8).text("Taxable amount", taxCols[1], y + 5, { width: 85, align: "right", lineBreak: false });
   font("B", 8).text("Rate", taxCols[2], y + 5, { width: 40, align: "right", lineBreak: false });
@@ -238,10 +270,6 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
     moneyAt(amt, taxCols[3], ty, mid - taxCols[3] - PAD);
     ty += 24;
   }
-  const taxTotal = round2((content.cgst || 0) + (content.sgst || 0) + (content.igst || 0));
-  const amountRows = [["Sub Total", content.subtotal]];
-  if (taxRows.length) amountRows.push([`Tax (${gstRate}%)`, taxTotal]);
-  if (Number(content.round_off)) amountRows.push(["Round off", content.round_off]);
   let ay = y + 24;
   for (const [label, value] of amountRows) {
     font("R", 8).text(label, mid + PAD, ay, { lineBreak: false });
@@ -258,10 +286,10 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- amount in words (left) and description (right) --------------------------------
+  fitPart(wordsPartH);
   const wordsTop = y;
   font("B", 8.4).text("Invoice Amount In Words", L + PAD, y + 6, { width: mid - L - PAD * 2, align: "center" });
   font("B", 8.4).text("Description", mid + PAD, y + 6, { lineBreak: false });
-  const words = content.amount_in_words || amountInWords(content.total);
   font("R", 8).text(words, L + PAD, y + 26, { width: mid - L - PAD * 2, align: "center" });
   font("R", 8).text(content.description || "", mid + PAD, y + 26, { width: R - mid - PAD * 2 });
   const wordsH = Math.max(textH(words, mid - L - PAD * 2, 8), textH(content.description || "", R - mid - PAD * 2, 8));
@@ -270,18 +298,13 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   hline(y);
 
   // ---- bank details / terms / signatory --------------------------------------------------
-  const b1 = L + Math.round(W * 0.335);
-  const b2 = L + Math.round(W * 0.67);
+  fitPart(bankPartH);
   const bankTop = y;
   font("B", 8.4).text("Bank Details", L + PAD + 4, y + 6, { lineBreak: false });
   font("B", 8.4).text("TERMS AND CONDITIONS", b1 + PAD, y + 6, { lineBreak: false });
   font("R", 8).text(`For : ${SELLER.name}`, b2 + PAD, y + 12, { width: R - b2 - PAD * 2, align: "center" });
 
-  const bankX = L + PAD + 4;
-  const bankW = b1 - bankX - PAD;
-  const labelW = 62;
   const valueX = bankX + labelW;
-  const valueW = bankW - labelW;
   let ky = y + 24;
   for (const [k, v] of BANK) {
     font("B", 7.8).text(k, bankX, ky, { width: labelW - 6, lineBreak: false });
@@ -290,8 +313,21 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   }
   let ry = y + 24;
   for (const t of TERMS) {
-    font("R", 7.6).text(t, b1 + PAD, ry, { width: b2 - b1 - PAD * 2 });
-    ry += textH(t, b2 - b1 - PAD * 2, 7.6) + 10;
+    const tw = b2 - b1 - PAD * 2;
+    // our company name is printed in bold inside the term ("... in the name of BESTSERVE PEST MANAGEMENT PVT LTD.")
+    const at = t.toUpperCase().indexOf(SELLER.name.toUpperCase());
+    if (at >= 0) {
+      const before = t.slice(0, at);
+      const name = t.slice(at, at + SELLER.name.length);
+      const after = t.slice(at + SELLER.name.length);
+      font("R", 7.6).text(before, b1 + PAD, ry, { width: tw, continued: true });
+      font("B", 7.6).text(name, { continued: Boolean(after) });
+      if (after) font("R", 7.6).text(after);
+      ry += textH(t, tw, 7.6, "B") + 10;
+    } else {
+      font("R", 7.6).text(t, b1 + PAD, ry, { width: tw });
+      ry += textH(t, tw, 7.6) + 10;
+    }
   }
   const bankEnd = Math.max(ky, ry, y + 104) + 4;
   const stampTop = y + 34;

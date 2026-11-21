@@ -69,7 +69,7 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
             bc.contract_code, bi.billing_type, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start, DATE_FORMAT(bi.period_end, '%Y-%m-%d') AS period_end,
             bi.subtotal, bi.total, bi.advance_adjusted, bi.print_copies,
             IF(bi.status = 'ISSUED', ${PAY.STATUS_SQL}, NULL) AS receivable_status, ${PAY.PAID_SQL} AS paid_amount,
-            (SELECT COUNT(*) FROM billing_invoice_lines l WHERE l.invoice_id = bi.id AND l.pricing_basis <> 'FIXED' AND l.quantity = 0 AND l.adjustment_type <> 'MANUAL') AS lines_needing_input,
+            (SELECT COUNT(*) FROM billing_invoice_lines l WHERE l.invoice_id = bi.id AND l.pricing_basis <> 'FIXED' AND l.quantity = 0 AND l.adjustment_type <> 'MANUAL' AND l.services_planned IS NULL) AS lines_needing_input,
             (SELECT COALESCE(SUM(GREATEST(l.services_planned - l.services_done, 0)), 0) FROM billing_invoice_lines l
               WHERE l.invoice_id = bi.id AND l.services_planned IS NOT NULL) AS service_shortfall,
             (SELECT GROUP_CONCAT(po.po_number ORDER BY po.po_date SEPARATOR ', ') FROM billing_invoice_pos bp JOIN customer_pos po ON po.id = bp.po_id
