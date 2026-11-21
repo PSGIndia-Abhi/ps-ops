@@ -7,8 +7,10 @@ import IssueDialog from "./IssueDialog";
 import ShareDialog from "./ShareDialog";
 import { Field, Msg, ServicesChip } from "./ui";
 
-// Draft invoice editor: header, lines (with services done against the plan and the billing
-// basis), live totals, the checks before issuing, preview and issue.
+// Draft invoice: header, lines (with services done against the plan and the billing basis), totals,
+// the checks before issuing, preview and issue. The lines are locked - items, rates and the billing
+// basis come from the contract and the SOS. Only the invoice date, the PO and the blanks the Bill Run
+// could not fill (a chemical / area quantity, the rate of an extra service) can be entered here.
 // Preview and Issue save unsaved changes first, so Save is optional. Issue goes straight through
 // (then opens Print / Share) when there is nothing to confirm; warnings still ask first.
 
@@ -30,8 +32,6 @@ function formFrom(inv) {
     lines: inv.lines.map((l) => ({ ...l, key: l.id })),
   };
 }
-
-let newKey = 0;
 
 export default function DraftEditor() {
   const { me } = useOutletContext();
@@ -87,15 +87,9 @@ export default function DraftEditor() {
       const body = {
         version: inv.version,
         invoice_date: form.invoice_date,
-        ship_to_site_id: form.ship_to_site_id || null,
-        description: form.description,
         po_ids: form.po_ids,
-        lines: form.lines.map((l) => ({
-          contract_line_id: l.contract_line_id, site_id: l.site_id, item_name: l.item_name, invoice_group: l.invoice_group || null, sac_code: l.sac_code, unit: l.unit,
-          pricing_basis: l.pricing_basis, rate: l.rate, quantity: l.quantity, adjustment_type: l.adjustment_type,
-          services_planned: l.services_planned, services_done: l.services_done, days_worked: l.days_worked, days_in_period: l.days_in_period,
-          percent: l.percent, manual_amount: l.manual_amount, adjustment_reason: l.adjustment_reason,
-        })),
+        // only the blanks a line allows (quantity of a per-unit line, rate of an extra service)
+        lines: form.lines.map((l) => ({ id: l.id, quantity: l.quantity, rate: l.rate })),
       };
       const saved = await billingPut(`/invoices/${id}`, body);
       setData(saved);
@@ -202,7 +196,7 @@ export default function DraftEditor() {
               {/* a group based invoice bills the group (its companies are the lines): no Ship To */}
               {inv.contract.contract_kind !== "GROUP" && (
                 <Field label="Ship To">
-                  <select className="ac-select" value={form.ship_to_site_id} disabled={!editable} onChange={(e) => set({ ship_to_site_id: e.target.value })}>
+                  <select className="ac-select" value={form.ship_to_site_id} disabled>
                     <option value="">Same as Bill To</option>
                     {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
                     {form.ship_to_site_id && !sites.some((s) => s.site_id === form.ship_to_site_id) && <option value={form.ship_to_site_id}>{inv.ship_to?.name || form.ship_to_site_id}</option>}
@@ -225,7 +219,7 @@ export default function DraftEditor() {
                 )}
               </Field>
               <Field label="Description" className="bl-span4">
-                <input className="ac-input" value={form.description} disabled={!editable} maxLength={1000} onChange={(e) => set({ description: e.target.value })} />
+                <input className="ac-input" value={form.description} readOnly />
               </Field>
             </div>
           </div>
@@ -233,32 +227,32 @@ export default function DraftEditor() {
           <div className="ac-card">
             <div className="ac-card-head">
               <h3 className="ac-card-title">Invoice lines</h3>
-              {editable && (
-                <button type="button" className="ac-btn sm" onClick={() => set({ lines: [...form.lines, { key: `new-${(newKey += 1)}`, item_name: "", pricing_basis: "FIXED", unit: "nos", rate: 0, quantity: 1, adjustment_type: "NONE", services_planned: null, services_done: null }] })}>
-                  + Add line
-                </button>
-              )}
+              <span className="bl-lock-note">🔒 From the contract and the SOS</span>
             </div>
             <div className="ac-table-wrap">
               <table className="ac-table ac-stack">
                 <thead>
-                  <tr><th>Item</th><th className="ac-num">Rate (₹)</th><th>Services (done / plan)</th><th className="ac-num">Qty</th><th>Billing basis</th><th className="ac-num">Amount (₹)</th><th /></tr>
+                  <tr><th>Item</th><th className="ac-num">Rate (₹)</th><th>Services (done / plan)</th><th className="ac-num">Qty</th><th>Billing basis</th><th className="ac-num">Amount (₹)</th></tr>
                 </thead>
                 <tbody>
                   {form.lines.map((l) => {
                     const short = l.services_planned !== null && l.services_planned !== undefined && l.services_done < l.services_planned;
                     // Fixed amount contracts bill the agreed number even when fewer were done: no red row
                     const fixedBilled = short && inv.contract?.shortfall_billing === "FULL";
-                    const options = Object.keys(ADJ).filter((k) => (k === "SERVICES" ? l.services_planned : k === "FULL_DESPITE_SHORTFALL" ? short : true));
+                    // the only blanks a draft can fill: a per-unit quantity, the rate of an extra service
+                    const qtyOpen = editable && l.pricing_basis === "PER_UNIT";
+                    const rateOpen = editable && !l.contract_line_id;
+                    const blank = (qtyOpen && !Number(l.quantity)) || (rateOpen && !Number(l.rate));
                     return (
                       <tr key={l.key} className={short && !fixedBilled && l.adjustment_type !== "FULL_DESPITE_SHORTFALL" ? "bl-short" : ""}>
                         <td style={{ minWidth: 200 }}>
-                          {editable ? <input className="bl-cell-input" value={l.item_name} onChange={(e) => setLine(l.key, { item_name: e.target.value })} aria-label="Item" /> : <b>{l.item_name}</b>}
+                          <b>{l.item_name}</b>
+                          {blank && <span className="ac-badge b-amber" style={{ marginLeft: 6 }}>Enter {qtyOpen && !Number(l.quantity) ? "quantity" : "rate"}</span>}
                           <div className="bl-sub">{[l.site, l.sac_code && `SAC ${l.sac_code}`, l.unit && `per ${l.unit}`].filter(Boolean).join(" · ")}</div>
                           {l.invoice_group && <div className="bl-sub" style={{ color: "#1d4ed8" }}>Printed in one line: “{l.invoice_group}”</div>}
                         </td>
                         <td className="bl-num" style={{ width: 110 }}>
-                          {editable ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Rate" /> : amount(l.rate)}
+                          {rateOpen ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={l.rate} onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Rate" /> : amount(l.rate)}
                         </td>
                         <td>
                           <ServicesChip done={l.services_done} planned={l.services_planned} />
@@ -266,41 +260,13 @@ export default function DraftEditor() {
                           {l.missed_dates?.length > 0 && <div className="bl-err" style={{ marginTop: 4 }}>Not done: {l.missed_dates.map(dmy).join(", ")}</div>}
                         </td>
                         <td className="bl-num" style={{ width: 120 }}>
-                          {editable ? <input type="number" min="0" step="0.001" className="bl-cell-input num" value={l.quantity} onChange={(e) => setLine(l.key, { quantity: e.target.value })} aria-label="Quantity" /> : l.quantity}
+                          {qtyOpen ? <input type="number" min="0" step="0.001" className="bl-cell-input num" value={l.quantity} onChange={(e) => setLine(l.key, { quantity: e.target.value })} aria-label="Quantity" /> : l.quantity}
                         </td>
-                        <td style={{ minWidth: 190 }}>
-                          {editable ? (
-                            <>
-                              <select className="bl-cell-input" value={l.adjustment_type} onChange={(e) => setLine(l.key, { adjustment_type: e.target.value })} aria-label="Billing basis">
-                                {options.map((k) => <option key={k} value={k}>{ADJ[k]}</option>)}
-                              </select>
-                              {l.adjustment_type === "SERVICES" && <div className="bl-sub">{amount(l.rate)} × {l.services_done} ÷ {l.services_planned}</div>}
-                              {l.adjustment_type === "DAYS" && (
-                                <div style={{ display: "flex", gap: 4, marginTop: 4, alignItems: "center" }}>
-                                  <input type="number" min="0" className="bl-cell-input num" placeholder="worked" value={l.days_worked ?? ""} onChange={(e) => setLine(l.key, { days_worked: e.target.value })} aria-label="Days worked" />
-                                  ÷
-                                  <input type="number" min="1" className="bl-cell-input num" placeholder="days" value={l.days_in_period ?? ""} onChange={(e) => setLine(l.key, { days_in_period: e.target.value })} aria-label="Days in period" />
-                                </div>
-                              )}
-                              {l.adjustment_type === "PERCENT" && <input type="number" min="0" max="100" className="bl-cell-input num" style={{ marginTop: 4 }} placeholder="%" value={l.percent ?? ""} onChange={(e) => setLine(l.key, { percent: e.target.value })} aria-label="Percent" />}
-                              {l.adjustment_type === "MANUAL" && <input type="number" min="0" className="bl-cell-input num" style={{ marginTop: 4 }} placeholder="Amount" value={l.manual_amount ?? ""} onChange={(e) => setLine(l.key, { manual_amount: e.target.value })} aria-label="Manual amount" />}
-                              {(l.adjustment_type === "FULL_DESPITE_SHORTFALL" || l.adjustment_type === "MANUAL") && (
-                                <input className="bl-cell-input" style={{ marginTop: 4 }} placeholder="Reason (required)" value={l.adjustment_reason || ""} onChange={(e) => setLine(l.key, { adjustment_reason: e.target.value })} aria-label="Reason" />
-                              )}
-                              {short && l.adjustment_type === "SERVICES" && (
-                                <button type="button" className="bl-link" style={{ marginTop: 4 }} onClick={() => setLine(l.key, { adjustment_type: "FULL_DESPITE_SHORTFALL" })}>Bill full amount instead ›</button>
-                              )}
-                            </>
-                          ) : (
-                            <span>{ADJ[l.adjustment_type]}{l.adjustment_reason ? ` – ${l.adjustment_reason}` : ""}</span>
-                          )}
+                        <td style={{ minWidth: 160 }}>
+                          <span>{ADJ[l.adjustment_type]}{l.adjustment_reason ? ` – ${l.adjustment_reason}` : ""}</span>
+                          {l.adjustment_type === "SERVICES" && <div className="bl-sub">{amount(l.rate)} × {l.services_done} ÷ {l.services_planned}</div>}
                         </td>
                         <td className="bl-num"><b>{amount(lineAmount(l))}</b></td>
-                        <td>
-                          {editable && form.lines.length > 1 && (
-                            <button type="button" className="bl-x" style={{ fontSize: 15 }} onClick={() => set({ lines: form.lines.filter((x) => x.key !== l.key) })} aria-label="Remove line">✕</button>
-                          )}
-                        </td>
                       </tr>
                     );
                   })}
@@ -308,7 +274,7 @@ export default function DraftEditor() {
               </table>
             </div>
             <div className="ac-info" style={{ marginTop: 12 }}>
-              ⓘ Services done / plan come from the Service Coordinator’s monthly SOS ({monthLabel(inv.period_start)}). {inv.contract?.shortfall_billing === "FULL" ? "Fixed amount: the agreed number is billed, even when fewer were done." : "Service based: the completed number is billed."} Rates come from the contract price list; changing a rate here applies to this invoice only.
+              ⓘ Services done / plan come from the Service Coordinator’s monthly SOS ({monthLabel(inv.period_start)}). {inv.contract?.shortfall_billing === "FULL" ? "Fixed amount: the agreed number is billed, even when fewer were done." : "Service based: the completed number is billed."} Items and rates come from the contract price list and cannot be changed here. To correct one, fix the contract or the SOS, delete this draft and run the bill again.
             </div>
           </div>
         </div>

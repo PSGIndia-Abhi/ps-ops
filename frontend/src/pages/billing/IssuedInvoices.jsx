@@ -90,7 +90,7 @@ export default function IssuedInvoices() {
       { header: "Date", value: (r) => dmy(r.invoice_date) },
       { header: "Customer", value: (r) => r.customer },
       { header: "Type", value: (r) => typeLabel(r.billing_type) },
-      { header: "Period", value: (r) => periodLabel(r.period_start, r.period_end) },
+      { header: "Period", value: (r) => `${periodLabel(r.period_start, r.period_end)}${r.is_manual ? " (manual bill)" : ""}` },
       { header: "Total", value: (r) => r.total },
       { header: "Advance adjusted", value: (r) => r.advance_adjusted },
       { header: "Receivable", value: (r) => (r.status === "CANCELLED" ? "Cancelled" : r.receivable_status) },
@@ -170,7 +170,7 @@ export default function IssuedInvoices() {
                       <td className="bl-nowrap">{dmy(r.invoice_date)}</td>
                       <td>{r.customer}{r.po_numbers.length > 0 && <div className="bl-sub">PO {r.po_numbers.join(", ")}</div>}</td>
                       <td><TypeBadge type={r.billing_type} /></td>
-                      <td>{periodLabel(r.period_start, r.period_end)}</td>
+                      <td>{periodLabel(r.period_start, r.period_end)}{r.is_manual && <div className="mi-kind">Manual bill</div>}</td>
                       <td className="bl-num">{cancelled ? <s>{amount(r.total)}</s> : amount(r.total)}</td>
                       <td className="bl-num">{r.advance_adjusted ? amount(r.advance_adjusted) : "—"}</td>
                       <td>{cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={r.receivable_status || "PENDING"} />}</td>

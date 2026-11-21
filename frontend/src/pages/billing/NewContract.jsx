@@ -6,6 +6,8 @@ import { GST_RATES, gstHint } from "./calc";
 import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, monthLabel, nextBilling, today, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
+import { DeliveryFields } from "./InvoiceDelivery";
+import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
 import { Field, Msg } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -15,6 +17,8 @@ import { deepCleaningServices, pestServices } from "../../components/CreateBooki
 //   2 Contract      - billing type, frequency, timing, dates, GST, shortfall rule, description
 //   3 Purchase order - only when one is needed: pick one or add a new one here
 //   4 Services      - the service, its amount and (Service Plan permission) how many per month
+//   6 Print & email - print copies, invoice emails, auto-email, bill-by day (per outlet if needed);
+//                     saved on Next (the customer's, used by all its invoices). Not for a group contract.
 //   5 Review        - the checklist, then Create
 // The billing profile (step 1) and a new PO (step 3) are saved when Next is pressed, since they
 // are useful on their own; the contract is created only at the last step.
@@ -36,7 +40,7 @@ function suggestDescription(billingType, frequencyMonths, kind) {
   if (once) return "Pest control service carried out on {period}";
   return `Towards charges for the Pest control service carried out ${when}`;
 }
-const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 5: "Review" };
+const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 6: "Print & email", 5: "Review" };
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const SQM = "sq.m";
 const SQFT = "sq.ft";
@@ -53,8 +57,14 @@ const newLine = (termite, kind = "SERVICE", site = "") => ({ key: (lineKey += 1)
 // (or the company name when it has none / several), quantity = services per month, rate = bill value.
 // the short code when a service has one: "General Pest Control (GPC)" -> "GPC"
 const tagOf = (svc) => /\(([^()]+)\)\s*$/.exec(svc || "")?.[1] || svc || "";
-// Group based: the item name on the invoice is the company name.
-const companyLine = (c) => ({ ...newLine(false, "SERVICE"), company: c.company_id, site: c.sites?.length === 1 ? c.sites[0].site_id : "", item_name: c.name, base: c.name });
+// Group based: one line per outlet of a ticked company (outlets in `off` are left out). The item name on
+// the invoice is the company name, with the outlet when the company has several.
+const outletUnits = (c, off = []) => {
+  const sites = c.sites || [];
+  if (sites.length <= 1) return [{ company: c, site: sites[0]?.site_id || "", outlet: sites[0]?.name || "", name: c.name }];
+  return sites.filter((s) => !off.includes(s.site_id)).map((s) => ({ company: c, site: s.site_id, outlet: s.name, name: `${c.name} - ${s.name}` }));
+};
+const companyLine = (u) => ({ ...newLine(false, "SERVICE"), company: u.company.company_id, site: u.site, item_name: u.name, base: u.name });
 const lineTotal = (l, termite) => Number(l.rate) * (termite && l.kind === "SERVICE" ? Number(l.area) || 0 : Number(l.qty) || 0);
 
 export default function NewContract() {
@@ -78,11 +88,16 @@ export default function NewContract() {
   const { data: contractGroups, error: groupsError, reload: reloadGroups } = useBilling(groupMode ? "/contract-groups" : null);
   const [groupId, setGroupId] = useState("");
   const [groupCompanyIds, setGroupCompanyIds] = useState([]);
+  const [groupSitesOff, setGroupSitesOff] = useState([]); // outlets of the ticked companies left out of the contract
   const group = (contractGroups || []).find((g) => g.id === groupId) || null;
   const [profile, setProfile] = useState(null); // the form; null while loading
   const [profileSaved, setProfileSaved] = useState(false);
+  // Invoice delivery (print copies, email): loaded with the customer, saved with the Bill To on Next.
+  const [delivery, setDelivery] = useState(null);
+  const [deliveryOutlets, setDeliveryOutlets] = useState([]);
   const customer = (customers || []).find((c) => c.company_id === companyId) || null;
   const pickedCompanies = (group?.companies || []).filter((c) => groupCompanyIds.includes(c.company_id));
+  const groupUnits = pickedCompanies.flatMap((c) => outletUnits(c, groupSitesOff));
   // The main company follows the ticks (the first ticked one, in the group's order).
   useEffect(() => {
     if (!groupMode) return;
@@ -165,7 +180,7 @@ export default function NewContract() {
   const groupLines = groupMode && !termite;
   // which companies have a line now: when it does not match the ticks (a restored draft, a reload),
   // the lines are made again below
-  const companySig = lines.filter((l) => l.company).map((l) => l.company).join(",");
+  const companySig = lines.filter((l) => l.company).map((l) => `${l.company}|${l.site || ""}`).join(",");
   useEffect(() => {
     if (!groupMode || !group) return;
     setLines((ls) => {
@@ -175,18 +190,18 @@ export default function NewContract() {
         const kept = ls.filter((l) => !l.company);
         return kept.some((l) => l.kind === "SERVICE") ? kept : [newLine(true, "SERVICE"), ...kept];
       }
-      // one line per ticked company (typed values kept), then the chemicals
-      const rows = pickedCompanies.map((c) => {
-        const l = ls.find((x) => x.company === c.company_id && !x.extra) || companyLine(c);
-        // a name not typed by hand is the company name (also for lines kept from an earlier draft)
-        return !l.edited && (l.item_name !== c.name || l.base !== c.name) ? { ...l, item_name: c.name, base: c.name } : l;
+      // one line per ticked outlet (typed values kept), then the chemicals
+      const rows = groupUnits.map((u) => {
+        const l = ls.find((x) => x.company === u.company.company_id && (x.site || "") === u.site && !x.extra) || companyLine(u);
+        // a name not typed by hand is the company (+ outlet) name (also for lines kept from an earlier draft)
+        return !l.edited && (l.item_name !== u.name || l.base !== u.name) ? { ...l, item_name: u.name, base: u.name } : l;
       });
       const next = [...rows, ...ls.filter((l) => !l.company && l.kind !== "SERVICE")];
       return next.length === ls.length && next.every((l, i) => l === ls[i]) ? ls : next;
     });
     // pickedCompanies follows group + groupCompanyIds; companySig follows the lines
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupMode, group, groupCompanyIds, termite, companySig]);
+  }, [groupMode, group, groupCompanyIds, groupSitesOff, termite, companySig]);
   // The services' amounts added up go into every company line not typed by hand (new lines too).
   useEffect(() => {
     if (!groupMode || !svcRated) return;
@@ -224,6 +239,7 @@ export default function NewContract() {
     { n: 2, title: "Contract" },
     ...(needsPo ? [{ n: 3, title: "Purchase order" }] : []),
     { n: 4, title: "Services & prices" },
+    ...(groupMode ? [] : [{ n: 6, title: "Print & email" }]),
     { n: 5, title: "Review" },
   ];
   const at = steps.findIndex((s) => s.n === step);
@@ -248,7 +264,7 @@ export default function NewContract() {
         const now = Date.now();
         localStorage.setItem(draftKey, JSON.stringify({
           v: 1, savedAt: now, step, companyId, customerName: customer?.name || "", stepsTotal: steps.length,
-          terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupMain,
+          terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupSitesOff, groupMain,
         }));
         setSavedAt(now);
       } catch { /* storage full or blocked: the form still works */ }
@@ -256,7 +272,7 @@ export default function NewContract() {
     return () => clearTimeout(id);
     // steps / customer are derived from the saved fields
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resume, done, companyId, step, terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupMain]);
+  }, [resume, done, companyId, step, terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupSitesOff, groupMain]);
   function continueDraft() {
     const d = resume;
     lineKey = Math.max(lineKey, ...d.lines.map((l) => Number(l.key) || 0));
@@ -274,6 +290,7 @@ export default function NewContract() {
     if (groupMode) {
       setGroupId(d.groupId || "");
       setGroupCompanyIds(d.groupCompanyIds || []);
+      setGroupSitesOff(d.groupSitesOff || []);
       const svcs = (d.groupMain?.services || [d.groupMain?.service || d.groupSvcs?.[0]?.service || d.groupService || ""])
         .map((s) => (typeof s === "string" ? { name: s, rate: "" } : s));
       setGroupMain({ services: svcs.length ? svcs : [{ name: "", rate: "" }] });
@@ -325,6 +342,24 @@ export default function NewContract() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
+  // The customer's invoice delivery settings (defaults when it has none yet).
+  useEffect(() => {
+    setDelivery(null);
+    setDeliveryOutlets([]);
+    if (!companyId || groupMode) return undefined;
+    let live = true;
+    billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
+      .then((d) => {
+        if (!live) return;
+        setDelivery(deliveryFrom(d));
+        setDeliveryOutlets(d.outlets || []);
+      })
+      .catch(() => live && setDelivery(deliveryFrom(null)));
+    return () => {
+      live = false;
+    };
+  }, [companyId, groupMode]);
+
   // The group's Bill To: loaded when the group is chosen, or started from the group's name.
   useEffect(() => {
     if (!groupMode || !groupId) return undefined;
@@ -350,6 +385,7 @@ export default function NewContract() {
   function chooseGroup(id) {
     setGroupId(id);
     setGroupCompanyIds([]);
+    setGroupSitesOff([]);
     setProfile(null);
     setProfileSaved(false);
     setPoId("");
@@ -358,6 +394,30 @@ export default function NewContract() {
     setMsg({});
   }
   const toggleCompany = (id) => setGroupCompanyIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  // One card per outlet (a company with one or no outlet: one card). An outlet card ticks its company with
+  // just that outlet; unticking its last outlet unticks the company.
+  const outletCards = (group?.companies || []).flatMap((c) => ((c.sites || []).length > 1
+    ? c.sites.map((s) => ({ key: `${c.company_id}|${s.site_id}`, company: c, site: s }))
+    : [{ key: c.company_id, company: c, site: null }]));
+  const cardOn = (k) => groupCompanyIds.includes(k.company.company_id) && (!k.site || !groupSitesOff.includes(k.site.site_id));
+  function toggleCard(k) {
+    const id = k.company.company_id;
+    if (!k.site) return toggleCompany(id);
+    const others = k.company.sites.filter((s) => s.site_id !== k.site.site_id).map((s) => s.site_id);
+    if (!groupCompanyIds.includes(id)) {
+      setGroupCompanyIds((ids) => [...ids, id]);
+      setGroupSitesOff((off) => [...off.filter((x) => x !== k.site.site_id), ...others.filter((x) => !off.includes(x))]);
+    } else if (groupSitesOff.includes(k.site.site_id)) {
+      setGroupSitesOff((off) => off.filter((x) => x !== k.site.site_id));
+    } else if (others.every((x) => groupSitesOff.includes(x))) {
+      // its last outlet: the company is unticked (and its outlets reset)
+      setGroupCompanyIds((ids) => ids.filter((x) => x !== id));
+      setGroupSitesOff((off) => off.filter((x) => !others.includes(x)));
+    } else {
+      setGroupSitesOff((off) => [...off, k.site.site_id]);
+    }
+    return undefined;
+  }
 
   function chooseCustomer(id) {
     setCompanyId(id);
@@ -378,6 +438,8 @@ export default function NewContract() {
     if (step === 1 && groupMode) {
       if (!groupId) return "Choose the group.";
       if (!pickedCompanies.length) return "Tick at least one company of the group.";
+      const noOutlet = pickedCompanies.find((c) => !outletUnits(c, groupSitesOff).length);
+      if (noOutlet) return `${noOutlet.name}: tick at least one of its outlets (or untick the company).`;
       const untyped = pickedCompanies.find((c) => !c.category);
       if (untyped) return `${untyped.name}: the customer type is not set. Set it on the customer in Companies first.`;
       if (new Set(pickedCompanies.map((c) => c.category)).size > 1) return "The ticked companies must all be Commercial or all Residential (it decides GST).";
@@ -401,6 +463,11 @@ export default function NewContract() {
       if (!residential && !g) return "Type the GSTIN (Commercial customers are billed with GST).";
       if (g && !GSTIN_RE.test(g)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
+    }
+    if (step === 6) {
+      if (!delivery) return "Loading the print and email settings…";
+      const d = deliveryProblem(delivery);
+      if (d) return d;
     }
     if (step === 2) {
       if (terms.billing_type !== "ONE_TIME" && !terms.frequency_months) return "Choose the billing frequency.";
@@ -480,6 +547,10 @@ export default function NewContract() {
           payment_terms_days: Number(profile.payment_terms_days) || 0, is_active: true, gst_number: profile.gst_number.trim().toUpperCase(),
         });
         setProfileSaved(true);
+      }
+      if (step === 6) {
+        // Print copies and email: the customer's, saved now (the Bill To was saved at step 1).
+        await billingPut(`/customer-profiles/${encodeURIComponent(companyId)}/settings`, deliveryBody(delivery));
       }
       if (step === 3 && addingPo) {
         const created = await billingPost("/pos", {
@@ -601,14 +672,13 @@ export default function NewContract() {
                 {!termite && kinds.SERVICE && <li><b>Service Coordinator</b><span>Fills the Monthly SOS{next ? ` for ${monthLabel(next.start.slice(0, 7))}` : ""}: services completed at each outlet.</span></li>}
                 {termite && <li><b>Service Coordinator</b><span>Enters the treated area completed on the Monthly SOS{next ? ` for ${monthLabel(next.billMonth)}` : ""} (each {unitOf(terms) === "DAY" ? "day" : unitOf(terms) === "WEEK" ? "week" : "month"} billed).</span></li>}
                 <li><b>Bill Run{next ? ` · ${monthLabel(next.billMonth)}` : ""}</b><span>The contract shows as ready once the SOS is in; generate the draft in one click.</span></li>
-                <li><b>Issue &amp; send</b><span>Issued with the next number, printed and emailed as set in the customer’s profile.</span></li>
+                <li><b>Issue &amp; send</b><span>Issued with the next number, printed and emailed as set in Print & email.</span></li>
               </ol>
             </div>
           </div>
 
           <div className="nc-success-actions">
             <button type="button" className="ac-btn" onClick={() => navigate("/billing/contracts")}>All contracts</button>
-            <button type="button" className="ac-btn" onClick={() => navigate(`/billing/customers/${encodeURIComponent(companyId)}`)}>Customer profile</button>
             <button type="button" className="ac-btn" onClick={() => window.location.reload()}><FiPlus /> Another contract</button>
             <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/contracts/${done.id}`, { replace: true })}>Open contract</button>
           </div>
@@ -686,21 +756,25 @@ export default function NewContract() {
                 <div className="nc-group-cos-head">
                   <span className="nc-sec-title" style={{ margin: 0 }}>Companies in {group.name}</span>
                   <span className="ac-actions" style={{ gap: 6 }}>
-                    <span className="ac-sub" style={{ fontSize: 12.5 }}>{pickedCompanies.length} of {group.companies.length} ticked</span>
-                    <button type="button" className="ac-btn sm" onClick={() => setGroupCompanyIds(group.companies.map((c) => c.company_id))}>Select all</button>
-                    <button type="button" className="ac-btn sm" disabled={!groupCompanyIds.length} onClick={() => setGroupCompanyIds([])}>Clear</button>
+                    <span className="ac-sub" style={{ fontSize: 12.5 }}>{outletCards.filter(cardOn).length} of {outletCards.length} ticked</span>
+                    <button type="button" className="ac-btn sm" onClick={() => { setGroupCompanyIds(group.companies.map((c) => c.company_id)); setGroupSitesOff([]); }}>Select all</button>
+                    <button type="button" className="ac-btn sm" disabled={!groupCompanyIds.length} onClick={() => { setGroupCompanyIds([]); setGroupSitesOff([]); }}>Clear</button>
                   </span>
                 </div>
                 <div className="nc-group-list">
-                  {group.companies.map((c) => (
-                    <label key={c.company_id} className={`nc-group-co ${groupCompanyIds.includes(c.company_id) ? "on" : ""}`}>
-                      <input type="checkbox" className="bl-cb" checked={groupCompanyIds.includes(c.company_id)} onChange={() => toggleCompany(c.company_id)} />
-                      <span className="nc-group-co-text">
-                        <b>{c.name}</b>
-                        <span className="ac-sub">{[c.category ? CATEGORY_LABEL[c.category] : "Customer type not set", c.outlets].filter(Boolean).join(" · ")}</span>
-                      </span>
-                    </label>
-                  ))}
+                  {outletCards.map((k) => {
+                    const c = k.company;
+                    const on = cardOn(k);
+                    return (
+                      <label key={k.key} className={`nc-group-co ${on ? "on" : ""}`}>
+                        <input type="checkbox" className="bl-cb" checked={on} onChange={() => toggleCard(k)} />
+                        <span className="nc-group-co-text">
+                          <b>{c.name}</b>
+                          <span className="ac-sub">{[c.category ? CATEGORY_LABEL[c.category] : "Customer type not set", k.site ? k.site.name : c.outlets].filter(Boolean).join(" · ")}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1048,13 +1122,7 @@ export default function NewContract() {
                                 <input type="checkbox" className="bl-cb" checked={l.picked} disabled={!l.item_name || l.rate === ""} onChange={(e) => setLine(l.key, { picked: e.target.checked })} aria-label="Tick for an invoice line summary" />
                                 <div className="nc-grp-item">
                                   <input className="ac-input" value={l.item_name} maxLength={255} onChange={(e) => setLine(l.key, { item_name: e.target.value, edited: true })} aria-label={`Item name for ${co.name}`} />
-                                  <span className="ac-sub">{co.name}</span>
-                                  {co?.sites?.length > 1 && (
-                                    <select className="ac-select" value={l.site} onChange={(e) => setLine(l.key, { site: e.target.value })} aria-label="Outlet">
-                                      <option value="">All outlets</option>
-                                      {co.sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
-                                    </select>
-                                  )}
+                                  <span className="ac-sub">{[co.name, (co.sites || []).find((s) => s.site_id === l.site)?.name].filter(Boolean).join(" · ")}</span>
                                 </div>
                               </div>
                               <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value, rateEdited: true })} aria-label="Bill value" />
@@ -1073,7 +1141,7 @@ export default function NewContract() {
                     {!pickedCompanies.length && (
                       <div className="ac-info" style={{ marginTop: 8 }}>{group ? "No company is ticked. Go back to step 1 and tick the companies of the group." : "Loading the group’s companies…"}</div>
                     )}
-                    <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>One line per ticked company, all on one invoice to the group. To add or remove a company, go back to step 1.</div>
+                    <div className="ac-sub" style={{ fontSize: 12, marginTop: 6 }}>One line per outlet of the ticked companies, all on one invoice to the group. To add or remove a company or outlet, go back to step 1.</div>
                   </>
                 ) : !termite ? (
                   <>
@@ -1238,6 +1306,21 @@ export default function NewContract() {
           </>
         )}
 
+        {step === 6 && (
+          <>
+            <h3 className="nc-title">Print &amp; email</h3>
+            <p className="ac-sub" style={{ margin: "-6px 0 16px" }}>
+              How many copies print when an invoice of {customer?.name?.trim() || "this customer"} is issued, and who gets it by email.
+              It applies to every invoice of the customer and can be changed later on the contract (Bill To &amp; delivery).
+            </p>
+            {delivery ? (
+              <DeliveryFields form={delivery} setForm={setDelivery} outlets={deliveryOutlets} />
+            ) : (
+              <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
+            )}
+          </>
+        )}
+
         {step === 5 && (
           <>
             <h3 className="nc-title">Review</h3>
@@ -1258,6 +1341,9 @@ export default function NewContract() {
               <dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}, billed at the {terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month, from {dmy(terms.start_date)}{terms.end_date ? ` to ${dmy(terms.end_date)}` : ""}</dd>
               {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)} <span className="ac-sub">(billed elsewhere before this date)</span></dd></>}
               <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}% GST` : "No GST"}</dd>
+              {!groupMode && delivery && (
+                <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.invoice_emails.trim() ? ` · ${delivery.auto_email ? "emailed automatically to" : "email"} ${delivery.invoice_emails}` : " · no email"}{" "}<button type="button" className="bl-link" onClick={() => setStep(6)}>Change</button></dd></>
+              )}
               {separate ? (
                 <>
                   <dt>Bills</dt><dd>Two separate invoices every period - pest control and chemicals (one contract, same PO)</dd>
@@ -1295,7 +1381,7 @@ export default function NewContract() {
                   <tbody>
                     {filledLines.map((l) => {
                       const sub = l.company
-                        ? pickedCompanies.find((c) => c.company_id === l.company)?.name
+                        ? (() => { const co = pickedCompanies.find((c) => c.company_id === l.company); return [co?.name, (co?.sites || []).find((s) => s.site_id === l.site)?.name].filter(Boolean).join(" · "); })()
                         : l.kind === "CHEMICAL" ? "Chemical"
                           : multiOutlet && !termite ? (l.site === ALL ? "All outlets" : sites.find((s) => s.site_id === l.site)?.name) : "";
                       return (
@@ -1361,6 +1447,7 @@ export default function NewContract() {
             <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
             {next && <><dt>First invoice</dt><dd>{dmy(next.start)} – {dmy(next.end)}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
             <dt>Services</dt><dd>{filledLines.length ? `${filledLines.length} line${filledLines.length === 1 ? "" : "s"}` : <span className="ac-sub">None yet</span>}</dd>
+            {!groupMode && delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
           </dl>
           {termite ? (
             <div className="nc-sum-total"><span>Rate per {areaLabel}</span><b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>

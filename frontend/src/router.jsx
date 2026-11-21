@@ -135,11 +135,10 @@ import BillingAccountsDashboard from "./pages/billing/AccountsDashboard";
 import BillingContracts from "./pages/billing/Contracts";
 import BillingContractForm from "./pages/billing/ContractForm";
 import BillingNewContract from "./pages/billing/NewContract";
+import BillingManualInvoice from "./pages/billing/ManualInvoice";
 import BillingInvoiceDescriptions from "./pages/billing/InvoiceDescriptions";
 import BillingFrequencies from "./pages/billing/BillingFrequencies";
 import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
-import BillingCustomers from "./pages/billing/Customers";
-import BillingCustomerProfile from "./pages/billing/CustomerProfile";
 import BillingMasters from "./pages/billing/MastersPage";
 import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
@@ -475,6 +474,9 @@ const router = createBrowserRouter([
       { path: "tracker", element: <Navigate to="/billing/sos" replace /> },
       { path: "run", element: <BillingBillRun /> },
       { path: "drafts", element: <BillingDraftInvoices /> },
+      // Generate Invoice (manual): an extra bill from the contract's prices, issued at once.
+      { path: "generate", element: <BillingManualInvoice /> },
+      { path: "drafts/manual", element: <Navigate to="/billing/generate" replace /> },
       { path: "drafts/:id", element: <BillingDraftEditor /> },
       { path: "invoices", element: <BillingIssuedInvoices /> },
       // One issued invoice: details, money (payments, TDS), prints / shares, actions.
@@ -485,9 +487,9 @@ const router = createBrowserRouter([
       { path: "contracts/new", element: <BillingNewContract /> },
       { path: "contracts/:id", element: <BillingContractForm /> },
       { path: "pos", element: <BillingPurchaseOrders /> },
-      // Customer Billing Profile: the list, and one customer's profile (details, outlets, services, POs, delivery).
-      { path: "customers", element: <BillingCustomers /> },
-      { path: "customers/:companyId", element: <BillingCustomerProfile /> },
+      // The old Customers pages: Bill To, print copies and email now live on the contract (Masters > Contracts).
+      { path: "customers", element: <Navigate to="/billing/contracts" replace /> },
+      { path: "customers/:companyId", element: <Navigate to="/billing/contracts" replace /> },
       // Masters: one page of cards (Contracts, POs, Invoice Descriptions, Billing Frequencies).
       { path: "masters", element: <BillingMasters /> },
       { path: "descriptions", element: <BillingInvoiceDescriptions /> },

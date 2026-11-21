@@ -89,7 +89,7 @@ export default function InvoiceView() {
           <span className="iv-hero-ic"><FiFileText /></span>
           <div>
             <div className="iv-hero-top">
-              <h1>{inv.invoice_number}</h1>
+              <h1>{inv.invoice_number}{inv.is_manual && <span className="ac-badge b-purple mi-tag">Manual invoice</span>}</h1>
               {cancelled ? <StatusBadge value="CANCELLED" /> : <StatusBadge value={col?.status || "PENDING"} />}
               <TypeBadge type={inv.contract.billing_type} frequency={inv.contract.frequency_months} unit={inv.contract.frequency_unit} />
             </div>

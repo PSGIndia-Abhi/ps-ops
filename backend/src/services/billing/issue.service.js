@@ -27,7 +27,7 @@ async function skipIssuedPeriods(conn, contractId, userId) {
     const [[row]] = await conn.query(
       `SELECT DATE_FORMAT(MAX(bi.period_end), '%Y-%m-%d') AS period_end
          FROM billing_contracts bc
-         JOIN billing_invoices bi ON bi.contract_id = bc.id AND bi.period_start = bc.next_period_start AND bi.status = 'ISSUED'
+         JOIN billing_invoices bi ON bi.contract_id = bc.id AND bi.period_start = bc.next_period_start AND bi.status = 'ISSUED' AND bi.is_manual = 0
         WHERE bc.id = ?`,
       [contractId]
     );
@@ -179,10 +179,13 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
         WHERE id = ? AND status = 'DRAFT'`,
       [number, fy, seq, receivableId, advanceAdjusted, JSON.stringify(content), userId, userId, id]
     );
-    const [[left]] = await conn.query(
-      "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT'",
-      [inv.contract.id, inv.period_start]
-    );
+    // A manual invoice is an extra bill: the contract's regular period does not move.
+    const [[left]] = inv.is_manual
+      ? [[{ n: 1 }]]
+      : await conn.query(
+        "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT' AND is_manual = 0",
+        [inv.contract.id, inv.period_start]
+      );
     if (!Number(left.n)) {
       await conn.query(
         `UPDATE billing_contracts
@@ -274,11 +277,14 @@ async function cancelIssued(pool, id, req, reason) {
     );
     await conn.query("UPDATE billing_invoice_shares SET revoked_at = NOW() WHERE billing_invoice_id = ? AND token_hash IS NOT NULL AND revoked_at IS NULL", [id]);
 
-    // If this was the contract's latest billed period, it can be billed again.
-    const [[other]] = await conn.query(
-      "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED'",
-      [inv.contract.id, inv.period_start]
-    );
+    // If this was the contract's latest billed period, it can be billed again (a manual invoice never
+    // moved the contract, so cancelling one leaves it alone).
+    const [[other]] = inv.is_manual
+      ? [[{ n: 1 }]]
+      : await conn.query(
+        "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED' AND is_manual = 0",
+        [inv.contract.id, inv.period_start]
+      );
     if (!Number(other.n)) {
       const short = inv.contract.frequency_unit && inv.contract.frequency_unit !== "MONTH";
       // Monthly: only the latest billed period opens again. Weekly / daily Termite: any earlier week

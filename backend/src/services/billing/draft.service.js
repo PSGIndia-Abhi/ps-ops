@@ -231,7 +231,7 @@ async function periodsToBill(db, contract, monthEnd) {
   if (!due.length) return { periods: [], drafted: [] };
   const [rows] = await db.query(
     `SELECT DATE_FORMAT(period_start, '%Y-%m-%d') AS period_start, status FROM billing_invoices
-      WHERE contract_id = ? AND status <> 'CANCELLED' AND period_start IN (?)`,
+      WHERE contract_id = ? AND status <> 'CANCELLED' AND is_manual = 0 AND period_start IN (?)`,
     [contract.id, due.map((p) => p.start)]
   );
   const taken = new Map(rows.map((r) => [r.period_start, r.status]));
@@ -245,15 +245,31 @@ async function periodsToBill(db, contract, monthEnd) {
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
   const range = C.monthRange(month);
   const [contracts] = await db.query(
-    `SELECT bc.*, c.name AS customer
+    `SELECT bc.*, c.name AS customer, IF(bc.contract_kind = 'GROUP', TRIM(g.name), NULL) AS billing_group
        FROM billing_contracts bc
        JOIN companies c ON c.id = bc.company_id
+       LEFT JOIN group_name g ON g.id = bc.group_id
       WHERE bc.status = 'ACTIVE' AND bc.next_period_start <= ?
         AND (? IS NULL OR bc.billing_type = ?)
-        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%'))
-      ORDER BY c.name, bc.contract_code`,
-    [range.end, type, type, q, q, q]
+        AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR bc.contract_code LIKE CONCAT('%', ?, '%')
+             OR (bc.contract_kind = 'GROUP' AND g.name LIKE CONCAT('%', ?, '%')))
+      ORDER BY COALESCE(IF(bc.contract_kind = 'GROUP', g.name, NULL), c.name), bc.contract_code`,
+    [range.end, type, type, q, q, q, q]
   );
+  // Group based contracts: the ticked companies (shown under the group name, matched by the customer filter).
+  const groupIds = contracts.filter((c) => c.contract_kind === "GROUP").map((c) => c.id);
+  const groupCompanies = new Map();
+  if (groupIds.length) {
+    const [gc] = await db.query(
+      `SELECT cc.contract_id, cc.company_id, TRIM(co.name) AS name FROM billing_contract_companies cc
+         JOIN companies co ON co.id = cc.company_id WHERE cc.contract_id IN (?) ORDER BY co.name`,
+      [groupIds]
+    );
+    for (const r of gc) {
+      if (!groupCompanies.has(r.contract_id)) groupCompanies.set(r.contract_id, []);
+      groupCompanies.get(r.contract_id).push({ company_id: r.company_id, name: r.name });
+    }
+  }
 
   const rows = [];
   for (const raw of contracts) {
@@ -279,7 +295,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
 
     if (!short) {
       const [[existing]] = await db.query(
-        "SELECT COUNT(*) AS drafts FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT'",
+        "SELECT COUNT(*) AS drafts FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'DRAFT' AND is_manual = 0",
         [contract.id, period.start]
       );
       existingDrafts = Number(existing.drafts);
@@ -338,6 +354,8 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       contract_code: contract.contract_code,
       company_id: contract.company_id,
       customer: raw.customer,
+      // group based contract: billed in the group's name, its companies are the invoice lines
+      billing_group: raw.billing_group ? { group: raw.billing_group, companies: groupCompanies.get(contract.id) || [] } : null,
       category: ctx.category,
       billing_type: contract.billing_type,
       frequency_months: contract.frequency_months,
@@ -416,7 +434,7 @@ async function draftContract(conn, contractId, month, runId, userId) {
 /** The drafts of one period of a contract (one per outlet when the invoice is split). */
 async function draftPeriod(conn, contract, ctx, period, runId, userId) {
   const [[existing]] = await conn.query(
-    "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED'",
+    "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status <> 'CANCELLED' AND is_manual = 0",
     [contract.id, period.start]
   );
   if (Number(existing.n)) throw C.conflict(`${P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start)} is already drafted for ${contract.contract_code}`);
@@ -607,6 +625,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
   return {
     id: inv.id,
     status: inv.status,
+    is_manual: Boolean(Number(inv.is_manual)),
     invoice_number: inv.invoice_number,
     updated_at: inv.updated_at_key,
     // Changes on every save (line ids are new each time): send it back on PUT to detect edits made meanwhile.
@@ -728,8 +747,11 @@ async function saveDraft(pool, id, body, userId) {
     if ((body.version && String(body.version) !== inv.version) || (!body.version && body.updated_at && String(body.updated_at) !== inv.updated_at)) {
       throw C.conflict("This draft was changed by someone else. Reload and try again.");
     }
-    if (!Array.isArray(body.lines) || !body.lines.length) throw C.bad("Add at least one line");
-    if (body.lines.length > 300) throw C.bad("Too many lines for one invoice");
+    // Lines are locked: items, rates, billing basis and adjustments come from the contract and the SOS.
+    // Only the blanks the Bill Run could not fill are taken from the request: the quantity of a
+    // PER_UNIT line (chemicals, termite area not on the SOS) and the rate of an extra SOS service.
+    // Lines cannot be added or removed.
+    const sent = new Map((Array.isArray(body.lines) ? body.lines : []).map((l) => [String(l?.id ?? ""), l]));
 
     // Planned / done counts come from the tracker, never from the browser.
     const contract = await loadContract(conn, inv.contract.id);
@@ -737,7 +759,13 @@ async function saveDraft(pool, id, body, userId) {
     const cl = await linesInForce(conn, contract.id, period.start);
     const built = await buildLines(conn, contract, period, cl);
     const server = new Map(built.lines.map((l) => [l.contract_line_id, l]));
-    const lines = body.lines.map((raw, i) => readLine(raw, i, server));
+    const lines = inv.lines.map((stored, i) => {
+      const raw = sent.get(String(stored.id));
+      const merged = { ...stored };
+      if (raw && stored.pricing_basis === "PER_UNIT" && raw.quantity !== undefined) merged.quantity = raw.quantity;
+      if (raw && !stored.contract_line_id && raw.rate !== undefined) merged.rate = raw.rate;
+      return readLine(merged, i, server);
+    });
 
     const [contractLineIds] = await conn.query("SELECT id FROM billing_contract_lines WHERE contract_id = ?", [contract.id]);
     const known = new Set(contractLineIds.map((r) => r.id));
@@ -752,9 +780,9 @@ async function saveDraft(pool, id, body, userId) {
     });
 
     const invoiceDate = C.date(body.invoice_date, "invoice_date") || inv.invoice_date;
-    const shipTo = body.ship_to_site_id === undefined ? inv.ship_to_site_id : C.str(body.ship_to_site_id, "ship_to_site_id", { max: 20 });
-    if (shipTo && !sites.has(shipTo)) throw C.bad("Ship To must be an outlet of this customer");
-    const description = body.description === undefined ? inv.description : C.str(body.description, "description", { required: true, max: 1000 });
+    // Ship To and the description come from the contract: not changed on the draft.
+    const shipTo = inv.ship_to_site_id;
+    const description = inv.description;
     const [[profile]] = await conn.query(
       `SELECT COALESCE(gp.payment_terms_days, bp.payment_terms_days) AS payment_terms_days
        FROM billing_contracts bc
@@ -789,6 +817,87 @@ async function saveDraft(pool, id, body, userId) {
     for (const poId of poIds) await conn.query("INSERT INTO billing_invoice_pos (invoice_id, po_id) VALUES (?, ?)", [id, poId]);
   });
   return loadInvoice(pool, id);
+}
+
+// ---- manual invoice --------------------------------------------------------------------------
+
+/**
+ * POST /invoices/manual: an extra, one-off invoice made by hand from the customer's contract.
+ * { contract_id, invoice_date, description, lines: [{ contract_line_id, quantity }] }
+ * Every rate, item, SAC and outlet comes from the contract's price list in force on the invoice date;
+ * only the quantity is typed. Written as a draft row marked is_manual (period = the invoice date) for
+ * the controller to issue at once. The contract's Bill Run period is not touched.
+ */
+async function createManual(pool, body, userId) {
+  const contractId = C.str(body.contract_id, "Contract", { required: true, max: 36 });
+  const today = C.todayIst();
+  const invoiceDate = C.date(body.invoice_date, "Invoice date") || today;
+  if (invoiceDate > today) throw C.bad("The invoice date cannot be in the future");
+  const description = C.str(body.description, "Description", { required: true, max: 1000 });
+  if (!Array.isArray(body.lines) || !body.lines.length) throw C.bad("Tick at least one service");
+  if (body.lines.length > 300) throw C.bad("Too many lines for one invoice");
+
+  return C.inTransaction(pool, async (conn) => {
+    const contract = await loadContract(conn, contractId);
+    if (!contract) throw C.notFound("Contract not found");
+    if (contract.status !== "ACTIVE") throw C.bad(`Contract ${contract.contract_code} is ${contract.status.toLowerCase()}`);
+    const ctx = await customerContext(conn, contract.company_id, contract);
+    if (!ctx.company) throw C.bad("Customer not found");
+    if (!ctx.category) throw C.bad("Customer type is not set");
+    if (!ctx.profile) throw C.bad(contract.contract_kind === "GROUP" ? "The group's billing details (Bill To) are missing" : "The customer's Bill To is missing");
+
+    const inForce = new Map((await linesInForce(conn, contract.id, invoiceDate)).map((l) => [l.id, l]));
+    const seen = new Set();
+    const lines = body.lines.map((raw, i) => {
+      const at = `Line ${i + 1}`;
+      const id = C.str(raw?.contract_line_id, `${at}: service`, { required: true, max: 36 });
+      const cl = inForce.get(id);
+      if (!cl) throw C.bad(`${at}: this service is not on the contract's price list on ${C.dmy(invoiceDate)}`);
+      if (seen.has(id)) throw C.bad(`${cl.item_name} is ticked twice`);
+      seen.add(id);
+      const quantity = C.num(raw.quantity, `${cl.item_name}: quantity`, { required: true, min: 0, max: 9999999 });
+      if (!(quantity > 0)) throw C.bad(`${cl.item_name}: enter a quantity more than 0`);
+      const line = {
+        contract_line_id: cl.id, site_id: cl.site_id, item_name: cl.item_name, invoice_group: cl.invoice_group || null,
+        sac_code: cl.sac_code, unit: cl.unit, pricing_basis: cl.pricing_basis, rate: Number(cl.rate), quantity,
+        adjustment_type: "NONE", services_planned: null, services_done: null, missed_dates: null, job_ids: null,
+      };
+      line.amount = calc.lineAmount(line);
+      return line;
+    });
+
+    const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code, contract.gst_applicable !== 0);
+    const gstRate = calc.gstRateOf(contract.gst_rate);
+    const totals = calc.totalsFor(lines, taxMode, gstRate);
+    const dueDate = C.addDays(invoiceDate, Number(ctx.profile.payment_terms_days) || 0);
+    const lineSites = [...new Set(lines.map((l) => l.site_id).filter(Boolean))];
+    const shipTo = lineSites.length === 1 ? lineSites[0] : contract.site_id || null;
+    // Print copies: the outlet's own setting when every line is for one outlet, else the customer's.
+    const [[outlet]] = lineSites.length === 1
+      ? await conn.query("SELECT print_copies FROM billing_outlet_settings WHERE company_id = ? AND site_id = ?", [contract.company_id, lineSites[0]])
+      : [[null]];
+    const copies = Number(outlet?.print_copies || ctx.profile.print_copies || 1);
+    const period = { start: invoiceDate, end: invoiceDate };
+    const pos = contract.po_required ? await validPos(conn, contract, period) : [];
+    const poIds = contract.billing_type === "CHEMICAL" ? pos.map((p) => p.id) : pos.slice(0, 1).map((p) => p.id);
+
+    const id = uuid();
+    await conn.query(
+      `INSERT INTO billing_invoices
+         (id, is_manual, contract_id, company_id, site_id, bill_run_id, billing_type, customer_category, tax_mode, gst_rate, place_of_supply,
+          ship_to_site_id, period_start, period_end, invoice_date, due_date, subtotal, cgst, sgst, igst, round_off, total,
+          print_copies, description, status, created_by, updated_by)
+       VALUES (?, 1, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)`,
+      [
+        id, contract.id, contract.company_id, contract.billing_type, ctx.category, taxMode, gstRate,
+        `${ctx.profile.state_code}-${ctx.profile.state_name}`, shipTo, period.start, period.end, invoiceDate, dueDate,
+        totals.subtotal, totals.cgst, totals.sgst, totals.igst, totals.round_off, totals.total, copies, description, userId, userId,
+      ]
+    );
+    await insertLines(conn, id, lines);
+    for (const poId of poIds) await conn.query("INSERT INTO billing_invoice_pos (invoice_id, po_id) VALUES (?, ?)", [id, poId]);
+    return id;
+  });
 }
 
 // ---- checks before issue ---------------------------------------------------------------------
@@ -848,11 +957,14 @@ async function checkInvoice(db, id) {
   if (inv.customer.category === "COMMERCIAL" && inv.tax_mode !== "NONE") {
     check("GSTIN", Boolean(inv.customer.gst_number), inv.customer.gst_number ? `GSTIN ${inv.customer.gst_number} present` : `GSTIN is missing for ${inv.customer.name}`, "WARNING");
   }
-  const [[dup]] = await db.query(
-    "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED' AND IFNULL(site_id, '-') = IFNULL(?, '-')",
-    [inv.contract.id, inv.period_start, inv.site_id]
-  );
-  check("PERIOD", !Number(dup.n), Number(dup.n) ? "This period is already invoiced" : "Period not billed before");
+  // A manual invoice is an extra bill: it has no regular period to clash with.
+  if (!inv.is_manual) {
+    const [[dup]] = await db.query(
+      "SELECT COUNT(*) AS n FROM billing_invoices WHERE contract_id = ? AND period_start = ? AND status = 'ISSUED' AND is_manual = 0 AND IFNULL(site_id, '-') = IFNULL(?, '-')",
+      [inv.contract.id, inv.period_start, inv.site_id]
+    );
+    check("PERIOD", !Number(dup.n), Number(dup.n) ? "This period is already invoiced" : "Period not billed before");
+  }
   check("LINES", inv.lines.length > 0, inv.lines.length ? "Invoice has lines" : "Add at least one line");
   for (const l of inv.lines) {
     const counted = l.services_planned !== null && l.services_planned !== undefined; // from the SOS: 0 completed bills 0
@@ -942,6 +1054,7 @@ module.exports = {
   generateDrafts,
   loadInvoice,
   saveDraft,
+  createManual,
   checkInvoice,
   advanceFor,
 };

@@ -120,6 +120,8 @@ router.get("/due", can(P.VIEW_BILLING), invoices.due);
 router.post("/runs", can(P.GENERATE_INVOICE), invoices.run);
 router.get("/invoices", can(P.VIEW_BILLING), invoices.list);
 router.post("/invoices/issue", can(P.ISSUE_INVOICE), invoices.issue);
+// Manual (extra, one-off) invoice: made and issued in one go, so both permissions are needed.
+router.post("/invoices/manual", can(P.GENERATE_INVOICE), requirePermission(P.ISSUE_INVOICE), invoices.manual);
 router.get("/invoices/download", can(P.VIEW_BILLING), invoices.download);
 router.get("/invoices/:id", can(P.VIEW_BILLING), invoices.get);
 router.put("/invoices/:id", can(P.GENERATE_INVOICE), invoices.save);

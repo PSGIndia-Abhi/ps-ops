@@ -85,7 +85,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   const c1 = L + Math.round(W * (noShip ? 0.5 : 0.335));
   const c2 = noShip ? c1 : L + Math.round(W * 0.67);
   font("B", 8.4).text("Bill To", L + PAD, y + 5, { lineBreak: false });
-  if (!termite) font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
+  if (!termite) if (!noShip) font("B", 8.4).text("Service Offered By", c1 + PAD, y + 5, { lineBreak: false });
   font("B", 8.4).text("Invoice Details", c2 + PAD, y + 5, { width: R - c2 - PAD * 2, align: "right", lineBreak: false });
   const partyHead = y;
   y += 19;
@@ -107,8 +107,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   let shy = y + 6;
   const shipW = c2 - c1 - PAD * 2;
-  // No outlet chosen: show the Bill To customer's name and address here instead.
-  const shipTo = (content.ship_to || []).length
+  // Group based invoices (hide_ship_to) have no middle column. Otherwise, no outlet chosen: show the
+  // Bill To customer's name and address here instead.
+  const shipTo = noShip ? [] : (content.ship_to || []).length
     ? content.ship_to
     : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
   for (const entry of termite ? [] : shipTo) {
