@@ -241,6 +241,61 @@
 .nc-review { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 14px; margin: 0 0 14px; font-size: 14px; }
 .nc-review dt { color: #64748b; font-weight: 600; }
 .nc-review dd { margin: 0; color: #0f172a; }
+/* Review: every detail in boxes (Customer, Contract, Print & email, then Bills across the width). */
+/* The top boxes share the full width (2 or 3 of them); Bills sits in its own row below. */
+.nc-rv-boxes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; margin: 0 0 12px; }
+.nc-rv-boxes.one { margin-bottom: 16px; }
+@media (max-width: 760px) { .nc-rv-boxes { grid-auto-flow: row; } }
+.nc-rv-box { border: 1px solid #e5e9f0; border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; background: #fff; }
+.nc-rv-box-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
+.nc-rv-edit { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #dbe3ee; background: #fff; color: #1d4ed8; border-radius: 7px; padding: 3px 9px; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; cursor: pointer; }
+.nc-rv-edit:hover { background: #eff6ff; border-color: #bfdbfe; }
+.nc-rv-edit:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.nc-rv-kv dd .nc-rv-edit { margin-left: 6px; padding: 1px 7px; font-size: 11.5px; }
+.nc-rv-box-h em { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; }
+/* Review content: who, icon lines, tags (text colour only, no background), timeline, stat tiles, bill cards. */
+.nc-rv-who { display: flex; align-items: center; gap: 10px; }
+.nc-rv-who b { font-size: 15px; color: #0f172a; }
+.nc-rv-av { flex: none; width: 36px; height: 36px; border-radius: 10px; background: #eff6ff; color: #1d4ed8; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+.nc-rv-tagline { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.nc-rv-t { font-size: 12.5px; font-weight: 600; color: #475569; }
+.nc-rv-t.blue { color: #1d4ed8; }
+.nc-rv-t.green { color: #15803d; }
+.nc-rv-t.purple { color: #7c3aed; }
+.nc-rv-line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: #0f172a; }
+.nc-rv-line > span { min-width: 0; overflow-wrap: anywhere; }
+.nc-rv-line > svg { flex: none; color: #94a3b8; }
+.nc-rv-mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.nc-rv-time { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 10px; }
+.nc-rv-time li { position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); column-gap: 10px; }
+.nc-rv-time li i { grid-row: 1 / span 3; width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; border: 2px solid #94a3b8; background: #fff; }
+.nc-rv-time li:not(:last-child)::after { content: ""; position: absolute; left: 5px; top: 16px; bottom: -10px; width: 2px; background: #e5e9f0; }
+.nc-rv-time li.now i { border-color: #2563eb; background: #2563eb; }
+.nc-rv-time span { font-size: 12px; color: #64748b; }
+.nc-rv-time b { font-size: 14px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.nc-rv-time small { font-size: 12px; color: #64748b; }
+.nc-rv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.nc-rv-stat { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 6px; padding: 8px 10px; border: 1px solid #eef2f7; border-radius: 10px; }
+.nc-rv-stat svg { color: #94a3b8; }
+.nc-rv-stat b { font-size: 18px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.nc-rv-stat span { grid-column: 1 / -1; font-size: 12px; color: #64748b; }
+.nc-rv-line .nc-rv-edit { margin-left: auto; padding: 1px 7px; font-size: 11.5px; }
+.nc-rv-bills { display: grid; gap: 10px; }
+.nc-rv-bills.two { grid-template-columns: 1fr 1fr; }
+.nc-rv-bill { display: grid; gap: 4px; justify-items: start; padding: 10px 12px; border: 1px solid #eef2f7; border-radius: 10px; min-width: 0; }
+.nc-rv-bill p { margin: 0; font-size: 14px; color: #0f172a; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .nc-rv-bills.two { grid-template-columns: minmax(0, 1fr); } }
+.nc-rv-kv { display: grid; gap: 2px; margin: 0; font-size: 14px; }
+.nc-rv-kv dt { font-size: 12px; color: #64748b; }
+.nc-rv-kv dd { margin: 0 0 8px; color: #0f172a; overflow-wrap: anywhere; }
+.nc-rv-kv dd:last-child { margin-bottom: 0; }
+.nc-rv-kv.wide { grid-template-columns: 150px minmax(0, 1fr); gap: 8px 14px; }
+.nc-rv-kv.wide dt { font-size: 13px; }
+.nc-rv-kv.wide dd { margin: 0; }
+@media (max-width: 640px) {
+  .nc-rv-kv.wide { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .nc-rv-kv.wide dd { margin-bottom: 8px; }
+}
 /* Review: tags (companies, services) and the table of what is billed */
 .nc-rv-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .nc-rv-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 12.5px; font-weight: 500; }
@@ -389,7 +444,10 @@
 }
 
 /* Services and prices: quantity x rate = amount (services from the Service Plan, chemicals typed). */
-.nc-lines.priced .nc-line { grid-template-columns: minmax(0, 1fr) 100px 150px 120px 32px; }
+.nc-lines.priced .nc-line { grid-template-columns: minmax(0, 1fr) 140px 150px 120px 32px; }
+.nc-lines.priced .sp-stp { width: 100%; }
+.nc-lines.priced .sp-stp input { flex: 1 1 auto; min-width: 0; }
+.bl-stp button:disabled { color: #cbd5e1; cursor: not-allowed; }
 .nc-num { text-align: right; font-variant-numeric: tabular-nums; }
 .nc-qty { font-weight: 700; color: #0f172a; padding-right: 6px; }
 .nc-amt { font-weight: 700; color: #0f172a; }
@@ -504,6 +562,18 @@
 /* Clickable table rows. */
 .bl-rowlink { cursor: pointer; }
 .bl-rowlink:hover td { background: #f8fafc; }
+/* Contracts list: an unfinished New Contract (kept in this browser) shown as a Draft row. */
+.bl-draftrow td { background: #fffbeb; border-top: 1px solid #fcd9a0; border-bottom: 1px solid #fcd9a0; }
+.bl-draftrow:hover td { background: #fef3c7; }
+.bl-draftrow td:first-child { box-shadow: inset 3px 0 0 #d97706; }
+.bl-draftrow .bl-avatar-sm { background: #fff; color: #b45309; border: 1.5px dashed #d97706; }
+.bl-draft-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+.bl-draft-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #fff; border: 1px solid #fcd9a0; color: #b45309; font-size: 12px; font-weight: 600; }
+.bl-draft-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.bl-seg2 button.bl-seg2-draft { color: #b45309; }
+.bl-seg2 button.bl-seg2-draft .bl-seg2-n { background: #fef3c7; color: #b45309; }
+.bl-seg2 button.bl-seg2-draft.active { color: #b45309; }
+.ac-btn.ac-btn-danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 
 /* Customer profile header. */
 .bl-hero { display: flex; align-items: center; gap: 16px; padding: 20px 22px; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 60%); border: 1px solid #e5e7eb; border-radius: 16px; margin-bottom: 16px; }
@@ -1599,6 +1669,23 @@
 .dl-copies button { width: 40px; height: 38px; border-radius: 10px; border: 1px solid #dbe3ee; background: #fff; font-weight: 600; color: #334155; cursor: pointer; }
 .dl-copies button.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .dl-copies button:disabled { opacity: .55; cursor: not-allowed; }
+/* Bill by: late alert switch and − n + day on one line, beside "Email invoice to". */
+.dl-billby-line { display: flex; align-items: center; gap: 10px; min-height: 38px; flex-wrap: wrap; }
+/* Small calendar page showing the bill-by day. */
+.dl-cal { flex: none; width: 46px; border: 1px solid #dbe3ee; border-radius: 8px; overflow: hidden; text-align: center; background: #fff; }
+.dl-cal small { display: block; background: #2563eb; color: #fff; font-size: 6.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 0; line-height: 1.2; }
+.dl-cal b { display: block; font-size: 16px; line-height: 22px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.dl-switch { flex: none; position: relative; width: 40px; height: 22px; border: 0; border-radius: 999px; background: #cbd5e1; padding: 0; cursor: pointer; transition: background .15s; }
+.dl-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .25); transition: left .15s; }
+.dl-switch.on { background: #2563eb; }
+.dl-switch.on::after { left: 21px; }
+.dl-switch:disabled { opacity: .55; cursor: not-allowed; }
+.dl-switch:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .dl-switch, .dl-switch::after { transition: none; } }
+/* Print copies stepper: its own size, not the full field width. */
+.bl-stp.dl-copies-stp { display: inline-flex; width: auto; max-width: max-content; align-self: flex-start; }
+.bl-stp.dl-copies-stp button { width: 38px; padding: 0; font-size: 16px; }
+.bl-stp.dl-copies-stp input { width: 48px; flex: none; }
 .dl-outlets { margin-top: 12px; border: 1px solid #eef2f7; border-radius: 12px; padding: 10px 12px; background: #fafcff; }
 .dl-outlets summary { cursor: pointer; font-weight: 600; color: #1e3a8a; font-size: 13px; }
 .dl-outlets .ac-table-wrap { margin-top: 10px; }

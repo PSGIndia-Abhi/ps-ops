@@ -12,6 +12,25 @@ import CustomerFilter from "./CustomerFilter";
 // billing details (Bill To, GSTIN, state) are complete, and what comes next.
 
 const STATUS = [["ACTIVE", "Active"], ["PAUSED", "Paused"], ["ENDED", "Ended"], ["", "All"]];
+const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 6: "Print & email", 5: "Review" };
+
+// Unfinished New Contract drafts kept in this browser by NewContract.jsx (same keys and rules:
+// version 1, a customer chosen, saved within the last 30 days). One per kind: service based / group.
+const draftKeys = () => {
+  const me = localStorage.getItem("userId") || "me";
+  return [[`bl-new-contract:${me}`, false], [`bl-new-contract-group:${me}`, true]];
+};
+function readDrafts() {
+  try {
+    return draftKeys().map(([key, group]) => {
+      const d = JSON.parse(localStorage.getItem(key) || "null");
+      return d && d.v === 1 && Date.now() - d.savedAt < 30 * 86400000 && d.companyId ? { ...d, key, group } : null;
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+const savedLabel = (t) => new Date(t).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export default function Contracts() {
   const { me } = useOutletContext();
@@ -35,10 +54,30 @@ export default function Contracts() {
   const rows = all.filter((c) => (!status || c.status === status) && (!missingOnly || (customers && complete.get(c.company_id) === false)));
   const open = (c) => navigate(`/billing/contracts/${c.id}`);
 
+  // Unfinished drafts: on top of Active / All, alone under Draft. Hidden by the other filters
+  // that a draft cannot meet (due this month, details missing).
+  const canDraft = me.can("MANAGE_BILLING_MASTERS");
+  const [drafts, setDrafts] = useState(() => (canDraft ? readDrafts() : []));
+  const [discarding, setDiscarding] = useState(null);
+  const needle = q.trim().toLowerCase();
+  const shownDrafts = drafts.filter((d) => (!picked.length || picked.includes(Number(d.companyId)) || picked.includes(d.companyId))
+    && (!type || d.terms?.billing_type === type) && (!needle || (d.customerName || "").toLowerCase().includes(needle)));
+  const draftRows = (status === "DRAFT" || status === "ACTIVE" || status === "") && !missingOnly && !dueOnly ? shownDrafts : [];
+  const contractRows = status === "DRAFT" ? [] : rows;
+  const continueDraft = (d) => navigate(`/billing/contracts/new?${d.group ? "type=group&" : ""}resume=1`);
+  function discardDraft(d) {
+    try { localStorage.removeItem(d.key); } catch { /* ignore */ }
+    const left = readDrafts();
+    setDrafts(left);
+    setDiscarding(null);
+    if (status === "DRAFT" && !left.length) setStatus("ACTIVE");
+  }
+
   return (
     <div className="ac-page">
       <div className="ac-head">
         <div>
+          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Contracts &amp; Price Lists</div>
           <h1 className="ac-title">Contracts &amp; Price Lists</h1>
           <p className="ac-sub">How each customer is billed: AMC, one-time, termite or chemical, the frequency, PO and the price of every service.</p>
         </div>
@@ -101,6 +140,11 @@ export default function Contracts() {
                 {l}<span className="bl-seg2-n">{data ? (v ? count(v) : all.length) : "…"}</span>
               </button>
             ))}
+            {drafts.length > 0 && (
+              <button type="button" className={`bl-seg2-draft ${status === "DRAFT" ? "active" : ""}`} aria-pressed={status === "DRAFT"} onClick={() => { setStatus("DRAFT"); setMissingOnly(false); setDueOnly(false); }}>
+                Draft<span className="bl-seg2-n">{drafts.length}</span>
+              </button>
+            )}
           </div>
           <button type="button" className={`bl-chiptoggle ${dueOnly ? "on" : ""}`} aria-pressed={dueOnly} onClick={() => setDueOnly((x) => !x)}><FiCalendar /> Due this month</button>
           <button type="button" className={`bl-chiptoggle warn ${missingOnly ? "on" : ""}`} aria-pressed={missingOnly} onClick={() => setMissingOnly((x) => !x)}><FiAlertTriangle /> Details missing</button>
@@ -114,9 +158,34 @@ export default function Contracts() {
             <tbody>
               {loading && !data ? (
                 <EmptyRow cols={10} loading text="" />
-              ) : !rows.length ? (
-                <EmptyRow cols={10} text={missingOnly ? "Every contract's customer has its billing details." : "No contracts match."} />
-              ) : rows.map((c) => (
+              ) : !contractRows.length && !draftRows.length ? (
+                <EmptyRow cols={10} text={status === "DRAFT" ? "No unfinished contracts match." : missingOnly ? "Every contract's customer has its billing details." : "No contracts match."} />
+              ) : [...draftRows.map((d) => (
+                <tr key={d.key} className="bl-rowlink bl-draftrow" onClick={() => continueDraft(d)} title="Continue this contract">
+                  <td>
+                    <div className="bl-cell2">
+                      <span className="bl-avatar-sm">{initials(d.customerName || "?")}</span>
+                      <div>
+                        <b>{d.customerName || "Customer chosen"}</b>
+                        <div className="bl-draft-sub">At “{STEP_NAMES[d.step] || "Customer"}” · saved {savedLabel(d.savedAt)}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{d.terms?.billing_type ? <TypeBadge type={d.terms.billing_type} frequency={d.terms.frequency_months} unit={d.terms.frequency_unit} /> : <span className="ac-sub">—</span>}</td>
+                  <td><span className="bl-soft">{d.group ? "Group based" : d.terms?.billing_type === "TERMITE" ? "Per area" : d.terms?.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
+                  <td><span className="ac-sub">—</span></td>
+                  <td><span className="bl-soft">{d.terms?.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
+                  <td><span className="ac-sub">—</span></td>
+                  <td><span className="ac-sub">Not finished</span></td>
+                  <td><span className="bl-draft-badge">Draft</span></td>
+                  <td colSpan={2}>
+                    <div className="bl-draft-acts">
+                      <button type="button" className="ac-btn sm" onClick={(e) => { e.stopPropagation(); setDiscarding(d); }}>Discard</button>
+                      <button type="button" className="ac-btn sm ac-btn-primary" onClick={(e) => { e.stopPropagation(); continueDraft(d); }}>Continue →</button>
+                    </div>
+                  </td>
+                </tr>
+              )), ...contractRows.map((c) => (
                 <tr key={c.id} className="bl-rowlink" onClick={() => open(c)}>
                   <td>
                     <div className="bl-cell2" title={c.contract_code}>
@@ -138,11 +207,27 @@ export default function Contracts() {
                   <td>{c.last_invoice_number ? <span className="bl-mono">{c.last_invoice_number}</span> : <span className="ac-sub">—</span>}</td>
                   <td><FiChevronRight style={{ color: "#94a3b8" }} /></td>
                 </tr>
-              ))}
+              ))]}
             </tbody>
           </table>
         </div>
       </div>
+
+      {discarding && (
+        <Modal onClose={() => setDiscarding(null)} narrow label="Discard unfinished contract">
+          <div className="bl-m-head">
+            <h3>Delete this unfinished contract?</h3>
+            <button type="button" className="bl-x" onClick={() => setDiscarding(null)} aria-label="Close">✕</button>
+          </div>
+          <div className="bl-m-body">
+            <p className="ac-sub" style={{ margin: 0 }}>Everything typed for {discarding.customerName || "this customer"} will be removed. This cannot be undone.</p>
+          </div>
+          <div className="bl-m-foot"><span /><div className="ac-actions">
+            <button type="button" className="ac-btn" onClick={() => setDiscarding(null)}>Keep it</button>
+            <button type="button" className="ac-btn ac-btn-danger" onClick={() => discardDraft(discarding)}>Delete draft</button>
+          </div></div>
+        </Modal>
+      )}
     </div>
   );
 }

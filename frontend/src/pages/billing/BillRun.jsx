@@ -21,7 +21,7 @@ export default function BillRun() {
   const [search, setSearch] = useState("");
   const q = useDebounced(search);
   const { data, error, loading, reload } = useBilling(`/due${qs({ month, type, category, q })}`);
-  const [picked, setPicked] = useState(null); // null = default selection (ready rows)
+  const [picked, setPicked] = useState(null); // null = nothing ticked yet (contracts are ticked by hand)
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [runError, setRunError] = useState("");
@@ -30,7 +30,8 @@ export default function BillRun() {
   const [customers, setCustomers] = useState([]); // customer filter: [] = all
   const rows = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers]);
   const selectable = (r) => !r.blocking && !r.already_drafted;
-  const selected = picked ?? new Set(rows.filter(selectable).map((r) => r.contract_id));
+  // Nothing is ticked by default: Accounts tick each contract (or "select all") themselves.
+  const selected = picked ?? new Set();
   const toggle = (id) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);

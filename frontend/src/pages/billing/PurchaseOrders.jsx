@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { FiPaperclip, FiUploadCloud, FiX } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, billingUpload, openPdf, qs, useBilling } from "./billingApi";
@@ -29,6 +29,7 @@ function filterParams(f) {
 
 export default function PurchaseOrders() {
   const { me } = useOutletContext();
+  const navigate = useNavigate();
   const canEdit = me.can("MANAGE_BILLING_MASTERS");
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -44,6 +45,7 @@ export default function PurchaseOrders() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
+          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Purchase Orders</div>
           <h1 className="ac-title">Purchase Orders</h1>
           <p className="ac-sub">Customer POs, expiry tracking and Termite advances.</p>
         </div>
@@ -118,7 +120,6 @@ function PoForm({ po, onClose, onSaved }) {
   const { data: customers } = useBilling(po ? null : "/customers");
   const [form, setForm] = useState(po ? { ...po, expiry_date: po.expiry_date || "", valid_from: po.valid_from || "", po_amount: po.po_amount ?? "", remarks: po.remarks || "" } : { company_id: "", contract_id: "", po_number: "", po_date: "", valid_from: "", expiry_date: "", po_amount: "", kind: "STANDARD", remarks: "" });
   const [openPo, setOpenPo] = useState(po ? po.is_open_po : false);
-  const { data: contracts } = useBilling(form.company_id ? `/contracts${qs({ company_id: form.company_id })}` : null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState(null);
@@ -175,17 +176,11 @@ function PoForm({ po, onClose, onSaved }) {
         <div className="bl-grid g2">
           <Field label="Customer" required>
             {po ? <input className="ac-input" readOnly value={po.customer} /> : (
-              <select className="ac-select" value={form.company_id} onChange={(e) => set({ company_id: e.target.value, contract_id: "" })}>
+              <select className="ac-select" value={form.company_id} onChange={(e) => set({ company_id: e.target.value })}>
                 <option value="">Choose a customer…</option>
                 {(customers || []).map((c) => <option key={c.company_id} value={c.company_id}>{c.name}</option>)}
               </select>
             )}
-          </Field>
-          <Field label="Contract">
-            <select className="ac-select" value={form.contract_id || ""} onChange={(e) => set({ contract_id: e.target.value })} disabled={!form.company_id}>
-              <option value="">Any contract of the customer</option>
-              {(contracts || []).map((c) => <option key={c.id} value={c.id}>{c.contract_code}</option>)}
-            </select>
           </Field>
           <Field label="PO number" required><input className="ac-input" value={form.po_number} maxLength={100} onChange={(e) => set({ po_number: e.target.value })} /></Field>
           <Field label="PO date" required><input type="date" className="ac-input" value={form.po_date || ""} onChange={(e) => set({ po_date: e.target.value })} /></Field>
@@ -197,12 +192,6 @@ function PoForm({ po, onClose, onSaved }) {
           <Field label="PO amount (₹, incl. GST)" required>
             <input type="number" min="0" step="0.01" className="ac-input" value={form.po_amount} onChange={(e) => set({ po_amount: e.target.value })} />
           </Field>
-          <Field label="Type">
-            <select className="ac-select" value={form.kind} onChange={(e) => set({ kind: e.target.value })}>
-              <option value="STANDARD">Standard</option>
-              <option value="ADVANCE">Advance (Termite – paid in advance)</option>
-            </select>
-          </Field>
           {po && (
             <Field label="Status">
               <select className="ac-select" value={form.status} onChange={(e) => set({ status: e.target.value })}>
@@ -211,7 +200,7 @@ function PoForm({ po, onClose, onSaved }) {
               </select>
             </Field>
           )}
-          <Field label="Remarks" className={po ? "" : "bl-span2"}><input className="ac-input" value={form.remarks} maxLength={1000} onChange={(e) => set({ remarks: e.target.value })} /></Field>
+          <Field label="Remarks" className="bl-span2"><input className="ac-input" value={form.remarks} maxLength={1000} onChange={(e) => set({ remarks: e.target.value })} /></Field>
           <Field label="PO copy" className="bl-span2" hint={po?.file && !file ? `Current: ${po.file.name} - choose a file to replace it (the old copy is kept)` : "PDF, JPG or PNG, up to 3 MB (optional)"}>
             {file ? (
               <div className="pd-file"><FiPaperclip /><span>{file.name}</span><small>{Math.max(1, Math.round(file.size / 1024))} KB</small><button type="button" className="sos-rm" onClick={() => setFile(null)} aria-label="Remove file"><FiX /></button></div>

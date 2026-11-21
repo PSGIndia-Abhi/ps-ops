@@ -86,7 +86,7 @@ function buildContent(inv, number) {
     ship_to: inv.ship_to ? [{ name: inv.ship_to.name, addresses: inv.ship_to.address ? [inv.ship_to.address] : [] }] : [],
     // a group based contract bills the group (its companies are the lines): no Ship To column
     hide_ship_to: inv.contract.contract_kind === "GROUP",
-    // Termite invoices print Bill To + Invoice Details only (no Service Offered By) and no Bill Value column
+    // Termite invoices print Bill To + Invoice Details only (no Service Offered To) and no Bill Value column
     termite: inv.contract.billing_type === "TERMITE",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
     lines: printed,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, useBilling } from "./billingApi";
 import { Msg } from "./ui";
@@ -19,6 +19,7 @@ const preview = (text) => String(text || "").replace(/\{(month|period|from_month
 
 export default function InvoiceDescriptions() {
   const { me } = useOutletContext();
+  const navigate = useNavigate();
   const canEdit = me.can("MANAGE_BILLING_MASTERS");
   const { data, error, loading, reload } = useBilling("/descriptions");
   const [text, setText] = useState("");
@@ -50,6 +51,7 @@ export default function InvoiceDescriptions() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
+          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Invoice Descriptions</div>
           <h1 className="ac-title">Invoice Descriptions</h1>
           <p className="ac-sub">The descriptions a contract can print on its invoices. Each contract picks one.</p>
         </div>
