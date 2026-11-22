@@ -926,10 +926,9 @@ const CALL_VISITS = (what) => `(SELECT ${what}
 // by desk users.
 // Query: due=today (default: due today + overdue) | all, or month (2026-10), or from / to (due dates),
 //        status (comma list, OPEN = not DONE), q (customer / site), company_id, mine=1, page, page_size.
-async function callList(req) {
-  const query = req.query || {};
-  const period = callListPeriod(query);
-
+// The call list's filters on its rows (x): who may see the call, Only my calls, customer and the
+// search box. Shared by GET /calls and GET /calls/completed so both show the same calls.
+function callListFilters(req, query) {
   const outer = [];
   const outerParams = [];
   if (!isDesk(req)) {
@@ -956,6 +955,29 @@ async function callList(req) {
       outerParams.push(likeOf(q), likeOf(q));
     }
   }
+  return { outer, outerParams };
+}
+
+// SQL: a call's status on the list - a done call whose ticket is still open is TICKET_OPEN.
+const LIST_STATUS_SQL = `CASE WHEN r.status = 'DONE' AND EXISTS (SELECT 1 FROM feedback_tickets ot WHERE ot.request_id = r.id AND ot.status = 'ACTION_PENDING')
+                THEN 'TICKET_OPEN' ELSE r.status END`;
+
+// The number of calls in each list status, for the Dashboard tiles.
+async function callStatusCounts(inner, innerParams, outer, outerParams) {
+  const baseWhere = outer.length ? `WHERE ${outer.join(" AND ")}` : "";
+  const [countRows] = await pool.query(
+    `SELECT x.status, COUNT(*) AS n FROM (${inner}) x ${baseWhere} GROUP BY x.status`,
+    [...innerParams, ...outerParams]
+  );
+  const statusCounts = Object.fromEntries(LIST_STATUSES.map((st) => [st, 0]));
+  for (const r of countRows) statusCounts[r.status] = Number(r.n);
+  return statusCounts;
+}
+
+async function callList(req) {
+  const query = req.query || {};
+  const period = callListPeriod(query);
+  const { outer, outerParams } = callListFilters(req, query);
 
   const inner = `
     SELECT r.id AS request_id, DATE_FORMAT(r.period_month, '%Y-%m') AS call_month, ${CALL_WINDOW},
@@ -971,8 +993,7 @@ async function callList(req) {
            ${EARLIER_VISIT("DATE_FORMAT(COALESCE(v.completed_at, v.scheduled_date), '%Y-%m-%d')")} AS earlier_visit_date,
            ${EARLIER_VISIT("COALESCE(NULLIF(j.sub_service, ''), j.service_type)")} AS earlier_service,
            -- A done call whose ticket is still open shows as TICKET_OPEN until the ticket is closed.
-           CASE WHEN r.status = 'DONE' AND EXISTS (SELECT 1 FROM feedback_tickets ot WHERE ot.request_id = r.id AND ot.status = 'ACTION_PENDING')
-                THEN 'TICKET_OPEN' ELSE r.status END AS status, r.result,
+           ${LIST_STATUS_SQL} AS status, r.result,
            r.collector_user_id, cu.name AS collector_name, r.next_call_at, r.updated_at AS last_activity_at
     FROM feedback_requests r
     JOIN sites s ON s.id = r.site_id
@@ -980,14 +1001,7 @@ async function callList(req) {
     LEFT JOIN users cu ON cu.id = r.collector_user_id
     WHERE ${period.sql}`;
   const innerParams = period.params;
-  const baseWhere = outer.length ? `WHERE ${outer.join(" AND ")}` : "";
-
-  const [countRows] = await pool.query(
-    `SELECT x.status, COUNT(*) AS n FROM (${inner}) x ${baseWhere} GROUP BY x.status`,
-    [...innerParams, ...outerParams]
-  );
-  const statusCounts = Object.fromEntries(LIST_STATUSES.map((st) => [st, 0]));
-  for (const r of countRows) statusCounts[r.status] = Number(r.n);
+  const statusCounts = await callStatusCounts(inner, innerParams, outer, outerParams);
 
   const statuses = csvOf(query.status, [...LIST_STATUSES, "OPEN"], "status");
   const wanted = [...new Set(statuses.flatMap((st) => (st === "OPEN" ? LIST_STATUSES.filter((x) => x !== "DONE") : [st])))];
@@ -1031,6 +1045,134 @@ async function callList(req) {
       next_call_at: r.next_call_at,
       last_activity_at: r.last_activity_at,
     })),
+  };
+}
+
+// The calls for the Completed view: the same period and filters as GET /calls, one row per call
+// (light - no visit columns), with the list status.
+function completedInner(period) {
+  return `
+    SELECT r.id AS request_id, r.due_date, r.done_at, r.result, r.latest_submission_id,
+           s.id AS site_id, s.name AS site_name, s.city AS site_city,
+           co.id AS company_id, co.name AS company_name,
+           r.collector_user_id, cu.name AS collector_name,
+           ${LIST_STATUS_SQL} AS status
+    FROM feedback_requests r
+    JOIN sites s ON s.id = r.site_id
+    JOIN companies co ON co.id = r.company_id
+    LEFT JOIN users cu ON cu.id = r.collector_user_id
+    WHERE ${period.sql}`;
+}
+
+// GET /calls/completed - the Completed view of the Dashboard: the completed calls grouped by site,
+// one row per site (how many, how many good / with an issue, the last one). Same query as GET /calls
+// (period, q, company_id, mine); status_counts for the tiles as there.
+async function completedSites(req) {
+  const query = req.query || {};
+  const period = callListPeriod(query);
+  const { outer, outerParams } = callListFilters(req, query);
+  const inner = completedInner(period);
+  const statusCounts = await callStatusCounts(inner, period.params, outer, outerParams);
+
+  const where = `WHERE ${[...outer, "x.status = 'DONE'"].join(" AND ")}`;
+  const params = [...period.params, ...outerParams];
+  const [[totals]] = await pool.query(
+    `SELECT COUNT(*) AS sites, COALESCE(SUM(g.n), 0) AS feedbacks
+     FROM (SELECT x.site_id, COUNT(*) AS n FROM (${inner}) x ${where} GROUP BY x.site_id) g`,
+    params
+  );
+
+  const { page, pageSize, offset } = pageOf(query, 50, 200);
+  const [rows] = await pool.query(
+    `SELECT x.site_id, MAX(x.site_name) AS site_name, MAX(x.site_city) AS site_city,
+            MAX(x.company_id) AS company_id, MAX(x.company_name) AS company_name,
+            COUNT(*) AS feedbacks,
+            SUM(x.result = 'GOOD') AS good, SUM(x.result = 'ISSUE') AS issues, SUM(x.result = 'NO_RESPONSE') AS no_response,
+            DATE_FORMAT(MAX(x.due_date), '%Y-%m-%d') AS last_due_date, MAX(x.done_at) AS last_done_at,
+            GROUP_CONCAT(COALESCE(x.result, '') ORDER BY x.due_date, x.done_at SEPARATOR ',') AS results
+     FROM (${inner}) x ${where}
+     GROUP BY x.site_id
+     ORDER BY MAX(x.done_at) DESC, company_name, site_name
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset]
+  );
+
+  return {
+    month: period.month,
+    status_counts: statusCounts,
+    total: Number(totals.sites || 0),
+    feedbacks: Number(totals.feedbacks || 0),
+    page,
+    page_size: pageSize,
+    sites: rows.map((r) => ({
+      customer: { id: r.company_id, name: r.company_name },
+      site: { id: r.site_id, name: r.site_name, city: r.site_city },
+      feedbacks: Number(r.feedbacks),
+      good: Number(r.good || 0),
+      issues: Number(r.issues || 0),
+      no_response: Number(r.no_response || 0),
+      last_due_date: r.last_due_date,
+      last_done_at: r.last_done_at,
+      // Oldest first: GOOD / ISSUE / NO_RESPONSE ('' = no result recorded).
+      results: r.results ? r.results.split(",") : [],
+    })),
+  };
+}
+
+// GET /calls/completed/:siteId - every completed call of one site in the same period and filters,
+// newest first: the feedback taken (the latest answers), who gave it and the tickets raised from it.
+async function completedSiteFeedback(req, siteId) {
+  const query = req.query || {};
+  const period = callListPeriod(query);
+  const { outer, outerParams } = callListFilters(req, query);
+  const where = `WHERE ${[...outer, "x.status = 'DONE'", "x.site_id = ?"].join(" AND ")}`;
+  const [calls] = await pool.query(
+    `SELECT x.*, DATE_FORMAT(x.due_date, '%Y-%m-%d') AS due_on
+     FROM (${completedInner(period)}) x ${where}
+     ORDER BY x.done_at DESC, x.due_date DESC`,
+    [...period.params, ...outerParams, String(siteId)]
+  );
+  if (!calls.length) throw new HttpError(404, "No completed feedback for this site in this period");
+
+  const ids = calls.map((c) => c.request_id);
+  const [submissions] = await pool.query(
+    `SELECT sb.*, u.name AS collected_by_name
+     FROM feedback_submissions sb LEFT JOIN users u ON u.id = sb.collected_by_user_id
+     WHERE sb.request_id IN (?) ORDER BY sb.submitted_at DESC, sb.id DESC`,
+    [ids]
+  );
+  // A call's feedback = its latest answers (a later round replaces the earlier one).
+  const latest = new Map();
+  for (const c of calls) {
+    const own = submissions.filter((s) => s.request_id === c.request_id);
+    const pick = own.find((s) => s.id === c.latest_submission_id) || own[0];
+    if (pick) latest.set(c.request_id, pick);
+  }
+  const responses = await questionsAnswers([...latest.values()].map((s) => s.id));
+  const [tickets] = await pool.query(
+    `SELECT t.id, t.request_id, t.ticket_number, t.status, t.priority, t.issue_summary, t.created_at
+     FROM feedback_tickets t WHERE t.request_id IN (?) ORDER BY t.seq`,
+    [ids]
+  );
+
+  const first = calls[0];
+  return {
+    customer: { id: first.company_id, name: first.company_name },
+    site: { id: first.site_id, name: first.site_name, city: first.site_city },
+    calls: calls.map((c) => {
+      const s = latest.get(c.request_id);
+      return {
+        request_id: c.request_id,
+        due_date: c.due_on,
+        done_at: c.done_at,
+        result: c.result,
+        collector: person(c.collector_user_id, c.collector_name),
+        feedback: s ? submissionRow(s, responses, s.id) : null,
+        tickets: tickets
+          .filter((t) => t.request_id === c.request_id)
+          .map((t) => ({ id: t.id, ticket_number: t.ticket_number, status: t.status, priority: t.priority, issue_summary: t.issue_summary, created_at: t.created_at })),
+      };
+    }),
   };
 }
 
@@ -3109,6 +3251,8 @@ module.exports = {
   getSettings,
   saveSettings,
   callList,
+  completedSites,
+  completedSiteFeedback,
   openCall,
   getCall,
   recordCallAttempt,

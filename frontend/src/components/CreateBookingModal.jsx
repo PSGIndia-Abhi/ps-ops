@@ -60,10 +60,12 @@ export default function CreateBookingModal({
   technicians,
   clientContact,
   // Optional (the Feedback Desk's re-visit booking): a starting contact and services, and siteId
-  // to offer only that site's contacts.
+  // to offer only the contacts of that site's customer. siteContacts: the site's own contacts, offered even when
+  // /api/contacts leaves them out (it lists verified contacts only).
   initialContactId = "",
   initialSubServices = [],
   siteId = null,
+  siteContacts = null,
 }) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
@@ -109,6 +111,16 @@ export default function CreateBookingModal({
   // admin can fix the input and resubmit.
   const [status, setStatus] = useState(null);
 
+  // Adds the site's contacts that /api/contacts did not return (e.g. unverified ones saved by the Feedback Desk).
+  function withSiteContacts(list) {
+    if (!siteId || !siteContacts?.length) return list;
+    const have = new Set(list.map(c => String(c.id)));
+    const extra = siteContacts
+      .filter(c => !have.has(String(c.id)))
+      .map(c => ({ ...c, company_id: siteId }));
+    return [...list, ...extra];
+  }
+
   useEffect(() => {
     async function loadContacts() {
       if (role === "client") {
@@ -122,9 +134,10 @@ export default function CreateBookingModal({
         const res = await apiFetch(`/api/contacts`);
         if (!res?.ok) throw new Error("Failed to load contacts");
         const data = await res.json();
-        setContacts(Array.isArray(data) ? data : []);
+        setContacts(withSiteContacts(Array.isArray(data) ? data : []));
       } catch (err) {
         console.error("Failed to load contacts", err);
+        setContacts(withSiteContacts([]));
       } finally {
         setLoadingContacts(false);
       }
@@ -193,11 +206,25 @@ export default function CreateBookingModal({
     }));
   }, [role, selectedContact?.company_id, companyAddress]);
 
+  // With siteId: the contacts of that site's customer (contacts.company_id holds a site id, and
+  // sites.company_id is the customer), the site's own contacts first.
+  const customerContacts = useMemo(() => {
+    if (!siteId) return contacts;
+    const customerId = companies.find((s) => String(s.id) === String(siteId))?.company_id;
+    const customerSiteIds = new Set(
+      companies.filter((s) => customerId && String(s.company_id) === String(customerId)).map((s) => String(s.id))
+    );
+    customerSiteIds.add(String(siteId));
+    if (customerId) customerSiteIds.add(String(customerId));
+    const mine = contacts.filter((c) => customerSiteIds.has(String(c.company_id)));
+    const atSite = mine.filter((c) => String(c.company_id) === String(siteId));
+    return [...atSite, ...mine.filter((c) => String(c.company_id) !== String(siteId))];
+  }, [contacts, companies, siteId]);
+
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
-    const atSite = siteId ? contacts.filter((c) => String(c.company_id) === String(siteId)) : contacts;
-    if (!query) return atSite;
-    return atSite.filter((c) => {
+    if (!query) return customerContacts;
+    return customerContacts.filter((c) => {
       const name = (c.name || "").toLowerCase();
       const phone = (c.phone || c.contact_phone || "").toLowerCase();
       const email = (c.email || c.contact_email || "").toLowerCase();
@@ -209,7 +236,7 @@ export default function CreateBookingModal({
         company.includes(query)
       );
     });
-  }, [contacts, contactSearch, siteId]);
+  }, [customerContacts, contactSearch]);
 
   async function reloadContacts() {
     if (role === "client") return;
@@ -217,7 +244,7 @@ export default function CreateBookingModal({
       const res = await apiFetch(`/api/contacts`);
       if (!res?.ok) throw new Error("Failed to load contacts");
       const data = await res.json();
-      setContacts(Array.isArray(data) ? data : []);
+      setContacts(withSiteContacts(Array.isArray(data) ? data : []));
     } catch (err) {
       console.error("Failed to load contacts", err);
     }
@@ -638,13 +665,13 @@ export default function CreateBookingModal({
             {!isClient && (
               <section className="bgm-section">
                 <SectionHead step={nextStep()} title="Requested by" done={stepDone.contact} />
-                {/* Booked from a feedback ticket: the site's contacts, all listed to pick from. */}
+                {/* Booked from a feedback ticket: the customer's contacts, all listed to pick from. */}
                 {siteId ? (
                   <div className="bgm-search-results" role="listbox" style={{ position: "static", boxShadow: "none", maxHeight: 260 }}>
                     {loadingContacts ? (
                       <div className="bgm-search-empty">Loading contacts…</div>
                     ) : filteredContacts.length === 0 ? (
-                      <div className="bgm-search-empty">No contacts saved for this site</div>
+                      <div className="bgm-search-empty">No contacts saved for this customer</div>
                     ) : (
                       filteredContacts.map(c => {
                         const on = String(form.contactId) === String(c.id);
@@ -660,7 +687,9 @@ export default function CreateBookingModal({
                             onClick={() => setForm(prev => ({ ...prev, contactId: c.id }))}
                           >
                             <span className="bgm-contact-name">{c.name}{on ? " ✓" : ""}</span>
-                            <span className="bgm-contact-sub">{[phoneLabel, c.role, c.email].filter(Boolean).join(" · ")}</span>
+                            <span className="bgm-contact-sub">
+                              {[phoneLabel, c.role, c.email, String(c.company_id) !== String(siteId) && c.company_site].filter(Boolean).join(" · ")}
+                            </span>
                           </button>
                         );
                       })

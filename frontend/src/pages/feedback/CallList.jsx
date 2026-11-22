@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listNumberRequests, monthLabel, periodText, shiftMonth, takeCall, takeUpcomingCall, thisMonth } from "./feedbackApi";
+import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listCompletedSites, listNumberRequests, monthLabel, periodText, shiftMonth, takeCall, takeUpcomingCall, thisMonth } from "./feedbackApi";
+import { CompletedFeedbackPanel, CompletedTable } from "./CompletedFeedback";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
 import { EndedSchedules } from "./ScheduleMaster";
@@ -129,6 +130,7 @@ export default function CallList() {
   const [error, setError] = useState("");
   const [busySite, setBusySite] = useState(null);
   const [details, setDetails] = useState(null); // { siteId, month, requestId } for the details pop-up
+  const [doneSite, setDoneSite] = useState(null); // site id for the Completed view's feedback pop-up
 
   const setParam = useCallback(
     (changes) => {
@@ -154,12 +156,18 @@ export default function CallList() {
   }, [search, params, setParam]);
 
   const q = params.get("q") || "";
+  const periodQuery = mode === "range" ? { from, to } : mode === "month" ? { month } : { due: mode };
+  // Completed: one row per site (CompletedFeedback); every other status: one row per call.
+  const completedView = status === "DONE";
   const load = useCallback(() => {
     // Upcoming (ahead): the calls taken early for that day plus the ones the schedules will make.
     const period = mode === "upcoming" ? { ahead } : mode === "range" ? { from, to } : mode === "month" ? { month } : { due: mode };
-    listCalls({ ...period, status: status === "ALL" ? "" : status, q, mine: mine ? "1" : "", page, page_size: PAGE_SIZE })
+    const common = { ...period, q, mine: mine ? "1" : "", page, page_size: PAGE_SIZE };
+    const request = status === "DONE" ? listCompletedSites(common) : listCalls({ ...common, status: status === "ALL" ? "" : status });
+    request
       .then((d) => {
-        setData(d);
+        // view: which table the rows are for, so a status switch never draws the wrong table.
+        setData({ ...d, view: status === "DONE" ? "done" : "calls" });
         setError("");
       })
       .catch((err) => setError(err.message));
@@ -205,7 +213,7 @@ export default function CallList() {
   const counts = data?.status_counts || {};
   const totalSites = Object.values(counts).reduce((n, c) => n + c, 0);
   const openCount = totalSites - (counts.DONE || 0);
-  const dueNow = (data?.sites || []).filter((s) => s.status !== "DONE" && s.next_call_at && isPast(s.next_call_at)).length;
+  const dueNow = data?.view === "calls" ? data.sites.filter((s) => s.status !== "DONE" && s.next_call_at && isPast(s.next_call_at)).length : 0;
   const tile = (key, label, tone, icon, sub) => ({
     label,
     value: counts[key] || 0,
@@ -233,7 +241,7 @@ export default function CallList() {
           tile("FORM_RECEIVED", "Form received", "violet", FiInbox, counts.FORM_RECEIVED ? "Needs your review" : undefined),
           tile("TICKET_OPEN", "Ticket open", "danger", FiAlertTriangle, counts.TICKET_OPEN ? "Waiting for the ticket" : undefined),
           tile("DONE", "Completed", "ok", FiCheckCircle),
-          { label: mode === "today" ? "Calls due today" : mode === "upcoming" ? `Calls due ${ahead === 1 ? "tomorrow" : `on ${aheadLabel(ahead)}`}` : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
+          { label: mode === "today" ? "Calls assigned today" : mode === "upcoming" ? `Calls due ${ahead === 1 ? "tomorrow" : `on ${aheadLabel(ahead)}`}` : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
         ]}
       />
 
@@ -259,7 +267,7 @@ export default function CallList() {
           )}
         </div>
 
-        {!data ? (
+        {!data || data.view !== (completedView ? "done" : "calls") ? (
           error ? null : <Loading />
         ) : !data?.sites?.length ? (
           <Empty
@@ -276,6 +284,8 @@ export default function CallList() {
                     : "Pick another period, or All."
             }
           />
+        ) : completedView ? (
+          <CompletedTable data={data} onView={(row) => setDoneSite(row.site.id)} />
         ) : (
           <div className="fb-table-wrap">
             <table className="fb-table">
@@ -391,6 +401,14 @@ export default function CallList() {
         )}
       </Card>
 
+      {doneSite && (
+        <CompletedFeedbackPanel
+          siteId={doneSite}
+          filters={{ ...periodQuery, q, mine: mine ? "1" : "" }}
+          onOpenTicket={(ticketId) => navigate(`${FEEDBACK_HOME}/tickets/${ticketId}`)}
+          onClose={() => setDoneSite(null)}
+        />
+      )}
       {details && (
         <SiteDetailsPanel
           siteId={details.siteId}

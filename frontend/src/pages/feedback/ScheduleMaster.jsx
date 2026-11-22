@@ -118,7 +118,9 @@ function previewText(f, mode) {
  * Customers and their sites in one field: type to search, tick customers (all their sites) and / or
  * single sites. single = one pick only (editing a schedule).
  */
-function TargetPicker({ customers, value, onChange, single }) {
+// taken: customers / sites that already have a schedule ([{ company_id, site_id }]); they show greyed
+// out and cannot be picked again - their schedule is changed with Edit in the list below.
+function TargetPicker({ customers, value, onChange, single, taken = [] }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const box = useRef(null);
@@ -135,17 +137,24 @@ function TargetPicker({ customers, value, onChange, single }) {
   const has = (cid, sid) => value.some((t) => t.company_id === cid && (t.site_id || null) === (sid || null));
   const wholeCustomer = (cid) => has(cid, null);
 
+  // Already scheduled: the whole customer, or single sites of it.
+  const takenWhole = useMemo(() => new Set(taken.filter((t) => !t.site_id).map((t) => t.company_id)), [taken]);
+  const takenSites = useMemo(() => new Set(taken.filter((t) => t.site_id).map((t) => t.site_id)), [taken]);
+  const siteTaken = (cid, sid) => takenWhole.has(cid) || takenSites.has(sid);
+  // The "all sites" row is blocked when the customer, or any of its sites, already has a schedule
+  // (a whole-customer schedule would call those sites twice).
+  const customerTaken = (c) => takenWhole.has(c.id) || c.sites.some((st) => takenSites.has(st.id));
+
   const matches = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return customers.slice(0, 40).map((c) => ({ c, sites: c.sites }));
+    if (!t) return customers.map((c) => ({ c, sites: c.sites }));
     return customers
       .map((c) => {
         const nameHit = c.name.toLowerCase().includes(t);
         const sites = nameHit ? c.sites : c.sites.filter((st) => `${st.name} ${st.city || ""}`.toLowerCase().includes(t));
         return nameHit || sites.length ? { c, sites } : null;
       })
-      .filter(Boolean)
-      .slice(0, 60);
+      .filter(Boolean);
   }, [q, customers]);
 
   // After a pick the list closes, so the rest of the form is reachable at once;
@@ -212,25 +221,34 @@ function TargetPicker({ customers, value, onChange, single }) {
           {!matches.length && <div className="fb-tp-empty">No customer or site matches “{q}”.</div>}
           {matches.map(({ c, sites }) => {
             const whole = wholeCustomer(c.id);
+            const cTaken = customerTaken(c);
             // A one-site customer is just its customer row.
             const siteRows = c.sites.length > 1 ? sites : [];
+            const scheduledNote = takenWhole.has(c.id) ? "Already scheduled · edit it below" : "Some sites already scheduled";
             return (
               <div key={c.id} className="fb-tp-group">
-                <label className={`fb-tp-opt ${whole ? "is-on" : ""}`}>
-                  <input type={single ? "radio" : "checkbox"} checked={whole} onChange={() => toggle(c.id, null)} />
+                <label className={`fb-tp-opt ${whole ? "is-on" : ""} ${cTaken ? "is-disabled" : ""}`}>
+                  <input type={single ? "radio" : "checkbox"} checked={whole} disabled={cTaken} onChange={() => toggle(c.id, null)} />
                   <span className="fb-tp-text">
                     <span className="fb-tp-name">{c.name}</span>
-                    <span className="fb-tp-meta">{c.sites.length > 1 ? `All ${c.sites.length} sites` : [c.sites[0]?.name, c.sites[0]?.city].filter(Boolean).join(" · ") || "All sites"}</span>
+                    <span className="fb-tp-meta">
+                      {c.sites.length > 1 ? `All ${c.sites.length} sites` : [c.sites[0]?.name, c.sites[0]?.city].filter(Boolean).join(" · ") || "All sites"}
+                      {cTaken && ` · ${c.sites.length > 1 ? scheduledNote : "Already scheduled · edit it below"}`}
+                    </span>
                   </span>
                 </label>
                 {siteRows.map((st) => {
                   const on = whole || has(c.id, st.id);
+                  const sTaken = siteTaken(c.id, st.id);
                   return (
-                    <label key={st.id} className={`fb-tp-opt ${on ? "is-on" : ""} ${whole ? "is-disabled" : ""}`}>
-                      <input type={single ? "radio" : "checkbox"} checked={on} disabled={whole} onChange={() => toggle(c.id, st.id)} />
+                    <label key={st.id} className={`fb-tp-opt ${on ? "is-on" : ""} ${whole || sTaken ? "is-disabled" : ""}`}>
+                      <input type={single ? "radio" : "checkbox"} checked={on} disabled={whole || sTaken} onChange={() => toggle(c.id, st.id)} />
                       <span className="fb-tp-text">
                         <span className="fb-tp-name">{c.name}</span>
-                        <span className="fb-tp-meta">{[st.name, st.city].filter(Boolean).join(" · ")}</span>
+                        <span className="fb-tp-meta">
+                          {[st.name, st.city].filter(Boolean).join(" · ")}
+                          {sTaken && " · Already scheduled"}
+                        </span>
                       </span>
                     </label>
                   );
@@ -238,15 +256,20 @@ function TargetPicker({ customers, value, onChange, single }) {
               </div>
             );
           })}
-          {!q.trim() && customers.length > 40 && <div className="fb-tp-empty">Type to find the other {customers.length - 40} customers.</div>}
         </div>
       )}
     </div>
   );
 }
 
-function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
+// schedules: the existing schedules - their customers / sites cannot be picked again here
+// (except the one being edited).
+function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, schedules = [] }) {
   const [f, setF] = useState(() => (renew ? renewForm(schedule) : formOf(schedule)));
+  const taken = useMemo(
+    () => schedules.filter((s) => s.id !== schedule?.id).map((s) => ({ company_id: s.customer.id, site_id: s.site?.id || null })),
+    [schedules, schedule]
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? (e.target.type === "checkbox" ? e.target.checked : e.target.value) : e }));
@@ -291,7 +314,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false }) {
             Customers & sites <span className="fb-req">*</span>
             <small>{schedule ? "One customer (all sites) or one site" : "Pick a customer for all its sites, or single sites. Each gets its own schedule."}</small>
           </div>
-          <TargetPicker customers={options.customers} value={f.targets} onChange={(targets) => setF((x) => ({ ...x, targets }))} single={Boolean(schedule)} />
+          <TargetPicker customers={options.customers} value={f.targets} onChange={(targets) => setF((x) => ({ ...x, targets }))} single={Boolean(schedule)} taken={taken} />
         </section>
 
         <section className="fb-sched-sec">
@@ -545,6 +568,7 @@ export function EndedSchedules({ schedules: given, onChanged }) {
         <ScheduleForm
           renew
           schedule={renewing}
+          schedules={given || loaded || []}
           options={options}
           onClose={() => setRenewing(null)}
           onSaved={(text) => {
@@ -701,6 +725,7 @@ export default function ScheduleMaster() {
       {editing && (
         <ScheduleForm
           schedule={editing === "new" ? null : editing}
+          schedules={schedules}
           options={options}
           onClose={() => setEditing(null)}
           onSaved={(text) => {
