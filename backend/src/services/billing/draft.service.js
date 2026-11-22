@@ -244,9 +244,17 @@ async function periodsToBill(db, contract, monthEnd) {
   };
 }
 
-/** Contracts due in `month` with their period, services, estimate and warnings. */
+/**
+ * Contracts due in `month` with their period, services, estimate and warnings. `month` "ALL": every
+ * active contract's next bill up to 12 months ahead, each with the month it is billed in (bill_month);
+ * only those due by this month can be generated (due_now).
+ */
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
-  const range = C.monthRange(month);
+  const allMonths = month === "ALL";
+  const thisMonth = C.todayIst().slice(0, 7);
+  const range = allMonths ? C.monthRange(C.addMonths(`${thisMonth}-01`, 12).slice(0, 7)) : C.monthRange(month);
+  // weekly / daily Termite: only what is due by this month (a year ahead would be dozens of weeks)
+  const shortEnd = allMonths ? C.monthRange(thisMonth).end : range.end;
   const [contracts] = await db.query(
     `SELECT bc.*, c.name AS customer, IF(bc.contract_kind = 'GROUP', TRIM(g.name), NULL) AS billing_group
        FROM billing_contracts bc
@@ -283,7 +291,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     let existingDrafts = 0;
     if (short) {
       // weekly / daily Termite: one row for all its periods due this month (one invoice each)
-      const { periods, drafted } = await periodsToBill(db, contract, range.end);
+      const { periods, drafted } = await periodsToBill(db, contract, shortEnd);
       if (!periods.length && !drafted.length) continue;
       const all = [...periods, ...drafted].sort((a, b) => (a.start < b.start ? -1 : 1));
       period = { start: all[0].start, end: all[all.length - 1].end };
@@ -353,8 +361,13 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (planned > done) warn("SERVICE_SHORTFALL", `${planned - done} service${planned - done > 1 ? "s" : ""} not done`);
     if (contract.end_date && contract.end_date <= period.end) warn("CONTRACT_ENDING", "Contract ends in this period");
 
+    // The month this bill is made in: billed in advance - the month the period starts; billed after
+    // (arrears) - the month it ends.
+    const billMonth = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
     rows.push({
       contract_id: contract.id,
+      bill_month: short ? (toBill[0] ? (contract.bill_timing === "ADVANCE" ? toBill[0].start : toBill[0].end).slice(0, 7) : billMonth) : billMonth,
+      due_now: !allMonths || (short ? true : billMonth <= thisMonth),
       contract_code: contract.contract_code,
       company_id: contract.company_id,
       customer: raw.customer,
@@ -371,7 +384,20 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       services: linked.length ? { planned, done, short: Math.max(planned - done, 0) } : null,
       // Termite: priced per sq. ft / sq. m of treated area (PER_SQFT / PER_SQM)
       structure: contract.billing_type === "TERMITE" ? (/ft/i.test(cl.find((x) => S.isAreaLine(contract, x))?.unit || "") ? "PER_SQFT" : "PER_SQM") : contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
-      sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,      estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
+      sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,
+      estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
+      // Separate bills: each period makes a services invoice and a chemicals invoice (shown as two bills)
+      separate_bills: Boolean(contract.separate_bills),
+      bills: contract.separate_bills ? (() => {
+        const kindOf = new Map(cl.map((x) => [x.id, x.item_kind || "SERVICE"]));
+        const isChem = (l) => Boolean(l.contract_line_id) && kindOf.get(l.contract_line_id) === "CHEMICAL";
+        const unknown = sosMissing.length || lines.some((l) => l.needs_input);
+        const est = (ls) => (unknown || !ls.length ? null : calc.totalsFor(ls, taxMode, contract.gst_rate).total);
+        return [
+          { kind: "SERVICE", estimated_total: est(lines.filter((l) => !isChem(l))) },
+          { kind: "CHEMICAL", estimated_total: est(lines.filter(isChem)) },
+        ];
+      })() : null,
       needs_input: lines.some((l) => l.needs_input),
       // extra SOS services with no rate: Generate opens the "Before generating" page to enter it
       extras_no_rate: extrasNoRate.map((l) => ({ item_name: l.item_name, site: l.site, quantity: l.quantity })),
@@ -388,7 +414,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     already_drafted: rows.filter((r) => r.already_drafted).length,
     estimated_total: calc.round2(rows.reduce((t, r) => t + (r.estimated_total || 0), 0)),
   };
-  return { month, summary, rows };
+  return { month, this_month: thisMonth, summary, rows };
 }
 
 // ---- Bill Run: generating drafts ----------------------------------------------------------

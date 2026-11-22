@@ -106,6 +106,10 @@ function TaskProShell() {
   // "Tickets" here as well.
   const { permissions: feedbackPerms, ticketsOnly } = useFeedbackPermissions();
   const hasFeedback = feedbackPerms.length > 0 && !ticketsOnly;
+  // The Accounts department works feedback tickets too: the "Customer Feedback" switch shows for them
+  // even when they only have ticket permissions (the desk opens on their tickets).
+  const ACCOUNTS_ROLES = ["Accounts Head", "Accounts Executive"];
+  const showFeedbackLink = hasFeedback || (feedbackPerms.length > 0 && ACCOUNTS_ROLES.includes(localStorage.getItem("role")));
   const showTickets = feedbackPerms.some((p) => TICKET_PERMISSIONS.includes(p));
   const navigate = useNavigate();
   const location = useLocation();
@@ -291,7 +295,7 @@ function TaskProShell() {
             </button>
           )}
           {/* Roles that admin gave a Customer Feedback permission (e.g. Operations Manager) open the desk here. */}
-          {hasFeedback && (
+          {showFeedbackLink && (
             <button
               type="button"
               className="tp-nav-item"

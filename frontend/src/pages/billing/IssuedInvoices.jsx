@@ -7,7 +7,7 @@ import { downloadFile, openPdf, printPdf, qs, useBilling, useCustomerOptions } f
 import { amount, dmy, periodLabel, thisMonth, typeLabel } from "./format";
 import { emailInvoice } from "./emailInvoice";
 import CancelDialog from "./CancelDialog";
-import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
+import { Modal, Msg, StatusBadge, TypeBadge, MonthPicker } from "./ui";
 import useDebounced from "./useDebounced";
 import CustomerFilter from "./CustomerFilter";
 
@@ -124,7 +124,7 @@ export default function IssuedInvoices() {
             <input className="ac-input" placeholder="Search invoice no. or customer…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} aria-label="Search" />
           </div>
           <CustomerFilter options={customerOptions} value={picked} onChange={(v) => { setPicked(v); setPage(0); }} />
-          <input type="month" className="ac-input" style={{ width: 170 }} value={month} onChange={(e) => { setMonth(e.target.value); setPage(0); }} aria-label="Month" title="Clear for all months" />
+          <MonthPicker value={month} allowEmpty fallback={thisMonth()} title="Clear for all months" onChange={(m) => { setMonth(m); setPage(0); }} />
           <select className="ac-select" value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} aria-label="Type">
             <option value="">All types</option>
             <option value="AMC">AMC</option>

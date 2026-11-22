@@ -20,9 +20,9 @@ function sendPdf(res, content, fileName, options) {
 // The file is named by the invoice number alone ("/" cannot be in a file name): BSPMPL26-27-1199.pdf
 const pdfName = (inv) => `${String(inv.invoice_number || "Invoice draft").replace(/\//g, "-")}.pdf`;
 
-// GET /due?month=2026-11&type=&category=&q=
+// GET /due?month=2026-11&type=&category=&q=   (month=ALL: every contract's next bill)
 const due = C.handle("Failed to load the bill run", async (req, res) => {
-  const month = C.month(req.query.month || C.todayIst().slice(0, 7));
+  const month = req.query.month === "ALL" ? "ALL" : C.month(req.query.month || C.todayIst().slice(0, 7));
   res.json(
     await D.dueList(pool, month, {
       type: C.oneOf(req.query.type, "type", TYPES, { required: false }),

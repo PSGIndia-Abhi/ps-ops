@@ -4,7 +4,7 @@ import { FiActivity, FiCheckCircle, FiChevronRight, FiClock, FiEdit3, FiLayers, 
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, qs, useBilling } from "./billingApi";
 import { monthLabel, thisMonth } from "./format";
-import { Kpi, Modal, Msg } from "./ui";
+import { Kpi, Modal, Msg, MonthPicker } from "./ui";
 import useDebounced from "./useDebounced";
 import { BILLING_HOME } from "./access";
 import { SOS_STATUS } from "./sosStatus";
@@ -33,8 +33,10 @@ export default function SosList() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null); // { ok, error, failed: [{ customer, reason }] }
   useEffect(() => { setTicked(new Set()); setResult(null); }, [month]);
-  const canTick = (r) => canFill && r.status === "DRAFT";
-  const tickHint = (r) => (r.status === "SUBMITTED" ? "Already submitted" : r.status === "NOT_STARTED" ? "Nothing entered yet: open it, check the numbers and save first" : "");
+  // Not started or In progress: ticked SOS are submitted with every service not entered as assigned.
+  // A termite SOS needs its treated area, so a Not started one is opened instead.
+  const canTick = (r) => canFill && (r.status === "DRAFT" || (r.status === "NOT_STARTED" && !r.area_only));
+  const tickHint = (r) => (r.status === "SUBMITTED" ? "Already submitted" : r.status === "NOT_STARTED" && r.area_only ? "Termite: open it and enter the treated area" : "");
   const all = useMemo(() => data?.rows || [], [data]);
   // Customer filter (checkboxes): the cards and counts follow the customers picked.
   const options = useMemo(() => all.map((r) => ({ id: r.company_id, name: r.customer, group: r.group, outlets: r.outlet_names })), [all]);
@@ -43,7 +45,8 @@ export default function SosList() {
     const set = new Set(picked);
     return all.filter((r) => set.has(r.company_id));
   }, [all, picked]);
-  const rows = inScope.filter((r) => !status || r.status === status);
+  // Still to do first; submitted ones go to the bottom (same order otherwise).
+  const rows = inScope.filter((r) => !status || r.status === status).sort((a, b) => (a.status === "SUBMITTED") - (b.status === "SUBMITTED"));
   const s = useMemo(() => {
     if (!data) return null;
     const sub = inScope.filter((r) => r.status === "SUBMITTED");
@@ -104,7 +107,7 @@ export default function SosList() {
           </p>
         </div>
         <div className="ac-actions">
-          <input type="month" className="ac-input" style={{ width: 170 }} value={month} max={thisMonth()} onChange={(e) => setParams({ month: e.target.value || thisMonth() })} aria-label="Month" />
+          <MonthPicker value={month} max={thisMonth()} fallback={thisMonth()} onChange={(m) => setParams({ month: m })} />
         </div>
       </div>
 
@@ -149,8 +152,11 @@ export default function SosList() {
         {canFill && chosen.length > 0 && (
           <div className="bl-selbar">
             <span><b>{chosen.length}</b> selected</span>
-            <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy} onClick={() => setConfirming(true)}><FiSend /> Submit to Accounts</button>
-            <button type="button" className="bl-link" onClick={() => setTicked(new Set())}>Clear</button>
+            {/* actions on the right */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+              <button type="button" className="bl-link" onClick={() => setTicked(new Set())}>Clear</button>
+              <button type="button" className="ac-btn sm ac-btn-primary" disabled={busy} onClick={() => setConfirming(true)}><FiSend /> Submit to Accounts</button>
+            </div>
           </div>
         )}
         <div className="ac-table-wrap">
@@ -214,14 +220,13 @@ export default function SosList() {
       {confirming && (
         <Modal onClose={() => !busy && setConfirming(false)} narrow label="Submit SOS">
           <div className="bl-m-head">
-            <div><h3>Submit {chosen.length} SOS to Accounts?</h3><div className="ac-sub">{monthLabel(month)} · as saved</div></div>
+            <div><h3>Submit {chosen.length} SOS to Accounts?</h3><div className="ac-sub">{monthLabel(month)}</div></div>
             <button type="button" className="bl-x" onClick={() => setConfirming(false)} aria-label="Close">✕</button>
           </div>
           <div className="bl-m-body">
             <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 220, overflowY: "auto" }}>
-              {chosen.map((r) => <li key={r.company_id}><b>{nameOf(r)}</b>{!r.area_only && <span className="ac-sub"> · {r.completed ?? 0} completed</span>}</li>)}
+              {chosen.map((r) => <li key={r.company_id}><b>{nameOf(r)}</b>{!r.area_only && r.status === "NOT_STARTED" && <span className="ac-sub"> · {r.assigned} completed</span>}</li>)}
             </ul>
-            <div className="ac-sub">Each SOS is submitted exactly as saved. One with a number not entered is skipped and listed. Accounts are notified; reopen an SOS to change it later.</div>
           </div>
           <div className="bl-m-foot"><span /><div className="ac-actions">
             <button type="button" className="ac-btn" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>

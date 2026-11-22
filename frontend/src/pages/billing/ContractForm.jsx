@@ -254,6 +254,8 @@ export default function ContractForm() {
             {!isNew && <StatusBadge value={contract.status} />}
             <span><FiRepeat /> {TYPE_LABEL[form.billing_type] || form.billing_type} · {freq.toLowerCase()}</span>
             <span><FiLayers /> {typeIs("TERMITE") ? `Per ${areaLabel}` : form.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span>
+            {/* separate bills: each period, one invoice for the services and one for the chemicals */}
+            {form.separate_bills && <span title="Each period: one invoice for pest control services, one for chemicals (same PO)"><FiFileText /> Separate bills · services + chemicals</span>}
             {!isNew && contract.last_invoice_number && <span><FiFileText /> Last {contract.last_invoice_number}</span>}
           </div>
         </div>

@@ -59,9 +59,11 @@ const reopen = C.handle("Failed to reopen the SOS", async (req, res) => {
   res.json({ ...(await S.sosView(pool, companyId, month)), drafts_removed: result.drafts_removed });
 });
 
-// POST /sos/submit-many { month, company_ids } - submits several saved (In progress) SOS at once,
-// each exactly as saved and in its own transaction: one that cannot be submitted (a number not
-// entered, already submitted, ...) is listed with the reason and does not stop the others.
+// POST /sos/submit-many { month, company_ids } - submits several SOS at once from the Monthly SOS
+// list (Not started or In progress), each in its own transaction. Every agreed service with no number
+// entered yet is submitted as completed = assigned; numbers already entered and extra services stay
+// as saved. One that cannot be submitted (termite area not entered, already submitted, ...) is listed
+// with the reason and does not stop the others.
 const submitMany = C.handle("Failed to submit the SOS", async (req, res) => {
   const month = monthOf(req.body?.month);
   const ids = [...new Set((Array.isArray(req.body?.company_ids) ? req.body.company_ids : []).map((v) => String(v || "").trim()).filter(Boolean))];
@@ -75,12 +77,13 @@ const submitMany = C.handle("Failed to submit the SOS", async (req, res) => {
       const view = await S.sosView(pool, companyId, month);
       customer = view.billing_group ? view.billing_group.group : view.customer;
       if (view.status === "SUBMITTED") throw C.bad("Already submitted");
-      if (view.status === "NOT_STARTED") throw C.bad("Nothing entered yet - open it, check the numbers and save");
+      if (!view.has_agreement) throw C.bad("No services agreed for this month");
       if (view.invoiced?.length) throw C.bad("Already invoiced");
-      // Submit what is saved: services, extras and termite areas as entered.
+      if ((view.area_lines || []).some((a) => a.area === null)) throw C.bad("Termite area not entered - open it and enter the treated area");
+      // Services not entered yet: completed as assigned. Entered numbers, extras and areas as saved.
       const body = {
         notes: view.notes || null,
-        lines: view.lines.filter((l) => !l.is_extra).map((l) => ({ contract_line_id: l.contract_line_id, completed: l.completed, remarks: l.remarks || null })),
+        lines: view.lines.filter((l) => !l.is_extra).map((l) => ({ contract_line_id: l.contract_line_id, completed: l.completed ?? l.assigned, remarks: l.remarks || null })),
         extras: view.lines.filter((l) => l.is_extra).map((l) => ({ site_id: l.site_id || null, service: l.service, completed: l.completed, remarks: l.remarks || null })),
         areas: (view.area_lines || []).map((a) => ({ contract_line_id: a.contract_line_id, period_start: a.period_start, area: a.area, remarks: a.remarks || null })),
       };

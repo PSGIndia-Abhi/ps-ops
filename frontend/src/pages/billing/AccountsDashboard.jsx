@@ -6,7 +6,7 @@ import { amount, dmy, monthLabel, periodLabel, rupees, rupeesShort, thisMonth } 
 import IssueDialog from "./IssueDialog";
 import Donut from "./Donut";
 import CustomerFilter from "./CustomerFilter";
-import { Kpi, Msg } from "./ui";
+import { Kpi, Msg, MonthPicker } from "./ui";
 import useDebounced from "./useDebounced";
 import { BILLING_HOME } from "./access";
 import { RowsSkeleton } from "./Skeletons";
@@ -110,7 +110,7 @@ export default function AccountsDashboard() {
             value={picked}
             onChange={setPicked}
           />
-          <input type="month" className="ac-input" style={{ width: 165, height: 42 }} value={month} onChange={(e) => setMonth(e.target.value || thisMonth())} aria-label="Month" />
+          <MonthPicker value={month} fallback={thisMonth()} onChange={setMonth} />
           <button type="button" className={`bl-refresh ${loading ? "spin" : ""}`} onClick={reload} disabled={loading} title="Refresh now" aria-label="Refresh now"><FiRefreshCw /></button>
         </div>
       </div>

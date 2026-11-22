@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiArrowLeft, FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
+import { FiArrowLeft, FiChevronLeft, FiChevronRight, FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
 import { typeLabel } from "./format";
 
 // Small shared pieces for the Billing screens.
@@ -164,5 +164,29 @@ export function BackButton({ to, label }) {
     <button type="button" className="sos-back bl-back" onClick={() => navigate(to)} aria-label={`Back to ${label}`} title={`Back to ${label}`}>
       <FiArrowLeft />
     </button>
+  );
+}
+
+/** "2026-11" moved by n months. */
+export function shiftMonth(ym, n) {
+  const [y, m] = String(ym).split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Month picker with ‹ › arrows to step one month back / forward. `value` "YYYY-MM" ("" = all months,
+ * when `allowEmpty`; the arrows then start from `fallback`). `max`: no later month.
+ */
+export function MonthPicker({ value, onChange, max, allowEmpty = false, fallback, title, width = 190 }) {
+  const base = value || fallback;
+  const nextOff = !base || (max && base >= max);
+  return (
+    <div className="bl-monthnav">
+      <button type="button" className="bl-monthnav-btn" onClick={() => base && onChange(shiftMonth(base, -1))} disabled={!base} aria-label="Previous month" title="Previous month"><FiChevronLeft /></button>
+      <input type="month" className="ac-input" style={{ width }} value={value} max={max} title={title}
+        onChange={(e) => onChange(e.target.value || (allowEmpty ? "" : fallback || value))} aria-label="Month" />
+      <button type="button" className="bl-monthnav-btn" onClick={() => base && !nextOff && onChange(shiftMonth(base, 1))} disabled={nextOff} aria-label="Next month" title="Next month"><FiChevronRight /></button>
+    </div>
   );
 }
