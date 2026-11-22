@@ -5,9 +5,9 @@ import {
   FiArrowDown, FiLayers, FiLock, FiMessageSquare, FiMinus, FiMinusCircle, FiPlus, FiPlusCircle, FiRotateCcw, FiSend, FiUsers, FiX,
 } from "react-icons/fi";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
-import { amount, monthLabel, periodLabel, rupees, thisMonth } from "./format";
+import { dmy, monthLabel, periodLabel, rupees, thisMonth } from "./format";
 import { LuClipboardCheck, LuClipboardList, LuListPlus, LuScale, LuTrendingDown, LuTrendingUp } from "react-icons/lu";
-import { CountUp, Modal, Msg } from "./ui";
+import { ComboInput, CountUp, Modal, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";
 import { BILLING_HOME } from "./access";
 import { PageSkeleton } from "./Skeletons";
@@ -77,7 +77,7 @@ export default function SosEntry() {
     }
     setDone(d);
     setRemarks(r);
-    setExtras(data.lines.filter((x) => x.is_extra).map((x) => ({ key: (extraKey += 1), site_id: x.site_id || ALL, service: x.service, completed: String(x.completed ?? 1), remarks: x.remarks || "" })));
+    setExtras(data.lines.filter((x) => x.is_extra).map((x) => ({ key: (extraKey += 1), site_id: x.site_id || ALL, service: x.service, completed: String(x.completed ?? 1), remarks: x.remarks || "", area: x.area === null || x.area === undefined ? "" : String(x.area), unit: x.unit || "" })));
     const ar = {};
     const arr = {};
     for (const a of data.area_lines || []) {
@@ -105,7 +105,12 @@ export default function SosEntry() {
   // A group based contract is one table: one row per company (its outlet under the name), priced as on the invoice.
   const grp = Boolean(data.billing_group);
   const outletIds = [...new Set([...agreed.map((l) => l.site_id || ALL), ...extras.map((x) => x.site_id)])];
-  const cards = grp ? [{ id: ALL, name: "Companies in this contract", all: true }] : [
+  // Termite only (no services agreed): its extra services are shown in the termite table instead.
+  const termiteOnly = !agreed.length && (data.area_lines || []).length > 0;
+  // Termite extras: the units the contract is priced in (sq. m / sq. ft) and the rate of each
+  const areaUnits = [...new Set((data.area_lines || []).map((a) => a.unit))];
+  const unitRate = (unit) => (data.area_lines || []).find((a) => a.unit === unit)?.rate ?? null;
+  const cards = termiteOnly ? [] : grp ? [{ id: ALL, name: "Companies in this contract", all: true }] : [
     ...data.outlets.filter((o) => outletIds.includes(o.site_id)).map((o) => ({ id: o.site_id, name: o.name })),
     ...(outletIds.includes(ALL) ? [{ id: ALL, name: data.outlets.length ? "All outlets (whole customer)" : data.customer }] : []),
   ];
@@ -114,7 +119,8 @@ export default function SosEntry() {
   const billOf = (rate, qty) => ({ qty, amount: qty === null || rate === null || rate === undefined ? null : qty * Number(rate) });
   const lineBill = (l, n) => billOf(l.rate, (l.structure || data.structures[0]) === "FIXED" ? l.assigned : n);
   const money = (v) => (v === null || v === undefined ? "—" : rupees(v));
-  const freeOutlets = data.outlets.filter((o) => !outletIds.includes(o.site_id));
+  // Outlets with nothing on this SOS yet (services, extras or Termite area rows): "Extra services at another outlet".
+  const freeOutlets = data.outlets.filter((o) => !outletIds.includes(o.site_id) && !(data.area_lines || []).some((a) => a.site_id === o.site_id));
   const num = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
   const totals = {
     assigned: agreed.reduce((t, l) => t + l.assigned, 0),
@@ -136,7 +142,7 @@ export default function SosEntry() {
   const setDoneFor = (id, v) => { setDone((d) => ({ ...d, [id]: v })); setDirty(true); };
   const setExtra = (key, patch) => { setExtras((xs) => xs.map((x) => (x.key === key ? { ...x, ...patch } : x))); setDirty(true); };
   // a new extra service goes to the end of the list (first added stays first)
-  const addExtra = (siteId) => { setExtras((xs) => [...xs, { key: (extraKey += 1), site_id: siteId, service: "", completed: "1", remarks: "" }]); setDirty(true); };
+  const addExtra = (siteId) => { setExtras((xs) => [...xs, { key: (extraKey += 1), site_id: siteId, service: "", completed: "1", remarks: "", area: "", unit: (data.area_lines || [])[0]?.unit || "" }]); setDirty(true); };
   // Fill one outlet's services with the assigned numbers.
   const fillLines = (lines) => { setDone((d) => ({ ...d, ...Object.fromEntries(lines.map((l) => [l.contract_line_id, String(l.assigned)])) })); setDirty(true); };
 
@@ -145,7 +151,10 @@ export default function SosEntry() {
       month,
       notes,
       lines: agreed.map((l) => ({ contract_line_id: l.contract_line_id, completed: num(done[l.contract_line_id]), remarks: remarks[l.contract_line_id] || null })),
-      extras: extras.filter((x) => x.service.trim()).map((x) => ({ site_id: x.site_id || null, service: x.service.trim(), completed: Number(x.completed) || 0, remarks: x.remarks || null })),
+      // Termite only: an extra is an area (sq. m / sq. ft) at the contract's rate, else a number of services
+      extras: extras.filter((x) => x.service.trim()).map((x) => (termiteOnly
+        ? { site_id: x.site_id || null, service: x.service.trim(), area: x.area === "" ? null : Number(x.area), unit: x.unit || areaUnits[0] || null, remarks: x.remarks || null }
+        : { site_id: x.site_id || null, service: x.service.trim(), completed: Number(x.completed) || 0, remarks: x.remarks || null })),
       areas: areaRows.map((a) => ({ contract_line_id: a.contract_line_id, period_start: a.period_start, area: num(areas[areaKey(a)]), remarks: areaRemarks[areaKey(a)] || null })),
     };
   }
@@ -243,61 +252,155 @@ export default function SosEntry() {
       {data.status === "DRAFT" && data.reopen_reason && (
         <div className="ac-info error" style={{ marginBottom: 12 }}><span><FiRotateCcw /> Sent back by <b>{data.reopened_by}</b> on {when(data.reopened_at)}: “{data.reopen_reason}”</span></div>
       )}
-      {!data.has_agreement && <div className="ac-info error" style={{ marginBottom: 12 }}><span>This customer has no services billed per service for {monthLabel(month)} in its billing profile.</span></div>}
-
-      {/* Termite: the treated area completed in each billing period (week / day / month) this month bills.
-          Accounts bill each period: this area × the contract's rate. */}
-      {areaRows.length > 0 && (
-        <div className="sos-card">
-          <div className="sos-card-head">
-            <h3>Termite treatment - area completed</h3>
-            <span className="ac-sub">{areaRows.length} period{areaRows.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="sos-list">
-            <div className="sos-item sos-thead"><span>Item · period</span><span>Rate</span><span>Area completed</span><span>Amount</span><span>Remark</span></div>
-            {areaRows.map((a) => {
-              const k = areaKey(a);
-              const id = `a${k}`;
-              const n = areaOf(a);
-              const remark = editable ? areaRemarks[k] : a.remarks;
-              const remarkOpen = openRemarks.has(id);
-              const u = unitLabel(a.unit);
-              return (
-                <div key={k} className="sos-item">
-                  <div className="sos-item-main">
-                    <b>{a.service}</b>
-                    <span className="sos-item-sub">
-                      <span>{periodLabel(a.period_start, a.period_end)}</span>
-                      {a.contract_code && <span>{a.contract_code}</span>}
-                      {!remarkOpen && remark && <span className="sos-remark">“{remark}”</span>}
-                    </span>
-                    {remarkOpen && editable && (
-                      <input className="sos-remarkinput" autoFocus value={areaRemarks[k] || ""} placeholder="Add a remark (optional)"
-                        onChange={(e) => { setAreaRemarks((r) => ({ ...r, [k]: e.target.value })); setDirty(true); }} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
-                    )}
-                  </div>
-                  <span className="sos-num sos-rate">{a.rate === null ? "—" : `${rupees(a.rate)} / ${u}`}</span>
-                  {editable ? (
-                    <span className="sos-area">
-                      <input type="number" min="0" step="0.01" className="ac-input" value={areas[k] ?? ""} placeholder="0"
-                        onChange={(e) => { setAreas((s) => ({ ...s, [k]: e.target.value })); setDirty(true); }} aria-label={`Area completed for ${a.service}, ${periodLabel(a.period_start, a.period_end)}`} />
-                      <span>{u}</span>
-                    </span>
-                  ) : (
-                    <span className="sos-area-val">{n === null ? "—" : `${n} ${u}`}</span>
-                  )}
-                  <span className={`sos-state ${n === null ? "grey" : "green"}`}>
-                    {n === null ? <><FiMinusCircle /> Not entered</> : a.rate === null ? <><FiCheckCircle /> Entered</> : <><FiCheckCircle /> ₹{amount(n * a.rate)}</>}
-                  </span>
-                  <span className="sos-acts">
-                    {editable && <button type="button" className={`sos-iconbtn ${remark ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+      {/* Nothing to report this month. A Termite contract: say which month's SOS takes its treated area. */}
+      {!data.has_agreement && (data.termite_next?.length ? (
+        <div className="ac-info" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 260px" }}>
+            Nothing to enter for {monthLabel(month)}.{" "}
+            {data.termite_next.map((t) => `Termite ${t.contract_code}: the treated area for ${dmy(t.period_start)} to ${dmy(t.period_end)} is entered on the ${monthLabel(`${t.month}-01`)} SOS${t.month > thisMonth() ? " (open it once that month starts)" : ""}.`).join(" ")}
+          </span>
+          {data.termite_next[0].month !== month.slice(0, 7) && data.termite_next[0].month <= thisMonth() && (
+            <button type="button" className="ac-btn sm" onClick={() => changeMonth(data.termite_next[0].month)}>Open {monthLabel(`${data.termite_next[0].month}-01`)}</button>
+          )}
         </div>
-      )}
+      ) : (
+        <div className="ac-info error" style={{ marginBottom: 12 }}><span>This customer has no services billed per service for {monthLabel(month)} in its billing profile.</span></div>
+      ))}
+
+      {/* Termite: the treated area completed in each billing period (week / day / month) this month bills,
+          laid out like the services table. Accounts bill each period: area × the contract's rate. */}
+      {areaRows.length > 0 && (() => {
+        const rowsOut = areaRows.map((a) => {
+          const n = areaOf(a);
+          return { a, n, amt: n === null || a.rate === null ? null : n * a.rate };
+        });
+        const entered = rowsOut.filter((r) => r.n !== null);
+        // + extra area added on the SOS (area x the contract's rate for its unit)
+        const extraAmt = termiteOnly ? (editable ? extras : data.lines.filter((x) => x.is_extra)).reduce((t, x) => {
+          const r = editable ? unitRate(x.unit || areaUnits[0]) : x.rate;
+          return t + (x.area === "" || x.area === null || x.area === undefined || r === null || r === undefined ? 0 : Number(x.area) * r);
+        }, 0) : 0;
+        const toBill = entered.reduce((t, r) => t + (r.amt || 0), 0) + extraAmt;
+        return (
+          <>
+            {!agreed.length && (
+              // drawn again once the saved areas are loaded, so loading does not show as a change (+1 / -1)
+              <div className="sos-sum" key={Object.keys(areas).length === areaRows.length ? "ready" : "loading"}>
+                <SumCard tone="slate" icon={LuClipboardList} label="Areas to enter" value={areaRows.length} note={`period${areaRows.length === 1 ? "" : "s"} this month`} />
+                <SumCard tone="green" icon={LuClipboardCheck} label="Entered" value={entered.length} note={entered.length === areaRows.length ? "all entered" : `${areaRows.length - entered.length} not entered`} />
+                <SumCard tone={entered.length === areaRows.length ? "green" : "amber"} icon={LuScale} label="Not entered" value={areaRows.length - entered.length} note={entered.length === areaRows.length ? "ready to submit" : "enter the treated area"} />
+                <SumCard tone="purple" icon={LuListPlus} label="To bill (₹)" value={Math.round(toBill)} note="area × rate, before GST" />
+              </div>
+            )}
+            <div className="sos-card priced">
+              <div className="sos-card-head">
+                <h3>{data.billing_group ? data.billing_group.group : data.customer}</h3>
+                <span className="ac-sub">{areaRows.length} item{areaRows.length === 1 ? "" : "s"}</span>
+                <span className="sos-card-right">
+                  <span className="sos-bill-note">Termite: area completed × rate is billed</span>
+                  {editable && termiteOnly && <button type="button" className="ac-btn sos-addbtn" onClick={() => addExtra(areaRows[0].site_id || ALL)}><FiPlusCircle /> Add extra service</button>}
+                </span>
+              </div>
+              <div className="sos-list">
+                <div className="sos-item sos-thead"><span>Item</span><span>Assigned</span><span>Area completed</span><span>Status</span><span className="sos-money">Rate</span><span className="sos-money">Billed</span><span className="sos-money">Amount</span><span /></div>
+                {rowsOut.map(({ a, n, amt }) => {
+                  const k = areaKey(a);
+                  const id = `a${k}`;
+                  const remark = editable ? areaRemarks[k] : a.remarks;
+                  const remarkOpen = openRemarks.has(id);
+                  const u = unitLabel(a.unit);
+                  return (
+                    <div key={k} className="sos-item">
+                      <div className="sos-item-main">
+                        <b title={`${periodLabel(a.period_start, a.period_end)}${a.site ? ` · ${a.site}` : ""}`}>{a.service}</b>
+                        {!remarkOpen && remark && <span className="sos-item-sub"><span className="sos-remark">“{remark}”</span></span>}
+                        {remarkOpen && editable && (
+                          <input className="sos-remarkinput" autoFocus value={areaRemarks[k] || ""} placeholder="Add a remark (optional)"
+                            onChange={(e) => { setAreaRemarks((r) => ({ ...r, [k]: e.target.value })); setDirty(true); }} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
+                        )}
+                      </div>
+                      <span className="sos-num muted">—</span>
+                      {editable ? (
+                        <span className="sos-area">
+                          <input type="number" min="0" step="0.01" className="ac-input" value={areas[k] ?? ""} placeholder="0"
+                            onChange={(e) => { setAreas((st) => ({ ...st, [k]: e.target.value })); setDirty(true); }} aria-label={`Area completed for ${a.service}, ${periodLabel(a.period_start, a.period_end)}`} />
+                          <span>{u}</span>
+                        </span>
+                      ) : (
+                        <span className="sos-num">{n === null ? "—" : `${n} ${u}`}</span>
+                      )}
+                      <span className={`sos-state ${n === null ? "grey" : "green"}`}>{n === null ? <><FiMinusCircle /> Not entered</> : <><FiCheckCircle /> Done</>}</span>
+                      <span className="sos-money">{a.rate === null ? <span className="sos-muted">—</span> : <>{money(a.rate)}<span className="sos-muted"> /{u}</span></>}</span>
+                      <span className="sos-money">{n === null ? <span className="sos-muted">—</span> : n}</span>
+                      <span className="sos-money">{amt === null ? <span className="sos-muted">—</span> : <b>{money(amt)}</b>}</span>
+                      <span className="sos-acts">
+                        {editable && <button type="button" className={`sos-iconbtn ${remark ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
+                      </span>
+                    </div>
+                  );
+                })}
+                {termiteOnly && (editable ? extras : data.lines.filter((x) => x.is_extra)).map((x) => {
+                  const id = `x${x.key || `${x.service}-${x.site_id}`}`;
+                  const unit = x.unit || areaUnits[0] || "";
+                  const rate = editable ? unitRate(unit) : x.rate;
+                  const remarkOpen = openRemarks.has(id);
+                  const xa = x.area === "" || x.area === null || x.area === undefined ? null : Number(x.area);
+                  const xb = billOf(rate, xa);
+                  return (
+                    <div key={id} className="sos-item extra">
+                      <div className="sos-item-main">
+                        {editable ? (
+                          <ComboInput className="sos-combo" value={x.service} options={catalog} autoFocus={!x.service} placeholder="Choose or type the service" onChange={(v) => setExtra(x.key, { service: v })} label="Extra service" />
+                        ) : <b>{x.service}</b>}
+                        <span className="sos-item-sub">
+                          <span className="sos-extra-lbl">Extra</span>
+                          {!remarkOpen && x.remarks && <span className="sos-remark">“{x.remarks}”</span>}
+                        </span>
+                        {remarkOpen && editable && (
+                          <input className="sos-remarkinput" autoFocus value={x.remarks} placeholder="Why was it done? (optional)" onChange={(e) => setExtra(x.key, { remarks: e.target.value })} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
+                        )}
+                      </div>
+                      {/* the unit: sq. m or sq. ft, as priced on the customer's contract */}
+                      {editable ? (
+                        <select className="ac-select sos-unitsel" value={unit} onChange={(e) => setExtra(x.key, { unit: e.target.value })} aria-label="Unit">
+                          {areaUnits.map((un) => <option key={un} value={un}>{unitLabel(un)}</option>)}
+                        </select>
+                      ) : <span className="sos-num muted">{unitLabel(unit)}</span>}
+                      {editable ? (
+                        <span className="sos-area">
+                          <input type="number" min="0" step="0.01" className="ac-input" value={x.area ?? ""} placeholder="0" onChange={(e) => setExtra(x.key, { area: e.target.value })} aria-label={`Extra area for ${x.service || "service"}`} />
+                          <span>{unitLabel(unit)}</span>
+                        </span>
+                      ) : <span className="sos-num">{xa === null ? "—" : `${xa} ${unitLabel(unit)}`}</span>}
+                      <span className="sos-state purple"><FiPlusCircle /> Extra</span>
+                      <span className="sos-money">{rate === null || rate === undefined ? <span className="sos-muted">—</span> : <>{money(rate)}<span className="sos-muted"> /{unitLabel(unit)}</span></>}</span>
+                      <span className="sos-money">{xa ?? <span className="sos-muted">—</span>}</span>
+                      <span className="sos-money">{xb.amount === null ? <span className="sos-muted">—</span> : <b>{money(xb.amount)}</b>}</span>
+                      <span className="sos-acts">
+                        {editable && <button type="button" className={`sos-iconbtn ${x.remarks ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
+                        {editable && <button type="button" className="sos-iconbtn red" onClick={() => { setExtras((xs) => xs.filter((y) => y.key !== x.key)); setDirty(true); }} title="Remove" aria-label="Remove extra"><FiX /></button>}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="sos-item sos-grp-tot">
+                  <span className="sos-grp-totlbl">
+                    Total to bill
+                    <span className="sos-grp-calc">{entered.length ? <>{entered.length} of {areaRows.length} entered · <b>{money(toBill)}</b></> : "Nothing entered yet"}</span>
+                  </span>
+                  <span className="sos-num muted">—</span>
+                  <span className="sos-num">{entered.length ? `${entered.length} / ${areaRows.length}` : <span className="sos-muted">—</span>}</span>
+                  <span className="sos-grp-note">{entered.length === areaRows.length ? "Area × rate billed" : "Enter every area"}</span>
+                  <span />
+                  <span />
+                  <span className="sos-money"><b>{money(toBill)}</b></span>
+                  <span />
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {cards.map((card) => {
         const lines = card.all ? agreed : agreed.filter((l) => (l.site_id || ALL) === card.id);
@@ -384,7 +487,7 @@ export default function SosEntry() {
                   <div key={id} className="sos-item extra">
                     <div className="sos-item-main">
                       {editable ? (
-                        <input className="sos-svcinput" list="sos-catalog" value={x.service} autoFocus={!x.service} placeholder="Choose or type the service" onChange={(e) => setExtra(x.key, { service: e.target.value })} aria-label="Extra service" />
+                        <ComboInput className="sos-combo" value={x.service} options={catalog} autoFocus={!x.service} placeholder="Choose or type the service" onChange={(v) => setExtra(x.key, { service: v })} label="Extra service" />
                       ) : <b>{x.service}</b>}
                       <span className="sos-item-sub">
                         <span className="sos-extra-lbl">Extra</span>
@@ -440,7 +543,6 @@ export default function SosEntry() {
           </div>
         );
       })}
-      <datalist id="sos-catalog">{catalog.map((n) => <option key={n} value={n} />)}</datalist>
 
       {editable && freeOutlets.length > 0 && (
         <div className="sos-addoutlet">

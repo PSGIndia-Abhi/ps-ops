@@ -136,7 +136,7 @@ export default function BillRun() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-tabstack">
             <thead>
               <tr>
                 <th>

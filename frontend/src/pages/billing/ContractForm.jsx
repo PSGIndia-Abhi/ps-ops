@@ -218,7 +218,11 @@ export default function ContractForm() {
   // Termite bill structure: per square metre or per square foot (the unit of its area lines). A saved
   // contract keeps the unit of its price lines; new lines added to it use the same unit.
   const areaUnit = isNew ? (form.area_unit === SQFT ? SQFT : SQM) : linesShown.find(isSqm)?.unit === SQFT ? SQFT : SQM;
-  const areaLabel = areaUnit === SQFT ? "sq. ft" : "sq. m";
+  // Termite items can each be priced per sq. m or per sq. ft: with both, the labels say so and each
+  // saved line shows its own unit.
+  const mixedUnits = !isNew && new Set(linesShown.filter(isSqm).map((l) => (l.unit === SQFT ? SQFT : SQM))).size > 1;
+  const areaLabel = mixedUnits ? "sq. m / sq. ft" : areaUnit === SQFT ? "sq. ft" : "sq. m";
+  const lineUnitText = (l) => (l.unit === SQFT ? "sq. ft" : "sq. m");
   const mkLine = (...args) => {
     const l = emptyLine(...args);
     return isSqm(l) ? { ...l, unit: areaUnit } : l;
@@ -534,8 +538,8 @@ export default function ContractForm() {
                 <tr>
                   <th>Outlet</th>
                   <th>Service / chemical</th>
-                  {sqmMode && <th className="ac-num">Rate per {areaLabel} (₹)</th>}
-                  {sqmMode && <th className="ac-num">Area ({areaLabel})</th>}
+                  {sqmMode && <th className="ac-num">{mixedUnits ? "Rate (₹)" : `Rate per ${areaLabel} (₹)`}</th>}
+                  {sqmMode && <th className="ac-num">{mixedUnits ? "Area" : `Area (${areaLabel})`}</th>}
                   {!sqmMode && <th className="ac-num">Qty / month</th>}
                   {!sqmMode && <th className="ac-num">Rate (₹)</th>}
                   <th className="ac-num">Amount (₹)</th>
@@ -560,7 +564,7 @@ export default function ContractForm() {
                       {l.item_kind === "CHEMICAL" && <span className="ct-kind"><FiDroplet /> Chemical</span>}
                       {l.invoice_group && <div className="bl-sub">Printed as “{l.invoice_group}”</div>}
                     </td>
-                    {sqmMode && <td className="bl-num">{isSqm(l) ? amount(l.rate) : "—"}</td>}
+                    {sqmMode && <td className="bl-num">{isSqm(l) ? <>{amount(l.rate)}{mixedUnits && <div className="bl-sub">per {lineUnitText(l)}</div>}</> : "—"}</td>}
                     {sqmMode && <td className="bl-num">{isSqm(l) ? l.default_qty ?? "—" : "—"}</td>}
                     {!sqmMode && <td className="bl-num">{Number(l.default_qty) || 1}</td>}
                     {!sqmMode && <td className="bl-num">{amount(l.rate)}</td>}

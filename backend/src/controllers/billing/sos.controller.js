@@ -84,7 +84,7 @@ const submitMany = C.handle("Failed to submit the SOS", async (req, res) => {
       const body = {
         notes: view.notes || null,
         lines: view.lines.filter((l) => !l.is_extra).map((l) => ({ contract_line_id: l.contract_line_id, completed: l.completed ?? l.assigned, remarks: l.remarks || null })),
-        extras: view.lines.filter((l) => l.is_extra).map((l) => ({ site_id: l.site_id || null, service: l.service, completed: l.completed, remarks: l.remarks || null })),
+        extras: view.lines.filter((l) => l.is_extra).map((l) => ({ site_id: l.site_id || null, service: l.service, completed: l.completed, area: l.area, unit: l.unit, remarks: l.remarks || null })),
         areas: (view.area_lines || []).map((a) => ({ contract_line_id: a.contract_line_id, period_start: a.period_start, area: a.area, remarks: a.remarks || null })),
       };
       const result = await C.inTransaction(pool, (conn) => S.saveSos(conn, req, companyId, month, body, { submit: true }));

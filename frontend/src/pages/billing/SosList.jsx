@@ -160,7 +160,7 @@ export default function SosList() {
           </div>
         )}
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-tabstack">
             <thead>
               <tr>
                 {canFill && (
