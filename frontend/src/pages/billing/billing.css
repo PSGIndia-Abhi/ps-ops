@@ -1878,3 +1878,9 @@
 .ct-qty button { height: 100%; padding: 0 11px; font-size: 15px; }
 .ct-qty button:disabled { color: #cbd5e1; cursor: default; }
 .ct-qty input { width: 48px; height: 100%; }
+
+/* Back arrow in front of a page's breadcrumb */
+.bl-backrow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bl-backrow .ac-crumb, .bl-backrow .ac-sub { margin: 0 !important; }
+.bl-back { width: 34px; height: 34px; min-width: 34px; padding: 0 !important; margin: 0; border-radius: 10px; line-height: 0; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+.bl-back svg { width: 17px; height: 17px; display: block; margin: 0; stroke-width: 2.25; }

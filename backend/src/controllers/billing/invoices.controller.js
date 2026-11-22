@@ -32,13 +32,36 @@ const due = C.handle("Failed to load the bill run", async (req, res) => {
   );
 });
 
-// POST /runs { month, contract_ids }
+// GET /runs/preview?month=2026-11&contract_ids=a,b : the Before generating page (extra services without a rate)
+const runPreview = C.handle("Failed to load the drafts to generate", async (req, res) => {
+  const month = C.month(req.query.month);
+  const ids = [...new Set(String(req.query.contract_ids || "").split(",").map((s) => s.trim()).filter(Boolean))];
+  if (!ids.length) throw C.bad("Select the contracts to bill");
+  if (ids.length > 500) throw C.bad("Too many contracts in one run (max 500)");
+  res.json({ month, contracts: await D.previewDrafts(pool, month, ids) });
+});
+
+// POST /runs { month, contract_ids, extras: [{ sos_line_ids, rate, quantity }] }
+// extras: each extra SOS service without a rate, as entered on the Before generating page (rate, and
+// the quantity to bill).
 const run = C.handle("Failed to generate the drafts", async (req, res) => {
   const month = C.month(req.body?.month);
   const ids = Array.isArray(req.body?.contract_ids) ? [...new Set(req.body.contract_ids.map(String))] : [];
   if (!ids.length) throw C.bad("Select the contracts to bill");
   if (ids.length > 500) throw C.bad("Too many contracts in one run (max 500)");
-  res.status(201).json(await D.generateDrafts(pool, month, ids, req.user.id));
+  const raw = Array.isArray(req.body?.extras) ? req.body.extras : [];
+  if (raw.length > 1000) throw C.bad("Too many extra services");
+  const extras = raw.map((x) => {
+    const lineIds = Array.isArray(x?.sos_line_ids) ? [...new Set(x.sos_line_ids.map(String).filter(Boolean))] : [];
+    if (!lineIds.length || lineIds.length > 50) throw C.bad("Extra service not found on the SOS");
+    const rate = Number(x?.rate);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 10000000) throw C.bad("Each extra service needs a rate more than 0");
+    const hasQty = x?.quantity !== undefined && x?.quantity !== null && x?.quantity !== "";
+    const quantity = hasQty ? Number(x.quantity) : null;
+    if (hasQty && (!Number.isFinite(quantity) || quantity <= 0 || quantity > 100000)) throw C.bad("Each extra service needs a quantity more than 0");
+    return { sos_line_ids: lineIds, rate: Math.round(rate * 100) / 100, quantity: hasQty ? Math.round(quantity * 1000) / 1000 : null };
+  });
+  res.status(201).json(await D.generateDrafts(pool, month, ids, req.user.id, extras));
 });
 
 // GET /invoices?status=DRAFT|ISSUED|CANCELLED (comma list)&month&company_id&type&q&page&page_size
@@ -230,4 +253,4 @@ const cancel = C.handle("Failed to cancel the invoice", async (req, res) => {
   res.json(await I.cancelIssued(pool, req.params.id, req, reason));
 });
 
-module.exports = { due, run, list, get, save, remove, check, preview, issue, manual, download, pdf, cancel, sendPdf, pdfName };
+module.exports = { due, run, runPreview, list, get, save, remove, check, preview, issue, manual, download, pdf, cancel, sendPdf, pdfName };

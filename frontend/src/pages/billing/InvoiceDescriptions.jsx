@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, useBilling } from "./billingApi";
-import { Msg } from "./ui";
+import { Msg, BackButton } from "./ui";
 
 // Masters > Invoice Descriptions: the wordings a contract can print as its "Description on invoice".
 // {month}, {period}, {from_month} and {to_month} are filled in on each invoice. A description that is
@@ -51,7 +51,7 @@ export default function InvoiceDescriptions() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Invoice Descriptions</div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Invoice Descriptions</div></div>
           <h1 className="ac-title">Invoice Descriptions</h1>
           <p className="ac-sub">The descriptions a contract can print on its invoices. Each contract picks one.</p>
         </div>

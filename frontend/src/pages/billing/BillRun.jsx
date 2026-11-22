@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { FiAlertTriangle, FiCalendar, FiEdit3, FiPlayCircle, FiSearch, FiTrendingUp } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, qs, useBilling, useCustomerOptions } from "./billingApi";
@@ -15,7 +15,9 @@ import CustomerFilter from "./CustomerFilter";
 export default function BillRun() {
   const { me } = useOutletContext();
   const navigate = useNavigate();
-  const [month, setMonth] = useState(thisMonth());
+  const [params] = useSearchParams();
+  // ?month= when coming back from an SOS opened here
+  const [month, setMonth] = useState(/^d{4}-d{2}$/.test(params.get("month") || "") ? params.get("month") : thisMonth());
   const [type, setType] = useState("");
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
@@ -28,7 +30,9 @@ export default function BillRun() {
 
   const customerOptions = useCustomerOptions();
   const [customers, setCustomers] = useState([]); // customer filter: [] = all
-  const rows = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers]);
+  const byCustomer = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers]);
+  // A contract whose draft is made leaves the list (it is in Draft Invoices); the card counts them.
+  const rows = byCustomer.filter((r) => !r.already_drafted);
   const selectable = (r) => !r.blocking && !r.already_drafted;
   // Nothing is ticked by default: Accounts tick each contract (or "select all") themselves.
   const selected = picked ?? new Set();
@@ -45,12 +49,18 @@ export default function BillRun() {
     due: rows.length,
     ready: rows.filter((r) => !r.warnings.length && !r.already_drafted).length,
     with_warnings: rows.filter((r) => r.warnings.length).length,
-    already_drafted: rows.filter((r) => r.already_drafted).length,
+    already_drafted: byCustomer.filter((r) => r.already_drafted).length,
     estimated_total: rows.reduce((t, r) => t + (r.estimated_total || 0), 0),
   } : null;
   const canGenerate = me.can("GENERATE_INVOICE");
 
   async function generate() {
+    // An extra SOS service without a rate: enter it first on the Before generating page (laid out like
+    // the draft), which then generates every selected contract.
+    if (rows.some((r) => selected.has(r.contract_id) && r.extras_no_rate?.length)) {
+      navigate(`/billing/run/generate${qs({ month, ids: [...selected].join(",") })}`);
+      return;
+    }
     setBusy(true);
     setRunError("");
     try {
@@ -94,7 +104,7 @@ export default function BillRun() {
         <Kpi color="blue" label="Due this month" icon={FiCalendar} value={s?.due ?? "—"} note="contracts" />
         <Kpi color="green" label="Ready to generate" icon={FiPlayCircle} value={s?.ready ?? "—"} note="no warnings" />
         <Kpi color="orange" label="With warnings" icon={FiAlertTriangle} value={s?.with_warnings ?? "—"} note="PO, profile or service shortfall" />
-        <Kpi color="purple" label="Already drafted" icon={FiEdit3} value={s?.already_drafted ?? "—"} note="awaiting issue" />
+        <Kpi color="purple" label="Already drafted" icon={FiEdit3} value={s?.already_drafted ?? "—"} note="in Draft Invoices" onClick={() => navigate("/billing/drafts")} />
         <Kpi color="teal" label="Estimated value" icon={FiTrendingUp} value={s ? rupeesShort(s.estimated_total) : "—"} note="incl. GST" />
       </div>
 
@@ -133,13 +143,16 @@ export default function BillRun() {
             </thead>
             <tbody>
               {loading || !rows.length ? (
-                <EmptyRow cols={9} loading={loading} text="Nothing is due for billing in this month. A contract billed in arrears appears in the month its period ends (each contract page shows which month)." />
+                <EmptyRow cols={9} loading={loading} text={s?.already_drafted ? `Nothing left to generate this month. ${s.already_drafted} draft${s.already_drafted === 1 ? " is" : "s are"} waiting in Draft Invoices.` : "Nothing is due for billing in this month. A contract billed in arrears appears in the month its period ends (each contract page shows which month)."} />
               ) : (
                 rows.map((r) => {
                   const short = r.services && r.services.done < r.services.planned;
                   return (
-                    <tr key={r.contract_id} className={`${short ? "bl-short" : ""} ${selected.has(r.contract_id) ? "bl-sel" : ""}`}>
-                      <td>
+                    // Clicking the row opens its SOS (back returns here); the tick box only selects.
+                    <tr key={r.contract_id} className={`${short ? "bl-short" : ""} ${selected.has(r.contract_id) ? "bl-sel" : ""} ${r.sos ? "bl-click" : ""}`}
+                      onClick={r.sos ? () => navigate(`/billing/sos/${encodeURIComponent(r.company_id)}?month=${String(r.period_start).slice(0, 7)}&from=run`) : undefined}
+                      title={r.sos ? "Open the SOS" : undefined}>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" className="bl-cb" checked={selected.has(r.contract_id)} disabled={!selectable(r)} onChange={() => toggle(r.contract_id)} aria-label={`Select ${r.customer}`} />
                       </td>
                       <td>
@@ -159,19 +172,17 @@ export default function BillRun() {
                         {r.periods > 1 && <div className="ac-sub" style={{ fontSize: 12 }}>{r.periods} invoices · one per {r.frequency_unit === "DAY" ? "day" : "week"}</div>}
                       </td>
                       <td className="bl-num">{r.estimated_total === null ? "—" : amount(r.estimated_total)}</td>
-                      <td>{r.needs_input ? <span className="ac-badge b-amber">{r.billing_type === "CHEMICAL" ? "Quantities" : "Quantity"}</span> : <span className="ac-sub">No</span>}</td>
+                      <td>
+                        {r.extras_no_rate?.length ? <span className="ac-badge b-amber">Extra service rate</span>
+                          : r.needs_input ? <span className="ac-badge b-amber">{r.billing_type === "CHEMICAL" ? "Quantities" : "Quantity"}</span>
+                          : <span className="ac-sub">No</span>}
+                      </td>
                       <td>
                         {r.already_drafted && <span className="ac-badge b-purple">Draft created</span>}
                         {r.warnings.map((w) => (
                           <span key={w.code} className={`bl-warn ${w.blocking ? "err" : ""}`}>{w.blocking ? "✕" : "⚠"} {w.message}</span>
                         ))}
                         {!r.already_drafted && !r.warnings.length && <span className="ac-sub">—</span>}
-                        {r.sos && (
-                          <button type="button" className="bl-link" style={{ display: "block", marginTop: 4 }}
-                            onClick={() => navigate(`/billing/sos/${encodeURIComponent(r.company_id)}?month=${String(r.period_start).slice(0, 7)}`)}>
-                            {r.sos === "SUBMITTED" ? "✓ SOS submitted - view" : "Open SOS"}
-                          </button>
-                        )}
                       </td>
                     </tr>
                   );

@@ -13,7 +13,7 @@ import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import InvoiceDelivery from "./InvoiceDelivery";
 import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
-import { Field, Modal, Msg, StatusBadge } from "./ui";
+import { Field, Modal, Msg, StatusBadge, BackButton } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { PageSkeleton } from "./Skeletons";
 
@@ -243,7 +243,7 @@ export default function ContractForm() {
 
   return (
     <div className="ac-page ct-page">
-      <div className="ac-crumb" style={{ marginBottom: 8 }}><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> /{isNew ? "New" : contract.contract_code}</div>
+      <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /><div className="ac-crumb" style={{ marginBottom: 8 }}><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / {isNew ? "New" : contract.contract_code}</div></div>
 
       <div className="ct-hero">
         <span className="ct-avatar">{initials(customerName)}</span>

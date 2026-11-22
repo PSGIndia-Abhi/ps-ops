@@ -9,7 +9,7 @@ import FrequencySelect from "./FrequencySelect";
 import { DeliveryFields } from "./InvoiceDelivery";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
-import { Field, Msg } from "./ui";
+import { Field, Msg, BackButton } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -750,7 +750,7 @@ export default function NewContract() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div>
+          <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div></div>
           <h1 className="ac-title">New Contract</h1>
         </div>
       </div>

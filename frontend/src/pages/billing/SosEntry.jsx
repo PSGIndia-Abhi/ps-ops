@@ -35,6 +35,8 @@ export default function SosEntry() {
   const { companyId } = useParams();
   const [params, setParams] = useSearchParams();
   const month = params.get("month") || thisMonth();
+  // Opened from the Bill Run ("SOS submitted - view"): the back arrow returns there, not to Monthly SOS.
+  const fromRun = params.get("from") === "run";
   const { me } = useOutletContext();
   const canFill = me.can("MANAGE_SERVICE_PLANS");
   const canSendBack = me.can("GENERATE_INVOICE");
@@ -194,13 +196,14 @@ export default function SosEntry() {
 
   function changeMonth(m) {
     if (dirty && !window.confirm("You have unsaved changes. Leave without saving?")) return;
-    setParams({ month: m });
+    setParams(fromRun ? { month: m, from: "run" } : { month: m });
   }
 
   return (
     <div className="ac-page sos-page">
       <div className="sos-top">
-        <button type="button" className="sos-back" onClick={() => navigate(`${BILLING_HOME}/sos?month=${month}`)} aria-label="Back to Monthly SOS" title="Monthly SOS"><FiArrowLeft /></button>
+        <button type="button" className="sos-back" onClick={() => navigate(fromRun ? `${BILLING_HOME}/run?month=${month}` : `${BILLING_HOME}/sos?month=${month}`)}
+          aria-label={fromRun ? "Back to Bill Run" : "Back to Monthly SOS"} title={fromRun ? "Bill Run" : "Monthly SOS"}><FiArrowLeft /></button>
         <div className="sos-top-main">
           <h1>{data.billing_group ? data.billing_group.group : data.customer}</h1>
           <div className="bl-meta">
