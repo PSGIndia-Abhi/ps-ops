@@ -108,7 +108,23 @@ export default function InvoiceDelivery({ companyId, canEdit }) {
   const [form, setForm] = useState(null);
   const [msg, setMsg] = useState({});
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data) setForm(deliveryFrom(data)); }, [data]);
+  // The last saved settings: Save / Reset are active only when the form differs from them.
+  const [saved, setSaved] = useState(null);
+  useEffect(() => {
+    if (!data) return;
+    const f = deliveryFrom(data);
+    setForm(f);
+    setSaved(f);
+  }, [data]);
+  const sameAs = (a, b) => {
+    try { return JSON.stringify(deliveryBody(a)) === JSON.stringify(deliveryBody(b)); } catch { return false; }
+  };
+  const dirty = Boolean(form && saved) && !sameAs(form, saved);
+  // editing again clears the "saved" message
+  const edit = (next) => {
+    setForm(next);
+    if (msg.ok) setMsg({});
+  };
 
   async function save() {
     const problem = deliveryProblem(form);
@@ -117,6 +133,7 @@ export default function InvoiceDelivery({ companyId, canEdit }) {
     setMsg({});
     try {
       await billingPut(`/customer-profiles/${encodeURIComponent(companyId)}/settings`, deliveryBody(form));
+      setSaved(form);
       setMsg({ ok: "Invoice delivery saved." });
     } catch (err) {
       setMsg({ error: err.message });
@@ -136,12 +153,12 @@ export default function InvoiceDelivery({ companyId, canEdit }) {
       {data && !data.profile && <div className="ac-info error"><span>Save the Bill To above first, then the print copies and email.</span></div>}
       {form && (
         <>
-          <DeliveryFields form={form} setForm={setForm} outlets={data.outlets} readOnly={!canEdit || !data.profile} />
+          <DeliveryFields form={form} setForm={edit} outlets={data.outlets} readOnly={!canEdit || !data.profile} />
           <Msg {...msg} />
           {canEdit && data.profile && (
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-              <button type="button" className="ac-btn" disabled={busy} onClick={() => { setForm(deliveryFrom(data)); setMsg({}); }}>Reset</button>
-              <button type="button" className="ac-btn ac-btn-primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save delivery"}</button>
+              <button type="button" className="ac-btn" disabled={busy || !dirty} onClick={() => { setForm(saved); setMsg({}); }}>Reset</button>
+              <button type="button" className="ac-btn ac-btn-primary" disabled={busy || !dirty} onClick={save}>{busy ? "Saving…" : "Save delivery"}</button>
             </div>
           )}
         </>
