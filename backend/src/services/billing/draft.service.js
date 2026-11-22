@@ -181,8 +181,9 @@ async function buildLines(db, contract, period, contractLines) {
   for (const x of sosLines.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
     const rate = x.rate === null ? null : Number(x.rate);
     const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}`;
-    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0 };
+    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0, sos_line_ids: [] };
     e.quantity += Number(x.completed) || 0;
+    e.sos_line_ids.push(x.id);
     extras.set(key, e);
   }
   const [siteNames] = extras.size
@@ -207,6 +208,7 @@ async function buildLines(db, contract, period, contractLines) {
       job_ids: null,
       needs_input: e.rate === null,
       sort_order: lines.length,
+      sos_line_ids: e.sos_line_ids, // the SOS lines it comes from (a missing rate is entered before generating)
     };
     line.amount = calc.lineAmount(line);
     lines.push(line);
@@ -242,9 +244,17 @@ async function periodsToBill(db, contract, monthEnd) {
   };
 }
 
-/** Contracts due in `month` with their period, services, estimate and warnings. */
+/**
+ * Contracts due in `month` with their period, services, estimate and warnings. `month` "ALL": every
+ * active contract's next bill up to 12 months ahead, each with the month it is billed in (bill_month);
+ * only those due by this month can be generated (due_now).
+ */
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
-  const range = C.monthRange(month);
+  const allMonths = month === "ALL";
+  const thisMonth = C.todayIst().slice(0, 7);
+  const range = allMonths ? C.monthRange(C.addMonths(`${thisMonth}-01`, 12).slice(0, 7)) : C.monthRange(month);
+  // weekly / daily Termite: only what is due by this month (a year ahead would be dozens of weeks)
+  const shortEnd = allMonths ? C.monthRange(thisMonth).end : range.end;
   const [contracts] = await db.query(
     `SELECT bc.*, c.name AS customer, IF(bc.contract_kind = 'GROUP', TRIM(g.name), NULL) AS billing_group
        FROM billing_contracts bc
@@ -281,7 +291,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     let existingDrafts = 0;
     if (short) {
       // weekly / daily Termite: one row for all its periods due this month (one invoice each)
-      const { periods, drafted } = await periodsToBill(db, contract, range.end);
+      const { periods, drafted } = await periodsToBill(db, contract, shortEnd);
       if (!periods.length && !drafted.length) continue;
       const all = [...periods, ...drafted].sort((a, b) => (a.start < b.start ? -1 : 1));
       period = { start: all[0].start, end: all[all.length - 1].end };
@@ -334,7 +344,8 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (sosMissing.length) warn("SOS_PENDING", `Waiting for SOS: ${sosMissing.map((m) => C.monthName(m)).join(", ")}`, true);
     const extraLines = lines.filter((l) => !l.contract_line_id);
     if (extraLines.length) warn("EXTRA_SERVICES", `${extraLines.reduce((t, l) => t + l.quantity, 0)} extra service(s) on the SOS`);
-    if (extraLines.some((l) => l.needs_input)) warn("EXTRA_NO_RATE", "Extra service without a rate in the profile: enter it on the draft");
+    const extrasNoRate = extraLines.filter((l) => l.needs_input);
+    if (extrasNoRate.length) warn("EXTRA_NO_RATE", "Extra service without a rate: enter it before generating the draft");
     if (contract.po_required) {
       const pos = await validPos(db, contract, period);
       if (!pos.length) {
@@ -350,8 +361,13 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (planned > done) warn("SERVICE_SHORTFALL", `${planned - done} service${planned - done > 1 ? "s" : ""} not done`);
     if (contract.end_date && contract.end_date <= period.end) warn("CONTRACT_ENDING", "Contract ends in this period");
 
+    // The month this bill is made in: billed in advance - the month the period starts; billed after
+    // (arrears) - the month it ends.
+    const billMonth = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
     rows.push({
       contract_id: contract.id,
+      bill_month: short ? (toBill[0] ? (contract.bill_timing === "ADVANCE" ? toBill[0].start : toBill[0].end).slice(0, 7) : billMonth) : billMonth,
+      due_now: !allMonths || (short ? true : billMonth <= thisMonth),
       contract_code: contract.contract_code,
       company_id: contract.company_id,
       customer: raw.customer,
@@ -370,7 +386,21 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       structure: contract.billing_type === "TERMITE" ? (/ft/i.test(cl.find((x) => S.isAreaLine(contract, x))?.unit || "") ? "PER_SQFT" : "PER_SQM") : contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
       sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,
       estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
+      // Separate bills: each period makes a services invoice and a chemicals invoice (shown as two bills)
+      separate_bills: Boolean(contract.separate_bills),
+      bills: contract.separate_bills ? (() => {
+        const kindOf = new Map(cl.map((x) => [x.id, x.item_kind || "SERVICE"]));
+        const isChem = (l) => Boolean(l.contract_line_id) && kindOf.get(l.contract_line_id) === "CHEMICAL";
+        const unknown = sosMissing.length || lines.some((l) => l.needs_input);
+        const est = (ls) => (unknown || !ls.length ? null : calc.totalsFor(ls, taxMode, contract.gst_rate).total);
+        return [
+          { kind: "SERVICE", estimated_total: est(lines.filter((l) => !isChem(l))) },
+          { kind: "CHEMICAL", estimated_total: est(lines.filter(isChem)) },
+        ];
+      })() : null,
       needs_input: lines.some((l) => l.needs_input),
+      // extra SOS services with no rate: Generate opens the "Before generating" page to enter it
+      extras_no_rate: extrasNoRate.map((l) => ({ item_name: l.item_name, site: l.site, quantity: l.quantity })),
       already_drafted: existingDrafts > 0,
       warnings,
       blocking: warnings.some((w) => w.blocking),
@@ -384,7 +414,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     already_drafted: rows.filter((r) => r.already_drafted).length,
     estimated_total: calc.round2(rows.reduce((t, r) => t + (r.estimated_total || 0), 0)),
   };
-  return { month, summary, rows };
+  return { month, this_month: thisMonth, summary, rows };
 }
 
 // ---- Bill Run: generating drafts ----------------------------------------------------------
@@ -413,7 +443,7 @@ async function insertLines(conn, invoiceId, lines) {
  * the invoice is split), or - weekly / daily Termite - every period due in the month that has no
  * invoice yet, one draft each.
  */
-async function draftContract(conn, contractId, month, runId, userId) {
+async function draftContract(conn, contractId, month, runId, userId, extraQty = new Map()) {
   const contract = await loadContract(conn, contractId, { lock: true });
   if (!contract) throw C.bad("Contract not found");
   if (contract.status !== "ACTIVE") throw C.bad(`Contract is ${contract.status.toLowerCase()}`);
@@ -428,12 +458,12 @@ async function draftContract(conn, contractId, month, runId, userId) {
   if (!ctx.profile) throw C.bad(contract.contract_kind === "GROUP" ? "The group's billing details (Bill To) are missing" : "Billing profile is missing");
 
   const drafts = [];
-  for (const period of periods) drafts.push(...(await draftPeriod(conn, contract, ctx, period, runId, userId)));
+  for (const period of periods) drafts.push(...(await draftPeriod(conn, contract, ctx, period, runId, userId, extraQty)));
   return drafts;
 }
 
 /** The drafts of one period of a contract (one per outlet when the invoice is split). */
-async function draftPeriod(conn, contract, ctx, period, runId, userId) {
+async function draftPeriod(conn, contract, ctx, period, runId, userId, extraQty = new Map()) {
   const periodName = P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start);
   const byKind = Boolean(contract.separate_bills);
   // The period's regular invoices already made. One invoice for the whole contract (bill_kind '')
@@ -449,7 +479,19 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId) {
   const cl = await linesInForce(conn, contract.id, period.start);
   if (!cl.length) throw C.bad("The contract has no price lines in force for this period");
   const { lines, sosMissing } = await buildLines(conn, contract, period, cl);
+  // Quantity of an extra SOS service as Accounts set it on the Before generating page (the SOS keeps
+  // the coordinator's number; only this invoice bills the quantity entered).
+  for (const l of lines) {
+    const key = l.sos_line_ids && [...l.sos_line_ids].sort().join(",");
+    if (key && extraQty.has(key)) {
+      l.quantity = extraQty.get(key);
+      l.amount = calc.lineAmount(l);
+    }
+  }
   if (sosMissing.length) throw C.bad(`Waiting for the Service Coordinator's SOS for ${sosMissing.map((m) => C.monthName(m)).join(", ")}`);
+  // An extra SOS service is billed at the rate Accounts enter before generating: no draft without it.
+  const noRate = lines.filter((l) => !l.contract_line_id && l.needs_input);
+  if (noRate.length) throw C.bad(`Enter the rate for the extra service${noRate.length > 1 ? "s" : ""} first: ${noRate.map((l) => l.item_name).join(", ")}`);
 
   const split = contract.invoice_grouping === "PER_SITE";
   // Print copies from the customer's billing profile: the outlet's own setting for an invoice made
@@ -527,14 +569,26 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId) {
 }
 
 /** POST /runs: drafts for each selected contract; one failing contract does not stop the others. */
-async function generateDrafts(pool, month, contractIds, userId) {
+async function generateDrafts(pool, month, contractIds, userId, extras = []) {
   const runId = uuid();
   await pool.query("INSERT INTO billing_runs (id, period_month, contracts_selected, run_by) VALUES (?, ?, ?, ?)", [runId, month, contractIds.length, userId]);
   const drafts = [];
   const skipped = [];
   for (const contractId of contractIds) {
     try {
-      drafts.push(...(await C.inTransaction(pool, (conn) => draftContract(conn, contractId, month, runId, userId))));
+      drafts.push(...(await C.inTransaction(pool, async (conn) => {
+        // Extra SOS services without a rate, as entered on the Before generating page: the rate is
+        // saved on the SOS lines (the SOS shows it too); the quantity applies to this invoice only.
+        const extraQty = new Map();
+        for (const x of extras) {
+          await conn.query(
+            "UPDATE billing_sos_lines SET rate = ? WHERE id IN (?) AND contract_id = ? AND is_extra = 1 AND rate IS NULL",
+            [x.rate, x.sos_line_ids, contractId]
+          );
+          if (x.quantity !== null) extraQty.set([...x.sos_line_ids].sort().join(","), x.quantity);
+        }
+        return draftContract(conn, contractId, month, runId, userId, extraQty);
+      })));
     } catch (err) {
       if (!(err instanceof C.HttpError) && err?.code !== "ER_DUP_ENTRY") throw err;
       const [[c]] = await pool.query(
@@ -553,6 +607,59 @@ async function generateDrafts(pool, month, contractIds, userId) {
   }
   await pool.query("UPDATE billing_runs SET drafts_created = ?, skipped = ? WHERE id = ?", [drafts.length, JSON.stringify(skipped), runId]);
   return { run_id: runId, drafts, skipped };
+}
+
+/**
+ * Before generating: for the selected contracts that have extra SOS services without a rate, the
+ * lines their draft will have (nothing is saved). Accounts enter those rates, then generate.
+ */
+async function previewDrafts(db, month, contractIds) {
+  const out = [];
+  for (const id of contractIds) {
+    const contract = await loadContract(db, id);
+    if (!contract || contract.status !== "ACTIVE") continue;
+    const { periods } = await periodsToBill(db, contract, C.monthRange(month).end);
+    if (!periods.length) continue;
+    const ctx = await customerContext(db, contract.company_id, contract);
+    const [[names]] = await db.query(
+      "SELECT TRIM(c.name) AS customer, TRIM(g.name) AS group_name FROM companies c LEFT JOIN group_name g ON g.id = ? WHERE c.id = ?",
+      [contract.contract_kind === "GROUP" ? contract.group_id : null, contract.company_id]
+    );
+    const taxMode = calc.taxModeFor(ctx.category, ctx.profile?.state_code, contract.gst_applicable !== 0);
+    for (const period of periods) {
+      const { lines, sosMissing } = await buildLines(db, contract, period, await linesInForce(db, contract.id, period.start));
+      if (sosMissing.length || !lines.some((l) => !l.contract_line_id && l.needs_input)) continue;
+      out.push({
+        contract_id: contract.id,
+        contract_code: contract.contract_code,
+        customer: names?.group_name || names?.customer || "",
+        billing_type: contract.billing_type,
+        structure: contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
+        period_start: period.start,
+        period_end: period.end,
+        tax_mode: taxMode,
+        gst_rate: calc.gstRateOf(contract.gst_rate),
+        bill_to: ctx.profile ? { name: ctx.profile.billing_name, address: ctx.profile.billing_address, state: ctx.profile.state_name } : null,
+        lines: lines.map((l, i) => ({
+          key: `${i}`,
+          item_name: l.item_name,
+          site: l.site,
+          sac_code: l.sac_code,
+          unit: l.unit,
+          pricing_basis: l.pricing_basis,
+          rate: l.rate,
+          quantity: l.quantity,
+          amount: l.amount,
+          services_planned: l.services_planned,
+          services_done: l.services_done,
+          extra: !l.contract_line_id,
+          needs_rate: !l.contract_line_id && l.needs_input,
+          sos_line_ids: l.sos_line_ids || null,
+        })),
+      });
+    }
+  }
+  return out;
 }
 
 // ---- one invoice ---------------------------------------------------------------------------
@@ -1085,6 +1192,7 @@ module.exports = {
   describe,
   buildLines,
   dueList,
+  previewDrafts,
   generateDrafts,
   loadInvoice,
   saveDraft,

@@ -1,6 +1,6 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FiArrowLeft, FiCheckSquare, FiLogOut } from "react-icons/fi";
+import { FiArrowLeft, FiCheckSquare, FiClipboard, FiFileText, FiLogOut } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
@@ -9,6 +9,7 @@ import { getBadges, getDepartments, getMyAccess } from "./feedbackApi";
 import { taskSwitchCount } from "../taskpro/tasksApi";
 import { useUnseenCounts } from "./unseenCounts";
 import { TASKPRO_HOME } from "../taskpro/access";
+import { BILLING_HOME } from "../billing/access";
 import { FeedbackContext } from "./feedbackContext";
 import { ErrorBox, Loading } from "./ui";
 import "./feedback.css";
@@ -158,6 +159,10 @@ export default function FeedbackLayout() {
     if (openBadge && openBadgeCount > 0) markSeen(openBadge);
   });
 
+  const showSos = (access?.role ?? role) === "Service Coordinator";
+  // The Accounts department: Billing one click away (next to Task Management, their own panel).
+  const showBilling = ["Accounts Head", "Accounts Executive"].includes(access?.role ?? role);
+
   function openSwitch() {
     if (switchesToTasks) markSeen("tasks");
     go(back.path);
@@ -204,11 +209,24 @@ export default function FeedbackLayout() {
             </nav>
             {/* Switch to the user's other panel, at the bottom like Task Management's own switches. */}
             <div className="fb-nav-switch">
+              {/* The Service Coordinator fills the Monthly SOS in the Billing area: one click from here. */}
+              {showSos && (
+                <button type="button" className="nav-btn" onClick={() => go(`${BILLING_HOME}/sos`)}>
+                  <FiClipboard aria-hidden="true" />
+                  <span>Monthly SOS</span>
+                </button>
+              )}
               {back && (
                 <button type="button" className="nav-btn" onClick={openSwitch}>
                   {switchesToTasks ? <FiCheckSquare aria-hidden="true" /> : <FiArrowLeft aria-hidden="true" />}
                   <span>{back.label}</span>
                   {unseen("tasks") > 0 && <span className="fb-nav-count">{unseen("tasks")}</span>}
+                </button>
+              )}
+              {showBilling && (
+                <button type="button" className="nav-btn" onClick={() => go(BILLING_HOME)}>
+                  <FiFileText aria-hidden="true" />
+                  <span>Billing</span>
                 </button>
               )}
               <button type="button" className="nav-btn" onClick={logout}>
@@ -241,12 +259,14 @@ export default function FeedbackLayout() {
                 {item.label}
               </button>
             ))}
+          {showSos && <button onClick={() => go(`${BILLING_HOME}/sos`)}>Monthly SOS</button>}
           {back && (
             <button onClick={openSwitch}>
               {back.label}
               {unseen("tasks") > 0 ? ` (${unseen("tasks")})` : ""}
             </button>
           )}
+          {showBilling && <button onClick={() => go(BILLING_HOME)}>Billing</button>}
           <button onClick={logout}>Logout</button>
         </div>
       )}

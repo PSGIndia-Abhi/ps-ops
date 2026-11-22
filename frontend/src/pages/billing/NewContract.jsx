@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiArrowRight, FiBookmark, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiEdit2, FiFileText, FiMail, FiPlus, FiRefreshCw, FiPrinter } from "react-icons/fi";
-import { ApiError, billingGet, billingPost, billingPut, qs, useBilling } from "./billingApi";
+import { FiArrowRight, FiBookmark, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiEdit2, FiFileText, FiMail, FiPaperclip, FiPlus, FiRefreshCw, FiPrinter, FiUploadCloud, FiX } from "react-icons/fi";
+import { ApiError, billingGet, billingPost, billingPut, billingUpload, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
 import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, initials, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
@@ -9,7 +9,7 @@ import FrequencySelect from "./FrequencySelect";
 import { DeliveryFields } from "./InvoiceDelivery";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
-import { Field, Msg } from "./ui";
+import { Field, Msg, BackButton } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -245,7 +245,7 @@ export default function NewContract() {
     { n: 2, title: "Contract" },
     ...(needsPo ? [{ n: 3, title: "Purchase order" }] : []),
     { n: 4, title: "Services & prices" },
-    ...(groupMode ? [] : [{ n: 6, title: "Print & email" }]),
+    { n: 6, title: "Print & email" },
     { n: 5, title: "Review" },
   ];
   const at = steps.findIndex((s) => s.n === step);
@@ -269,7 +269,7 @@ export default function NewContract() {
       try {
         const now = Date.now();
         localStorage.setItem(draftKey, JSON.stringify({
-          v: 1, savedAt: now, step, companyId, customerName: customer?.name || "", stepsTotal: steps.length,
+          v: 1, savedAt: now, step, companyId, customerName: (groupMode ? group?.name : customer?.name) || "", stepsTotal: steps.length,
           terms, lines, kinds, poId, addingPo, po, groupText, groupId, groupCompanyIds, groupSitesOff, groupMain,
         }));
         setSavedAt(now);
@@ -303,7 +303,9 @@ export default function NewContract() {
     }
     setStep(d.step);
     setResume(null);
-    setMsg({ ok: `Continuing your contract for ${d.customerName || "the customer"}.` });
+    // a group contract is named by its group (drafts saved earlier kept the main company's name)
+    const groupName = groupMode ? (contractGroups || []).find((g) => g.id === d.groupId)?.name : null;
+    setMsg({ ok: `Continuing your contract for ${groupName || d.customerName || (groupMode ? "the group" : "the customer")}.` });
   }
   function startOver() {
     try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
@@ -383,16 +385,19 @@ export default function NewContract() {
   // The customer's invoice delivery settings (defaults when it has none yet). A new contract
   // starts with the late alert on (bill by the 25th) unless the customer already has a day.
   const withBillByDefault = (f) => ({ ...f, bill_by_day: f.bill_by_day || 25 });
+  // Group contract: print copies and email for the group's invoice, kept with the main company (the
+  // first ticked one, which the invoice is made under); no per-outlet settings (one invoice for the group).
   useEffect(() => {
     setDelivery(null);
     setDeliveryOutlets([]);
-    if (!companyId || groupMode) return undefined;
+    if (!companyId) return undefined;
     let live = true;
     billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
       .then((d) => {
         if (!live) return;
-        setDelivery(withBillByDefault(deliveryFrom(d)));
-        setDeliveryOutlets(d.outlets || []);
+        const form = withBillByDefault(deliveryFrom(d));
+        setDelivery(groupMode ? { ...form, outlets: [] } : form);
+        setDeliveryOutlets(groupMode ? [] : d.outlets || []);
       })
       .catch(() => live && setDelivery(withBillByDefault(deliveryFrom(null))));
     return () => {
@@ -457,6 +462,18 @@ export default function NewContract() {
       setGroupSitesOff((off) => [...off, k.site.site_id]);
     }
     return undefined;
+  }
+
+  // PO copy for a new PO (step 3): checked here, uploaded after the PO is saved on Next
+  const [poFile, setPoFile] = useState(null);
+  function pickPoFile(e) {
+    const picked = e.target.files?.[0] || null;
+    e.target.value = "";
+    if (!picked) return;
+    if (!["application/pdf", "image/png", "image/jpeg"].includes(picked.type)) { setMsg({ error: "The PO copy must be a PDF, JPG or PNG." }); return; }
+    if (picked.size > 3 * 1024 * 1024) { setMsg({ error: "The PO copy is too large (max 3 MB)." }); return; }
+    setMsg({});
+    setPoFile(picked);
   }
 
   function chooseCustomer(id) {
@@ -532,6 +549,13 @@ export default function NewContract() {
     if (step === 4) {
       const filled = lines.filter((l) => kinds[l.kind] && (l.item_name || l.rate !== ""));
       if (!filled.length) return "Add at least one service or chemical with its amount.";
+      // Services / chemicals chosen on the Contract step must each have an item here.
+      if (kinds.CHEMICAL && !lines.some((l) => l.kind === "CHEMICAL" && String(l.item_name || "").trim() && l.rate !== "")) {
+        return "Chemicals were chosen on the Contract step: add at least one chemical with its rate (or untick Chemicals there).";
+      }
+      if (kinds.SERVICE && !termite && !groupLines && !lines.some((l) => l.kind === "SERVICE" && String(l.item_name || "").trim() && l.rate !== "")) {
+        return "Services were chosen on the Contract step: add at least one service with its rate (or untick Services there).";
+      }
       if (kinds.SERVICE && groupLines) {
         if (!chosenSvcs.length) return "Choose the service done at the outlets.";
         if (chosenSvcs.length !== groupMain.services.length) return "Choose the added service, or remove it with ✕.";
@@ -592,7 +616,7 @@ export default function NewContract() {
       }
       if (step === 6) {
         // Print copies and email: the customer's, saved now (the Bill To was saved at step 1).
-        await billingPut(`/customer-profiles/${encodeURIComponent(companyId)}/settings`, deliveryBody(delivery));
+        await billingPut(`/customer-profiles/${encodeURIComponent(companyId)}/settings`, groupMode ? { ...deliveryBody(delivery), outlets: [], for_group: true } : deliveryBody(delivery));
       }
       if (step === 3 && addingPo) {
         const created = await billingPost("/pos", {
@@ -600,6 +624,17 @@ export default function NewContract() {
           valid_from: po.valid_from || null, expiry_date: po.open ? null : po.expiry_date || null,
           po_amount: po.po_amount === "" ? null : po.po_amount, kind: po.kind, remarks: po.remarks || null,
         });
+        // the PO copy (optional), uploaded once the PO exists
+        if (poFile) {
+          try {
+            const fd = new FormData();
+            fd.append("file", poFile);
+            await billingUpload(`/pos/${created.id}/file`, fd);
+            setPoFile(null);
+          } catch (err) {
+            setMsg({ error: `PO saved, but the copy didn't upload (${err.message}). Upload it from Purchase Orders.` });
+          }
+        }
         setPoId(created.id);
         setAddingPo(false);
         reloadPos();
@@ -750,7 +785,7 @@ export default function NewContract() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div>
+          <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div></div>
           <h1 className="ac-title">New Contract</h1>
         </div>
       </div>
@@ -1091,6 +1126,15 @@ export default function NewContract() {
                 <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={!addingPo} onChange={(e) => setP({ po_amount: e.target.value })} />
               </Field>
               <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={!addingPo} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
+              {addingPo && (
+                <Field label="PO copy" className="bl-span2" hint="PDF, JPG or PNG, up to 3 MB (optional)">
+                  {poFile ? (
+                    <div className="pd-file"><FiPaperclip /><span>{poFile.name}</span><small>{Math.max(1, Math.round(poFile.size / 1024))} KB</small><button type="button" className="sos-rm" onClick={() => setPoFile(null)} aria-label="Remove file"><FiX /></button></div>
+                  ) : (
+                    <label className="pd-drop"><FiUploadCloud /><span>Choose the PO copy</span><input type="file" accept="application/pdf,image/png,image/jpeg" onChange={pickPoFile} /></label>
+                  )}
+                </Field>
+              )}
             </div>
           </>
         )}
@@ -1420,7 +1464,7 @@ export default function NewContract() {
                   {next && <li className="now"><i /><span>First invoice</span><b>{dmy(next.start)} → {dmy(next.end)}</b><small>Bill Run · {monthLabel(next.billMonth)}</small></li>}
                 </ol>
               </div>
-              {!groupMode && delivery && (
+              {delivery && (
                 <div className="nc-rv-box">
                   <div className="nc-rv-box-h">Print &amp; email <EditStep label="print and email" onClick={() => setStep(6)} /></div>
                   <div className="nc-rv-stats">
@@ -1545,7 +1589,7 @@ export default function NewContract() {
             <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
             {next && <><dt>First invoice</dt><dd>{dmy(next.start)} – {dmy(next.end)}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
             <dt>Services</dt><dd>{filledLines.length ? `${filledLines.length} line${filledLines.length === 1 ? "" : "s"}` : <span className="ac-sub">None yet</span>}</dd>
-            {!groupMode && delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
+            {delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
           </dl>
           {termite ? (
             <div className="nc-sum-total"><span>Rate per {areaLabel}</span><b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>

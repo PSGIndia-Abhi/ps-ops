@@ -4,7 +4,7 @@ import { billingPost, billingPut, openPdf, qs, useBilling } from "./billingApi";
 import { amountInWords, gstRateOf, lineAmount, totalsFor } from "./calc";
 import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, typeLabel } from "./format";
 import IssueDialog from "./IssueDialog";
-import { Field, Msg, ServicesChip } from "./ui";
+import { Field, Msg, ServicesChip, BackButton } from "./ui";
 import { InvoiceSkeleton } from "./Skeletons";
 
 // Draft invoice: header, lines (with services done against the plan and the billing basis), totals,
@@ -156,7 +156,7 @@ export default function DraftEditor() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/drafts")}>Draft Invoices</button> / {inv.customer.name}</div>
+          <div className="bl-backrow"><BackButton to="/billing/drafts" label="Draft Invoices" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/drafts")}>Draft Invoices</button> / {inv.customer.name}</div></div>
           <h1 className="ac-title">
             {inv.status === "DRAFT" ? "Draft Invoice" : `Invoice ${inv.invoice_number}`}{" "}
             <span className={`ac-badge ${inv.status === "DRAFT" ? "b-amber" : inv.status === "ISSUED" ? "b-green" : "b-grey"}`} style={{ verticalAlign: "middle" }}>
@@ -249,7 +249,7 @@ export default function DraftEditor() {
                         <td style={{ minWidth: 200 }}>
                           <b>{l.item_name}</b>
                           {blank && <span className="ac-badge b-amber" style={{ marginLeft: 6 }}>Enter {qtyOpen && !Number(l.quantity) ? "quantity" : "rate"}</span>}
-                          <div className="bl-sub">{[l.site, l.sac_code && `SAC ${l.sac_code}`, l.unit && `per ${l.unit}`].filter(Boolean).join(" · ")}</div>
+                          <div className="bl-sub">{[!l.contract_line_id && "Extra service (added on the SOS)", l.site, l.sac_code && `SAC ${l.sac_code}`, l.unit && `per ${l.unit}`].filter(Boolean).join(" · ")}</div>
                           {l.invoice_group && <div className="bl-sub" style={{ color: "#1d4ed8" }}>Printed in one line: “{l.invoice_group}”</div>}
                         </td>
                         <td className="bl-num" style={{ width: 110 }}>

@@ -70,6 +70,9 @@ const LOGIN_HOME = {
   // (feedback_collector's own panel is already the desk, see ROLE_HOME.)
   "Operations Manager": "/feedback-desk",
   "Service Coordinator": "/feedback-desk",
+  // The Accounts department starts in Billing (invoice generation); Task Management is one click away.
+  "Accounts Head": "/billing",
+  "Accounts Executive": "/billing",
 };
 
 export const loginHomePath = (role) => LOGIN_HOME[role] || roleBasePath(role);

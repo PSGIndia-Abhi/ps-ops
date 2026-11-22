@@ -59,9 +59,12 @@ function buildContent(inv, number) {
   // print as ONE line, the summary as the item name and the total of those lines (after any service
   // shortfall) as its amount, where the group's first line was. Lines without a group print as they are.
   // The lines stay separate in the draft (services done, checks); only the print merges them.
+  // A line with quantity 0 (and nothing to bill) is not printed, e.g. a service completed 0 times; a
+  // summary prints only when one of its lines has a quantity. The draft still shows every line.
   const printed = [];
   const groups = new Map();
   inv.lines.forEach((l, i) => {
+    if (Number(l.quantity) === 0 && Number(l.amount) === 0) return;
     const key = String(l.invoice_group || "").trim();
     if (!key) return printed.push(lines[i]);
     let g = groups.get(key);

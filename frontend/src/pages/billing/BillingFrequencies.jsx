@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, useBilling } from "./billingApi";
-import { Msg } from "./ui";
+import { Msg, BackButton } from "./ui";
 
 // Masters > Billing Frequencies: the "every N months" choices (1 to 12) a contract can pick as its
 // billing frequency. A frequency that is switched off can no longer be picked; contracts already on
@@ -45,7 +45,7 @@ export default function BillingFrequencies() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Billing Frequencies</div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Billing Frequencies</div></div>
           <h1 className="ac-title">Billing Frequencies</h1>
           <p className="ac-sub">How often a contract can be billed. Each contract picks one in its Billing frequency.</p>
         </div>

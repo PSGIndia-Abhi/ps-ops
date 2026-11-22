@@ -8,9 +8,8 @@ const T = require("../../services/billing/tracker.service");
 const { notifyUsers } = require("../../services/notifications.service");
 const { logAudit } = require("../../services/Audit.service");
 
-// Any number of copies: the 4th and every later copy is an "Extra copy".
-const COPY_LABELS = ["Original for Recipient", "Duplicate for Transporter", "Triplicate for Supplier", "Extra copy"];
-const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), 127) }, (_, i) => COPY_LABELS[Math.min(i, COPY_LABELS.length - 1)]);
+// Copies are not labelled on the invoice: Copy 1, Copy 2, ...
+const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), 127) }, (_, i) => `Copy ${i + 1}`);
 
 function planOut(plan, extra = {}) {
   const lines = (plan.lines || []).map((l) => ({

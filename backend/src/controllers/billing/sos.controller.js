@@ -4,6 +4,7 @@
 //   PUT  /sos/:companyId                     save as draft  { month, notes, lines, extras }
 //   POST /sos/:companyId/submit              save and submit to Accounts (locks it, notifies Accounts)
 //   POST /sos/:companyId/reopen              { month, reason } - coordinator corrects / Accounts sends back
+//   POST /sos/submit-many                    { month, company_ids } - submit several saved SOS at once
 // Logic: services/billing/sos.service.js.
 
 const { pool } = require("../../../db");
@@ -58,4 +59,43 @@ const reopen = C.handle("Failed to reopen the SOS", async (req, res) => {
   res.json({ ...(await S.sosView(pool, companyId, month)), drafts_removed: result.drafts_removed });
 });
 
-module.exports = { overview, get, save, submit, reopen };
+// POST /sos/submit-many { month, company_ids } - submits several SOS at once from the Monthly SOS
+// list (Not started or In progress), each in its own transaction. Every agreed service with no number
+// entered yet is submitted as completed = assigned; numbers already entered and extra services stay
+// as saved. One that cannot be submitted (termite area not entered, already submitted, ...) is listed
+// with the reason and does not stop the others.
+const submitMany = C.handle("Failed to submit the SOS", async (req, res) => {
+  const month = monthOf(req.body?.month);
+  const ids = [...new Set((Array.isArray(req.body?.company_ids) ? req.body.company_ids : []).map((v) => String(v || "").trim()).filter(Boolean))];
+  if (!ids.length) throw C.bad("Choose at least one customer");
+  if (ids.length > 200) throw C.bad("Too many customers at once (200 at most)");
+  const submitted = [];
+  const failed = [];
+  for (const companyId of ids) {
+    let customer = companyId;
+    try {
+      const view = await S.sosView(pool, companyId, month);
+      customer = view.billing_group ? view.billing_group.group : view.customer;
+      if (view.status === "SUBMITTED") throw C.bad("Already submitted");
+      if (!view.has_agreement) throw C.bad("No services agreed for this month");
+      if (view.invoiced?.length) throw C.bad("Already invoiced");
+      if ((view.area_lines || []).some((a) => a.area === null)) throw C.bad("Termite area not entered - open it and enter the treated area");
+      // Services not entered yet: completed as assigned. Entered numbers, extras and areas as saved.
+      const body = {
+        notes: view.notes || null,
+        lines: view.lines.filter((l) => !l.is_extra).map((l) => ({ contract_line_id: l.contract_line_id, completed: l.completed ?? l.assigned, remarks: l.remarks || null })),
+        extras: view.lines.filter((l) => l.is_extra).map((l) => ({ site_id: l.site_id || null, service: l.service, completed: l.completed, remarks: l.remarks || null })),
+        areas: (view.area_lines || []).map((a) => ({ contract_line_id: a.contract_line_id, period_start: a.period_start, area: a.area, remarks: a.remarks || null })),
+      };
+      const result = await C.inTransaction(pool, (conn) => S.saveSos(conn, req, companyId, month, body, { submit: true }));
+      await S.notifyAccounts(pool, result);
+      submitted.push({ company_id: companyId, customer });
+    } catch (err) {
+      if (!(err instanceof C.HttpError)) throw err;
+      failed.push({ company_id: companyId, customer, reason: err.message });
+    }
+  }
+  res.json({ month: S.monthStart(month), submitted, failed });
+});
+
+module.exports = { overview, get, save, submit, submitMany, reopen };

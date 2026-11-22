@@ -35,6 +35,8 @@ export default function SosEntry() {
   const { companyId } = useParams();
   const [params, setParams] = useSearchParams();
   const month = params.get("month") || thisMonth();
+  // Opened from the Bill Run ("SOS submitted - view"): the back arrow returns there, not to Monthly SOS.
+  const fromRun = params.get("from") === "run";
   const { me } = useOutletContext();
   const canFill = me.can("MANAGE_SERVICE_PLANS");
   const canSendBack = me.can("GENERATE_INVOICE");
@@ -133,7 +135,8 @@ export default function SosEntry() {
 
   const setDoneFor = (id, v) => { setDone((d) => ({ ...d, [id]: v })); setDirty(true); };
   const setExtra = (key, patch) => { setExtras((xs) => xs.map((x) => (x.key === key ? { ...x, ...patch } : x))); setDirty(true); };
-  const addExtra = (siteId) => { setExtras((xs) => [{ key: (extraKey += 1), site_id: siteId, service: "", completed: "1", remarks: "" }, ...xs]); setDirty(true); };
+  // a new extra service goes to the end of the list (first added stays first)
+  const addExtra = (siteId) => { setExtras((xs) => [...xs, { key: (extraKey += 1), site_id: siteId, service: "", completed: "1", remarks: "" }]); setDirty(true); };
   // Fill one outlet's services with the assigned numbers.
   const fillLines = (lines) => { setDone((d) => ({ ...d, ...Object.fromEntries(lines.map((l) => [l.contract_line_id, String(l.assigned)])) })); setDirty(true); };
 
@@ -194,13 +197,14 @@ export default function SosEntry() {
 
   function changeMonth(m) {
     if (dirty && !window.confirm("You have unsaved changes. Leave without saving?")) return;
-    setParams({ month: m });
+    setParams(fromRun ? { month: m, from: "run" } : { month: m });
   }
 
   return (
     <div className="ac-page sos-page">
       <div className="sos-top">
-        <button type="button" className="sos-back" onClick={() => navigate(`${BILLING_HOME}/sos?month=${month}`)} aria-label="Back to Monthly SOS" title="Monthly SOS"><FiArrowLeft /></button>
+        <button type="button" className="sos-back" onClick={() => navigate(fromRun ? `${BILLING_HOME}/run?month=${month}` : `${BILLING_HOME}/sos?month=${month}`)}
+          aria-label={fromRun ? "Back to Bill Run" : "Back to Monthly SOS"} title={fromRun ? "Bill Run" : "Monthly SOS"}><FiArrowLeft /></button>
         <div className="sos-top-main">
           <h1>{data.billing_group ? data.billing_group.group : data.customer}</h1>
           <div className="bl-meta">
@@ -335,40 +339,7 @@ export default function SosEntry() {
               {(lines.length > 0 || cardExtras.length > 0) && (
                 <div className="sos-item sos-thead"><span>{grp ? "Company · outlet" : "Service"}</span><span>Assigned</span><span>Completed</span><span>Status</span><span className="sos-money">Rate</span><span className="sos-money">Billed</span><span className="sos-money">Amount</span><span /></div>
               )}
-              {cardExtras.map((x) => {
-                const id = `x${x.key || `${x.service}-${x.site_id}`}`;
-                const rate = editable ? rateOf(x.site_id, x.service) : x.rate;
-                const remarkOpen = openRemarks.has(id);
-                const xb = billOf(rate, Number(x.completed) || 0);
-                return (
-                  <div key={id} className="sos-item extra">
-                    <div className="sos-item-main">
-                      {editable ? (
-                        <input className="sos-svcinput" list="sos-catalog" value={x.service} autoFocus={!x.service} placeholder="Choose or type the service" onChange={(e) => setExtra(x.key, { service: e.target.value })} aria-label="Extra service" />
-                      ) : <b>{x.service}</b>}
-                      <span className="sos-item-sub">
-                        <span className="sos-extra-lbl">Extra</span>
-                        {grp && <span>{outletName(x.site_id)}</span>}
-                        {(x.service || !editable) && <span className="sos-grp-calc">{rate !== null && rate !== undefined ? <>{xb.qty} × {money(rate)} = <b>{money(xb.amount)}</b></> : "Rate set by Accounts"}</span>}
-                        {!remarkOpen && x.remarks && <span className="sos-remark">“{x.remarks}”</span>}
-                      </span>
-                      {remarkOpen && editable && (
-                        <input className="sos-remarkinput" autoFocus value={x.remarks} placeholder="Why was it done? (optional)" onChange={(e) => setExtra(x.key, { remarks: e.target.value })} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
-                      )}
-                    </div>
-                    <span className="sos-num muted">—</span>
-                    <Counter editable={editable} value={x.completed} min={1}
-                      onChange={(v) => setExtra(x.key, { completed: v })} label={`Extra ${x.service || "service"} done`} />
-                    <span className="sos-state purple"><FiPlusCircle /> Extra</span>
-                    <span className="sos-money">{rate !== null && rate !== undefined ? rupees(rate) : <span className="ac-sub">By Accounts</span>}</span><span className="sos-money">{xb.qty}</span><span className="sos-money">{xb.amount === null ? <span className="sos-muted">—</span> : <b>{money(xb.amount)}</b>}</span>
-                    <span className="sos-acts">
-                      {editable && <button type="button" className={`sos-iconbtn ${x.remarks ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
-                      {editable && <button type="button" className="sos-iconbtn red" onClick={() => { setExtras((xs) => xs.filter((y) => y.key !== x.key)); setDirty(true); }} title="Remove" aria-label="Remove extra"><FiX /></button>}
-                    </span>
-                  </div>
-                );
-              })}
-
+              {/* agreed services first, then the extra services in the order they were added */}
               {lines.map((l) => {
                 const id = `l${l.contract_line_id}`;
                 const v = editable ? done[l.contract_line_id] : l.completed;
@@ -404,6 +375,40 @@ export default function SosEntry() {
                   </div>
                 );
               })}
+              {cardExtras.map((x) => {
+                const id = `x${x.key || `${x.service}-${x.site_id}`}`;
+                const rate = editable ? rateOf(x.site_id, x.service) : x.rate;
+                const remarkOpen = openRemarks.has(id);
+                const xb = billOf(rate, Number(x.completed) || 0);
+                return (
+                  <div key={id} className="sos-item extra">
+                    <div className="sos-item-main">
+                      {editable ? (
+                        <input className="sos-svcinput" list="sos-catalog" value={x.service} autoFocus={!x.service} placeholder="Choose or type the service" onChange={(e) => setExtra(x.key, { service: e.target.value })} aria-label="Extra service" />
+                      ) : <b>{x.service}</b>}
+                      <span className="sos-item-sub">
+                        <span className="sos-extra-lbl">Extra</span>
+                        {grp && <span>{outletName(x.site_id)}</span>}
+                        {(x.service || !editable) && <span className="sos-grp-calc">{rate !== null && rate !== undefined ? <>{xb.qty} × {money(rate)} = <b>{money(xb.amount)}</b></> : "Rate set by Accounts"}</span>}
+                        {!remarkOpen && x.remarks && <span className="sos-remark">“{x.remarks}”</span>}
+                      </span>
+                      {remarkOpen && editable && (
+                        <input className="sos-remarkinput" autoFocus value={x.remarks} placeholder="Why was it done? (optional)" onChange={(e) => setExtra(x.key, { remarks: e.target.value })} onBlur={() => toggleRemark(id, false)} aria-label="Remarks" />
+                      )}
+                    </div>
+                    <span className="sos-num muted">—</span>
+                    <Counter editable={editable} value={x.completed} min={1}
+                      onChange={(v) => setExtra(x.key, { completed: v })} label={`Extra ${x.service || "service"} done`} />
+                    <span className="sos-state purple"><FiPlusCircle /> Extra</span>
+                    <span className="sos-money">{rate !== null && rate !== undefined ? rupees(rate) : <span className="ac-sub">By Accounts</span>}</span><span className="sos-money">{xb.qty}</span><span className="sos-money">{xb.amount === null ? <span className="sos-muted">—</span> : <b>{money(xb.amount)}</b>}</span>
+                    <span className="sos-acts">
+                      {editable && <button type="button" className={`sos-iconbtn ${x.remarks ? "on" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={() => toggleRemark(id)} title="Remark" aria-label="Remark"><FiMessageSquare /></button>}
+                      {editable && <button type="button" className="sos-iconbtn red" onClick={() => { setExtras((xs) => xs.filter((y) => y.key !== x.key)); setDirty(true); }} title="Remove" aria-label="Remove extra"><FiX /></button>}
+                    </span>
+                  </div>
+                );
+              })}
+
               {(lines.length > 0 || cardExtras.length > 0) && (() => {
                 const note = fixedCard ? "Fixed: assigned billed" : anyEntered ? "Completed billed" : "Nothing entered yet";
                 const ifAll = !fixedCard && fullAmt > billAmt ? `if all done ${money(fullAmt)}` : "";

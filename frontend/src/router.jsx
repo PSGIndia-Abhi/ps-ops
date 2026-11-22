@@ -124,13 +124,13 @@ import { FEEDBACK_HOME } from "./pages/feedback/access";
 import BillingLayout from "./pages/billing/BillingLayout";
 import BillingHome from "./pages/billing/BillingHome";
 import BillingBillRun from "./pages/billing/BillRun";
+import BillingBeforeGenerate from "./pages/billing/BeforeGenerate";
 import BillingDraftInvoices from "./pages/billing/DraftInvoices";
 import BillingDraftEditor from "./pages/billing/DraftEditor";
 import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
 import BillingInvoiceView from "./pages/billing/InvoiceView";
 import BillingSosList from "./pages/billing/SosList";
 import BillingSosEntry from "./pages/billing/SosEntry";
-import BillingCoordinatorDashboard from "./pages/billing/CoordinatorDashboard";
 import BillingAccountsDashboard from "./pages/billing/AccountsDashboard";
 import BillingContracts from "./pages/billing/Contracts";
 import BillingContractForm from "./pages/billing/ContractForm";
@@ -464,8 +464,8 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <BillingHome /> },
-      // Service Coordinator: dashboard and the monthly SOS (Accounts read the SOS too).
-      { path: "coordinator", element: <BillingCoordinatorDashboard /> },
+      // Service Coordinator: the monthly SOS (Accounts read it too). The old coordinator dashboard is gone.
+      { path: "coordinator", element: <Navigate to="/billing/sos" replace /> },
       // Accounts: the billing dashboard (one-click generate / issue / download, late alerts).
       { path: "dashboard", element: <BillingAccountsDashboard /> },
       { path: "sos", element: <BillingSosList /> },
@@ -473,6 +473,7 @@ const router = createBrowserRouter([
       // Old Service Tracker / Service Plans pages: replaced by the monthly SOS.
       { path: "tracker", element: <Navigate to="/billing/sos" replace /> },
       { path: "run", element: <BillingBillRun /> },
+      { path: "run/generate", element: <BillingBeforeGenerate /> },
       { path: "drafts", element: <BillingDraftInvoices /> },
       // Generate Invoice (manual): an extra bill from the contract's prices, issued at once.
       { path: "generate", element: <BillingManualInvoice /> },

@@ -52,6 +52,7 @@ router.get("/dashboard", can(P.VIEW_BILLING), dashboardCtl.dashboard);
 // Accounts reads it and can send it back. Billing of counted services waits for it.
 router.get("/sos", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.overview);
 router.get("/sos/:companyId", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.get);
+router.post("/sos/submit-many", can(P.MANAGE_SERVICE_PLANS), sos.submitMany);
 router.put("/sos/:companyId", can(P.MANAGE_SERVICE_PLANS), sos.save);
 router.post("/sos/:companyId/submit", can(P.MANAGE_SERVICE_PLANS), sos.submit);
 router.post("/sos/:companyId/reopen", canAny(P.MANAGE_SERVICE_PLANS, P.GENERATE_INVOICE), sos.reopen);
@@ -117,6 +118,7 @@ router.get("/payments", can(P.MANAGE_BILLING_MASTERS), pos.advanceCandidates);
 
 // Bill Run and invoices (fixed paths before /invoices/:id)
 router.get("/due", can(P.VIEW_BILLING), invoices.due);
+router.get("/runs/preview", can(P.GENERATE_INVOICE), invoices.runPreview);
 router.post("/runs", can(P.GENERATE_INVOICE), invoices.run);
 router.get("/invoices", can(P.VIEW_BILLING), invoices.list);
 router.post("/invoices/issue", can(P.ISSUE_INVOICE), invoices.issue);
