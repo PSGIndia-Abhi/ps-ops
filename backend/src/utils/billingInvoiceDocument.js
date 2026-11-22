@@ -191,7 +191,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   lines.forEach((line, i) => {
     const nameH = textH(line.name, colW(1) - PAD * 2, 8, "B");
     const rowH = Math.max(18, nameH + 8);
-    if (y + rowH > PAGE_H - 40) {
+    if (y + rowH > PAGE_H - 90) {
       cols.forEach((_, ci) => ci > 0 && vline(colX[ci], tableTop, y));
       box(L, frameTop, W, y - frameTop);
       doc.addPage();
@@ -212,7 +212,8 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   });
   // ---- the block under the items: four parts (Total, tax/amounts, amount in words, bank/terms) ----
   // As many parts as fit go on the current page; the rest continue on the next page.
-  const BOTTOM = PAGE_H - 30;
+  // 80pt bottom gap: the content also fits Letter paper (50pt shorter than A4) when printed at actual size.
+  const BOTTOM = PAGE_H - 80;
   const mid = L + Math.round(W * 0.5);
   // The invoice's GST rate (copied from its contract); invoices from before the rate was stored are 18 %.
   const gstRate = [5, 12, 18, 28].includes(Number(content.gst_rate)) ? Number(content.gst_rate) : 18;
