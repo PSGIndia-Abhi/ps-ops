@@ -125,7 +125,10 @@ export default function NewContract() {
   const setT = (patch) => setTerms((t) => ({ ...t, ...patch }));
   const termite = terms.billing_type === "TERMITE";
   const areaUnit = terms.area_unit === SQFT ? SQFT : SQM;
-  const areaLabel = areaUnit === SQFT ? "sq. ft" : "sq. m";
+  // Termite: each item has its own unit (sq. m / sq. ft), chosen in step 4. An item without one (a draft
+  // saved before units were per item) uses the contract's old unit, sq. m by default.
+  const lineUnit = (l) => (l?.unit === SQFT || l?.unit === SQM ? l.unit : areaUnit);
+  const unitText = (u) => (u === SQFT ? "sq. ft" : "sq. m");
   const gstOn = !residential && terms.gst_applicable !== false;
   const needsPo = PO_TYPES.includes(terms.billing_type) || terms.po_required;
 
@@ -159,6 +162,9 @@ export default function NewContract() {
 
   // 4. services and prices
   const [lines, setLines] = useState([newLine(false)]);
+  const termiteUnits = termite ? [...new Set(lines.filter((l) => l.kind === "SERVICE").map(lineUnit))] : [];
+  // one unit for all the items: that unit; mixed: "sq. m / sq. ft"
+  const areaLabel = termiteUnits.length > 1 ? "sq. m / sq. ft" : unitText(termiteUnits[0] || areaUnit);
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   // Services and / or chemicals: lines of a kind that is switched off are kept but not saved.
   const [kinds, setKinds] = useState({ SERVICE: true, CHEMICAL: false });
@@ -222,15 +228,16 @@ export default function NewContract() {
     setKinds(next);
     if (next[kind] && !lines.some((l) => l.kind === kind)) setLines((ls) => [...ls, newLine(false, kind)]);
   }
-  // Termite is billed on the treated area only: one termite line (rate per sq. m / sq. ft × area),
-  // no services to pick and no chemicals. (Also tidies a draft restored from before this rule.)
+  // Termite is billed on the treated area only: one or more termite items (each rate per sq. m /
+  // sq. ft × its own area from the SOS), no services to pick, no chemicals and no item summaries.
+  // (Also tidies a draft restored from before this rule.)
   useEffect(() => {
     if (!termite) return;
     if (kinds.CHEMICAL || !kinds.SERVICE) setKinds({ SERVICE: true, CHEMICAL: false });
     setLines((ls) => {
       const svc = ls.filter((l) => l.kind === "SERVICE");
-      if (ls.length === 1 && svc.length === 1 && !svc[0].group && !svc[0].picked) return ls;
-      return [svc[0] ? { ...svc[0], group: "", picked: false } : newLine(true)];
+      if (svc.length && svc.length === ls.length && svc.every((l) => !l.group && !l.picked)) return ls;
+      return svc.length ? svc.map((l) => ({ ...l, group: "", picked: false })) : [newLine(true)];
     });
   }, [termite, kinds.CHEMICAL, kinds.SERVICE]);
   const { data: options } = useBilling(companyId ? `/service-options${qs({ company_id: companyId })}` : null);
@@ -557,10 +564,11 @@ export default function NewContract() {
         const own = filled.filter((l) => l.kind === kind);
         const word = kind === "SERVICE" ? "Service" : "Chemical";
         const bad = own.findIndex((l) => !l.item_name.trim() || l.rate === "" || Number(l.rate) < 0);
-        if (bad >= 0 && termite && kind === "SERVICE") return `Type the item name and the rate per ${areaLabel}.`;
+        if (bad >= 0 && termite && kind === "SERVICE") return `${own.length > 1 ? `Item ${bad + 1}: t` : "T"}ype the item name and the rate per ${areaLabel}.`;
+        if (termite && kind === "SERVICE" && !own.length) return `Type the item name and the rate per ${areaLabel}.`;
         if (bad >= 0) return `${word} ${bad + 1}: ${kind === "SERVICE" ? "choose the service" : "type the chemical"} and the ${termite && kind === "SERVICE" ? "rate and the area" : "amount"}.`;
         const names = own.map((l) => l.item_name.trim().toLowerCase());
-        if (new Set(names).size !== names.length) return `The same ${word.toLowerCase()} is listed twice.`;
+        if (new Set(names).size !== names.length) return termite && kind === "SERVICE" ? "Two items have the same name. Make each item name different." : `The same ${word.toLowerCase()} is listed twice.`;
       }
     }
     return "";
@@ -662,7 +670,7 @@ export default function NewContract() {
             return { ...common, item_name: l.item_name.trim(), sac_code: null, pricing_basis: "PER_UNIT", unit: "Nos", rate: l.rate, default_qty: Number(l.qty), plan_service_type: null, plan_sub_service: null };
           }
           return termite
-            ? { ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_UNIT", unit: areaUnit, rate: l.rate, default_qty: null } // area: entered on each draft
+            ? { ...common, item_name: l.item_name, sac_code: "998531", pricing_basis: "PER_UNIT", unit: lineUnit(l), rate: l.rate, default_qty: null } // area: entered on each draft
             : {
               // rate per service x services. default_qty = services per month agreed (Fixed amount
               // bills it every month); Service based bills the completed number from the SOS.
@@ -982,14 +990,8 @@ export default function NewContract() {
                   )}
                 </div>
               </Field>
-              {termite ? (
-                // Termite is billed on the treated area: rate per square metre or per square foot × area
-                <Field label="Bill structure" required hint={`Rate per ${areaLabel} × treated area`}>
-                  <select className="ac-select" value={areaUnit} onChange={(e) => setT({ area_unit: e.target.value })}>
-                    {AREA_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </Field>
-              ) : (
+              {/* Termite: the bill structure (sq. m / sq. ft) is chosen for each item in step 4 (Price). */}
+              {termite ? null : (
               <Field label="Bill structure" hint={terms.shortfall_billing === "FULL" ? "The full amount every period, even if a service is missed" : "Billed for the services actually done (amount ÷ planned × done)"}>
                 <select className="ac-select" value={terms.shortfall_billing} onChange={(e) => setT({ shortfall_billing: e.target.value })}>
                   <option value="FULL">Fixed amount</option>
@@ -1099,7 +1101,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">{termite ? "Price" : "Services and prices"}</h3>
             <p className="ac-sub" style={{ margin: "-6px 0 14px" }}>
-              {termite ? `Fix the rate per ${areaLabel}; each invoice bills the treated area from the monthly SOS × this rate` : "Amount = quantity × rate"}
+              {termite ? `Fix the rate per ${areaLabel} for each item; each invoice bills the treated area from the monthly SOS × the item's rate` : "Amount = quantity × rate"}
               {residential || terms.gst_applicable === false ? ", no GST." : ", excluding GST (added on the invoice)."}
               {!termite && (terms.shortfall_billing === "FULL"
                 ? " Fixed amount: every month bills the services per month agreed here, even if fewer were done."
@@ -1107,22 +1109,49 @@ export default function NewContract() {
             </p>
             {/* Services / chemicals were chosen in step 2 (What is billed). */}
 
-            {/* Termite: no services to pick - the item name printed on the invoice and the rate per
-                sq. m / sq. ft. The Service Coordinator enters the treated area on the monthly SOS;
-                each invoice bills that area × the rate. */}
+            {/* Termite: no services to pick - one or more items, each with the name printed on the
+                invoice line and its rate per sq. m / sq. ft. The Service Coordinator enters each item's
+                treated area on the monthly SOS; each invoice bills that area × the item's rate. */}
             {termite && (() => {
-              const t = lines.find((l) => l.kind === "SERVICE") || null;
-              const setTermite = (patch) => (t ? setLine(t.key, patch) : setLines([{ ...newLine(true), ...patch }]));
+              const items = lines.filter((l) => l.kind === "SERVICE");
+              const rows = items.length ? items : [null];
+              const setItem = (t, patch) => (t ? setLine(t.key, patch) : setLines([{ ...newLine(true), unit: areaUnit, ...patch }]));
+              const many = rows.length > 1;
+              const grid = { display: "grid", gridTemplateColumns: many ? "2fr 1fr 1fr 32px" : "2fr 1fr 1fr", gap: 16 };
+              // a new item takes the unit of the last item (one click for the common case)
+              const addItem = () => {
+                const base = items.length ? lines : [{ ...newLine(true), unit: areaUnit }];
+                const last = base.filter((l) => l.kind === "SERVICE").pop();
+                setLines([...base, { ...newLine(true), unit: lineUnit(last) }]);
+              };
               return (
                 <section className="nc-sec">
-                  <div className="bl-grid g2">
-                    <Field label="Item name" required hint="Printed on the invoice line">
-                      <input className="ac-input" value={t?.item_name ?? ""} maxLength={255} placeholder="e.g. Termite Post-Construction Treatment" onChange={(e) => setTermite({ item_name: e.target.value })} aria-label="Item name" />
-                    </Field>
-                    <Field label={`Rate per ${areaLabel} (₹)`} required hint={`The amount for 1 ${areaLabel}. The Service Coordinator enters the treated area on the monthly SOS.`}>
-                      <input type="number" min="0" step="0.01" className="ac-input" value={t?.rate ?? ""} placeholder="0.00" onChange={(e) => setTermite({ rate: e.target.value })} aria-label={`Rate per ${areaUnit === SQFT ? "square foot" : "square metre"}`} />
-                    </Field>
+                  {rows.map((t, i) => {
+                    const u = lineUnit(t);
+                    const name = <input className="ac-input" value={t?.item_name ?? ""} maxLength={255} placeholder={i === 0 ? "e.g. Termite Post-Construction Treatment" : "e.g. Termite Pre-Construction Treatment"} onChange={(e) => setItem(t, { item_name: e.target.value })} aria-label={`Item ${i + 1} name`} />;
+                    const unit = (
+                      <select className="ac-select" value={u} onChange={(e) => setItem(t, { unit: e.target.value })} aria-label={`Item ${i + 1} bill structure`}>
+                        {AREA_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                    );
+                    const rate = <input type="number" min="0" step="0.01" className="ac-input" value={t?.rate ?? ""} placeholder="0.00" onChange={(e) => setItem(t, { rate: e.target.value })} aria-label={`Item ${i + 1} rate per ${u === SQFT ? "square foot" : "square metre"}`} />;
+                    return (
+                      <div key={t?.key ?? "new"} style={{ ...grid, alignItems: "end", marginBottom: 10 }}>
+                        {i === 0 ? <Field label="Item name" required>{name}</Field> : name}
+                        {i === 0 ? <Field label="Bill structure" required>{unit}</Field> : unit}
+                        {i === 0 ? <Field label={many ? "Rate (₹)" : `Rate per ${unitText(u)} (₹)`} required>{rate}</Field> : rate}
+                        {many && (
+                          <button type="button" className="bl-x" style={{ marginBottom: 8 }} onClick={() => setLines(lines.filter((x) => x.key !== t.key))} aria-label={`Remove item ${i + 1}`}>✕</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div style={{ ...grid, color: "#64748b", fontSize: 12 }}>
+                    <span>Printed on the invoice line</span>
+                    <span>Rate per sq. m or per sq. ft</span>
+                    <span>The amount for 1 unit. The Service Coordinator enters each item's treated area on the monthly SOS.</span>
                   </div>
+                  <button type="button" className="sp-add" style={{ marginTop: 12 }} onClick={addItem}>+ Add item</button>
                 </section>
               );
             })()}
@@ -1330,14 +1359,18 @@ export default function NewContract() {
             )}
 
             {termite ? (
-              <div className="nc-total">Rate: <b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b> per {areaLabel}{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</div>
+              lines.filter((l) => l.kind === "SERVICE").length > 1 ? (
+                <div className="nc-total">{lines.filter((l) => l.kind === "SERVICE").length} items · per {areaLabel}{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</div>
+              ) : (
+                <div className="nc-total">Rate: <b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b> per {unitText(lineUnit(lines.find((l) => l.kind === "SERVICE")))}{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</div>
+              )
             ) : (
               <div className="nc-total">Total per period: <b>₹{amount(total)}</b>{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</div>
             )}
 
             {/* Invoice line summaries: ticked lines print as ONE invoice line (summary + their total).
                 Lines not in a summary print one by one. */}
-            {filledLines.length > 1 && (
+            {filledLines.length > 1 && !termite && (
               <div className="nc-summary">
                 <div className="nc-sec-title" style={{ margin: 0 }}>Item summary (optional)</div>
                 {picked.length ? (
@@ -1488,10 +1521,10 @@ export default function NewContract() {
                             <div className="nc-rv-item">{l.item_name}</div>
                             {sub && sub !== l.item_name && <div className="ac-sub">{sub}</div>}
                             {/* phones: quantity × rate here instead of their own columns */}
-                            <div className="ac-sub nc-rv-calc">{termite && l.kind === "SERVICE" ? `₹${amount(Number(l.rate))} per ${areaLabel} × area from the monthly SOS` : `${l.qty} × ₹${amount(Number(l.rate))}`}</div>
+                            <div className="ac-sub nc-rv-calc">{termite && l.kind === "SERVICE" ? `₹${amount(Number(l.rate))} per ${unitText(lineUnit(l))} × area from the monthly SOS` : `${l.qty} × ₹${amount(Number(l.rate))}`}</div>
                           </td>
                           <td className="num">{termite && l.kind === "SERVICE" ? <span className="ac-sub">Area from SOS</span> : l.qty}</td>
-                          <td className="num">₹{amount(Number(l.rate))}{termite && l.kind === "SERVICE" ? ` / ${areaLabel}` : ""}</td>
+                          <td className="num">₹{amount(Number(l.rate))}{termite && l.kind === "SERVICE" ? ` / ${unitText(lineUnit(l))}` : ""}</td>
                           <td className="num">{termite && l.kind === "SERVICE" ? <span className="ac-sub">Area × rate</span> : <b>₹{amount(lineTotal(l, termite))}</b>}</td>
                         </tr>
                       );
@@ -1548,7 +1581,11 @@ export default function NewContract() {
             {!groupMode && delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
           </dl>
           {termite ? (
-            <div className="nc-sum-total"><span>Rate per {areaLabel}</span><b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>
+            filledLines.length > 1 ? (
+              <div className="nc-sum-total"><span>Items</span><b>{filledLines.length}</b><span className="nc-sum-sub">each per {areaLabel}{gstOn ? ` + GST ${terms.gst_rate}%` : ""}</span></div>
+            ) : (
+              <div className="nc-sum-total"><span>Rate per {unitText(lineUnit(lines.find((l) => l.kind === "SERVICE")))}</span><b>₹{amount(Number(lines.find((l) => l.kind === "SERVICE")?.rate) || 0)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>
+            )
           ) : (
             <div className="nc-sum-total"><span>Per period</span><b>₹{amount(total)}</b>{gstOn && <span className="nc-sum-sub">+ GST {terms.gst_rate}%</span>}</div>
           )}
