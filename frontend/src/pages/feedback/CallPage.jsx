@@ -46,6 +46,8 @@ import { problemNote } from "./feedbackApi";
 import { AnswerButtons, CallButton, CallStatusChip, Card, Chip, CloseTicketChoice, CustomerCard, ErrorBox, FeedbackRound, Loading, Modal, PageHead, PriorityChip, QuestionModePicker, QuestionProgress, ResultChip, Segmented, Steps, TicketStatusChip, Timeline, Toast } from "./ui";
 
 const OTHER = "other";
+// The "Request number" button next to the call results (asks the service coordinator for a number).
+const REQUEST_NUMBER = "REQUEST_NUMBER";
 
 function nowStamp() {
   const d = new Date();
@@ -145,6 +147,7 @@ export default function CallPage() {
   const [otherRole, setOtherRole] = useState(""); // position, saved as contacts.role
   const [otherEmail, setOtherEmail] = useState("");
   const [outcome, setOutcome] = useState(null); // null = show the last saved result
+  const [askNumber, setAskNumber] = useState(false); // "Request number" picked (not a call result)
   const [savingAttempt, setSavingAttempt] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
 
@@ -216,6 +219,8 @@ export default function CallPage() {
   const attemptChanged = false; // nothing waits for a Save button any more
   const mine = call?.collector?.id === userId;
   const canWork = Boolean(call) && call.status !== "DONE" && (mine || can("FEEDBACK_MANAGE"));
+  // The site has no phone number saved: the collector can ask the service coordinator for one.
+  const siteHasNoNumber = Boolean(call) && !(call.contacts || []).some((c) => c.phone?.trim());
   const canRaiseLater = Boolean(call?.submissions?.length) && (mine || can("FEEDBACK_MANAGE"));
   const latest = call?.submissions?.find((s) => s.is_latest) || call?.submissions?.[0] || null;
   const firstTicket = call?.tickets?.[0] || null; // the call's first ticket (a new complaint gets its own)
@@ -726,6 +731,19 @@ export default function CallPage() {
                         {savedContact?.phone?.trim() && <CallButton className="fb-btn fb-btn-primary" name={savedContact.name} phone={savedContact.phone} onClick={() => setContactKey(savedContact.id)} />}
                       </div>
                     ))}
+                  {/* No number saved for the site: ask the service coordinator for one (Requests). */}
+                  {siteHasNoNumber && (
+                    <WrongNumberRequest
+                      call={call}
+                      canWork={canWork}
+                      noNumber
+                      lastCallAt={savedAttempt?.called_at}
+                      onChanged={(text) => {
+                        flash(text, "ok");
+                        load();
+                      }}
+                    />
+                  )}
                   <div className={`fb-contact ${contactKey === OTHER ? "is-on" : ""}`}>
                     <label className="fb-contact-pick" style={{ flex: "0 0 auto" }}>
                       <input type="radio" name="fb-contact" checked={contactKey === OTHER} onChange={() => setContactKey(OTHER)} />
@@ -754,9 +772,19 @@ export default function CallPage() {
 
                   <div className="fb-field fb-callbox-result">
                     What happened on this call?
-                    {/* Picking a result saves it straight away. */}
+                    {/* Picking a result saves it straight away. Request number is not a result: it
+                        opens the request to the service coordinator below (nothing saved yet). */}
                     <div className="fb-row">
-                      <Segmented label="Call result" options={CALL_OUTCOMES} value={shownOutcome} onChange={(v) => saveAttempt(v)} />
+                      <Segmented
+                        label="Call result"
+                        options={canWork && !siteHasNoNumber ? [...CALL_OUTCOMES, { value: REQUEST_NUMBER, label: "Request number" }] : CALL_OUTCOMES}
+                        value={askNumber ? REQUEST_NUMBER : shownOutcome}
+                        onChange={(v) => {
+                          if (v === REQUEST_NUMBER) return setAskNumber(true);
+                          setAskNumber(false);
+                          saveAttempt(v);
+                        }}
+                      />
                       {savingAttempt && <span className="fb-small fb-muted">Saving…</span>}
                     </div>
                     {savedAttempt && (
@@ -766,18 +794,20 @@ export default function CallPage() {
                       </span>
                     )}
                     {/* Wrong number: ask the service coordinator for the right one (Requests). */}
-                    <WrongNumberRequest
+                    {!siteHasNoNumber && <WrongNumberRequest
                       call={call}
                       canWork={canWork}
-                      wrongPicked={shownOutcome === "WRONG_NUMBER"}
+                      wrongPicked={!askNumber && shownOutcome === "WRONG_NUMBER"}
+                      requestPicked={askNumber}
                       unsaved={attemptChanged}
                       saveResult={saveAttempt}
                       lastCallAt={savedAttempt?.called_at}
                       onChanged={(text) => {
+                        setAskNumber(false);
                         flash(text, "ok");
                         load();
                       }}
-                    />
+                    />}
                   </div>
                 </div>
               </Card>

@@ -45,6 +45,9 @@ function row(q) {
     customer: { id: q.company_id, name: q.company_name },
     site: { id: q.site_id, name: q.site_name, city: q.site_city },
     wrong: { contact_id: q.contact_id, name: q.wrong_name, phone: q.wrong_phone },
+    // NUMBER_REQUESTED: asked for a number ("Request number", or the site had none) - no wrong
+    // number with it (a wrong-number request has the number that was called).
+    kind: q.wrong_phone || q.wrong_name || q.contact_id ? "WRONG_NUMBER" : "NUMBER_REQUESTED",
     note: q.note,
     status: q.status,
     requested_by: person(q.requested_by, q.requested_by_name),
@@ -104,7 +107,8 @@ async function callNumberRequests(callId) {
   return rows.map(row);
 }
 
-// POST /calls/:id/number-request - Body: { contact_id?, note? }. The call's collector (or a desk
+// POST /calls/:id/number-request - Body: { contact_id?, note?, reason? } (reason REQUEST = ask for a
+// number without a wrong number; also allowed any time the site has no number saved). The call's collector (or a desk
 // manager) asks for the right number after a wrong number. contact_id = the contact that was wrong
 // (default: the last number called).
 async function sendNumberRequest(req, callId, body) {
@@ -114,13 +118,23 @@ async function sendNumberRequest(req, callId, body) {
     if (Number(r.collector_user_id) !== Number(req.user.id) && !hasAnyPerm(req, ["FEEDBACK_MANAGE"])) {
       throw new HttpError(403, "Only the collector of this call can ask for the right number");
     }
-    if (r.status !== "WRONG_NUMBER") throw new HttpError(400, "Ask for the right number after a call reaches a wrong number");
+    // A number request (no wrong number): the collector asked for one (reason REQUEST, "Request
+    // number" on the call), or the site has no number saved at all.
+    const [[{ n: savedNumbers }]] = await conn.query(
+      "SELECT COUNT(*) AS n FROM contacts WHERE company_id = ? AND COALESCE(is_active, 1) = 1 AND TRIM(COALESCE(phone, '')) <> ''",
+      [r.site_id]
+    );
+    const noNumber = body?.reason === "REQUEST" || (r.status !== "WRONG_NUMBER" && !Number(savedNumbers));
+    if (!noNumber && r.status !== "WRONG_NUMBER") throw new HttpError(400, "Ask for the right number after a call reaches a wrong number");
+    if (r.status === "DONE") throw new HttpError(400, "This call is already completed");
     const [[open]] = await conn.query("SELECT id FROM feedback_number_requests WHERE request_id = ? AND status = 'OPEN'", [r.id]);
-    if (open) throw new HttpError(409, "A request for the right number is already waiting for the service coordinator");
+    if (open) throw new HttpError(409, "A request for the number is already waiting for the service coordinator");
 
-    // The wrong number: the contact given, else the last number called.
+    // The wrong number: the contact given, else the last number called. None for a "no number" request.
     let wrong = null;
-    if (body?.contact_id) {
+    if (noNumber) {
+      wrong = null;
+    } else if (body?.contact_id) {
       [[wrong]] = await conn.query("SELECT id AS contact_id, name, phone FROM contacts WHERE id = ? AND company_id = ?", [String(body.contact_id), r.site_id]);
       if (!wrong) throw new HttpError(400, "That contact does not belong to this site");
     } else {
@@ -138,7 +152,9 @@ async function sendNumberRequest(req, callId, body) {
     );
     await addHistory(conn, {
       requestId: r.id, event: "NUMBER_REQUESTED",
-      note: `Asked the service coordinator for the right number${wrong?.phone ? ` (wrong: ${[wrong.name, wrong.phone].filter(Boolean).join(", ")})` : ""}${note ? ` - ${note}` : ""}`,
+      note: noNumber
+        ? `Asked the service coordinator for a number${Number(savedNumbers) ? "" : " - no number saved for the site"}${note ? ` - ${note}` : ""}`
+        : `Asked the service coordinator for the right number${wrong?.phone ? ` (wrong: ${[wrong.name, wrong.phone].filter(Boolean).join(", ")})` : ""}${note ? ` - ${note}` : ""}`,
       userId: req.user.id,
     });
     return id;
@@ -168,14 +184,18 @@ async function resolveNumberRequest(req, id, body) {
        WHERE id = ?`,
       [req.user.id, contactId, name, phone, note, q.id]
     );
-    // Back on the collector's list: call the right number now.
+    // Back on the collector's list: call the number now. A wrong-number call goes back to To call; a
+    // "no number" one (still open, not answered...) keeps its status with a call-back due now.
+    const [[call]] = await conn.query("SELECT status FROM feedback_requests WHERE id = ?", [q.request_id]);
     await conn.query(
-      "UPDATE feedback_requests SET status = 'TO_CALL', next_call_at = NOW(), row_version = row_version + 1 WHERE id = ? AND status = 'WRONG_NUMBER'",
+      `UPDATE feedback_requests SET status = IF(status = 'WRONG_NUMBER', 'TO_CALL', status), next_call_at = NOW(), row_version = row_version + 1
+       WHERE id = ? AND status <> 'DONE'`,
       [q.request_id]
     );
     await addHistory(conn, {
-      requestId: q.request_id, event: "NUMBER_ADDED", from: "WRONG_NUMBER", to: "TO_CALL",
-      note: `Right number from the service coordinator: ${name}, ${phone}${note ? ` - ${note}` : ""}`,
+      requestId: q.request_id, event: "NUMBER_ADDED",
+      from: call?.status === "WRONG_NUMBER" ? "WRONG_NUMBER" : null, to: call?.status === "WRONG_NUMBER" ? "TO_CALL" : null,
+      note: `${q.wrong_phone ? "Right number" : "Number"} from the service coordinator: ${name}, ${phone}${note ? ` - ${note}` : ""}`,
       userId: req.user.id,
     });
     return q.id;

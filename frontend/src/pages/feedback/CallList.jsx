@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiAlertTriangle, FiCalendar, FiCheckCircle, FiChevronLeft, FiChevronRight, FiInbox, FiLayers, FiPhoneCall, FiPhoneMissed, FiSearch, FiSend } from "react-icons/fi";
 import { FEEDBACK_HOME } from "./access";
-import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listNumberRequests, monthLabel, periodText, shiftMonth, takeCall, thisMonth } from "./feedbackApi";
+import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listNumberRequests, monthLabel, periodText, shiftMonth, takeCall, takeUpcomingCall, thisMonth } from "./feedbackApi";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
 import { EndedSchedules } from "./ScheduleMaster";
@@ -13,7 +13,6 @@ import { Card, Empty, ErrorBox, Loading, PageHead, Segmented, Switch, Tiles } fr
 // month or a date range (due dates) show the others.
 // Filtered by status; TICKET_OPEN = feedback taken but its ticket is not closed yet.
 const FILTERS = [
-  { value: "ALL", label: "All" },
   { value: "TO_CALL", label: "To call" },
   { value: "NOT_ANSWERED", label: "Not answered" },
   { value: "WRONG_NUMBER", label: "Wrong number" },
@@ -21,6 +20,7 @@ const FILTERS = [
   { value: "FORM_RECEIVED", label: "Form received" },
   { value: "TICKET_OPEN", label: "Ticket open" },
   { value: "DONE", label: "Completed" },
+  { value: "ALL", label: "All" },
 ];
 const PAGE_SIZE = 50;
 
@@ -29,8 +29,15 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Period filter: Due today, All, By month (one month, with arrows) or Date range (from - to), by due date. */
-function PeriodFilter({ mode, month, from, to, onChange }) {
+/** The day `n` days from today, e.g. "Wed, 25 Nov". */
+function aheadLabel(n) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+}
+
+/** Period filter: Due today, Upcoming (one day 1-7 days ahead), All, By month (one month, with arrows) or Date range (from - to), by due date. */
+function PeriodFilter({ mode, ahead, month, from, to, onChange }) {
   const today = todayIso();
   return (
     <div className="fb-period">
@@ -38,18 +45,39 @@ function PeriodFilter({ mode, month, from, to, onChange }) {
         label="Period"
         options={[
           { value: "today", label: "Due today" },
-          { value: "all", label: "All" },
           { value: "month", label: "By month" },
           { value: "range", label: "Date range" },
+          { value: "all", label: "All" },
         ]}
         value={mode}
         onChange={(m) => {
-          if (m === "today") onChange({ due: "", month: "", from: "", to: "" });
-          if (m === "all") onChange({ due: "all", month: "", from: "", to: "" });
-          if (m === "month") onChange({ due: "", month: month || thisMonth(), from: "", to: "" });
-          if (m === "range") onChange({ due: "", month: "", from: from || `${thisMonth()}-01`, to: to || today });
+          if (m === "today") onChange({ ahead: "", due: "", month: "", from: "", to: "" });
+          if (m === "all") onChange({ ahead: "", due: "all", month: "", from: "", to: "" });
+          if (m === "month") onChange({ ahead: "", due: "", month: month || thisMonth(), from: "", to: "" });
+          if (m === "range") onChange({ ahead: "", due: "", month: "", from: from || `${thisMonth()}-01`, to: to || today });
         }}
       />
+      {/* Upcoming: its own button, apart from the group (a forecast, not a period of made calls). */}
+      <button
+        type="button"
+        className={`fb-btn ${mode === "upcoming" ? "fb-btn-primary" : ""}`}
+        aria-pressed={mode === "upcoming"}
+        onClick={() => mode !== "upcoming" && onChange({ ahead: String(ahead || 1), due: "", month: "", from: "", to: "", status: "" })}
+      >
+        <FiCalendar aria-hidden="true" /> Upcoming
+      </button>
+      {mode === "upcoming" && (
+        <label className="fb-row" style={{ gap: 6 }}>
+          <FiCalendar aria-hidden="true" className="fb-muted" />
+          <select className="fb-input" style={{ width: 210 }} value={ahead} onChange={(e) => onChange({ ahead: e.target.value })} aria-label="Days ahead">
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? "Tomorrow" : `In ${n} days`} · {aheadLabel(n)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {mode === "month" && (
         <div className="fb-row" style={{ gap: 6 }}>
           <button type="button" className="fb-btn fb-btn-sm" onClick={() => onChange({ month: shiftMonth(month, -1) })} aria-label="Previous month">
@@ -88,7 +116,9 @@ export default function CallList() {
   const month = params.get("month") || "";
   const from = params.get("from") || "";
   const to = params.get("to") || "";
-  const mode = from || to ? "range" : month ? "month" : params.get("due") === "all" ? "all" : "today";
+  const aheadParam = Number(params.get("ahead"));
+  const ahead = Number.isInteger(aheadParam) && aheadParam >= 1 && aheadParam <= 7 ? aheadParam : 0;
+  const mode = ahead ? "upcoming" : from || to ? "range" : month ? "month" : params.get("due") === "all" ? "all" : "today";
   const periodLabel = mode === "month" ? monthLabel(month) : mode === "range" ? (from && from === to ? formatDate(from) : `${from ? formatDate(from) : "the start"} – ${to ? formatDate(to) : "today"}`) : "";
   const status = params.get("status") || "ALL";
   const mine = params.get("mine") === "1";
@@ -125,14 +155,15 @@ export default function CallList() {
 
   const q = params.get("q") || "";
   const load = useCallback(() => {
-    const period = mode === "range" ? { from, to } : mode === "month" ? { month } : { due: mode };
+    // Upcoming (ahead): the calls taken early for that day plus the ones the schedules will make.
+    const period = mode === "upcoming" ? { ahead } : mode === "range" ? { from, to } : mode === "month" ? { month } : { due: mode };
     listCalls({ ...period, status: status === "ALL" ? "" : status, q, mine: mine ? "1" : "", page, page_size: PAGE_SIZE })
       .then((d) => {
         setData(d);
         setError("");
       })
       .catch((err) => setError(err.message));
-  }, [mode, month, from, to, status, q, mine, page]);
+  }, [mode, ahead, month, from, to, status, q, mine, page]);
 
   useEffect(load, [load]);
 
@@ -153,11 +184,15 @@ export default function CallList() {
     Boolean(addedNumbers[row.request_id]) &&
     (!row.last_activity_at || new Date(row.last_activity_at).getTime() <= new Date(addedNumbers[row.request_id]).getTime() + 5000);
 
-  async function start(requestId) {
-    setBusySite(requestId);
+  // A row's key: its call, or for an upcoming call not made yet its site.
+  const rowKey = (row) => row.request_id || `upcoming-${row.site.id}`;
+
+  /** Take a call; an upcoming one (forecast) is made now first. */
+  async function start(row) {
+    setBusySite(rowKey(row));
     setError("");
     try {
-      const call = await takeCall(requestId);
+      const call = row.forecast ? await takeUpcomingCall(row.site.id, row.ahead) : await takeCall(row.request_id);
       navigate(`${FEEDBACK_HOME}/calls/${call.id}`);
     } catch (err) {
       setError(err.message);
@@ -187,17 +222,18 @@ export default function CallList() {
       <PageHead title="Dashboard" />
       {(can("FEEDBACK_ADMIN") || can("FEEDBACK_SCHEDULE")) && <EndedSchedules />}
 
-      <PeriodFilter mode={mode} month={month} from={from} to={to} onChange={setParam} />
+      <PeriodFilter mode={mode} ahead={ahead} month={month} from={from} to={to} onChange={setParam} />
 
+      {/* The status tiles, with the period's total last. */}
       <Tiles
         items={[
-          { label: mode === "today" ? "Calls due today" : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
           tile("TO_CALL", "To call", "muted", FiPhoneCall),
           tile("NOT_ANSWERED", "Not answered", "warn", FiPhoneMissed, dueNow ? `${dueNow} call-back due now` : undefined),
           tile("FORM_SENT", "Form sent", "info", FiSend),
           tile("FORM_RECEIVED", "Form received", "violet", FiInbox, counts.FORM_RECEIVED ? "Needs your review" : undefined),
           tile("TICKET_OPEN", "Ticket open", "danger", FiAlertTriangle, counts.TICKET_OPEN ? "Waiting for the ticket" : undefined),
           tile("DONE", "Completed", "ok", FiCheckCircle),
+          { label: mode === "today" ? "Calls due today" : mode === "upcoming" ? `Calls due ${ahead === 1 ? "tomorrow" : `on ${aheadLabel(ahead)}`}` : mode === "month" ? "Calls this month" : "All calls", value: totalSites, tone: "dark", icon: FiLayers, share: totalSites ? (totalSites - openCount) / totalSites : 0, sub: `${totalSites - openCount} completed · ${openCount} still open`, active: status === "ALL", onClick: () => setParam({ status: "ALL" }) },
         ]}
       />
 
@@ -227,10 +263,12 @@ export default function CallList() {
           error ? null : <Loading />
         ) : !data?.sites?.length ? (
           <Empty
-            title={totalSites ? "No calls match these filters" : mode === "today" ? "No calls due today" : mode === "all" ? "No calls yet" : `No calls due in ${periodLabel}`}
+            title={totalSites ? "No calls match these filters" : mode === "today" ? "No calls due today" : mode === "upcoming" ? `No calls due ${ahead === 1 ? "tomorrow" : `on ${aheadLabel(ahead)}`}` : mode === "all" ? "No calls yet" : `No calls due in ${periodLabel}`}
             text={
               totalSites
                 ? "Try another status or clear the search."
+                : mode === "upcoming"
+                  ? "No call schedule falls on that day. Pick another day."
                 : mode === "today"
                   ? "Calls come from Masters › Call schedule. Pick All to see every call."
                   : mode === "all"
@@ -258,12 +296,17 @@ export default function CallList() {
                 {[...data.sites].sort((a, b) => callRank(a) - callRank(b)).map((row) => {
                   const open = () => navigate(`${FEEDBACK_HOME}/calls/${row.request_id}`);
                   const takenBySomeoneElse = row.collector && row.collector.id !== userId;
+                  const key = rowKey(row);
+                  // Due on a later day: an upcoming call (made on its day) or one taken early.
+                  const early = row.due_date > todayIso();
                   return (
-                    <tr key={row.request_id} className="is-link" onClick={() => setDetails({ siteId: row.site.id, month: row.month, requestId: row.request_id })} title="Show the customer's details">
+                    <tr key={key} className="is-link" onClick={() => setDetails({ siteId: row.site.id, month: row.month, requestId: row.request_id, row })} title="Show the customer's details">
                       <td style={{ whiteSpace: "nowrap" }}>
                         <div className="fb-strong">{formatDay(row.due_date)}</div>
                         {row.overdue ? (
                           <span className="fb-due-late">{lateText(row.due_date)}</span>
+                        ) : early && !row.forecast && mode !== "upcoming" ? (
+                          <div className="fb-small fb-muted">Taken early · {periodText(row.period_start, row.period_end)}</div>
                         ) : (
                           <div className="fb-small fb-muted">{periodText(row.period_start, row.period_end)}</div>
                         )}
@@ -294,11 +337,23 @@ export default function CallList() {
                         {row.services || (row.earlier_visit ? <span className="fb-muted">{row.earlier_visit.service} (earlier)</span> : <span className="fb-muted">No service yet</span>)}
                       </td>
                       <td>
-                        <StatusCell status={row.status} result={row.result} numberAdded={numberAdded(row)} />
+                        {row.waiting ? (
+                          // Its earlier call is still open: no new call until that one is done.
+                          <div className="fb-status-cell">
+                            <span className="fb-pill fb-pill-warn">Earlier call open</span>
+                            <span className="fb-result-line fb-result-muted">
+                              {CALL_STATUS[row.waiting.status]?.label || row.waiting.status} · due {formatDay(row.waiting.due_date)}
+                            </span>
+                          </div>
+                        ) : (
+                          <StatusCell status={row.status} result={row.result} numberAdded={numberAdded(row)} />
+                        )}
                       </td>
                       <td>{row.collector?.name || <span className="fb-muted">—</span>}</td>
                       <td className="fb-right" onClick={(e) => e.stopPropagation()}>
-                        {row.collector || !canCollect ? (
+                        {row.forecast && (row.waiting || !canCollect) ? (
+                          <span className="fb-muted">—</span>
+                        ) : row.collector || !canCollect ? (
                           <button
                             type="button"
                             className={`fb-btn fb-btn-sm ${row.status === "FORM_RECEIVED" ? "fb-btn-dark" : row.next_call_at && isPast(row.next_call_at) && row.status !== "DONE" ? "fb-btn-primary" : ""}`}
@@ -307,8 +362,8 @@ export default function CallList() {
                             {row.status === "FORM_RECEIVED" ? "Review form" : row.status === "DONE" ? "View" : takenBySomeoneElse ? "View" : "Open"}
                           </button>
                         ) : (
-                          <button type="button" className="fb-btn fb-btn-sm fb-btn-primary" disabled={busySite === row.request_id} onClick={() => start(row.request_id)}>
-                            {busySite === row.request_id ? "Taking…" : "Take call"}
+                          <button type="button" className="fb-btn fb-btn-sm fb-btn-primary" disabled={busySite === key} onClick={() => start(row)}>
+                            {busySite === key ? "Taking…" : "Take call"}
                           </button>
                         )}
                       </td>
@@ -343,8 +398,8 @@ export default function CallList() {
           requestId={details.requestId}
           canCollect={canCollect}
           userId={userId}
-          busy={Boolean(busySite) && busySite === details.requestId}
-          onTake={(requestId) => start(requestId)}
+          busy={Boolean(busySite) && Boolean(details.requestId) && busySite === details.requestId}
+          onTake={(requestId) => start(requestId === details.requestId && details.row ? details.row : { request_id: requestId, site: { id: details.siteId } })}
           onOpenCall={(callId) => navigate(`${FEEDBACK_HOME}/calls/${callId}`)}
           onOpenTicket={(ticketId) => navigate(`${FEEDBACK_HOME}/tickets/${ticketId}`)}
           onSiteChange={(siteId) => setDetails((d) => ({ ...d, siteId, requestId: null }))}

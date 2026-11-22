@@ -15,6 +15,16 @@ const REQUEST_STATUS = {
 };
 
 const wrongText = (w) => [w?.name, w?.phone].filter(Boolean).join(" · ") || "Not recorded";
+// A number asked for without a wrong number ("Request number" on the call, or none saved).
+const noNumber = (q) => q.kind === "NUMBER_REQUESTED";
+const savedText = (contacts) => contacts.map((c) => [c.name, c.phone].filter(Boolean).join(" · ")).join(", ");
+/** The request's problem: the wrong number; or a number requested - with the site's current numbers (open ones). */
+function problemText(q) {
+  if (!noNumber(q)) return wrongText(q.wrong);
+  if (!q.site_contacts) return "Number requested";
+  const withPhone = q.site_contacts.filter((c) => c.phone?.trim());
+  return withPhone.length ? `Number requested (current: ${savedText(withPhone)})` : "No number saved";
+}
 
 /** The coordinator saves the right number: a new contact, or the wrong contact corrected. */
 function ResolveModal({ request, onSaved, onClose }) {
@@ -37,7 +47,7 @@ function ResolveModal({ request, onSaved, onClose }) {
 
   return (
     <Modal
-      title={`Right number · ${request.site.name}`}
+      title={`${noNumber(request) ? "Add number" : "Right number"} · ${request.site.name}`}
       onClose={onClose}
       footer={
         <>
@@ -55,7 +65,7 @@ function ResolveModal({ request, onSaved, onClose }) {
         <div className="fb-nr-wrong">
           <FiPhoneOff aria-hidden="true" />
           <span>
-            Wrong number: <b>{wrongText(request.wrong)}</b>
+            {noNumber(request) ? <b>{problemText(request)}</b> : <>Wrong number: <b>{wrongText(request.wrong)}</b></>}
             <small>
               {request.customer.name} · asked by {request.requested_by?.name} {formatDateTime(request.requested_at)}
             </small>
@@ -169,7 +179,7 @@ export default function NumberRequests() {
         {!data.requests.length ? (
           <Empty
             title={status === "OPEN" ? "No requests waiting" : "No requests"}
-            text={handler ? "When a collector reaches a wrong number and sends a request, it shows here." : "After a wrong number, use Send request on the call."}
+            text={handler ? "When a collector reaches a wrong number or asks for a number, the request shows here." : "On a call, pick Wrong number or Request number and send the request."}
           />
         ) : (
           <div className="fb-table-wrap">
@@ -177,7 +187,7 @@ export default function NumberRequests() {
               <thead>
                 <tr>
                   <th>Customer · Site</th>
-                  <th>Wrong number</th>
+                  <th>Problem</th>
                   <th>Asked by</th>
                   <th>Status</th>
                   <th aria-label="Action" />
@@ -196,7 +206,7 @@ export default function NumberRequests() {
                       </div>
                     </td>
                     <td className="fb-small">
-                      <div>{wrongText(q.wrong)}</div>
+                      <div className={noNumber(q) ? "fb-strong" : undefined}>{problemText(q)}</div>
                       {q.note && <div className="fb-muted">“{q.note}”</div>}
                     </td>
                     <td className="fb-small" style={{ whiteSpace: "nowrap" }}>
@@ -263,7 +273,10 @@ export default function NumberRequests() {
  * wrongPicked = Wrong number is the result picked; unsaved = that result is not saved yet;
  * saveResult() saves it (true when saved); lastCallAt = when the last call was made.
  */
-export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveResult, lastCallAt, onChanged }) {
+// noNumber: the site has no phone number saved - ask for one before any call (no result needed).
+// requestPicked: "Request number" picked on the call - ask for a (different) number; not a call result.
+export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveResult, lastCallAt, onChanged, noNumber: siteHasNoNumber = false, requestPicked = false }) {
+  const asking = siteHasNoNumber || requestPicked; // a number request, without a wrong number
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -272,18 +285,21 @@ export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveRe
   const lastDone = requests.find((q) => q.status === "DONE");
   // The right number came in and hasn't been called yet.
   const freshNumber = !open && lastDone && (!lastCallAt || new Date(lastCallAt) < new Date(lastDone.resolved_at));
-  // Saved as wrong number and still waiting, or Wrong number just picked (saved with the request).
-  const canSend = canWork && wrongPicked && !open && (call.status === "WRONG_NUMBER" || unsaved);
+  // No number saved: ask any time the call is open. Wrong number: saved as wrong number and still
+  // waiting, or Wrong number just picked (saved with the request).
+  const canSend = asking
+    ? canWork && !open
+    : canWork && wrongPicked && !open && (call.status === "WRONG_NUMBER" || unsaved);
   if (!open && !canSend && !freshNumber) return null;
 
   async function send() {
     setSaving(true);
     setError("");
     try {
-      if (unsaved && !(await saveResult())) return;
-      await sendNumberRequest(call.id, { note: note.trim() || null });
+      if (!asking && unsaved && !(await saveResult())) return;
+      await sendNumberRequest(call.id, { note: note.trim() || null, reason: asking ? "REQUEST" : undefined });
       setNote("");
-      onChanged("Wrong number saved and the request sent to the service coordinator.");
+      onChanged(asking ? "Request for the number sent to the service coordinator." : "Wrong number saved and the request sent to the service coordinator.");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -309,7 +325,15 @@ export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveRe
       {open ? (
         <div className="fb-nr-state is-waiting">
           <span>
-            <b>Request sent - waiting for the service coordinator</b> for the right number (wrong: {wrongText(open.wrong)}, {formatDateTime(open.requested_at)}).
+            {noNumber(open) ? (
+              <>
+                <b>Request sent - waiting for the service coordinator</b> for a number (asked {formatDateTime(open.requested_at)}).
+              </>
+            ) : (
+              <>
+                <b>Request sent - waiting for the service coordinator</b> for the right number (wrong: {wrongText(open.wrong)}, {formatDateTime(open.requested_at)}).
+              </>
+            )}
           </span>
           {canWork && (
             <button type="button" className="fb-btn fb-btn-sm" onClick={cancel} disabled={saving}>
@@ -319,11 +343,19 @@ export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveRe
         </div>
       ) : canSend ? (
         <div className="fb-nr-ask">
-          <span className="fb-small">Ask the service coordinator for the right number. The call comes back to you when they add it.</span>
+          {siteHasNoNumber ? (
+            <span className="fb-small">
+              <FiPhoneOff aria-hidden="true" /> <b>No phone number saved for this site.</b> Ask the service coordinator for the number. The call comes back to you when they add it.
+            </span>
+          ) : requestPicked ? (
+            <span className="fb-small">Ask the service coordinator for a different number. The call comes back to you when they add it.</span>
+          ) : (
+            <span className="fb-small">Ask the service coordinator for the right number. The call comes back to you when they add it.</span>
+          )}
           <div className="fb-row" style={{ gap: 8 }}>
-            <input className="fb-input" style={{ flex: "1 1 220px" }} maxLength={500} placeholder="Note (optional), e.g. The number belongs to someone else" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note for the coordinator" />
+            <input className="fb-input" style={{ flex: "1 1 220px" }} maxLength={500} placeholder={asking ? "Note (optional), e.g. Need the site manager's number" : "Note (optional), e.g. The number belongs to someone else"} value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note for the coordinator" />
             <button type="button" className="fb-btn fb-btn-primary" onClick={send} disabled={saving}>
-              <FiSend aria-hidden="true" /> {saving ? "Sending…" : unsaved ? "Save & send request" : "Send request"}
+              <FiSend aria-hidden="true" /> {saving ? "Sending…" : unsaved && !asking ? "Save & send request" : "Send request"}
             </button>
           </div>
         </div>
@@ -332,7 +364,7 @@ export function WrongNumberRequest({ call, canWork, wrongPicked, unsaved, saveRe
         <div className="fb-nr-state is-done">
           <FiCheck aria-hidden="true" />
           <span>
-            Right number from {lastDone.resolved_by?.name || "the coordinator"}: <b>{lastDone.right?.name}</b> · {lastDone.right?.phone}
+            {noNumber(lastDone) ? "Number" : "Right number"} from {lastDone.resolved_by?.name || "the coordinator"}: <b>{lastDone.right?.name}</b> · {lastDone.right?.phone}
             {lastDone.resolve_note ? ` · “${lastDone.resolve_note}”` : ""}. It is added above, marked New - call it now.
           </span>
         </div>

@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { pool } = require("../../db");
-const { HttpError, inTransaction, addHistory, optionalDate } = require("./feedback.service");
+const { HttpError, inTransaction, addHistory, optionalDate, callList, openCall } = require("./feedback.service");
 
 // ---------------------------------------------------------------------------
 // Customer Feedback - call schedules (Feedback Desk > Masters > Call schedule).
@@ -343,17 +343,9 @@ async function dueCallFor(siteId, rule, today) {
   return null;
 }
 
-// Adds the calls that are due today (or were due and not made yet). Returns how many it added.
-async function generateDueCalls() {
-  const [[{ today }]] = await pool.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
-  const [rules] = await pool.query(
-    `SELECT id, company_id, site_id, mode, every_days, first_services, then_every_days, month_days, service_types,
-            DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
-     FROM feedback_schedules WHERE is_active = 1 AND start_date <= ?`,
-    [today]
-  );
-  if (!rules.length) return 0;
-  // Each site's rules: its own (one per way of calling), else its customer's.
+// Each site's rules: its own (one per way of calling), else its customer's.
+// site id -> { rules, companyId, own }.
+async function rulesBySite(rules) {
   const bySite = new Map();
   const customerRules = new Map();
   for (const r of rules.filter((x) => !x.site_id)) customerRules.set(r.company_id, [...(customerRules.get(r.company_id) || []), r]);
@@ -365,6 +357,20 @@ async function generateDueCalls() {
     const cur = bySite.get(r.site_id);
     bySite.set(r.site_id, { rules: cur?.own ? [...cur.rules, r] : [r], companyId: r.company_id, own: true });
   }
+  return bySite;
+}
+
+// Adds the calls that are due today (or were due and not made yet). Returns how many it added.
+async function generateDueCalls() {
+  const [[{ today }]] = await pool.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
+  const [rules] = await pool.query(
+    `SELECT id, company_id, site_id, mode, every_days, first_services, then_every_days, month_days, service_types,
+            DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
+     FROM feedback_schedules WHERE is_active = 1 AND start_date <= ?`,
+    [today]
+  );
+  if (!rules.length) return 0;
+  const bySite = await rulesBySite(rules);
 
   let added = 0;
   for (const [siteId, { rules: siteRules, companyId }] of bySite) {
@@ -389,6 +395,218 @@ async function generateDueCalls() {
   return added;
 }
 
+/* ------------------------------------------------------------ upcoming calls (forecast) */
+
+// The site's services (booked ones too) from `from` up to and including `until`, oldest first.
+async function bookedServices(siteId, from, until, rule) {
+  const [rows] = await pool.query(
+    `SELECT DATE_FORMAT(${VISIT_DATE}, '%Y-%m-%d') AS d, ${SERVICE_NAME} AS service
+     FROM job_visits v JOIN jobs j ON j.id = v.job_id
+     WHERE j.company_id = ? AND COALESCE(v.status, '') <> 'CANCELED'
+       AND ${VISIT_DATE} >= ? AND ${VISIT_DATE} < ? + INTERVAL 1 DAY
+     ORDER BY ${VISIT_DATE}, v.id`,
+    [siteId, from, until]
+  );
+  const only = new Set(jsonList(rule.service_types).map((x) => x.toLowerCase()));
+  return rows.filter((r) => !only.size || only.has(String(r.service || "").toLowerCase()));
+}
+
+// Whether the rule calls on `day`. For "after each service" this uses the services booked so far,
+// so it can change if visits are booked or moved.
+async function ruleCallsOn(siteId, rule, day) {
+  if (day < rule.start_date || (rule.end_date && day > rule.end_date)) return false;
+  if (rule.mode === "EVERY_N_DAYS") return daysBetween(rule.start_date, day) % rule.every_days === 0;
+  if (rule.mode === "MONTH_DAYS") return onMonthDay(day, monthDaysOf(rule.month_days));
+
+  const dayBefore = addDays(day, -1);
+  const services = await bookedServices(siteId, rule.start_date, dayBefore, rule);
+  const counted = rule.first_services ? services.slice(0, rule.first_services) : services;
+  if (counted.some((v) => v.d === dayBefore)) return true;
+  if (rule.first_services && rule.then_every_days && services.length >= rule.first_services) {
+    const passed = daysBetween(addDays(services[rule.first_services - 1].d, 1), day);
+    return passed > 0 && passed % rule.then_every_days === 0;
+  }
+  return false;
+}
+
+// Where the services the call asks about start, as the call made on `day` would have it
+// (the same periods as dueCallFor). covered = where the site's last call stopped.
+function forecastStart(rule, day, covered) {
+  if (rule.mode === "EVERY_N_DAYS") return maxDate(covered, addDays(day, -rule.every_days));
+  if (rule.mode === "MONTH_DAYS") {
+    const previous = lastMonthDay(monthDaysOf(rule.month_days), addDays(day, -1), "2000-01-01") || addDays(day, -31);
+    return covered && covered > previous ? covered : previous;
+  }
+  return maxDate(covered, rule.start_date);
+}
+
+function aheadDays(value) {
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 7) throw new HttpError(400, "Pick 1 to 7 days ahead");
+  return days;
+}
+
+// The calls the schedules will make on one day ahead (today + days) that are not made yet.
+// Nothing is saved. A site whose last call is still open gets no new call until it is done (waiting).
+// [{ siteId, companyId, rule, start, waiting }]; onlySite limits it to one site.
+async function forecastCalls(day, onlySite = null) {
+  const [rules] = await pool.query(
+    `SELECT id, company_id, site_id, mode, every_days, first_services, then_every_days, month_days, service_types,
+            DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date
+     FROM feedback_schedules WHERE is_active = 1 AND start_date <= ? AND (end_date IS NULL OR end_date >= ?)`,
+    [day, day]
+  );
+  if (!rules.length) return [];
+
+  const due = [];
+  for (const [siteId, { rules: siteRules, companyId }] of await rulesBySite(rules)) {
+    if (onlySite && siteId !== onlySite) continue;
+    for (const r of siteRules) {
+      if (await ruleCallsOn(siteId, r, day)) {
+        due.push({ siteId, companyId, rule: r });
+        break;
+      }
+    }
+  }
+  if (!due.length) return [];
+
+  // Each site's latest call: none on that day yet (else it is a real call on the list), and
+  // whether one is still open.
+  const ids = due.map((d) => d.siteId);
+  const [last] = await pool.query(
+    `SELECT r.site_id, r.status, DATE_FORMAT(r.due_date, '%Y-%m-%d') AS due_date,
+            DATE_FORMAT(IF(r.done_at IS NULL, r.period_end, LEAST(r.period_end, DATE(r.done_at) + INTERVAL 1 DAY)), '%Y-%m-%d') AS covered
+     FROM feedback_requests r
+     JOIN (SELECT site_id, MAX(due_date) AS d FROM feedback_requests WHERE site_id IN (?) GROUP BY site_id) m
+       ON m.site_id = r.site_id AND m.d = r.due_date`,
+    [ids]
+  );
+  const lastBySite = new Map(last.map((l) => [l.site_id, l]));
+  return due
+    .filter((d) => !(lastBySite.get(d.siteId)?.due_date >= day))
+    .map((d) => {
+      const l = lastBySite.get(d.siteId);
+      return {
+        ...d,
+        start: forecastStart(d.rule, day, l?.status === "DONE" ? l.covered : null),
+        waiting: l && l.status !== "DONE" ? { status: l.status, due_date: l.due_date } : null,
+      };
+    });
+}
+
+// GET /calls?ahead=1..7: the calls due on that day ahead - the ones taken early (real calls, as the
+// call list has them) plus the ones the schedules will make (status TO_CALL, request_id null,
+// forecast: true; "Take call" makes them now).
+async function upcomingCallList(req) {
+  const query = req.query || {};
+  const days = aheadDays(query.ahead);
+  const list = await callList(req);
+  const mine = query.mine === "1" || query.mine === "true";
+  const statuses = String(query.status || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const showToCall = !statuses.length || statuses.includes("TO_CALL") || statuses.includes("OPEN");
+  if (mine) return list; // nobody has the upcoming ones yet
+
+  const [[{ day }]] = await pool.query("SELECT DATE_FORMAT(CURDATE() + INTERVAL ? DAY, '%Y-%m-%d') AS day", [days]);
+  let forecast = await forecastCalls(day);
+  if (query.company_id) forecast = forecast.filter((f) => f.companyId === String(query.company_id));
+  if (!forecast.length) return list;
+
+  // Each site's names and its services in the period so far (up to today), else its last earlier one.
+  const [sites] = await pool.query(
+    `SELECT s.id, s.name, s.city, co.id AS company_id, co.name AS company_name
+     FROM sites s JOIN companies co ON co.id = s.company_id WHERE s.id IN (?)`,
+    [forecast.map((f) => f.siteId)]
+  );
+  const siteById = new Map(sites.map((s) => [s.id, s]));
+  const q = typeof query.q === "string" ? query.q.trim().toLowerCase() : "";
+  forecast = forecast.filter((f) => {
+    const s = siteById.get(f.siteId);
+    return s && (!q || `${s.company_name} ${s.name}`.toLowerCase().includes(q));
+  });
+
+  const rows = [];
+  for (const f of forecast) {
+    const s = siteById.get(f.siteId);
+    const [[v]] = await pool.query(
+      `SELECT COUNT(DISTINCT v.id) AS n, DATE_FORMAT(MAX(${VISIT_DATE}), '%Y-%m-%d') AS last_date,
+              GROUP_CONCAT(DISTINCT ${SERVICE_NAME} SEPARATOR ', ') AS services
+       FROM job_visits v JOIN jobs j ON j.id = v.job_id
+       WHERE j.company_id = ? AND COALESCE(v.status, '') <> 'CANCELED'
+         AND ${VISIT_DATE} >= ? AND ${VISIT_DATE} < LEAST(?, CURDATE() + INTERVAL 1 DAY)`,
+      [f.siteId, f.start, day]
+    );
+    let earlier = null;
+    if (!Number(v.n)) {
+      [[earlier]] = await pool.query(
+        `SELECT DATE_FORMAT(${VISIT_DATE}, '%Y-%m-%d') AS date, ${SERVICE_NAME} AS service
+         FROM job_visits v JOIN jobs j ON j.id = v.job_id
+         WHERE j.company_id = ? AND COALESCE(v.status, '') <> 'CANCELED' AND ${VISIT_DATE} < ?
+         ORDER BY ${VISIT_DATE} DESC, v.id DESC LIMIT 1`,
+        [f.siteId, f.start]
+      );
+    }
+    rows.push({
+      forecast: true,
+      ahead: days,
+      month: day.slice(0, 7),
+      request_id: null,
+      due_date: day,
+      period_start: f.start,
+      period_end: addDays(day, -1),
+      overdue: false,
+      status: "TO_CALL",
+      result: null,
+      customer: { id: s.company_id, name: s.company_name },
+      site: { id: s.id, name: s.name, city: s.city },
+      visit_count: Number(v.n || 0),
+      last_visit_date: v.last_date,
+      services: v.services,
+      earlier_visit: earlier ? { date: earlier.date, service: earlier.service } : null,
+      collector: null,
+      next_call_at: null,
+      last_activity_at: null,
+      schedule: ruleText(f.rule),
+      waiting: f.waiting,
+    });
+  }
+  rows.sort((a, b) => a.customer.name.localeCompare(b.customer.name) || a.site.name.localeCompare(b.site.name));
+
+  // Counted under To call; listed after the real calls when To call is shown.
+  const status_counts = { ...list.status_counts, TO_CALL: (list.status_counts.TO_CALL || 0) + rows.length };
+  if (!showToCall) return { ...list, status_counts };
+  return { ...list, status_counts, total: list.total + rows.length, sites: list.page > 1 ? list.sites : [...list.sites, ...rows] };
+}
+
+// POST /calls/upcoming/take { site_id, ahead }: makes an upcoming call now (due on its own day, with
+// the period it would have) and gives it to this collector. On its day the schedule makes no second
+// one (one call per site per due date). Returns the call id.
+async function takeUpcomingCall(req, body) {
+  const days = aheadDays(body?.ahead);
+  const siteId = typeof body?.site_id === "string" ? body.site_id.trim() : "";
+  if (!siteId) throw new HttpError(400, "Choose the call");
+  const [[{ day }]] = await pool.query("SELECT DATE_FORMAT(CURDATE() + INTERVAL ? DAY, '%Y-%m-%d') AS day", [days]);
+
+  const [[made]] = await pool.query("SELECT id FROM feedback_requests WHERE site_id = ? AND due_date = ?", [siteId, day]);
+  let id = made?.id;
+  if (!id) {
+    const [f] = await forecastCalls(day, siteId);
+    if (!f) throw new HttpError(404, "No call is scheduled for this site on that day any more - refresh the list");
+    if (f.waiting) throw new HttpError(409, `This site's earlier call (due ${f.waiting.due_date}) is still open - finish it first`);
+    id = crypto.randomUUID();
+    const [result] = await pool.query(
+      `INSERT IGNORE INTO feedback_requests (id, period_month, due_date, period_start, period_end, schedule_id, company_id, site_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TO_CALL')`,
+      [id, `${day.slice(0, 7)}-01`, day, f.start, day, f.rule.id, f.companyId, siteId]
+    );
+    if (result.affectedRows) {
+      await addHistory(pool, { requestId: id, event: "SCHEDULED", to: "TO_CALL", note: `Due ${day} - ${ruleText(f.rule)} (taken early)`, userId: req.user.id });
+    } else {
+      [[{ id }]] = await pool.query("SELECT id FROM feedback_requests WHERE site_id = ? AND due_date = ?", [siteId, day]);
+    }
+  }
+  return inTransaction((conn) => openCall(conn, req, { request_id: id }));
+}
+
 // The same, at most every few minutes (the call list asks each time it opens).
 let lastRun = 0;
 let running = null;
@@ -406,4 +624,4 @@ async function ensureDueCalls(maxAgeMs = 5 * 60000) {
   return running;
 }
 
-module.exports = { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, generateDueCalls, ensureDueCalls, ruleText, MODES };
+module.exports = { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, generateDueCalls, ensureDueCalls, upcomingCallList, takeUpcomingCall, ruleText, MODES };
