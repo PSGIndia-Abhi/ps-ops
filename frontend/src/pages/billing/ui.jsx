@@ -168,7 +168,7 @@ export function BackButton({ to, label }) {
 }
 
 /** "2026-11" moved by n months. */
-export function shiftMonth(ym, n) {
+function shiftMonth(ym, n) {
   const [y, m] = String(ym).split("-").map(Number);
   const d = new Date(y, m - 1 + n, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
