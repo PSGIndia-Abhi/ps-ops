@@ -1326,3 +1326,17 @@ button.fb-fchip { font: inherit; font-size: 13px; padding-right: 34px; }
 .fb-done-ticket-no { font-weight: 800; color: var(--fb-primary); }
 .fb-done-ticket-t { flex: 1 1 140px; min-width: 0; color: #334155; overflow-wrap: anywhere; }
 .fb-done-ticket-go { margin-left: auto; color: var(--fb-muted); }
+
+/* Call schedule picker: OK closes the list so the rest of the form shows */
+.fb-tp-menu { padding-bottom: 0; }
+.fb-tp-foot { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: #fff; border-top: 1px solid var(--fb-line); font-size: 13px; color: var(--fb-muted); }
+.fb-tp-ok { min-width: 84px; height: 34px; padding: 0 16px; border: 0; border-radius: 9px; background: #0284c7; color: #fff; font-weight: 600; font-size: 13.5px; cursor: pointer; }
+.fb-tp-ok:hover { background: #0369a1; }
+/* Add a schedule: before OK in the customer list */
+.fb-sched-wait { padding: 14px 16px; border: 1px dashed var(--fb-line); border-radius: 12px; background: #f8fafc; color: var(--fb-muted); font-size: 13.5px; }
+/* Add a schedule, before OK: the customer list sits in the dialog, open and tall */
+.fb-tp.is-inline .fb-tp-menu { position: static; margin-top: 6px; max-height: min(460px, 55vh); box-shadow: none; }
+/* Call schedule picker: the picked customers scroll inside the box (the dialog keeps its size); the arrow stays put */
+.fb-tp { position: relative; }
+.fb-tp-field { position: static; max-height: 118px; overflow-y: auto; align-content: flex-start; scrollbar-width: thin; }
+.fb-tp-caret { pointer-events: none; }
