@@ -103,7 +103,7 @@ export default function SosList() {
         <div>
           <h1 className="ac-title">Monthly SOS</h1>
           <p className="ac-sub">
-            {canFill ? "Enter the services completed for each customer and submit them to Accounts." : "Services completed, as submitted by the Service Coordinator. Billing waits for the SOS."}
+            {canFill ? "Accounts can bill a customer only after its SOS is submitted." : "Billing waits for the Service Coordinator's SOS."}
           </p>
         </div>
         <div className="ac-actions">

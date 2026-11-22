@@ -259,7 +259,7 @@ export default function ManualInvoice() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Generate Invoice</h1>
-          <p className="ac-sub">An extra bill outside the monthly Bill Run, at the customer&apos;s contract prices. Issued and printed as soon as you press Generate.</p>
+          <p className="ac-sub">Issued and printed as soon as you press Generate - check the services and quantities first.</p>
         </div>
       </div>
       <Msg error={listError || contractError} />

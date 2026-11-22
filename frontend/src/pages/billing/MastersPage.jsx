@@ -28,7 +28,6 @@ export default function MastersPage() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Masters</h1>
-          <p className="ac-sub">Lists billing is set up from.</p>
         </div>
       </div>
       <div className="bl-mcards">

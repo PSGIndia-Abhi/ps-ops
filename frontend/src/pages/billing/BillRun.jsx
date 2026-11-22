@@ -92,7 +92,6 @@ export default function BillRun() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Bill Run</h1>
-          <p className="ac-sub">{allMonths ? "Every contract's next bill and the month it is billed in. Bills due by this month can be generated." : "Contracts due for billing in the selected month. Generate drafts, check them, then issue."}</p>
         </div>
         <div className="ac-actions">
           <button type="button" className={`bl-allbtn ${allMonths ? "on" : ""}`} aria-pressed={allMonths}

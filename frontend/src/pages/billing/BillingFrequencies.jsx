@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, useBilling } from "./billingApi";
 import { Msg, BackButton } from "./ui";
@@ -12,7 +12,6 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 export default function BillingFrequencies() {
   const { me } = useOutletContext();
-  const navigate = useNavigate();
   const canEdit = me.can("MANAGE_BILLING_MASTERS");
   const { data, error, loading, reload } = useBilling("/frequencies");
   const [months, setMonths] = useState("");
@@ -45,9 +44,8 @@ export default function BillingFrequencies() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Billing Frequencies</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /></div>
           <h1 className="ac-title">Billing Frequencies</h1>
-          <p className="ac-sub">How often a contract can be billed. Each contract picks one in its Billing frequency.</p>
         </div>
       </div>
 

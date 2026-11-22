@@ -102,7 +102,6 @@ export default function IssuedInvoices() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Issued Invoices</h1>
-          <p className="ac-sub">Final, numbered invoices. They also flow to the Accountant Panel (Invoice List, Outstanding, Payments) for collection.</p>
         </div>
         <div className="ac-actions">
           <button type="button" className="ac-btn bl-ibtn csv" disabled={!rows.length} onClick={exportRows} title="Export this list to Excel (CSV)"><FiFileText /> Export CSV</button>
