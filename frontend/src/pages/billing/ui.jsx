@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiArrowLeft, FiChevronLeft, FiChevronRight, FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
+import { FiArrowLeft, FiChevronDown, FiChevronLeft, FiChevronRight, FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
 import { typeLabel } from "./format";
 
 // Small shared pieces for the Billing screens.
@@ -187,6 +187,65 @@ export function MonthPicker({ value, onChange, max, allowEmpty = false, fallback
       <input type="month" className="ac-input" style={{ width }} value={value} max={max} title={title}
         onChange={(e) => onChange(e.target.value || (allowEmpty ? "" : fallback || value))} aria-label="Month" />
       <button type="button" className="bl-monthnav-btn" onClick={() => base && !nextOff && onChange(shiftMonth(base, 1))} disabled={nextOff} aria-label="Next month" title="Next month"><FiChevronRight /></button>
+    </div>
+  );
+}
+
+/**
+ * A dropdown you can also type in: the list opens under the box (click or the arrow), narrows as you
+ * type, and any typed text is kept as it is. Arrow keys + Enter pick, Esc closes.
+ */
+export function ComboInput({ value, onChange, options, placeholder, autoFocus, label, className = "" }) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const [pos, setPos] = useState(null); // where the list opens: under the box, or above it near the bottom of the screen
+  const box = useRef(null);
+  const text = String(value || "");
+  const q = text.trim().toLowerCase();
+  // the whole list while the box shows a picked option, else the options matching what is typed
+  const picked = options.some((o) => o.toLowerCase() === q);
+  const shown = !q || picked ? options : options.filter((o) => o.toLowerCase().includes(q));
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const place = () => {
+      const r = box.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom;
+      const up = below < 220 && r.top > below;
+      setPos({ left: r.left, width: r.width, maxHeight: Math.max(140, Math.min(260, (up ? r.top : below) - 12)), ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }) });
+    };
+    place();
+    document.addEventListener("mousedown", close);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+  function choose(o) { onChange(o); setOpen(false); setHi(-1); }
+  function onKey(e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(shown.length - 1, h + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+    else if (e.key === "Enter" && open && hi >= 0 && shown[hi]) { e.preventDefault(); choose(shown[hi]); }
+    else if (e.key === "Escape") setOpen(false);
+  }
+  return (
+    <div className={`bl-combo ${open ? "open" : ""} ${className}`} ref={box}>
+      <input className="bl-combo-input" value={text} placeholder={placeholder} autoFocus={autoFocus} aria-label={label} role="combobox"
+        aria-expanded={open} aria-autocomplete="list"
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setHi(-1); }} onFocus={() => setOpen(true)} onKeyDown={onKey} />
+      <button type="button" className="bl-combo-btn" tabIndex={-1} aria-label="Show the list" onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen((o) => !o)}><FiChevronDown /></button>
+      {open && shown.length > 0 && (
+        <ul className="bl-combo-list" role="listbox" style={pos || undefined}>
+          {shown.map((o, i) => (
+            <li key={o} role="option" aria-selected={o.toLowerCase() === q} className={`${i === hi ? "hi" : ""} ${o.toLowerCase() === q ? "on" : ""}`}
+              onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)} onMouseEnter={() => setHi(i)}>{o}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

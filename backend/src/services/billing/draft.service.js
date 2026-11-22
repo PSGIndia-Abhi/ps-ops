@@ -123,7 +123,8 @@ async function buildLines(db, contract, period, contractLines) {
 
   // Termite: the treated area of this period comes from the SOS of the month that bills it.
   const hasArea = contractLines.some((cl) => S.isAreaLine(contract, cl));
-  const areaMonth = hasArea ? `${S.billMonthOf(contract, period)}-01` : null;
+  // the area of the period is on the SOS of the month the period starts (see sos.service areaMonthOf)
+  const areaMonth = hasArea ? `${S.areaMonthOf(contract, period)}-01` : null;
   const areaSos = hasArea ? await S.submittedFor(db, contract.company_id, [areaMonth]) : new Map();
   if (hasArea && !areaSos.has(areaMonth) && !sosMissing.includes(areaMonth)) sosMissing.push(areaMonth);
 
@@ -177,12 +178,23 @@ async function buildLines(db, contract, period, contractLines) {
   });
 
   // Extra services from the SOS that this contract bills, one line per outlet + service + rate.
+  // Termite (no counted services): extras added on the SOS that holds its area, billed once - on the
+  // first period that starts in that month (a weekly / daily contract has several).
+  let extraSource = sosLines;
+  if (!counted && hasArea) {
+    const unit = P.unitOf(contract);
+    const step = unit === "WEEK" ? 7 : unit === "DAY" ? 1 : 0;
+    const firstOfMonth = !step || C.addDays(period.start, -step).slice(0, 7) !== period.start.slice(0, 7);
+    extraSource = firstOfMonth ? [...areaSos.values()].flat().filter((l) => l.kind !== "AREA") : [];
+  }
   const extras = new Map();
-  for (const x of sosLines.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
+  for (const x of extraSource.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
     const rate = x.rate === null ? null : Number(x.rate);
-    const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}`;
-    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0, sos_line_ids: [] };
-    e.quantity += Number(x.completed) || 0;
+    // Termite extra: an area (sq. m / sq. ft) at the contract's rate; otherwise a number of services
+    const byArea = x.area !== null && x.area !== undefined;
+    const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}|${byArea ? x.unit || "" : ""}`;
+    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0, sos_line_ids: [], unit: byArea ? x.unit || "sq.m" : null };
+    e.quantity += byArea ? Number(x.area) || 0 : Number(x.completed) || 0;
     e.sos_line_ids.push(x.id);
     extras.set(key, e);
   }
@@ -194,11 +206,11 @@ async function buildLines(db, contract, period, contractLines) {
       contract_line_id: null,
       site_id: e.site_id,
       site: siteNames.find((s) => s.id === e.site_id)?.name || null,
-      item_name: `${e.service} (additional services)`,
+      item_name: e.unit ? `${e.service} (additional area)` : `${e.service} (additional services)`,
       invoice_group: null,
       sac_code: "998531",
-      unit: "Service",
-      pricing_basis: "PER_SERVICE",
+      unit: e.unit || "Service",
+      pricing_basis: e.unit ? "PER_UNIT" : "PER_SERVICE",
       rate: e.rate ?? 0,
       quantity: e.quantity,
       adjustment_type: "NONE",
@@ -343,7 +355,12 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     // Counted services are billed from the Service Coordinator's submitted SOS: wait for it.
     if (sosMissing.length) warn("SOS_PENDING", `Waiting for SOS: ${sosMissing.map((m) => C.monthName(m)).join(", ")}`, true);
     const extraLines = lines.filter((l) => !l.contract_line_id);
-    if (extraLines.length) warn("EXTRA_SERVICES", `${extraLines.reduce((t, l) => t + l.quantity, 0)} extra service(s) on the SOS`);
+    // extra services counted; Termite extra area per unit (sq. m / sq. ft)
+    const extraCount = extraLines.filter((l) => l.unit === "Service").reduce((t, l) => t + l.quantity, 0);
+    const extraArea = [...new Set(extraLines.filter((l) => l.unit !== "Service").map((l) => l.unit))]
+      .map((un) => `${extraLines.filter((l) => l.unit === un).reduce((t, l) => t + l.quantity, 0)} ${/ft/i.test(un) ? "sq. ft" : "sq. m"}`);
+    if (extraCount) warn("EXTRA_SERVICES", `${extraCount} extra service(s) on the SOS`);
+    if (extraArea.length) warn("EXTRA_AREA", `Extra area on the SOS: ${extraArea.join(", ")}`);
     const extrasNoRate = extraLines.filter((l) => l.needs_input);
     if (extrasNoRate.length) warn("EXTRA_NO_RATE", "Extra service without a rate: enter it before generating the draft");
     if (contract.po_required) {

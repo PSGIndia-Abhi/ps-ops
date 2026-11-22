@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -121,25 +122,26 @@ import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
 import FeedbackGate from "./pages/feedback/FeedbackGate";
 import { FEEDBACK_HOME } from "./pages/feedback/access";
 // Billing (Invoice Generation) — Accounts department and Service Coordinator, see pages/billing/
-import BillingLayout from "./pages/billing/BillingLayout";
-import BillingHome from "./pages/billing/BillingHome";
-import BillingBillRun from "./pages/billing/BillRun";
-import BillingBeforeGenerate from "./pages/billing/BeforeGenerate";
-import BillingDraftInvoices from "./pages/billing/DraftInvoices";
-import BillingDraftEditor from "./pages/billing/DraftEditor";
-import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
-import BillingInvoiceView from "./pages/billing/InvoiceView";
-import BillingSosList from "./pages/billing/SosList";
-import BillingSosEntry from "./pages/billing/SosEntry";
-import BillingAccountsDashboard from "./pages/billing/AccountsDashboard";
-import BillingContracts from "./pages/billing/Contracts";
-import BillingContractForm from "./pages/billing/ContractForm";
-import BillingNewContract from "./pages/billing/NewContract";
-import BillingManualInvoice from "./pages/billing/ManualInvoice";
-import BillingInvoiceDescriptions from "./pages/billing/InvoiceDescriptions";
-import BillingFrequencies from "./pages/billing/BillingFrequencies";
-import BillingPurchaseOrders from "./pages/billing/PurchaseOrders";
-import BillingMasters from "./pages/billing/MastersPage";
+// Loaded on demand: the billing pages are a separate download, fetched only when /billing is opened.
+const BillingLayout = lazy(() => import("./pages/billing/BillingLayout"));
+const BillingHome = lazy(() => import("./pages/billing/BillingHome"));
+const BillingBillRun = lazy(() => import("./pages/billing/BillRun"));
+const BillingBeforeGenerate = lazy(() => import("./pages/billing/BeforeGenerate"));
+const BillingDraftInvoices = lazy(() => import("./pages/billing/DraftInvoices"));
+const BillingDraftEditor = lazy(() => import("./pages/billing/DraftEditor"));
+const BillingIssuedInvoices = lazy(() => import("./pages/billing/IssuedInvoices"));
+const BillingInvoiceView = lazy(() => import("./pages/billing/InvoiceView"));
+const BillingSosList = lazy(() => import("./pages/billing/SosList"));
+const BillingSosEntry = lazy(() => import("./pages/billing/SosEntry"));
+const BillingAccountsDashboard = lazy(() => import("./pages/billing/AccountsDashboard"));
+const BillingContracts = lazy(() => import("./pages/billing/Contracts"));
+const BillingContractForm = lazy(() => import("./pages/billing/ContractForm"));
+const BillingNewContract = lazy(() => import("./pages/billing/NewContract"));
+const BillingManualInvoice = lazy(() => import("./pages/billing/ManualInvoice"));
+const BillingInvoiceDescriptions = lazy(() => import("./pages/billing/InvoiceDescriptions"));
+const BillingFrequencies = lazy(() => import("./pages/billing/BillingFrequencies"));
+const BillingPurchaseOrders = lazy(() => import("./pages/billing/PurchaseOrders"));
+const BillingMasters = lazy(() => import("./pages/billing/MastersPage"));
 import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
 if (typeof window !== "undefined") {
@@ -459,7 +461,9 @@ const router = createBrowserRouter([
     path: BILLING_HOME,
     element: (
       <ProtectedRoute allowedRoles={BILLING_ROLES}>
-        <BillingLayout />
+        <Suspense fallback={null}>
+          <BillingLayout />
+        </Suspense>
       </ProtectedRoute>
     ),
     children: [

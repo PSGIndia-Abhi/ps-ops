@@ -146,7 +146,7 @@ export default function IssuedInvoices() {
           </div>
         )}
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-tabstack">
             <thead>
               <tr>
                 <th><input type="checkbox" className="bl-cb" checked={allOn} disabled={!pickable.length} onChange={toggleAll} aria-label="Select all on this page" /></th>

@@ -66,11 +66,14 @@ const isAreaLine = (contract, cl) =>
 
 /** The month ("YYYY-MM") whose Bill Run - and SOS - bills a period: in advance its start, else its end. */
 const billMonthOf = (contract, period) => (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
+// Termite: the treated area of a period is entered on the SOS of the month the period STARTS (when the
+// work is done), whatever month it is billed in; the Bill Run reads it from there.
+const areaMonthOf = (contract, period) => period.start.slice(0, 7);
 
 const dayNo = (ymd) => Math.round(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10))) / 86400000);
 
 /**
- * The periods of a Termite contract that the month `key` ("YYYY-MM") bills: each week / day of a
+ * The periods of a Termite contract whose area is entered on the SOS of month `key` ("YYYY-MM"), i.e. that start in it: each week / day of a
  * weekly / daily contract, the month of a monthly one. Periods follow on from next_period_start; one
  * before it is listed only while it has an invoice (it was billed here, not elsewhere).
  */
@@ -93,11 +96,34 @@ function periodsBilledIn(contract, key, invoicedStarts) {
   for (let guard = 0; guard < 80; guard += 1) {
     const period = P.periodFrom(contract, start);
     if (!period || period.start > monthEnd) break;
-    const bm = billMonthOf(contract, period);
+    const bm = areaMonthOf(contract, period);
     if (bm > key) break;
     const known = period.start >= from || invoicedStarts.has(period.start);
     if (bm === key && period.start >= contract.start_date && known) out.push(period);
     start = P.periodAfter(contract, period);
+  }
+  return out;
+}
+
+/**
+ * A month with nothing to report for a Termite customer: where its treated area is entered instead -
+ * each active Termite contract's next period and the SOS month that bills it (e.g. a monthly contract
+ * billed at the end of the month from 22 Nov: 22 Nov - 21 Dec, entered on the December SOS).
+ */
+async function termiteNext(db, companyId) {
+  const [rows] = await db.query(
+    `SELECT contract_code, billing_type, frequency_months, frequency_unit, cycle_start_day, bill_timing,
+            DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date, DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+            DATE_FORMAT(next_period_start, '%Y-%m-%d') AS next_period_start
+       FROM billing_contracts WHERE company_id = ? AND status = 'ACTIVE' AND billing_type = 'TERMITE'
+      ORDER BY contract_code`,
+    [companyId]
+  );
+  const out = [];
+  for (const r of rows) {
+    const contract = { ...r, frequency_months: r.frequency_months === null ? null : Number(r.frequency_months), cycle_start_day: Number(r.cycle_start_day) };
+    const period = P.nextPeriod(contract);
+    if (period) out.push({ contract_code: r.contract_code, period_start: period.start, period_end: period.end, month: areaMonthOf(contract, period) });
   }
   return out;
 }
@@ -251,6 +277,7 @@ async function sosView(db, companyId, month) {
         contract_line_id: l.contract_line_id, contract_id: l.contract_id, site_id: l.site_id, site: l.site || null, service: l.service,
         assigned: Number(l.assigned), completed: l.completed === null ? null : Number(l.completed), is_extra: Boolean(l.is_extra),
         rate: l.rate !== null ? Number(l.rate) : a ? a.rate : null, remarks: l.remarks || "", structure: a ? a.structure : null,
+        area: l.area === null || l.area === undefined ? null : Number(l.area), unit: l.unit || null,
       };
     });
     // Lines added to the agreement after the SOS was submitted: shown as not entered (the Bill Run
@@ -275,6 +302,7 @@ async function sosView(db, companyId, month) {
         contract_line_id: null, contract_id: s.contract_id, site_id: s.site_id, site: s.site || null, service: s.service,
         assigned: 0, completed: s.completed === null ? null : Number(s.completed), is_extra: true,
         rate: s.rate === null ? null : Number(s.rate), remarks: s.remarks || "",
+        area: s.area === null || s.area === undefined ? null : Number(s.area), unit: s.unit || null,
       });
     }
   }
@@ -303,6 +331,8 @@ async function sosView(db, companyId, month) {
     reopen_reason: so?.reopen_reason || null,
     invoiced,
     has_agreement: agreed.length > 0 || areas.length > 0 || submitted,
+    // nothing to report this month: a Termite contract's area is entered on the SOS of the month its period starts
+    termite_next: agreed.length > 0 || areas.length > 0 || submitted ? [] : await termiteNext(db, companyId),
     structures: [...new Set(agreed.map((a) => a.structure))],
     outlets: sites.map((s) => ({ site_id: s.id, name: s.name })),
     lines,
@@ -359,14 +389,31 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
       assigned: a.per_month, completed, is_extra: 0, rate: null, remarks: C.str(g.remarks, "remarks", { max: 255 }), sort_order: i,
     };
   });
+  // Termite only (no services agreed): an extra is extra AREA in sq. m / sq. ft, billed at the contract's
+  // rate for that unit (from the customer's billing profile), not a count of services.
+  const termiteOnly = !agreed.length && areasDue.length > 0;
+  const unitKey = (u) => (/ft/i.test(u || "") ? "ft" : "m");
   const extras = (Array.isArray(body.extras) ? body.extras : []).map((x, i) => {
     const service = C.str(x?.service, `Extra service ${i + 1}`, { required: true, max: 255 });
     const siteId = C.str(x?.site_id, `Extra service ${i + 1}: outlet`, { max: 20 });
     if (siteId && !sites.has(siteId)) throw C.bad("An extra service is for an outlet of another customer");
+    if (termiteOnly) {
+      const area = C.num(x?.area, `Extra ${service}: area`, { required: true, min: 0.01, max: 9999999.99 });
+      const unit = C.str(x?.unit, `Extra ${service}: unit`, { required: true, max: 20 });
+      const same = areasDue.filter((a) => unitKey(a.unit) === unitKey(unit));
+      const home = same.find((a) => (a.site_id || null) === (siteId || null)) || same[0];
+      if (!home) throw C.bad(`Extra ${service}: this customer has no Termite rate per ${unitKey(unit) === "ft" ? "sq. ft" : "sq. m"}`);
+      return {
+        contract_line_id: null, contract_id: home.contract_id, site_id: siteId, service, assigned: 0, completed: null, area, unit: home.unit,
+        is_extra: 1, rate: Number(home.rate), remarks: C.str(x?.remarks, "remarks", { max: 255 }), sort_order: 1000 + i,
+      };
+    }
     const completed = C.num(x?.completed, `Extra ${service}: how many`, { required: true, integer: true, min: 1, max: 999 });
     const priced = rateFor(agreed, siteId, service);
+    // No services agreed (Termite only): the extra is billed on the Termite contract (rate by Accounts).
+    const homeArea = priced.contract_id ? null : areasDue.find((a) => (a.site_id || null) === (siteId || null)) || areasDue[0];
     return {
-      contract_line_id: null, contract_id: priced.contract_id, site_id: siteId, service, assigned: 0, completed,
+      contract_line_id: null, contract_id: priced.contract_id || homeArea?.contract_id || null, site_id: siteId, service, assigned: 0, completed,
       is_extra: 1, rate: priced.rate, remarks: C.str(x?.remarks, "remarks", { max: 255 }), sort_order: 1000 + i,
     };
   });
@@ -408,7 +455,7 @@ async function saveSos(conn, req, companyId, month, body, { submit = false } = {
     await conn.query("UPDATE billing_sos SET status = 'SUBMITTED', submitted_by = ?, submitted_at = NOW() WHERE id = ?", [req.user.id, so.id]);
     const done = rows.reduce((t, r) => t + r.completed, 0);
     const assigned = rows.reduce((t, r) => t + r.assigned, 0);
-    const extra = extras.reduce((t, r) => t + r.completed, 0);
+    const extra = extras.reduce((t, r) => t + (r.completed || 0), 0);
     const areaText = areaRows.length ? `${areaRows.length} termite period${areaRows.length === 1 ? "" : "s"} with the area completed` : "";
     await logAudit(conn, req, {
       module: "BILLING", action: "SOS_SUBMITTED", entity_type: "BILLING_SOS", entity_id: so.id,
@@ -600,6 +647,6 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
 }
 
 module.exports = {
-  monthStart, monthStarts, monthsIn, agreedLines, areaLines, isAreaLine, billMonthOf, sosView, saveSos, notifyAccounts, reopenSos, notifySentBack, notifyReopened,
+  monthStart, monthStarts, monthsIn, agreedLines, areaLines, isAreaLine, billMonthOf, areaMonthOf, sosView, saveSos, notifyAccounts, reopenSos, notifySentBack, notifyReopened,
   submittedFor, monthOverview, invoicedFor,
 };

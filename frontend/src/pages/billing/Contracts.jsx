@@ -168,7 +168,7 @@ export default function Contracts() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack bl-ctable">
+          <table className="ac-table ac-stack bl-tabstack bl-ctable">
             <thead>
               <tr><th>Customer</th><th>Type</th><th>Structure</th><th>Next period</th><th>Bill date</th><th>PO</th><th>Billing details</th><th>Status</th><th>Last invoice</th><th aria-label="Open" /></tr>
             </thead>

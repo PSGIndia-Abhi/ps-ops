@@ -69,7 +69,7 @@ export default function PurchaseOrders() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-tabstack">
             <thead>
               <tr><th>PO number</th><th>Customer</th><th>PO date</th><th>Expiry</th><th>Type</th><th className="ac-num">PO amount (₹)</th><th className="ac-num">Invoiced / adjusted (₹)</th><th>Balance</th><th>Status</th></tr>
             </thead>
