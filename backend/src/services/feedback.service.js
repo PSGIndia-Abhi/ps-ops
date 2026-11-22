@@ -895,7 +895,19 @@ function callListPeriod(query) {
     const { month, start } = monthRange(query.month);
     return { month, sql: "r.period_month = ?", params: [start] };
   }
-  return { month: "today", sql: "(r.due_date = CURDATE() OR (r.due_date < CURDATE() AND r.status <> 'DONE'))", params: [] };
+  // ahead=1..7: the calls due on that one day ahead (made early, by taking an upcoming call).
+  if (query.ahead !== undefined && query.ahead !== "") {
+    const ahead = Number(query.ahead);
+    if (!Number.isInteger(ahead) || ahead < 1 || ahead > 7) throw new HttpError(400, "Pick 1 to 7 days ahead");
+    return { month: "upcoming", sql: "r.due_date = CURDATE() + INTERVAL ? DAY", params: [ahead] };
+  }
+  // Today also keeps the calls taken early (due later) while they are not done.
+  return {
+    month: "today",
+    sql: `(r.due_date = CURDATE() OR (r.due_date < CURDATE() AND r.status <> 'DONE')
+           OR (r.due_date > CURDATE() AND r.status <> 'DONE' AND r.collector_user_id IS NOT NULL))`,
+    params: [],
+  };
 }
 
 // The services of a call's period, for its row: count, last date and names.
@@ -1001,7 +1013,7 @@ async function callList(req) {
   const { page, pageSize, offset } = pageOf(query, 50, 200);
   const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM (${inner}) x ${whereSql}`, [...innerParams, ...listParams]);
   // Today: what to do first (forms back, call-backs due...), oldest due first. Otherwise newest first.
-  const order = period.month === "today" ? `${CALL_ORDER}, x.due_date, x.company_name, x.site_name` : `x.due_date DESC, ${CALL_ORDER}, x.company_name, x.site_name`;
+  const order = period.month === "today" || period.month === "upcoming" ? `${CALL_ORDER}, x.due_date, x.company_name, x.site_name` : `x.due_date DESC, ${CALL_ORDER}, x.company_name, x.site_name`;
   const [rows] = await pool.query(
     `SELECT x.* FROM (${inner}) x ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`,
     [...innerParams, ...listParams, pageSize, offset]

@@ -43,6 +43,8 @@ export const saveSettings = (settings) => feedbackRequest("/settings", send("PUT
 
 /* ---- monthly calls ---- */
 export const listCalls = (params) => feedbackRequest(`/calls${query(params)}`);
+/** Take an upcoming call (Upcoming, 1..7 days ahead): it is made now, due on its own day. Returns the call. */
+export const takeUpcomingCall = (siteId, ahead) => feedbackRequest("/calls/upcoming/take", send("POST", { site_id: siteId, ahead }));
 /** Completed view: completed calls grouped by site (same params as listCalls, no status). */
 export const listCompletedSites = (params) => feedbackRequest(`/calls/completed${query(params)}`);
 /** Every completed call of one site, with answers and tickets (same params as listCalls). */

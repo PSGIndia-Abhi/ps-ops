@@ -12,7 +12,9 @@ const factory = (t: CrmTheme) => ({
   menu: { position: 'absolute' as const, backgroundColor: t.surface, borderRadius: radii.lg, paddingVertical: 6, borderWidth: 1, borderColor: t.border, ...t.cardShadow, elevation: 12 },
   item: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, gap: spacing.md, paddingHorizontal: spacing.md, paddingVertical: 11 },
   itemOn: { backgroundColor: t.primarySoftBg },
-  itemText: { ...typography.body, color: t.textPrimary },
+  itemText: { ...typography.body, color: t.textPrimary, flex: 1 },
+  itemLeft: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, flex: 1 },
+  dot: { width: 9, height: 9, borderRadius: 5 },
   itemTextOn: { color: t.primary, fontWeight: '700' as const },
   pressed: { opacity: 0.8 },
 });
@@ -31,7 +33,8 @@ export function Dropdown<T extends string>({
   highlight = false,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  /** dot = an optional colour shown before the label (e.g. a priority's colour). */
+  options: { value: T; label: string; dot?: string }[];
   onChange: (v: T) => void;
   caption?: string;
   /** Shows the pill in blue (e.g. a filter other than the usual one is on). */
@@ -59,6 +62,7 @@ export function Dropdown<T extends string>({
           accessibilityLabel={`${caption ? `${caption} ` : ''}${current?.label}. Change`}
         >
           {!!caption && <Text style={styles.caption}>{caption}</Text>}
+          {!!current?.dot && <View style={[styles.dot, { backgroundColor: current.dot }]} />}
           <Text style={[styles.label, highlight && { color: theme.primary }]}>{current?.label}</Text>
           <ChevronDownIcon size={16} color={highlight ? theme.primary : theme.textSecondary} />
         </Pressable>
@@ -80,7 +84,10 @@ export function Dropdown<T extends string>({
                     accessibilityRole="menuitem"
                     accessibilityState={{ selected: on }}
                   >
-                    <Text style={[styles.itemText, on && styles.itemTextOn]}>{o.label}</Text>
+                    <View style={styles.itemLeft}>
+                      {!!o.dot && <View style={[styles.dot, { backgroundColor: o.dot }]} />}
+                      <Text style={[styles.itemText, on && styles.itemTextOn]}>{o.label}</Text>
+                    </View>
                     {on && <CheckIcon size={16} color={theme.primary} />}
                   </Pressable>
                 );

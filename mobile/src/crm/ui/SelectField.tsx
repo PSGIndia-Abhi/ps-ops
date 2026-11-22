@@ -61,6 +61,11 @@ const factory = (t: CrmTheme) => ({
   optionLabelSelected: { color: t.primary, fontWeight: '700' as const },
   fieldIcon: { marginRight: spacing.sm },
   fieldText: { flex: 1 },
+  // compact: a medium-height field inside a card (e.g. the call screen's "Saved numbers").
+  containerCompact: { marginBottom: spacing.xs },
+  labelCompact: { ...typography.caption, marginBottom: 2 },
+  fieldCompact: { minHeight: 34, borderRadius: radii.md, paddingHorizontal: spacing.sm },
+  valueCompact: { ...typography.caption, fontSize: 14 },
 });
 
 interface SelectFieldProps<T extends string> {
@@ -75,6 +80,8 @@ interface SelectFieldProps<T extends string> {
   sheetTitle?: string;
   /** Drawn at the left of the field, like the icons in the text fields. */
   icon?: React.ReactNode;
+  /** A smaller, medium-height field (default: the full-size form field). */
+  compact?: boolean;
 }
 
 /** A dropdown that opens a bottom sheet - the touch-friendly way to pick from a list on a phone. */
@@ -88,6 +95,7 @@ export function SelectField<T extends string>({
   disabled = false,
   sheetTitle,
   icon,
+  compact = false,
 }: SelectFieldProps<T>) {
   const { styles, theme } = useCrmStyles(factory);
   const insets = useSafeAreaInsets();
@@ -96,24 +104,24 @@ export function SelectField<T extends string>({
   const selected = options.find((o) => o.value === value);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[styles.container, compact && styles.containerCompact]}>
+      <Text style={[styles.label, compact && styles.labelCompact]}>{label}</Text>
       <Pressable
         onPress={() => !disabled && setOpen(true)}
         accessibilityRole="button"
         accessibilityLabel={`${label}, ${selected ? selected.label : 'not selected'}`}
         accessibilityState={{ disabled }}
-        style={[styles.field, !!error && styles.fieldError, disabled && styles.fieldDisabled]}
+        style={[styles.field, compact && styles.fieldCompact, !!error && styles.fieldError, disabled && styles.fieldDisabled]}
       >
         {!!icon && (
           <View style={styles.fieldIcon}>
             <IconTile icon={icon} />
           </View>
         )}
-        <Text style={[selected ? styles.value : styles.placeholder, styles.fieldText]} numberOfLines={1}>
+        <Text style={[selected ? styles.value : styles.placeholder, compact && styles.valueCompact, styles.fieldText]} numberOfLines={1}>
           {selected ? selected.label : placeholder}
         </Text>
-        <ChevronDownIcon size={18} color={theme.textMuted} />
+        <ChevronDownIcon size={compact ? 16 : 18} color={theme.textMuted} />
       </Pressable>
       {!!error && <Text style={styles.error}>{error}</Text>}
 

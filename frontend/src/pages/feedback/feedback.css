@@ -1170,6 +1170,8 @@ button.fb-fchip { font: inherit; font-size: 13px; padding-right: 34px; }
 .fb-callbox-result .fb-seg button:nth-child(2) { --dot: #d97706; --on: #b45309; --bg: #fef3c7; }
 .fb-callbox-result .fb-seg button:nth-child(3) { --dot: #ea580c; --on: #c2410c; --bg: #ffedd5; }
 .fb-callbox-result .fb-seg button:nth-child(4) { --dot: #dc2626; --on: #b91c1c; --bg: #fee2e2; }
+/* Request number: not a call result - asks the service coordinator for a number. */
+.fb-callbox-result .fb-seg button:nth-child(5) { --dot: #2563eb; --on: #1d4ed8; --bg: #dbeafe; }
 .fb-callbox-result .fb-seg button:hover:not(.is-on) { background: #fff; color: #0f172a; }
 .fb-callbox-result .fb-seg button.is-on { background: var(--bg); color: var(--on); box-shadow: 0 1px 2px rgba(15, 23, 42, .06), inset 0 0 0 1px color-mix(in srgb, var(--dot) 35%, transparent); }
 .fb-callbox-result .fb-seg button.is-on::before { opacity: 1; }

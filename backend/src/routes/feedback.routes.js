@@ -20,7 +20,7 @@ const minioClient = require("../lib/minio");
 // A department's file when it marks its part done: one file, up to 10 MB.
 const partUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }).single("file");
 const numberRequests = require("../services/feedbackNumberRequest.service");
-const { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, ensureDueCalls } = require("../services/feedbackSchedule.service");
+const { listSchedules, scheduleOptions, saveSchedule, deleteSchedule, ensureDueCalls, upcomingCallList, takeUpcomingCall } = require("../services/feedbackSchedule.service");
 const { buildCustomerReport, exportCustomerReport, exportTickets } = require("../services/feedbackReport.service");
 
 function sendFile(res, file) {
@@ -222,14 +222,27 @@ router.put("/settings", requirePermission("FEEDBACK_ADMIN"), async (req, res) =>
 // The call list: the calls the call schedules made. Query: due=today (default: due today and
 // overdue) | all, month, from / to (due dates), status=OPEN|TO_CALL,..., q, company_id, mine=1,
 // page, page_size. A collector sees calls nobody has taken yet plus their own; the desk sees all.
+// ahead=1..7: one day ahead - the calls taken early plus the ones the schedules will make (forecast).
 router.get("/calls", async (req, res) => {
   try {
     requireAny(req, ANY_FEEDBACK);
     // Calls the schedules made since the last look (at most every few minutes).
     await ensureDueCalls();
-    res.json(await callList(req));
+    res.json(req.query.ahead ? await upcomingCallList(req) : await callList(req));
   } catch (err) {
     sendError(res, err, "Failed to load the call list");
+  }
+});
+
+// Take an upcoming call: makes it now (due on its own day) and gives it to this collector.
+// Body: { site_id, ahead: 1..7 }. Returns the call like POST /calls.
+router.post("/calls/upcoming/take", async (req, res) => {
+  try {
+    requireAny(req, ["FEEDBACK_COLLECT"]);
+    const id = await takeUpcomingCall(req, req.body);
+    res.json(await getCall(req, id));
+  } catch (err) {
+    sendError(res, err, "Failed to take the upcoming call");
   }
 });
 
