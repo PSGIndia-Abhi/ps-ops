@@ -19,6 +19,7 @@ import { isActive, isOverdue } from '../format';
 import { useTasks } from '../TasksContext';
 import { Avatar, ScreenHeader } from '../ui/parts';
 import { Sheet } from '../ui/sheets';
+import { showRole } from '../../utils/roleDisplay';
 
 const factory = (t: CrmTheme) => ({
   flex: { flex: 1 },
@@ -133,7 +134,7 @@ export function TaskProfileScreen() {
               {user.email}
             </Text>
           )}
-          {!!viewer.role && <StatusBadge label={viewer.role} tone="info" dot={false} />}
+          {!!viewer.role && <StatusBadge label={showRole(viewer.role)} tone="info" dot={false} />}
         </View>
       </View>
 
@@ -163,7 +164,7 @@ export function TaskProfileScreen() {
               <Avatar name={m.name} id={m.id} size={36} />
               <View style={styles.flex}>
                 <Text style={styles.memberName}>{m.name}</Text>
-                <Text style={styles.memberRole}>{[m.designation || m.role, m.is_direct ? 'Direct report' : null].filter(Boolean).join(' · ')}</Text>
+                <Text style={styles.memberRole}>{[m.designation || showRole(m.role), m.is_direct ? 'Direct report' : null].filter(Boolean).join(' · ')}</Text>
               </View>
               <Text style={styles.count}>{tasks.filter((x) => x.assigned_to === m.id && isActive(x)).length}</Text>
             </View>

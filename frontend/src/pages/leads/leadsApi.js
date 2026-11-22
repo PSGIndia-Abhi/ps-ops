@@ -16,7 +16,7 @@
 import { useSyncExternalStore } from "react";
 import { API_BASE, apiFetch, safeJson } from "../../api";
 import { PERSONAS, ROLE_ALIASES } from "./access";
-import { KNOWN_VISIT_OUTCOMES, PROVIDER_SOURCE, sourceLabel } from "./constants";
+import { KNOWN_VISIT_OUTCOMES, PROVIDER_SOURCE, setIndustryTypes, sourceLabel } from "./constants";
 
 const EMPTY = { ready: false, error: "", me: null, leads: [], meetings: [], activities: [], providers: [], people: [], leadSources: [], lossReasons: [] };
 
@@ -232,12 +232,14 @@ function toActivity(row) {
 // ---- loading ----------------------------------------------------------------
 
 async function loadStaff() {
-  const [data, lossReasons, leadSources] = await Promise.all([
+  const [data, lossReasons, leadSources, industryTypes] = await Promise.all([
     request("/api/crm/lead-workspace"),
-    // The reason and source pickers fall back to their own lists if these cannot be read.
+    // The reason, source and industry pickers fall back to their own lists if these cannot be read.
     request("/api/crm/lead-loss-reasons").catch(() => []),
     request("/api/crm/lead-sources").catch(() => []),
+    request("/api/crm/industry-types").catch(() => []),
   ]);
+  setIndustryTypes(industryTypes);
 
   // Why a lead was closed, for a lead closed with a typed reason rather than one from the list.
   const closingNote = new Map();
@@ -442,6 +444,63 @@ export async function updateSource(id, { name, active }) {
   });
   await loadWorkspace();
 }
+
+// ---- industry type master (sales manager / MD / PA / admin) ------------------
+
+/** GET /industry-types?all=1 - every type, switched-off ones too, with how many leads use each. */
+export async function listAllIndustryTypes() {
+  const rows = await request("/api/crm/industry-types?all=1");
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.code,
+    name: r.name,
+    word: r.agreement_word,
+    order: Number(r.sort_order) || 0,
+    active: r.is_active !== false,
+    leads: Number(r.lead_count) || 0,
+  }));
+}
+
+/** POST /industry-types - a new type, active straight away. The agreement word defaults to the name. */
+export async function addIndustryType({ name, word }) {
+  await request("/api/crm/industry-types", { method: "POST", body: { name: name.trim(), ...(word?.trim() ? { agreement_word: word.trim() } : {}) } });
+  await loadWorkspace(); // the lead forms pick it up
+}
+
+/** PATCH /industry-types/{id} - rename, change the agreement word or order, switch on or off. */
+export async function updateIndustryType(id, { name, word, order, active }) {
+  await request(`/api/crm/industry-types/${id}`, {
+    method: "PATCH",
+    body: {
+      ...(name !== undefined ? { name: name.trim() } : {}),
+      ...(word !== undefined ? { agreement_word: word.trim() } : {}),
+      ...(order !== undefined ? { sort_order: order } : {}),
+      ...(active !== undefined ? { is_active: active } : {}),
+    },
+  });
+  await loadWorkspace();
+}
+
+// ---- my signature (printed on the quotations I generate) ----------------------
+
+/** GET /my-signature - { url (blob URL - revoke it when done), uploadedAt }, or null when none is uploaded. */
+export async function getMySignature() {
+  const res = await apiFetch("/api/crm/my-signature");
+  if (!res) throw new Error("Your session has ended. Please sign in again.");
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error((await safeJson(res))?.error || "Could not load your signature.");
+  return { url: URL.createObjectURL(await res.blob()), uploadedAt: res.headers.get("X-Uploaded-At") };
+}
+
+/** PUT /my-signature - upload (or replace) my signature: a PNG or JPG photo up to 2 MB. */
+export async function uploadMySignature(file) {
+  const form = new FormData();
+  form.append("file", file);
+  await request("/api/crm/my-signature", { method: "PUT", form });
+}
+
+/** DELETE /my-signature - my quotations go back to a blank line to sign by hand. */
+export const deleteMySignature = () => request("/api/crm/my-signature", { method: "DELETE" });
 
 // ---- quotation master (sales manager / admin) --------------------------------
 

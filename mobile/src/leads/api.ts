@@ -1,5 +1,6 @@
 import { httpClient } from '../api/httpClient';
 import { proposalFileName } from './proposalName';
+import { showRole } from '../utils/roleDisplay';
 import type {
   CallOutcome,
   Conversion,
@@ -794,7 +795,7 @@ export async function assignLead(id: string, userId: number): Promise<void> {
 
 /** "Sales Executive" / "Telecaller" / "Sales Manager" for a person's role. */
 export const roleName = (role?: string) =>
-  (role || '').toLowerCase() === 'telecaller' ? 'Telecaller' : (role || '').toLowerCase() === 'sales_manager' ? 'Sales Manager' : role || '';
+  (role || '').toLowerCase() === 'telecaller' ? 'Telecaller' : (role || '').toLowerCase() === 'sales_manager' ? 'Sales Manager' : showRole(role);
 
 /** Sales managers, and the Managing Director / Personal Assistant who work leads as sales managers. */
 export const isManagerRole = (role?: string) => ['sales_manager', 'Managing Director', 'Personal Assistant'].includes(role || '');

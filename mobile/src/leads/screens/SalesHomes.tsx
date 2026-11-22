@@ -159,8 +159,9 @@ export function SalesManagerHome() {
   const { styles, theme } = useCrmStyles(factory);
   const { myIdNum } = useMe();
   const { user } = useAuth();
-  // The Managing Director / Personal Assistant keep their own title; others read "Sales Manager".
-  const role = user?.role === 'Managing Director' || user?.role === 'Personal Assistant' ? user.role : 'Sales Manager';
+  // The Managing Director keeps their own title; everyone else (the Personal Assistant included,
+  // whose role is shown as "Sales Manager") reads "Sales Manager".
+  const role = user?.role === 'Managing Director' ? user.role : 'Sales Manager';
 
   const loader = useCallback(async () => {
     const [leads, visits, team, targets, unread] = await Promise.all([

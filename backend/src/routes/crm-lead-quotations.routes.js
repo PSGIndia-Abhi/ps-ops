@@ -12,6 +12,7 @@ const { notifyLead } = require("../utils/crmLeadNotifications");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
 const { normalizeQuotationContent, renderQuotationPdf, QuotationInputError } = require("../utils/crmQuotationDocument");
+const { MAX_SIGNATURE_BYTES, signatureImageType, streamToBuffer, findSignature, loadSignatureImage } = require("../utils/userSignature");
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -284,7 +285,8 @@ router.post("/leads/:id/quotations/preview", auth, requirePermission("CRM_VIEW_L
   try {
     const content = await readContent(req);
     const by = await preparedBy(req.user.id);
-    const pdf = await renderQuotationPdf(content, { number: "", date: new Date(), leadNumber: req.lead.lead_number, draft: true, preparedBy: by });
+    const signature = await loadSignatureImage(req.user.id); // their own, printed above their name
+    const pdf = await renderQuotationPdf(content, { number: "", date: new Date(), leadNumber: req.lead.lead_number, draft: true, preparedBy: { ...by, signature } });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "inline; filename=\"quotation-preview.pdf\"");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -318,6 +320,8 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
     }
     const content = await readContent(req);
     content.preparedBy = await preparedBy(req.user.id); // saved with the quotation's content
+    // Their own signature image, printed above their name - drawn into the PDF only, not saved in the content.
+    const signature = await loadSignatureImage(req.user.id);
     const quotationId = uuid();
     objectKey = `crm-quotations/${lead.id}/${quotationId}.pdf`;
     if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
@@ -327,7 +331,7 @@ router.post("/leads/:id/quotations/generate", auth, requirePermission("CRM_VIEW_
     const total = content.totals.final; // after any special discount
     const quotationNumber = await inTransaction(async (conn) => {
       const number = await nextQuotationNumber(conn);
-      const pdf = await renderQuotationPdf(content, { number, date: new Date(), leadNumber: lead.lead_number, draft: false, preparedBy: content.preparedBy });
+      const pdf = await renderQuotationPdf(content, { number, date: new Date(), leadNumber: lead.lead_number, draft: false, preparedBy: { ...content.preparedBy, signature } });
       await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, pdf, pdf.length, { "Content-Type": "application/pdf" });
       await conn.query(
         `INSERT INTO crm_lead_quotations (id, lead_id, quotation_number, total_amount, status, pdf_object_key, sent_at, created_by)
@@ -792,6 +796,72 @@ router.put("/leads/:id/conversion", auth, requirePermission("CRM_VIEW_LEAD"), as
     res.json(updated);
   } catch (err) {
     sendError(res, err, "Failed to update the conversion");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET / PUT / DELETE /api/crm/my-signature -- the caller's OWN signature image, printed above
+// their name on the quotations they generate. Nobody can see or change anyone else's.
+// PUT: multipart field "file", a PNG or JPG photo up to 2 MB.
+// ---------------------------------------------------------------------------
+const signatureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_SIGNATURE_BYTES, files: 1 } });
+
+router.get("/my-signature", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const row = await findSignature(req.user.id);
+    if (!row) throw new HttpError(404, "No signature uploaded yet");
+    const buffer = await streamToBuffer(await minioClient.getObject(process.env.MINIO_BUCKET, row.object_key));
+    res.setHeader("Content-Type", signatureImageType(buffer) || "application/octet-stream");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Uploaded-At", new Date(row.uploaded_at).toISOString());
+    res.setHeader("Access-Control-Expose-Headers", "X-Uploaded-At");
+    res.send(buffer);
+  } catch (err) {
+    sendError(res, err, "Failed to load your signature");
+  }
+});
+
+router.put("/my-signature", auth, requirePermission("CRM_VIEW_LEAD"), (req, res) => {
+  signatureUpload.single("file")(req, res, async (uploadErr) => {
+    try {
+      if (uploadErr) {
+        throw new HttpError(400, uploadErr.code === "LIMIT_FILE_SIZE" ? "The photo is too large (max 2 MB)" : "Could not read the uploaded photo");
+      }
+      const buffer = req.file?.buffer;
+      if (!buffer?.length) throw new HttpError(400, "Choose a photo of your signature");
+      const type = signatureImageType(buffer);
+      if (!type) throw new HttpError(400, "Upload a PNG or JPG photo");
+      if (!(await minioClient.bucketExists(process.env.MINIO_BUCKET))) {
+        await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+      }
+      const objectKey = `user-signatures/${req.user.id}/${uuid()}.${type === "image/png" ? "png" : "jpg"}`;
+      await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, buffer, buffer.length, { "Content-Type": type });
+      const old = await findSignature(req.user.id);
+      await pool.query(
+        `INSERT INTO user_signatures (user_id, object_key, content_type) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE object_key = VALUES(object_key), content_type = VALUES(content_type), uploaded_at = CURRENT_TIMESTAMP`,
+        [req.user.id, objectKey, type]
+      );
+      // The replaced image is no longer used anywhere (generated PDFs carry their own copy).
+      if (old?.object_key) await minioClient.removeObject(process.env.MINIO_BUCKET, old.object_key).catch(() => {});
+      res.json({ ok: true, uploaded_at: new Date().toISOString() });
+    } catch (err) {
+      sendError(res, err, "Failed to save your signature");
+    }
+  });
+});
+
+router.delete("/my-signature", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) => {
+  try {
+    const old = await findSignature(req.user.id);
+    if (old) {
+      await pool.query("DELETE FROM user_signatures WHERE user_id = ?", [req.user.id]);
+      await minioClient.removeObject(process.env.MINIO_BUCKET, old.object_key).catch(() => {});
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, "Failed to remove your signature");
   }
 });
 

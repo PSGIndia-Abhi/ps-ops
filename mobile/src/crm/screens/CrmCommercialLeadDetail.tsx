@@ -25,8 +25,6 @@ import { useLeads } from '../LeadsContext';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
-  INDUSTRY_TYPES,
-  optionLabel,
   type Lead,
 } from '../types';
 import { WhatsAppIcon } from '../ui/crmIcons';
@@ -34,6 +32,7 @@ import { CrmScreen } from '../ui/CrmScreen';
 import { LocalLeadPhotos, ServerLeadPhotos } from '../ui/LeadPhotos';
 import { LeadStatusBadge } from '../ui/StatusBadge';
 import { TopBar } from '../ui/TopBar';
+import { industryLabel, useIndustryTypes } from '../industryTypes';
 
 const WHATSAPP = '#25D366';
 
@@ -292,7 +291,8 @@ export function CommercialLeadDetail({
   const iconColor = theme.primary;
   const localPhotos = lead.localPhotos ?? [];
   const hasPoint = typeof lead.latitude === 'number' && typeof lead.longitude === 'number';
-  const industry = optionLabel(INDUSTRY_TYPES, lead.industryType ?? null);
+  useIndustryTypes();
+  const industry = industryLabel(lead.industryType);
   const services = (lead.serviceNames ?? []).join(', ');
   // A source from outside this app's own list (e.g. "Lead Provider") is shown as stored.
   const source = leadSourceLabel(lead.source);

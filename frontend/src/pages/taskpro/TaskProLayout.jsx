@@ -42,6 +42,7 @@ import { Avatar } from "./ui";
 import { isHelpdeskAgentRole, useHelpdeskSummary } from "../../helpdesk/helpdeskHooks";
 import { FiLifeBuoy } from "react-icons/fi";
 import "./taskpro.css";
+import { showRole } from "../../utils/roleDisplay";
 
 const NAV = [
   { label: "Dashboard", to: TASKPRO_HOME, icon: FiGrid, end: true },
@@ -364,7 +365,7 @@ function TaskProShell() {
                 <Avatar name={name} size={36} />
                 <span className="tp-user-text">
                   <strong>{name}</strong>
-                  <small>{viewer.role}</small>
+                  <small>{showRole(viewer.role)}</small>
                 </span>
                 <FiChevronDown className={`tp-user-caret ${userOpen ? "open" : ""}`} />
               </button>

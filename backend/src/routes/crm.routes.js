@@ -14,6 +14,7 @@ const {
   nextLeadNumber, logLeadHistory, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
   readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices, isValidDate,
+  isAllowedIndustryType,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -54,7 +55,7 @@ const LIST_LIMIT = 500;
 // A commercial lead is a business enquiry: company + address + approximate quote + photos,
 // with no house type / service / plan and no payment. Everything else is a consumer lead.
 const COMMERCIAL_LEAD_SOURCES = ["google", "website", "referral", "social_media", "other"];
-const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
+// Industry type: an active type from the Industry Types master (crm_industry_types) - see isAllowedIndustryType.
 // Services requested: Quotation Master service ids (crm_quote_services) - see resolveLeadServices.
 const MAX_LEAD_PHOTOS = 5;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -463,7 +464,7 @@ async function readCommercialFields(body, lead) {
 
   if (companyName.length < 2) return { error: "Company / business name is required" };
   if (companyName.length > 150) return { error: "Company / business name is too long (max 150)" };
-  if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) return { error: "Invalid industry type" };
+  if (!(await isAllowedIndustryType(pool, industryType, lead.currentIndustryType ?? null))) return { error: "Invalid industry type" };
   if (designation.length > 100) return { error: "Designation is too long (max 100)" };
   const picked = await resolveLeadServices(pool, body.services_requested);
   if (picked.error) return { error: picked.error };
@@ -707,7 +708,7 @@ router.put("/leads/:id", auth, requirePermission("CRM_CREATE_LEAD"), async (req,
       if (existing.lead_status === "converted" || ["WON", "CONVERTED"].includes(existing.pipeline_stage)) {
         return res.status(400).json({ error: "A converted lead cannot be edited" });
       }
-      const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus });
+      const read = await readCommercialFields(body, { location, referenceBy, amount, leadStatus, currentIndustryType: existing.industry_type });
       if (read.error) return res.status(400).json({ error: read.error });
       const v = read.values;
 

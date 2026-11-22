@@ -217,8 +217,44 @@ const PIPELINE_STAGES = [
   "QUOTATION_SENT", "WON", "CONVERTED", "NEED_MORE_INFO", "NOT_GENUINE", "LOST", "CANCELLED",
 ];
 
-// A commercial lead's industry - the same codes as crm.routes.js (the app's form).
-const INDUSTRY_TYPES = ["restaurant", "apartment", "hospital", "it", "qsr", "builder", "other"];
+// ---------------------------------------------------------------------------
+// A commercial lead's industry comes from the Industry Types master (crm_industry_types):
+// crm_leads.industry_type holds its `code`. The seven types below are what the apps had built in;
+// they are only used if the master table is not there yet (the migration not run).
+// ---------------------------------------------------------------------------
+const BUILT_IN_INDUSTRY_TYPES = [
+  { code: "restaurant", name: "Restaurant", agreement_word: "Restaurant", sort_order: 10, is_active: true },
+  { code: "apartment", name: "Apartment", agreement_word: "Apartment", sort_order: 20, is_active: true },
+  { code: "hospital", name: "Hospital", agreement_word: "Hospital", sort_order: 30, is_active: true },
+  { code: "it", name: "IT", agreement_word: "IT", sort_order: 40, is_active: true },
+  { code: "qsr", name: "QSR", agreement_word: "QSR", sort_order: 50, is_active: true },
+  { code: "builder", name: "Builder", agreement_word: "Builder", sort_order: 60, is_active: true },
+  { code: "other", name: "Other", agreement_word: "Company", sort_order: 999, is_active: true },
+];
+
+/** Every industry type (switched-off ones too), in dropdown order: [{ id, code, name, agreement_word, sort_order, is_active }]. */
+async function loadIndustryTypes(executor) {
+  try {
+    const [rows] = await executor.query(
+      "SELECT id, code, name, agreement_word, sort_order, is_active FROM crm_industry_types ORDER BY sort_order ASC, name ASC"
+    );
+    return rows.map((r) => ({ ...r, sort_order: Number(r.sort_order), is_active: Number(r.is_active) === 1 }));
+  } catch (err) {
+    if (err?.code === "ER_NO_SUCH_TABLE") return BUILT_IN_INDUSTRY_TYPES.map((t) => ({ id: t.code, ...t }));
+    throw err;
+  }
+}
+
+/**
+ * Whether a lead may be saved with this industry code: an active type from the master, or the
+ * code the lead already has (so a lead whose type was switched off can still be edited).
+ */
+async function isAllowedIndustryType(executor, code, currentCode = null) {
+  if (code === null || code === undefined || code === "") return true;
+  if (currentCode && code === currentCode) return true;
+  const types = await loadIndustryTypes(executor);
+  return types.some((t) => t.code === code && t.is_active);
+}
 
 // ---------------------------------------------------------------------------
 // The services a commercial lead asks for are the Quotation Master's services (crm_quote_services):
@@ -278,7 +314,7 @@ async function resolveLeadServices(executor, list) {
 }
 
 module.exports = {
-  INDUSTRY_TYPES, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
+  loadIndustryTypes, isAllowedIndustryType, loadQuoteServices, forgetQuoteServices, quoteServiceNames, resolveLeadServices,
   uuid, isValidDate, logLeadHistory, nextLeadNumber, nextQuotationNumber, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead,
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, PIPELINE_STAGES,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,

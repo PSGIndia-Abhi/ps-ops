@@ -470,6 +470,135 @@ export function JobDetailScreen({ route, navigation }: Props) {
   const endVisitBlocked =
     isBrigadeJob && primaryVisit?.status === 'IN_PROGRESS' && !(photoStatus?.before_done && photoStatus?.after_done);
 
+  // Technician layout: before the visit starts, Location sits on top (they need to get there);
+  // once started, Activity (photos / voice / updates) moves up and Location drops to the bottom.
+  const visitStarted =
+    isTechnician &&
+    !!primaryVisit &&
+    (['IN_PROGRESS', 'AWAITING_APPROVAL', 'COMPLETED'] as VisitStatus[]).includes(primaryVisit.status);
+  const hasCoords = company?.latitude != null && company?.longitude != null;
+  const openMaps = () =>
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${company?.latitude},${company?.longitude}`);
+
+  const locationSection =
+    job && (company?.site || company?.address || company?.name) ? (
+      <Section
+        key="location"
+        title="Location"
+        titleIcon={<PinIcon size={15} color={colors.textMuted} />}
+        iconAction={
+          hasCoords
+            ? { icon: <ExternalLinkIcon size={15} color={colors.primary} />, onPress: openMaps }
+            : undefined
+        }
+      >
+        {!!company?.name && <Row label="Company" value={company.name} />}
+        {!!company?.site && <Row label="Site" value={company.site} />}
+        {!!company?.address && <Row label="Address" value={company.address} />}
+        {hasCoords && (
+          <Pressable
+            style={isTechnician && !visitStarted ? styles.navigateButton : styles.viewLocationButton}
+            onPress={openMaps}
+            accessibilityRole="button"
+          >
+            <PinIcon size={16} color={isTechnician && !visitStarted ? colors.textOnPrimary : colors.primary} />
+            <Text style={isTechnician && !visitStarted ? styles.navigateText : styles.viewLocationText}>
+              {isTechnician && !visitStarted ? 'Navigate' : 'View Location'}
+            </Text>
+          </Pressable>
+        )}
+      </Section>
+    ) : null;
+
+  const notesSection = job?.notes ? (
+    <Section key="notes" title="Notes">
+      <Text style={styles.notes}>{job.notes}</Text>
+    </Section>
+  ) : null;
+
+  const visitsSection =
+    !!visits && visits.length > 0 ? (
+      <Section key="visits" title="Visits">
+        {visits.map((visit) => (
+          <VisitRow
+            key={visit.id}
+            visit={visit}
+            isTechnician={isTechnician}
+            canManage={canReassign}
+            isMine={visit.technicians.some((t) => String(t.id) === String(user?.id))}
+            isPrimaryVisit={isTechnician && visit.id === primaryVisit?.id}
+            actionLoading={visitActionId === visit.id}
+            anyActionLoading={!!visitActionId}
+            locationPhase={visitActionId === visit.id ? locationPhase : null}
+            onStart={() => handleStartVisit(visit)}
+            onSubmit={() => handleSubmitVisit(visit)}
+            onApprove={() => handleApproveVisit(visit)}
+            onReschedule={() => setRescheduleTarget(visit)}
+            onChangeTechnicians={() => setTechnicianPickerTarget(visit)}
+            onCancel={() => setCancelVisitTarget(visit)}
+          />
+        ))}
+      </Section>
+    ) : null;
+
+  const activitySection = (
+    <View key="activity" style={styles.section}>
+      <Text style={[styles.sectionTitle, styles.activityTitle]}>Activity</Text>
+      {/* A technician can only post updates/photos while their own visit is actually underway
+          (IN_PROGRESS) or already submitted (AWAITING_APPROVAL) - never before they've tapped
+          Start Visit, and never again once it's COMPLETED. Supervisor/admin keep the composer
+          always, since they aren't gated by any visit of their own. */}
+      {isTechnician && primaryVisit?.status !== 'IN_PROGRESS' && primaryVisit?.status !== 'AWAITING_APPROVAL' ? (
+        <View style={styles.composerLocked}>
+          <View style={styles.composerLockedIcon}>
+            <LockIcon size={18} color={colors.textMuted} />
+          </View>
+          <Text style={styles.composerLockedText}>
+            {primaryVisit?.status === 'COMPLETED'
+              ? 'This visit is complete - no further updates needed.'
+              : 'Start your visit to post updates and attach photos.'}
+          </Text>
+        </View>
+      ) : (
+        <CommentComposer onSubmit={handleAddComment} submitting={commentSubmitting} />
+      )}
+
+      <View style={styles.timeline}>
+        {history === null ? (
+          <Skeleton height={60} radius={12} style={styles.skeletonGap} />
+        ) : (() => {
+            const shown = history.filter(
+              (entry) =>
+                !(showWorkPhotos && WORK_PHOTO_ACTIONS.includes(entry.action)) &&
+                // Technicians don't need the back-office "Job created" entry.
+                !(isTechnician && entry.action === 'CREATED'),
+            );
+            return shown.length === 0 ? (
+              <Text style={styles.emptyText}>No activity yet.</Text>
+            ) : (
+              shown.map((entry) => <HistoryRow key={entry.id} entry={entry} />)
+            );
+          })()}
+      </View>
+    </View>
+  );
+
+  const workPhotosSection =
+    showWorkPhotos && primaryVisit && brigade ? (
+      <BrigadeWorkPhotos
+        key="workPhotos"
+        jobId={jobId}
+        visit={primaryVisit}
+        details={brigade}
+        status={photoStatus}
+        history={history}
+        onUploaded={async () => {
+          await Promise.all([loadPhotoStatus(), load()]);
+        }}
+        onMessage={(message, variant) => setFeedback({ message, variant })}
+      />
+    ) : null;
+
   return (
     <View style={styles.screenFlex}>
     <Toast toast={feedback} onDismiss={() => setFeedback(null)} />
@@ -492,7 +621,7 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
       {job && (
         <>
-          <GradientCard color={colors.primary} style={styles.hero}>
+          <GradientCard color={colors.primary} style={[styles.hero, isTechnician && styles.heroCompact]}>
             <View style={[styles.heroNavRow, { paddingTop: insets.top + spacing.sm }]}>
               <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.heroIconButton}>
                 <ChevronLeftIcon size={20} color={colors.textOnPrimary} />
@@ -519,8 +648,15 @@ export function JobDetailScreen({ route, navigation }: Props) {
               </Text>
             )}
             <Text style={styles.heroCode}>Job ID: {job.code}</Text>
+            {isTechnician && (
+              <View style={styles.heroChip}>
+                <CalendarIcon size={13} color={colors.textOnPrimary} />
+                <Text style={styles.heroChipText}>Start {formatDate(job.start_date)}</Text>
+              </View>
+            )}
           </GradientCard>
 
+          {!isTechnician && (
           <Card style={styles.factsCard}>
             <View style={styles.factsRow}>
               <FactItem
@@ -538,19 +674,6 @@ export function JobDetailScreen({ route, navigation }: Props) {
               <FactItem icon={<TagIcon size={16} color={colors.primary} />} value={job.service_type} label="Category" />
             </View>
           </Card>
-
-          {showWorkPhotos && primaryVisit && brigade && (
-            <BrigadeWorkPhotos
-              jobId={jobId}
-              visit={primaryVisit}
-              details={brigade}
-              status={photoStatus}
-              history={history}
-              onUploaded={async () => {
-                await Promise.all([loadPhotoStatus(), load()]);
-              }}
-              onMessage={(message, variant) => setFeedback({ message, variant })}
-            />
           )}
 
           {/* Below the hero/facts, not above them - with the native header
@@ -609,154 +732,79 @@ export function JobDetailScreen({ route, navigation }: Props) {
             </View>
           )}
 
-          {(company?.site || company?.address || company?.name) && (
+          {isTechnician ? (
+            visitStarted ? (
+              <>
+                {workPhotosSection}
+                {activitySection}
+                {visitsSection}
+                {notesSection}
+                {locationSection}
+              </>
+            ) : (
+              <>
+                {locationSection}
+                {visitsSection}
+                {notesSection}
+                {activitySection}
+              </>
+            )
+          ) : (
+            <>
+              {locationSection}
+
+            {!!supervisor && (
+              <Section title="Supervisor" titleIcon={<PersonIcon size={15} color={colors.textMuted} />}>
+                <PersonRow
+                  name={supervisor.name}
+                  accentColor={colors.crestBlue}
+                  trailing={
+                    supervisor.phone ? (
+                      <Pressable
+                        onPress={() => Linking.openURL(`tel:${supervisor.phone}`)}
+                        style={styles.callButton}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Call ${supervisor.name}`}
+                      >
+                        <PhoneIcon size={16} color={colors.primary} />
+                      </Pressable>
+                    ) : undefined
+                  }
+                />
+              </Section>
+            )}
+
             <Section
-              title="Location"
-              titleIcon={<PinIcon size={15} color={colors.textMuted} />}
-              iconAction={
-                company?.latitude != null && company?.longitude != null
-                  ? {
-                      icon: <ExternalLinkIcon size={15} color={colors.primary} />,
-                      onPress: () =>
-                        Linking.openURL(
-                          `https://www.google.com/maps/search/?api=1&query=${company.latitude},${company.longitude}`,
-                        ),
-                    }
+              title="Assigned team"
+              titleIcon={<UsersIcon size={15} color={colors.textMuted} />}
+              action={
+                canReassign
+                  ? { label: 'Change', onPress: () => setReassignVisible(true) }
                   : undefined
               }
             >
-              {!!company?.name && <Row label="Company" value={company.name} />}
-              {!!company?.site && <Row label="Site" value={company.site} />}
-              {!!company?.address && <Row label="Address" value={company.address} />}
-              {company?.latitude != null && company?.longitude != null && (
-                <Pressable
-                  style={styles.viewLocationButton}
-                  onPress={() =>
-                    Linking.openURL(
-                      `https://www.google.com/maps/search/?api=1&query=${company.latitude},${company.longitude}`,
-                    )
-                  }
-                  accessibilityRole="button"
-                >
-                  <PinIcon size={16} color={colors.primary} />
-                  <Text style={styles.viewLocationText}>View Location</Text>
-                </Pressable>
-              )}
-            </Section>
-          )}
-
-          {!!supervisor && (
-            <Section title="Supervisor" titleIcon={<PersonIcon size={15} color={colors.textMuted} />}>
-              <PersonRow
-                name={supervisor.name}
-                accentColor={colors.crestBlue}
-                trailing={
-                  supervisor.phone ? (
-                    <Pressable
-                      onPress={() => Linking.openURL(`tel:${supervisor.phone}`)}
-                      style={styles.callButton}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Call ${supervisor.name}`}
-                    >
-                      <PhoneIcon size={16} color={colors.primary} />
-                    </Pressable>
-                  ) : undefined
-                }
-              />
-            </Section>
-          )}
-
-          <Section
-            title="Assigned team"
-            titleIcon={<UsersIcon size={15} color={colors.textMuted} />}
-            action={
-              canReassign
-                ? { label: 'Change', onPress: () => setReassignVisible(true) }
-                : undefined
-            }
-          >
-            {job.team.length > 0 ? (
-              job.team.map((member) => (
-                <PersonRow key={member.id} name={member.name} accentColor={colors.success} />
-              ))
-            ) : (
-              <Text style={styles.emptyText}>No technicians assigned yet.</Text>
-            )}
-          </Section>
-
-          {!!job.requestedBy && (
-            <Section title="Requested by">
-              <Row label="Name" value={job.requestedBy.name} />
-              {!!job.requestedBy.phone && <Row label="Phone" value={job.requestedBy.phone} />}
-            </Section>
-          )}
-
-          {!!job.notes && (
-            <Section title="Notes">
-              <Text style={styles.notes}>{job.notes}</Text>
-            </Section>
-          )}
-
-          {!!visits && visits.length > 0 && (
-            <Section title="Visits">
-              {visits.map((visit) => (
-                <VisitRow
-                  key={visit.id}
-                  visit={visit}
-                  isTechnician={isTechnician}
-                  canManage={canReassign}
-                  isMine={visit.technicians.some((t) => String(t.id) === String(user?.id))}
-                  isPrimaryVisit={isTechnician && visit.id === primaryVisit?.id}
-                  actionLoading={visitActionId === visit.id}
-                  anyActionLoading={!!visitActionId}
-                  locationPhase={visitActionId === visit.id ? locationPhase : null}
-                  onStart={() => handleStartVisit(visit)}
-                  onSubmit={() => handleSubmitVisit(visit)}
-                  onApprove={() => handleApproveVisit(visit)}
-                  onReschedule={() => setRescheduleTarget(visit)}
-                  onChangeTechnicians={() => setTechnicianPickerTarget(visit)}
-                  onCancel={() => setCancelVisitTarget(visit)}
-                />
-              ))}
-            </Section>
-          )}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Activity</Text>
-            {/* A technician can only post updates/photos while their own visit is actually underway
-                (IN_PROGRESS) or already submitted (AWAITING_APPROVAL) - never before they've tapped
-                Start Visit, and never again once it's COMPLETED. Attaching "proof of work" photos to a
-                visit that was never started would be exactly backwards. Supervisor/admin keep the
-                composer always, since they can still add follow-up notes after a technician's work is
-                done and aren't gated by any visit of their own. */}
-            {isTechnician && primaryVisit?.status !== 'IN_PROGRESS' && primaryVisit?.status !== 'AWAITING_APPROVAL' ? (
-              <View style={styles.composerLocked}>
-                <View style={styles.composerLockedIcon}>
-                  <LockIcon size={18} color={colors.textMuted} />
-                </View>
-                <Text style={styles.composerLockedText}>
-                  {primaryVisit?.status === 'COMPLETED'
-                    ? 'This visit is complete - no further updates needed.'
-                    : 'Start your visit to post updates and attach photos.'}
-                </Text>
-              </View>
-            ) : (
-              <CommentComposer onSubmit={handleAddComment} submitting={commentSubmitting} />
-            )}
-
-            <View style={styles.timeline}>
-              {history === null ? (
-                <Skeleton height={60} radius={12} style={styles.skeletonGap} />
-              ) : history.length === 0 ? (
-                <Text style={styles.emptyText}>No activity yet.</Text>
+              {job.team.length > 0 ? (
+                job.team.map((member) => (
+                  <PersonRow key={member.id} name={member.name} accentColor={colors.success} />
+                ))
               ) : (
-                history
-                  .filter((entry) => !(showWorkPhotos && WORK_PHOTO_ACTIONS.includes(entry.action)))
-                  .map((entry) => <HistoryRow key={entry.id} entry={entry} />)
+                <Text style={styles.emptyText}>No technicians assigned yet.</Text>
               )}
-            </View>
-          </View>
+            </Section>
+
+            {!!job.requestedBy && (
+              <Section title="Requested by">
+                <Row label="Name" value={job.requestedBy.name} />
+                {!!job.requestedBy.phone && <Row label="Phone" value={job.requestedBy.phone} />}
+              </Section>
+            )}
+
+              {notesSection}
+              {visitsSection}
+              {activitySection}
+            </>
+          )}
         </>
       )}
 
@@ -1217,7 +1265,7 @@ function Row({ label, value }: { label: string; value: string }) {
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
       {!!value && (
-        <Text style={styles.rowValue} numberOfLines={2}>
+        <Text style={styles.rowValue} numberOfLines={3}>
           {value}
         </Text>
       )}
@@ -1357,6 +1405,43 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     marginTop: spacing.xs,
   },
+  // Technician view has no overlapping facts card, so the hero doesn't need the extra bottom room.
+  heroCompact: {
+    paddingBottom: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  heroChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xxs,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  heroChipText: {
+    ...typography.captionMedium,
+    color: colors.textOnPrimary,
+  },
+  activityTitle: {
+    marginBottom: spacing.xs,
+  },
+  navigateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    minHeight: 48,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary,
+  },
+  navigateText: {
+    ...typography.bodyMedium,
+    color: colors.textOnPrimary,
+  },
   factsCard: {
     marginTop: -spacing.xxl,
     marginBottom: spacing.lg,
@@ -1483,12 +1568,12 @@ const styles = StyleSheet.create({
   rowLabel: {
     ...typography.body,
     color: colors.textSecondary,
-    flexShrink: 1,
+    flexShrink: 0,
   },
   rowValue: {
     ...typography.bodyMedium,
     color: colors.textPrimary,
-    flexShrink: 1,
+    flex: 1,
     marginLeft: spacing.md,
     textAlign: 'right',
   },

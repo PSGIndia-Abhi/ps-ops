@@ -11,6 +11,7 @@ import { AppState } from 'react-native';
 import { ApiError, crmApi } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { newClientRef } from './leadHelpers';
+import { loadIndustryTypes } from './industryTypes';
 import { loadLeadSources } from './leadSources';
 import { loadQuoteServices } from './quoteServices';
 import {
@@ -93,6 +94,7 @@ export function LeadsProvider({ children }: { children: React.ReactNode }) {
     if (!session) return;
     loadQuoteServices().catch(() => undefined);
     loadLeadSources().catch(() => undefined);
+    loadIndustryTypes().catch(() => undefined);
   }, [session]);
   const syncing = useRef(false);
   const [serviceMaster, setServiceMaster] = useState<ServiceMasterRow[]>([]);

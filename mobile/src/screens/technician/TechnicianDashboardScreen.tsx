@@ -158,7 +158,10 @@ export function TechnicianDashboardScreen() {
   // already in progress - not a raw subtraction against the (now
   // day-independent) count above, which could include a visit that was
   // never part of today's schedule at all.
-  const pendingCount = todaysVisits ? todaysVisits.filter((v) => v.status !== 'IN_PROGRESS').length : 0;
+  // Visits already submitted for approval are done from the technician's side - not "pending".
+  const pendingCount = todaysVisits
+    ? todaysVisits.filter((v) => v.status !== 'IN_PROGRESS' && v.status !== 'AWAITING_APPROVAL').length
+    : 0;
   const restOfToday = todaysVisits?.filter((v) => v.id !== inProgressVisit?.id) ?? [];
   const nextVisitId = restOfToday.find((v) => v.status !== 'IN_PROGRESS')?.id ?? restOfToday[0]?.id;
   const schedulePreview = restOfToday.slice(0, SCHEDULE_PREVIEW_LIMIT);
@@ -213,11 +216,11 @@ export function TechnicianDashboardScreen() {
 
         <View style={styles.dashStatRow}>
           <DashStat
-            icon={<BriefcaseIcon size={16} color={colors.textOnPrimary} />}
-            value={todaysVisits?.length}
-            label="Today's jobs"
-            accentColor={colors.primary}
-            onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
+            icon={<AlertCircleIcon size={16} color={colors.textOnPrimary} />}
+            value={todaysVisits ? pendingCount : undefined}
+            label="Pending today"
+            accentColor={colors.danger}
+            onPress={() => navigation.navigate('MyJobs', { filter: 'pendingToday' })}
           />
           <DashStat
             icon={<ClockIcon size={16} color={colors.textOnPrimary} />}
@@ -227,11 +230,11 @@ export function TechnicianDashboardScreen() {
             onPress={() => navigation.navigate('MyJobs', { filter: 'inProgress' })}
           />
           <DashStat
-            icon={<AlertCircleIcon size={16} color={colors.textOnPrimary} />}
-            value={todaysVisits ? pendingCount : undefined}
-            label="Pending today"
-            accentColor={colors.danger}
-            onPress={() => navigation.navigate('MyJobs', { filter: 'pendingToday' })}
+            icon={<BriefcaseIcon size={16} color={colors.textOnPrimary} />}
+            value={todaysVisits?.length}
+            label="Today's jobs"
+            accentColor={colors.primary}
+            onPress={() => navigation.navigate('MyJobs', { filter: 'today' })}
           />
         </View>
 

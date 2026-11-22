@@ -16,6 +16,7 @@ import {
 } from '../../components/icons';
 import { useAuth } from '../../auth/AuthContext';
 import { useUserRole, normalizeRole, roleLabel } from '../../auth/role';
+import { showRole } from '../../utils/roleDisplay';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { AuthenticatedStackParamList } from '../../navigation/types';
 import { useHelpRow } from '../../helpdesk/useHelpRow';
@@ -176,7 +177,9 @@ function ContactRow({
 function formatRoleLabel(role: string | undefined): string {
   if (!role) return '—';
   const known = normalizeRole(role);
-  return known ? roleLabel(known) : role.charAt(0).toUpperCase() + role.slice(1);
+  if (known) return roleLabel(known);
+  const shown = showRole(role);
+  return shown.charAt(0).toUpperCase() + shown.slice(1);
 }
 
 const styles = StyleSheet.create({

@@ -14,6 +14,7 @@ import { compactINR } from './AchievementCard';
 import { targetPercent } from './TargetCard';
 import { monthLabel, ProgressRing } from './TeamReportParts';
 import { personTone } from './ui';
+import { showRole } from '../utils/roleDisplay';
 
 /**
  * The sales manager's Home, built from the Team performance page (ReportScreens.tsx): one compact
@@ -246,7 +247,7 @@ export function TeamPeopleRow({ people, onOpen }: { people: TeamPerson[]; onOpen
               </Text>
               {!!p.role && (
                 <Text style={styles.personRole} numberOfLines={1}>
-                  {p.role}
+                  {showRole(p.role)}
                 </Text>
               )}
               <View style={styles.personRow}>

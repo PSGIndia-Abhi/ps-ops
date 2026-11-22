@@ -25,7 +25,7 @@ import {
   updateLead,
 } from "./leadsApi";
 import PlacesSearchInput from "../../components/maps/PlacesSearchInput";
-import { FORM_SOURCES, INDUSTRY_TYPES, REASONS, VISIT_OUTCOMES } from "./constants";
+import { FORM_SOURCES, industryOptions, REASONS, VISIT_OUTCOMES } from "./constants";
 import { dateTime, toLocalInput, tomorrowInput } from "./format";
 import { clashesAt, kindLabel, myReminders, openFollowUpsFor, showReminderCard } from "./remindersApi";
 import { useToast } from "./hooks";
@@ -114,7 +114,7 @@ function IndustryServiceFields({ values, setValues }) {
       <Field label="Industry Type">
         <select className="lm-select" value={values.industry} onChange={(e) => setValues((v) => ({ ...v, industry: e.target.value }))}>
           <option value="">Select industry</option>
-          {INDUSTRY_TYPES.map((o) => (
+          {industryOptions(values.industry).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>

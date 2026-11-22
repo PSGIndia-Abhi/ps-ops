@@ -7,6 +7,7 @@ import { PrimaryButton } from '../../crm/ui/PrimaryButton';
 import { radii, spacing, typography } from '../../theme';
 import { MONTHS_LONG, parseDate, toDateStr, todayStr, WEEKDAYS } from '../format';
 import type { TeamMember } from '../types';
+import { showRole } from '../../utils/roleDisplay';
 import { Avatar } from './parts';
 import { CheckIcon, SearchIcon } from './taskIcons';
 
@@ -420,7 +421,7 @@ export function PeopleList({
                 {p.name}
                 {p.id === meId ? ' (you)' : ''}
               </Text>
-              {!!(p.designation || p.role) && <Text style={styles.personRole}>{p.designation || p.role}</Text>}
+              {!!(p.designation || p.role) && <Text style={styles.personRole}>{p.designation || showRole(p.role)}</Text>}
             </View>
             <RadioDot on={on} />
           </Pressable>

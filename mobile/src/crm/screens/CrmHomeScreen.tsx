@@ -10,7 +10,7 @@ import {
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useAuth } from '../../auth/AuthContext';
-import { roleLabel, useRawRole, useUserRole } from '../../auth/role';
+import { displayRole, roleLabel, useRawRole, useUserRole } from '../../auth/role';
 import { useResidentialOnly } from '../../navigation/AppSwitchContext';
 import { GradientCard } from '../../components/GradientCard';
 import {
@@ -530,7 +530,7 @@ export function CrmHomeScreen() {
       <CrmBackgroundWash />
       <CrmHeader
         userName={user?.name ?? ''}
-        roleLabel={role ? roleLabel(role) : rawRole ?? ''}
+        roleLabel={role ? roleLabel(role) : displayRole(rawRole)}
         onProfilePress={canSwitch ? openSwitchSheet : openProfile}
         onLogoPress={canSwitch ? openSwitchSheet : undefined}
         switchHint={canSwitch}

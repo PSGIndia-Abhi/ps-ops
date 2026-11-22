@@ -6,7 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const multer = require("multer");
 const minioClient = require("../lib/minio");
 const {
-  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
+  uuid, logLeadHistory, hasPerm, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead, loadIndustryTypes,
 } = require("../utils/crmLeadManagement");
 const { normalizeAgreementContent, renderAgreementPdf, AgreementInputError } = require("../utils/crmAgreementDocument");
 
@@ -156,10 +156,13 @@ async function signatoryFor(userId) {
   return { name: u.name || "", designation: title(u.designation || u.role) };
 }
 
-// The word used for the customer in the agreement text, from the lead's industry type.
-const INDUSTRY_WORD = {
-  restaurant: "Restaurant", apartment: "Apartment", hospital: "Hospital", it: "IT", qsr: "QSR", builder: "Builder", other: "Company",
-};
+// The word used for the customer in the agreement text: the lead's industry type's agreement word,
+// from the Industry Types master ("Company" when the lead has none).
+async function agreementWordFor(industryCode) {
+  if (!industryCode) return "Company";
+  const type = (await loadIndustryTypes(pool)).find((t) => t.code === industryCode);
+  return type?.agreement_word || "Company";
+}
 // "The Promont Tata Housing" -> "PROMONT"
 function shortNameOf(name) {
   const words = String(name || "").replace(/[^A-Za-z0-9& ]+/g, " ").split(/\s+/).filter(Boolean);
@@ -237,7 +240,7 @@ router.get("/leads/:id/agreements/prefill", auth, requirePermission("CRM_VIEW_LE
         customer: {
           name,
           shortName: shortNameOf(name),
-          industryWord: INDUSTRY_WORD[lead.industry_type] || "Company",
+          industryWord: await agreementWordFor(lead.industry_type),
           address: content?.customer?.address || lead.location || "",
           representative,
         },

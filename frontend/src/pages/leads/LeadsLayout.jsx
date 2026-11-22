@@ -23,6 +23,7 @@ import {
   FiPlusCircle,
   FiSearch,
   FiTag,
+  FiEdit3,
   FiThumbsDown,
   FiTarget,
   FiTrendingUp,
@@ -118,6 +119,7 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/meetings`, label: "Meetings", icon: <FiCalendar />, count: counts.today },
         { to: `${LEADS_HOME}/targets`, label: "My Target", icon: <FiTarget /> },
         { to: `${LEADS_HOME}/performance`, label: "My Performance", icon: <FiTrendingUp /> },
+        { to: `${LEADS_HOME}/my-signature`, label: "My Signature", icon: <FiEdit3 /> },
       ];
     default:
       return [
@@ -128,9 +130,11 @@ function navFor(persona, counts) {
         { to: `${LEADS_HOME}/team-visits`, label: "Team Visits", icon: <FiMapPin /> },
         { to: `${LEADS_HOME}/field-tracking`, label: "Field Tracking", icon: <FiNavigation /> },
         { to: `${LEADS_HOME}/sources`, label: "Lead Sources", icon: <FiTag /> },
+        { to: `${LEADS_HOME}/industry-types`, label: "Industry Types", icon: <FiBriefcase /> },
         { to: `${LEADS_HOME}/quote-master`, label: "Quotation Master", icon: <FiFileText /> },
         { to: `${LEADS_HOME}/targets`, label: "Targets", icon: <FiTarget /> },
         { to: `${LEADS_HOME}/performance`, label: "Team Report", icon: <FiTrendingUp /> },
+        { to: `${LEADS_HOME}/my-signature`, label: "My Signature", icon: <FiEdit3 /> },
       ];
   }
 }

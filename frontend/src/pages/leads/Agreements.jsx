@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FiCheckCircle, FiCopy, FiEdit2, FiEye, FiFileText, FiPlus, FiPrinter, FiSave, FiTrash2, FiUpload } from "react-icons/fi";
+import { industryAgreementWords } from "./constants";
 import { money } from "./format";
 import { useToast } from "./hooks";
 import {
@@ -25,8 +26,10 @@ import { Badge, Button, Empty, Field, Modal, Note, SkeletonRows } from "./ui";
 const fmtDate = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-");
 const ROW_KEYS = ["defense_area", "material_used", "treatment_area", "frequency"];
 const BLANK_ROW = { defense_area: "", material_used: "", treatment_area: "", frequency: "" };
-// The word used for the customer in the agreement text ("...the Apartment has agreed...").
-const INDUSTRY_WORDS = ["Apartment", "Hospital", "Restaurant", "QSR", "IT", "Builder", "Company", "Society", "Association"];
+// The word used for the customer in the agreement text ("...the Apartment has agreed..."): the
+// Industry Types master's agreement words, plus these general ones that belong to no industry.
+const EXTRA_INDUSTRY_WORDS = ["Company", "Society", "Association"];
+const industryWords = () => [...new Set([...industryAgreementWords(), ...EXTRA_INDUSTRY_WORDS])];
 // The usual agreement terms; any other number of months is "Custom".
 const TERM_CHOICES = [
   { months: 6, label: "6 months" },
@@ -380,7 +383,8 @@ function AgreementBuilder({ lead, from, mode = "new", replaces, onClose, onSaved
   const autoTotal = Math.round(monthly * months * 100) / 100;
   const total = form.totalEdited ? Number(form.total) || 0 : autoTotal;
   // the dropdowns also offer the value already filled in, when it is not one of the choices
-  const industryChoices = INDUSTRY_WORDS.includes(form.customer.industryWord) || !form.customer.industryWord ? INDUSTRY_WORDS : [form.customer.industryWord, ...INDUSTRY_WORDS];
+  const words = industryWords();
+  const industryChoices = words.includes(form.customer.industryWord) || !form.customer.industryWord ? words : [form.customer.industryWord, ...words];
   const signatoryChoices = signatories.some((p) => p.name === form.signatory.name) || !form.signatory.name
     ? signatories
     : [{ id: "current", name: form.signatory.name }, ...signatories];

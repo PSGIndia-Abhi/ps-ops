@@ -11,6 +11,7 @@ import { money } from "./format";
 import { useToast } from "./hooks";
 import { Button, Card, Empty, Kpi, Modal, Note, SkeletonRows, StageBadge, Who } from "./ui";
 import { useViewer } from "./viewer";
+import { showRole } from "../../utils/roleDisplay";
 
 /** A YYYY-MM-DD in the user's own time zone (the server reads the dates as wall-clock days). */
 function ymd(d) {
@@ -225,7 +226,7 @@ export default function Performance() {
                   {teamRows.map(({ user, data }, i) => (
                     <tr key={user.id} style={{ "--i": i }} onClick={() => setPersonId(user.id === String(me?.id) ? "" : user.id)}>
                       <td>
-                        <Who name={user.name} sub={ROLE_LABEL[user.role] || user.role || ""} size={34} />
+                        <Who name={user.name} sub={ROLE_LABEL[user.role] || showRole(user.role) || ""} size={34} />
                       </td>
                       {data ? (
                         ["leadsGenerated", "genuineLeads", "meetingsScheduled", "visitsCompleted", "quotationsSent", "leadsConverted", "leadsLost"].map((k) => (
@@ -513,7 +514,7 @@ function Targets({ manager, myId, picked, onPick }) {
                     onClick={onPick ? () => onPick(t) : undefined}
                   >
                     <td>
-                      <Who name={t.name} sub={ROLE_LABEL[t.role] || t.role} size={34} />
+                      <Who name={t.name} sub={ROLE_LABEL[t.role] || showRole(t.role)} size={34} />
                     </td>
                     <td className="num">{t.target ? money(t.target) : "-"}</td>
                     <td className="num">{money(t.achieved)}</td>

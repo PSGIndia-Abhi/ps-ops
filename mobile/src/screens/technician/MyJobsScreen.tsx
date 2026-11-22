@@ -144,6 +144,9 @@ function caughtUpCopy(filter: TechnicianWorkQueueFilter, count: number): string 
   }
 }
 
+/** Submitted for approval = done from the technician's side, so never counted as "pending". */
+const isSubmitted = (v: { status?: string | null }) => v.status === 'AWAITING_APPROVAL';
+
 // Sort order for the "Status" sort mode - active/actionable work first, done/dead states last. Client-side display order only.
 const STATUS_SORT_RANK: Record<string, number> = {
   IN_PROGRESS: 0,
@@ -224,8 +227,8 @@ export function MyJobsScreen() {
     return {
       today: visits.filter((v) => isToday(v.scheduled_date)).length,
       inProgress: visits.filter((v) => v.status === 'IN_PROGRESS').length,
-      pendingToday: visits.filter((v) => isToday(v.scheduled_date) && v.status !== 'IN_PROGRESS').length,
-      pending: visits.filter((v) => isBeforeToday(v.scheduled_date)).length,
+      pendingToday: visits.filter((v) => isToday(v.scheduled_date) && v.status !== 'IN_PROGRESS' && !isSubmitted(v)).length,
+      pending: visits.filter((v) => isBeforeToday(v.scheduled_date) && !isSubmitted(v)).length,
       tomorrow: visits.filter((v) => isTomorrow(v.scheduled_date)).length,
       completed: completedJobs?.length ?? null,
       all: visits.length,
@@ -238,14 +241,14 @@ export function MyJobsScreen() {
       case 'today':
         return visits.filter((v) => isToday(v.scheduled_date));
       case 'pending':
-        return visits.filter((v) => isBeforeToday(v.scheduled_date));
+        return visits.filter((v) => isBeforeToday(v.scheduled_date) && !isSubmitted(v));
       case 'tomorrow':
         return visits.filter((v) => isTomorrow(v.scheduled_date));
       case 'inProgress':
         // Not scoped to today - a visit started today but originally scheduled earlier still counts.
         return visits.filter((v) => v.status === 'IN_PROGRESS');
       case 'pendingToday':
-        return visits.filter((v) => isToday(v.scheduled_date) && v.status !== 'IN_PROGRESS');
+        return visits.filter((v) => isToday(v.scheduled_date) && v.status !== 'IN_PROGRESS' && !isSubmitted(v));
       default:
         return visits;
     }

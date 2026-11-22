@@ -1,4 +1,5 @@
 import { useAuth } from './AuthContext';
+import { showRole } from '../utils/roleDisplay';
 
 /**
  * The roles this mobile app has a dedicated dashboard for. Anything else
@@ -84,6 +85,8 @@ export function canSwitchToSales(role: string | null | undefined): boolean {
 export function displayRole(role: string | null | undefined): string {
   const known = normalizeRole(role);
   if (known) return roleLabel(known);
+  const shown = showRole(role);
+  if (shown !== (role ?? '')) return shown;
   return (role ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

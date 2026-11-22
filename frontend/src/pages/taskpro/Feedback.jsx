@@ -12,6 +12,7 @@ import { useToast } from "./toastContext";
 import { PersonPicker, Prop } from "./NewTaskModal";
 import { Avatar, Drawer, EmptyState, Modal, Skeleton } from "./ui";
 import "./feedback.css";
+import { showRole } from "../../utils/roleDisplay";
 
 export const FEEDBACK_ROLE = "Managing Director";
 const MAX_MARK = 10;
@@ -44,7 +45,7 @@ const fmtWhen = (s) =>
   s
     ? new Date(s.replace(" ", "T")).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })
     : "";
-const roleOf = (e) => e?.designation || e?.role || "";
+const roleOf = (e) => e?.designation || showRole(e?.role) || "";
 
 /** "8/10" in the mark's colour; `value` may be a decimal (an average). */
 function Mark({ value }) {

@@ -81,6 +81,7 @@ import { useToast } from "./toastContext";
 import useNow from "./useNow";
 import { useViewer } from "./viewerContext";
 import { Avatar, CompletionBurst, Drawer, EmptyState, Modal, PriorityBadge, Skeleton, StatusBadge } from "./ui";
+import { showRole } from "../../utils/roleDisplay";
 
 /* ---------- small pieces ---------- */
 
@@ -839,7 +840,7 @@ function WhoDialog({ userId, onClose }) {
               <span className="tp-inline-text">
                 <strong style={{ fontSize: 16 }}>{data.user.name}</strong>
                 <small>
-                  {data.user.role}
+                  {showRole(data.user.role)}
                   {data.designation ? ` · ${data.designation.name}` : ""}
                 </small>
               </span>

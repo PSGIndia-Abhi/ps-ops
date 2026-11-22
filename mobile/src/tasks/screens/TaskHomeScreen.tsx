@@ -22,6 +22,7 @@ import { TONE_GRADIENT } from '../theme';
 import type { WorkTask } from '../types';
 import { GradientBlock, TaskRow } from '../ui/parts';
 import { CheckIcon, ClipboardIcon, FlagIcon, RepeatIcon, SwapIcon } from '../ui/taskIcons';
+import { showRole } from '../../utils/roleDisplay';
 
 const RECENT_LIMIT = 3;
 /** How far the stat tiles hang below the header band. */
@@ -348,7 +349,7 @@ export function TaskHomeScreen() {
               </Text>
               {!!viewer.role && (
                 <View style={styles.roleChip}>
-                  <Text style={styles.roleText}>{viewer.role.toUpperCase()}</Text>
+                  <Text style={styles.roleText}>{showRole(viewer.role).toUpperCase()}</Text>
                 </View>
               )}
             </View>

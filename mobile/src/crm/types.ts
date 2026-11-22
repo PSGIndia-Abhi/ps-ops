@@ -11,7 +11,8 @@ export type LeadSource = string;
  * Commercial = a business enquiry with a quote and photos, no payment.
  */
 export type LeadType = 'consumer' | 'commercial';
-export type IndustryType = 'restaurant' | 'apartment' | 'hospital' | 'it' | 'qsr' | 'builder' | 'other';
+/** An Industry Types master code ('restaurant', ...) - see crm/industryTypes.ts. */
+export type IndustryType = string;
 /** A Quotation Master service id (crm_quote_services) - see crm/quoteServices.ts. */
 export type CommercialService = string;
 
@@ -112,6 +113,7 @@ export const LEAD_SOURCES: Option<LeadSource>[] = [
   { value: 'other', label: 'Other' },
 ];
 
+/** The built-in industry types - only the fallback until the master (crm/industryTypes.ts) loads. */
 export const INDUSTRY_TYPES: Option<IndustryType>[] = [
   { value: 'restaurant', label: 'Restaurant' },
   { value: 'apartment', label: 'Apartment' },

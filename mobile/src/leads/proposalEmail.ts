@@ -2,7 +2,7 @@
 // person, the company overview with our client list, and the signature of whoever is signed in.
 // The web has the same text in frontend/src/pages/leads/proposalEmail.js - keep the two alike.
 
-import { INDUSTRY_TYPES } from '../crm/types';
+import { industryLabel } from '../crm/industryTypes';
 
 const CLIENTS = [
   'LSG Sky Chefs (India) Pvt. Ltd',
@@ -43,7 +43,7 @@ export function proposalEmail(
 ): ProposalEmail {
   const company = (lead.companyName || '').trim();
   const contact = (lead.contactPerson || '').trim();
-  const industry = lead.industry && lead.industry !== 'other' ? INDUSTRY_TYPES.find(o => o.value === lead.industry)?.label ?? '' : '';
+  const industry = lead.industry && lead.industry !== 'other' ? industryLabel(lead.industry) : '';
   const place = [company, industry].filter(Boolean).join(' ') || 'premises';
   const name = sender?.name?.trim();
   const phone = sender?.phone?.trim();

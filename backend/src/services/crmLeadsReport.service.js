@@ -1,5 +1,5 @@
 const ExcelJS = require("exceljs");
-const { loadQuoteServices, quoteServiceNames } = require("../utils/crmLeadManagement");
+const { loadQuoteServices, quoteServiceNames, loadIndustryTypes } = require("../utils/crmLeadManagement");
 
 // ---------------------------------------------------------------------------
 // Lead report Excel (Team Report -> Download Excel). Commercial leads added in a period, either
@@ -31,7 +31,7 @@ function statusKey(raw) {
 }
 const statusLabel = (raw) => STATUS_LABEL[statusKey(raw)] || raw;
 
-const INDUSTRY = { restaurant: "Restaurant", apartment: "Apartment", hospital: "Hospital", it: "IT", qsr: "QSR", builder: "Builder", other: "Other" };
+// Industry names come from the Industry Types master - read once per report in buildLeadsReport.
 const SOURCE_CODES = { google: "Google", website: "Website", referral: "Referral", social_media: "Social Media", other: "Other" };
 const sourceLabel = (raw) => (raw ? SOURCE_CODES[String(raw).toLowerCase()] || raw : "");
 const CONTRACT = { ONE_TIME: "One-time", AMC: "AMC" };
@@ -189,6 +189,7 @@ function titleRows(ws, lines) {
  */
 async function buildLeadsReport(db, { subject, period }) {
   await loadQuoteServices(db);
+  const industryName = new Map((await loadIndustryTypes(db)).map((t) => [t.code, t.name]));
   const leads = await loadLeads(db, { people: subject.people, from: period.from, to: period.to });
   const ids = leads.map((l) => l.id);
   const d = await loadDetails(db, ids);
@@ -229,7 +230,7 @@ async function buildLeadsReport(db, { subject, period }) {
       phone: l.phone || "",
       altPhone: l.alternate_phone || "",
       email: l.customer_email || "",
-      industry: INDUSTRY[l.industry_type] || l.industry_type || "",
+      industry: industryName.get(l.industry_type) || l.industry_type || "",
       source: sourceLabel(l.lead_source),
       reference: l.reference_by || "",
       services: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")).join(", ") : "",

@@ -86,6 +86,8 @@ import { ResidentialDashboard, ResidentialLeadPage, ResidentialNewLead } from ".
 import { FollowUps, LeadFollowUps, Meetings, Providers, SubmitLead } from "./pages/leads/Pages";
 import LeadsPerformance, { TargetsPage as LeadsTargets } from "./pages/leads/Performance";
 import LeadSources from "./pages/leads/LeadSources";
+import IndustryTypes from "./pages/leads/IndustryTypes";
+import MySignature from "./pages/leads/MySignature";
 import QuoteMaster from "./pages/leads/QuoteMaster";
 import TeamVisits from "./pages/leads/TeamVisits";
 import FieldTracking from "./pages/leads/FieldTracking";
@@ -368,6 +370,8 @@ const router = createBrowserRouter([
       { path: "performance", element: <LeadsPerformance /> },
       { path: "targets", element: <LeadsTargets /> },
       { path: "sources", element: <LeadSources /> },
+      { path: "industry-types", element: <IndustryTypes /> },
+      { path: "my-signature", element: <MySignature /> },
       { path: "quote-master", element: <QuoteMaster /> },
       // Customer Feedback tickets for salespeople (a Sales step assigned to them) and other lead staff.
       {

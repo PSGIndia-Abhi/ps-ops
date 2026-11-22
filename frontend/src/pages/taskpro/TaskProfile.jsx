@@ -4,6 +4,7 @@ import OrgTree from "./OrgTree";
 import { getMyHierarchy } from "./tasksApi";
 import { useViewer } from "./viewerContext";
 import { Avatar, Skeleton } from "./ui";
+import { showRole } from "../../utils/roleDisplay";
 
 function Fact({ icon, label, children }) {
   const Icon = icon;
@@ -73,7 +74,7 @@ export default function TaskProfile() {
           <Avatar name={user.name} size={84} />
           <div className="tp-prof-id">
             <h1>{user.name}</h1>
-            <p>{[designation, dept].filter(Boolean).join(" · ") || user.role}</p>
+            <p>{[designation, dept].filter(Boolean).join(" · ") || showRole(user.role)}</p>
             <div className="tp-prof-tags">
               {data?.is_head ? <span className="tp-prof-tag strong">Head of {data.unit?.name}</span> : null}
               {teamCount > 0 && (
@@ -118,7 +119,7 @@ export default function TaskProfile() {
               {dept}
             </Fact>
             <Fact icon={FiShield} label="Access role">
-              {user.role}
+              {showRole(user.role)}
             </Fact>
             <Fact icon={FiMapPin} label="Branch">
               {user.branch_name}

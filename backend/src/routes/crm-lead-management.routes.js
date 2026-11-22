@@ -6,7 +6,7 @@ const requirePermission = require("../middleware/permission.middleware");
 const {
   uuid, isValidDate, logLeadHistory, hasPerm, isLeadHead, isConvertedLead, resolveVisibleUserIds, isOwnLead, isHiddenSalesOwnLead,
   findLeadAssignee, assignmentFor, LEAD_ASSIGNEE_ROLES, LEAD_OWNER_ROLES, readCompetitor, COMPETITOR_SET_SQL,
-  INDUSTRY_TYPES, resolveLeadServices,
+  isAllowedIndustryType, loadIndustryTypes, resolveLeadServices,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -141,6 +141,123 @@ router.patch("/lead-sources/:id", auth, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/crm/industry-types -- the Industry Types master (crm_industry_types), for the lead
+// forms, lead detail, the proposal email and the agreement. Any signed-in user may read it.
+// Switched-off types are included (flagged is_active: false) so a lead that still has one shows
+// its name; the forms offer only the active ones. ?all=1 (lead managers) adds how many
+// commercial leads use each type, for the master screen.
+//
+// POST /api/crm/industry-types, PATCH /api/crm/industry-types/:id -- kept by whoever manages
+// leads (sales manager, Managing Director, Personal Assistant, admin). A type is never deleted:
+// leads store its code, so it is switched off instead. The code is set once from the name when
+// the type is added and never changes, so a rename never touches the leads that use it.
+// ---------------------------------------------------------------------------
+const toIndustryType = (r) => ({
+  id: r.id,
+  code: r.code,
+  name: r.name,
+  agreement_word: r.agreement_word,
+  sort_order: Number(r.sort_order) || 0,
+  is_active: r.is_active === true || Number(r.is_active) === 1,
+});
+
+router.get("/industry-types", auth, async (req, res) => {
+  try {
+    const types = (await loadIndustryTypes(pool)).map(toIndustryType);
+    if (req.query.all === "1" && hasPerm(req, "MANAGE_LEADS")) {
+      const [counts] = await pool.query(
+        "SELECT industry_type AS code, COUNT(*) AS n FROM crm_leads WHERE lead_type = 'commercial' AND industry_type IS NOT NULL GROUP BY industry_type"
+      );
+      const byCode = new Map(counts.map((c) => [c.code, Number(c.n)]));
+      return res.json(types.map((t) => ({ ...t, lead_count: byCode.get(t.code) || 0 })));
+    }
+    res.json(types);
+  } catch (err) {
+    sendError(res, err, "Failed to load industry types");
+  }
+});
+
+function industryText(value, label, max) {
+  const text = optionalText(value, max);
+  if (text === false) throw new HttpError(400, `${label} is too long (max ${max} characters)`);
+  if (!text || text.length < 2) throw new HttpError(400, `Enter the ${label.toLowerCase()}`);
+  return text;
+}
+
+function industrySortOrder(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 9999) throw new HttpError(400, "Order must be a whole number from 0 to 9999");
+  return n;
+}
+
+// "Hotel & Resort" -> "hotel_resort"; made unique against the codes already taken.
+async function newIndustryCode(name) {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24) || "industry";
+  const [rows] = await pool.query("SELECT code FROM crm_industry_types WHERE code = ? OR code LIKE ?", [base, `${base}\\_%`]);
+  const taken = new Set(rows.map((r) => r.code));
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i += 1) {
+    if (!taken.has(`${base}_${i}`)) return `${base}_${i}`;
+  }
+  return `${base}_${Date.now()}`.slice(0, 30);
+}
+
+router.post("/industry-types", auth, async (req, res) => {
+  try {
+    if (!hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "You cannot manage industry types");
+    const body = req.body || {};
+    const name = industryText(body.name, "Industry name", 60);
+    // The agreement word defaults to the name ("Hotel" -> "the Hotel has agreed ...").
+    const agreementWord = body.agreement_word ? industryText(body.agreement_word, "Agreement word", 40) : name.slice(0, 40);
+    const [[taken]] = await pool.query("SELECT id FROM crm_industry_types WHERE name = ?", [name]);
+    if (taken) throw new HttpError(409, "An industry type with this name already exists");
+    const [[last]] = await pool.query("SELECT MAX(sort_order) AS m FROM crm_industry_types WHERE code <> 'other'");
+    const sortOrder = industrySortOrder(body.sort_order, Math.min((Number(last?.m) || 0) + 10, 998));
+    const id = uuid();
+    const code = await newIndustryCode(name);
+    await pool.query(
+      "INSERT INTO crm_industry_types (id, code, name, agreement_word, sort_order, is_active) VALUES (?, ?, ?, ?, ?, 1)",
+      [id, code, name, agreementWord, sortOrder]
+    );
+    res.status(201).json({ id, code, name, agreement_word: agreementWord, sort_order: sortOrder, is_active: true, lead_count: 0 });
+  } catch (err) {
+    if (err?.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "An industry type with this name already exists" });
+    sendError(res, err, "Failed to add industry type");
+  }
+});
+
+router.patch("/industry-types/:id", auth, async (req, res) => {
+  try {
+    if (!hasPerm(req, "MANAGE_LEADS")) throw new HttpError(403, "You cannot manage industry types");
+    const [[type]] = await pool.query(
+      "SELECT id, code, name, agreement_word, sort_order, is_active FROM crm_industry_types WHERE id = ?",
+      [req.params.id]
+    );
+    if (!type) throw new HttpError(404, "Industry type not found");
+
+    const body = req.body || {};
+    const name = body.name !== undefined ? industryText(body.name, "Industry name", 60) : type.name;
+    const agreementWord = body.agreement_word !== undefined ? industryText(body.agreement_word, "Agreement word", 40) : type.agreement_word;
+    const sortOrder = industrySortOrder(body.sort_order, Number(type.sort_order));
+    const isActive = body.is_active !== undefined ? (body.is_active ? 1 : 0) : Number(type.is_active);
+    if (name !== type.name) {
+      const [[taken]] = await pool.query("SELECT id FROM crm_industry_types WHERE name = ? AND id <> ?", [name, type.id]);
+      if (taken) throw new HttpError(409, "An industry type with this name already exists");
+    }
+
+    await pool.query(
+      "UPDATE crm_industry_types SET name = ?, agreement_word = ?, sort_order = ?, is_active = ? WHERE id = ?",
+      [name, agreementWord, sortOrder, isActive, type.id]
+    );
+    res.json(toIndustryType({ ...type, name, agreement_word: agreementWord, sort_order: sortOrder, is_active: isActive }));
+  } catch (err) {
+    if (err?.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "An industry type with this name already exists" });
+    sendError(res, err, "Failed to update industry type");
+  }
+});
+
 router.get("/lead-loss-reasons", auth, async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT id, name FROM crm_lead_loss_reasons WHERE is_active = 1 ORDER BY name ASC");
@@ -219,11 +336,11 @@ router.patch("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req,
       next.lead_source = source.name;
     }
 
-    // Industry (optional): the same codes as the app's form.
+    // Industry (optional): an active type from the Industry Types master, or the one it already has.
     let industryType = lead.industry_type ?? null;
     if (body.industry_type !== undefined) {
       industryType = body.industry_type || null;
-      if (industryType !== null && !INDUSTRY_TYPES.includes(industryType)) throw new HttpError(400, "Invalid industry type");
+      if (!(await isAllowedIndustryType(pool, industryType, lead.industry_type))) throw new HttpError(400, "Invalid industry type");
     }
     // Services: Quotation Master service ids (old app codes are converted).
     let services = lead.services_requested ?? null;

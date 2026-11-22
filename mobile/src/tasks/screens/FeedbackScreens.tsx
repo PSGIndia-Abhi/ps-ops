@@ -17,6 +17,7 @@ import * as fb from '../feedbackApi';
 import type { TaskStackParamList } from '../navigation';
 import { errorMessage, useTasks } from '../TasksContext';
 import type { TeamMember } from '../types';
+import { showRole } from '../../utils/roleDisplay';
 import { Avatar, ScreenHeader, inputStyle } from '../ui/parts';
 import { PeopleSheet, Sheet } from '../ui/sheets';
 
@@ -628,7 +629,7 @@ export function FeedbackFormScreen() {
                 {person ? <Avatar name={person.name} id={person.id} size={36} /> : <GlossyBadge color={theme.accent} size={36} icon={<UsersIcon size={16} color="#fff" />} />}
                 <View style={styles.flex}>
                   <Text style={[styles.pickerText, !person && styles.placeholder]}>{person ? person.name : 'Choose an employee'}</Text>
-                  {!!person && !!(person.designation || person.role) && <Text style={styles.filterSub}>{person.designation || person.role}</Text>}
+                  {!!person && !!(person.designation || person.role) && <Text style={styles.filterSub}>{person.designation || showRole(person.role)}</Text>}
                 </View>
                 <View style={styles.chevronDown}>
                   <ChevronRightIcon size={16} color={theme.textMuted} />

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { showRole } from "../utils/roleDisplay";
 
 function formatRole(role) {
   if (!role) return "User";
-  return String(role)
+  return String(showRole(role))
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");

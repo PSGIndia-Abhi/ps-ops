@@ -38,12 +38,12 @@ import { DateSheet } from '../../tasks/ui/sheets';
 import type { Person } from '../../leads/types';
 import { formatINR } from '../format';
 import { useLeads } from '../LeadsContext';
+import { industryLabel, industryOptions, isActiveIndustry, useIndustryTypes } from '../industryTypes';
 import { cachedLeadSources, matchLeadSource, useLeadSources } from '../leadSources';
 import { useQuoteServices } from '../quoteServices';
 import type { CrmStackParamList } from '../navigation';
 import { useCrmStyles, type CrmTheme } from '../theme';
 import {
-  INDUSTRY_TYPES,
   LEAD_STATUSES,
   LEAD_TYPES,
   MAX_LEAD_PHOTOS,
@@ -390,6 +390,9 @@ export function CrmNewCommercialLeadScreen({
   // Source of Lead: the lead source master (crm_lead_sources), plus the lead's own source when the
   // master no longer has it (switched off, or an old one).
   const leadSources = useLeadSources();
+  useIndustryTypes();
+  // The type the lead had when the form opened - still offered if it has since been switched off.
+  const initialIndustry = useRef<string | null>(values.industryType ?? null);
   const sourceOptions = useMemo(() => {
     const names = leadSources.sources ?? [];
     const all = values.source && !names.includes(values.source) ? [...names, values.source] : names;
@@ -532,7 +535,7 @@ export function CrmNewCommercialLeadScreen({
     let cancelled = false;
     loadLastChoices(scope).then(last => {
       if (cancelled) return;
-      const industryType = INDUSTRY_TYPES.some(o => o.value === last.industryType) ? last.industryType : null;
+      const industryType = isActiveIndustry(last.industryType) ? last.industryType : null;
       // The source used last time, if the master still has it.
       const names = cachedLeadSources();
       const lastSource = matchLeadSource(last.commercialSource, names);
@@ -796,7 +799,7 @@ export function CrmNewCommercialLeadScreen({
               <ReviewRow
                 first
                 label="Industry Type"
-                value={optionLabel(INDUSTRY_TYPES, values.industryType as IndustryType)}
+                value={industryLabel(values.industryType)}
               />
               <ReviewRow label="Company / Business Name" value={values.companyName.trim()} />
               <ReviewRow label="Address" value={values.address.trim()} />
@@ -895,7 +898,7 @@ export function CrmNewCommercialLeadScreen({
                 sheetTitle="Industry Type"
                 icon={<TagIcon size={18} color={theme.textMuted} />}
                 placeholder="Select industry type"
-                options={INDUSTRY_TYPES}
+                options={industryOptions(initialIndustry.current)}
                 value={values.industryType as IndustryType | null}
                 onChange={value => setField('industryType', value)}
                 error={errors.industryType}

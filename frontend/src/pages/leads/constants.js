@@ -33,17 +33,37 @@ export const FORM_SOURCES = [
 /** A lead a provider submits always carries this source (a row of the server's lead-source list). */
 export const PROVIDER_SOURCE = "Lead Provider";
 
-/** A commercial lead's industry - the same codes as the Android form. */
-export const INDUSTRY_TYPES = [
-  { value: "restaurant", label: "Restaurant" },
-  { value: "apartment", label: "Apartment" },
-  { value: "hospital", label: "Hospital" },
-  { value: "it", label: "IT" },
-  { value: "qsr", label: "QSR" },
-  { value: "builder", label: "Builder" },
-  { value: "other", label: "Other" },
+/**
+ * A commercial lead's industry comes from the Industry Types master (GET /api/crm/industry-types),
+ * which leadsApi reads with the workspace and hands over with setIndustryTypes(). These seven are
+ * only the fallback for when it cannot be read.
+ * Each type: { value: code, label: name, word: agreement word, active }.
+ */
+const BUILT_IN_INDUSTRY_TYPES = [
+  { value: "restaurant", label: "Restaurant", word: "Restaurant", active: true },
+  { value: "apartment", label: "Apartment", word: "Apartment", active: true },
+  { value: "hospital", label: "Hospital", word: "Hospital", active: true },
+  { value: "it", label: "IT", word: "IT", active: true },
+  { value: "qsr", label: "QSR", word: "QSR", active: true },
+  { value: "builder", label: "Builder", word: "Builder", active: true },
+  { value: "other", label: "Other", word: "Company", active: true },
 ];
-export const industryLabel = (v) => INDUSTRY_TYPES.find((o) => o.value === v)?.label || "";
+let industryTypes = BUILT_IN_INDUSTRY_TYPES;
+
+/** Takes the master's rows ({ code, name, agreement_word, is_active }, already in order). */
+export function setIndustryTypes(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  industryTypes = rows.map((r) => ({ value: r.code, label: r.name, word: r.agreement_word, active: r.is_active !== false }));
+}
+
+/** What the lead form offers: the active types, plus `current` if the lead has a switched-off one. */
+export const industryOptions = (current = "") => industryTypes.filter((o) => o.active || o.value === current);
+
+/** A type's name for its code ("" when unknown). */
+export const industryLabel = (v) => industryTypes.find((o) => o.value === v)?.label || "";
+
+/** The words the active types use in the agreement text, in order and without repeats. */
+export const industryAgreementWords = () => [...new Set(industryTypes.filter((o) => o.active).map((o) => o.word).filter(Boolean))];
 // Services requested are Quotation Master services: the server sends their names with the lead.
 
 /** The stored source as it reads on screen ("social_media" -> "Social Media"). */

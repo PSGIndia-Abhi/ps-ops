@@ -937,8 +937,10 @@ function draw(doc, q, meta) {
     "We do not work from standard rates or packages: our in-house team of experts shapes each service around the client's needs.";
   font("R", 10);
   const commitmentH = doc.heightOfString(commitment, { width: W, lineGap: 3 });
+  // Room above the acceptance line: a little more when a signature image is printed there.
+  const signGap = Buffer.isBuffer(by.signature) ? 66 : 54;
   // "Our commitment" and "Acceptance" stay together, on the last page above the contact band.
-  const closingH = 28 + 15 + 28 + commitmentH + 6 + 22 + 22 + 54 + 40;
+  const closingH = 28 + 15 + 28 + commitmentH + 6 + 22 + 22 + signGap + 40;
   if (y + closingH > PAGE_H - BAND_H - 16) newPage();
   const atTop = y < 120;
   y += atTop ? 0 : 28;
@@ -954,13 +956,23 @@ function draw(doc, q, meta) {
   hLine(y);
   y += 22;
   eyebrow("Acceptance", L, y);
-  y += 54;
+  y += signGap;
   const aw = (W - 40) / 2;
   [
     [`For ${COMPANY.name}`, [by.name, by.designation].filter(Boolean).join("  ·  ")],
     [`For ${q.customer.name}`, "Name, signature & date"],
   ].forEach(([who, sub], i) => {
     const x = L + i * (aw + 40);
+    // BestServe's side: the signature of whoever made the quotation, if they uploaded one, just
+    // above the line. A bad image never stops the PDF - the line is then left to sign by hand.
+    if (i === 0 && Buffer.isBuffer(by.signature)) {
+      try {
+        // Centred over the line, at most 42pt tall (the width follows the signature's shape).
+        doc.image(by.signature, x, y - 46, { fit: [aw, 42], align: "center", valign: "bottom" });
+      } catch (err) {
+        console.error("Quotation signature could not be drawn:", err?.message || err);
+      }
+    }
     hLine(y, "#9aa1ad", 0.8, x, x + aw);
     font("B", 9.6, C.ink).text(who, x, y + 9, { width: aw, lineBreak: false });
     font("R", 8.8, C.muted).text(sub, x, y + 24, { width: aw, lineBreak: false });
