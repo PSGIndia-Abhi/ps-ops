@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiUpload, FiXCircle } from "react-icons/fi";
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiDownload, FiEye, FiFileText, FiList, FiPieChart, FiSearch, FiXCircle } from "react-icons/fi";
 import { Badge, DataError, EmptyRow, Pager } from "./ui";
 import { money } from "./format";
 import { showDate, sortGroups, useAccountantData, usePaged } from "./data";
@@ -87,9 +87,6 @@ export default function InvoiceList() {
       <div className="ac-head">
         <h2 className="ac-title ac-title-icon"><FiFileText /> Invoices</h2>
         <div className="ac-actions">
-          <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate("/accountant/invoices/upload")}>
-            <FiUpload /> Upload Invoice
-          </button>
           <button type="button" className="ac-btn" onClick={exportRows} disabled={!rows.length}><FiDownload /> Export</button>
         </div>
       </div>

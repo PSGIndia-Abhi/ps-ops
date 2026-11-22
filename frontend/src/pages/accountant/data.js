@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, safeJson } from "../../api";
+import { inBusiness, useBusiness } from "./business";
 
 // ---------------------------------------------------------------------------
 // Small helpers. The server sends amounts as text ("50000.00") and dates as full
@@ -257,7 +258,18 @@ export function useAccountantData() {
     load();
   }, [load]);
 
-  return { ...state, reload: load };
+  // Only the customers of the business chosen in the header (Pest Control / Deep Clean).
+  const [business] = useBusiness();
+  const shown = useMemo(() => {
+    const keep = (row) => inBusiness(business, row.customer_name);
+    return {
+      invoices: state.invoices.filter(keep),
+      payments: state.payments.filter(keep),
+      followUps: state.followUps.filter(keep),
+    };
+  }, [state.invoices, state.payments, state.followUps, business]);
+
+  return { ...state, ...shown, business, reload: load };
 }
 
 // ---------------------------------------------------------------------------

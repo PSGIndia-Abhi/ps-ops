@@ -181,3 +181,38 @@
 @media (max-width: 380px) {
   .acc-square .logo { height: 28px; }
 }
+
+/* Header switch: Pest Control (all customers except Brigade) / Deep Clean (only Brigade) */
+.acc-biz-switch {
+  display: inline-flex;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+  margin-right: 8px;
+}
+.acc-biz-switch button {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.acc-biz-switch button.on {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.35);
+}
+.acc-biz-switch button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+@media (max-width: 480px) {
+  .acc-biz-switch button { padding: 5px 10px; font-size: 12px; }
+}

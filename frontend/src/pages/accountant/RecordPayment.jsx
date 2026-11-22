@@ -1,12 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  FiAlertCircle, FiAlertTriangle, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiDollarSign, FiFileText, FiHash,
+  FiAlertCircle, FiAlertTriangle, FiCalendar, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiDollarSign, FiEdit2, FiFileText, FiHash,
   FiInfo, FiList, FiMessageSquare, FiPieChart, FiPlus, FiShield, FiUser, FiX,
 } from "react-icons/fi";
 import { Badge, DataError, EmptyRow } from "./ui";
 import { money } from "./format";
-import { groupByCustomer, savePayment, showDate, todayYmd, useAccountantData } from "./data";
+import { fetchTdsSettings, groupByCustomer, saveTdsSettingsForRow, savePayment, showDate, todayYmd, useAccountantData } from "./data";
 import { rescheduleFollowUp, showDue } from "./followups";
 import DateInput from "../../components/accountant/DateInput";
 
@@ -42,6 +42,8 @@ export default function RecordPayment() {
   const [cash, setCash] = useState({}); // { [invoiceId]: string }
   const [tds, setTds] = useState({}); // { [invoiceId]: string } -- the TDS column: how much TDS is being deducted on this row
   const [prevOpen, setPrevOpen] = useState(false);
+  const [tdsEditOpen, setTdsEditOpen] = useState(false); // the "Set TDS" dialog for the selected customer
+  const [tdsNotice, setTdsNotice] = useState("");
   const [form, setForm] = useState({ date: todayYmd(), mode: "NEFT", reference: "", received: "", remarks: "" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -135,7 +137,21 @@ export default function RecordPayment() {
     setCash((s) => ({ ...s, ...next }));
   }
 
+  // The customer's TDS was just changed from the "Set TDS" dialog. The invoices are reloaded so their
+  // TDS (rate and pending TDS) is the new one, and the ticked rows are cleared because the TDS and
+  // amounts pre-filled in them were worked out from the old setting -- ticking them again uses the new one.
+  async function afterTdsSaved(message) {
+    setTdsEditOpen(false);
+    await reload();
+    setSelected([]);
+    setCash({});
+    setTds({});
+    setSaveError("");
+    setTdsNotice(message);
+  }
+
   function changeCustomer(id) {
+    setTdsNotice("");
     setCustomerId(id);
     setSelected([]);
     setCash({});
@@ -368,11 +384,19 @@ export default function RecordPayment() {
             <div className="ac-head" style={{ marginBottom: 0 }}>
               <div className="ac-mini-label" style={{ fontWeight: 600, color: "#0f172a" }}><span className="ac-lab-ic"><FiUser /></span>Customer Details</div>
               {customer && (
-                <span className={`ac-badge ${tdsInvoice ? "paid" : "cancelled"}`}>
-                  <FiShield style={{ verticalAlign: "-2px" }} /> {tdsInvoice ? `TDS Applicable (${tdsInvoice.tds_rate}%)` : "TDS not applicable"}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span className={`ac-badge ${tdsInvoice ? "paid" : "cancelled"}`}>
+                    <FiShield style={{ verticalAlign: "-2px" }} /> {tdsInvoice ? `TDS Applicable (${tdsInvoice.tds_rate}%)` : "TDS not applicable"}
+                  </span>
+                  <button type="button" className="ac-btn" style={{ padding: "4px 8px", fontSize: 13 }} disabled={saved}
+                    title={tdsInvoice ? "Change TDS" : "Set TDS"} aria-label={tdsInvoice ? "Change TDS" : "Set TDS"}
+                    onClick={() => { setTdsNotice(""); setTdsEditOpen(true); }}>
+                    <FiEdit2 />
+                  </button>
                 </span>
               )}
             </div>
+            {customer && tdsNotice && <div className="ac-note ok" style={{ marginTop: 6 }}><FiCheckCircle /> {tdsNotice}</div>}
             {customer ? (
               <>
                 <div style={{ fontSize: 17, fontWeight: 700, marginTop: 4 }}>{customer.name}</div>
@@ -588,6 +612,116 @@ export default function RecordPayment() {
       </div>
 
       {prevOpen && <PreviousTdsModal invoices={previousCandidates} current={tds} onClose={() => setPrevOpen(false)} onApply={applyPrevious} />}
+      {tdsEditOpen && customer && (
+        <CustomerTdsModal customer={customer} onClose={() => setTdsEditOpen(false)} onSaved={afterTdsSaved} />
+      )}
+    </div>
+  );
+}
+
+const TDS_BASES = [
+  { key: "TAXABLE", label: "Taxable TDS", hint: "On the taxable value (before GST)" },
+  { key: "INVOICE", label: "Invoice TDS", hint: "On the full invoice amount (incl. GST)" },
+];
+
+// Sets the customer's TDS (applicable, rate, basis) without leaving Record Payment -- the same
+// setting and the same save as the TDS Settings page, for every record of this customer.
+// "Apply to existing invoices" is ticked by default here, since the point is usually to get TDS
+// onto the invoices being paid right now (only invoices with no TDS deducted yet are changed).
+function CustomerTdsModal({ customer, onClose, onSaved }) {
+  const [form, setForm] = useState(null); // { applicable, rate, basis, existing } once the current setting is loaded
+  const [loadError, setLoadError] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    fetchTdsSettings()
+      .then((rows) => {
+        if (!live) return;
+        const mine = rows.filter((r) => customer.ids.includes(r.id));
+        const on = mine.find((r) => r.tds_applicable);
+        setForm({
+          applicable: true, // opened to set TDS, so it starts ticked; untick it to switch TDS off
+          rate: on?.tds_rate ?? "",
+          basis: on?.tds_basis || "INVOICE",
+          existing: true,
+        });
+      })
+      .catch((err) => live && setLoadError(err.message || "Could not load this customer's TDS setting."));
+    return () => { live = false; };
+  }, [customer]);
+
+  async function save() {
+    const rate = Number(form.rate);
+    if (form.applicable && !(rate > 0 && rate <= 100)) return setError("Enter a TDS rate between 0 and 100.");
+    setSaving(true);
+    setError("");
+    try {
+      const res = await saveTdsSettingsForRow(customer.ids, {
+        tds_applicable: form.applicable,
+        tds_rate: form.applicable ? rate : null,
+        tds_basis: form.basis,
+        apply_to_existing: form.existing,
+      });
+      const updated = res?.updated_invoices || 0;
+      await onSaved(
+        `TDS ${form.applicable ? `set to ${rate}%` : "switched off"} for ${customer.name}.${form.existing ? ` ${updated} invoice(s) updated.` : ""}`
+      );
+    } catch (err) {
+      setError(err.message || "The TDS setting could not be saved.");
+      setSaving(false);
+    }
+  }
+
+  const patch = (change) => setForm((f) => ({ ...f, ...change }));
+
+  return (
+    <div className="ac-overlay" onMouseDown={() => !saving && onClose()}>
+      <div className="ac-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ac-head" style={{ marginBottom: 4 }}>
+          <h3 style={{ margin: 0 }}>TDS for {customer.name}</h3>
+          <button type="button" className="ac-link" aria-label="Close" onClick={onClose} disabled={saving}><FiX /></button>
+        </div>
+        {customer.ids.length > 1 && (
+          <p className="ac-sub" style={{ fontSize: 14, marginTop: 0 }}>Saved for all {customer.ids.length} customer records with this name.</p>
+        )}
+        {loadError && <div className="ac-info error" role="alert"><FiAlertCircle /><span>{loadError}</span></div>}
+        {!form && !loadError && <p className="ac-sub">Loading…</p>}
+        {form && (
+          <>
+            <label className="ac-checkline" style={{ marginBottom: 12 }}>
+              <input type="checkbox" checked={form.applicable} onChange={(e) => patch({ applicable: e.target.checked })} /> TDS applicable
+            </label>
+            <div className="ac-field" style={{ marginBottom: 12 }}>
+              <label>Calculate TDS on</label>
+              <div className="tds-basis-options" role="radiogroup" aria-label="Calculate TDS on">
+                {TDS_BASES.map((b) => (
+                  <label key={b.key} className={`tds-basis-option ${form.basis === b.key ? "selected" : ""} ${form.applicable ? "" : "disabled"}`}>
+                    <input type="radio" name="rp-tds-basis" value={b.key} checked={form.basis === b.key} disabled={!form.applicable}
+                      onChange={() => patch({ basis: b.key })} />
+                    <span><strong>{b.label}</strong><small>{b.hint}</small></span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="ac-field">
+              <label>TDS Rate (%)</label>
+              <input className="ac-input" type="number" min="0" max="100" step="0.01" disabled={!form.applicable} value={form.rate}
+                onChange={(e) => patch({ rate: e.target.value })} />
+            </div>
+            <label className="ac-checkline" style={{ marginTop: 12 }}>
+              <input type="checkbox" checked={form.existing} onChange={(e) => patch({ existing: e.target.checked })} />
+              Also apply to existing invoices that have no TDS deducted yet
+            </label>
+          </>
+        )}
+        {error && <div className="ac-info error" style={{ marginTop: 12 }} role="alert"><FiAlertCircle /><span>{error}</span></div>}
+        <div className="ac-modal-foot">
+          <button type="button" className="ac-btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="button" className="ac-btn ac-btn-primary" onClick={save} disabled={saving || !form}>{saving ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
     </div>
   );
 }

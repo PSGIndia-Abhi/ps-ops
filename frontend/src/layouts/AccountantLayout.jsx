@@ -28,12 +28,17 @@ import NotificationsMenu from "../components/NotificationsMenu";
 import ReminderAlerts from "../components/accountant/ReminderAlerts";
 import UserMenu from "../components/UserMenu";
 import { useNotificationsFor } from "../pages/taskpro/tasksApi";
+import { BUSINESSES, useBusiness } from "../pages/accountant/business";
 import "./AccountantLayout.css";
 import "../pages/accountant/accountant.css";
 
 // A tab with `children` is a collapsible group; otherwise it is a direct link.
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/accountant", icon: FiGrid, exact: true },
+  // The three pages used every day sit at the top, outside the dropdowns.
+  { label: "Invoice List", path: "/accountant/invoices/list", icon: FiFileText },
+  { label: "Record Payment", path: "/accountant/payments/record", icon: FiEdit2 },
+  { label: "Customer Outstanding", path: "/accountant/payments/customer-outstanding", icon: FiUsers },
   {
     label: "Invoices",
     icon: FiFileText,
@@ -48,11 +53,6 @@ const NAV_ITEMS = [
         path: "/accountant/invoices/review",
         icon: FiCheckSquare,
       },
-      {
-        label: "Invoice List",
-        path: "/accountant/invoices/list",
-        icon: FiFileText,
-      },
       // { label: "Payment Tracking", path: "/accountant/invoices/tracking", icon: FiActivity },
       {
         label: "Outstanding",
@@ -66,21 +66,11 @@ const NAV_ITEMS = [
     icon: FiCreditCard,
     children: [
       {
-        label: "Record Payment",
-        path: "/accountant/payments/record",
-        icon: FiEdit2,
-      },
-      {
         label: "Payment List",
         path: "/accountant/payments/list",
         icon: FiList,
       },
       // { label: "Payment Pending", path: "/accountant/payments/pending", icon: FiClock },
-      {
-        label: "Customer Outstanding",
-        path: "/accountant/payments/customer-outstanding",
-        icon: FiUsers,
-      },
     ],
   },
   { label: "Tasks & Reminders", path: "/accountant/tasks", icon: FiBell, also: ["/accountant/follow-ups"] },
@@ -93,6 +83,7 @@ export default function AccountantLayout() {
   const location = useLocation();
   const { user } = useMe();
   const { unread: taskUnread } = useNotificationsFor(user?.id ?? null);
+  const [business, setBusiness] = useBusiness();
 
   const mainRef = useRef(null);
   useStackedTables(mainRef);
@@ -225,6 +216,15 @@ export default function AccountantLayout() {
         </button>
 
         <div className="header-right">
+          {/* Pest Control shows every customer except Brigade; Deep Clean shows only Brigade */}
+          <div className="acc-biz-switch" role="radiogroup" aria-label="Business">
+            {BUSINESSES.map((b) => (
+              <button key={b.key} type="button" role="radio" aria-checked={business === b.key}
+                className={business === b.key ? "on" : ""} onClick={() => setBusiness(b.key)}>
+                {b.label}
+              </button>
+            ))}
+          </div>
           <NotificationsMenu iconOnly />
           <UserMenu user={user} onLogout={logout} actions={[]} />
         </div>
