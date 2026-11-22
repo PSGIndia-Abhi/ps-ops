@@ -8,18 +8,17 @@ const { amountInWords, SELLER, BANK, TERMS, LOGO, STAMP, FONT_DIR, FONTS } = req
 //   * Bill To / Ship To from the customer's billing profile and outlet
 //   * CGST + SGST, IGST (outside Karnataka) or no tax rows (Residential, titled "Invoice")
 //   * a Round off row, any number of PO numbers (no due date is printed)
-//   * copies: one set of pages per copy, labelled "ORIGINAL FOR RECIPIENT", ...
+//   * copies: one set of pages per copy, all identical (no Original / Duplicate / Triplicate label)
 //   * PREVIEW (draft) and CANCELLED watermarks
 // Drawn only from `content` (billing_invoices.content, frozen on issue), so a re-download or
 // re-print is always identical to what was issued.
 // ---------------------------------------------------------------------------
 
-const COPY_LABELS = ["ORIGINAL FOR RECIPIENT", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR SUPPLIER", "EXTRA COPY"];
-// Any number of copies: the 4th and every later copy is an "EXTRA COPY".
+// Copies are not labelled on the invoice; the print screen calls them Copy 1, Copy 2, ...
 // 127 is only the print_copies column's limit (TINYINT).
 const MAX_COPIES = 127;
-const copyLabel = (i) => COPY_LABELS[Math.min(i, COPY_LABELS.length - 1)];
-const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), MAX_COPIES) }, (_, i) => copyLabel(i));
+const COPY_LABELS = ["Copy 1", "Copy 2", "Copy 3", "Copy 4"];
+const copyLabels = (n) => Array.from({ length: Math.min(Math.max(Number(n) || 1, 1), MAX_COPIES) }, (_, i) => `Copy ${i + 1}`);
 
 const inr2 = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const round2 = (n) => Math.round(((Number(n) || 0) + Number.EPSILON) * 100) / 100;
@@ -112,11 +111,11 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
 
   let shy = y + 6;
   const shipW = c2 - c1 - PAD * 2;
-  // Group based invoices (hide_ship_to) have no middle column. Otherwise, no outlet chosen: show the
-  // Bill To customer's name and address here instead.
+  // Group based invoices (hide_ship_to) have no middle column. Otherwise, no outlet chosen: show only
+  // the billing address (as typed in the customer's profile) here - no name, no state.
   const shipTo = noShip ? [] : (content.ship_to || []).length
     ? content.ship_to
-    : [{ name: billTo.name || "", addresses: [...(billTo.lines || []), ...(billTo.state ? [`State: ${billTo.state}`] : [])] }];
+    : [{ name: "", addresses: billTo.lines || [] }];
   for (const entry of termite ? [] : shipTo) {
     if (entry.name) {
       font("B", 8).text(entry.name, c1 + PAD, shy, { width: shipW });
@@ -362,7 +361,7 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
  *   copies  number of copies (1-4), each a separate set of pages with its label; 1 copy prints no label
  *   preview PREVIEW watermark (draft)     cancelled  CANCELLED watermark
  */
-function renderBillingInvoicePdf(content, stream, { copies = 1, preview = false, cancelled = false, labelSingle = false } = {}) {
+function renderBillingInvoicePdf(content, stream, { copies = 1, preview = false, cancelled = false } = {}) {
   const doc = new PDFDocument({ size: "A4", margin: 0, info: { Title: `${content.title || "Tax Invoice"} ${content.invoice_number || ""}`.trim() } });
   for (const [name, file] of Object.entries(FONTS)) doc.registerFont(name, path.join(FONT_DIR, file));
   doc.pipe(stream);
@@ -370,7 +369,8 @@ function renderBillingInvoicePdf(content, stream, { copies = 1, preview = false,
   const watermarkText = preview ? "PREVIEW" : cancelled ? "CANCELLED" : "";
   for (let i = 0; i < count; i += 1) {
     if (i > 0) doc.addPage();
-    drawCopy(doc, content, { label: count > 1 || labelSingle ? copyLabel(i) : "", watermarkText });
+    // No "ORIGINAL / DUPLICATE / TRIPLICATE" label on any copy: every copy prints the same.
+    drawCopy(doc, content, { label: "", watermarkText });
   }
   doc.end();
 }
@@ -389,7 +389,7 @@ function renderBillingInvoicesPdf(items, stream, { title = "Invoices" } = {}) {
     for (let i = 0; i < count; i += 1) {
       if (!first) doc.addPage();
       first = false;
-      drawCopy(doc, it.content, { label: count > 1 ? copyLabel(i) : "", watermarkText: it.cancelled ? "CANCELLED" : "" });
+      drawCopy(doc, it.content, { label: "", watermarkText: it.cancelled ? "CANCELLED" : "" });
     }
   }
   doc.end();
