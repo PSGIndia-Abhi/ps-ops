@@ -5,7 +5,7 @@ import { LuArrowRight, LuBuilding2, LuNetwork } from "react-icons/lu";
 import { EmptyRow } from "../accountant/ui";
 import { qs, useBilling, useCustomerOptions } from "./billingApi";
 import { dmy, thisMonth, initials } from "./format";
-import { Kpi, Modal, Msg, StatusBadge, TypeBadge } from "./ui";
+import { Kpi, Modal, Msg, StatusBadge, TypeBadge, BackButton } from "./ui";
 import useDebounced from "./useDebounced";
 import CustomerFilter from "./CustomerFilter";
 
@@ -80,7 +80,7 @@ export default function Contracts() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Contracts &amp; Price Lists</div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Contracts &amp; Price Lists</div></div>
           <h1 className="ac-title">Contracts &amp; Price Lists</h1>
           <p className="ac-sub">How each customer is billed: AMC, one-time, termite or chemical, the frequency, PO and the price of every service.</p>
         </div>

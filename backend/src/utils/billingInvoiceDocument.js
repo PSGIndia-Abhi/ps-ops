@@ -182,7 +182,9 @@ function drawCopy(doc, content, { label = "", watermarkText = "" } = {}) {
   let tableTop = y;
   y = itemHeader(y);
 
-  const lines = content.lines || [];
+  // A line with quantity 0 (nothing done, e.g. an outlet with no completed services) is not printed;
+  // it adds nothing to the total. The # column numbers only the printed lines.
+  const lines = (content.lines || []).filter((l) => !(Number(l.qty) === 0 && Number(l.amount) === 0));
   let minBodyEnd = y + 160; // a short invoice keeps some empty table body on its first page only
   const qtyText = (q) => (Number.isInteger(Number(q)) ? String(Number(q)) : String(Number(q)));
   // Lines fill each page; only the totals block moves to the next page when it does not fit.

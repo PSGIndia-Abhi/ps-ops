@@ -4,7 +4,7 @@ import { FiPaperclip, FiUploadCloud, FiX } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, billingUpload, openPdf, qs, useBilling } from "./billingApi";
 import { amount, dmy, rupees, rupeesShort } from "./format";
-import { Field, Kpi, Modal, Msg, StatusBadge } from "./ui";
+import { Field, Kpi, Modal, Msg, StatusBadge, BackButton } from "./ui";
 import useDebounced from "./useDebounced";
 
 // Purchase Orders: standard POs, Open POs (no expiry) and advance POs (Termite: an advance the
@@ -45,7 +45,7 @@ export default function PurchaseOrders() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>← Masters</button> / Purchase Orders</div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Purchase Orders</div></div>
           <h1 className="ac-title">Purchase Orders</h1>
           <p className="ac-sub">Customer POs, expiry tracking and Termite advances.</p>
         </div>

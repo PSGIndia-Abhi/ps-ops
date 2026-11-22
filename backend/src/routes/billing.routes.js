@@ -118,6 +118,7 @@ router.get("/payments", can(P.MANAGE_BILLING_MASTERS), pos.advanceCandidates);
 
 // Bill Run and invoices (fixed paths before /invoices/:id)
 router.get("/due", can(P.VIEW_BILLING), invoices.due);
+router.get("/runs/preview", can(P.GENERATE_INVOICE), invoices.runPreview);
 router.post("/runs", can(P.GENERATE_INVOICE), invoices.run);
 router.get("/invoices", can(P.VIEW_BILLING), invoices.list);
 router.post("/invoices/issue", can(P.ISSUE_INVOICE), invoices.issue);

@@ -133,7 +133,8 @@ export default function BillingLayout() {
   if (me.ready && !allowed) return <Navigate to={BILLING_HOME} replace />;
 
   const nav = navFor(me.can, drafts);
-  const current = MENU_OF[section] || section;
+  // An SOS opened from the Bill Run (?from=run) keeps the Bill Run tab lit.
+  const current = section === "sos" && new URLSearchParams(location.search).get("from") === "run" ? "run" : MENU_OF[section] || section;
 
   function go(path) {
     setMenuOpen(false);

@@ -124,6 +124,7 @@ import { FEEDBACK_HOME } from "./pages/feedback/access";
 import BillingLayout from "./pages/billing/BillingLayout";
 import BillingHome from "./pages/billing/BillingHome";
 import BillingBillRun from "./pages/billing/BillRun";
+import BillingBeforeGenerate from "./pages/billing/BeforeGenerate";
 import BillingDraftInvoices from "./pages/billing/DraftInvoices";
 import BillingDraftEditor from "./pages/billing/DraftEditor";
 import BillingIssuedInvoices from "./pages/billing/IssuedInvoices";
@@ -472,6 +473,7 @@ const router = createBrowserRouter([
       // Old Service Tracker / Service Plans pages: replaced by the monthly SOS.
       { path: "tracker", element: <Navigate to="/billing/sos" replace /> },
       { path: "run", element: <BillingBillRun /> },
+      { path: "run/generate", element: <BillingBeforeGenerate /> },
       { path: "drafts", element: <BillingDraftInvoices /> },
       // Generate Invoice (manual): an extra bill from the contract's prices, issued at once.
       { path: "generate", element: <BillingManualInvoice /> },

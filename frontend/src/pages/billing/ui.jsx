@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
+import { FiArrowLeft, FiDroplet, FiRepeat, FiShield, FiZap } from "react-icons/fi";
 import { typeLabel } from "./format";
 
 // Small shared pieces for the Billing screens.
@@ -153,5 +154,15 @@ export function Bar({ done, planned, status }) {
     <div className={`bl-bar ${color}`}>
       <i style={{ width: `${status === "EXTRA" ? 100 : pct}%` }} />
     </div>
+  );
+}
+
+/** Back arrow at the top of a page (same square button as the SOS page): goes to `to`. */
+export function BackButton({ to, label }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" className="sos-back bl-back" onClick={() => navigate(to)} aria-label={`Back to ${label}`} title={`Back to ${label}`}>
+      <FiArrowLeft />
+    </button>
   );
 }
