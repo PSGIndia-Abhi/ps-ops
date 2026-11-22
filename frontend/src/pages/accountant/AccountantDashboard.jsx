@@ -444,7 +444,7 @@ export default function AccountantDashboard() {
             <button type="button" className="ac-link" onClick={() => navigate("/accountant/payments/customer-outstanding")}>{viewAllLabel(topOutstandingAll)}</button>
           </div>
           <div className="ac-table-wrap">
-            <table className="ac-table">
+            <table className="ac-table ac-stack">
               <thead>
                 <tr><th>Customer</th><th className="ac-num">Total Invoiced</th><th className="ac-num">Paid</th><th className="ac-num">Outstanding</th><th className="ac-num">Days Overdue</th></tr>
               </thead>
@@ -467,7 +467,7 @@ export default function AccountantDashboard() {
             <button type="button" className="ac-link" onClick={() => navigate("/accountant/payments/list")}>{viewAllLabel(recentPaymentsAll)}</button>
           </div>
           <div className="ac-table-wrap">
-            <table className="ac-table">
+            <table className="ac-table ac-stack">
               <thead>
                 <tr><th>Date</th><th>Customer</th><th>Payment No</th><th className="ac-num">Amount</th><th>Mode</th></tr>
               </thead>

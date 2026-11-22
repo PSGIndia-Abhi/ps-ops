@@ -12,6 +12,7 @@ import {
   FiCheckSquare,
   FiChevronDown,
   FiClipboard,
+  FiFileText,
   FiGrid,
   FiList,
   FiLogOut,
@@ -28,6 +29,7 @@ import {
 import { ACCOUNTANT_PANEL_ROLES, LEAD_MANAGER_ROLES, LEAD_ROLES, TASKPRO_HOME } from "./access";
 import { FEEDBACK_ROLE } from "./Feedback";
 import { FEEDBACK_HOME } from "../feedback/access";
+import { BILLING_HOME, canOpenBilling } from "../billing/access";
 import { TICKET_PERMISSIONS, useFeedbackPermissions, useFeedbackSwitchCount, useFeedbackTicketCount } from "../feedback/useHasFeedbackAccess";
 import { useUnseenCounts } from "../feedback/unseenCounts";
 import NewTaskModal from "./NewTaskModal";
@@ -105,6 +107,10 @@ function TaskProShell() {
   // "Tickets" here as well.
   const { permissions: feedbackPerms, ticketsOnly } = useFeedbackPermissions();
   const hasFeedback = feedbackPerms.length > 0 && !ticketsOnly;
+  // The Accounts department works feedback tickets too: the "Customer Feedback" switch shows for them
+  // even when they only have ticket permissions (the desk opens on their tickets).
+  const ACCOUNTS_ROLES = ["Accounts Head", "Accounts Executive"];
+  const showFeedbackLink = hasFeedback || (feedbackPerms.length > 0 && ACCOUNTS_ROLES.includes(localStorage.getItem("role")));
   const showTickets = feedbackPerms.some((p) => TICKET_PERMISSIONS.includes(p));
   const navigate = useNavigate();
   const location = useLocation();
@@ -282,8 +288,15 @@ function TaskProShell() {
               <span className="tp-nav-label">Accountant Panel</span>
             </button>
           )}
+          {/* Accounts Head / Accounts Executive (Billing) and the Service Coordinator (Service Plans). */}
+          {canOpenBilling(localStorage.getItem("role")) && (
+            <button type="button" className="tp-nav-item" onClick={() => navigate(BILLING_HOME)} title={collapsed ? "Billing" : undefined}>
+              <FiFileText className="tp-nav-icon" />
+              <span className="tp-nav-label">{localStorage.getItem("role") === "Service Coordinator" ? "Service Plans" : "Billing"}</span>
+            </button>
+          )}
           {/* Roles that admin gave a Customer Feedback permission (e.g. Operations Manager) open the desk here. */}
-          {hasFeedback && (
+          {showFeedbackLink && (
             <button
               type="button"
               className="tp-nav-item"

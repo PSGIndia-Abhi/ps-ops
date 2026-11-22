@@ -46,7 +46,7 @@ const BANK = [
 ];
 
 const TERMS = [
-  "All Payments should be made in the name of Bestserve pest management Pvt ltd.",
+  "All Payments should be made in the name of BESTSERVE PEST MANAGEMENT PVT LTD.",
   '"Thanks for your Business. As we are raise the invoice after providing the service we request you to clear the payment Immediately"',
 ];
 
@@ -399,4 +399,6 @@ function renderInvoicePdf(content, stream, { preview = false } = {}) {
   doc.end();
 }
 
-module.exports = { renderInvoicePdf, amountInWords, taxFor, round2 };
+// SELLER, BANK, TERMS and the asset paths are also used by the Invoice Generation PDF
+// (utils/billingInvoiceDocument.js), so both invoices print the same company details.
+module.exports = { renderInvoicePdf, amountInWords, taxFor, round2, SELLER, BANK, TERMS, LOGO, STAMP, FONT_DIR, FONTS };

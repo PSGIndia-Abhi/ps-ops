@@ -73,8 +73,25 @@ const sendInviteEmail = async ({ toEmail, name, inviteLink }) => {
   }
 };
 
+// ---------------- BILLING INVOICE ----------------
+// An issued invoice emailed to the customer with its PDF attached (Invoice Generation ->
+// Share). Unlike the emails above it throws on failure, so the caller can record it as FAILED.
+// The sender name can be set with BILLING_MAIL_FROM_NAME (default "BestServe Accounts").
+const sendBillingInvoiceEmail = async ({ to = [], cc = [], subject, text, attachments = [] }) => {
+  const fromName = process.env.BILLING_MAIL_FROM_NAME || "BestServe Accounts";
+  await transporter.sendMail({
+    from: `"${fromName}" <${process.env.SMTP_USER}>`,
+    to: to.join(","),
+    cc: cc.length ? cc.join(",") : undefined,
+    subject,
+    text,
+    attachments,
+  });
+};
+
 module.exports = {
   sendOTPEmail,
   sendTicketCreatedEmail,
   sendInviteEmail,
+  sendBillingInvoiceEmail,
 };

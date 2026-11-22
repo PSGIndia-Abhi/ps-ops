@@ -72,6 +72,9 @@ const feedbackPublicRoutes = require("./src/routes/feedback.public.routes");
 const clientAccountsRoutes = require("./src/routes/client-accounts.routes");
 const clientPortalRoutes = require("./src/routes/client-portal.routes");
 const serviceRequestsRoutes = require("./src/routes/service-requests.routes");
+const billingRoutes = require("./src/routes/billing.routes");
+const billingPublicRoutes = require("./src/routes/billing.public.routes");
+const { startBillingDailyCron } = require("./src/jobs/billingDaily.cron");
 const { startWorkTaskScheduler } = require("./src/utils/workTaskRecurrence");
 const { connectRedis } = require("./src/utils/redis");
 
@@ -164,6 +167,9 @@ app.use("/api/helpdesk", helpdeskRoutes);
 app.use("/api/client-accounts", clientAccountsRoutes);
 app.use("/api/client-portal", clientPortalRoutes);
 app.use("/api/service-requests", serviceRequestsRoutes);
+// Invoice Generation (Billing): service plans, tracker, contracts, POs, bill run, invoices, share.
+app.use("/api/billing", billingRoutes);
+app.use("/api/public/billing", billingPublicRoutes); // shared invoice link (no login, token in the link)
 
 
 
@@ -187,6 +193,7 @@ const PORT = process.env.PORT || 3000;
     startUserActivityCleanupCron();
     startAuditQueueCron();
     startFeedbackCron();
+    startBillingDailyCron();
     startWorkTaskScheduler(pool);
   } catch (err) {
     console.error('MySQL connection failed:', err.message);

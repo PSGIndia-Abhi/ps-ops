@@ -176,7 +176,7 @@ export default function TdsSettings() {
 
       <div className="ac-card">
         <div className="ac-table-wrap">
-          <table className="ac-table">
+          <table className="ac-table ac-stack">
             <thead><tr><th>Customer</th><th>TDS Applicable</th><th>TDS On</th><th className="ac-num">TDS Rate</th><th className="ac-num">Pending TDS</th><th /></tr></thead>
             <tbody>
               {pageRows.length ? pageRows.map((g) => {

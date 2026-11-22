@@ -140,3 +140,44 @@
 .acc-square .notifications-mark-all {
   border-radius: 0;
 }
+
+/* ---------- Responsive: Accountant Panel + Billing (phones 360px up to wide screens) ----------
+   Scoped to .acc-square (both layouts) so the other panels are not affected. */
+
+/* No bottom tab bar in these panels, so no need for the 150px gap under the page. */
+.acc-square .main-content { padding-bottom: 32px; }
+
+/* Small laptops / tablets in landscape: a slimmer menu leaves more room for the tables. */
+@media (max-width: 1100px) {
+  .acc-square .sidebar { width: 220px; }
+}
+
+@media (max-width: 640px) {
+  /* Header: logo, tag, bell and profile only (the long title does not fit). */
+  .acc-square .app-header { padding: 0 12px; gap: 8px; }
+  .acc-square .header-left { gap: 8px; min-width: 0; }
+  .acc-square .header-title { display: none; }
+  .acc-square .header-right { gap: 8px; }
+
+  /* Page header: the action buttons take the full width and share it. */
+  .acc-square .ac-head > .ac-actions { width: 100%; }
+  .acc-square .ac-head > .ac-actions > * { flex: 1 1 auto; justify-content: center; }
+
+  /* Empty placeholder cells in the filter grids would leave gaps once the filters stack. */
+  .acc-square :is(.ac-filters, .ac-filters-5, .ac-filters-6) > div:empty { display: none; }
+
+  /* 16px text in form boxes stops iPhones zooming the page in when a box is tapped. */
+  .acc-square :is(.ac-input, .ac-select, .ac-textarea, .bl-cell-input) { font-size: 16px; }
+
+  /* Pill filters scroll sideways instead of running off the screen. */
+  .acc-square .ac-pills { max-width: 100%; overflow-x: auto; }
+  .acc-square .ac-pill { white-space: nowrap; padding: 7px 12px; }
+
+  .acc-square .ac-card { padding: 14px 12px; }
+  .acc-square .ac-card-head { flex-wrap: wrap; gap: 8px; }
+  .acc-square .ac-title { font-size: 20px; }
+}
+
+@media (max-width: 380px) {
+  .acc-square .logo { height: 28px; }
+}

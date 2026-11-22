@@ -1,0 +1,32 @@
+// Invoice delivery (print copies, email) form helpers - used by InvoiceDelivery.jsx and New Contract.
+
+/** The form from GET /customer-profiles/:companyId. */
+export function deliveryFrom(data) {
+  const s = data?.settings || {};
+  return {
+    print_copies: s.print_copies || 1,
+    invoice_emails: (s.invoice_emails || []).join(", "),
+    auto_email: Boolean(s.auto_email),
+    bill_by_day: s.bill_by_day || "",
+    outlets: (data?.outlets || []).map((o) => ({ site_id: o.site_id, print_copies: o.print_copies || s.print_copies || 1, emails: (o.emails || []).join(", ") })),
+  };
+}
+
+/** The body for PUT /customer-profiles/:companyId/settings. */
+export function deliveryBody(form) {
+  return {
+    print_copies: Number(form.print_copies),
+    invoice_emails: form.invoice_emails,
+    auto_email: form.auto_email,
+    bill_by_day: form.bill_by_day ? Number(form.bill_by_day) : null,
+    outlets: form.outlets.map((o) => ({ site_id: o.site_id, print_copies: Number(o.print_copies), emails: o.emails })),
+  };
+}
+
+/** A quick check before saving (the server checks again). Returns a message or "". */
+export function deliveryProblem(form) {
+  if (form.auto_email && !form.invoice_emails.trim() && !form.outlets.some((o) => o.emails.trim())) {
+    return "Add at least one invoice email, or untick \"Email invoices automatically\".";
+  }
+  return "";
+}

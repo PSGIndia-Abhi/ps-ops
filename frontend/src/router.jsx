@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -122,6 +123,28 @@ import FeedbackTemplatesSettings from "./pages/feedback/TemplatesSettings";
 import PublicFeedbackForm from "./pages/feedback/PublicFeedbackForm";
 import FeedbackGate from "./pages/feedback/FeedbackGate";
 import { FEEDBACK_HOME } from "./pages/feedback/access";
+// Billing (Invoice Generation) — Accounts department and Service Coordinator, see pages/billing/
+// Loaded on demand: the billing pages are a separate download, fetched only when /billing is opened.
+const BillingLayout = lazy(() => import("./pages/billing/BillingLayout"));
+const BillingHome = lazy(() => import("./pages/billing/BillingHome"));
+const BillingBillRun = lazy(() => import("./pages/billing/BillRun"));
+const BillingBeforeGenerate = lazy(() => import("./pages/billing/BeforeGenerate"));
+const BillingDraftInvoices = lazy(() => import("./pages/billing/DraftInvoices"));
+const BillingDraftEditor = lazy(() => import("./pages/billing/DraftEditor"));
+const BillingIssuedInvoices = lazy(() => import("./pages/billing/IssuedInvoices"));
+const BillingInvoiceView = lazy(() => import("./pages/billing/InvoiceView"));
+const BillingSosList = lazy(() => import("./pages/billing/SosList"));
+const BillingSosEntry = lazy(() => import("./pages/billing/SosEntry"));
+const BillingAccountsDashboard = lazy(() => import("./pages/billing/AccountsDashboard"));
+const BillingContracts = lazy(() => import("./pages/billing/Contracts"));
+const BillingContractForm = lazy(() => import("./pages/billing/ContractForm"));
+const BillingNewContract = lazy(() => import("./pages/billing/NewContract"));
+const BillingManualInvoice = lazy(() => import("./pages/billing/ManualInvoice"));
+const BillingInvoiceDescriptions = lazy(() => import("./pages/billing/InvoiceDescriptions"));
+const BillingFrequencies = lazy(() => import("./pages/billing/BillingFrequencies"));
+const BillingPurchaseOrders = lazy(() => import("./pages/billing/PurchaseOrders"));
+const BillingMasters = lazy(() => import("./pages/billing/MastersPage"));
+import { BILLING_HOME, BILLING_ROLES } from "./pages/billing/access";
 
 if (typeof window !== "undefined") {
   window._0xA13H1 = () => {
@@ -432,6 +455,54 @@ const router = createBrowserRouter([
           { path: ":id", element: <FeedbackTicketPage /> },
         ],
       },
+    ],
+  },
+
+  // BILLING — Invoice Generation: service plans and tracker, bill run, drafts, issued invoices,
+  // contracts, POs, billing customers. The menu follows GET /api/billing/me (the API checks every call).
+  // -------------------------
+  {
+    path: BILLING_HOME,
+    element: (
+      <ProtectedRoute allowedRoles={BILLING_ROLES}>
+        <Suspense fallback={null}>
+          <BillingLayout />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <BillingHome /> },
+      // Service Coordinator: the monthly SOS (Accounts read it too). The old coordinator dashboard is gone.
+      { path: "coordinator", element: <Navigate to="/billing/sos" replace /> },
+      // Accounts: the billing dashboard (one-click generate / issue / download, late alerts).
+      { path: "dashboard", element: <BillingAccountsDashboard /> },
+      { path: "sos", element: <BillingSosList /> },
+      { path: "sos/:companyId", element: <BillingSosEntry /> },
+      // Old Service Tracker / Service Plans pages: replaced by the monthly SOS.
+      { path: "tracker", element: <Navigate to="/billing/sos" replace /> },
+      { path: "run", element: <BillingBillRun /> },
+      { path: "run/generate", element: <BillingBeforeGenerate /> },
+      { path: "drafts", element: <BillingDraftInvoices /> },
+      // Generate Invoice (manual): an extra bill from the contract's prices, issued at once.
+      { path: "generate", element: <BillingManualInvoice /> },
+      { path: "drafts/manual", element: <Navigate to="/billing/generate" replace /> },
+      { path: "drafts/:id", element: <BillingDraftEditor /> },
+      { path: "invoices", element: <BillingIssuedInvoices /> },
+      // One issued invoice: details, money (payments, TDS), prints / shares, actions.
+      { path: "invoices/:id", element: <BillingInvoiceView /> },
+      { path: "plans", element: <Navigate to="/billing/sos" replace /> },
+      { path: "contracts", element: <BillingContracts /> },
+      // A new contract is made step by step (customer, terms, PO, services, review); an existing one is edited on ContractForm.
+      { path: "contracts/new", element: <BillingNewContract /> },
+      { path: "contracts/:id", element: <BillingContractForm /> },
+      { path: "pos", element: <BillingPurchaseOrders /> },
+      // The old Customers pages: Bill To, print copies and email now live on the contract (Masters > Contracts).
+      { path: "customers", element: <Navigate to="/billing/contracts" replace /> },
+      { path: "customers/:companyId", element: <Navigate to="/billing/contracts" replace /> },
+      // Masters: one page of cards (Contracts, POs, Invoice Descriptions, Billing Frequencies).
+      { path: "masters", element: <BillingMasters /> },
+      { path: "descriptions", element: <BillingInvoiceDescriptions /> },
+      { path: "frequencies", element: <BillingFrequencies /> },
     ],
   },
 

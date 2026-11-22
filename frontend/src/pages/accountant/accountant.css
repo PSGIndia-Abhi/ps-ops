@@ -937,6 +937,10 @@ a.ac-contact-call:hover { background: #dcfce7; }
 
 }
 
+/* Expanded rows (Payment List, Customer Outstanding): the inner invoice table scrolls inside its
+   box on small screens instead of pushing the page wider. */
+.ac-expand-box { overflow-x: auto; }
+
 /* ---- TDS basis: Taxable TDS / Invoice TDS (TDS Settings) ---- */
 .ac-badge.tds-taxable { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
 .ac-badge.tds-invoice { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
