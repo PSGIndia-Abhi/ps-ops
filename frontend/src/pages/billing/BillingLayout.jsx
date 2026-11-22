@@ -36,7 +36,6 @@ import "./billing.css";
 // A list = any one of them.
 const PAGE_PERMISSION = {
   dashboard: "VIEW_BILLING",
-  coordinator: "VIEW_SERVICE_TRACKER",
   sos: ["VIEW_SERVICE_TRACKER", "VIEW_BILLING"],
   run: "VIEW_BILLING",
   generate: "GENERATE_INVOICE",
@@ -80,14 +79,12 @@ function navFor(can, drafts) {
       }
     );
   }
-  // The Service Coordinator: a dashboard and the monthly SOS (Accounts reach the SOS from Billing).
-  if (coordinator) {
+  // The Service Coordinator: the monthly SOS only, no dashboard (Accounts reach the SOS from Billing).
+  if (coordinator && !accounts) {
     sections.push({
-      heading: "Service Coordinator",
-      items: [
-        { key: "coordinator", label: "Dashboard", icon: FiGrid },
-        ...(accounts ? [] : [{ key: "sos", label: "Monthly SOS", icon: FiCheckSquare }]),
-      ],
+      key: "coordinator",
+      heading: "", // no heading: just the Monthly SOS item
+      items: [{ key: "sos", label: "Monthly SOS", icon: FiCheckSquare }],
     });
   }
   return sections;
@@ -153,8 +150,8 @@ export default function BillingLayout() {
   const navEl = (
     <nav className="acc-nav bl-nav">
       {nav.map((sec) => (
-        <div key={sec.heading} className="bl-nav-sec">
-          <div className="bl-nav-heading">{sec.heading}</div>
+        <div key={sec.key || sec.heading} className="bl-nav-sec">
+          {sec.heading && <div className="bl-nav-heading">{sec.heading}</div>}
           {sec.items.map((item) => {
             const Icon = item.icon;
             const active = current === item.key;
