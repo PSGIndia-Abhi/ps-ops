@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import { FiPaperclip, FiUploadCloud, FiX } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, billingUpload, openPdf, qs, useBilling } from "./billingApi";
@@ -29,7 +29,6 @@ function filterParams(f) {
 
 export default function PurchaseOrders() {
   const { me } = useOutletContext();
-  const navigate = useNavigate();
   const canEdit = me.can("MANAGE_BILLING_MASTERS");
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -45,9 +44,8 @@ export default function PurchaseOrders() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Purchase Orders</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /></div>
           <h1 className="ac-title">Purchase Orders</h1>
-          <p className="ac-sub">Customer POs, expiry tracking and Termite advances.</p>
         </div>
         {canEdit && <div className="ac-actions"><button type="button" className="ac-btn ac-btn-primary" onClick={() => setEditing({})}>+ Add PO</button></div>}
       </div>

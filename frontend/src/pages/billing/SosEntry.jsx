@@ -5,7 +5,7 @@ import {
   FiArrowDown, FiLayers, FiLock, FiMessageSquare, FiMinus, FiMinusCircle, FiPlus, FiPlusCircle, FiRotateCcw, FiSend, FiUsers, FiX,
 } from "react-icons/fi";
 import { billingPost, billingPut, qs, useBilling } from "./billingApi";
-import { amount, dmy, monthLabel, periodLabel, rupees, thisMonth } from "./format";
+import { dmy, monthLabel, periodLabel, rupees, thisMonth } from "./format";
 import { LuClipboardCheck, LuClipboardList, LuListPlus, LuScale, LuTrendingDown, LuTrendingUp } from "react-icons/lu";
 import { ComboInput, CountUp, Modal, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";

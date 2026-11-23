@@ -80,9 +80,8 @@ export default function Contracts() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Contracts &amp; Price Lists</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /></div>
           <h1 className="ac-title">Contracts &amp; Price Lists</h1>
-          <p className="ac-sub">How each customer is billed: AMC, one-time, termite or chemical, the frequency, PO and the price of every service.</p>
         </div>
         {me.can("MANAGE_BILLING_MASTERS") && (
           <div className="ac-actions">

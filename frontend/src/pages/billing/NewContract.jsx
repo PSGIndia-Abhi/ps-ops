@@ -807,7 +807,7 @@ export default function NewContract() {
     <div className="ac-page nc-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / New</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /></div>
           <h1 className="ac-title">New Contract</h1>
         </div>
       </div>

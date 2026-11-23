@@ -251,7 +251,7 @@ export default function ContractForm() {
 
   return (
     <div className="ac-page ct-page">
-      <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /><div className="ac-crumb" style={{ marginBottom: 8 }}><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / <button type="button" onClick={() => navigate("/billing/contracts")}>Contracts</button> / {isNew ? "New" : contract.contract_code}</div></div>
+      <div className="bl-backrow"><BackButton to="/billing/contracts" label="Contracts" /></div>
 
       <div className="ct-hero">
         <span className="ct-avatar">{initials(customerName)}</span>
