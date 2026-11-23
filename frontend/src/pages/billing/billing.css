@@ -1955,3 +1955,19 @@
 .bl-combo.sos-combo .bl-combo-input { height: 34px; font-size: 13.5px; font-weight: 600; }
 /* Termite extra: the unit (sq. m / sq. ft) */
 .sos-unitsel { height: 36px; padding: 0 8px; min-width: 0; width: 100%; font-size: 13px; }
+
+/* New contract › services: the month amount can be typed (it sets the rate per service). */
+.nc-month-input { text-align: right; font-weight: 700; color: #0f172a; }
+
+/* Billing details: "Service Offered To" - a field beside the Billing address; its label carries the tick box. */
+.bl-svcto-label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.bl-svcto-label .bl-cb { margin: 0; }
+.bl-svcto textarea:disabled { background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
+
+/* New contract › review: the billing and Service Offered To addresses under Bill To. */
+.nc-rv-line.nc-rv-addr { align-items: flex-start; }
+.nc-rv-line.nc-rv-addr > svg { margin-top: 3px; }
+.nc-rv-line.nc-rv-addr > span { display: block; width: 100%; min-width: 0; font-size: 13px; color: #334155; line-height: 1.45; }
+/* One line only, ending in "..." when longer (the full address shows on hover), so the cards keep their size. */
+.nc-rv-clamp { display: block; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nc-rv-line.nc-rv-addr small { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #94a3b8; margin-bottom: 1px; }

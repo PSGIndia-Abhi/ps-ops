@@ -12,7 +12,7 @@ import BillingProfileCard from "./BillingProfileCard";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import InvoiceDelivery from "./InvoiceDelivery";
-import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
+import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, isOnce, monthLabel, nextBilling, rupees, shortDate, today, unitOf } from "./format";
 import { Field, Modal, Msg, StatusBadge, BackButton } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { PageSkeleton } from "./Skeletons";
@@ -85,7 +85,8 @@ export default function ContractForm() {
     return {
       company_id: form.company_id,
       billing_type: form.billing_type,
-      frequency_months: form.billing_type === "ONE_TIME" ? null : Number(form.frequency_months) || 1,
+      // One-time, and Termite billed once (no frequency), have none.
+      frequency_months: form.billing_type === "ONE_TIME" || isOnce(form) ? null : Number(form.frequency_months) || 1,
       frequency_unit: unitOf(form),
       cycle_start_day: form.cycle_start_day || undefined,
       bill_timing: form.bill_timing,
@@ -119,7 +120,7 @@ export default function ContractForm() {
       setMsg({ error: `GST rate must be one of ${GST_RATES.join(", ")} %.` });
       return;
     }
-    if (form.billing_type !== "ONE_TIME" && !form.frequency_months) {
+    if (!isOnce(form) && !form.frequency_months) {
       setMsg({ error: "Choose the billing frequency." });
       return;
     }
@@ -212,6 +213,9 @@ export default function ContractForm() {
   if (!isNew && !contract) return error ? <Msg error={error} /> : <PageSkeleton />;
 
   const typeIs = (t) => form.billing_type === t;
+  // Termite billed once (new Termite contracts): no frequency, bill date or term dates. Older Termite
+  // contracts with a frequency keep them.
+  const termiteOnce = typeIs("TERMITE") && isOnce(form);
   const linesShown = isNew ? newLines : contract.lines;
   const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
   const cols = 7;
@@ -285,7 +289,7 @@ export default function ContractForm() {
           <span className="ct-sum-ic"><FiCalendar /></span>
           <div>
             <span>{isNew ? "First invoice" : "Next invoice"}</span>
-            <b>{next ? `${shortDate(next.start)} – ${shortDate(next.end)}` : "—"}</b>
+            <b>{!next ? "—" : termiteOnce ? "One invoice" : next.start === next.end ? shortDate(next.start) : `${shortDate(next.start)} – ${shortDate(next.end)}`}</b>
             <small>{next ? `Bill Run ${monthLabel(next.billMonth)}${next.billMonth < thisMonthKey ? " · already due" : next.billMonth === thisMonthKey ? " · this month" : ""}` : form.status === "PAUSED" ? "Paused - not billed" : "Not billed"}</small>
           </div>
         </div>
@@ -343,8 +347,10 @@ export default function ContractForm() {
                     <button key={v} type="button" disabled={!isNew} className={typeIs(v) ? "active" : ""} aria-pressed={typeIs(v)}
                       onClick={() => {
                         set({
-                          billing_type: v, frequency_months: v === "ONE_TIME" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required,
-                          ...(v !== "TERMITE" ? { frequency_unit: "MONTH" } : {}), // daily / weekly is for Termite only
+                          billing_type: v, frequency_months: v === "ONE_TIME" || v === "TERMITE" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required,
+                          frequency_unit: "MONTH",
+                          // Termite is billed once: start = the day it is saved, no end date, billed after.
+                          ...(v === "TERMITE" ? { bill_timing: "ARREARS", start_date: today(), end_date: "" } : {}),
                         });
                         // Untouched lines follow the type (termite: per sq. m / sq. ft, as the Bill structure).
                         if (newLines.every((l2) => l2.rate === "" && l2.default_qty === "")) setNewLines(newLines.map((l2) => ({ ...mkLine(l2.site_id, v), key: l2.key })));
@@ -352,6 +358,8 @@ export default function ContractForm() {
                   ))}
                 </div>
               </Field>
+              {!termiteOnce && (
+                <>
               <Field
                 label="Billing frequency"
                 required={typeIs("AMC") || typeIs("TERMITE")}
@@ -378,6 +386,8 @@ export default function ContractForm() {
               <Field label="Term end date" hint="Leave empty for an open-ended contract">
                 <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />
               </Field>
+                </>
+              )}
               {!isNew && (
                 <Field label="Next bill from" className="bl-span2" hint={nextEditable ? "Billed in Vyapar until a date? Set the first date not billed yet." : "Follows on from the last invoice"}>
                   <input type="date" className="ac-input" value={form.next_period_start || ""} disabled={!nextEditable}

@@ -10,17 +10,19 @@ import { RowsSkeleton } from "./Skeletons";
 // contract page (Billing details). Stored on the customer's billing profile
 // (PUT /customer-profiles/:companyId/settings), so every contract of the customer uses it.
 
-// Any number of copies; 127 is only the database column's limit (TINYINT), not a business rule.
-const MAX_COPIES = 127;
-const copiesIn = (v) => (v === "" ? "" : Math.min(MAX_COPIES, Math.max(1, Math.round(Number(v)) || 1)));
-// Bill-by day: 1 to 28, so the day exists in every month (February too).
-const LAST_DAY = 28;
+// Any number of copies (65535 is only the database column's limit, SMALLINT UNSIGNED - not a business rule).
+const MAX_COPIES = 65535;
+// 0 = nothing is printed when an invoice is issued.
+const copiesIn = (v) => (v === "" ? "" : Math.min(MAX_COPIES, Math.max(0, Math.round(Number(v)) || 0)));
+// Bill-by day: 1 to 30. In a shorter month (February) a day past its end gives no late alert that
+// month (the next month still shows the invoice as late).
+const LAST_DAY = 30;
 const DEFAULT_DAY = 25;
 const dayIn = (v) => (v === "" ? "" : Math.min(LAST_DAY, Math.max(1, Math.round(Number(v)) || 1)));
 const ordinal = (d) => `${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
 
 /** The fields only: the parent holds the form and saves it. */
-export function DeliveryFields({ form, setForm, outlets = [], readOnly = false }) {
+export function DeliveryFields({ form, setForm, readOnly = false }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   // Late alert switch: on = a bill-by day is set. Kept apart from the day so clearing the box
   // while typing does not switch it off.
@@ -31,15 +33,14 @@ export function DeliveryFields({ form, setForm, outlets = [], readOnly = false }
   function toggleAlert() {
     if (alertOn) { setAlertOn(false); set({ bill_by_day: "" }); } else { setAlertOn(true); set({ bill_by_day: day || DEFAULT_DAY }); }
   }
-  const setOutlet = (siteId, patch) => setForm((f) => ({ ...f, outlets: f.outlets.map((o) => (o.site_id === siteId ? { ...o, ...patch } : o)) }));
   return (
     <div className="dl-wrap">
       <div className="bl-grid g4">
-        <Field label="Print copies" hint="Printed when an invoice is issued">
+        <Field label="Print copies" hint={Number(form.print_copies) === 0 ? "0 - not printed when an invoice is issued" : "Printed when an invoice is issued"}>
           {/* − n + : as many copies as needed (Original, Duplicate, Triplicate, then extra copies); typed or stepped */}
           <div className="bl-stp sp-stp dl-copies-stp">
-            <button type="button" disabled={readOnly || (Number(form.print_copies) || 1) <= 1} onClick={() => set({ print_copies: Math.max(1, (Number(form.print_copies) || 1) - 1) })} aria-label="Fewer copies">−</button>
-            <input type="number" min="1" value={form.print_copies ?? ""} disabled={readOnly} aria-label="Print copies"
+            <button type="button" disabled={readOnly || (Number(form.print_copies) || 0) <= 0} onClick={() => set({ print_copies: Math.max(0, (Number(form.print_copies) || 0) - 1) })} aria-label="Fewer copies">−</button>
+            <input type="number" min="0" value={form.print_copies ?? ""} disabled={readOnly} aria-label="Print copies"
               onChange={(e) => set({ print_copies: copiesIn(e.target.value) })}
               onBlur={() => { if (form.print_copies === "") set({ print_copies: 1 }); }} />
             <button type="button" disabled={readOnly || (Number(form.print_copies) || 1) >= MAX_COPIES} onClick={() => set({ print_copies: copiesIn((Number(form.print_copies) || 0) + 1) })} aria-label="More copies">+</button>
@@ -49,7 +50,7 @@ export function DeliveryFields({ form, setForm, outlets = [], readOnly = false }
           <input className="ac-input" type="text" inputMode="email" value={form.invoice_emails} disabled={readOnly} placeholder="accounts@customer.com, manager@customer.com" onChange={(e) => set({ invoice_emails: e.target.value })} />
         </Field>
         {/* Bill by: late alert switch + the day (− n +, typed or stepped). Off hides the day. */}
-        <Field label="Bill by (late alert)" hint={alertOn ? (day ? `Late alert after the ${ordinal(day)} · day 1–28` : "Type a day from 1 to 28") : "Off · no late alert"}>
+        <Field label="Bill by (late alert)" hint={alertOn ? (day ? `Late alert after the ${ordinal(day)} · day 1–30` : "Type a day from 1 to 30") : "Off · no late alert"}>
           <div className="dl-billby-line">
             <button type="button" role="switch" aria-checked={alertOn} disabled={readOnly} className={`dl-switch ${alertOn ? "on" : ""}`} onClick={toggleAlert} aria-label="Late alert if not billed by a day" />
             {alertOn && <div className="dl-cal" aria-hidden="true"><small>EVERY MONTH</small><b>{day || "–"}</b></div>}
@@ -69,35 +70,9 @@ export function DeliveryFields({ form, setForm, outlets = [], readOnly = false }
         <input type="checkbox" className="bl-cb" checked={form.auto_email} disabled={readOnly} onChange={(e) => set({ auto_email: e.target.checked })} />
         <span>
           <b>Email invoices automatically</b>
-          <small>{form.auto_email ? "Each invoice is emailed as soon as it is issued - to the outlet’s emails for per-outlet invoices, else to the addresses above." : "Off - no email is sent on issue. Invoices can still be shared by hand."}</small>
+          <small>{form.auto_email ? "Each invoice is emailed to the addresses above as soon as it is issued." : "Off - no email is sent on issue. Invoices can still be shared by hand."}</small>
         </span>
       </label>
-      {outlets.length > 0 && (
-        <details className="dl-outlets">
-          <summary>Different copies or email for an outlet? <span className="ac-sub">({outlets.length} outlet{outlets.length === 1 ? "" : "s"})</span></summary>
-          <div className="ac-table-wrap">
-            <table className="ac-table ac-stack">
-              <thead><tr><th>Outlet</th><th style={{ width: 130 }}><FiPrinter aria-hidden="true" /> Copies</th><th><FiMail aria-hidden="true" /> Email invoice to</th></tr></thead>
-              <tbody>
-                {outlets.map((o) => {
-                  const f = form.outlets.find((x) => x.site_id === o.site_id) || {};
-                  return (
-                    <tr key={o.site_id}>
-                      <td data-label="Outlet"><b>{o.name}</b>{o.address && <div className="bl-sub">{o.address}</div>}</td>
-                      <td data-label="Copies">
-                        <input type="number" min="1" className="bl-cell-input" value={f.print_copies ?? 1} disabled={readOnly}
-                          onChange={(e) => setOutlet(o.site_id, { print_copies: copiesIn(e.target.value) })}
-                          onBlur={() => { if (f.print_copies === "") setOutlet(o.site_id, { print_copies: 1 }); }} aria-label={`Print copies for ${o.name}`} />
-                      </td>
-                      <td data-label="Email"><input className="bl-cell-input" value={f.emails || ""} disabled={readOnly} placeholder="Same as above" onChange={(e) => setOutlet(o.site_id, { emails: e.target.value })} aria-label={`Email for ${o.name}`} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
     </div>
   );
 }
@@ -153,7 +128,7 @@ export default function InvoiceDelivery({ companyId, canEdit }) {
       {data && !data.profile && <div className="ac-info error"><span>Save the Bill To above first, then the print copies and email.</span></div>}
       {form && (
         <>
-          <DeliveryFields form={form} setForm={edit} outlets={data.outlets} readOnly={!canEdit || !data.profile} />
+          <DeliveryFields form={form} setForm={edit} readOnly={!canEdit || !data.profile} />
           <Msg {...msg} />
           {canEdit && data.profile && (
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>

@@ -53,12 +53,19 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone, issuedR
   const withWarnings = (checks || []).filter((c) => c.warnings.length);
   const withErrors = (checks || []).filter((c) => c.errors.length);
 
-  async function printIssued(issued) {
+  // byHand ("Print again"): invoices set to 0 copies print one copy; on issue they are not printed.
+  async function printIssued(issued, { byHand = false } = {}) {
     if (!issued?.length) return;
+    const withCopies = issued.filter((i) => Number(i.print_copies ?? 1) > 0);
+    if (!withCopies.length && !byHand) return;
     setPrinting(true);
     setPrintError("");
     try {
-      await printPdf(`/invoices/download${qs({ ids: issued.map((i) => i.id).join(","), copies: "print" })}`);
+      await printPdf(
+        withCopies.length
+          ? `/invoices/download${qs({ ids: withCopies.map((i) => i.id).join(","), copies: "print" })}`
+          : `/invoices/download${qs({ ids: issued.map((i) => i.id).join(",") })}`,
+      );
     } catch (err) {
       setPrintError(`Issued, but the print could not open (${err.message}). Use Print again.`);
     } finally {
@@ -91,6 +98,7 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone, issuedR
   }, [issuedResult]);
 
   const ok = result?.issued || [];
+  const notPrinted = ok.length > 0 && ok.every((i) => Number(i.print_copies ?? 1) === 0);
   const emailLine = (e) => {
     if (!e) return null;
     if (e.status === "SENT") return { cls: "ok", icon: <FiMail />, text: `Email sent to ${e.to.join(", ")}` };
@@ -115,7 +123,7 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone, issuedR
             <span className="is-ok-mark"><FiCheck /></span>
             <div>
               <b>{ok.length === 1 ? "Issued successfully" : `${ok.length} invoices issued successfully`}</b>
-              <span><FiPrinter aria-hidden="true" /> {printing ? "Opening the print window…" : printError ? "Print did not open - use Print again" : `Print window opened (${ok.length === 1 ? `${ok[0].print_copies || 1} cop${(ok[0].print_copies || 1) === 1 ? "y" : "ies"}` : `${ok.length} invoices`})`}</span>
+              <span><FiPrinter aria-hidden="true" /> {printing ? "Opening the print window…" : printError ? "Print did not open - use Print again" : notPrinted ? "Not printed - print copies are set to 0" : `Print window opened (${ok.length === 1 ? `${ok[0].print_copies || 1} cop${(ok[0].print_copies || 1) === 1 ? "y" : "ies"}` : `${ok.length} invoices`})`}</span>
             </div>
           </div>
         )}
@@ -173,7 +181,7 @@ export default function IssueDialog({ drafts, warnings, onClose, onDone, issuedR
         <div className="ac-actions">
           {result ? (
             <>
-              {result.issued.length > 0 && <button type="button" className="ac-btn" onClick={() => printIssued(result.issued)} disabled={printing}>{printing ? "Opening print…" : "Print again"}</button>}
+              {result.issued.length > 0 && <button type="button" className="ac-btn" onClick={() => printIssued(result.issued, { byHand: true })} disabled={printing}>{printing ? "Opening print…" : notPrinted ? "Print" : "Print again"}</button>}
               <button type="button" className="ac-btn ac-btn-primary" onClick={onClose}>Done</button>
             </>
           ) : (
