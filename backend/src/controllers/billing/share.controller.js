@@ -14,6 +14,7 @@ const { renderBillingInvoicePdf, billingInvoicePdfBuffer, copyLabels } = require
 const { sendBillingInvoiceEmail } = require("../../utils/mailer");
 const { sendPdf, pdfName } = require("./invoices.controller");
 const { recipientsFor } = require("../../services/billing/delivery.service");
+const F = require("../../services/billing/sosFiles.service");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -23,8 +24,9 @@ const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 /** The issued invoice with its frozen content (404 / 400 otherwise). */
 async function issuedInvoice(db, id, { allowCancelled = false } = {}) {
   const [[row]] = await db.query(
-    `SELECT bi.id, bi.invoice_number, bi.status, bi.total, bi.print_copies, bi.company_id, bi.site_id, bi.content,
+    `SELECT bi.id, bi.invoice_number, bi.status, bi.total, bi.print_copies, bi.company_id, bi.site_id, bi.content, bi.is_manual,
             DATE_FORMAT(bi.due_date, '%Y-%m-%d') AS due_date, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start,
+            DATE_FORMAT(bi.period_end, '%Y-%m-%d') AS period_end,
             bi.description, c.name AS customer
        FROM billing_invoices bi JOIN companies c ON c.id = bi.company_id
       WHERE bi.id = ?`,
@@ -131,7 +133,8 @@ const shareOptions = C.handle("Failed to load the share options", async (req, re
   });
 });
 
-// POST /invoices/:id/share/email { to, cc, subject, message, attach: ORIGINAL | ALL_COPIES }
+// POST /invoices/:id/share/email { to, cc, subject, message, attach: ORIGINAL | ALL_COPIES, include_sos_files? }
+// The SOS attachments of the invoice's months are attached too unless include_sos_files is false.
 const shareEmail = C.handle("Failed to email the invoice", async (req, res) => {
   const b = req.body || {};
   const inv = await issuedInvoice(pool, req.params.id);
@@ -142,15 +145,24 @@ const shareEmail = C.handle("Failed to email the invoice", async (req, res) => {
   const message = C.str(b.message, "message", { max: 5000 }) || d.message;
   const attach = C.oneOf(b.attach, "attach", ["ORIGINAL", "ALL_COPIES"], { fallback: "ORIGINAL" });
   const pdf = await billingInvoicePdfBuffer(inv.content, attach === "ALL_COPIES" ? { copies: inv.print_copies, labelSingle: true } : {});
+  // The files attached to the SOS of the invoice's months go with it (include_sos_files: false to leave them out).
+  const sosFiles = b.include_sos_files === false ? { attachments: [], count: 0, tooLarge: false } : await F.emailAttachments(pool, inv);
+  if (sosFiles.tooLarge) {
+    throw C.bad(`The SOS attachments are too large to email together (${F.mb(sosFiles.totalBytes)}, ${F.mb(F.MAX_EMAIL_BYTES)} at most). Remove some files from the SOS and try again.`);
+  }
   try {
-    await sendBillingInvoiceEmail({ to, cc, subject, text: message, attachments: [{ filename: pdfName(inv), content: pdf, contentType: "application/pdf" }] });
+    await sendBillingInvoiceEmail({
+      to, cc, subject, text: message,
+      attachments: [{ filename: pdfName(inv), content: pdf, contentType: "application/pdf" }, ...sosFiles.attachments],
+    });
   } catch (err) {
     console.error("Invoice email failed:", err.message);
     await logShare(pool, inv.id, req.user.id, { channel: "EMAIL", recipients: to, cc, subject, attach, status: "FAILED", error_message: String(err.message).slice(0, 500) });
     throw new C.HttpError(502, "The email could not be sent. Check the mail settings and try again.");
   }
-  const shareId = await logShare(pool, inv.id, req.user.id, { channel: "EMAIL", recipients: to, cc, subject, attach, status: "SENT" });
-  res.json({ share_id: shareId, channel: "EMAIL", sent_to: to.length + cc.length, sent_at: new Date().toISOString() });
+  const note = sosFiles.attachments.length ? `With ${sosFiles.attachments.length} SOS attachment${sosFiles.attachments.length === 1 ? "" : "s"}` : null;
+  const shareId = await logShare(pool, inv.id, req.user.id, { channel: "EMAIL", recipients: to, cc, subject, attach, note, status: "SENT" });
+  res.json({ share_id: shareId, channel: "EMAIL", sent_to: to.length + cc.length, sos_files: sosFiles.attachments.length, sent_at: new Date().toISOString() });
 });
 
 // POST /invoices/:id/share/whatsapp { phone, text }  -> wa.me link with a secure invoice link

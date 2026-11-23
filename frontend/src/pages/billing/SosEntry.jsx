@@ -11,6 +11,7 @@ import { CountUp, Modal, Msg } from "./ui";
 import { SOS_STATUS } from "./sosStatus";
 import { BILLING_HOME } from "./access";
 import { PageSkeleton } from "./Skeletons";
+import SosFiles from "./SosFiles";
 
 // SOS entry: one customer, one month. The services agreed in the customer's billing profile come up
 // per outlet with "assigned"; the Service Coordinator enters "completed" (filled with the assigned
@@ -459,6 +460,9 @@ export default function SosEntry() {
       ) : data.notes ? (
         <div className="sos-note"><label><FiMessageSquare /> Note for Accounts</label><div className="ac-sub">{data.notes}</div></div>
       ) : null}
+
+      {/* Optional files for Accounts: shown on the draft / issued invoice and sent with the invoice email. */}
+      {!nothingToReport && <SosFiles companyId={companyId} month={month} editable={editable} />}
 
       <Msg {...msg} />
 

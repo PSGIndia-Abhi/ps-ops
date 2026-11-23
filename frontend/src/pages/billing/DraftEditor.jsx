@@ -6,6 +6,7 @@ import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, typeLabel
 import IssueDialog from "./IssueDialog";
 import { Field, Msg, ServicesChip, BackButton } from "./ui";
 import { InvoiceSkeleton } from "./Skeletons";
+import SosFiles from "./SosFiles";
 
 // Draft invoice: header, lines (with services done against the plan and the billing basis), totals,
 // the checks before issuing, preview and issue. The lines are locked - items, rates and the billing
@@ -298,6 +299,9 @@ export default function DraftEditor() {
               </div>
             )}
           </div>
+
+          {/* Files the Service Coordinator attached to the SOS of this period (sent with the invoice email). */}
+          <SosFiles invoiceId={id} />
 
           {inv.status === "DRAFT" && (
             <div className="ac-card">
