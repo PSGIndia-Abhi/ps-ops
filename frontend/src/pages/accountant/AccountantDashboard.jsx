@@ -217,7 +217,8 @@ export default function AccountantDashboard() {
   const statusTotal = paymentStatus.reduce((sum2, p) => sum2 + p.value, 0);
 
   // The preview tables.
-  const topOutstandingAll = groupByCustomer(live, fPayments)
+  // Records that share a display name are one customer, as on Customer Outstanding.
+  const topOutstandingAll = groupByCustomer(live, fPayments, { byName: true })
     .filter((c) => c.outstanding > 0)
     .sort((a, b) => b.outstanding - a.outstanding)
     .map((c) => ({

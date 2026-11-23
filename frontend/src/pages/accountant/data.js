@@ -163,6 +163,8 @@ export const nameKey = (name) => String(name || "").trim().replace(/\s+/g, " ").
 // One row per customer with an unpaid balance, worked out from the invoices.
 // With { byName: true } records that share a display name become one row: its `id` is the name key
 // and `ids` lists the customer records in it. Otherwise `id` is the customer id and `ids` is [id].
+// `main_id` is the real customer record to act on for the row (contacts, new reminders, Record
+// Payment): the record with the oldest unpaid invoice.
 export function groupByCustomer(invoices, payments = [], { byName = false } = {}) {
   const map = new Map();
   const groupOf = new Map(); // customer id -> row
@@ -172,7 +174,7 @@ export function groupByCustomer(invoices, payments = [], { byName = false } = {}
     let c = map.get(key);
     if (!c) {
       c = {
-        id: key, ids: [], name: String(inv.customer_name || "").trim(), code: inv.customer_code || "", phone: "",
+        id: key, ids: [], main_id: inv.customer_id, name: String(inv.customer_name || "").trim(), code: inv.customer_code || "", phone: "",
         total_invoiced: 0, total_paid: 0, outstanding: 0, overdue_amount: 0, oldest_due: "",
         unpaid_count: 0, invoice_count: 0, overdue_count: 0, last_payment_date: "", invoices: [],
       };
@@ -189,7 +191,10 @@ export function groupByCustomer(invoices, payments = [], { byName = false } = {}
       c.outstanding += inv.pending_amount;
       c.unpaid_count += 1;
       c.invoices.push({ id: inv.id, invoice_number: inv.invoice_number, due_date: inv.due_date, pending_amount: inv.pending_amount });
-      if (inv.due_date && (!c.oldest_due || inv.due_date < c.oldest_due)) c.oldest_due = inv.due_date;
+      if (inv.due_date && (!c.oldest_due || inv.due_date < c.oldest_due)) {
+        c.oldest_due = inv.due_date;
+        c.main_id = inv.customer_id;
+      }
       if ((daysOverdue(inv.due_date) ?? -1) > 0) {
         c.overdue_amount += inv.pending_amount;
         c.overdue_count += 1;

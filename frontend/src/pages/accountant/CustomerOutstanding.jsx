@@ -54,16 +54,23 @@ export default function CustomerOutstanding() {
   const [minAmount, setMinAmount] = useState("");
   const [open, setOpen] = useState(null); // id of the expanded row
 
-  const customers = useMemo(() => groupByCustomer(invoices, payments), [invoices, payments]);
+  // Customer records that share a display name are one row (same as Record Payment), e.g. one
+  // record per outlet or floor. c.ids lists the records in the row.
+  const customers = useMemo(() => groupByCustomer(invoices, payments, { byName: true }), [invoices, payments]);
   const withDues = useMemo(() => customers.filter((c) => c.outstanding > 0), [customers]);
-  // Each customer's next open follow-up (their own, or one on any of their invoices), soonest first.
-  const nextFollowUp = useMemo(() => {
+  // Each customer record's next open follow-up (their own, or one on any of their invoices), soonest first.
+  const nextFollowUpOf = useMemo(() => {
     const map = new Map();
     for (const f of followUps.filter((x) => x.active).sort(byDue)) {
       if (f.customer_id && !map.has(f.customer_id)) map.set(f.customer_id, f);
     }
     return map;
   }, [followUps]);
+  // A row's next follow-up: the soonest one over all its customer records.
+  const nextFollowUp = (c) => c.ids.map((id) => nextFollowUpOf.get(id)).filter(Boolean).sort(byDue)[0];
+  // A row's invoices: every invoice of all its customer records, by due date.
+  const rowInvoices = (c) => c.ids.flatMap((id) => invoicesByCustomer.get(id) || [])
+    .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || ""));
   const hasData = withDues.length > 0;
   const customerOptions = [...withDues].sort(compare("NAME"));
 
@@ -100,7 +107,7 @@ export default function CustomerOutstanding() {
       { header: "Oldest Due", value: (c) => c.oldest_due },
       { header: "Unpaid Invoices", value: (c) => c.unpaid_count },
       { header: "Last Payment", value: (c) => c.last_payment_date },
-      { header: "Next Reminder", value: (c) => { const f = nextFollowUp.get(c.id); return f ? `${f.due_date} ${f.due_time}`.trim() : ""; } },
+      { header: "Next Reminder", value: (c) => { const f = nextFollowUp(c); return f ? `${f.due_date} ${f.due_time}`.trim() : ""; } },
     ], rows);
   }
 
@@ -154,6 +161,7 @@ export default function CustomerOutstanding() {
               {pageRows.length ? pageRows.map((c) => {
                 const expanded = open === c.id;
                 const d = daysOverdue(c.oldest_due);
+                const list = expanded ? rowInvoices(c) : [];
                 return (
                   <Fragment key={c.id}>
                     <tr>
@@ -175,14 +183,14 @@ export default function CustomerOutstanding() {
                       <td className="ac-num">{c.unpaid_count}</td>
                       <td>{showDate(c.last_payment_date) || "—"}</td>
                       <td>
-                        <ReminderCell followUp={nextFollowUp.get(c.id)} customerName={c.name} onOpen={() => setPanel({ id: c.id, mode: "reminder" })} />
+                        <ReminderCell followUp={nextFollowUp(c)} customerName={c.name} onOpen={() => setPanel({ id: c.id, mode: "reminder" })} />
                       </td>
                       <td>
                         <ActionMenu
                           customerName={c.name}
                           expanded={expanded}
                           onViewDetails={() => setOpen(expanded ? null : c.id)}
-                          onRecordPayment={() => navigate("/accountant/payments/record", { state: { customerId: c.id } })}
+                          onRecordPayment={() => navigate("/accountant/payments/record", { state: { customerId: c.main_id } })}
                         />
                       </td>
                       <td>
@@ -198,7 +206,7 @@ export default function CustomerOutstanding() {
                         <td colSpan={11}>
                           <div className="ac-expand-box">
                             <h4>Invoices</h4>
-                            {invoicesByCustomer.get(c.id)?.length ? (
+                            {list.length ? (
                               // Fixed column widths so every row lines up under its heading.
                               <table className="ac-table" style={{ tableLayout: "fixed", width: "100%" }}>
                                 <colgroup>
@@ -213,7 +221,7 @@ export default function CustomerOutstanding() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {invoicesByCustomer.get(c.id).map((i) => (
+                                  {list.map((i) => (
                                     <tr key={i.id}>
                                       <td style={{ textAlign: "left" }}>
                                         <button type="button" className="ac-link" style={{ textAlign: "left" }} onClick={() => navigate(`/accountant/invoices/${i.id}`)}>
