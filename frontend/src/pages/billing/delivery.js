@@ -4,11 +4,11 @@
 export function deliveryFrom(data) {
   const s = data?.settings || {};
   return {
-    print_copies: s.print_copies || 1,
+    print_copies: s.print_copies ?? 1, // 0 = not printed on issue
     invoice_emails: (s.invoice_emails || []).join(", "),
     auto_email: Boolean(s.auto_email),
     bill_by_day: s.bill_by_day || "",
-    outlets: (data?.outlets || []).map((o) => ({ site_id: o.site_id, print_copies: o.print_copies || s.print_copies || 1, emails: (o.emails || []).join(", ") })),
+    outlets: (data?.outlets || []).map((o) => ({ site_id: o.site_id, print_copies: o.print_copies ?? s.print_copies ?? 1, emails: (o.emails || []).join(", ") })),
   };
 }
 
@@ -19,7 +19,9 @@ export function deliveryBody(form) {
     invoice_emails: form.invoice_emails,
     auto_email: form.auto_email,
     bill_by_day: form.bill_by_day ? Number(form.bill_by_day) : null,
-    outlets: form.outlets.map((o) => ({ site_id: o.site_id, print_copies: Number(o.print_copies), emails: o.emails })),
+    // No per-outlet settings any more: every outlet follows the customer's copies and emails (saving
+    // clears any outlet setting made earlier).
+    outlets: form.outlets.map((o) => ({ site_id: o.site_id, print_copies: Number(form.print_copies), emails: "" })),
   };
 }
 

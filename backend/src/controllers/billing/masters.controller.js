@@ -26,6 +26,7 @@ const BASES = ["FIXED", "PER_SERVICE", "PER_UNIT"];
 /** The invoice description used when the contract does not give one. */
 function defaultDescription(billingType, frequency) {
   if (billingType === "ONE_TIME") return "Pest control service carried out on {period}";
+  if (billingType === "TERMITE" && !frequency) return "Termite treatment carried out on {period}";
   if (frequency && frequency > 1) return "Pest control services for {from_month} to {to_month}";
   return "Pest control services for the month of {month}";
 }
@@ -104,13 +105,15 @@ function profileOut(p) {
     payment_terms_days: Number(p.payment_terms_days),
     is_active: Boolean(p.is_active),
     gst_number: p.gst_number || "",
+    // A different address printed under "Service Offered To" on the invoices (null = not used).
+    service_offered_to: p.service_offered_to || null,
     updated_at: p.updated_at,
   };
 }
 
 // The profile with the customer's GSTIN (kept on companies.gst_number, shared with the Companies screen).
 const PROFILE_SQL = `SELECT bp.*, c.gst_number FROM billing_profiles bp JOIN companies c ON c.id = bp.company_id WHERE bp.company_id = ?`;
-const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][0-9A-Z][0-9A-Z]$/;
 
 // GET /profiles/:companyId
 const getProfile = C.handle("Failed to load the billing profile", async (req, res) => {
@@ -150,6 +153,11 @@ const saveProfile = C.handle("Failed to save the billing profile", async (req, r
     [companyId, ...values, req.user.id, req.user.id]
   );
   if (gstin !== undefined) await pool.query("UPDATE companies SET gst_number = ? WHERE id = ?", [gstin || null, companyId]);
+  // Service Offered To: sent as null / "" it is cleared (the invoice then shows the outlet or Bill To).
+  if (b.service_offered_to !== undefined) {
+    const serviceTo = C.str(b.service_offered_to, "Service Offered To", { max: 1000 }) || null;
+    await pool.query("UPDATE billing_profiles SET service_offered_to = ? WHERE company_id = ?", [serviceTo, companyId]);
+  }
   const [[p]] = await pool.query(PROFILE_SQL, [companyId]);
   res.json(profileOut(p));
 });
@@ -311,12 +319,16 @@ function readContractHeader(b, sites, billingType, startDate) {
   if (billingType === "AMC") {
     // 1 to 12 months; it must also be in Masters > Billing Frequencies (checked on save).
     frequency = C.num(b.frequency_months, "Billing frequency", { required: true, integer: true, min: 1, max: 12 });
+  } else if (billingType === "TERMITE" && (b.frequency_months === null || b.frequency_months === undefined || b.frequency_months === "")) {
+    // Termite with no billing frequency: billed once, like One-time.
+    frequency = null;
   } else if (billingType !== "ONE_TIME") {
     frequency = C.num(b.frequency_months, "Billing frequency", { integer: true, min: 1, max: 12 }) ?? 1;
   }
-  // Termite only: billed every day (DAY), every week (WEEK) or every month (MONTH). A day / week is
-  // one period, so frequency_months is 1. Every other type is MONTH.
-  const unit = billingType === "TERMITE" ? C.oneOf(b.frequency_unit, "Billing frequency", ["MONTH", "WEEK", "DAY"], { fallback: "MONTH" }) : "MONTH";
+  const termiteOnce = billingType === "TERMITE" && frequency === null;
+  // Recurring Termite only: billed every day (DAY), every week (WEEK) or every month (MONTH). A day /
+  // week is one period, so frequency_months is 1. Every other type (and Termite billed once) is MONTH.
+  const unit = billingType === "TERMITE" && !termiteOnce ? C.oneOf(b.frequency_unit, "Billing frequency", ["MONTH", "WEEK", "DAY"], { fallback: "MONTH" }) : "MONTH";
   if (unit !== "MONTH") frequency = 1;
   const siteId = C.str(b.site_id, "site_id", { max: 20 });
   if (siteId && !sites.has(siteId)) throw C.bad("site_id must be an outlet of this customer");

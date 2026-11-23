@@ -100,6 +100,8 @@ function periodsBilledIn(contract, key, invoicedStarts) {
     if (bm > key) break;
     const known = period.start >= from || invoicedStarts.has(period.start);
     if (bm === key && period.start >= contract.start_date && known) out.push(period);
+    // Billed once (Termite with no frequency): its one period only.
+    if (P.isOnce(contract)) break;
     start = P.periodAfter(contract, period);
   }
   return out;

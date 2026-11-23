@@ -209,6 +209,10 @@ export default function ManualInvoice() {
   }
 
   async function print(issued) {
+    if (Number(issued.print_copies) === 0) {
+      setPrintNote("Not printed - print copies are set to 0 for this customer. Use Print on the invoice to print one.");
+      return;
+    }
     setPrintNote("Opening the print window…");
     try {
       await printPdf(`/invoices/download${qs({ ids: issued.id, copies: "print" })}`);

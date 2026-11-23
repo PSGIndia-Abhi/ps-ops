@@ -229,7 +229,11 @@ const download = C.handle("Failed to download the invoices", async (req, res) =>
   );
   if (!rows.length) throw C.notFound("No issued invoices to download for this selection");
   if (rows.length > 500) throw C.bad("More than 500 invoices - pick a month or a customer");
-  const items = rows.map((r) => ({ content: C.json(r.content, null), copies: withCopies ? Number(r.print_copies) || 1 : 1, cancelled: r.status === "CANCELLED" }));
+  // Print copies: invoices set to 0 copies are left out (nothing is printed for them).
+  const items = rows
+    .map((r) => ({ content: C.json(r.content, null), copies: withCopies ? Number(r.print_copies) : 1, cancelled: r.status === "CANCELLED" }))
+    .filter((i) => i.copies > 0);
+  if (!items.length) throw C.bad("Print copies are set to 0 for these invoices - nothing to print. Use Print on the invoice to print one by hand.");
   // one invoice: named by its number; several: one combined file for the month / selection
   const name = rows.length === 1
     ? pdfName(rows[0])
