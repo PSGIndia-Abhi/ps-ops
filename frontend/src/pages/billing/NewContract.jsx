@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiArrowRight, FiBookmark, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiEdit2, FiFileText, FiMail, FiPaperclip, FiPlus, FiRefreshCw, FiPrinter, FiUploadCloud, FiX } from "react-icons/fi";
+import { FiArrowRight, FiBookmark, FiCheck, FiCheckCircle, FiClock, FiCreditCard, FiEdit2, FiFileText, FiMail, FiMapPin, FiPaperclip, FiPlus, FiRefreshCw, FiPrinter, FiUploadCloud, FiX } from "react-icons/fi";
 import { ApiError, billingGet, billingPost, billingPut, billingUpload, qs, useBilling } from "./billingApi";
 import { GST_RATES, gstHint } from "./calc";
-import { CATEGORY_LABEL, TERMITE_UNITS, amount, dmy, frequencyText, initials, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
+import { CATEGORY_LABEL, amount, dmy, frequencyText, initials, monthLabel, nextBilling, today, typeLabel, unitOf } from "./format";
 import DescriptionPicker from "./DescriptionPicker";
 import FrequencySelect from "./FrequencySelect";
 import { DeliveryFields } from "./InvoiceDelivery";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
 import { Field, Msg, BackButton } from "./ui";
+import ServiceToField from "./ServiceToField";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -46,7 +47,7 @@ const EditStep = ({ onClick, label }) => (
 );
 const ordinalDay = (d) => `${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
 const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Services & prices", 6: "Print & email", 5: "Review" };
-const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z][0-9A-Z][0-9A-Z]$/;
 const SQM = "sq.m";
 const SQFT = "sq.ft";
 // Termite bill structure: priced per square metre or per square foot of treated area (the line's unit)
@@ -70,7 +71,19 @@ const outletUnits = (c, off = []) => {
   return sites.filter((s) => !off.includes(s.site_id)).map((s) => ({ company: c, site: s.site_id, outlet: s.name, name: `${c.name} - ${s.name}` }));
 };
 const companyLine = (u) => ({ ...newLine(false, "SERVICE"), company: u.company.company_id, site: u.site, item_name: u.name, base: u.name });
+/** An address on one line (its lines joined with commas) - the review shows it cut with "...". */
+const oneLine = (text) => String(text || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean).join(", ");
 const lineTotal = (l, termite) => Number(l.rate) * (termite && l.kind === "SERVICE" ? Number(l.area) || 0 : Number(l.qty) || 0);
+/**
+ * A month amount typed on a service line (whole rupees), divided by the services per month: the rate
+ * per service to 4 decimals, so rate x services comes back to the typed amount (18,500 / 12 =
+ * 1,541.6667 -> 18,500.00). The rate is stored with 4 decimals; amounts stay at 2.
+ */
+const rateFromMonth = (month, qty) => (month === "" ? "" : String(Math.round(((Number(month) || 0) / (Number(qty) || 1)) * 10000) / 10000));
+/** The month amount shown for a line: rate x services, to the paisa (no decimals when whole). */
+const monthOf = (l, termite) => String(Math.round(lineTotal(l, termite) * 100) / 100);
+/** Whole rupees only in the month box. */
+const wholeRupees = (v) => (v === "" ? "" : String(Math.max(0, Math.floor(Number(v)) || 0)));
 
 export default function NewContract() {
   const { me } = useOutletContext();
@@ -99,7 +112,6 @@ export default function NewContract() {
   const [profileSaved, setProfileSaved] = useState(false);
   // Invoice delivery (print copies, email): loaded with the customer, saved with the Bill To on Next.
   const [delivery, setDelivery] = useState(null);
-  const [deliveryOutlets, setDeliveryOutlets] = useState([]);
   const customer = (customers || []).find((c) => c.company_id === companyId) || null;
   const pickedCompanies = (group?.companies || []).filter((c) => groupCompanyIds.includes(c.company_id));
   const groupUnits = pickedCompanies.flatMap((c) => outletUnits(c, groupSitesOff));
@@ -378,8 +390,9 @@ export default function NewContract() {
         if (!live) return;
         setProfileSaved(Boolean(p));
         setProfile(p
-          ? { billing_name: p.billing_name || "", gst_number: p.gst_number || "", billing_address: p.billing_address || "", state_code: p.state_code || "29", payment_terms_days: p.payment_terms_days ?? 30 }
-          : { billing_name: customer?.display_name || customer?.name || "", gst_number: customer?.gst_number || "", billing_address: "", state_code: "29", payment_terms_days: 30 });
+          ? { billing_name: p.billing_name || "", gst_number: p.gst_number || "", billing_address: p.billing_address || "", state_code: p.state_code || "29", payment_terms_days: p.payment_terms_days ?? 30,
+              service_offered_to: p.service_offered_to || "", service_to_on: Boolean(p.service_offered_to) }
+          : { billing_name: customer?.display_name || customer?.name || "", gst_number: customer?.gst_number || "", billing_address: "", state_code: "29", payment_terms_days: 30, service_offered_to: "", service_to_on: false });
       })
       .catch((err) => live && setMsg({ error: err.message }));
     return () => {
@@ -396,7 +409,6 @@ export default function NewContract() {
   // first ticked one, which the invoice is made under); no per-outlet settings (one invoice for the group).
   useEffect(() => {
     setDelivery(null);
-    setDeliveryOutlets([]);
     if (!companyId) return undefined;
     let live = true;
     billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
@@ -404,7 +416,6 @@ export default function NewContract() {
         if (!live) return;
         const form = withBillByDefault(deliveryFrom(d));
         setDelivery(groupMode ? { ...form, outlets: [] } : form);
-        setDeliveryOutlets(groupMode ? [] : d.outlets || []);
       })
       .catch(() => live && setDelivery(withBillByDefault(deliveryFrom(null))));
     return () => {
@@ -529,6 +540,7 @@ export default function NewContract() {
       if (!residential && !g) return "Type the GSTIN (Commercial customers are billed with GST).";
       if (g && !GSTIN_RE.test(g)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
+      if (profile.service_to_on && !(profile.service_offered_to || "").trim()) return "Type the Service Offered To address, or untick it.";
     }
     if (step === 6) {
       if (!delivery) return "Loading the print and email settings…";
@@ -536,7 +548,7 @@ export default function NewContract() {
       if (d) return d;
     }
     if (step === 2) {
-      if (terms.billing_type !== "ONE_TIME" && !terms.frequency_months) return "Choose the billing frequency.";
+      if (!["ONE_TIME", "TERMITE"].includes(terms.billing_type) && !terms.frequency_months) return "Choose the billing frequency.";
       if (!terms.start_date) return "Choose the start date.";
       if (terms.end_date && terms.end_date < terms.start_date) return "The term end date cannot be before the term start date.";
       if (terms.first_bill_from && terms.first_bill_from < terms.start_date) return "First bill from cannot be before the term start date.";
@@ -619,6 +631,7 @@ export default function NewContract() {
         await billingPut(`/profiles/${encodeURIComponent(companyId)}`, {
           billing_name: profile.billing_name.trim(), billing_address: profile.billing_address.trim(), state_code: profile.state_code,
           payment_terms_days: Number(profile.payment_terms_days) || 0, is_active: true, gst_number: profile.gst_number.trim().toUpperCase(),
+          service_offered_to: profile.service_to_on ? (profile.service_offered_to || "").trim() : null,
         });
         setProfileSaved(true);
       }
@@ -673,7 +686,8 @@ export default function NewContract() {
         company_id: companyId,
         ...(groupMode ? { contract_kind: "GROUP", group_id: groupId, company_ids: pickedCompanies.map((c) => c.company_id) } : {}),
         billing_type: terms.billing_type,
-        frequency_months: terms.billing_type === "ONE_TIME" ? null : Number(terms.frequency_months) || 1,
+        // One-time and Termite are billed once (no frequency).
+        frequency_months: ["ONE_TIME", "TERMITE"].includes(terms.billing_type) ? null : Number(terms.frequency_months) || 1,
         frequency_unit: unitOf(terms),
         bill_timing: terms.bill_timing,
         start_date: terms.start_date,
@@ -744,7 +758,7 @@ export default function NewContract() {
               <div className="nc-sum-head"><FiFileText /> What was set up</div>
               <dl className="nc-success-dl">
                 {groupMode ? <><dt>Group</dt><dd>{group?.name} · {pickedCompanies.length} companies</dd></> : <><dt>Customer</dt><dd>{customer?.name}</dd></>}
-                <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""} ·{terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month</dd>
+                <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}{termite ? "" : ` · ${terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month`}</dd>
                 <dt>Structure</dt><dd>{termite ? `Per ${areaLabel} of treated area` : terms.shortfall_billing === "FULL" ? "Fixed amount - the agreed services every month" : "Service based - the services completed"}</dd>
                 <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
                 {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)}</dd></>}
@@ -955,9 +969,12 @@ export default function NewContract() {
                     }} />
                 </Field>
               ) : <div />}
-              <Field label="Billing address" required className="bl-span2">
+              <Field label="Billing address" required>
                 <textarea className="ac-textarea" rows={3} disabled={locked} value={shown.billing_address} maxLength={1000} placeholder="As printed under Bill To" onChange={(e) => setProfile({ ...shown, billing_address: e.target.value })} />
               </Field>
+              {/* Service Offered To: a different address for the invoice's "Service Offered To" column, typed only when ticked. */}
+              <ServiceToField disabled={locked} on={Boolean(shown.service_to_on)} value={shown.service_offered_to || ""}
+                onToggle={(v) => setProfile({ ...shown, service_to_on: v })} onChange={(v) => setProfile({ ...shown, service_offered_to: v })} />
               <Field label="State (GST)" required hint={shown.state_code === "29" ? "Karnataka: CGST + SGST" : "Outside Karnataka: IGST"}>
                 <select className="ac-select" disabled={locked} value={shown.state_code} onChange={(e) => setProfile({ ...shown, state_code: e.target.value })}>
                   {STATES.map(([code, name]) => <option key={code} value={code}>{code} – {name}</option>)}
@@ -979,9 +996,10 @@ export default function NewContract() {
                   <button key={v} type="button" className={`ac-pill ${terms.billing_type === v ? "active" : ""}`}
                     onClick={() => {
                       setT({
-                        billing_type: v, frequency_months: v === "ONE_TIME" ? null : terms.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : terms.po_required,
-                        // daily / weekly is for Termite only
-                        ...(v !== "TERMITE" ? { frequency_unit: "MONTH" } : {}),
+                        billing_type: v, frequency_months: v === "ONE_TIME" || v === "TERMITE" ? null : terms.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : terms.po_required,
+                        frequency_unit: "MONTH",
+                        // Termite is billed once: no frequency, bill date or term dates (start = the day it is saved).
+                        ...(v === "TERMITE" ? { bill_timing: "ARREARS", start_date: today(), end_date: "" } : {}),
                       });
                       // Termite always starts from its one area line; other types keep typed lines.
                       if (v === "TERMITE" ? !termite : lines.every((l) => l.rate === "")) setLines([newLine(v === "TERMITE")]);
@@ -990,24 +1008,22 @@ export default function NewContract() {
               </div>
             </Field>
             <div className="bl-grid g2" style={{ marginTop: 12 }}>
-              <Field label="Billing frequency" required hint={termite && unitOf(terms) !== "MONTH" ? `One invoice per ${unitOf(terms) === "DAY" ? "day" : "week"}: the month's Bill Run drafts every ${unitOf(terms) === "DAY" ? "day" : "week"} that is due` : undefined}>
-                {termite ? (
-                  // Termite: billed every day, week or month
-                  <select className="ac-select" value={unitOf(terms)} onChange={(e) => setT({ frequency_unit: e.target.value, frequency_months: 1 })}>
-                    {TERMITE_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                ) : (
-                  <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
-                )}
-              </Field>
-              <Field label="Bill date" required>
-                <select className="ac-select" value={terms.bill_timing} onChange={(e) => setT({ bill_timing: e.target.value })}>
-                  <option value="ADVANCE">Start of the month</option>
-                  <option value="ARREARS">End of the month</option>
-                </select>
-              </Field>
-              <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
-              <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
+              {/* Termite is billed once (like One-time): no frequency, bill date or term dates. */}
+              {!termite && (
+                <>
+                  <Field label="Billing frequency" required>
+                    <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
+                  </Field>
+                  <Field label="Bill date" required>
+                    <select className="ac-select" value={terms.bill_timing} onChange={(e) => setT({ bill_timing: e.target.value })}>
+                      <option value="ADVANCE">Start of the month</option>
+                      <option value="ARREARS">End of the month</option>
+                    </select>
+                  </Field>
+                  <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
+                  <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
+                </>
+              )}
               <Field label="First bill from" hint="Already billed in Vyapar? Enter the first date not billed yet. Leave empty to bill from the start date.">
                 <input type="date" className="ac-input" value={terms.first_bill_from} min={terms.start_date || undefined} max={terms.end_date || undefined} onChange={(e) => setT({ first_bill_from: e.target.value })} />
               </Field>
@@ -1081,7 +1097,11 @@ export default function NewContract() {
             </div>
             {next && (
               <div className="ac-info" style={{ marginTop: 12 }}>
-                <span>ⓘ First invoice: <b>{dmy(next.start)} to {dmy(next.end)}</b>, in the <b>Bill Run for {monthLabel(next.billMonth)}</b>.</span>
+                {termite ? (
+                  <span>ⓘ Billed once: one invoice for the treated area, in the <b>Bill Run for {monthLabel(next.billMonth)}</b>.</span>
+                ) : (
+                  <span>ⓘ First invoice: <b>{next.start === next.end ? dmy(next.start) : `${dmy(next.start)} to ${dmy(next.end)}`}</b>, in the <b>Bill Run for {monthLabel(next.billMonth)}</b>.</span>
+                )}
               </div>
             )}
           </>
@@ -1310,8 +1330,13 @@ export default function NewContract() {
                               <input type="number" min="1" max="999" value={l.qty} onChange={(e) => setLine(l.key, { qty: e.target.value })} aria-label="Services per month" />
                               <button type="button" onClick={() => setLine(l.key, { qty: Math.min(999, (Number(l.qty) || 0) + 1) })} aria-label="More per month">+</button>
                             </div>
-                            <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label="Rate per service" />
-                            <span className="nc-num nc-amt">{l.rate === "" ? "—" : amount(lineTotal(l, termite))}</span>
+                            <input type="number" min="0" step="any" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value, month: undefined })} aria-label="Rate per service" />
+                            {/* Month amount: typed here, it is divided by the services per month into the rate. */}
+                            <input type="number" min="0" step="1" inputMode="numeric" className="ac-input nc-month-input" placeholder="0"
+                              value={l.month ?? (l.rate === "" ? "" : monthOf(l, termite))}
+                              onChange={(e) => { const m = wholeRupees(e.target.value); setLine(l.key, { month: m, rate: rateFromMonth(m, l.qty) }); }}
+                              onBlur={() => setLine(l.key, { month: undefined })}
+                              aria-label="Amount per month" />
                             <button type="button" className="bl-x" disabled={lines.filter((x) => x.kind === "SERVICE").length === 1 && !kinds.CHEMICAL} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label="Remove service">✕</button>
                           </div>
                           {l.group && <div className="nc-in-group">In invoice line “{l.group}”</div>}
@@ -1450,7 +1475,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Print &amp; email</h3>
             {delivery ? (
-              <DeliveryFields form={delivery} setForm={setDelivery} outlets={deliveryOutlets} />
+              <DeliveryFields form={delivery} setForm={setDelivery} />
             ) : (
               <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
             )}
@@ -1476,6 +1501,13 @@ export default function NewContract() {
                 </div>
                 {groupMode && <div className="nc-rv-tags">{pickedCompanies.map((c) => <span key={c.company_id} className="nc-rv-tag">{c.name}</span>)}</div>}
                 <div className="nc-rv-line"><FiFileText aria-hidden="true" /><span>Bill To <b>{profile?.billing_name}</b></span></div>
+                {/* The billing address, and the Service Offered To address when it is ticked: one line each, ending in "..." when longer (full address on hover). */}
+                {profile?.billing_address?.trim() && (
+                  <div className="nc-rv-line nc-rv-addr"><FiMapPin aria-hidden="true" /><span title={profile.billing_address.trim()}><small>Billing address</small><em className="nc-rv-clamp">{oneLine(profile.billing_address)}</em></span></div>
+                )}
+                {!groupMode && profile?.service_to_on && profile?.service_offered_to?.trim() && (
+                  <div className="nc-rv-line nc-rv-addr"><FiMapPin aria-hidden="true" /><span title={profile.service_offered_to.trim()}><small>Service offered to</small><em className="nc-rv-clamp">{oneLine(profile.service_offered_to)}</em></span></div>
+                )}
                 {profile?.gst_number && <div className="nc-rv-line"><FiCreditCard aria-hidden="true" /><span className="nc-rv-mono" title="GSTIN">{profile.gst_number}</span></div>}
                 {needsPo && (
                   <div className="nc-rv-line"><FiBookmark aria-hidden="true" /><span>PO <b className="nc-rv-mono">{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</b></span><EditStep label="purchase order" onClick={() => setStep(3)} /></div>
@@ -1486,15 +1518,15 @@ export default function NewContract() {
                 <div className="nc-rv-tagline">
                   <span className="nc-rv-t blue">{TYPES.find(([v]) => v === terms.billing_type)?.[1]}</span>
                   {terms.billing_type !== "ONE_TIME" && <span className="nc-rv-t">{frequencyText(terms)}</span>}
-                  <span className="nc-rv-t">{terms.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span>
+                  {!termite && <span className="nc-rv-t">{terms.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span>}
                   <span className="nc-rv-t green">{gstOn ? `GST ${terms.gst_rate}%` : "No GST"}</span>
                 </div>
                 <ol className="nc-rv-time">
-                  <li><i /><span>Starts</span><b>{dmy(terms.start_date)}{terms.end_date ? ` → ${dmy(terms.end_date)}` : ""}</b></li>
+                  {!termite && <li><i /><span>Starts</span><b>{dmy(terms.start_date)}{terms.end_date ? ` → ${dmy(terms.end_date)}` : ""}</b></li>}
                   {terms.first_bill_from && terms.first_bill_from !== terms.start_date && (
                     <li><i /><span>First bill from</span><b>{dmy(terms.first_bill_from)}</b><small>billed elsewhere before this date</small></li>
                   )}
-                  {next && <li className="now"><i /><span>First invoice</span><b>{dmy(next.start)} → {dmy(next.end)}</b><small>Bill Run · {monthLabel(next.billMonth)}</small></li>}
+                  {next && <li className="now"><i /><span>{termite ? "Invoice" : "First invoice"}</span><b>{termite ? "One invoice" : next.start === next.end ? dmy(next.start) : `${dmy(next.start)} → ${dmy(next.end)}`}</b><small>Bill Run · {monthLabel(next.billMonth)}</small></li>}
                 </ol>
               </div>
               {delivery && (
@@ -1617,10 +1649,10 @@ export default function NewContract() {
               <><dt>Customer</dt><dd>{customer?.name || <span className="ac-sub">Not chosen</span>}</dd></>
             )}
             <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? ` · ${frequencyText(terms).toLowerCase()}` : ""}</dd>
-            <dt>Bill date</dt><dd>{terms.bill_timing === "ADVANCE" ? "Start of the month" : "End of the month"}</dd>
+            {!termite && <><dt>Bill date</dt><dd>{terms.bill_timing === "ADVANCE" ? "Start of the month" : "End of the month"}</dd></>}
             <dt>Structure</dt><dd>{termite ? `Per ${areaLabel}` : terms.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</dd>
             <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
-            {next && <><dt>First invoice</dt><dd>{dmy(next.start)} – {dmy(next.end)}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
+            {next && <><dt>{termite ? "Invoice" : "First invoice"}</dt><dd>{termite ? "One invoice" : next.start === next.end ? dmy(next.start) : `${dmy(next.start)} – ${dmy(next.end)}`}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
             <dt>Services</dt><dd>{filledLines.length ? `${filledLines.length} line${filledLines.length === 1 ? "" : "s"}` : <span className="ac-sub">None yet</span>}</dd>
             {delivery && <><dt>Print &amp; email</dt><dd>{delivery.print_copies} cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}{delivery.auto_email ? " · auto email" : ""}</dd></>}
           </dl>

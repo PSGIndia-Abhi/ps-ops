@@ -70,7 +70,7 @@ export function nextBilling(contract, from) {
   if (contract.end_date && from > contract.end_date) return null;
   let end;
   const unit = unitOf(contract);
-  if (contract.billing_type === "ONE_TIME") end = contract.end_date && contract.end_date >= from ? contract.end_date : from;
+  if (isOnce(contract)) end = contract.end_date && contract.end_date >= from ? contract.end_date : from;
   else if (unit !== "MONTH") {
     // Termite billed daily (one-day periods) or weekly (7-day periods from the first bill date)
     end = unit === "DAY" ? from : addDaysYmd(from, 6);
@@ -120,12 +120,15 @@ const FREQ = { 1: "Monthly", 3: "Quarterly", 4: "4-monthly", 6: "Half-yearly", 1
 export const TERMITE_UNITS = [["DAY", "Daily"], ["WEEK", "Weekly"], ["MONTH", "Monthly"]];
 
 /** MONTH, or WEEK / DAY for a Termite contract billed weekly / daily (as period.js decides). */
+/** Billed once: One-time, or Termite with no billing frequency (new Termite contracts). */
+export const isOnce = (contract) => contract?.billing_type === "ONE_TIME" || (contract?.billing_type === "TERMITE" && contract.frequency_months === null);
+
 export const unitOf = (contract) =>
-  contract?.billing_type === "TERMITE" && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
+  contract?.billing_type === "TERMITE" && !isOnce(contract) && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
 
 /** "Every 3 months", "Every week", "Every day", "One-time". */
 export function frequencyText(contract) {
-  if (contract.billing_type === "ONE_TIME") return "One-time";
+  if (isOnce(contract)) return "One-time";
   const unit = unitOf(contract);
   if (unit === "WEEK") return "Every week";
   if (unit === "DAY") return "Every day";
@@ -136,7 +139,8 @@ export function frequencyText(contract) {
 /** "AMC · Monthly", "Termite", "Termite · Weekly", ... */
 export function typeLabel(type, frequency, unit) {
   if (type === "AMC" && frequency) return `AMC · ${FREQ[frequency] || `${frequency} months`}`;
-  if (type === "TERMITE") return `Termite · ${unit === "WEEK" ? "Weekly" : unit === "DAY" ? "Daily" : "Monthly"}`;
+  // frequency null: billed once (frequency undefined = not known here)
+  if (type === "TERMITE") return `Termite · ${frequency === null ? "One-time" : unit === "WEEK" ? "Weekly" : unit === "DAY" ? "Daily" : "Monthly"}`;
   return TYPE_LABEL[type] || type || "—";
 }
 

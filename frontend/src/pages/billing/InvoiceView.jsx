@@ -13,6 +13,7 @@ import { modeLabel } from "./payModes";
 import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import { BILLING_HOME } from "./access";
 import { InvoiceSkeleton } from "./Skeletons";
+import SosFiles from "./SosFiles";
 
 // One issued invoice, everything an accountant needs: who it is for, what it bills, the tax, the
 // money (paid / pending, payments recorded in Billing with TDS and proof), and every print and share.
@@ -149,10 +150,11 @@ export default function InvoiceView() {
                 {inv.bill_to.state && <div className="iv-meta">State {inv.bill_to.state}</div>}
               </div>
               {/* a group based invoice bills the group: no Ship to */}
-              {inv.contract?.contract_kind !== "GROUP" && (
+              {/* Service offered to: only when it is set on the customer's billing details */}
+              {inv.contract?.contract_kind !== "GROUP" && inv.service_offered_to && (
                 <div>
-                  <div className="iv-label">Ship to</div>
-                  {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
+                  <div className="iv-label">{inv.service_offered_to ? "Service offered to" : "Ship to"}</div>
+                  {inv.service_offered_to ? <div className="iv-addr" style={{ whiteSpace: "pre-line" }}><FiMapPin /> {inv.service_offered_to}</div> : inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
                 </div>
               )}
               <div className="iv-facts">
@@ -252,6 +254,9 @@ export default function InvoiceView() {
               </>
             )}
           </section>
+
+          {/* Files from the SOS of this period: they go with the invoice email. */}
+          <SosFiles invoiceId={id} />
 
           <section className="ac-card iv-card">
             <h3 className="ac-card-title">Activity</h3>

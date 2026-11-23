@@ -7,9 +7,12 @@
 //   POST /sos/submit-many                    { month, company_ids } - submit several saved SOS at once
 // Logic: services/billing/sos.service.js.
 
+const multer = require("multer");
 const { pool } = require("../../../db");
+const minioClient = require("../../lib/minio");
 const C = require("../../services/billing/common");
 const S = require("../../services/billing/sos.service");
+const F = require("../../services/billing/sosFiles.service");
 
 const monthOf = (v) => C.month(String(v || C.todayIst()).slice(0, 7), "month");
 
@@ -98,4 +101,57 @@ const submitMany = C.handle("Failed to submit the SOS", async (req, res) => {
   res.json({ month: S.monthStart(month), submitted, failed });
 });
 
-module.exports = { overview, get, save, submit, submitMany, reopen };
+// ---- Files attached to the SOS (optional) ---------------------------------------------------
+//   GET    /sos/:companyId/files?month=2026-11        the files of the customer and month
+//   POST   /sos/:companyId/files?month=2026-11        multipart, field "file" (one file per call)
+//   DELETE /sos/:companyId/files/:fileId?month=...    removes one (not once submitted or invoiced)
+//   GET    /sos-files/:fileId                         opens / downloads one file
+//   GET    /invoices/:id/sos-files                    the SOS files of every month of an invoice
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: F.MAX_FILE_BYTES, files: 1 } });
+
+/** multer for one file in the "file" field, with readable errors. */
+function acceptFile(req, res, next) {
+  upload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: `File is too large (max ${F.mb(F.MAX_FILE_BYTES)})` });
+    return res.status(400).json({ error: "Invalid upload. Send one file in the 'file' field." });
+  });
+}
+
+const companyOf = (req) => C.str(req.params.companyId, "companyId", { required: true, max: 20 });
+
+const listFiles = C.handle("Failed to load the attachments", async (req, res) => {
+  res.json(await F.listFor(pool, companyOf(req), monthOf(req.query.month)));
+});
+
+const uploadFile = C.handle("Failed to attach the file", async (req, res) => {
+  const companyId = companyOf(req);
+  const month = monthOf(req.query.month);
+  await F.addFile(pool, req, companyId, month, req.file);
+  res.status(201).json(await F.listFor(pool, companyId, month));
+});
+
+const deleteFile = C.handle("Failed to remove the file", async (req, res) => {
+  const companyId = companyOf(req);
+  const month = monthOf(req.query.month);
+  await F.removeFile(pool, companyId, month, C.str(req.params.fileId, "fileId", { required: true, max: 36 }));
+  res.json(await F.listFor(pool, companyId, month));
+});
+
+const openFile = C.handle("Failed to open the file", async (req, res) => {
+  const f = await F.fileRow(pool, C.str(req.params.fileId, "fileId", { required: true, max: 36 }));
+  const stream = await minioClient.getObject(process.env.MINIO_BUCKET, f.object_key);
+  res.setHeader("Content-Type", f.file_type || "application/octet-stream");
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(f.file_name || "file")}`);
+  stream.on("error", () => res.end());
+  stream.pipe(res);
+});
+
+const invoiceFiles = C.handle("Failed to load the SOS attachments", async (req, res) => {
+  const [[inv]] = await pool.query("SELECT id, company_id, period_start, period_end, is_manual FROM billing_invoices WHERE id = ?", [req.params.id]);
+  if (!inv) throw C.notFound("Invoice not found");
+  res.json(await F.forInvoice(pool, inv));
+});
+
+module.exports = { overview, get, save, submit, submitMany, reopen, acceptFile, listFiles, uploadFile, deleteFile, openFile, invoiceFiles };
