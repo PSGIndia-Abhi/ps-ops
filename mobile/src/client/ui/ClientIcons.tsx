@@ -1,5 +1,8 @@
 import React from 'react';
+import { View } from 'react-native';
 import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
+import { useCrmTheme } from '../../crm/theme';
+import { shadows } from '../../theme';
 
 /**
  * The client app's own icon set - two-tone glyphs drawn for BestServe (a soft fill under a deep
@@ -10,6 +13,40 @@ import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
 export const ICON_DEEP = '#0B57D0';
 export const ICON_SOFT = '#A8C7FA';
 export const TILE_BG = '#D3E3FD';
+
+/** BestServe brand duotone (from the logo): deep navy outline, soft brand-red body. */
+export const BRAND_NAVY = '#1F2A55';
+export const BRAND_RED = '#C62835';
+export const BRAND_RED_SOFT = '#FBCDD2';
+
+type GlyphType = React.ComponentType<{ size?: number; color?: string; fill?: string }>;
+
+/**
+ * A brand icon tile: white rounded square with a hairline border and soft shadow, the glyph in
+ * navy with a red accent. Dark mode: surface tile, light outline, muted red body.
+ */
+export function GlyphTile({ Icon, size = 64, iconSize = 30, radius }: { Icon: GlyphType; size?: number; iconSize?: number; radius?: number }) {
+  const t = useCrmTheme();
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: radius ?? Math.round(size * 0.34),
+          backgroundColor: t.surface,
+          borderWidth: 1,
+          borderColor: t.isDark ? t.border : '#ECEEF3',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        !t.isDark && shadows.card,
+      ]}
+    >
+      <Icon size={iconSize} color={t.isDark ? '#D6DCF5' : BRAND_NAVY} fill={t.isDark ? '#6B2A33' : BRAND_RED_SOFT} />
+    </View>
+  );
+}
 
 interface P {
   size?: number;

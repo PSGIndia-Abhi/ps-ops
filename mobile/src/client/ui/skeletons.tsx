@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { Bone, SkeletonGroup } from '../../components/Shimmer';
@@ -11,23 +11,56 @@ import { shadows, spacing } from '../../theme';
  * the data arrives. Built from the shared shimmer kit (components/Shimmer).
  */
 
-/** Home: the row of shortcut pills (next visit, complaints, invoices). */
-export function ShortcutsSkeleton() {
+/** Home: the bento overview - tall next-visit card + two small cards, health card, two small cards. */
+export function BentoSkeleton({ withHealth = true }: { withHealth?: boolean }) {
   const theme = useCrmTheme();
+  const card = {
+    backgroundColor: theme.surface,
+    borderColor: theme.isDark ? theme.border : '#ECEEF3',
+  };
+  const small = (key: string) => (
+    <View key={key} style={[styles.bentoSmall, card]}>
+      <SkeletonGroup>
+        <Bone width={36} height={36} radius={12} />
+        <Bone width="62%" height={16} radius={6} style={styles.gap12} />
+        <Bone width="44%" height={10} style={styles.gap8} />
+      </SkeletonGroup>
+    </View>
+  );
   return (
-    <ScrollView horizontal scrollEnabled={false} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
-      {[0, 1, 2].map((i) => (
-        <View key={i} style={[styles.pill, { borderColor: theme.border }]}>
-          <SkeletonGroup style={styles.pillInner}>
-            <Bone width={42} height={42} radius={21} />
-            <View>
-              <Bone width={70} height={10} />
-              <Bone width={104} height={13} style={styles.gap8} />
-            </View>
+    <View>
+      <SkeletonGroup>
+        <Bone width={96} height={17} radius={6} />
+      </SkeletonGroup>
+      <View style={[styles.bentoRow, styles.gap16]}>
+        <View style={[styles.bentoTall, card]}>
+          <SkeletonGroup>
+            <Bone width={70} height={10} />
+            <Bone width={64} height={36} radius={8} style={styles.gap16} />
+            <Bone width="85%" height={14} style={styles.gap12} />
+            <Bone width="55%" height={10} style={styles.gap8} />
           </SkeletonGroup>
         </View>
-      ))}
-    </ScrollView>
+        <View style={styles.bentoCol}>
+          {small('a')}
+          {small('b')}
+        </View>
+      </View>
+      {withHealth && (
+        <View style={styles.gap12}>
+          <GlanceSkeleton />
+        </View>
+      )}
+      {withHealth && (
+        <View style={[styles.bentoRow, styles.gap12]}>
+          {[small('c'), small('d')].map((el, i) => (
+            <View key={i} style={styles.flex1}>
+              {el}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -35,7 +68,16 @@ export function ShortcutsSkeleton() {
 export function GlanceSkeleton() {
   const theme = useCrmTheme();
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: theme.isDark ? 1 : 0 }]}>
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+          borderWidth: theme.isDark ? 1 : 0,
+        },
+      ]}
+    >
       <SkeletonGroup>
         <View style={styles.row}>
           <Bone width={130} height={16} radius={6} />
@@ -51,7 +93,7 @@ export function GlanceSkeleton() {
         <View style={[styles.row, styles.gap16]}>
           <Bone width={136} height={136} radius={68} />
           <View style={styles.flex1}>
-            {[0, 1, 2].map((i) => (
+            {[0, 1, 2].map(i => (
               <View key={i} style={[styles.row, i > 0 && styles.gap12]}>
                 <Bone width={10} height={10} radius={5} />
                 <Bone width="55%" height={12} />
@@ -74,7 +116,15 @@ export function GlanceSkeleton() {
  * A list of simple rows: a leading shape, two lines, a short label on the right.
  * `lead`: "date" (rounded date chip), "circle" (icon), "tile" (rounded square, e.g. a document).
  */
-export function RowsSkeleton({ count = 3, lead = 'circle', inset = false }: { count?: number; lead?: 'date' | 'circle' | 'tile'; inset?: boolean }) {
+export function RowsSkeleton({
+  count = 3,
+  lead = 'circle',
+  inset = false,
+}: {
+  count?: number;
+  lead?: 'date' | 'circle' | 'tile';
+  inset?: boolean;
+}) {
   const r = lead === 'tile' ? 14 : 22;
   return (
     <SkeletonGroup style={inset ? styles.inset : undefined}>
@@ -83,7 +133,11 @@ export function RowsSkeleton({ count = 3, lead = 'circle', inset = false }: { co
           <Bone width={44} height={44} radius={r} />
           <View style={styles.flex1}>
             <Bone width={i % 2 ? '58%' : '70%'} height={14} />
-            <Bone width={i % 2 ? '36%' : '44%'} height={11} style={styles.gap8} />
+            <Bone
+              width={i % 2 ? '36%' : '44%'}
+              height={11}
+              style={styles.gap8}
+            />
           </View>
           <Bone width={40} height={11} />
         </View>
@@ -104,16 +158,35 @@ export function ClientHomeSkeletonScreen() {
   const bottom = theme.isDark ? '#121B2E' : '#E6EFFF';
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: page }]} edges={[]}>
-      <View style={styles.hero} onLayout={(e) => setHero({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      <View
+        style={styles.hero}
+        onLayout={e =>
+          setHero({
+            w: e.nativeEvent.layout.width,
+            h: e.nativeEvent.layout.height,
+          })
+        }
+      >
         {!!hero && (
-          <Svg style={styles.heroBg} width={hero.w} height={hero.h} pointerEvents="none">
+          <Svg
+            style={styles.heroBg}
+            width={hero.w}
+            height={hero.h}
+            pointerEvents="none"
+          >
             <Defs>
               <LinearGradient id="skeletonHero" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={top} stopOpacity="1" />
                 <Stop offset="1" stopColor={bottom} stopOpacity="1" />
               </LinearGradient>
             </Defs>
-            <Rect x="0" y="0" width={hero.w} height={hero.h} fill="url(#skeletonHero)" />
+            <Rect
+              x="0"
+              y="0"
+              width={hero.w}
+              height={hero.h}
+              fill="url(#skeletonHero)"
+            />
           </Svg>
         )}
         <SafeAreaView edges={['top']}>
@@ -127,7 +200,12 @@ export function ClientHomeSkeletonScreen() {
                 <Bone width={140} height={11} />
                 <Bone width="80%" height={24} radius={8} style={styles.gap12} />
                 <Bone width="55%" height={13} style={styles.gap8} />
-                <Bone width={130} height={30} radius={15} style={styles.gap16} />
+                <Bone
+                  width={130}
+                  height={30}
+                  radius={15}
+                  style={styles.gap16}
+                />
               </View>
               <Bone width={130} height={104} radius={20} />
             </View>
@@ -142,7 +220,9 @@ export function ClientHomeSkeletonScreen() {
           </View>
         ))}
       </SkeletonGroup>
-      <ShortcutsSkeleton />
+      <View style={[styles.inset, styles.gap16]}>
+        <BentoSkeleton withHealth={false} />
+      </View>
     </SafeAreaView>
   );
 }
@@ -155,11 +235,23 @@ const styles = StyleSheet.create({
   heroBg: { position: 'absolute', top: 0, left: 0 },
   topRow: { paddingTop: spacing.sm },
   banner: { marginTop: spacing.xl, alignItems: 'flex-end' },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.sm, marginTop: spacing.lg },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.sm,
+    marginTop: spacing.lg,
+  },
   action: { width: '25%', alignItems: 'center', paddingVertical: spacing.sm },
-  pills: { gap: 10, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  pill: { borderRadius: 32, borderWidth: 1, paddingVertical: 10, paddingLeft: 10, paddingRight: 18, minWidth: 168 },
-  pillInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bentoRow: { flexDirection: 'row', gap: 12 },
+  bentoCol: { flex: 1, gap: 12 },
+  bentoTall: {
+    flex: 1.08,
+    height: 236,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 16,
+  },
+  bentoSmall: { height: 112, borderRadius: 22, borderWidth: 1, padding: 14 },
   card: { borderRadius: 24, padding: spacing.lg, ...shadows.card },
   chipsGap: { gap: 6 },
   listRow: { paddingVertical: spacing.sm + 2 },

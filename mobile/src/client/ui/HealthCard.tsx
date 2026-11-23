@@ -29,7 +29,8 @@ const SIZE = 136;
 const STROKE = 20;
 
 function verdict(score: number | null) {
-  if (score === null) return { word: 'No visits finished yet', bg: '#F1F3F4', fg: '#5F6368' };
+  if (score === null)
+    return { word: 'No visits finished yet', bg: '#F1F3F4', fg: '#5F6368' };
   if (score >= 90) return { word: 'Excellent', bg: '#E6F4EA', fg: '#137333' };
   if (score >= 75) return { word: 'Good', bg: '#E6F4EA', fg: '#137333' };
   if (score >= 50) return { word: 'Fair', bg: '#FEF7E0', fg: '#B06000' };
@@ -37,18 +38,31 @@ function verdict(score: number | null) {
 }
 
 /** Donut: one arc per non-zero part, with a small gap between parts. */
-function Donut({ parts, track }: { parts: { value: number; color: string }[]; track: string }) {
+function Donut({
+  parts,
+  track,
+}: {
+  parts: { value: number; color: string }[];
+  track: string;
+}) {
   const r = (SIZE - STROKE) / 2;
   const c = 2 * Math.PI * r;
   const total = parts.reduce((s, p) => s + p.value, 0);
-  const shown = parts.filter((p) => p.value > 0);
+  const shown = parts.filter(p => p.value > 0);
   const gap = shown.length > 1 ? 3 : 0;
   let offset = 0;
   return (
     <Svg width={SIZE} height={SIZE} style={styles.rotate}>
-      <Circle cx={SIZE / 2} cy={SIZE / 2} r={r} stroke={track} strokeWidth={STROKE} fill="none" />
+      <Circle
+        cx={SIZE / 2}
+        cy={SIZE / 2}
+        r={r}
+        stroke={track}
+        strokeWidth={STROKE}
+        fill="none"
+      />
       {total > 0 &&
-        shown.map((p) => {
+        shown.map(p => {
           const len = (p.value / total) * c;
           const arc = (
             <Circle
@@ -80,12 +94,24 @@ interface Props {
   onPeriod: (key: PeriodKey) => void;
   /** New numbers are loading for a just-picked period: the figures dim until they arrive. */
   busy?: boolean;
+  /** The Jobs / Open issues tiles at the bottom (off when the page shows them elsewhere). */
+  showFigures?: boolean;
 }
 
-export function HealthCard({ kpis, onJobs, onComplaints, period, rangeText, onPeriod, busy }: Props) {
+export function HealthCard({
+  kpis,
+  onJobs,
+  onComplaints,
+  period,
+  rangeText,
+  onPeriod,
+  busy,
+  showFigures = true,
+}: Props) {
   const theme = useCrmTheme();
   const finished = kpis.visits_done + kpis.visits_missed;
-  const score = finished > 0 ? Math.round((kpis.visits_done / finished) * 100) : null;
+  const score =
+    finished > 0 ? Math.round((kpis.visits_done / finished) * 100) : null;
   const v = verdict(score);
   const toCome = kpis.upcoming_visits + kpis.visits_in_progress;
   const ink = theme.textPrimary;
@@ -94,12 +120,26 @@ export function HealthCard({ kpis, onJobs, onComplaints, period, rangeText, onPe
 
   const legend = [
     { key: 'done', label: 'Done', value: kpis.visits_done, color: DONE },
-    { key: 'missed', label: 'Missed', value: kpis.visits_missed, color: MISSED },
+    {
+      key: 'missed',
+      label: 'Missed',
+      value: kpis.visits_missed,
+      color: MISSED,
+    },
     { key: 'coming', label: 'Still to come', value: toCome, color: COMING },
   ];
 
   return (
-    <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: theme.isDark ? 1 : 0 }]}>
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+          borderWidth: theme.isDark ? 1 : 0,
+        },
+      ]}
+    >
       <View style={styles.head}>
         <Text style={[styles.title, { color: ink }]}>Service health</Text>
         <View style={[styles.verdict, { backgroundColor: v.bg }]}>
@@ -108,20 +148,38 @@ export function HealthCard({ kpis, onJobs, onComplaints, period, rangeText, onPe
       </View>
 
       <View style={styles.chips}>
-        {RANGE_CHIPS.map((chip) => {
+        {RANGE_CHIPS.map(chip => {
           const on = chip.key === period;
           return (
             <Pressable
               key={chip.key}
               onPress={() => onPeriod(chip.key)}
-              style={({ pressed }) => [styles.chip, { backgroundColor: on ? ICON_DEEP : soft }, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.chip,
+                { backgroundColor: on ? ICON_DEEP : soft },
+                pressed && styles.pressed,
+              ]}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
-              accessibilityLabel={chip.key === 'custom' ? 'Custom dates' : chip.label}
+              accessibilityLabel={
+                chip.key === 'custom' ? 'Custom dates' : chip.label
+              }
               hitSlop={4}
             >
-              {chip.key === 'custom' && <CalendarIcon size={13} color={on ? '#FFFFFF' : theme.textSecondary} />}
-              <Text style={[styles.chipText, { color: on ? '#FFFFFF' : theme.textSecondary }]}>{chip.label}</Text>
+              {chip.key === 'custom' && (
+                <CalendarIcon
+                  size={13}
+                  color={on ? '#FFFFFF' : theme.textSecondary}
+                />
+              )}
+              <Text
+                style={[
+                  styles.chipText,
+                  { color: on ? '#FFFFFF' : theme.textSecondary },
+                ]}
+              >
+                {chip.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -133,37 +191,79 @@ export function HealthCard({ kpis, onJobs, onComplaints, period, rangeText, onPe
           <View style={styles.donut}>
             <Donut parts={legend} track={soft} />
             <View style={styles.center} pointerEvents="none">
-              <Text style={[styles.score, { color: ink }]}>{score === null ? '—' : `${score}%`}</Text>
-              <Text style={[styles.scoreLabel, { color: muted }]}>on schedule</Text>
+              <Text style={[styles.score, { color: ink }]}>
+                {score === null ? '—' : `${score}%`}
+              </Text>
+              <Text style={[styles.scoreLabel, { color: muted }]}>
+                on schedule
+              </Text>
             </View>
           </View>
           <View style={styles.legend}>
-            {legend.map((l) => (
+            {legend.map(l => (
               <View key={l.key} style={styles.legendRow}>
                 <View style={[styles.dot, { backgroundColor: l.color }]} />
-                <Text style={[styles.legendLabel, { color: theme.textSecondary }]}>{l.label}</Text>
-                <Text style={[styles.legendValue, { color: ink }]}>{l.value}</Text>
+                <Text
+                  style={[styles.legendLabel, { color: theme.textSecondary }]}
+                >
+                  {l.label}
+                </Text>
+                <Text style={[styles.legendValue, { color: ink }]}>
+                  {l.value}
+                </Text>
               </View>
             ))}
-            <Text style={[styles.note, { color: muted }]}>{kpis.visits_total > 0 ? `${kpis.visits_total} visits in this period` : 'No visits planned in this period'}</Text>
+            <Text style={[styles.note, { color: muted }]}>
+              {kpis.visits_total > 0
+                ? `${kpis.visits_total} visits in this period`
+                : 'No visits planned in this period'}
+            </Text>
           </View>
         </View>
 
-        <View style={styles.figures}>
-          <Pressable onPress={onJobs} style={({ pressed }) => [styles.figure, { backgroundColor: soft }, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Jobs: ${kpis.jobs_in_period}`}>
-            <Text style={[styles.figureValue, { color: ink }]}>{kpis.jobs_in_period}</Text>
-            <Text style={[styles.figureLabel, { color: muted }]}>Jobs</Text>
-          </Pressable>
-          <Pressable
-            onPress={onComplaints}
-            style={({ pressed }) => [styles.figure, { backgroundColor: kpis.open_complaints > 0 ? '#FEF7E0' : soft }, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={`Open issues: ${kpis.open_complaints}`}
-          >
-            <Text style={[styles.figureValue, { color: kpis.open_complaints > 0 ? '#B06000' : ink }]}>{kpis.open_complaints}</Text>
-            <Text style={[styles.figureLabel, { color: muted }]}>Open issues</Text>
-          </Pressable>
-        </View>
+        {showFigures && (
+          <View style={styles.figures}>
+            <Pressable
+              onPress={onJobs}
+              style={({ pressed }) => [
+                styles.figure,
+                { backgroundColor: soft },
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Jobs: ${kpis.jobs_in_period}`}
+            >
+              <Text style={[styles.figureValue, { color: ink }]}>
+                {kpis.jobs_in_period}
+              </Text>
+              <Text style={[styles.figureLabel, { color: muted }]}>Jobs</Text>
+            </Pressable>
+            <Pressable
+              onPress={onComplaints}
+              style={({ pressed }) => [
+                styles.figure,
+                {
+                  backgroundColor: kpis.open_complaints > 0 ? '#FEF7E0' : soft,
+                },
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Open issues: ${kpis.open_complaints}`}
+            >
+              <Text
+                style={[
+                  styles.figureValue,
+                  { color: kpis.open_complaints > 0 ? '#B06000' : ink },
+                ]}
+              >
+                {kpis.open_complaints}
+              </Text>
+              <Text style={[styles.figureLabel, { color: muted }]}>
+                Open issues
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -174,15 +274,36 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   title: { ...typography.subtitle, fontSize: 17, flex: 1 },
-  verdict: { borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 4 },
+  verdict: {
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
   verdictText: { fontSize: 12.5, fontWeight: '700' },
   chips: { flexDirection: 'row', gap: 6, marginTop: spacing.md },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 32, paddingHorizontal: 12, borderRadius: 16 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
   chipText: { fontSize: 12.5, fontWeight: '700' },
   range: { fontSize: 12, marginTop: 8 },
   dim: { opacity: 0.5 },
-  body: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, marginTop: spacing.lg },
-  donut: { width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' },
+  body: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  donut: {
+    width: SIZE,
+    height: SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rotate: { position: 'absolute', transform: [{ rotate: '-90deg' }] },
   center: { alignItems: 'center' },
   score: { fontSize: 26, lineHeight: 30, fontWeight: '800' },
@@ -194,7 +315,12 @@ const styles = StyleSheet.create({
   legendValue: { fontSize: 15, fontWeight: '800' },
   note: { fontSize: 11.5, marginTop: 2 },
   figures: { flexDirection: 'row', gap: 10, marginTop: spacing.lg },
-  figure: { flex: 1, borderRadius: 16, paddingVertical: 12, paddingHorizontal: spacing.md },
+  figure: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+  },
   figureValue: { fontSize: 20, lineHeight: 25, fontWeight: '800' },
   figureLabel: { fontSize: 12, marginTop: 1 },
 });

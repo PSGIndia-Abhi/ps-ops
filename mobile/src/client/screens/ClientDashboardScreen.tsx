@@ -12,9 +12,9 @@ import { initials } from '../../tasks/format';
 import { avatarColor } from '../../tasks/theme';
 import { DateSheet } from '../../tasks/ui/sheets';
 import { shadows, spacing, typography } from '../../theme';
-import { getClientDashboard, type ClientDashboard } from '../api';
+import { getClientDashboard, listDocuments, type ClientDashboard } from '../api';
 import { useClientPortal } from '../ClientPortalContext';
-import { RISK_STYLE, SUPPORT_CONTACT, formatDate, periodRange, plural, relativeDay, serviceLabel, type PeriodKey } from '../format';
+import { RISK_STYLE, SUPPORT_CONTACT, formatDate, formatMoney, periodRange, type PeriodKey } from '../format';
 import type { ClientStackParamList, ClientTabParamList } from '../navigation';
 import {
   AuditGlyph,
@@ -22,13 +22,12 @@ import {
   ComplaintGlyph,
   DocumentsGlyph,
   HeroArt,
+  GlyphTile,
   ICON_DEEP,
-  ICON_SOFT,
   JobsGlyph,
   OutletGlyph,
   SearchGlyph,
   SupportGlyph,
-  TILE_BG,
   VisitsGlyph,
 } from '../ui/ClientIcons';
 import { CompanyMonogram } from '../ui/CompanyMonogram';
@@ -36,7 +35,8 @@ import { useFloatingBarSpace } from '../ui/FloatingTabBar';
 import { HealthCard } from '../ui/HealthCard';
 import { OutletSheet } from '../ui/OutletPicker';
 import { PAGE_BG, TONES } from '../ui/page';
-import { GlanceSkeleton, ShortcutsSkeleton } from '../ui/skeletons';
+import { HomeBento } from '../ui/HomeBento';
+import { BentoSkeleton } from '../ui/skeletons';
 
 type Nav = NavigationProp<ClientTabParamList & ClientStackParamList>;
 type Glyph = React.ComponentType<{ size?: number; color?: string; fill?: string }>;
@@ -79,15 +79,7 @@ const factory = (t: CrmTheme) => ({
   // Actions
   actions: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, paddingHorizontal: spacing.sm, marginTop: spacing.lg },
   action: { width: '25%' as const, alignItems: 'center' as const, paddingVertical: spacing.sm },
-  actionTile: { width: 64, height: 64, borderRadius: 22, backgroundColor: t.isDark ? t.surfaceAlt : TILE_BG, alignItems: 'center' as const, justifyContent: 'center' as const },
   actionLabel: { ...typography.body, fontSize: 13.5, lineHeight: 17, color: t.textPrimary, marginTop: 8, textAlign: 'center' as const },
-
-  // Shortcut pills
-  pills: { gap: 10, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  pill: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, paddingVertical: 10, paddingLeft: 10, paddingRight: 18, borderRadius: 32, borderWidth: 1, borderColor: t.border, backgroundColor: t.surface, minWidth: 168 },
-  pillIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: t.isDark ? t.surfaceAlt : TILE_BG, alignItems: 'center' as const, justifyContent: 'center' as const },
-  pillLabel: { ...typography.caption, fontSize: 12.5, color: t.textSecondary },
-  pillValue: { ...typography.bodyMedium, fontSize: 14.5, color: t.textPrimary, maxWidth: 170 },
 
   section: { paddingHorizontal: spacing.lg, marginTop: spacing.xl },
   sectionHead: { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: spacing.md },
@@ -126,6 +118,18 @@ export function ClientDashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [heroSize, setHeroSize] = useState<{ w: number; h: number } | null>(null);
+  const [expiring, setExpiring] = useState<number | null>(null);
+
+  // Certificates expiring within 30 days (the documents API counts them); best effort.
+  useEffect(() => {
+    let alive = true;
+    listDocuments({ kind: 'shared', siteId: outletId || undefined })
+      .then((body) => alive && setExpiring(body.expiring_soon ?? 0))
+      .catch(() => alive && setExpiring(null));
+    return () => {
+      alive = false;
+    };
+  }, [outletId, reloadKey]);
 
   useEffect(() => {
     let alive = true;
@@ -159,8 +163,14 @@ export function ClientDashboardScreen() {
   const firstLoad = loading && !data;
   const heroColors = theme.isDark ? HERO.dark : HERO.light;
   const rangeText = `${formatDate(range.from, { day: 'numeric', month: 'short' })} – ${formatDate(range.to, { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  const deep = theme.isDark ? '#8AB4F8' : ICON_DEEP;
-  const soft = theme.isDark ? '#2A3B5C' : ICON_SOFT;
+  // Worst audit risk across the outlets in view.
+  const RISK_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+  const risks = (data?.outlets || [])
+    .filter((o) => !outletId || o.id === outletId)
+    .map((o) => String(o.audit_risk || '').toUpperCase())
+    .filter((r) => RISK_ORDER.includes(r));
+  const worst = risks.sort((x, y) => RISK_ORDER.indexOf(x) - RISK_ORDER.indexOf(y))[0];
+  const auditRisk = worst ? RISK_STYLE[worst]?.label || null : null;
 
   const outletTitle = multi ? (outletId ? outletName(outletId) : `All ${outlets.length} outlets`) : [single?.name, single?.city].filter(Boolean).join(', ') || 'Your outlet';
   const openOutlet = () => (multi ? setOutletSheet(true) : single ? navigation.navigate('ClientOutletDetail', { siteId: single.id }) : navigation.navigate('ClientOutlets'));
@@ -176,15 +186,6 @@ export function ClientDashboardScreen() {
     { key: 'support', label: 'Support', Icon: SupportGlyph, onPress: () => Linking.openURL(`tel:${SUPPORT_CONTACT.phone}`) },
   ];
 
-  const shortcuts: { key: string; label: string; value: string; Icon: Glyph; onPress: () => void }[] = k
-    ? [
-        nextVisit
-          ? { key: 'next', label: `Next visit · ${relativeDay(nextVisit.scheduled_date)}`, value: serviceLabel(nextVisit.service_type), Icon: VisitsGlyph, onPress: () => navigation.navigate('ClientJobDetail', { jobId: nextVisit.job_id }) }
-          : { key: 'next', label: 'Next visit', value: 'Book a service', Icon: VisitsGlyph, onPress: () => navigation.navigate('ClientRequestService') },
-        { key: 'issues', label: 'Complaints', value: k.open_complaints > 0 ? `${k.open_complaints} open` : 'All resolved', Icon: ComplaintGlyph, onPress: () => navigation.navigate('Complaints') },
-        { key: 'invoices', label: 'Invoices', value: k.pending_invoices > 0 ? `${plural(k.pending_invoices, 'invoice')} due` : 'Nothing due', Icon: DocumentsGlyph, onPress: () => navigation.navigate('ClientDocuments') },
-      ]
-    : [];
 
   return (
     <View style={styles.screen}>
@@ -248,13 +249,11 @@ export function ClientDashboardScreen() {
           </View>
         </View>
 
-        {/* Quick actions - custom glyphs on soft blue tiles */}
+        {/* Quick actions - BestServe duotone glyphs on white tiles */}
         <View style={styles.actions}>
           {actions.map((a) => (
             <Pressable key={a.key} onPress={a.onPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={a.label.replace('\n', ' ')}>
-              <View style={styles.actionTile}>
-                <a.Icon size={30} color={deep} fill={soft} />
-              </View>
+              <GlyphTile Icon={a.Icon} />
               <Text style={styles.actionLabel} numberOfLines={2}>
                 {a.label}
               </Text>
@@ -262,54 +261,46 @@ export function ClientDashboardScreen() {
           ))}
         </View>
 
-        {/* Shortcut pills */}
-        {firstLoad ? (
-          <ShortcutsSkeleton />
-        ) : shortcuts.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
-            {shortcuts.map((s) => (
-              <Pressable key={s.key} onPress={s.onPress} style={({ pressed }) => [styles.pill, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`${s.label}: ${s.value}`}>
-                <View style={styles.pillIcon}>
-                  <s.Icon size={22} color={deep} fill={soft} />
-                </View>
-                <View>
-                  <Text style={styles.pillLabel} numberOfLines={1}>
-                    {s.label}
-                  </Text>
-                  <Text style={styles.pillValue} numberOfLines={1}>
-                    {s.value}
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
-
         {!!error && (
           <View style={styles.section}>
             <CrmErrorBanner message={error} onRetry={() => setReloadKey((n) => n + 1)} />
           </View>
         )}
 
-        {/* Service health */}
+        {/* Overview - bento grid */}
         <View style={styles.section}>
           {firstLoad ? (
-            <GlanceSkeleton />
+            <BentoSkeleton />
           ) : k ? (
-            <HealthCard
-              kpis={k}
-              onJobs={() => navigation.navigate('Jobs')}
+            <HomeBento
+              nextVisit={nextVisit}
+              openComplaints={k.open_complaints}
+              pendingInvoices={k.pending_invoices}
+              pendingAmountText={formatMoney(k.pending_amount)}
+              expiring={expiring}
+              auditRisk={auditRisk}
+              onOpenJob={(jobId) => navigation.navigate('ClientJobDetail', { jobId })}
+              onBook={() => navigation.navigate('ClientRequestService')}
               onComplaints={() => navigation.navigate('Complaints')}
-              period={period}
-              rangeText={rangeText}
-              onPeriod={(key) => {
-                if (key === 'custom') {
-                  setCustom(range);
-                  setPicking('from');
-                } else setPeriod(key);
-              }}
-              busy={loading}
-            />
+              onDocuments={() => navigation.navigate('ClientDocuments')}
+              onAudits={() => navigation.navigate('ClientAudits')}
+            >
+              <HealthCard
+                kpis={k}
+                onJobs={() => navigation.navigate('Jobs')}
+                onComplaints={() => navigation.navigate('Complaints')}
+                period={period}
+                rangeText={rangeText}
+                onPeriod={(key) => {
+                  if (key === 'custom') {
+                    setCustom(range);
+                    setPicking('from');
+                  } else setPeriod(key);
+                }}
+                busy={loading}
+                showFigures={false}
+              />
+            </HomeBento>
           ) : null}
         </View>
 

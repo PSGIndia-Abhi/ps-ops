@@ -2,20 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon } from '../../components/icons';
+import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, CloseIcon } from '../../components/icons';
+import { kvGet, kvSet } from '../../crm/secureKv';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { radii, spacing, typography } from '../../theme';
 import { listComplaints, listDocuments, listJobs, type ClientComplaint, type ClientDocument, type ClientJob } from '../api';
 import { useClientPortal } from '../ClientPortalContext';
 import { formatDate, serviceLabel, statusInfo } from '../format';
 import type { ClientStackParamList } from '../navigation';
-import { ComplaintGlyph, DocumentsGlyph, ICON_DEEP, JobsGlyph, SearchGlyph, TILE_BG } from '../ui/ClientIcons';
+import { AuditGlyph, ComplaintGlyph, DocumentsGlyph, GlyphTile, ICON_DEEP, JobsGlyph, SearchGlyph } from '../ui/ClientIcons';
 import { PAGE_BG, SOFT } from '../ui/page';
 import { RowsSkeleton } from '../ui/skeletons';
 
 type Nav = NavigationProp<ClientStackParamList>;
 
-const SUGGESTIONS = ['Pest control', 'Deep cleaning', 'Certificate', 'Invoice', 'Rodent'];
+const SUGGESTIONS = ['Pest control', 'Deep cleaning', 'Certificate', 'Invoice'];
+const RECENT_KEY = 'clientPortal.recentSearches';
+const MAX_RECENT = 5;
 const PER_GROUP = 5;
 
 interface Results {
@@ -37,16 +40,23 @@ const factory = (t: CrmTheme) => ({
   input: { flex: 1, ...typography.body, fontSize: 16, color: t.textPrimary, paddingVertical: 0 },
   clear: { width: 32, height: 32, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const },
   content: { paddingBottom: spacing.xxxl },
-  hint: { ...typography.caption, fontSize: 13, color: t.textMuted, paddingHorizontal: spacing.lg, marginTop: spacing.lg, marginBottom: spacing.sm },
+  label: { ...typography.captionMedium, fontSize: 13, letterSpacing: 0.3, color: t.textMuted, paddingHorizontal: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.md },
+  labelRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, paddingRight: spacing.lg },
+  clearAll: { ...typography.captionMedium, fontSize: 13, color: t.isDark ? '#8AB4F8' : ICON_DEEP, marginTop: spacing.xl, marginBottom: spacing.md },
+  recent: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, paddingLeft: spacing.lg, paddingRight: spacing.sm, height: 48 },
+  recentText: { ...typography.body, fontSize: 15, color: t.textPrimary, flex: 1 },
+  remove: { width: 40, height: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const },
+  browse: { flexDirection: 'row' as const, paddingHorizontal: spacing.sm },
+  browseItem: { flex: 1, alignItems: 'center' as const },
+  browseLabel: { ...typography.caption, fontSize: 12.5, color: t.textPrimary, marginTop: 8, textAlign: 'center' as const },
   chips: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: spacing.sm, paddingHorizontal: spacing.lg },
-  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: radii.pill, borderWidth: 1, borderColor: t.border },
+  chip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, paddingHorizontal: 14, height: 38, borderRadius: radii.pill, backgroundColor: SOFT(t) },
   chipText: { ...typography.captionMedium, fontSize: 13.5, color: t.textPrimary },
   group: { marginTop: spacing.lg },
   groupHead: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: spacing.lg, marginBottom: 4 },
   groupTitle: { ...typography.subtitle, fontSize: 16, color: t.textPrimary, flex: 1 },
   groupCount: { ...typography.caption, color: t.textMuted },
   row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: 10 },
-  tile: { width: 44, height: 44, borderRadius: 14, backgroundColor: t.isDark ? t.surfaceAlt : TILE_BG, alignItems: 'center' as const, justifyContent: 'center' as const },
   rowTitle: { ...typography.bodyMedium, color: t.textPrimary },
   rowSub: { ...typography.caption, fontSize: 12.5, color: t.textMuted, marginTop: 1 },
   empty: { alignItems: 'center' as const, paddingHorizontal: spacing.xl, marginTop: spacing.xxxl, gap: spacing.sm },
@@ -59,8 +69,33 @@ const factory = (t: CrmTheme) => ({
 export function ClientSearchScreen() {
   const navigation = useNavigation<Nav>();
   const { styles, theme } = useCrmStyles(factory);
-  const { outletId } = useClientPortal();
+  const { outletId, portal } = useClientPortal();
+  const scope = portal?.user?.id ? String(portal.user.id) : '';
   const [q, setQ] = useState('');
+  const [recent, setRecent] = useState<string[]>([]);
+
+  // Recent searches, per login, in the phone's encrypted store.
+  useEffect(() => {
+    if (scope) kvGet<string[]>(scope, RECENT_KEY).then((list) => setRecent(Array.isArray(list) ? list : []));
+  }, [scope]);
+
+  const remember = (term: string) => {
+    const t = term.trim();
+    if (t.length < 2 || !scope) return;
+    setRecent((list) => {
+      const next = [t, ...list.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, MAX_RECENT);
+      kvSet(scope, RECENT_KEY, next);
+      return next;
+    });
+  };
+  const forget = (term?: string) => {
+    if (!scope) return;
+    setRecent((list) => {
+      const next = term ? list.filter((x) => x !== term) : [];
+      kvSet(scope, RECENT_KEY, next);
+      return next;
+    });
+  };
   const [results, setResults] = useState<Results | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,8 +139,16 @@ export function ClientSearchScreen() {
 
   const open = (fn: () => void) => () => {
     Keyboard.dismiss();
+    remember(q);
     fn();
   };
+
+  const browse: { key: string; label: string; Icon: React.ComponentType<{ size?: number; color?: string; fill?: string }>; go: () => void }[] = [
+    { key: 'jobs', label: 'Jobs', Icon: JobsGlyph, go: () => navigation.navigate('ClientTabs', { screen: 'Jobs' }) },
+    { key: 'complaints', label: 'Complaints', Icon: ComplaintGlyph, go: () => navigation.navigate('ClientTabs', { screen: 'Complaints' }) },
+    { key: 'docs', label: 'Documents', Icon: DocumentsGlyph, go: () => navigation.navigate('ClientDocuments') },
+    { key: 'audits', label: 'Audit reports', Icon: AuditGlyph, go: () => navigation.navigate('ClientAudits') },
+  ];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -123,6 +166,7 @@ export function ClientSearchScreen() {
             style={styles.input}
             autoFocus
             returnKeyType="search"
+            onSubmitEditing={() => remember(q)}
             autoCorrect={false}
           />
           {!!q && (
@@ -136,15 +180,49 @@ export function ClientSearchScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {q.trim().length < 2 ? (
           <>
-            <Text style={styles.hint}>Try searching for</Text>
+            {recent.length > 0 && (
+              <>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Recent</Text>
+                  <Pressable onPress={() => forget()} hitSlop={8} accessibilityRole="button">
+                    <Text style={styles.clearAll}>Clear all</Text>
+                  </Pressable>
+                </View>
+                {recent.map((term) => (
+                  <Pressable key={term} onPress={() => setQ(term)} style={({ pressed }) => [styles.recent, pressed && styles.pressed]} accessibilityRole="button">
+                    <ClockIcon size={19} color={theme.textMuted} />
+                    <Text style={styles.recentText} numberOfLines={1}>
+                      {term}
+                    </Text>
+                    <Pressable onPress={() => forget(term)} style={styles.remove} hitSlop={4} accessibilityRole="button" accessibilityLabel={`Remove ${term}`}>
+                      <CloseIcon size={16} color={theme.textMuted} />
+                    </Pressable>
+                  </Pressable>
+                ))}
+              </>
+            )}
+
+            <Text style={styles.label}>Browse</Text>
+            <View style={styles.browse}>
+              {browse.map((b) => (
+                <Pressable key={b.key} onPress={open(b.go)} style={({ pressed }) => [styles.browseItem, pressed && styles.pressed]} accessibilityRole="button">
+                  <GlyphTile Icon={b.Icon} size={56} iconSize={26} />
+                  <Text style={styles.browseLabel} numberOfLines={1}>
+                    {b.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Popular</Text>
             <View style={styles.chips}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => setQ(s)} style={({ pressed }) => [styles.chip, pressed && styles.pressed]} accessibilityRole="button">
+                  <SearchGlyph size={14} color={theme.textSecondary} />
                   <Text style={styles.chipText}>{s}</Text>
                 </Pressable>
               ))}
             </View>
-            <Text style={styles.hint}>Search by job number (e.g. 2026-1179), service, outlet, complaint subject or document name.</Text>
           </>
         ) : loading && !results ? (
           <View style={styles.group}>
@@ -156,7 +234,7 @@ export function ClientSearchScreen() {
           <View style={styles.empty}>
             <SearchGlyph size={40} color={theme.textMuted} />
             <Text style={styles.emptyTitle}>No matches for “{q.trim()}”</Text>
-            <Text style={styles.emptySub}>Check the spelling, or try a job number or service name.</Text>
+            <Text style={styles.emptySub}>Try a job number or service name.</Text>
           </View>
         ) : results ? (
           <View style={loading ? { opacity: 0.6 } : undefined}>
@@ -168,9 +246,7 @@ export function ClientSearchScreen() {
                 </View>
                 {results.jobs.slice(0, PER_GROUP).map((j) => (
                   <Pressable key={j.id} onPress={open(() => navigation.navigate('ClientJobDetail', { jobId: j.id }))} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button">
-                    <View style={styles.tile}>
-                      <JobsGlyph size={22} color={ICON_DEEP} />
-                    </View>
+                    <GlyphTile Icon={JobsGlyph} size={44} iconSize={22} radius={14} />
                     <View style={styles.flex1}>
                       <Text style={styles.rowTitle} numberOfLines={1}>
                         {serviceLabel(j.service_type)}
@@ -192,9 +268,7 @@ export function ClientSearchScreen() {
                 </View>
                 {results.complaints.slice(0, PER_GROUP).map((c) => (
                   <Pressable key={c.id} onPress={open(() => navigation.navigate('ClientComplaintDetail', { complaintId: c.id }))} style={({ pressed }) => [styles.row, pressed && styles.pressed]} accessibilityRole="button">
-                    <View style={styles.tile}>
-                      <ComplaintGlyph size={22} color={ICON_DEEP} />
-                    </View>
+                    <GlyphTile Icon={ComplaintGlyph} size={44} iconSize={22} radius={14} />
                     <View style={styles.flex1}>
                       <Text style={styles.rowTitle} numberOfLines={1}>
                         {c.subject}
@@ -221,9 +295,7 @@ export function ClientSearchScreen() {
                     style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                     accessibilityRole="button"
                   >
-                    <View style={styles.tile}>
-                      <DocumentsGlyph size={22} color={ICON_DEEP} />
-                    </View>
+                    <GlyphTile Icon={DocumentsGlyph} size={44} iconSize={22} radius={14} />
                     <View style={styles.flex1}>
                       <Text style={styles.rowTitle} numberOfLines={1}>
                         {d.title}
