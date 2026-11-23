@@ -62,10 +62,15 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
   const [notice, setNotice] = useState("");
   const [contact, setContact] = useState(null); // the customer's phone numbers; null while loading
 
+  // A row can hold several customer records that share a display name (customer.ids). Lists cover
+  // all of them; contacts, new reminders and Record Payment use the main record (customer.main_id).
+  const ids = useMemo(() => (customer.ids?.length ? customer.ids : [customer.id]), [customer.ids, customer.id]);
+  const mainId = customer.main_id || ids[0];
+
   // Only the Reminder panel shows the Contact section.
   const loadContact = useCallback(
-    () => fetchCustomerContact(customer.id).catch(() => ({ contacts: [] })),
-    [customer.id]
+    () => fetchCustomerContact(mainId).catch(() => ({ contacts: [] })),
+    [mainId]
   );
   useEffect(() => {
     if (isHistory) return undefined;
@@ -76,15 +81,15 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
 
   const unpaid = useMemo(
     () => invoices
-      .filter((i) => i.customer_id === customer.id && i.status !== "CANCELLED" && i.pending_amount > 0)
+      .filter((i) => ids.includes(i.customer_id) && i.status !== "CANCELLED" && i.pending_amount > 0)
       .sort((a, b) => byDue({ due_date: a.due_date || a.invoice_date }, { due_date: b.due_date || b.invoice_date })),
-    [invoices, customer.id]
+    [invoices, ids]
   );
   const reminders = useMemo(
     () => followUps
-      .filter((f) => f.customer_id === customer.id)
+      .filter((f) => ids.includes(f.customer_id))
       .sort((a, b) => (a.active === b.active ? (a.active ? byDue(a, b) : byDue(b, a)) : a.active ? -1 : 1)),
-    [followUps, customer.id]
+    [followUps, ids]
   );
   // The panel lists every open reminder of the customer, soonest due first (a whole-customer
   // reminder and reminders for single invoices can be open at the same time).
@@ -97,7 +102,7 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
     const ids = new Set(open.map((f) => f.invoice_id));
     return unpaid.filter((i) => ids.has(i.id));
   }, [reminders, unpaid]);
-  const customerPayments = payments.filter((p) => p.customer_id === customer.id && p.status !== "CANCELLED");
+  const customerPayments = payments.filter((p) => ids.includes(p.customer_id) && p.status !== "CANCELLED");
 
   // Reminder events come from each reminder's own history; reloaded whenever the reminders change.
   const historyKey = reminders.slice(0, MAX_HISTORY_TASKS).map((f) => `${f.id}:${f.status}:${f.due_date}:${f.due_time}`).join("|");
@@ -165,7 +170,9 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
           <span className={`ac-drawer-icon${isHistory ? " history" : ""}`} aria-hidden="true">{isHistory ? <FiClock /> : <FiBell />}</span>
           <div style={{ minWidth: 0, flex: 1 }}>
             <h3>{customer.name}</h3>
-            <span className="ac-sub">{customer.code ? `${customer.code} · ` : ""}{isHistory ? "Activity history" : "Payment reminders"}</span>
+            <span className="ac-sub">
+              {customer.code ? `${customer.code} · ` : ""}{ids.length > 1 ? `${ids.length} customer records · ` : ""}{isHistory ? "Activity history" : "Payment reminders"}
+            </span>
           </div>
           <button type="button" className="ac-link ac-drawer-close" aria-label="Close" onClick={onClose}><FiX /></button>
         </header>
@@ -176,7 +183,7 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
 
           {!isHistory && (<>
           <CustomerContacts
-            customerId={customer.id}
+            customerId={mainId}
             data={contact}
             onSaved={async () => { setContact(await loadContact()); setNotice("Contact saved."); }}
           />
@@ -269,7 +276,7 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
         onCreated={async () => { setNotice("Reminder saved."); await onChanged?.(); }}
         invoices={invoices}
         followUps={followUps}
-        customerId={customer.id}
+        customerId={mainId}
         lockCustomer
       />
       {updating && (
@@ -280,7 +287,7 @@ export default function CustomerReminderPanel({ customer, invoices, payments, fo
             setUpdating(null);
             setNotice(rescheduled ? "Reminder updated and rescheduled." : "Reminder updated.");
             await onChanged?.();
-            if (outcome === "PAYMENT_RECEIVED") navigate("/accountant/payments/record", { state: { customerId: customer.id, followUpId: updating.id } });
+            if (outcome === "PAYMENT_RECEIVED") navigate("/accountant/payments/record", { state: { customerId: updating.customer_id || mainId, followUpId: updating.id } });
           }}
         />
       )}
