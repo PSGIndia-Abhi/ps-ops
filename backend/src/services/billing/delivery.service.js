@@ -13,6 +13,7 @@ const { v4: uuid } = require("uuid");
 const C = require("./common");
 const { billingInvoicePdfBuffer } = require("../../utils/billingInvoiceDocument");
 const { sendBillingInvoiceEmail } = require("../../utils/mailer");
+const F = require("./sosFiles.service");
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const list = (s) => String(s || "").split(",").map((e) => e.trim()).filter(Boolean);
@@ -34,8 +35,9 @@ async function recipientsFor(db, inv) {
  */
 async function emailIssued(db, invoiceId, userId) {
   const [[inv]] = await db.query(
-    `SELECT bi.id, bi.company_id, bi.site_id, bi.invoice_number, bi.status, bi.total, bi.content,
-            DATE_FORMAT(bi.due_date, '%Y-%m-%d') AS due_date, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start
+    `SELECT bi.id, bi.company_id, bi.site_id, bi.invoice_number, bi.status, bi.total, bi.content, bi.is_manual,
+            DATE_FORMAT(bi.due_date, '%Y-%m-%d') AS due_date, DATE_FORMAT(bi.period_start, '%Y-%m-%d') AS period_start,
+            DATE_FORMAT(bi.period_end, '%Y-%m-%d') AS period_end
        FROM billing_invoices bi WHERE bi.id = ?`,
     [invoiceId]
   );
@@ -52,14 +54,23 @@ async function emailIssued(db, invoiceId, userId) {
   const text =
     `Dear Sir/Madam,\n\nPlease find attached our invoice ${inv.invoice_number} for pest control services${month ? ` for ${month}` : ""} ` +
     `(${amount}). Kindly arrange payment.\n\nRegards,\nAccounts - BestServe Pest Management Pvt Ltd`;
+  let note = "Sent automatically on issue";
   const log = (status, error = null) => db.query(
     `INSERT INTO billing_invoice_shares (id, billing_invoice_id, channel, recipients, subject, attach, status, error_message, note, created_by)
-     VALUES (?, ?, 'EMAIL', ?, ?, 'ORIGINAL', ?, ?, 'Sent automatically on issue', ?)`,
-    [uuid(), inv.id, JSON.stringify(to), subject, status, error ? String(error).slice(0, 500) : null, userId]
+     VALUES (?, ?, 'EMAIL', ?, ?, 'ORIGINAL', ?, ?, ?, ?)`,
+    [uuid(), inv.id, JSON.stringify(to), subject, status, error ? String(error).slice(0, 500) : null, note, userId]
   );
   try {
     const pdf = await billingInvoicePdfBuffer(content, {});
-    await sendBillingInvoiceEmail({ to, subject, text, attachments: [{ filename: fileName(content, inv.invoice_number), content: pdf, contentType: "application/pdf" }] });
+    // The files attached to the SOS of the invoice's months go with it. Too large together: the
+    // invoice is still sent, without them (they can be sent by hand).
+    const sosFiles = await F.emailAttachments(db, inv);
+    if (sosFiles.tooLarge) note += ` - SOS attachments not included (${F.mb(sosFiles.totalBytes)}, too large to email)`;
+    else if (sosFiles.attachments.length) note += ` with ${sosFiles.attachments.length} SOS attachment${sosFiles.attachments.length === 1 ? "" : "s"}`;
+    await sendBillingInvoiceEmail({
+      to, subject, text,
+      attachments: [{ filename: fileName(content, inv.invoice_number), content: pdf, contentType: "application/pdf" }, ...sosFiles.attachments],
+    });
     await log("SENT");
     return { status: "SENT", to };
   } catch (err) {
