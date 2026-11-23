@@ -185,7 +185,9 @@ const issue = C.handle("Failed to issue the invoices", async (req, res) => {
   if (ids.length > 200) throw C.bad("Too many invoices in one go (max 200)");
   const result = await I.issueMany(pool, ids, req, { confirmWarnings: C.bool(req.body?.confirm_warnings) });
   // Delivered as the customer's billing profile says: emailed to the outlet / customer addresses.
-  for (const it of result.issued) it.email = await delivery.emailIssued(pool, it.id, req.user.id);
+  // Invoices issued together for exactly the same addresses go in one email (one PDF each).
+  const emails = await delivery.emailIssuedMany(pool, result.issued.map((it) => it.id), req.user.id);
+  for (const it of result.issued) it.email = emails.get(it.id);
   res.json(result);
 });
 
