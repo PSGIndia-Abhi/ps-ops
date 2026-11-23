@@ -1904,3 +1904,74 @@
   .sosf-name { flex-basis: calc(100% - 30px); }
   .sosf-meta { flex: 1; }
 }
+
+/* Bill Run: one warnings button per row (opens the list) */
+.bl-warnbtn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; border: 1px solid #fcd9a8; background: #fff7ed; color: #b45309; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s; }
+.bl-warnbtn:hover { background: #ffedd5; border-color: #f9b871; }
+.bl-warnbtn.err { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.bl-warnbtn.err:hover { background: #fee2e2; border-color: #fca5a5; }
+.bl-warnbtn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* Month picker with ‹ › arrows */
+.bl-monthnav { display: inline-flex; align-items: center; gap: 6px; }
+.bl-monthnav .ac-input { height: 42px; min-width: 190px; padding-left: 12px; padding-right: 10px; font-variant-numeric: tabular-nums; }
+.bl-monthnav-btn { width: 38px; height: 42px; padding: 0; border-radius: 10px; border: 1px solid #e2e8f0; background: #fff; color: #475569; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; transition: all .15s; }
+.bl-monthnav-btn:hover:not(:disabled) { color: #2563eb; border-color: #bfdbfe; background: #f8fbff; }
+.bl-monthnav-btn:disabled { color: #cbd5e1; cursor: default; }
+.bl-monthnav-btn svg { width: 18px; height: 18px; display: block; }
+
+/* Bill Run: All months toggle next to the month picker */
+.bl-allbtn { height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid #e2e8f0; background: #fff; color: #334155; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .15s; }
+.bl-allbtn:hover { border-color: #bfdbfe; color: #2563eb; background: #f8fbff; }
+.bl-allbtn.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+
+/* ---------- Responsive: phones and tablets ---------- */
+/* Phones: stat cards two per row and compact, so the list is reached without scrolling past them */
+@media (max-width: 640px) {
+  .bl-app .ac-kpis.ac-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .bl-app .bl-kpi { padding: 12px 12px 11px; gap: 4px; border-radius: 14px; }
+  .bl-app .bl-kpi-value { font-size: 20px; }
+  .bl-app .bl-kpi-label { font-size: 12px; padding-right: 30px; }
+  .bl-app .bl-kpi-note { font-size: 11px; line-height: 1.3; }
+  .bl-app .bl-kpi-icon { width: 28px; height: 28px; border-radius: 8px; }
+  .bl-app .bl-kpi-icon svg { width: 15px; height: 15px; }
+  .bl-app .bl-kpi::after { width: 70px; height: 70px; right: -20px; bottom: -24px; }
+}
+/* Tablets: the long list tables (Bill Run, drafts, issued, POs, SOS, contracts) become cards like on
+   phones instead of a squeezed table that scrolls sideways; two cards per row on wider tablets. */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .bl-app .ac-table.ac-stack.bl-tabstack { min-width: 0; display: block; }
+  .bl-app .ac-table.ac-stack.bl-tabstack thead { display: none; }
+  .bl-app .ac-table.ac-stack.bl-tabstack tbody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .bl-app .ac-table.ac-stack.bl-tabstack tr { display: block; padding: 8px 14px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); align-items: center; column-gap: 14px; padding: 6px 0; border: 0; text-align: right; justify-items: end; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td::before { content: attr(data-label); justify-self: start; text-align: left; font-size: 12px; font-weight: 600; color: #64748b; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td[data-label=""]::before { content: none; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td[data-label=""] { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td[colspan] { display: block; text-align: left; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td.ac-empty { text-align: center; }
+  .bl-app .ac-table.ac-stack.bl-tabstack td:empty { display: none; }
+  .bl-app .ac-table.ac-stack.bl-tabstack tr.bl-short { border-left: 3px solid #ef4444; }
+}
+@media (min-width: 900px) and (max-width: 1024px) {
+  .bl-app .ac-table.ac-stack.bl-tabstack tbody { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bl-app .ac-table.ac-stack.bl-tabstack tr:only-child { grid-column: 1 / -1; }
+}
+
+/* Dropdown you can also type in (ComboInput): the list opens under the box */
+.bl-combo { position: relative; display: flex; align-items: center; min-width: 0; }
+.bl-combo-input { width: 100%; min-width: 0; height: 36px; padding: 0 34px 0 12px; border: 1px solid #d7dde6; border-radius: 9px; background: #fff; font: inherit; font-size: 14px; color: #0f172a; outline: none; transition: border-color .15s, box-shadow .15s; }
+.bl-combo-input:focus, .bl-combo.open .bl-combo-input { border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+.bl-combo-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #64748b; display: grid; place-items: center; cursor: pointer; }
+.bl-combo-btn:hover { background: #f1f5f9; color: #2563eb; }
+.bl-combo.open .bl-combo-btn svg { transform: rotate(180deg); }
+.bl-combo-btn svg { width: 16px; height: 16px; transition: transform .15s; }
+.bl-combo-list { position: fixed; z-index: 1000; max-height: 260px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14); }
+.bl-combo-list li { padding: 8px 10px; border-radius: 7px; font-size: 13.5px; color: #1e293b; cursor: pointer; }
+.bl-combo-list li.hi { background: #eff6ff; color: #1d4ed8; }
+.bl-combo-list li.on { font-weight: 600; }
+/* the SOS extra-service box: the dropdown itself, no second border around it */
+.bl-combo.sos-combo { width: 100%; max-width: 420px; }
+.bl-combo.sos-combo .bl-combo-input { height: 34px; font-size: 13.5px; font-weight: 600; }
+/* Termite extra: the unit (sq. m / sq. ft) */
+.sos-unitsel { height: 36px; padding: 0 8px; min-width: 0; width: 100%; font-size: 13px; }

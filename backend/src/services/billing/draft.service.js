@@ -123,7 +123,8 @@ async function buildLines(db, contract, period, contractLines) {
 
   // Termite: the treated area of this period comes from the SOS of the month that bills it.
   const hasArea = contractLines.some((cl) => S.isAreaLine(contract, cl));
-  const areaMonth = hasArea ? `${S.billMonthOf(contract, period)}-01` : null;
+  // the area of the period is on the SOS of the month the period starts (see sos.service areaMonthOf)
+  const areaMonth = hasArea ? `${S.areaMonthOf(contract, period)}-01` : null;
   const areaSos = hasArea ? await S.submittedFor(db, contract.company_id, [areaMonth]) : new Map();
   if (hasArea && !areaSos.has(areaMonth) && !sosMissing.includes(areaMonth)) sosMissing.push(areaMonth);
 
@@ -177,12 +178,23 @@ async function buildLines(db, contract, period, contractLines) {
   });
 
   // Extra services from the SOS that this contract bills, one line per outlet + service + rate.
+  // Termite (no counted services): extras added on the SOS that holds its area, billed once - on the
+  // first period that starts in that month (a weekly / daily contract has several).
+  let extraSource = sosLines;
+  if (!counted && hasArea) {
+    const unit = P.unitOf(contract);
+    const step = unit === "WEEK" ? 7 : unit === "DAY" ? 1 : 0;
+    const firstOfMonth = !step || C.addDays(period.start, -step).slice(0, 7) !== period.start.slice(0, 7);
+    extraSource = firstOfMonth ? [...areaSos.values()].flat().filter((l) => l.kind !== "AREA") : [];
+  }
   const extras = new Map();
-  for (const x of sosLines.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
+  for (const x of extraSource.filter((l) => Number(l.is_extra) === 1 && l.contract_id === contract.id)) {
     const rate = x.rate === null ? null : Number(x.rate);
-    const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}`;
-    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0, sos_line_ids: [] };
-    e.quantity += Number(x.completed) || 0;
+    // Termite extra: an area (sq. m / sq. ft) at the contract's rate; otherwise a number of services
+    const byArea = x.area !== null && x.area !== undefined;
+    const key = `${x.site_id || ""}|${norm(x.service)}|${rate ?? "-"}|${byArea ? x.unit || "" : ""}`;
+    const e = extras.get(key) || { site_id: x.site_id, service: x.service, rate, quantity: 0, sos_line_ids: [], unit: byArea ? x.unit || "sq.m" : null };
+    e.quantity += byArea ? Number(x.area) || 0 : Number(x.completed) || 0;
     e.sos_line_ids.push(x.id);
     extras.set(key, e);
   }
@@ -194,11 +206,11 @@ async function buildLines(db, contract, period, contractLines) {
       contract_line_id: null,
       site_id: e.site_id,
       site: siteNames.find((s) => s.id === e.site_id)?.name || null,
-      item_name: `${e.service} (additional services)`,
+      item_name: e.unit ? `${e.service} (additional area)` : `${e.service} (additional services)`,
       invoice_group: null,
       sac_code: "998531",
-      unit: "Service",
-      pricing_basis: "PER_SERVICE",
+      unit: e.unit || "Service",
+      pricing_basis: e.unit ? "PER_UNIT" : "PER_SERVICE",
       rate: e.rate ?? 0,
       quantity: e.quantity,
       adjustment_type: "NONE",
@@ -244,9 +256,17 @@ async function periodsToBill(db, contract, monthEnd) {
   };
 }
 
-/** Contracts due in `month` with their period, services, estimate and warnings. */
+/**
+ * Contracts due in `month` with their period, services, estimate and warnings. `month` "ALL": every
+ * active contract's next bill up to 12 months ahead, each with the month it is billed in (bill_month);
+ * only those due by this month can be generated (due_now).
+ */
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
-  const range = C.monthRange(month);
+  const allMonths = month === "ALL";
+  const thisMonth = C.todayIst().slice(0, 7);
+  const range = allMonths ? C.monthRange(C.addMonths(`${thisMonth}-01`, 12).slice(0, 7)) : C.monthRange(month);
+  // weekly / daily Termite: only what is due by this month (a year ahead would be dozens of weeks)
+  const shortEnd = allMonths ? C.monthRange(thisMonth).end : range.end;
   const [contracts] = await db.query(
     `SELECT bc.*, c.name AS customer, IF(bc.contract_kind = 'GROUP', TRIM(g.name), NULL) AS billing_group
        FROM billing_contracts bc
@@ -283,7 +303,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     let existingDrafts = 0;
     if (short) {
       // weekly / daily Termite: one row for all its periods due this month (one invoice each)
-      const { periods, drafted } = await periodsToBill(db, contract, range.end);
+      const { periods, drafted } = await periodsToBill(db, contract, shortEnd);
       if (!periods.length && !drafted.length) continue;
       const all = [...periods, ...drafted].sort((a, b) => (a.start < b.start ? -1 : 1));
       period = { start: all[0].start, end: all[all.length - 1].end };
@@ -335,7 +355,12 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     // Counted services are billed from the Service Coordinator's submitted SOS: wait for it.
     if (sosMissing.length) warn("SOS_PENDING", `Waiting for SOS: ${sosMissing.map((m) => C.monthName(m)).join(", ")}`, true);
     const extraLines = lines.filter((l) => !l.contract_line_id);
-    if (extraLines.length) warn("EXTRA_SERVICES", `${extraLines.reduce((t, l) => t + l.quantity, 0)} extra service(s) on the SOS`);
+    // extra services counted; Termite extra area per unit (sq. m / sq. ft)
+    const extraCount = extraLines.filter((l) => l.unit === "Service").reduce((t, l) => t + l.quantity, 0);
+    const extraArea = [...new Set(extraLines.filter((l) => l.unit !== "Service").map((l) => l.unit))]
+      .map((un) => `${extraLines.filter((l) => l.unit === un).reduce((t, l) => t + l.quantity, 0)} ${/ft/i.test(un) ? "sq. ft" : "sq. m"}`);
+    if (extraCount) warn("EXTRA_SERVICES", `${extraCount} extra service(s) on the SOS`);
+    if (extraArea.length) warn("EXTRA_AREA", `Extra area on the SOS: ${extraArea.join(", ")}`);
     const extrasNoRate = extraLines.filter((l) => l.needs_input);
     if (extrasNoRate.length) warn("EXTRA_NO_RATE", "Extra service without a rate: enter it before generating the draft");
     if (contract.po_required) {
@@ -353,8 +378,13 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     if (planned > done) warn("SERVICE_SHORTFALL", `${planned - done} service${planned - done > 1 ? "s" : ""} not done`);
     if (contract.end_date && contract.end_date <= period.end) warn("CONTRACT_ENDING", "Contract ends in this period");
 
+    // The month this bill is made in: billed in advance - the month the period starts; billed after
+    // (arrears) - the month it ends.
+    const billMonth = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
     rows.push({
       contract_id: contract.id,
+      bill_month: short ? (toBill[0] ? (contract.bill_timing === "ADVANCE" ? toBill[0].start : toBill[0].end).slice(0, 7) : billMonth) : billMonth,
+      due_now: !allMonths || (short ? true : billMonth <= thisMonth),
       contract_code: contract.contract_code,
       company_id: contract.company_id,
       customer: raw.customer,
@@ -371,7 +401,20 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
       services: linked.length ? { planned, done, short: Math.max(planned - done, 0) } : null,
       // Termite: priced per sq. ft / sq. m of treated area (PER_SQFT / PER_SQM)
       structure: contract.billing_type === "TERMITE" ? (/ft/i.test(cl.find((x) => S.isAreaLine(contract, x))?.unit || "") ? "PER_SQFT" : "PER_SQM") : contract.shortfall_billing === "FULL" ? "FIXED" : "SERVICE_BASED",
-      sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,      estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
+      sos: sosMissing.length ? "PENDING" : cl.some(isCounted) ? "SUBMITTED" : null,
+      estimated_total: sosMissing.length || lines.some((l) => l.needs_input) ? null : totals.total,
+      // Separate bills: each period makes a services invoice and a chemicals invoice (shown as two bills)
+      separate_bills: Boolean(contract.separate_bills),
+      bills: contract.separate_bills ? (() => {
+        const kindOf = new Map(cl.map((x) => [x.id, x.item_kind || "SERVICE"]));
+        const isChem = (l) => Boolean(l.contract_line_id) && kindOf.get(l.contract_line_id) === "CHEMICAL";
+        const unknown = sosMissing.length || lines.some((l) => l.needs_input);
+        const est = (ls) => (unknown || !ls.length ? null : calc.totalsFor(ls, taxMode, contract.gst_rate).total);
+        return [
+          { kind: "SERVICE", estimated_total: est(lines.filter((l) => !isChem(l))) },
+          { kind: "CHEMICAL", estimated_total: est(lines.filter(isChem)) },
+        ];
+      })() : null,
       needs_input: lines.some((l) => l.needs_input),
       // extra SOS services with no rate: Generate opens the "Before generating" page to enter it
       extras_no_rate: extrasNoRate.map((l) => ({ item_name: l.item_name, site: l.site, quantity: l.quantity })),
@@ -388,7 +431,7 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     already_drafted: rows.filter((r) => r.already_drafted).length,
     estimated_total: calc.round2(rows.reduce((t, r) => t + (r.estimated_total || 0), 0)),
   };
-  return { month, summary, rows };
+  return { month, this_month: thisMonth, summary, rows };
 }
 
 // ---- Bill Run: generating drafts ----------------------------------------------------------

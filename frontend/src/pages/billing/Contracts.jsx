@@ -80,9 +80,8 @@ export default function Contracts() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/masters")}>Masters</button> / Contracts &amp; Price Lists</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/masters" label="Masters" /></div>
           <h1 className="ac-title">Contracts &amp; Price Lists</h1>
-          <p className="ac-sub">How each customer is billed: AMC, one-time, termite or chemical, the frequency, PO and the price of every service.</p>
         </div>
         {me.can("MANAGE_BILLING_MASTERS") && (
           <div className="ac-actions">
@@ -168,7 +167,7 @@ export default function Contracts() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack bl-ctable">
+          <table className="ac-table ac-stack bl-tabstack bl-ctable">
             <thead>
               <tr><th>Customer</th><th>Type</th><th>Structure</th><th>Next period</th><th>Bill date</th><th>PO</th><th>Billing details</th><th>Status</th><th>Last invoice</th><th aria-label="Open" /></tr>
             </thead>

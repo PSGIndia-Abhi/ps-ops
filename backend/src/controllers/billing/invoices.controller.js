@@ -20,9 +20,9 @@ function sendPdf(res, content, fileName, options) {
 // The file is named by the invoice number alone ("/" cannot be in a file name): BSPMPL26-27-1199.pdf
 const pdfName = (inv) => `${String(inv.invoice_number || "Invoice draft").replace(/\//g, "-")}.pdf`;
 
-// GET /due?month=2026-11&type=&category=&q=
+// GET /due?month=2026-11&type=&category=&q=   (month=ALL: every contract's next bill)
 const due = C.handle("Failed to load the bill run", async (req, res) => {
-  const month = C.month(req.query.month || C.todayIst().slice(0, 7));
+  const month = req.query.month === "ALL" ? "ALL" : C.month(req.query.month || C.todayIst().slice(0, 7));
   res.json(
     await D.dueList(pool, month, {
       type: C.oneOf(req.query.type, "type", TYPES, { required: false }),
@@ -185,7 +185,9 @@ const issue = C.handle("Failed to issue the invoices", async (req, res) => {
   if (ids.length > 200) throw C.bad("Too many invoices in one go (max 200)");
   const result = await I.issueMany(pool, ids, req, { confirmWarnings: C.bool(req.body?.confirm_warnings) });
   // Delivered as the customer's billing profile says: emailed to the outlet / customer addresses.
-  for (const it of result.issued) it.email = await delivery.emailIssued(pool, it.id, req.user.id);
+  // Invoices issued together for exactly the same addresses go in one email (one PDF each).
+  const emails = await delivery.emailIssuedMany(pool, result.issued.map((it) => it.id), req.user.id);
+  for (const it of result.issued) it.email = emails.get(it.id);
   res.json(result);
 });
 

@@ -237,7 +237,11 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
   const companyId = C.str(req.params.companyId, "companyId", { required: true, max: 20 });
   const b = req.body || {};
   const [[profile]] = await pool.query("SELECT company_id FROM billing_profiles WHERE company_id = ?", [companyId]);
-  if (!profile) throw C.bad("Save the billing details (Bill To) first");
+  // A group contract keeps its print / email settings with its main company, which may have no Bill To
+  // of its own (the group's Bill To is used). Then an inactive profile holds just these settings; the
+  // company still needs its own Bill To before it can be billed on its own.
+  const forGroup = C.bool(b.for_group);
+  if (!profile && !forGroup) throw C.bad("Save the billing details (Bill To) first");
   const printCopies = copiesOf(b.print_copies, "print_copies");
   const invoiceEmails = readEmails(b.invoice_emails, "Invoice emails");
   const billBy = C.num(b.bill_by_day, "bill_by_day", { min: 1, max: 28, integer: true });
@@ -255,6 +259,14 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
     throw C.bad("Add at least one email, or untick \"Send invoices by email automatically\"");
   }
   await C.inTransaction(pool, async (conn) => {
+    if (!profile) {
+      const [[co]] = await conn.query("SELECT name FROM companies WHERE id = ?", [companyId]);
+      if (!co) throw C.notFound("Customer not found");
+      await conn.query(
+        "INSERT INTO billing_profiles (company_id, billing_name, billing_address, is_active, created_by, updated_by) VALUES (?, ?, '', 0, ?, ?)",
+        [companyId, String(co.name || "").trim().slice(0, 255), req.user.id, req.user.id]
+      );
+    }
     await conn.query(
       "UPDATE billing_profiles SET print_copies = ?, invoice_emails = ?, auto_email = ?, bill_by_day = ?, updated_by = ? WHERE company_id = ?",
       [printCopies, invoiceEmails, autoEmail ? 1 : 0, billBy, req.user.id, companyId]

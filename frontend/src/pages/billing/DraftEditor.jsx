@@ -157,7 +157,7 @@ export default function DraftEditor() {
     <div className="ac-page">
       <div className="ac-head">
         <div>
-          <div className="bl-backrow"><BackButton to="/billing/drafts" label="Draft Invoices" /><div className="ac-crumb"><button type="button" onClick={() => navigate("/billing/drafts")}>Draft Invoices</button> / {inv.customer.name}</div></div>
+          <div className="bl-backrow"><BackButton to="/billing/drafts" label="Draft Invoices" /></div>
           <h1 className="ac-title">
             {inv.status === "DRAFT" ? "Draft Invoice" : `Invoice ${inv.invoice_number}`}{" "}
             <span className={`ac-badge ${inv.status === "DRAFT" ? "b-amber" : inv.status === "ISSUED" ? "b-green" : "b-grey"}`} style={{ verticalAlign: "middle" }}>

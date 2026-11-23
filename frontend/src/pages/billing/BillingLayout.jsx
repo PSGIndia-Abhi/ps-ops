@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   FiCheckSquare,
@@ -216,7 +216,8 @@ export default function BillingLayout() {
               {menuOpen && <div className="acc-mobile-panel">{navEl}</div>}
             </>
           )}
-          {me.ready ? <Outlet context={{ me }} /> : <CenterSpinner label="Loading billing" />}
+          {/* each billing page is loaded when first opened (see router.jsx): a spinner meanwhile */}
+          {me.ready ? <Suspense fallback={<CenterSpinner label="Loading" />}><Outlet context={{ me }} /></Suspense> : <CenterSpinner label="Loading billing" />}
         </main>
       </div>
     </div>

@@ -120,11 +120,14 @@ function previewText(f, mode) {
  */
 // taken: customers / sites that already have a schedule ([{ company_id, site_id }]); they show greyed
 // out and cannot be picked again - their schedule is changed with Edit in the list below.
-function TargetPicker({ customers, value, onChange, single, taken = [] }) {
+function TargetPicker({ customers, value, onChange, single, taken = [], onDone, inline = false }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const box = useRef(null);
   const inputRef = useRef(null);
+  const fieldRef = useRef(null);
+  // a new pick: the box scrolls to the end, where the search input is
+  useEffect(() => { if (fieldRef.current) fieldRef.current.scrollTop = fieldRef.current.scrollHeight; }, [value.length]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -179,7 +182,8 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
       const rest = sid ? value : value.filter((t) => t.company_id !== cid);
       onChange([...rest, { company_id: cid, site_id: sid || null }]);
     }
-    if (fromList) closeList();
+    // several picks: the list stays open until OK (onDone)
+    if (fromList && !onDone) closeList();
   }
 
   const label = (t) => {
@@ -190,8 +194,9 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
   };
 
   return (
-    <div className={`fb-tp ${open ? "is-open" : ""}`} ref={box}>
-      <div className="fb-tp-field" onClick={() => { setOpen(true); inputRef.current?.focus(); }}>
+    // inline (new schedule, before OK): the list is part of the dialog and stays open, tall enough to pick from
+    <div className={`fb-tp ${open || inline ? "is-open" : ""} ${inline ? "is-inline" : ""}`} ref={box}>
+      <div className="fb-tp-field" ref={fieldRef} onClick={() => { setOpen(true); inputRef.current?.focus(); }}>
         <FiSearch aria-hidden="true" className="fb-muted" />
         {value.map((t) => {
           const l = label(t);
@@ -216,7 +221,7 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
         />
         <FiChevronDown aria-hidden="true" className="fb-muted fb-tp-caret" />
       </div>
-      {open && (
+      {(open || inline) && (
         <div className="fb-tp-menu" role="group" aria-label="Customers and sites">
           {!matches.length && <div className="fb-tp-empty">No customer or site matches “{q}”.</div>}
           {matches.map(({ c, sites }) => {
@@ -256,6 +261,11 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
               </div>
             );
           })}
+          {/* OK: closes the list so the next fields (how often, from when) can be filled in */}
+          <div className="fb-tp-foot">
+            <span>{value.length ? `${value.length} selected` : "Nothing selected yet"}</span>
+            <button type="button" className="fb-tp-ok" onMouseDown={(e) => e.preventDefault()} onClick={() => { closeList(); onDone?.(); }}>OK</button>
+          </div>
         </div>
       )}
     </div>
@@ -272,6 +282,9 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // New schedule: customers and sites first; OK in their list shows the rest (editing shows all at once).
+  const [picked, setPicked] = useState(Boolean(schedule));
+  const showRest = picked && f.targets.length > 0;
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? (e.target.type === "checkbox" ? e.target.checked : e.target.value) : e }));
   const toggleIn = (k, v) => setF((x) => ({ ...x, [k]: x[k].includes(v) ? x[k].filter((n) => n !== v) : [...x[k], v] }));
 
@@ -300,7 +313,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
           <button type="button" className="fb-btn" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving}>
+          <button type="button" className="fb-btn fb-btn-primary" onClick={save} disabled={saving || !showRest}>
             {saving ? "Saving…" : f.targets.length > 1 ? `Save ${f.targets.length} schedules` : "Save schedule"}
           </button>
         </>
@@ -314,8 +327,16 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
             Customers & sites <span className="fb-req">*</span>
             <small>{schedule ? "One customer (all sites) or one site" : "Pick a customer for all its sites, or single sites. Each gets its own schedule."}</small>
           </div>
-          <TargetPicker customers={options.customers} value={f.targets} onChange={(targets) => setF((x) => ({ ...x, targets }))} single={Boolean(schedule)} taken={taken} />
+          <TargetPicker customers={options.customers} value={f.targets} onChange={(targets) => setF((x) => ({ ...x, targets }))} single={Boolean(schedule)} taken={taken}
+            onDone={schedule ? undefined : () => setPicked(true)} inline={!schedule && !showRest} />
         </section>
+
+        {!showRest && (
+          <div className="fb-sched-wait">
+            {f.targets.length ? "Press OK in the list to choose when to call." : "Tick the customers and sites to call, then press OK."}
+          </div>
+        )}
+        {showRest && (<>
 
         <section className="fb-sched-sec">
           <div className="fb-sched-label">
@@ -463,6 +484,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
             ))}
           </span>
         </div>
+        </>)}
       </div>
     </Modal>
   );

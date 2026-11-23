@@ -77,7 +77,7 @@ export default function DraftInvoices() {
       <div className="ac-head">
         <div>
           <h1 className="ac-title">Draft Invoices</h1>
-          <p className="ac-sub">Check each draft, fill in quantities where needed, then issue. Numbers are given when issued.</p>
+          <p className="ac-sub">Check each draft before issuing: an issued invoice gets its number and cannot be edited.</p>
         </div>
         <div className="ac-actions">
           {/* One button: with drafts ticked it issues those (count = ticked); with none ticked it issues
@@ -112,7 +112,7 @@ export default function DraftInvoices() {
         </div>
         <Msg error={error} />
         <div className="ac-table-wrap">
-          <table className="ac-table ac-stack">
+          <table className="ac-table ac-stack bl-tabstack">
             <thead>
               <tr>
                 <th><input type="checkbox" className="bl-cb" checked={allOn} disabled={!issuable.length} onChange={() => setSelected(allOn ? new Set() : new Set(issuable.map((r) => r.id)))} aria-label="Select all" /></th>
