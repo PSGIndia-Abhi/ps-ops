@@ -31,6 +31,7 @@ export function Dropdown<T extends string>({
   onChange,
   caption,
   highlight = false,
+  buttonLabel,
 }: {
   value: T;
   /** dot = an optional colour shown before the label (e.g. a priority's colour). */
@@ -39,6 +40,8 @@ export function Dropdown<T extends string>({
   caption?: string;
   /** Shows the pill in blue (e.g. a filter other than the usual one is on). */
   highlight?: boolean;
+  /** The pill's text instead of the current choice's label (e.g. "Upcoming" while none is picked). */
+  buttonLabel?: string;
 }) {
   const { styles, theme } = useCrmStyles(factory);
   const anchor = useRef<React.ComponentRef<typeof View>>(null);
@@ -59,11 +62,11 @@ export function Dropdown<T extends string>({
           onPress={open}
           style={({ pressed }) => [styles.btn, highlight && styles.btnOn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={`${caption ? `${caption} ` : ''}${current?.label}. Change`}
+          accessibilityLabel={`${caption ? `${caption} ` : ''}${buttonLabel ?? current?.label}. Change`}
         >
           {!!caption && <Text style={styles.caption}>{caption}</Text>}
-          {!!current?.dot && <View style={[styles.dot, { backgroundColor: current.dot }]} />}
-          <Text style={[styles.label, highlight && { color: theme.primary }]}>{current?.label}</Text>
+          {!buttonLabel && !!current?.dot && <View style={[styles.dot, { backgroundColor: current.dot }]} />}
+          <Text style={[styles.label, highlight && { color: theme.primary }]}>{buttonLabel ?? current?.label}</Text>
           <ChevronDownIcon size={16} color={highlight ? theme.primary : theme.textSecondary} />
         </Pressable>
       </View>
