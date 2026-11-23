@@ -6,8 +6,8 @@ import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmEmptyState, CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { SearchIcon } from '../../crm/ui/crmIcons';
 import { radii, spacing, typography } from '../../theme';
-import { errorText, listCalls, listNumberRequests, takeCall } from '../api';
-import { CALL_FILTERS, defaultPeriod, periodLabel, periodQuery, type Period } from '../format';
+import { errorText, listCalls, listNumberRequests, takeCall, takeUpcomingCall } from '../api';
+import { CALL_FILTERS, aheadLabel, defaultPeriod, periodLabel, periodQuery, type Period } from '../format';
 import type { FeedbackStackParamList, FeedbackTabParamList } from '../navigation';
 import { HeroHeader } from '../Hero';
 import { SiteCard } from '../SiteCard';
@@ -15,6 +15,10 @@ import type { CallList, CallRow } from '../types';
 import { Chips, PeriodPicker } from '../ui';
 import { Dropdown } from '../Dropdown';
 import { PhoneIcon } from '../../components/icons';
+
+const AHEAD_DAYS = [1, 2, 3, 4, 5, 6, 7];
+/** A row's key: its call, or (an upcoming call not made yet) its site. */
+const rowKey = (r: CallRow) => r.request_id || `upcoming-${r.site.id}`;
 
 // The calls to make first (To call, Not answered), then the others; in each, calls nobody has taken first.
 const CALL_FIRST = ['TO_CALL', 'NOT_ANSWERED', 'WRONG_NUMBER', 'FORM_SENT', 'FORM_RECEIVED', 'TICKET_OPEN', 'DONE'];
@@ -36,7 +40,9 @@ const factory = (t: CrmTheme) => ({
   searchRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.md },
   periodBox: { marginBottom: spacing.sm },
   topRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginTop: spacing.sm, marginBottom: spacing.md },
+  topLeft: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.xs, flexShrink: 1 },
   count: { ...typography.captionMedium, color: t.textMuted },
+  dimmed: { opacity: 0.55 },
 });
 
 /**
@@ -50,7 +56,10 @@ export function FeedbackCallsScreen() {
   const { user } = useAuth();
   const myId = Number(user?.id);
 
-  const [period, setPeriod] = useState<Period>(defaultPeriod('today'));
+  // The Show dropdown's period; Upcoming (ahead = 1-7 days) replaces it while on.
+  const [basePeriod, setPeriod] = useState<Period>(defaultPeriod('today'));
+  const [ahead, setAhead] = useState<number | null>(null);
+  const period: Period = ahead ? { ...basePeriod, mode: 'upcoming', ahead } : basePeriod;
   const [status, setStatus] = useState(route.params?.status ?? '');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
@@ -78,7 +87,8 @@ export function FeedbackCallsScreen() {
     setLoading(true);
     setError(null);
     try {
-      setData(await listCalls({ ...periodQuery(period), status, q: query }));
+      const shownPeriod: Period = ahead ? { ...basePeriod, mode: 'upcoming', ahead } : basePeriod;
+      setData(await listCalls({ ...periodQuery(shownPeriod), status, q: query }));
       listNumberRequests('DONE')
         .then((d) => {
           const at: Record<string, string> = {};
@@ -91,7 +101,7 @@ export function FeedbackCallsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [period, status, query]);
+  }, [basePeriod, ahead, status, query]);
 
   useFocusEffect(
     useCallback(() => {
@@ -100,10 +110,11 @@ export function FeedbackCallsScreen() {
   );
 
   async function take(row: CallRow) {
-    setBusy(row.request_id);
+    setBusy(rowKey(row));
     setError(null);
     try {
-      const call = await takeCall(row.request_id);
+      // An upcoming call not made yet is made now (with its real due date) and taken.
+      const call = row.forecast || !row.request_id ? await takeUpcomingCall(row.site.id, ahead || 1) : await takeCall(row.request_id);
       navigation.navigate('FeedbackCall', { callId: call.id });
     } catch (err) {
       setError(errorText(err, 'Could not take the call.'));
@@ -116,23 +127,41 @@ export function FeedbackCallsScreen() {
 
   const header = (
     <View>
-      {/* Which calls: due today (the usual), all, a month or dates - a dropdown. */}
+      {/* Which calls: due today (the usual), a month, dates or all - a dropdown; Upcoming on its own. */}
       <View style={styles.topRow}>
-        <Dropdown
-          caption="Show"
-          value={period.mode}
-          options={[
-            { value: 'today', label: 'Due today' },
-            { value: 'all', label: 'All calls' },
-            { value: 'month', label: 'By month' },
-            { value: 'range', label: 'By dates' },
-          ]}
-          onChange={(mode) => setPeriod((p) => ({ ...p, mode }))}
-          highlight={period.mode !== 'today'}
-        />
+        <View style={styles.topLeft}>
+          <View style={ahead ? styles.dimmed : undefined}>
+            <Dropdown
+              caption="Show"
+              value={basePeriod.mode}
+              options={[
+                { value: 'today', label: 'Due today' },
+                { value: 'month', label: 'By month' },
+                { value: 'range', label: 'By dates' },
+                { value: 'all', label: 'All calls' },
+              ]}
+              onChange={(mode) => {
+                setAhead(null);
+                setPeriod((p) => ({ ...p, mode }));
+              }}
+              highlight={!ahead && basePeriod.mode !== 'today'}
+            />
+          </View>
+          {/* Upcoming: one dropdown - pick the day (1-7 days ahead), or Off. */}
+          <Dropdown
+            value={ahead ? String(ahead) : 'off'}
+            buttonLabel={!ahead ? 'Upcoming' : ahead === 1 ? 'Tomorrow' : `In ${ahead} days`}
+            options={[
+              ...AHEAD_DAYS.map((n) => ({ value: String(n), label: aheadLabel(n) })),
+              ...(ahead ? [{ value: 'off', label: 'Off' }] : []),
+            ]}
+            onChange={(v) => setAhead(v === 'off' ? null : Number(v))}
+            highlight={!!ahead}
+          />
+        </View>
         <Text style={styles.count}>{data ? `${data.total} call${data.total === 1 ? '' : 's'}` : ''}</Text>
       </View>
-      {(period.mode === 'month' || period.mode === 'range') && (
+      {!ahead && (period.mode === 'month' || period.mode === 'range') && (
         <View style={styles.periodBox}>
           <PeriodPicker value={period} onChange={setPeriod} withDue hideModes />
         </View>
@@ -155,12 +184,12 @@ export function FeedbackCallsScreen() {
       <HeroHeader icon={PhoneIcon} title="Calls" subtitle={periodLabel(period)} />
       <FlatList
         data={[...(data?.sites || [])].sort((a, b) => callRank(a) - callRank(b))}
-        keyExtractor={(r) => r.request_id}
+        keyExtractor={rowKey}
         renderItem={({ item: row }) => (
           <SiteCard
             row={row}
             myId={myId}
-            busy={busy === row.request_id}
+            busy={busy === rowKey(row)}
             onOpen={() => navigation.navigate('FeedbackCall', { callId: row.request_id })}
             onTake={() => take(row)}
             numberAdded={

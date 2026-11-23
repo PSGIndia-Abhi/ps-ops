@@ -113,7 +113,15 @@ const OUTCOME_COLORS: Record<string, { bg: string; fg: string; border: string }>
   NO_ANSWER: { bg: '#FEF3C7', fg: '#B45309', border: '#FCD34D' },
   BUSY: { bg: '#FFEDD5', fg: '#C2410C', border: '#FDBA74' },
   WRONG_NUMBER: { bg: '#FEE2E2', fg: '#B91C1C', border: '#FCA5A5' },
+  REQUEST_NUMBER: { bg: '#DBEAFE', fg: '#1D4ED8', border: '#93C5FD' },
 };
+
+/** Request a number by itself: what the request's wrong / asked part says. */
+function requestText(q: { kind?: string; wrong: { name: string | null; phone: string | null } }): string {
+  const wrong = [q.wrong.name, q.wrong.phone].filter(Boolean).join(' · ');
+  if (q.kind === 'NUMBER_REQUESTED') return wrong ? `number requested, current: ${wrong}` : 'number requested';
+  return `wrong: ${wrong || 'not recorded'}`;
+}
 
 /** "RK" for "Ravi Kumar". */
 function initialsOf(name: string | null | undefined): string {
@@ -149,6 +157,8 @@ export function FeedbackCallScreen() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [requestNote, setRequestNote] = useState('');
+  // "Request number" picked in What happened on this call? - only sends a request, saves no call result.
+  const [askPicked, setAskPicked] = useState(false);
   const setNotice = (message: string) => setToast({ message, variant: 'success' });
   const [saving, setSaving] = useState(false);
 
@@ -274,6 +284,24 @@ export function FeedbackCallScreen() {
       await sendNumberRequest(call!.id, requestNote.trim() || null);
       setRequestNote('');
       setNotice('Wrong number saved and the request sent to the service coordinator.');
+      await load();
+    } catch (err) {
+      setToast({ message: errorText(err), variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  }
+  // No number saved for the site: the request box shows at the top of Call the customer.
+  const siteHasNoNumber = !call.contacts.some((c) => !!c.phone?.trim());
+  const canRequestAnyway = canWork && !openRequest;
+  // A request for a number on its own (no number saved, or Request number picked): no call result saved.
+  async function requestOnly() {
+    setSaving(true);
+    try {
+      await sendNumberRequest(call!.id, requestNote.trim() || null, 'REQUEST');
+      setRequestNote('');
+      setAskPicked(false);
+      setNotice('Request sent to the service coordinator. The call comes back to you when they add the number.');
       await load();
     } catch (err) {
       setToast({ message: errorText(err), variant: 'error' });
@@ -658,6 +686,23 @@ export function FeedbackCallScreen() {
         {canWork && !formReceived && (
           <>
             <Panel title="Call the customer" icon={<PhoneIcon size={17} color={theme.primary} />}>
+              {/* No number saved for this site: ask the service coordinator for one. */}
+              {siteHasNoNumber &&
+                (openRequest ? (
+                  <View style={[styles.nrWait, { marginBottom: spacing.sm }]}>
+                    <Text style={styles.nrWaitText}>
+                      Request sent - waiting for the service coordinator ({requestText(openRequest)}, {formatDateTime(openRequest.requested_at)}).
+                    </Text>
+                    <PrimaryButton label="Cancel request" variant="secondary" onPress={cancelAsk} loading={saving} style={{ marginTop: spacing.xs }} />
+                  </View>
+                ) : canRequestAnyway ? (
+                  <View style={[styles.nrAsk, { marginBottom: spacing.sm }]}>
+                    <Text style={[styles.nrAskText, { fontWeight: '800' }]}>No number saved for this site</Text>
+                    <Text style={styles.nrAskText}>Ask the service coordinator for a number, or add one below with Another number.</Text>
+                    <TextInput style={styles.input} placeholder="Note (optional)" placeholderTextColor={theme.textMuted} value={requestNote} onChangeText={setRequestNote} maxLength={500} />
+                    <PrimaryButton label="Request number" onPress={requestOnly} loading={saving} style={{ marginTop: spacing.xs }} />
+                  </View>
+                ) : null)}
               {savedCard}
               <Pressable onPress={() => pickContact(OTHER)} style={[styles.another, contactKey === OTHER && styles.anotherOn]} accessibilityRole="radio" accessibilityState={{ checked: contactKey === OTHER }}>
                 <View style={[styles.dot, contactKey === OTHER && styles.dotOn]} />
@@ -681,12 +726,15 @@ export function FeedbackCallScreen() {
                   <Text style={styles.label}>What happened on this call?</Text>
                   <View style={styles.outcomes} accessibilityRole="radiogroup">
                     {CALL_OUTCOMES.map((o) => {
-                      const on = shownOutcome === o.value;
+                      const on = !askPicked && shownOutcome === o.value;
                       const c = OUTCOME_COLORS[o.value];
                       return (
                         <Pressable
                           key={o.value}
-                          onPress={() => saveAttempt(o.value)}
+                          onPress={() => {
+                            setAskPicked(false);
+                            saveAttempt(o.value);
+                          }}
                           disabled={saving}
                           style={[styles.outcome, on && { backgroundColor: c.bg, borderColor: c.border }]}
                           accessibilityRole="radio"
@@ -698,7 +746,28 @@ export function FeedbackCallScreen() {
                         </Pressable>
                       );
                     })}
+                    {/* A 5th choice: ask the service coordinator for a (new) number - saves no call result. */}
+                    {!siteHasNoNumber && canRequestAnyway && (
+                      <Pressable
+                        onPress={() => setAskPicked((v) => !v)}
+                        disabled={saving}
+                        style={[styles.outcome, { width: '100%' }, askPicked && { backgroundColor: OUTCOME_COLORS.REQUEST_NUMBER.bg, borderColor: OUTCOME_COLORS.REQUEST_NUMBER.border }]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: askPicked, disabled: saving }}
+                      >
+                        <Text style={[styles.outcomeText, askPicked && { color: OUTCOME_COLORS.REQUEST_NUMBER.fg, fontWeight: '800' }]} numberOfLines={1}>
+                          Request number
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
+                  {askPicked && canRequestAnyway && !siteHasNoNumber && (
+                    <View style={styles.nrAsk}>
+                      <Text style={styles.nrAskText}>Ask the service coordinator for a new number for this site. No call result is saved; the call comes back to you when they add it.</Text>
+                      <TextInput style={styles.input} placeholder="Note (optional)" placeholderTextColor={theme.textMuted} value={requestNote} onChangeText={setRequestNote} maxLength={500} />
+                      <PrimaryButton label="Send request" onPress={requestOnly} loading={saving} style={{ marginTop: spacing.xs }} />
+                    </View>
+                  )}
                   {/* Picking a result saves it straight away. */}
                   {saving && outcome ? (
                     <Text style={styles.savedHint}>Saving…</Text>
@@ -708,14 +777,14 @@ export function FeedbackCallScreen() {
                     </Text>
                   ) : null}
                   {/* Wrong number: ask the service coordinator for the right one (web: Feedback Desk > Requests). */}
-                  {openRequest ? (
+                  {siteHasNoNumber ? null : openRequest ? (
                     <View style={styles.nrWait}>
                       <Text style={styles.nrWaitText}>
-                        Request sent - waiting for the service coordinator (wrong: {[openRequest.wrong.name, openRequest.wrong.phone].filter(Boolean).join(' · ') || 'not recorded'}, {formatDateTime(openRequest.requested_at)}).
+                        Request sent - waiting for the service coordinator ({requestText(openRequest)}, {formatDateTime(openRequest.requested_at)}).
                       </Text>
                       <PrimaryButton label="Cancel request" variant="secondary" onPress={cancelAsk} loading={saving} style={{ marginTop: spacing.xs }} />
                     </View>
-                  ) : canAskNumber ? (
+                  ) : canAskNumber && !askPicked ? (
                     <View style={styles.nrAsk}>
                       <Text style={styles.nrAskText}>Ask the service coordinator for the right number. The call comes back to you when they add it.</Text>
                       <TextInput style={styles.input} placeholder="Note (optional)" placeholderTextColor={theme.textMuted} value={requestNote} onChangeText={setRequestNote} maxLength={500} />

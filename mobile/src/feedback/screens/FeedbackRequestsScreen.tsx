@@ -27,6 +27,13 @@ const STATUS: Record<NumberRequestRow['status'], { label: string; tone: 'warning
   CANCELLED: { label: 'Cancelled', tone: 'neutral' },
 };
 
+/** What the request is about: the wrong number, or a number asked for (none saved / Request number). */
+function problemText(q: NumberRequestRow): string {
+  const wrong = [q.wrong.name, q.wrong.phone].filter(Boolean).join(' · ');
+  if (q.kind === 'NUMBER_REQUESTED') return wrong ? `Number requested (current: ${wrong})` : 'Number requested';
+  return `Wrong: ${wrong || 'not recorded'}`;
+}
+
 const factory = (t: CrmTheme) => ({
   screen: { flex: 1, backgroundColor: t.background },
   list: { padding: spacing.md, paddingBottom: spacing.xxxl },
@@ -94,7 +101,7 @@ export function FeedbackRequestsScreen() {
 
   return (
     <View style={styles.screen}>
-      <HeroHeader icon={SendIcon} title="Requests" subtitle="Right numbers asked from the service coordinator" />
+      <HeroHeader icon={SendIcon} title="Requests" subtitle="Numbers asked from the service coordinator" />
       <FlatList
         data={data?.requests || []}
         keyExtractor={(q) => q.id}
@@ -113,7 +120,7 @@ export function FeedbackRequestsScreen() {
           ) : (
             <CrmEmptyState
               title={status === 'OPEN' ? 'No requests waiting' : 'No requests'}
-              subtitle="When a call reaches a wrong number, pick Wrong number on the call and send a request."
+              subtitle="On a call, pick Wrong number or Request number to ask the service coordinator for a number."
             />
           )
         }
@@ -135,15 +142,15 @@ export function FeedbackRequestsScreen() {
                 {q.site.city ? ` · ${q.site.city}` : ''}
                 {q.due_date ? ` · call due ${formatDay(q.due_date)}` : ''}
               </Text>
-              <Text style={styles.wrong}>
-                Wrong: {[q.wrong.name, q.wrong.phone].filter(Boolean).join(' · ') || 'not recorded'}
+              <Text style={[styles.wrong, q.kind === 'NUMBER_REQUESTED' && { color: theme.primary }]}>
+                {problemText(q)}
                 {q.note ? `  "${q.note}"` : ''}
               </Text>
               <Text style={styles.muted}>Sent {formatDateTime(q.requested_at)}</Text>
               {!!q.right && (
                 <View style={styles.right}>
                   <Text style={styles.rightText}>
-                    ✓ Right number: {q.right.name} · {q.right.phone}
+                    ✓ {q.kind === 'NUMBER_REQUESTED' ? 'Number' : 'Right number'}: {q.right.name} · {q.right.phone}
                   </Text>
                   <Text style={styles.muted}>
                     {[q.resolved_by?.name, formatDateTime(q.resolved_at)].filter(Boolean).join(' · ')}

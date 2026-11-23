@@ -40,6 +40,9 @@ const factory = (t: CrmTheme) => ({
   btnText: { ...typography.captionMedium, color: t.primary },
   btnTextSolid: { color: t.textOnPrimary },
   pressed: { opacity: 0.8 },
+  // An upcoming call whose earlier call is still open: it can't be taken yet.
+  waitPill: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radii.pill, backgroundColor: '#FEF3C7' },
+  waitText: { color: '#92400E', fontSize: 12, fontWeight: '700' as const },
   // Compact card (Home "Needs attention"): name, site, due and the action - nothing else.
   cBody: { flex: 1, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
   cInitial: { width: 36, height: 36, borderRadius: 12, alignItems: 'center' as const, justifyContent: 'center' as const },
@@ -215,9 +218,23 @@ export function SiteCard({
 
         <View style={styles.foot}>
           <Text style={[styles.footText, late && styles.footLate]} numberOfLines={1}>
-            {callBack ? `Call back ${formatDateTime(row.next_call_at)}` : row.collector ? (someoneElse ? `Taken by ${row.collector.name}` : 'Your call') : 'Not taken yet'}
+            {callBack
+              ? `Call back ${formatDateTime(row.next_call_at)}`
+              : row.collector
+              ? someoneElse
+                ? `Taken by ${row.collector.name}`
+                : 'Your call'
+              : row.forecast
+              ? row.waiting
+                ? 'Finish the earlier call first'
+                : 'Upcoming · take it early'
+              : 'Not taken yet'}
           </Text>
-          {row.collector ? (
+          {!row.collector && row.waiting ? (
+            <View style={styles.waitPill}>
+              <Text style={styles.waitText}>Earlier call open</Text>
+            </View>
+          ) : row.collector ? (
             <View style={[styles.btn, row.status === 'FORM_RECEIVED' && styles.btnSolid]}>
               <Text style={[styles.btnText, row.status === 'FORM_RECEIVED' && styles.btnTextSolid]}>
                 {row.status === 'FORM_RECEIVED' ? 'Review form' : row.status === 'DONE' || someoneElse ? 'View' : 'Open'}

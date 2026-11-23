@@ -46,6 +46,10 @@ export interface CallRow {
   earlier_visit?: { date: string; service: string | null } | null;
   collector: Person | null;
   next_call_at: string | null;
+  /** Upcoming: a call the schedule will make on that day - not made yet (request_id is empty). */
+  forecast?: boolean;
+  /** Upcoming: the site's earlier call is still open, so this one can't be taken yet. */
+  waiting?: boolean;
 }
 
 export interface CallList {
@@ -211,6 +215,8 @@ export interface Call {
 
 export interface NumberRequest {
   id: string;
+  /** WRONG_NUMBER = after a wrong number; NUMBER_REQUESTED = no number saved / Request number. */
+  kind?: 'WRONG_NUMBER' | 'NUMBER_REQUESTED';
   status: 'OPEN' | 'DONE' | 'CANCELLED';
   wrong: { contact_id: string | null; name: string | null; phone: string | null };
   note: string | null;
