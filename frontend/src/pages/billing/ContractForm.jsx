@@ -16,6 +16,7 @@ import { TERMITE_UNITS, TYPE_LABEL, amount, dmy, frequencyText, initials, isOnce
 import { Field, Modal, Msg, StatusBadge, BackButton } from "./ui";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 import { PageSkeleton } from "./Skeletons";
+import BillDayField from "./BillDayField";
 
 // A contract and its price list. New: header + lines in one save. Existing: the header is saved on
 // its own; price lines are added, corrected, or re-priced from a date (the old price is kept as history).
@@ -54,7 +55,7 @@ export default function ContractForm() {
   const [lineEdit, setLineEdit] = useState(null); // line being added
   const [bulk, setBulk] = useState(null); // Edit: every current line editable at once ({ [line id]: edited line })
 
-  const base = contract || { billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", invoice_grouping: "PER_CUSTOMER", po_required: false, gst_applicable: true, shortfall_billing: "PRO_RATA", start_date: today(), description_template: "", company_id: "" };
+  const base = contract || { billing_type: "AMC", frequency_months: 1, bill_timing: "ARREARS", bill_day: 31, invoice_grouping: "PER_CUSTOMER", po_required: false, gst_applicable: true, shortfall_billing: "PRO_RATA", start_date: today(), description_template: "", company_id: "" };
   const form = edits || { ...base, po_ids: (contract?.pos || []).map((p) => p.id) };
   const set = (patch) => setEdits({ ...form, ...patch });
   const companyId = form.company_id;
@@ -90,6 +91,7 @@ export default function ContractForm() {
       frequency_unit: unitOf(form),
       cycle_start_day: form.cycle_start_day || undefined,
       bill_timing: form.bill_timing,
+      bill_day: form.bill_day === "" || form.bill_day === null || form.bill_day === undefined ? null : Number(form.bill_day),
       start_date: form.start_date,
       end_date: form.end_date || null,
       ...(nextEditable && form.next_period_start && form.next_period_start !== contract.next_period_start ? { next_period_start: form.next_period_start } : {}),
@@ -350,7 +352,7 @@ export default function ContractForm() {
                           billing_type: v, frequency_months: v === "ONE_TIME" || v === "TERMITE" ? null : form.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : form.po_required,
                           frequency_unit: "MONTH",
                           // Termite is billed once: start = the day it is saved, no end date, billed after.
-                          ...(v === "TERMITE" ? { bill_timing: "ARREARS", start_date: today(), end_date: "" } : {}),
+                          ...(v === "TERMITE" ? { bill_timing: "ARREARS", bill_day: "", start_date: today(), end_date: "" } : {}),
                         });
                         // Untouched lines follow the type (termite: per sq. m / sq. ft, as the Bill structure).
                         if (newLines.every((l2) => l2.rate === "" && l2.default_qty === "")) setNewLines(newLines.map((l2) => ({ ...mkLine(l2.site_id, v), key: l2.key })));
@@ -374,12 +376,7 @@ export default function ContractForm() {
                   <FrequencySelect value={form.frequency_months} oneTime={typeIs("ONE_TIME")} disabled={readOnly} onChange={(v) => set({ frequency_months: v })} />
                 )}
               </Field>
-              <Field label="Bill date" required>
-                <select className="ac-select" value={form.bill_timing} disabled={readOnly} onChange={(e) => set({ bill_timing: e.target.value })}>
-                  <option value="ADVANCE">Start of the month</option>
-                  <option value="ARREARS">End of the month</option>
-                </select>
-              </Field>
+              <BillDayField day={form.bill_day ?? ""} timing={form.bill_timing} disabled={readOnly} onDay={(v) => set({ bill_day: v })} />
               <Field label="Term start date" required>
                 <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew} onChange={(e) => set({ start_date: e.target.value })} />
               </Field>

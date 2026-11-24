@@ -4,6 +4,7 @@ import { billingPut, useBilling } from "./billingApi";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { Field, Msg } from "./ui";
 import { RowsSkeleton } from "./Skeletons";
+import LateAlertField from "./LateAlertField";
 
 // Invoice delivery: how many copies are printed and where the invoice is emailed, for the whole
 // customer and per outlet, plus the bill-by day. Asked on New Contract (step 1) and edited on the
@@ -14,25 +15,10 @@ import { RowsSkeleton } from "./Skeletons";
 const MAX_COPIES = 65535;
 // 0 = nothing is printed when an invoice is issued.
 const copiesIn = (v) => (v === "" ? "" : Math.min(MAX_COPIES, Math.max(0, Math.round(Number(v)) || 0)));
-// Bill-by day: 1 to 30. In a shorter month (February) a day past its end gives no late alert that
-// month (the next month still shows the invoice as late).
-const LAST_DAY = 30;
-const DEFAULT_DAY = 25;
-const dayIn = (v) => (v === "" ? "" : Math.min(LAST_DAY, Math.max(1, Math.round(Number(v)) || 1)));
-const ordinal = (d) => `${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
-
 /** The fields only: the parent holds the form and saves it. */
-export function DeliveryFields({ form, setForm, readOnly = false }) {
+// showAlert: false where the late alert is asked elsewhere (New Contract shows it beside the Bill date).
+export function DeliveryFields({ form, setForm, readOnly = false, showAlert = true }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
-  // Late alert switch: on = a bill-by day is set. Kept apart from the day so clearing the box
-  // while typing does not switch it off.
-  const [switchedOn, setSwitchedOn] = useState(false);
-  const alertOn = switchedOn || Boolean(form.bill_by_day);
-  const setAlertOn = setSwitchedOn;
-  const day = Number(form.bill_by_day) || 0;
-  function toggleAlert() {
-    if (alertOn) { setAlertOn(false); set({ bill_by_day: "" }); } else { setAlertOn(true); set({ bill_by_day: day || DEFAULT_DAY }); }
-  }
   return (
     <div className="dl-wrap">
       <div className="bl-grid g4">
@@ -46,25 +32,10 @@ export function DeliveryFields({ form, setForm, readOnly = false }) {
             <button type="button" disabled={readOnly || (Number(form.print_copies) || 1) >= MAX_COPIES} onClick={() => set({ print_copies: copiesIn((Number(form.print_copies) || 0) + 1) })} aria-label="More copies">+</button>
           </div>
         </Field>
-        <Field label="Email invoice to" className="bl-span2" hint="Separate several addresses with commas">
+        <Field label="Email invoice to" className={showAlert ? "bl-span2" : "bl-span3"} hint="Separate several addresses with commas">
           <input className="ac-input" type="text" inputMode="email" value={form.invoice_emails} disabled={readOnly} placeholder="accounts@customer.com, manager@customer.com" onChange={(e) => set({ invoice_emails: e.target.value })} />
         </Field>
-        {/* Bill by: late alert switch + the day (− n +, typed or stepped). Off hides the day. */}
-        <Field label="Bill by (late alert)" hint={alertOn ? (day ? `Late alert after the ${ordinal(day)} · day 1–30` : "Type a day from 1 to 30") : "Off · no late alert"}>
-          <div className="dl-billby-line">
-            <button type="button" role="switch" aria-checked={alertOn} disabled={readOnly} className={`dl-switch ${alertOn ? "on" : ""}`} onClick={toggleAlert} aria-label="Late alert if not billed by a day" />
-            {alertOn && <div className="dl-cal" aria-hidden="true"><small>EVERY MONTH</small><b>{day || "–"}</b></div>}
-            {alertOn ? (
-              <div className="bl-stp sp-stp dl-copies-stp">
-                <button type="button" disabled={readOnly || day <= 1} onClick={() => set({ bill_by_day: Math.max(1, (day || 1) - 1) })} aria-label="Earlier day">−</button>
-                <input type="number" min="1" max={LAST_DAY} value={form.bill_by_day ?? ""} disabled={readOnly} aria-label="Bill by day of month"
-                  onChange={(e) => set({ bill_by_day: dayIn(e.target.value) })}
-                  onBlur={() => { if (form.bill_by_day === "") set({ bill_by_day: DEFAULT_DAY }); }} />
-                <button type="button" disabled={readOnly || day >= LAST_DAY} onClick={() => set({ bill_by_day: Math.min(LAST_DAY, day + 1) })} aria-label="Later day">+</button>
-              </div>
-            ) : <span className="ac-sub">Off</span>}
-          </div>
-        </Field>
+        {showAlert && <LateAlertField value={form.bill_by_day ?? ""} readOnly={readOnly} onChange={(v) => set({ bill_by_day: v })} />}
       </div>
       <label className={`bl-autoemail ${form.auto_email ? "on" : ""}`}>
         <input type="checkbox" className="bl-cb" checked={form.auto_email} disabled={readOnly} onChange={(e) => set({ auto_email: e.target.checked })} />
