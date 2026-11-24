@@ -1289,8 +1289,8 @@ async function startPhotoUpload(req, res) {
 /* ------------------------------------------------------------------ */
 
 // A service is one job of a Brigade booking. Its PO is the one it was linked
-// to on the Billing page (brigade_po_lines), else the PO typed during booking
-// (brigade_booking_details, read only). Canceled jobs are left out.
+// to on the Billing page (brigade_po_lines -> customer_pos, source BRIGADE), else the PO typed
+// during booking (brigade_booking_details, read only). Canceled jobs are left out.
 const BILLING_PO_OF_JOB = "COALESCE(p.po_number, NULLIF(TRIM(bd.client_po_number), ''))";
 const BILLING_SERVICE_SELECT = `
   SELECT j.id AS job_id, j.code, j.sub_service, j.status, j.start_date, j.booking_id, j.address AS service_address,
@@ -1302,7 +1302,7 @@ const BILLING_SERVICE_SELECT = `
   JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
   LEFT JOIN companies co ON co.id = bd.company_id
   LEFT JOIN brigade_po_lines l ON l.job_id = j.id
-  LEFT JOIN brigade_pos p ON p.id = l.po_id
+  LEFT JOIN customer_pos p ON p.id = l.po_id
   WHERE j.status <> 'CANCELED'
 `;
 const BILLING_SERVICE_ORDER = "ORDER BY co.name ASC, bd.flat_number ASC, j.created_at ASC";
@@ -1369,11 +1369,17 @@ function gstOn(value) {
   return { base, cgst: half, sgst: half, gst: round2(half * 2), total: round2(base + half * 2) };
 }
 
-function billingTotals(poAmount, services, pendingValue = 0) {
+/**
+ * Totals of a PO. The PO amount (incl. GST) is used up only by tax invoices generated on it:
+ * balance = PO amount - invoiced (incl. GST). Services on the PO (assigned / completed) and pending
+ * flats are shown as what is still to come, not taken off the balance.
+ */
+function billingTotals(poAmount, services, pendingValue = 0, invoicedTotal = 0) {
   const billed = round2(services.reduce((sum, s) => sum + (s.amount || 0), 0));
   const booked = round2(services.reduce((sum, s) => sum + (s.booked_price || 0), 0));
   const tax = gstOn(billed);
   const pending = gstOn(pendingValue);
+  const invoiced = round2(invoicedTotal);
   return {
     po_amount: poAmount, // incl. GST
     booked,
@@ -1385,7 +1391,8 @@ function billingTotals(poAmount, services, pendingValue = 0) {
     // Pending flats on this PO, not scheduled yet (PO tab / booking form check).
     pending_value: pending.base,
     pending_incl: pending.total,
-    balance: poAmount === null ? null : round2(poAmount - tax.total),
+    invoiced, // tax invoices generated on this PO, incl. GST
+    balance: poAmount === null ? null : round2(poAmount - invoiced),
     services: services.length,
   };
 }
@@ -1429,8 +1436,11 @@ async function loadInvoicedJobs(db, number) {
   try {
     const [rows] = await db.query(
       `SELECT l.job_id, i.invoice_number
-       FROM brigade_invoice_lines l JOIN brigade_invoices i ON i.id = l.invoice_id
-       WHERE i.po_number = ?
+       FROM billing_invoice_lines l
+       JOIN billing_invoices i ON i.id = l.invoice_id AND i.source = 'BRIGADE' AND i.status = 'ISSUED'
+       JOIN billing_invoice_pos ip ON ip.invoice_id = i.id
+       JOIN customer_pos p ON p.id = ip.po_id AND p.source = 'BRIGADE'
+       WHERE p.brigade_po_key = LOWER(TRIM(?)) AND l.job_id IS NOT NULL
        ORDER BY i.created_at ASC`,
       [number]
     );
@@ -1448,7 +1458,7 @@ const PO_HEADER_COLUMNS = "po_source, DATE_FORMAT(po_date, '%Y-%m-%d') AS po_dat
 // PO details: saved on the Billing page, else from the latest booking with that PO.
 async function loadPoHeader(db, number) {
   const [[saved]] = await db.query(
-    `SELECT id, po_number, ${PO_HEADER_COLUMNS} FROM brigade_pos WHERE po_number = ?`,
+    `SELECT id, po_number, ${PO_HEADER_COLUMNS} FROM customer_pos WHERE source = 'BRIGADE' AND brigade_po_key = LOWER(TRIM(?))`,
     [number]
   );
   if (saved) return { ...saved, header_from: "billing" };
@@ -1465,6 +1475,25 @@ async function loadPoHeader(db, number) {
 
 // One PO: its details, services and totals. Billing sees completed services only; the PO tab
 // passes { allStatuses: true } to see every service assigned to the PO (not canceled).
+/** Invoiced total (incl. GST) per PO number (lower case): Map. Empty before the invoice tables exist. */
+async function loadInvoicedTotals(db, number = null) {
+  try {
+    const [rows] = await db.query(
+      `SELECT p.brigade_po_key AS po, COALESCE(SUM(i.total), 0) AS total
+         FROM billing_invoices i
+         JOIN billing_invoice_pos ip ON ip.invoice_id = i.id
+         JOIN customer_pos p ON p.id = ip.po_id AND p.source = 'BRIGADE'
+        WHERE i.source = 'BRIGADE' AND i.status = 'ISSUED' ${number ? "AND p.brigade_po_key = LOWER(TRIM(?))" : ""}
+        GROUP BY p.brigade_po_key`,
+      number ? [number] : []
+    );
+    return new Map(rows.map((r) => [r.po, Number(r.total) || 0]));
+  } catch (err) {
+    if (err.code === "ER_NO_SUCH_TABLE") return new Map();
+    throw err;
+  }
+}
+
 async function loadBillingPo(db, number, { allStatuses = false } = {}) {
   const header = await loadPoHeader(db, number);
   const [rows] = await db.query(
@@ -1476,8 +1505,10 @@ async function loadBillingPo(db, number, { allStatuses = false } = {}) {
   const pending = (await loadPendingByPo(db, number))[String(number).toLowerCase()] || null;
   const head = header || (pending ? { ...pending.header, header_from: "pending" } : null);
   const poAmount = toAmount(head?.po_amount);
+  const poNo = head?.po_number || rows[0]?.po_number || number;
+  const invoicedTotal = (await loadInvoicedTotals(db, poNo)).get(String(poNo).trim().toLowerCase()) || 0;
   return {
-    po_number: head?.po_number || rows[0]?.po_number || number,
+    po_number: poNo,
     is_new: !head && !services.length,
     header_from: head?.header_from || null, // "billing" | "booking" | "pending" | null
     po_source: head?.po_source ?? null,
@@ -1485,7 +1516,7 @@ async function loadBillingPo(db, number, { allStatuses = false } = {}) {
     po_amount: poAmount,
     services,
     pending_flats: pending?.flats || [],
-    totals: billingTotals(poAmount, services, pending?.value || 0),
+    totals: billingTotals(poAmount, services, pending?.value || 0, invoicedTotal),
   };
 }
 
@@ -1496,11 +1527,11 @@ function sendBillingError(res, err, fallback) {
   return sendError(res, err, fallback);
 }
 
-// Every PO with its totals: from Billing (brigade_pos) and from bookings that typed a PO.
+// Every PO with its totals: saved Brigade POs (customer_pos, source BRIGADE) and bookings that typed a PO.
 // Billing counts completed services only; the PO tab counts every assigned service.
 async function listPos({ allStatuses = false } = {}) {
   const [saved] = await pool.query(
-    `SELECT po_number, ${PO_HEADER_COLUMNS}, updated_at FROM brigade_pos`
+    `SELECT po_number, ${PO_HEADER_COLUMNS}, updated_at FROM customer_pos WHERE source = 'BRIGADE'`
   );
   const [booked] = await pool.query(
     `SELECT TRIM(client_po_number) AS po_number, ${PO_HEADER_COLUMNS}, created_at AS updated_at
@@ -1532,8 +1563,10 @@ async function listPos({ allStatuses = false } = {}) {
     e.pending = p;
   }
 
+  const invoicedBy = await loadInvoicedTotals(pool);
   const list = [...byPo.values()].map(({ header, services, pending }) => {
     const poAmount = toAmount(header?.po_amount);
+    const poNo = header?.po_number || services[0]?.po_number;
     return {
       po_number: header?.po_number || services[0]?.po_number,
       header_from: header?.header_from || null,
@@ -1542,7 +1575,7 @@ async function listPos({ allStatuses = false } = {}) {
       properties: [...new Set([...services, ...(pending?.flats || [])].map((s) => s.property).filter(Boolean))],
       flats: [...new Set([...services, ...(pending?.flats || [])].map((s) => s.flat_number).filter(Boolean))],
       updated_at: header?.updated_at ?? null,
-      totals: billingTotals(poAmount, services, pending?.value || 0),
+      totals: billingTotals(poAmount, services, pending?.value || 0, invoicedBy.get(String(poNo || "").trim().toLowerCase()) || 0),
       pending_flats: pending?.flats.length || 0,
       // How far the work has got: services done vs assigned (PO tab).
       completed: services.filter((s) => s.status === "COMPLETED").length,
@@ -1644,6 +1677,28 @@ function readBillingLines(body) {
 
 // PUT /api/brigade/billing/po
 // { po_number, po_source, po_date, po_amount, lines: [{ job_id, amount }], remove_job_ids: [] }
+/**
+ * The id of the Brigade PO with this number, creating the PO (customer_pos, source BRIGADE) when the
+ * number was only typed on a booking / pending flat - with that booking's PO details. In the caller's
+ * transaction.
+ */
+async function ensureBrigadePo(conn, number, userId) {
+  const [[existing]] = await conn.query(
+    "SELECT id, po_number FROM customer_pos WHERE source = 'BRIGADE' AND brigade_po_key = LOWER(TRIM(?)) FOR UPDATE",
+    [number]
+  );
+  if (existing) return existing;
+  const header = await loadPoHeader(conn, number);
+  const id = uuid();
+  const poNumber = header?.po_number || String(number).trim();
+  await conn.query(
+    `INSERT INTO customer_pos (id, source, company_id, po_number, po_source, po_date, po_amount, po_kind, status, created_by, updated_by)
+     VALUES (?, 'BRIGADE', NULL, ?, ?, ?, ?, 'STANDARD', 'ACTIVE', ?, ?)`,
+    [id, poNumber, header?.po_source ?? null, header?.po_date ?? null, header?.po_amount ?? null, userId, userId]
+  );
+  return { id, po_number: poNumber };
+}
+
 async function saveBillingPo(req, res) {
   let conn;
   try {
@@ -1659,15 +1714,15 @@ async function saveBillingPo(req, res) {
 
     // Upsert the PO. A new one keeps the spelling typed during booking, if any.
     const [[existing]] = await conn.query(
-      "SELECT id, po_number FROM brigade_pos WHERE po_number = ? FOR UPDATE",
+      "SELECT id, po_number FROM customer_pos WHERE source = 'BRIGADE' AND brigade_po_key = LOWER(TRIM(?)) FOR UPDATE",
       [number]
     );
     let poId = existing?.id;
     let poNumber = existing?.po_number || number;
     if (poId) {
       await conn.query(
-        `UPDATE brigade_pos SET po_source = ?, po_date = ?, po_amount = ?, updated_by_user_id = ?
-         WHERE id = ?`,
+        `UPDATE customer_pos SET po_source = ?, po_date = ?, po_amount = ?, updated_by = ?
+         WHERE id = ? AND source = 'BRIGADE'`,
         [header.source, header.date, header.amount, req.user.id, poId]
       );
     } else {
@@ -1679,9 +1734,9 @@ async function saveBillingPo(req, res) {
       poNumber = booked?.po_number || number;
       poId = uuid();
       await conn.query(
-        `INSERT INTO brigade_pos
-         (id, po_number, po_source, po_date, po_amount, created_by_user_id, updated_by_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO customer_pos
+         (id, source, company_id, po_number, po_source, po_date, po_amount, po_kind, status, created_by, updated_by)
+         VALUES (?, 'BRIGADE', NULL, ?, ?, ?, ?, 'STANDARD', 'ACTIVE', ?, ?)`,
         [poId, poNumber, header.source, header.date, header.amount, req.user.id, req.user.id]
       );
     }
@@ -1694,7 +1749,7 @@ async function saveBillingPo(req, res) {
          FROM jobs j
          LEFT JOIN brigade_booking_details bd ON bd.booking_id = j.booking_id
          LEFT JOIN brigade_po_lines l ON l.job_id = j.id
-         LEFT JOIN brigade_pos p ON p.id = l.po_id
+         LEFT JOIN customer_pos p ON p.id = l.po_id
          WHERE j.id IN (?)`,
         [lines.map((l) => l.jobId)]
       );
@@ -1981,7 +2036,7 @@ async function getFlatsReport(req, res) {
     try {
       const [lines] = await pool.query(
         `SELECT l.job_id, l.amount, p.po_number
-         FROM brigade_po_lines l JOIN brigade_pos p ON p.id = l.po_id`
+         FROM brigade_po_lines l JOIN customer_pos p ON p.id = l.po_id`
       );
       for (const l of lines) billing.set(String(l.job_id), { po: l.po_number, amount: Number(l.amount) });
     } catch (err) {
@@ -2092,6 +2147,9 @@ module.exports = {
   cancelFlatRequest,
   listAllPos,
   getPoDetail,
+  // Shared with brigadeInvoices.controller / brigadePoFiles.controller.
+  ensureBrigadePo,
+  loadInvoicedTotals,
   // Shared with brigadeInvoices.controller: a PO's details and services.
   loadBillingPo,
   loadInvoicedJobs,

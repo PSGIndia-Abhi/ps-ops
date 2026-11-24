@@ -1,12 +1,14 @@
 // Brigade PO files: documents attached to a client PO (the PO copy, the email it
-// came in, ...). Kept per PO number, so the booking form's Client PO section and
-// the Billing PO page share them. Files live in MinIO; brigade_po_files holds
-// only where each one is (database/brigade/04_brigade_po_files.sql).
+// came in, ...). Found by PO number, so the booking form's Client PO section and
+// the Billing PO page share them. Files live in MinIO; customer_po_files holds where each
+// one is, under the Brigade PO (customer_pos, source BRIGADE - created when a number that was
+// only typed on a booking gets its first file). Only Brigade POs' files are reachable here.
 
 const multer = require("multer");
 const { v4: uuid } = require("uuid");
 const { pool } = require("../../db");
 const minioClient = require("../lib/minio");
+const { ensureBrigadePo } = require("./brigade.controller");
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE_BYTES, files: 1 } });
@@ -14,9 +16,11 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX
 // (html, svg, ...) is always downloaded, so a file can never run as a page here.
 const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]);
 
-const FILE_COLUMNS = `f.id, f.po_number, f.file_name, f.file_type, f.file_size, f.created_at,
-                      f.uploaded_by_user_id, u.name AS uploaded_by_name`;
-const FILE_SQL = `SELECT ${FILE_COLUMNS} FROM brigade_po_files f LEFT JOIN users u ON u.id = f.uploaded_by_user_id`;
+const FILE_COLUMNS = `f.id, p.po_number, f.file_name, f.file_type, f.file_size, f.created_at,
+                      f.uploaded_by AS uploaded_by_user_id, u.name AS uploaded_by_name`;
+const FILE_SQL = `SELECT ${FILE_COLUMNS} FROM customer_po_files f
+  JOIN customer_pos p ON p.id = f.po_id AND p.source = 'BRIGADE'
+  LEFT JOIN users u ON u.id = f.uploaded_by`;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -55,7 +59,7 @@ function acceptFile(req, res, next) {
 async function listPoFiles(req, res) {
   try {
     const number = readPoNumber(req.query.po_number);
-    const [rows] = await pool.query(`${FILE_SQL} WHERE f.po_number = ? ORDER BY f.created_at ASC`, [number]);
+    const [rows] = await pool.query(`${FILE_SQL} WHERE p.brigade_po_key = LOWER(TRIM(?)) ORDER BY f.created_at ASC`, [number]);
     res.json(rows);
   } catch (err) {
     sendError(res, err, "Failed to load PO files");
@@ -81,11 +85,22 @@ async function uploadPoFile(req, res) {
       await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
     }
     await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.buffer.length, { "Content-Type": fileType });
-    await pool.query(
-      `INSERT INTO brigade_po_files (id, po_number, object_key, file_name, file_type, file_size, uploaded_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, number, objectKey, fileName, fileType, req.file.buffer.length, req.user.id]
-    );
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const po = await ensureBrigadePo(conn, number, req.user.id);
+      await conn.query(
+        `INSERT INTO customer_po_files (id, po_id, object_key, file_name, file_type, file_size, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, po.id, objectKey, fileName, fileType, req.file.buffer.length, req.user.id]
+      );
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
     const [[row]] = await pool.query(`${FILE_SQL} WHERE f.id = ?`, [id]);
     res.status(201).json(row);
   } catch (err) {
@@ -98,7 +113,10 @@ async function uploadPoFile(req, res) {
 // GET /api/brigade/po-files/:id/view - streams the file
 async function viewPoFile(req, res) {
   try {
-    const [[file]] = await pool.query("SELECT object_key, file_type, file_name FROM brigade_po_files WHERE id = ?", [req.params.id]);
+    const [[file]] = await pool.query(
+      "SELECT f.object_key, f.file_type, f.file_name FROM customer_po_files f JOIN customer_pos p ON p.id = f.po_id AND p.source = 'BRIGADE' WHERE f.id = ?",
+      [req.params.id]
+    );
     if (!file) throw new HttpError(404, "File not found");
     const stream = await minioClient.getObject(process.env.MINIO_BUCKET, file.object_key);
     const inline = INLINE_TYPES.has(file.file_type);
@@ -118,9 +136,12 @@ async function viewPoFile(req, res) {
 // DELETE /api/brigade/po-files/:id
 async function deletePoFile(req, res) {
   try {
-    const [[file]] = await pool.query("SELECT object_key FROM brigade_po_files WHERE id = ?", [req.params.id]);
+    const [[file]] = await pool.query(
+      "SELECT f.id, f.object_key FROM customer_po_files f JOIN customer_pos p ON p.id = f.po_id AND p.source = 'BRIGADE' WHERE f.id = ?",
+      [req.params.id]
+    );
     if (!file) throw new HttpError(404, "File not found");
-    await pool.query("DELETE FROM brigade_po_files WHERE id = ?", [req.params.id]);
+    await pool.query("DELETE FROM customer_po_files WHERE id = ?", [file.id]);
     // The file goes after the row; a failed removal leaves an unreferenced file, never a broken row.
     minioClient.removeObject(process.env.MINIO_BUCKET, file.object_key).catch((err) => {
       console.error(`Failed to remove PO file ${file.object_key}:`, err.message);

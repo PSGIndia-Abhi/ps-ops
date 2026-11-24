@@ -10,7 +10,8 @@ import "./brigade.css";
 // limits every list here to Brigade Group.
 // Same flat sidebar as the admin panel.
 const NAV = [
-  { path: "/brigade", label: "Dashboard", exact: true },
+  // The jobs list (with Pending and Flats). A by-property Dashboard is added above it later.
+  { path: "/brigade", label: "Jobs", exact: true },
   { path: "/brigade/companies", label: "Companies" },
   { path: "/brigade/contacts", label: "Contacts" },
   { path: "/brigade/group-management", label: "Group Management" },

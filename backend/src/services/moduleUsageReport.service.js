@@ -143,7 +143,7 @@ const MODULES = [
         { scope: "period", label: "Services booked", value: await count(`${jobs("j.status <> 'CANCELED'")}${b.sql}`, b.params) },
         { scope: "now", label: "Open now", value: await count(jobs("j.status IN ('CREATED','NOT_STARTED','IN_PROGRESS','PAUSED')")), tone: "warn" },
         { scope: "period", label: "Completed", value: await count(`${jobs("j.status = 'COMPLETED'")}${done.sql}`, done.params), tone: "ok" },
-        { scope: "period", label: "Invoices issued", value: await count(`SELECT COUNT(*) n FROM brigade_invoices WHERE 1=1${inv.sql}`, inv.params) },
+        { scope: "period", label: "Invoices issued", value: await count(`SELECT COUNT(*) n FROM billing_invoices WHERE source = 'BRIGADE' AND status = 'ISSUED'${inv.sql}`, inv.params) },
       ];
     },
   },

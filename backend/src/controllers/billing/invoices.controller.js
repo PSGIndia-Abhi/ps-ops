@@ -77,7 +77,8 @@ const list = C.handle("Failed to load invoices", async (req, res) => {
   const { page, pageSize, offset } = C.paging(req.query);
   // Customer filter (checkboxes): company_ids=a,b - none = every customer.
   const companyIds = String(req.query.company_ids || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
-  const where = `bi.status IN (?)
+  // Billing invoices only (Brigade invoices, source BRIGADE, have their own screens).
+  const where = `bi.source = 'BILLING' AND bi.status IN (?)
       AND (? IS NULL OR (bi.invoice_date >= ? AND bi.invoice_date < ?))
       AND (? IS NULL OR bi.company_id = ?) AND (? IS NULL OR bi.billing_type = ?)
       ${companyIds.length ? "AND bi.company_id IN (?)" : ""}
@@ -219,7 +220,7 @@ const download = C.handle("Failed to download the invoices", async (req, res) =>
   const withCopies = C.oneOf(req.query.copies, "copies", ["ORIGINAL", "PRINT"], { fallback: "ORIGINAL" }) === "PRINT";
   const [rows] = await pool.query(
     `SELECT bi.id, bi.invoice_number, bi.status, bi.print_copies, bi.content FROM billing_invoices bi
-      WHERE bi.status IN (?) AND bi.content IS NOT NULL
+      WHERE bi.source = 'BILLING' AND bi.status IN (?) AND bi.content IS NOT NULL
         AND (? IS NULL OR (bi.invoice_date >= ? AND bi.invoice_date < ?))
         AND (? IS NULL OR bi.company_id = ?)
         ${ids.length ? "AND bi.id IN (?)" : ""}

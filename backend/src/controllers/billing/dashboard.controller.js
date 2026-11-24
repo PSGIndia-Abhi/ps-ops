@@ -56,7 +56,8 @@ const dashboard = C.handle("Failed to load the dashboard", async (req, res) => {
   const sos = await S.monthOverview(pool, month, { q, groupId, companyIds });
 
   // Drafts waiting to be issued (any month) and invoices issued in the month (+ their collection).
-  const groupSql = `${groupId ? "AND c.group_id = ?" : ""} ${companyIds.length ? "AND bi.company_id IN (?)" : ""}`;
+  // Billing invoices only (Brigade invoices, source BRIGADE, have their own screens).
+  const groupSql = `AND bi.source = 'BILLING' ${groupId ? "AND c.group_id = ?" : ""} ${companyIds.length ? "AND bi.company_id IN (?)" : ""}`;
   const scope = [...(groupId ? [groupId] : []), ...(companyIds.length ? [companyIds] : [])];
   const qSql = q ? "AND (c.name LIKE CONCAT('%', ?, '%') OR bi.invoice_number LIKE CONCAT('%', ?, '%'))" : "";
   const extra = [...scope, ...(q ? [q, q] : [])];

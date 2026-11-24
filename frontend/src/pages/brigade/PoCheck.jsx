@@ -1,13 +1,13 @@
 import { formatInr, gstOn } from "./brigadeShared";
 
 // The PO-match message (from poMatch() or an invoice check): green when the services match the
-// PO, blue for information, amber when something doesn't add up. It never blocks anything.
+// PO, blue for information, amber when something doesn't add up, red ("bad") when it blocks (over the PO).
 export function PoCheck({ check, className = "" }) {
   if (!check) return null;
   return (
-    <div className={`bgc-check ${check.tone} ${className}`} role={check.tone === "warn" ? "alert" : "status"}>
+    <div className={`bgc-check ${check.tone} ${className}`} role={check.tone === "warn" || check.tone === "bad" ? "alert" : "status"}>
       <span className="bgc-check-icon" aria-hidden="true">
-        {check.tone === "ok" ? "✓" : check.tone === "warn" ? "!" : "i"}
+        {check.tone === "ok" ? "✓" : check.tone === "warn" || check.tone === "bad" ? "!" : "i"}
       </span>
       <div>
         <strong>{check.title}</strong>

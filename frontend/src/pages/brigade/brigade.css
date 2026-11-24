@@ -3866,3 +3866,19 @@
     padding-left: 18px;
   }
 }
+
+/* Over the PO amount: the invoice cannot be generated */
+.bgc-check.bad {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.bgc-check.bad .bgc-check-icon {
+  background: #dc2626;
+}
+
+/* Invoice preview: one tab per property when the services make several invoices */
+.bgi-parts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0; }
+.bgi-parts button { border: 1px solid #e2e8f0; background: #fff; color: #334155; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.bgi-parts button.on { background: #2563eb; border-color: #2563eb; color: #fff; }

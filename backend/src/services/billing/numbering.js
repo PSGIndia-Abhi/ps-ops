@@ -76,4 +76,24 @@ async function nextInvoiceNumber(conn, invoiceDate) {
   return { fy, seq, number: invoiceNumber(fy, seq) };
 }
 
-module.exports = { PREFIX, financialYear, invoiceNumber, nextInvoiceNumber };
+// Brigade invoices have their own series: BSBR<financial year>/<number>, no leading zeros, with their
+// own counter (sequences "brigade_invoice_<fy>"). A new year starts at 1. To start live from a given
+// number, set that counter once before the first Brigade invoice of the year:
+//   INSERT INTO sequences (name, value) VALUES ('brigade_invoice_26-27', <start - 1>)
+//     ON DUPLICATE KEY UPDATE value = GREATEST(value, <start - 1>);
+const BRIGADE_PREFIX = "BSBR";
+const brigadeInvoiceNumber = (fy, seq) => `${BRIGADE_PREFIX}${fy}/${seq}`;
+
+/** The next Brigade invoice number for an invoice dated `invoiceDate`, inside the caller's transaction. */
+async function nextBrigadeInvoiceNumber(conn, invoiceDate) {
+  const fy = financialYear(invoiceDate);
+  const key = `brigade_invoice_${fy}`;
+  await conn.query("INSERT IGNORE INTO sequences (name, value) VALUES (?, 0)", [key]);
+  const [[counter]] = await conn.query("SELECT value FROM sequences WHERE name = ? FOR UPDATE", [key]);
+  let seq = (Number(counter.value) || 0) + 1;
+  while (await taken(conn, brigadeInvoiceNumber(fy, seq))) seq += 1;
+  await conn.query("UPDATE sequences SET value = ? WHERE name = ?", [seq, key]);
+  return { fy, seq, number: brigadeInvoiceNumber(fy, seq) };
+}
+
+module.exports = { PREFIX, BRIGADE_PREFIX, financialYear, invoiceNumber, nextInvoiceNumber, nextBrigadeInvoiceNumber };

@@ -155,16 +155,19 @@ function PoTable({ onOpen }) {
                   <th className="num">Services</th>
                   <th className="num">PO amount</th>
                   <th className="num">Assigned value</th>
+                  <th className="num">Invoiced</th>
                   <th className="num">Balance</th>
                   <th style={{ width: 160 }}>Used</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((p) => {
-                  // PO amount includes GST: compare with services + pending flats, both with GST.
+                  // Assigned = services + pending flats on the PO (with GST): work to come, shown for information.
+                  // The PO amount (incl. GST) is used up only by invoices: balance = PO amount - invoiced.
                   const usedIncl = round2((p.totals.billed_incl ?? p.totals.billed) + (p.totals.pending_incl || 0));
-                  const balance = p.totals.po_amount === null ? null : round2(p.totals.po_amount - usedIncl);
-                  const pct = pctOf(usedIncl, p.totals.po_amount);
+                  const invoiced = p.totals.invoiced || 0;
+                  const balance = p.totals.balance;
+                  const pct = pctOf(invoiced, p.totals.po_amount);
                   return (
                     <tr key={p.po_number} tabIndex={0} onClick={() => onOpen(p.po_number)} onKeyDown={(e) => e.key === "Enter" && onOpen(p.po_number)}>
                       <td>
@@ -183,10 +186,11 @@ function PoTable({ onOpen }) {
                       </td>
                       <td className="num"><Money value={p.totals.po_amount} /></td>
                       <td className="num">{formatInr(usedIncl)}</td>
+                      <td className="num">{formatInr(invoiced)}</td>
                       <td className="num bgb-strong"><Money value={balance} signed /></td>
                       <td>
                         <div className="bgb-util">
-                          <Bar value={usedIncl} poAmount={p.totals.po_amount} />
+                          <Bar value={invoiced} poAmount={p.totals.po_amount} />
                           <span>{pct === null ? "—" : `${pct}%`}</span>
                         </div>
                       </td>

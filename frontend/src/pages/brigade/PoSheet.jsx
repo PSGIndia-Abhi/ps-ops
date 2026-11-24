@@ -209,9 +209,11 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
   const pendingValue = round2(pendingFlats.reduce((s, f) => s + (f.value || 0), 0)); // excl. GST
   const onPo = round2(servicesValue + pendingValue);
   const onPoIncl = gstOn(onPo).total;
-  const balance = poAmount === null ? null : round2(poAmount - onPoIncl);
+  // The PO amount (incl. GST) is used up only by tax invoices generated on it.
+  const invoiced = po?.totals?.invoiced || 0;
+  const balance = poAmount === null ? null : round2(poAmount - invoiced);
   const state = poState(poAmount, balance);
-  const pct = usedPct(onPoIncl, poAmount);
+  const pct = usedPct(invoiced, poAmount);
   // Everything on the PO (with GST) against the PO amount (incl. GST) - a message, never a block.
   const poCheck = po && (rows.length || pendingFlats.length) ? poMatch({ poAmount, value: onPo }) : null;
   const invalidIds = new Set(
@@ -360,12 +362,13 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
             <div className={`bgb-doc-status ${state.key}`}>
               <span className="bgb-eyebrow">Balance</span>
               <strong>{balance === null ? "—" : formatInr(balance)}</strong>
-              <UsageBar billed={onPoIncl} poAmount={poAmount} />
+              <UsageBar billed={invoiced} poAmount={poAmount} />
               <span className="bgb-sub">
                 {pct === null
                   ? manage ? "Enter the PO amount to track it" : "No PO amount yet"
-                  : `${formatInr(onPoIncl)} incl. GST ${manage ? "on this PO" : "completed"} · ${pct}% of PO`}
+                  : `${formatInr(invoiced)} invoiced · ${pct}% of PO`}
               </span>
+              <span className="bgb-sub">{formatInr(onPoIncl)} incl. GST {manage ? "on this PO" : "completed"} (not taken off until invoiced)</span>
             </div>
           </header>
 
@@ -629,8 +632,9 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
                 <div className="bgb-picked-total"><dt>Selected for invoice ({pickedRows.length}, incl. GST)</dt><dd>{formatInr(gstOn(pickedAmount).total)}</dd></div>
               )}
               <div><dt>PO amount (incl. GST)</dt><dd><Money value={poAmount} /></dd></div>
+              <div><dt>Invoiced so far (incl. GST)</dt><dd>{formatInr(invoiced)}</dd></div>
               <div className="grand">
-                <dt>Balance</dt>
+                <dt>Balance (PO amount - invoiced)</dt>
                 <dd><Money value={balance} signed /></dd>
               </div>
             </dl>

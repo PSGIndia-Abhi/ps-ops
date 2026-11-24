@@ -123,7 +123,7 @@ const listPos = C.handle("Failed to load purchase orders", async (req, res) => {
   const q = C.str(req.query.q, "q", { max: 100 });
   const [rows] = await pool.query(
     `${PO_SQL}
-      WHERE (? IS NULL OR po.company_id = ?) AND (? IS NULL OR po.contract_id = ?) AND (? IS NULL OR po.po_kind = ?)
+      WHERE po.source = 'BILLING' AND (? IS NULL OR po.company_id = ?) AND (? IS NULL OR po.contract_id = ?) AND (? IS NULL OR po.po_kind = ?)
         AND (? IS NULL OR po.status = ?)
         AND (? IS NULL OR (po.expiry_date IS NOT NULL AND po.expiry_date >= CURDATE() AND po.expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)))
         AND (? IS NULL OR po.po_number LIKE CONCAT('%', ?, '%') OR c.name LIKE CONCAT('%', ?, '%'))
@@ -139,7 +139,7 @@ const listPos = C.handle("Failed to load purchase orders", async (req, res) => {
             SUM(status = 'ACTIVE' AND expiry_date IS NULL) AS open_po,
             SUM(status = 'ACTIVE' AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)) AS expiring_30_days,
             SUM(status = 'ACTIVE' AND expiry_date < CURDATE()) AS expired
-       FROM customer_pos`
+       FROM customer_pos WHERE source = 'BILLING'`
   );
   const [[adv]] = await pool.query(
     `SELECT COALESCE(SUM(p.received_amount - COALESCE((SELECT SUM(pa.allocated_amount) FROM payment_allocations pa WHERE pa.payment_id = p.id), 0)), 0) AS remaining

@@ -25,7 +25,7 @@ export default function BrigadeDashboard() {
 
   return (
     <div className="bgf-wrap">
-      <div className="bgf-switch" role="tablist" aria-label="Dashboard view">
+      <div className="bgf-switch" role="tablist" aria-label="Jobs view">
         <button
           type="button"
           role="tab"

@@ -559,7 +559,11 @@ async function undoImport(req, res) {
     const requestIds = created.request_ids || [];
 
     if (jobIds.length) {
-      const [[inv]] = await conn.query("SELECT COUNT(*) AS n FROM brigade_invoice_lines WHERE job_id IN (?)", [jobIds]);
+      const [[inv]] = await conn.query(
+        `SELECT COUNT(*) AS n FROM billing_invoice_lines l JOIN billing_invoices i ON i.id = l.invoice_id
+          WHERE l.job_id IN (?) AND i.source = 'BRIGADE' AND i.status <> 'CANCELLED'`,
+        [jobIds]
+      );
       if (Number(inv.n)) throw new HttpError(409, `${inv.n} imported service(s) are already on an invoice - this import cannot be undone`);
     }
     if (requestIds.length) {

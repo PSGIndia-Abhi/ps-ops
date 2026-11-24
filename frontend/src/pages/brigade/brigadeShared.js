@@ -111,9 +111,15 @@ async function fetchPdfUrl(endpoint, options) {
   return URL.createObjectURL(await res.blob());
 }
 
-/** POST /api/brigade/billing/invoices/preview - the invoice for the ticked services, stamped PREVIEW. */
-export function previewInvoiceUrl(poNumber, jobIds) {
-  return fetchPdfUrl("/api/brigade/billing/invoices/preview", { method: "POST", body: JSON.stringify({ po_number: poNumber, job_ids: jobIds }) });
+/**
+ * POST /api/brigade/billing/invoices/preview - the invoice for the ticked services, stamped PREVIEW.
+ * Services of several properties make one invoice per property: companyId picks which one.
+ */
+export function previewInvoiceUrl(poNumber, jobIds, companyId = null) {
+  return fetchPdfUrl("/api/brigade/billing/invoices/preview", {
+    method: "POST",
+    body: JSON.stringify({ po_number: poNumber, job_ids: jobIds, ...(companyId ? { company_id: companyId } : {}) }),
+  });
 }
 
 export function createInvoice(poNumber, jobIds) {
@@ -124,12 +130,12 @@ export function listInvoices(poNumber) {
   return brigadeRequest(`/api/brigade/billing/invoices?po_number=${encodeURIComponent(poNumber)}`);
 }
 
-/** Downloads an issued invoice as "Tax Invoice BSPMPL26-27-5000.pdf". */
+/** Downloads an issued invoice, named by its number: "BSBR26-27-12.pdf". */
 export async function downloadInvoice(invoice) {
   const url = await fetchPdfUrl(`/api/brigade/billing/invoices/${invoice.id}/pdf`);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Tax Invoice ${invoice.invoice_number.replace(/\//g, "-")}.pdf`;
+  a.download = `${invoice.invoice_number.replace(/\//g, "-")}.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -42,9 +42,24 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
         previewInvoiceUrl(poNumber, selected.ids),
         checkInvoice(poNumber, selected.ids).catch(() => null),
       ]);
-      setPreview({ url, check });
+      setPreview({ url, check, part: check?.invoices?.[0]?.company_id || null });
     } catch (err) {
       setPreview({ error: err.message || "Could not prepare the invoice" });
+    }
+  }
+
+  // Several properties = several invoices: show another one's preview.
+  async function showPart(companyId) {
+    if (!preview || preview.part === companyId) return;
+    const old = preview.url;
+    setPreview((p) => ({ ...p, part: companyId, url: null, loading: true }));
+    try {
+      const url = await previewInvoiceUrl(poNumber, selected.ids, companyId);
+      setPreview((p) => ({ ...p, url, loading: false }));
+    } catch (err) {
+      setPreview((p) => ({ ...p, loading: false, error: err.message || "Could not prepare the invoice" }));
+    } finally {
+      if (old) URL.revokeObjectURL(old);
     }
   }
 
@@ -57,11 +72,12 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
     setConfirming(false);
     setGenerating(true);
     try {
-      const invoice = await createInvoice(poNumber, selected.ids);
+      const result = await createInvoice(poNumber, selected.ids);
+      const made = result.invoices?.length ? result.invoices : [result];
       closePreview();
-      setDone(invoice.invoice_number);
+      setDone(made.map((i) => i.invoice_number).join(", "));
       load();
-      await downloadInvoice(invoice);
+      for (const inv of made) await downloadInvoice(inv);
     } catch (err) {
       setPreview((p) => (p ? { ...p, saveError: err.message || "Could not generate the invoice" } : p));
     } finally {
@@ -103,7 +119,7 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
           <strong>{formatInr(gstOn(selected.amount).total)}</strong>
         </div>
       )}
-      {done && <div className="bgb-invoice-done">Invoice {done} generated and downloaded.</div>}
+      {done && <div className="bgb-invoice-done">{done.includes(",") ? "Invoices" : "Invoice"} {done} generated and downloaded.</div>}
       {error && <div className="bg-field-error">{error}</div>}
 
       {invoices && invoices.length > 0 && (
@@ -112,6 +128,7 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
             <tr>
               <th>Invoice No.</th>
               <th>Date</th>
+              <th>Property</th>
               <th>Services</th>
               <th className="num">Taxable</th>
               <th className="num">GST (18%)</th>
@@ -124,6 +141,7 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
               <tr key={inv.id}>
                 <td><strong>{inv.invoice_number}</strong></td>
                 <td>{formatDate(inv.invoice_date)}</td>
+                <td>{inv.property || "—"}</td>
                 <td>{inv.lines}</td>
                 <td className="num">{formatInr(inv.subtotal)}</td>
                 <td className="num">{formatInr(inv.cgst + inv.sgst)}</td>
@@ -148,6 +166,16 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
               </div>
               <button type="button" className="bgb-btn-ghost" onClick={closePreview} disabled={generating}>Close</button>
             </header>
+            {preview.check?.invoices?.length > 1 && (
+              <div className="bgi-parts" role="tablist" aria-label="Invoices to be made">
+                {preview.check.invoices.map((p) => (
+                  <button key={p.company_id} type="button" role="tab" aria-selected={preview.part === p.company_id}
+                    className={preview.part === p.company_id ? "on" : ""} onClick={() => showPart(p.company_id)} disabled={generating}>
+                    {p.property} · {formatInr(p.total)}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="bgi-body">
               {preview.loading && <div className="bg-loading">Preparing the invoice…</div>}
               {preview.error && <div className="bg-error">{preview.error}</div>}
@@ -157,7 +185,8 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
             <footer className="bgi-foot">
               {preview.saveError && <span className="bg-field-error">{preview.saveError}</span>}
               <button type="button" className="bgb-btn-ghost" onClick={closePreview} disabled={generating}>Cancel</button>
-              <button type="button" className="primary" onClick={() => setConfirming(true)} disabled={!preview.url || generating}>
+              <button type="button" className="primary" onClick={() => setConfirming(true)} disabled={!preview.url || generating || Boolean(preview.check?.blocked)}
+                title={preview.check?.blocked ? "Over the PO balance - the invoice cannot be generated" : undefined}>
                 {generating ? "Generating…" : "Generate invoice"}
               </button>
             </footer>
@@ -169,7 +198,7 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
         open={confirming}
         title="Generate invoice?"
         message={
-          `Are you sure you want to generate the invoice for ${selected.count} service${selected.count === 1 ? "" : "s"} on PO ${poNumber}` +
+          `Are you sure you want to generate ${preview?.check?.invoices?.length > 1 ? `${preview.check.invoices.length} invoices (one per property)` : "the invoice"} for ${selected.count} service${selected.count === 1 ? "" : "s"} on PO ${poNumber}` +
           (preview?.check ? ` (${formatInr(preview.check.total)} incl. GST)` : "") +
           "? Once generated, it is saved and cannot be changed." +
           (preview?.check?.warnings?.length ? ` Please note: ${preview.check.warnings.join(" ")}` : "")
@@ -183,10 +212,12 @@ export default function PoInvoices({ poNumber, selected, blockedReason, readOnly
 }
 
 // Under the preview: what the invoice comes to (CGST 9% + SGST 9%) against the PO amount (incl. GST),
-// and anything that doesn't match. Information only - generating is still allowed.
+// and anything that doesn't match. Over the PO balance blocks generating (red); other notes are warnings.
 function InvoiceCheck({ check }) {
   const warn = check.warnings || [];
-  const status = warn.length
+  const status = check.blocked
+    ? { tone: "bad", title: "Over the PO amount - this invoice cannot be generated", text: check.block_reason }
+    : warn.length
     ? { tone: "warn", title: warn.length === 1 ? "Please check before generating" : `${warn.length} things to check before generating`, text: warn.join(" ") }
     : check.po_amount === null
       ? null

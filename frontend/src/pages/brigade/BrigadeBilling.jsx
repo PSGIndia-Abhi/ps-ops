@@ -6,7 +6,7 @@ import PoSheet, { Money, SearchIcon, StateBadge, UsageBar } from "./PoSheet";
 import "./brigade.css";
 
 // Brigade billing (/brigade/billing): VIEW ONLY. Every PO with its completed services,
-// totals with GST and the balance; inside a PO, tick completed services and
+// totals with GST and the balance (PO amount - invoices generated); inside a PO, tick completed services and
 // Preview -> Generate the tax invoice. POs, prices and services are managed in the
 // PO section. The open PO lives in the URL (?po=) so the browser back button returns.
 export default function BrigadeBilling() {
@@ -78,6 +78,8 @@ function PoList({ onOpen }) {
       value: round2(withAmount.reduce((s, p) => s + p.totals.po_amount, 0)),
       billedAgainst: round2(withAmount.reduce((s, p) => s + (p.totals.billed_incl ?? p.totals.billed), 0)),
       billed: round2(pos.reduce((s, p) => s + (p.totals.billed_incl ?? p.totals.billed), 0)),
+      invoiced: round2(pos.reduce((s, p) => s + (p.totals.invoiced || 0), 0)),
+      invoicedAgainst: round2(withAmount.reduce((s, p) => s + (p.totals.invoiced || 0), 0)),
       balance: round2(withAmount.reduce((s, p) => s + p.totals.balance, 0)),
       over: counts.over || 0,
     };
@@ -123,8 +125,8 @@ function PoList({ onOpen }) {
         <KpiTile
           icon="receipt"
           tone="green"
-          label="Billed incl. GST"
-          value={formatInr(summary.billed)}
+          label="Invoiced incl. GST"
+          value={formatInr(summary.invoiced)}
           progress={overallPct}
           note={overallPct === null ? "No PO amounts yet" : `${overallPct}% of PO value`}
         />
@@ -191,6 +193,7 @@ function PoList({ onOpen }) {
                   <th className="num">Lines</th>
                   <th className="num">PO amount</th>
                   <th className="num">Completed incl. GST</th>
+                  <th className="num">Invoiced</th>
                   <th className="num">Balance</th>
                   <th style={{ width: 170 }}>Utilisation</th>
                   <th>Status</th>
@@ -199,7 +202,8 @@ function PoList({ onOpen }) {
               <tbody>
                 {shown.map((p) => {
                   const billedIncl = p.totals.billed_incl ?? p.totals.billed;
-                  const pct = usedPct(billedIncl, p.totals.po_amount);
+                  const invoiced = p.totals.invoiced || 0; // the PO is used up only by invoices
+                  const pct = usedPct(invoiced, p.totals.po_amount);
                   return (
                     <tr
                       key={p.po_number}
@@ -219,10 +223,11 @@ function PoList({ onOpen }) {
                       <td className="num">{p.totals.services}</td>
                       <td className="num"><Money value={p.totals.po_amount} /></td>
                       <td className="num">{formatInr(billedIncl)}</td>
+                      <td className="num">{formatInr(invoiced)}</td>
                       <td className="num bgb-strong"><Money value={p.totals.balance} signed /></td>
                       <td>
                         <div className="bgb-util">
-                          <UsageBar billed={billedIncl} poAmount={p.totals.po_amount} />
+                          <UsageBar billed={invoiced} poAmount={p.totals.po_amount} />
                           <span>{pct === null ? "—" : `${pct}%`}</span>
                         </div>
                       </td>
