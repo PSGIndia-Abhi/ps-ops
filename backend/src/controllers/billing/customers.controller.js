@@ -150,7 +150,7 @@ async function profileDetail(db, companyId) {
   );
   const [lines] = await db.query(LINES_SQL, [companyId]);
   const [pos] = await db.query(
-    `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status, contract_id FROM customer_pos
+    `SELECT id, po_number, po_date, expiry_date, po_amount, po_area, po_area_unit, po_kind, status, contract_id FROM customer_pos
       WHERE company_id = ? ORDER BY (status = 'ACTIVE') DESC, po_date DESC`,
     [companyId]
   );
@@ -220,6 +220,8 @@ async function profileDetail(db, companyId) {
       po_date: C.ymd(po.po_date),
       expiry_date: C.ymd(po.expiry_date),
       po_amount: po.po_amount === null ? null : Number(po.po_amount),
+      po_area: po.po_area === null || po.po_area === undefined ? null : Number(po.po_area),
+      po_area_unit: po.po_area_unit || null,
       kind: po.po_kind,
       status: po.status !== "ACTIVE" ? "CLOSED" : po.expiry_date && C.ymd(po.expiry_date) < today ? "EXPIRED" : "ACTIVE",
       contract_id: po.contract_id,

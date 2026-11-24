@@ -190,7 +190,7 @@ export default function Contracts() {
                   <td>{d.terms?.billing_type ? <TypeBadge type={d.terms.billing_type} frequency={d.terms.frequency_months} unit={d.terms.frequency_unit} /> : <span className="ac-sub">—</span>}</td>
                   <td><span className="bl-soft">{d.group ? "Group based" : d.terms?.billing_type === "TERMITE" ? "Per area" : d.terms?.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
                   <td><span className="ac-sub">—</span></td>
-                  <td><span className="bl-soft">{d.terms?.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
+                  <td><span className="bl-soft">{d.terms?.bill_day ? `Day ${d.terms.bill_day}` : "—"}</span></td>
                   <td><span className="ac-sub">—</span></td>
                   <td><span className="ac-sub">Not finished</span></td>
                   <td><span className="bl-draft-badge">Draft</span></td>
@@ -212,7 +212,7 @@ export default function Contracts() {
                   <td><TypeBadge type={c.billing_type} frequency={c.frequency_months} unit={c.frequency_unit} /></td>
                   <td><span className="bl-soft">{c.billing_type === "TERMITE" ? `Per ${c.area_unit === "sq.ft" ? "sq. ft" : "sq. m"}` : c.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</span></td>
                   <td><span className="bl-date">{dmy(c.next_period_start)}</span></td>
-                  <td><span className="bl-soft">{c.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span></td>
+                  <td><span className="bl-soft">{c.bill_day ? `Day ${c.bill_day}` : "—"}</span></td>
                   <td>{c.po_required ? <StatusBadge value="PARTIAL" label="Required" /> : <span className="ac-sub">—</span>}</td>
                   <td>
                     {!customers ? <span className="ac-sub">…</span> : detailsOk(c)
