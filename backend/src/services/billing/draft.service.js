@@ -59,7 +59,7 @@ async function customerContext(db, companyId, contract = null) {
     const billTo = gp
       ? {
         ...(profile || {}), billing_name: gp.billing_name, billing_address: gp.billing_address, state_code: gp.state_code, state_name: gp.state_name,
-        payment_terms_days: gp.payment_terms_days, is_active: 1, print_copies: profile?.print_copies || 1,
+        payment_terms_days: gp.payment_terms_days, is_active: 1, print_copies: profile?.print_copies ?? 1,
       }
       : null;
     return { company: company ? { ...company, gst_number: gp ? gp.gst_number : company.gst_number } : null, profile: billTo, category: calc.categoryOf(company?.type) };
@@ -514,7 +514,8 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId, extraQty 
   // Print copies from the customer's billing profile: the outlet's own setting for an invoice made
   // per outlet, else the profile's.
   const [outletCopies] = await conn.query("SELECT site_id, print_copies FROM billing_outlet_settings WHERE company_id = ?", [contract.company_id]);
-  const copiesFor = (siteId) => Number(outletCopies.find((o) => o.site_id === siteId)?.print_copies || ctx.profile.print_copies || 1);
+  // 0 = nothing printed when the invoice is issued.
+  const copiesFor = (siteId) => Number(outletCopies.find((o) => o.site_id === siteId)?.print_copies ?? ctx.profile.print_copies ?? 1);
   // Separate bills: the service lines and the chemical lines go on two invoices, each with its own
   // description. A line's kind comes from its contract line; SOS extra services are services.
   const kindOf = new Map(cl.map((c) => [c.id, c.item_kind || "SERVICE"]));
@@ -716,6 +717,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
             c.name AS customer_name, IF(gp.group_id IS NULL, c.gst_number, gp.gst_number) AS gst_number, c.type AS customer_type,
             COALESCE(gp.billing_name, bp.billing_name) AS billing_name, COALESCE(gp.billing_address, bp.billing_address) AS billing_address,
             COALESCE(gp.state_code, bp.state_code) AS state_code, COALESCE(gp.state_name, bp.state_name) AS state_name,
+            IF(bc.contract_kind = 'GROUP', NULL, bp.service_offered_to) AS service_offered_to,
             bc.contract_kind, bc.group_id AS contract_group_id,
             ss.name AS ship_to_site, ss.address AS ship_to_address, ss.city AS ship_to_city,
             iu.name AS issued_by_name,
@@ -783,13 +785,15 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     site_id: inv.site_id,
     ship_to_site_id: inv.ship_to_site_id,
     ship_to: inv.ship_to_site_id ? { name: inv.ship_to_site, address: [inv.ship_to_address, inv.ship_to_city].filter(Boolean).join(", ") } : null,
+    // The customer's own "Service Offered To" address (billing profile): printed instead of the outlet / Bill To.
+    service_offered_to: inv.service_offered_to || null,
     period_start: period.start,
     period_end: period.end,
     invoice_date: C.ymd(inv.invoice_date),
     due_date: C.ymd(inv.due_date),
     description: inv.description,
     place_of_supply: inv.place_of_supply,
-    service_plan: { print_copies: copies?.n ? Number(copies.n) : Number(inv.print_copies) },
+    service_plan: { print_copies: copies?.n !== null && copies?.n !== undefined ? Number(copies.n) : Number(inv.print_copies) },
     services: linked.length
       ? { planned: linked.reduce((t, l) => t + Number(l.services_planned), 0), done: linked.reduce((t, l) => t + Math.min(Number(l.services_done || 0), Number(l.services_planned)), 0) }
       : null,
@@ -1019,7 +1023,7 @@ async function createManual(pool, body, userId) {
     const [[outlet]] = lineSites.length === 1
       ? await conn.query("SELECT print_copies FROM billing_outlet_settings WHERE company_id = ? AND site_id = ?", [contract.company_id, lineSites[0]])
       : [[null]];
-    const copies = Number(outlet?.print_copies || ctx.profile.print_copies || 1);
+    const copies = Number(outlet?.print_copies ?? ctx.profile.print_copies ?? 1); // 0 = not printed on issue
     const period = { start: invoiceDate, end: invoiceDate };
     const pos = contract.po_required ? await validPos(conn, contract, period) : [];
     const poIds = contract.billing_type === "CHEMICAL" ? pos.map((p) => p.id) : pos.slice(0, 1).map((p) => p.id);

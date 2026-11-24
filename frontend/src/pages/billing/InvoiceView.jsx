@@ -150,10 +150,11 @@ export default function InvoiceView() {
                 {inv.bill_to.state && <div className="iv-meta">State {inv.bill_to.state}</div>}
               </div>
               {/* a group based invoice bills the group: no Ship to */}
-              {inv.contract?.contract_kind !== "GROUP" && (
+              {/* Service offered to: only when it is set on the customer's billing details */}
+              {inv.contract?.contract_kind !== "GROUP" && inv.service_offered_to && (
                 <div>
-                  <div className="iv-label">Ship to</div>
-                  {inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
+                  <div className="iv-label">{inv.service_offered_to ? "Service offered to" : "Ship to"}</div>
+                  {inv.service_offered_to ? <div className="iv-addr" style={{ whiteSpace: "pre-line" }}><FiMapPin /> {inv.service_offered_to}</div> : inv.ship_to ? <><b>{inv.ship_to.name}</b><div className="iv-addr"><FiMapPin /> {inv.ship_to.address}</div></> : <span className="ac-sub">Same as Bill To</span>}
                 </div>
               )}
               <div className="iv-facts">

@@ -12,7 +12,9 @@
 //   CHEMICAL   weekly (frequency_unit WEEK: 7-day periods from the first bill date) or daily (DAY:
 //              one-day periods); each such period is its own invoice, and the month's Bill Run
 //              drafts every one of them that is due (see duePeriods).
-//   ONE_TIME   one period: start_date to end_date (or the start date alone)
+//   ONE_TIME   one period: start_date to end_date (or the start date alone). A Termite contract
+//              with no billing frequency (frequency_months NULL) is billed the same way: once.
+//              Termite contracts made before that keep their daily / weekly / monthly periods.
 //
 // A period is due for a month when it can be billed by the month end:
 //   ARREARS (billed after the period) -> the period has ended by the month end
@@ -30,11 +32,14 @@ function onCycleDay(index, day) {
   return `${y}-${pad(m)}-${pad(Math.min(day, daysInMonth(y, m)))}`;
 }
 
-const frequencyOf = (contract) => (contract.billing_type === "ONE_TIME" ? null : Number(contract.frequency_months) || 1);
+/** Billed once: One-time, or Termite with no billing frequency (frequency_months NULL). */
+const isOnce = (contract) => contract.billing_type === "ONE_TIME" || (contract.billing_type === "TERMITE" && contract.frequency_months === null);
 
-/** MONTH, WEEK or DAY. Weekly / daily billing is for Termite contracts only; anything else is MONTH. */
+const frequencyOf = (contract) => (isOnce(contract) ? null : Number(contract.frequency_months) || 1);
+
+/** MONTH, WEEK or DAY. Weekly / daily billing is for (recurring) Termite contracts only; anything else is MONTH. */
 const unitOf = (contract) =>
-  contract.billing_type === "TERMITE" && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
+  contract.billing_type === "TERMITE" && !isOnce(contract) && (contract.frequency_unit === "WEEK" || contract.frequency_unit === "DAY") ? contract.frequency_unit : "MONTH";
 
 /** Several invoices per month (one per week / day)? */
 const isShortPeriod = (contract) => unitOf(contract) !== "MONTH";
@@ -64,7 +69,7 @@ function nextPeriod(contract) {
 function periodFrom(contract, start) {
   if (!start) return null;
   if (contract.end_date && start > contract.end_date) return null;
-  if (contract.billing_type === "ONE_TIME") {
+  if (isOnce(contract)) {
     const end = contract.end_date && contract.end_date >= start ? contract.end_date : start;
     return { start, end };
   }
@@ -103,4 +108,4 @@ function isDue(contract, period, monthEnd) {
   return contract.bill_timing === "ADVANCE" ? period.start <= monthEnd : period.end <= monthEnd;
 }
 
-module.exports = { frequencyOf, unitOf, isShortPeriod, cycleDayOf, nextPeriod, periodFrom, duePeriods, periodAfter, isDue };
+module.exports = { isOnce, frequencyOf, unitOf, isShortPeriod, cycleDayOf, nextPeriod, periodFrom, duePeriods, periodAfter, isDue };

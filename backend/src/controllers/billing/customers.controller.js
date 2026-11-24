@@ -25,7 +25,8 @@ function readEmails(raw, field) {
 }
 
 // Any number of print copies; 127 is only the TINYINT column's limit.
-const copiesOf = (raw, field) => C.num(raw, field, { min: 1, max: 127, integer: true }) ?? 1;
+// 0 = nothing is printed when an invoice is issued (Print by hand still prints one).
+const copiesOf = (raw, field) => C.num(raw, field, { min: 0, max: 65535, integer: true }) ?? 1; // 65535 = the column limit
 const emailList = (s) => String(s || "").split(",").map((e) => e.trim()).filter(Boolean);
 
 // Price lines in force today, with what a month comes to.
@@ -244,7 +245,7 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
   if (!profile && !forGroup) throw C.bad("Save the billing details (Bill To) first");
   const printCopies = copiesOf(b.print_copies, "print_copies");
   const invoiceEmails = readEmails(b.invoice_emails, "Invoice emails");
-  const billBy = C.num(b.bill_by_day, "bill_by_day", { min: 1, max: 28, integer: true });
+  const billBy = C.num(b.bill_by_day, "bill_by_day", { min: 1, max: 30, integer: true });
   const autoEmail = C.bool(b.auto_email);
   const outlets = Array.isArray(b.outlets) ? b.outlets : [];
   const [siteRows] = await pool.query("SELECT id FROM sites WHERE company_id = ?", [companyId]);

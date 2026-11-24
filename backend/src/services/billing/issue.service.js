@@ -92,9 +92,12 @@ function buildContent(inv, number) {
     place_of_supply: inv.place_of_supply,
     category: inv.customer.category,
     bill_to: { name: inv.bill_to.name, lines: address, gstin: inv.bill_to.gst_number || null, state: inv.bill_to.state },
-    ship_to: inv.ship_to ? [{ name: inv.ship_to.name, addresses: inv.ship_to.address ? [inv.ship_to.address] : [] }] : [],
-    // a group based contract bills the group (its companies are the lines): no Ship To column
-    hide_ship_to: inv.contract.contract_kind === "GROUP",
+    // Service Offered To: printed only when the customer's billing details have it ticked (its address).
+    ship_to: inv.service_offered_to
+      ? [{ name: "", addresses: String(inv.service_offered_to).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) }]
+      : [],
+    // No "Service Offered To" column unless it is set; a group based contract never has one.
+    hide_ship_to: inv.contract.contract_kind === "GROUP" || !inv.service_offered_to,
     // Termite invoices print Bill To + Invoice Details only (no Service Offered To) and no Bill Value column
     termite: inv.contract.billing_type === "TERMITE",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
@@ -199,7 +202,7 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
     if (!Number(left.n)) {
       await conn.query(
         `UPDATE billing_contracts
-            SET next_period_start = ?, status = IF(billing_type = 'ONE_TIME', 'ENDED', status), updated_by = ?
+            SET next_period_start = ?, status = IF((billing_type = 'ONE_TIME' OR (billing_type = 'TERMITE' AND frequency_months IS NULL)), 'ENDED', status), updated_by = ?
           WHERE id = ? AND next_period_start = ?`,
         [C.addDays(inv.period_end, 1), userId, inv.contract.id, inv.period_start]
       );
@@ -301,7 +304,7 @@ async function cancelIssued(pool, id, req, reason) {
       // or day - the Bill Run skips the ones still issued after it.
       await conn.query(
         `UPDATE billing_contracts
-            SET next_period_start = ?, status = IF(billing_type = 'ONE_TIME' AND status = 'ENDED', 'ACTIVE', status), updated_by = ?
+            SET next_period_start = ?, status = IF((billing_type = 'ONE_TIME' OR (billing_type = 'TERMITE' AND frequency_months IS NULL)) AND status = 'ENDED', 'ACTIVE', status), updated_by = ?
           WHERE id = ? AND ${short ? "next_period_start > ?" : "next_period_start = ?"}`,
         [inv.period_start, userId, inv.contract.id, short ? inv.period_start : C.addDays(inv.period_end, 1)]
       );
