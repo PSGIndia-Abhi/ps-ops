@@ -754,7 +754,7 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     [id]
   );
   const [pos] = await db.query(
-    `SELECT po.id, po.po_number, po.po_date, po.expiry_date, po.po_amount, po.po_kind, po.status
+    `SELECT po.id, po.po_number, po.po_date, po.expiry_date, po.po_amount, po.po_area, po.po_area_unit, po.po_kind, po.status
        FROM billing_invoice_pos bp JOIN customer_pos po ON po.id = bp.po_id
       WHERE bp.invoice_id = ? ORDER BY po.po_date`,
     [id]
@@ -777,6 +777,8 @@ async function loadInvoice(db, id, { lock = false } = {}) {
     expiry_date: C.ymd(p.expiry_date),
     is_open_po: p.expiry_date === null,
     po_amount: C.n2(p.po_amount),
+    po_area: C.n2(p.po_area),
+    po_area_unit: p.po_area_unit || null,
     kind: p.po_kind,
     status: p.status,
   });
@@ -1194,6 +1196,24 @@ async function checkInvoice(db, id) {
       const after = calc.round2(Number(used.invoiced) + inv.total);
       if (after > po.po_amount) {
         warnings.push(`Invoices on PO ${po.po_number} would come to ₹${after.toFixed(2)} incl. GST - ₹${calc.round2(after - po.po_amount).toFixed(2)} more than the PO amount.`);
+      }
+    }
+    // Termite PO with an area: the treated area billed on it, this invoice included (warning only).
+    const areaLines = inv.contract.billing_type === "TERMITE"
+      ? inv.lines.filter((l) => l.pricing_basis === "PER_UNIT" && /^sq/i.test(l.unit || "") && (!po.po_area_unit || l.unit === po.po_area_unit))
+      : [];
+    if (po.po_area !== null && po.po_area !== undefined && areaLines.length) {
+      const [[usedArea]] = await db.query(
+        `SELECT COALESCE(SUM(bil.quantity), 0) AS area FROM billing_invoice_pos bp
+           JOIN billing_invoices bi ON bi.id = bp.invoice_id AND bi.status = 'ISSUED' AND bi.billing_type = 'TERMITE'
+           JOIN billing_invoice_lines bil ON bil.invoice_id = bi.id AND bil.pricing_basis = 'PER_UNIT' AND bil.unit LIKE 'sq%'
+          WHERE bp.po_id = ? AND bi.id <> ? AND (? IS NULL OR bil.unit = ?)`,
+        [po.id, inv.id, po.po_area_unit, po.po_area_unit]
+      );
+      const unit = po.po_area_unit || areaLines[0].unit;
+      const areaAfter = calc.round2(Number(usedArea.area) + areaLines.reduce((t, l) => t + Number(l.quantity || 0), 0));
+      if (areaAfter > po.po_area) {
+        warnings.push(`Area billed on PO ${po.po_number} would come to ${areaAfter} ${unit} - ${calc.round2(areaAfter - po.po_area)} ${unit} more than the PO area (${po.po_area} ${unit}).`);
       }
     }
   }

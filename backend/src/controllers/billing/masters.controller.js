@@ -474,7 +474,7 @@ async function contractDetail(db, id) {
     [id]
   );
   const [pos] = await db.query(
-    `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status FROM customer_pos WHERE contract_id = ? ORDER BY po_date DESC`,
+    `SELECT id, po_number, po_date, expiry_date, po_amount, po_area, po_area_unit, po_kind, status FROM customer_pos WHERE contract_id = ? ORDER BY po_date DESC`,
     [id]
   );
   const [companies] = c.contract_kind === "GROUP"
@@ -494,7 +494,7 @@ async function contractDetail(db, id) {
     lines: current.map(lineOut), price_history: history.map(lineOut), invoices_issued: Number(inv.n || 0),
     // No draft or issued invoice yet: the next billing date can still be moved (e.g. billed elsewhere until then).
     next_period_editable: !Number(inv.open || 0) && c.status !== "ENDED",
-    pos: pos.map((p) => ({ id: p.id, po_number: p.po_number, po_date: C.ymd(p.po_date), expiry_date: C.ymd(p.expiry_date), po_amount: p.po_amount === null ? null : Number(p.po_amount), po_kind: p.po_kind, status: p.status })),
+    pos: pos.map((p) => ({ id: p.id, po_number: p.po_number, po_date: C.ymd(p.po_date), expiry_date: C.ymd(p.expiry_date), po_amount: p.po_amount === null ? null : Number(p.po_amount), po_area: p.po_area === null ? null : Number(p.po_area), po_area_unit: p.po_area_unit || null, po_kind: p.po_kind, status: p.status })),
   };
 }
 

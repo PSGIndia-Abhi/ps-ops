@@ -1997,3 +1997,20 @@
 /* New Contract: Bill date and the late alert side by side in one column */
 .nc-billday-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 640px) { .nc-billday-pair { grid-template-columns: 1fr; } }
+/* PO area: one joined control - unit dropdown on the left, the area (with its unit) on the right */
+.po-area { display: flex; align-items: stretch; width: 100%; }
+.po-area .ac-select, .po-area .ac-input { height: 42px; box-sizing: border-box; margin: 0; }
+.po-area .ac-select { flex: 0 0 40%; width: 40%; max-width: 220px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.po-area-input { position: relative; flex: 1 1 auto; min-width: 0; margin-left: -1px; }
+.po-area-input .ac-input { width: 100%; padding-right: 60px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.po-area .ac-select:focus, .po-area .ac-input:focus { position: relative; z-index: 1; }
+.po-area-input .ac-input:disabled { background: var(--ac-bg-soft, #f8fafc); cursor: not-allowed; }
+.po-area-input span { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); z-index: 2; font-size: 12.5px; font-weight: 600; color: var(--ac-muted, #64748b); pointer-events: none; }
+
+/* Review: a section title with its Edit button on the right */
+.nc-sec-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.nc-sec-title-row .nc-rv-edit { text-transform: none; letter-spacing: 0; }
+/* Step bar: finished steps can be clicked */
+.nc-steps li.clickable { cursor: pointer; }
+.nc-steps li.clickable:hover .nc-lbl, .nc-steps li.clickable:focus-visible .nc-lbl { text-decoration: underline; }
+.nc-steps li.clickable:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }

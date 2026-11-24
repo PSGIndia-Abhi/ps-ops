@@ -13,6 +13,7 @@ import { Field, Msg, BackButton } from "./ui";
 import ServiceToField from "./ServiceToField";
 import BillDayField from "./BillDayField";
 import LateAlertField from "./LateAlertField";
+import PoAreaField from "./PoAreaField";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -149,18 +150,18 @@ export default function NewContract() {
   // 3. purchase order
   const [poId, setPoId] = useState("");
   const [addingPo, setAddingPo] = useState(false);
-  const [po, setPo] = useState({ po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", kind: "STANDARD", remarks: "" });
+  const [po, setPo] = useState({ po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", po_area: "", po_area_unit: "", kind: "STANDARD", remarks: "" });
   const setP = (patch) => setPo((p) => ({ ...p, ...patch }));
   const { data: poData, reload: reloadPos } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
   const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" && !p.contract_id);
-  const emptyPo = { po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", kind: "STANDARD", remarks: "" };
+  const emptyPo = { po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", po_area: "", po_area_unit: "", kind: "STANDARD", remarks: "" };
   // Picking an existing PO fills in its details (shown, not edited, here).
   function choosePo(id) {
     const p = poRows.find((x) => x.id === id);
     setPoId(id);
     setAddingPo(false);
     setPo(p
-      ? { po_number: p.po_number, po_date: p.po_date || "", valid_from: p.valid_from || "", expiry_date: p.expiry_date || "", open: Boolean(p.is_open_po), po_amount: p.po_amount ?? "", kind: p.kind || "STANDARD", remarks: p.remarks || "" }
+      ? { po_number: p.po_number, po_date: p.po_date || "", valid_from: p.valid_from || "", expiry_date: p.expiry_date || "", open: Boolean(p.is_open_po), po_amount: p.po_amount ?? "", po_area: p.po_area ?? "", po_area_unit: p.po_area_unit || "", area_used: p.area_used ?? 0, kind: p.kind || "STANDARD", remarks: p.remarks || "" }
       : emptyPo);
   }
   function startNewPo() {
@@ -514,8 +515,8 @@ export default function NewContract() {
   const locked = groupMode ? !groupId || !profile : !customer?.category || !profile || Boolean(existingContract);
 
   // ---- step checks and Next --------------------------------------------------------------------
-  function problems() {
-    if (step === 1 && groupMode) {
+  function problems(at_ = step) {
+    if (at_ === 1 && groupMode) {
       if (!groupId) return "Choose the group.";
       if (!pickedCompanies.length) return "Tick at least one company of the group.";
       const noOutlet = pickedCompanies.find((c) => !outletUnits(c, groupSitesOff).length);
@@ -532,8 +533,8 @@ export default function NewContract() {
       if (gg && gg.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${gg.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
       return "";
     }
-    if (step === 1 && blockingDraft) return `${blockingDraft.customerName || "This customer"} has an unfinished contract. Continue it or discard it first.`;
-    if (step === 1) {
+    if (at_ === 1 && blockingDraft) return `${blockingDraft.customerName || "This customer"} has an unfinished contract. Continue it or discard it first.`;
+    if (at_ === 1) {
       if (!companyId) return "Choose the customer.";
       if (existingContract) return `${customer?.name?.trim() || "This customer"} already has contract ${existingContract.contract_code}. A customer can have only one contract - open it to make changes.`;
       if (!customer?.category) return "This customer's type (Corporate / Individual / RWA) is not set. Set it on the customer in Companies first.";
@@ -546,12 +547,12 @@ export default function NewContract() {
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
       if (profile.service_to_on && !(profile.service_offered_to || "").trim()) return "Type the Service Offered To address, or untick it.";
     }
-    if (step === 6) {
+    if (at_ === 6) {
       if (!delivery) return "Loading the print and email settings…";
       const d = deliveryProblem(delivery);
       if (d) return d;
     }
-    if (step === 2) {
+    if (at_ === 2) {
       if (!["ONE_TIME", "TERMITE"].includes(terms.billing_type) && !terms.frequency_months) return "Choose the billing frequency.";
       if (!terms.start_date) return "Choose the start date.";
       if (terms.end_date && terms.end_date < terms.start_date) return "The term end date cannot be before the term start date.";
@@ -562,14 +563,15 @@ export default function NewContract() {
       if (!description) return separate ? "Type or choose the description for the pest control bill." : "Type or choose the description on invoice.";
       if (separate && !chemicalDescription) return "Type or choose the description for the chemical bill.";
     }
-    if (step === 3) {
+    if (at_ === 3) {
       if (addingPo) {
         if (!po.po_number.trim()) return "Type the PO number.";
         if (!po.po_date) return "Choose the PO date.";
         if (po.po_amount === "" || Number(po.po_amount) <= 0) return "Type the PO amount.";
+        if (termite && po.po_area_unit && !(Number(po.po_area) > 0)) return "Type the PO area, or choose No area.";
       } else if (!poId) return "Choose a purchase order, or add a new one.";
     }
-    if (step === 4) {
+    if (at_ === 4) {
       const filled = lines.filter((l) => kinds[l.kind] && (l.item_name || l.rate !== ""));
       if (!filled.length) return "Add at least one service or chemical with its amount.";
       // Services / chemicals chosen on the Contract step must each have an item here.
@@ -647,7 +649,7 @@ export default function NewContract() {
         const created = await billingPost("/pos", {
           company_id: companyId, contract_id: null, po_number: po.po_number.trim(), po_date: po.po_date,
           valid_from: po.valid_from || null, expiry_date: po.open ? null : po.expiry_date || null,
-          po_amount: po.po_amount === "" ? null : po.po_amount, kind: po.kind, remarks: po.remarks || null,
+          po_amount: po.po_amount === "" ? null : po.po_amount, po_area: termite && po.po_area_unit && po.po_area !== "" ? po.po_area : null, po_area_unit: termite && po.po_area_unit ? po.po_area_unit : null, kind: po.kind, remarks: po.remarks || null,
         });
         // the PO copy (optional), uploaded once the PO exists
         if (poFile) {
@@ -664,12 +666,37 @@ export default function NewContract() {
         setAddingPo(false);
         reloadPos();
       }
-      setStep(steps[at + 1].n);
+      setStep(nextAfter());
     } catch (err) {
       setMsg({ error: err.message, errors: err.errors });
     } finally {
       setBusy(false);
     }
+  }
+
+  // Edit from the Review page: that step opens, and Next / Save brings you back to Review (any step in
+  // between that the change made incomplete is shown first).
+  const [backToReview, setBackToReview] = useState(false);
+  function editStep(n) {
+    setMsg({});
+    setBackToReview(true);
+    setStep(n);
+  }
+  function nextAfter() {
+    if (!backToReview) return steps[at + 1].n;
+    const later = steps.slice(at + 1).find((st) => st.n !== 5 && problems(st.n));
+    if (later) {
+      setMsg({ error: `Check ${later.title}: ${problems(later.n)}` });
+      return later.n;
+    }
+    setBackToReview(false);
+    return 5;
+  }
+
+  // Clicking a finished step in the step bar: from Review it is an Edit (back to Review after), else just go there.
+  function openStep(n) {
+    if (step === 5) editStep(n);
+    else { setMsg({}); setStep(n); }
   }
 
   function goBack() {
@@ -831,7 +858,9 @@ export default function NewContract() {
 
       <ol className="nc-track" aria-label="Steps">
         {steps.map((s, i) => (
-          <li key={s.n} className={i < at ? "done" : i === at ? "on" : ""} aria-current={i === at ? "step" : undefined}>
+          // A finished step can be opened by clicking it; from Review it comes back to Review (like Edit).
+          <li key={s.n} className={i < at ? "done clickable" : i === at ? "on" : ""} aria-current={i === at ? "step" : undefined}
+            {...(i < at && !busy ? { role: "button", tabIndex: 0, title: `Go to ${s.title}`, onClick: () => openStep(s.n), onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openStep(s.n); } } } : {})}>
             <span className="nc-dot">{i < at ? <FiCheck /> : i + 1}</span>
             <span className="nc-lbl">{s.title}</span>
           </li>
@@ -1130,7 +1159,7 @@ export default function NewContract() {
                     <option value="">{!poData ? "Loading…" : poRows.length ? "Choose a PO…" : "No purchase orders yet"}</option>
                     {poRows.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.po_number} · {p.is_open_po ? "Open PO" : p.expiry_date ? `till ${dmy(p.expiry_date)}` : `from ${dmy(p.po_date)}`}{p.kind === "ADVANCE" ? " · Advance" : ""}{p.po_amount !== null ? ` · ₹${amount(p.po_amount)}` : ""}
+                        {p.po_number} · {p.is_open_po ? "Open PO" : p.expiry_date ? `till ${dmy(p.expiry_date)}` : `from ${dmy(p.po_date)}`}{p.kind === "ADVANCE" ? " · Advance" : ""}{p.po_amount !== null ? ` · ₹${amount(p.po_amount)}` : ""}{termite && p.po_area !== null && p.po_area !== undefined ? ` · ${amount(p.area_balance)} of ${amount(p.po_area)} ${p.po_area_unit === "sq.ft" ? "sq. ft" : p.po_area_unit === "sq.m" ? "sq. m" : ""} left` : ""}
                       </option>
                     ))}
                   </select>
@@ -1151,6 +1180,11 @@ export default function NewContract() {
               <Field label="PO amount (₹, incl. GST)" required>
                 <input type="number" min="0" step="0.01" className="ac-input" value={po.po_amount} disabled={!addingPo} onChange={(e) => setP({ po_amount: e.target.value })} />
               </Field>
+              {/* Termite: the treated area the PO covers; each issued invoice's billed area is deducted from it, like the amount. */}
+              {termite && (
+                <PoAreaField className="bl-span2" unit={po.po_area_unit} area={po.po_area} disabled={!addingPo} onChange={setP}
+                  hint={poId ? (po.po_area === "" ? "No area on this PO" : `${amount(Number(po.po_area) - Number(po.area_used || 0))} left · ${amount(po.area_used || 0)} billed`) : undefined} />
+              )}
               <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={!addingPo} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
               {addingPo && (
                 <Field label="PO copy" className="bl-span2" hint="PDF, JPG or PNG, up to 3 MB (optional)">
@@ -1493,7 +1527,7 @@ export default function NewContract() {
                 Each box's Edit goes back to the step it came from. */}
             <div className="nc-rv-boxes">
               <div className="nc-rv-box">
-                <div className="nc-rv-box-h">{groupMode ? "Group" : "Customer"} <EditStep label={groupMode ? "group" : "customer"} onClick={() => setStep(1)} /></div>
+                <div className="nc-rv-box-h">{groupMode ? "Group" : "Customer"} <EditStep label={groupMode ? "group" : "customer"} onClick={() => editStep(1)} /></div>
                 <div className="nc-rv-who">
                   <span className="nc-rv-av">{initials(groupMode ? group?.name || "?" : customer?.name || "?")}</span>
                   <div>
@@ -1514,11 +1548,11 @@ export default function NewContract() {
                 )}
                 {profile?.gst_number && <div className="nc-rv-line"><FiCreditCard aria-hidden="true" /><span className="nc-rv-mono" title="GSTIN">{profile.gst_number}</span></div>}
                 {needsPo && (
-                  <div className="nc-rv-line"><FiBookmark aria-hidden="true" /><span>PO <b className="nc-rv-mono">{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</b></span><EditStep label="purchase order" onClick={() => setStep(3)} /></div>
+                  <div className="nc-rv-line"><FiBookmark aria-hidden="true" /><span>PO <b className="nc-rv-mono">{poRows.find((p) => p.id === poId)?.po_number || (poId ? "Chosen" : "—")}</b></span><EditStep label="purchase order" onClick={() => editStep(3)} /></div>
                 )}
               </div>
               <div className="nc-rv-box">
-                <div className="nc-rv-box-h">Contract <EditStep label="contract" onClick={() => setStep(2)} /></div>
+                <div className="nc-rv-box-h">Contract <EditStep label="contract" onClick={() => editStep(2)} /></div>
                 <div className="nc-rv-tagline">
                   <span className="nc-rv-t blue">{TYPES.find(([v]) => v === terms.billing_type)?.[1]}</span>
                   {terms.billing_type !== "ONE_TIME" && <span className="nc-rv-t">{frequencyText(terms)}</span>}
@@ -1535,7 +1569,7 @@ export default function NewContract() {
               </div>
               {delivery && (
                 <div className="nc-rv-box">
-                  <div className="nc-rv-box-h">Print &amp; email <EditStep label="print and email" onClick={() => setStep(6)} /></div>
+                  <div className="nc-rv-box-h">Print &amp; email <EditStep label="print and email" onClick={() => editStep(6)} /></div>
                   <div className="nc-rv-stats">
                     <div className="nc-rv-stat"><FiPrinter aria-hidden="true" /><b>{delivery.print_copies}</b><span>cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}</span></div>
                     <div className="nc-rv-stat"><FiClock aria-hidden="true" /><b>{delivery.bill_by_day ? ordinalDay(Number(delivery.bill_by_day)) : "Off"}</b><span>late alert</span></div>
@@ -1551,7 +1585,7 @@ export default function NewContract() {
               <div className="nc-rv-box">
                 <div className="nc-rv-box-h">
                   <span>{separate ? <>Bills · 2 invoices every period <em>(one contract, same PO)</em></> : "Invoice description"}</span>
-                  <EditStep label={separate ? "bills" : "invoice description"} onClick={() => setStep(2)} />
+                  <EditStep label={separate ? "bills" : "invoice description"} onClick={() => editStep(2)} />
                 </div>
                 <div className={`nc-rv-bills ${separate ? "two" : ""}`}>
                   <div className="nc-rv-bill">
@@ -1571,7 +1605,7 @@ export default function NewContract() {
             {/* What is billed: the services (group: done at every outlet, with their amounts), then
                 one row per invoice line, the total per period and the GST. */}
             <div className="nc-rv-sec">
-              <div className="nc-sec-title">{groupMode ? "Services and outlets" : "Services and prices"}</div>
+              <div className="nc-sec-title nc-sec-title-row">{groupMode ? "Services and outlets" : "Services and prices"} <EditStep label="services and prices" onClick={() => editStep(4)} /></div>
               {groupLines && chosenSvcs.length > 0 && (
                 <div className="nc-rv-tags" style={{ marginBottom: 10 }}>
                   {groupMain.services.filter((s) => s.name).map((s) => (
@@ -1636,7 +1670,7 @@ export default function NewContract() {
             <button type="button" className="ac-btn ac-btn-primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create contract"}</button>
           ) : (
             <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (step === 1 && (!customer?.category || !profile || Boolean(blockingDraft) || (!groupMode && Boolean(existingContract))))} onClick={goNext}>
-              {busy ? "Saving…" : step === 1 ? "Save and continue →" : step === 3 && addingPo ? "Save PO and continue →" : "Next →"}
+              {busy ? "Saving…" : backToReview ? (step === 1 || step === 6 || (step === 3 && addingPo) ? "Save and back to review →" : "Back to review →") : step === 1 ? "Save and continue →" : step === 3 && addingPo ? "Save PO and continue →" : "Next →"}
             </button>
           )}
         </div>
