@@ -9,7 +9,9 @@ import "./brigade.css";
 // totals with GST and the balance (PO amount - invoices generated); inside a PO, tick completed services and
 // Preview -> Generate the tax invoice. POs, prices and services are managed in the
 // PO section. The open PO lives in the URL (?po=) so the browser back button returns.
-export default function BrigadeBilling() {
+// inBilling: shown in the Billing panel (Billing -> Brigade) for Accounts - same screens, without the
+// links that open Brigade-only pages (PO section, job details).
+export default function BrigadeBilling({ inBilling = false }) {
   const [params, setParams] = useSearchParams();
   const openPo = params.get("po");
 
@@ -18,7 +20,7 @@ export default function BrigadeBilling() {
   }
 
   return openPo ? (
-    <PoSheet key={openPo} mode="billing" number={openPo} onBack={() => open(null)} onOpen={open} />
+    <PoSheet key={openPo} mode="billing" number={openPo} onBack={() => open(null)} onOpen={open} inBilling={inBilling} />
   ) : (
     <PoList onOpen={open} />
   );

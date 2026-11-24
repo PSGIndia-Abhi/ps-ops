@@ -54,70 +54,62 @@ export default function BrigadeMasters() {
   }, [reload]);
 
   const property = properties.find((p) => p.id === companyId) || null;
+  const cells = subServices.length * bhkTypes.length;
 
   return (
-    <div className="bg-page">
-      <div className="bg-page-header">
-        <div>
-          <h2>Prices &amp; BHK</h2>
-          <p>Price list for each Brigade property by BHK and service, and the BHK types used in the booking form. Prices exclude GST.</p>
+    <div className="bg-page bdz bpm">
+      <section className="bdz-hero bpm-hero">
+        <div className="bdz-hero-top">
+          <div>
+            <span className="bdz-eyebrow">Brigade · Masters</span>
+            <h1>Prices &amp; BHK</h1>
+            <p>Price per property, BHK and service · prices exclude GST</p>
+          </div>
+          {property && (
+            <div className="bpm-hero-stat">
+              <span>Priced for {property.name}</span>
+              <b>{prices.length}<small> / {cells}</small></b>
+              <span className="bpm-meter" aria-hidden="true"><i style={{ width: `${cells ? Math.min((prices.length / cells) * 100, 100) : 0}%` }} /></span>
+            </div>
+          )}
         </div>
-      </div>
+
+        {loading ? (
+          <div className="bpm-props">{[0, 1, 2, 3].map((i) => <span key={i} className="bdz-skel dark" style={{ height: 60 }} />)}</div>
+        ) : properties.length > 0 && (
+          <div className="bpm-props" role="radiogroup" aria-label="Property">
+            {properties.map((p) => (
+              <button key={p.id} type="button" role="radio" aria-checked={p.id === companyId}
+                className={`bpm-prop ${p.id === companyId ? "on" : ""}`} onClick={() => setCompanyId(p.id)}>
+                <span className="bpm-avatar" aria-hidden="true">{initials(p.name)}</span>
+                <span className="bpm-prop-name">{p.name}</span>
+                {/* Only flag a property that cannot be booked yet. */}
+                {!p.sites.length && <span className="bpm-nosite">No site</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       {error && <div className="bg-error">{error}</div>}
 
-      {loading ? (
-        <div className="bg-card"><div className="bg-loading">Loading properties…</div></div>
-      ) : !properties.length ? (
-        <div className="bg-card">
+      {!loading && !properties.length && (
+        <div className="bdz-panel">
           <div className="bg-empty-state">
             <strong>No Brigade properties yet</strong>
             Add a company under “Brigade Group” in Companies, with a site, then come back here.
           </div>
         </div>
-      ) : (
-        <div className="bg-props" role="radiogroup" aria-label="Property">
-          {properties.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              role="radio"
-              aria-checked={p.id === companyId}
-              className={`bg-prop ${p.id === companyId ? "active" : ""}`}
-              onClick={() => setCompanyId(p.id)}
-            >
-              <span className="bg-prop-name">{p.name}</span>
-              {/* Only flag a property that cannot be booked yet. */}
-              {!p.sites.length && (
-                <span className="bg-prop-meta">
-                  <span className="bg-chip warn">No site</span>
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
       )}
 
       {property && (
         <>
-          <div className="bg-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "prices"}
-              className={`bg-tab ${tab === "prices" ? "active" : ""}`}
-              onClick={() => setTab("prices")}
-            >
-              Price list <span className="bg-tab-count">{prices.length}</span>
+          <div className="bpm-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === "prices"} className={tab === "prices" ? "on" : ""} onClick={() => setTab("prices")}>
+              Price grid <span>{prices.length}</span>
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "bhk"}
-              className={`bg-tab ${tab === "bhk" ? "active" : ""}`}
-              onClick={() => setTab("bhk")}
-            >
-              BHK types <span className="bg-tab-count">{bhkTypes.length}</span>
+            <button type="button" role="tab" aria-selected={tab === "bhk"} className={tab === "bhk" ? "on" : ""} onClick={() => setTab("bhk")}>
+              BHK types <span>{bhkTypes.length}</span>
             </button>
           </div>
 
@@ -130,10 +122,9 @@ export default function BrigadeMasters() {
               onStatus={setStatus}
             />
           ) : (
-            <PricesMaster
+            <PriceGrid
               property={property}
               bhkTypes={bhkTypes}
-              flats={[]}
               prices={prices}
               subServices={subServices}
               loading={loadingData}
@@ -148,6 +139,8 @@ export default function BrigadeMasters() {
     </div>
   );
 }
+
+const initials = (name) => String(name || "?").replace(/^brigade\s+/i, "").trim().slice(0, 2).toUpperCase();
 
 /* ------------------------------------------------------------------ */
 /* BHK types (shared by every Brigade property)                        */
@@ -246,7 +239,7 @@ function BhkTypesMaster({ onChanged, onStatus }) {
   }
 
   return (
-    <div className="bg-card">
+    <div className="bdz-panel bpm-bhk">
       <div className="bg-card-head">
         <div>
           <h3>BHK types</h3>
@@ -386,91 +379,50 @@ function BhkTypesMaster({ onChanged, onStatus }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Prices                                                              */
+/* Price grid: services down the side, BHK types across the top        */
 /* ------------------------------------------------------------------ */
 
-const sortBhk = (a, b) => a.localeCompare(b, undefined, { numeric: true });
-
-// Price list: quick-add bar, filter chips, one table. A BHK price covers
-// every flat of that BHK in the property.
-function PricesMaster({ property, bhkTypes, flats, prices, subServices, loading, onChanged, onStatus }) {
-  const [form, setForm] = useState({ target: "", sub_service: "", price: "" }); // target: "bhk:<bhk>" | "flat:<id>"
-  const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState(""); // "" | "bhk:<bhk>" | "flats"
+// Every cell is one price (property + BHK + service). Click a cell, type, Enter.
+// An empty cell is "+ Set"; clearing a price asks before removing it.
+function PriceGrid({ property, bhkTypes, prices, subServices, loading, onChanged, onStatus }) {
   const [search, setSearch] = useState("");
+  const [view, setView] = useState("all"); // all | priced | missing
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const priceInputRef = useRef(null);
 
-  const bhkPrices = prices.filter((p) => !p.flat_id);
-  const flatPrices = prices.filter((p) => p.flat_id);
+  // Columns: every BHK type in master order, plus any BHK still used by an old price.
+  const columns = useMemo(() => {
+    const extra = [...new Set(prices.map((p) => p.bhk))].filter((b) => !bhkTypes.includes(b));
+    return [...bhkTypes, ...extra];
+  }, [bhkTypes, prices]);
+  const byKey = useMemo(() => new Map(prices.map((p) => [`${p.bhk}\u0000${p.sub_service}`, p])), [prices]);
+  const cell = (bhk, service) => byKey.get(`${bhk}\u0000${service}`) || null;
+  const rowCount = (service) => columns.filter((b) => cell(b, service)).length;
+  const colCount = (bhk) => subServices.filter((s) => cell(bhk, s)).length;
 
-  // BHKs that have flats or prices first; every standard BHK is still selectable.
-  const usedBhks = useMemo(
-    () => [...new Set([...flats.map((f) => f.bhk), ...bhkPrices.map((p) => p.bhk)])].sort(sortBhk),
-    [flats, bhkPrices]
-  );
-  const otherBhks = bhkTypes.filter((b) => !usedBhks.includes(b));
+  const q = search.trim().toLowerCase();
+  const rows = subServices.filter((s) => {
+    if (q && !s.toLowerCase().includes(q)) return false;
+    const n = rowCount(s);
+    if (view === "priced") return n > 0;
+    if (view === "missing") return n < columns.length;
+    return true;
+  });
 
-  const priceFor = (bhk, service) => bhkPrices.find((p) => p.bhk === bhk && p.sub_service === service) || null;
-  const pricedCount = (bhk) => subServices.filter((s) => priceFor(bhk, s)).length;
-
-  /* ----- add bar helpers ----- */
-  const targetFlat = form.target.startsWith("flat:") ? flats.find((f) => f.id === form.target.slice(5)) : null;
-  const targetBhk = form.target.startsWith("bhk:") ? form.target.slice(4) : targetFlat?.bhk || "";
-  const existing = !form.sub_service || !form.target
-    ? null
-    : targetFlat
-      ? flatPrices.find((p) => p.flat_id === targetFlat.id && p.sub_service === form.sub_service) || null
-      : priceFor(targetBhk, form.sub_service);
-  const basePrice = targetFlat && form.sub_service ? priceFor(targetFlat.bhk, form.sub_service)?.price ?? null : null;
-  const priceInvalid = form.price !== "" && (!Number.isFinite(Number(form.price)) || Number(form.price) < 0);
-
-  let priceHint = " ";
-  if (existing) priceHint = `Currently ${formatInr(existing.price)} — saving replaces it`;
-  else if (targetFlat && form.sub_service) {
-    priceHint = basePrice !== null ? `${targetFlat.bhk} price is ${formatInr(basePrice)}` : `No ${targetFlat.bhk} price for this service`;
-  }
-
-  function prefill(target, service) {
-    setForm({ target, sub_service: service, price: "" });
-    setTimeout(() => priceInputRef.current?.focus(), 0);
-  }
-
-  async function savePrice(e) {
-    e.preventDefault();
-    if (!form.target) return onStatus({ type: "error", message: "Choose a BHK or a flat" });
-    if (!form.sub_service) return onStatus({ type: "error", message: "Choose the service" });
-    if (form.price === "" || priceInvalid) return onStatus({ type: "error", message: "Price must be a number of 0 or more" });
-
-    setSaving(true);
-    try {
-      const data = await brigadeRequest("/api/brigade/prices", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: property.id,
-          bhk: targetFlat ? undefined : targetBhk,
-          flat_id: targetFlat ? targetFlat.id : undefined,
-          sub_service: form.sub_service,
-          price: Number(form.price),
-        }),
-      });
-      setForm((f) => ({ ...f, sub_service: "", price: "" })); // keep the BHK/flat for the next service
-      await onChanged();
-      onStatus({ type: "success", message: data.updated ? "Price updated" : "Price saved" });
-    } catch (err) {
-      onStatus({ type: "error", message: err.message });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveInline(row, value) {
+  async function save(bhk, service, value) {
+    const row = cell(bhk, service);
     try {
       if (value === "") {
-        setConfirmDelete(row);
+        if (row) setConfirmDelete(row);
         return true;
       }
-      await brigadeRequest(`/api/brigade/prices/${row.id}`, { method: "PUT", body: JSON.stringify({ price: Number(value) }) });
+      if (row) {
+        await brigadeRequest(`/api/brigade/prices/${row.id}`, { method: "PUT", body: JSON.stringify({ price: Number(value) }) });
+      } else {
+        await brigadeRequest("/api/brigade/prices", {
+          method: "POST",
+          body: JSON.stringify({ company_id: property.id, bhk, sub_service: service, price: Number(value) }),
+        });
+      }
       await onChanged();
       return true;
     } catch (err) {
@@ -491,172 +443,65 @@ function PricesMaster({ property, bhkTypes, flats, prices, subServices, loading,
     }
   }
 
-  /* ----- table rows ----- */
-  const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return [...bhkPrices, ...flatPrices]
-      .filter((p) => {
-        if (filter === "flats" && !p.flat_id) return false;
-        if (filter.startsWith("bhk:") && (p.bhk !== filter.slice(4) || p.flat_id)) return false;
-        return !q || p.sub_service.toLowerCase().includes(q) || (p.flat_number || "").toLowerCase().includes(q);
-      })
-      .sort(
-        (a, b) =>
-          sortBhk(a.bhk, b.bhk) ||
-          Number(Boolean(a.flat_id)) - Number(Boolean(b.flat_id)) ||
-          subServices.indexOf(a.sub_service) - subServices.indexOf(b.sub_service) ||
-          (a.flat_number || "").localeCompare(b.flat_number || "")
-      );
-  }, [bhkPrices, flatPrices, filter, search, subServices]);
-
-  const filterBhk = filter.startsWith("bhk:") ? filter.slice(4) : "";
-  const missingForFilter = filterBhk ? subServices.filter((s) => !priceFor(filterBhk, s)) : [];
-
   return (
-    <div className="bg-card">
-      <div className="bg-card-head">
+    <section className="bdz-panel bpm-grid-card">
+      <div className="bpm-grid-head">
         <div>
-          <h3>Price list — {property.name}</h3>
-          <p className="bg-card-sub">
-            {prices.length} price{prices.length === 1 ? "" : "s"} · Each price applies to every flat of that BHK in this property.
-          </p>
+          <h3>{property.name}</h3>
+          <span>Click a price to change it · Enter saves · Esc cancels · clear it to remove</span>
         </div>
-      </div>
-
-      <form className="bg-quickadd cols-4" onSubmit={savePrice} aria-label="Set price">
-        <div className="bg-field">
-          <label htmlFor="bg-price-target">Applies to</label>
-          <select id="bg-price-target" value={form.target} onChange={(e) => setForm((f) => ({ ...f, target: e.target.value }))}>
-            <option value="">Select BHK or flat</option>
-            <optgroup label="Every flat of a BHK">
-              {[...usedBhks, ...otherBhks].map((b) => (
-                <option key={b} value={`bhk:${b}`}>All {b} flats</option>
-              ))}
-            </optgroup>
-            {flats.length > 0 && (
-              <optgroup label="One flat (special price)">
-                {flats.map((f) => (
-                  <option key={f.id} value={`flat:${f.id}`}>Flat {f.flat_number} · {f.bhk}</option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </div>
-        <div className="bg-field">
-          <label htmlFor="bg-price-service">Service</label>
-          <select id="bg-price-service" value={form.sub_service} onChange={(e) => setForm((f) => ({ ...f, sub_service: e.target.value }))}>
-            <option value="">Select service</option>
-            {subServices.map((s) => (
-              <option key={s} value={s}>{s}</option>
+        <div className="bpm-grid-tools">
+          <div className="bpm-seg" role="radiogroup" aria-label="Show">
+            {[["all", "All"], ["priced", "Priced"], ["missing", "Missing"]].map(([k, l]) => (
+              <button key={k} type="button" role="radio" aria-checked={view === k} className={view === k ? "on" : ""} onClick={() => setView(k)}>{l}</button>
             ))}
-          </select>
-        </div>
-        <div className="bg-field">
-          <label htmlFor="bg-price-amount">Price (₹, excl. GST)</label>
-          <input
-            id="bg-price-amount"
-            ref={priceInputRef}
-            type="number"
-            min="0"
-            step="0.01"
-            inputMode="decimal"
-            placeholder="0.00"
-            className={priceInvalid ? "invalid" : ""}
-            value={form.price}
-            onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-          />
-          <span className={priceInvalid ? "bg-field-error" : "bg-field-hint"}>
-            {priceInvalid ? "Enter a number of 0 or more" : priceHint}
-          </span>
-        </div>
-        <div className="bg-field">
-          <span className="bg-label" aria-hidden="true">&nbsp;</span>
-          <button type="submit" className="primary" disabled={saving}>
-            {saving ? "Saving…" : existing ? "Update price" : "+ Save price"}
-          </button>
-        </div>
-      </form>
-
-      <div className="bg-toolbar" style={{ justifyContent: "space-between", margin: "16px 0 6px" }}>
-        <div className="bg-filter-chips" role="group" aria-label="Filter prices">
-          <button type="button" className={`bg-filter-chip ${!filter ? "active" : ""}`} onClick={() => setFilter("")}>
-            All <span>{prices.length}</span>
-          </button>
-          {usedBhks.map((b) => (
-            <button
-              key={b}
-              type="button"
-              className={`bg-filter-chip ${filter === `bhk:${b}` ? "active" : ""}`}
-              onClick={() => setFilter(filter === `bhk:${b}` ? "" : `bhk:${b}`)}
-              title={`${pricedCount(b)} of ${subServices.length} services priced`}
-            >
-              {b}{" "}
-              <span className={pricedCount(b) === subServices.length ? "bg-coverage full" : ""}>
-                {pricedCount(b)}/{subServices.length}
-              </span>
-            </button>
-          ))}
-          {flatPrices.length > 0 && (
-            <button
-              type="button"
-              className={`bg-filter-chip ${filter === "flats" ? "active" : ""}`}
-              onClick={() => setFilter(filter === "flats" ? "" : "flats")}
-            >
-              Flat prices <span>{flatPrices.length}</span>
-            </button>
-          )}
-        </div>
-        <div className="bg-field" style={{ minWidth: 200 }}>
-          <input placeholder="Search service or flat" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search prices" />
+          </div>
+          <input className="bpm-search" placeholder="Search service" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search services" />
         </div>
       </div>
 
       {loading && !prices.length ? (
-        <div className="bg-loading">Loading prices…</div>
-      ) : prices.length === 0 ? (
-        <div className="bg-empty-state">
-          <strong>No prices yet</strong>
-          Set the first one above — e.g. All 2 BHK flats · Deep Cleaning · ₹6,000.
+        <div className="bpm-skel-grid" role="status" aria-label="Loading prices">
+          {Array.from({ length: 6 }).map((_, i) => <span key={i} className="bdz-skel" style={{ height: 44, borderRadius: 10 }} />)}
         </div>
-      ) : rows.length === 0 ? (
-        <div className="bg-empty">No prices match these filters.</div>
+      ) : !columns.length || !subServices.length ? (
+        <div className="bg-empty-state">
+          <strong>{columns.length ? "No services set up" : "No BHK types yet"}</strong>
+          {columns.length ? "Services come from the Brigade service list." : "Add BHK types in the BHK types tab first."}
+        </div>
+      ) : !rows.length ? (
+        <div className="bdz-empty">No services match</div>
       ) : (
-        <div className="bg-table-wrap">
-          <table className="bg-table">
+        <div className={`bpm-scroll ${loading ? "busy" : ""}`}>
+          <table className="bpm-grid">
             <thead>
               <tr>
-                <th style={{ width: "36%" }}>Service</th>
-                <th>Applies to</th>
-                <th className="num" style={{ width: 220 }}>Price</th>
-                <th className="num" style={{ width: 90 }}>Actions</th>
+                <th className="bpm-svc-h">Service</th>
+                {columns.map((b) => (
+                  <th key={b}>
+                    <span className="bpm-col">{b}</span>
+                    <small className={colCount(b) === subServices.length ? "full" : ""}>{colCount(b)}/{subServices.length}</small>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => {
-                const base = p.flat_id ? priceFor(p.bhk, p.sub_service)?.price ?? null : null;
+              {rows.map((s) => {
+                const n = rowCount(s);
                 return (
-                  <tr key={p.id}>
-                    <td><strong>{p.sub_service}</strong></td>
-                    <td>
-                      {p.flat_id ? (
-                        <span className="bg-chip warn">Flat {p.flat_number} · {p.bhk}</span>
-                      ) : (
-                        <span className="bg-chip accent">All {p.bhk} flats</span>
-                      )}
-                      {p.flat_id && base !== null && (
-                        <span className="bg-field-hint" style={{ marginLeft: 8 }}>
-                          {p.bhk} price {formatInr(base)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="num" style={{ width: 220 }}>
-                      <PriceCell value={p.price} label={`${p.sub_service}, ${p.flat_id ? `flat ${p.flat_number}` : p.bhk}`} onSave={(v) => saveInline(p, v)} />
-                    </td>
-                    <td style={{ width: 90 }}>
-                      <div className="bg-actions">
-                        <button type="button" className="bg-link-btn danger" onClick={() => setConfirmDelete(p)}>Delete</button>
-                      </div>
-                    </td>
+                  <tr key={s}>
+                    <th scope="row" className="bpm-svc">
+                      <span>{s}</span>
+                      <small className={n === columns.length ? "full" : n ? "" : "none"}>{n}/{columns.length}</small>
+                    </th>
+                    {columns.map((b) => {
+                      const row = cell(b, s);
+                      return (
+                        <td key={b}>
+                          <PriceCell value={row ? row.price : null} label={`${s}, ${b}`} onSave={(v) => save(b, s, v)} />
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
@@ -665,34 +510,15 @@ function PricesMaster({ property, bhkTypes, flats, prices, subServices, loading,
         </div>
       )}
 
-      {filterBhk && missingForFilter.length > 0 && (
-        <div className="bg-missing">
-          <span className="bg-label">Not priced yet for {filterBhk}</span>
-          <div className="bg-filter-chips">
-            {missingForFilter.map((s) => (
-              <button key={s} type="button" className="bg-filter-chip dashed" onClick={() => prefill(`bhk:${filterBhk}`, s)}>
-                + {s}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <ConfirmDialog
         open={Boolean(confirmDelete)}
         title="Remove price?"
-        message={
-          confirmDelete
-            ? confirmDelete.flat_id
-              ? `Flat ${confirmDelete.flat_number} will use the ${confirmDelete.bhk} price for ${confirmDelete.sub_service} again. Existing bookings keep their price.`
-              : `${confirmDelete.sub_service} will not be bookable for ${confirmDelete.bhk} flats until a price is set again. Existing bookings keep their price.`
-            : ""
-        }
+        message={confirmDelete ? `${confirmDelete.sub_service} will not be bookable for ${confirmDelete.bhk} flats until a price is set again. Existing bookings keep their price.` : ""}
         confirmLabel="Remove"
         onConfirm={doDelete}
         onCancel={() => setConfirmDelete(null)}
       />
-    </div>
+    </section>
   );
 }
 
@@ -701,21 +527,26 @@ function PriceCell({ value, label, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const busy = useRef(false);
 
   function start() {
     setDraft(value === null ? "" : String(value));
     setEditing(true);
   }
 
+  const invalid = draft.trim() !== "" && (!Number.isFinite(Number(draft)) || Number(draft) < 0);
+
   async function commit() {
     const trimmed = draft.trim();
-    if (trimmed !== "" && (!Number.isFinite(Number(trimmed)) || Number(trimmed) < 0)) return;
+    if (invalid || busy.current) return;
     if ((trimmed === "" && value === null) || (trimmed !== "" && Number(trimmed) === value)) {
       setEditing(false);
       return;
     }
+    busy.current = true;
     setSaving(true);
     const ok = await onSave(trimmed);
+    busy.current = false;
     setSaving(false);
     if (ok) setEditing(false);
   }
@@ -724,41 +555,35 @@ function PriceCell({ value, label, onSave }) {
     return (
       <button
         type="button"
-        className={`bg-cell ${value === null ? "empty" : ""}`}
+        className={`bpm-cell ${value === null ? "empty" : ""}`}
         onClick={start}
         aria-label={value === null ? `Set price for ${label}` : `Change price for ${label}, now ${formatInr(value)}`}
+        title={value === null ? "Set price" : formatInr(value)}
       >
-        {value === null ? "+ Set" : formatInr(value)}
+        {value === null ? "+ Set" : formatInr(value).replace(/\.00$/, "")}
       </button>
     );
   }
 
-  const invalid = draft.trim() !== "" && (!Number.isFinite(Number(draft)) || Number(draft) < 0);
   return (
-    <div className="bg-cell-edit">
-      <input
-        type="number"
-        min="0"
-        step="0.01"
-        inputMode="decimal"
-        value={draft}
-        autoFocus
-        disabled={saving}
-        aria-label={`Price for ${label}`}
-        aria-invalid={invalid}
-        style={invalid ? { borderColor: "#dc2626" } : undefined}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-      />
-      <button type="button" className="primary" onClick={commit} disabled={saving || invalid}>
-        {saving ? "…" : "Save"}
-      </button>
-      <button type="button" onClick={() => setEditing(false)} disabled={saving} aria-label="Cancel">
-        ✕
-      </button>
-    </div>
+    <input
+      className={`bpm-cell-input ${invalid ? "invalid" : ""}`}
+      type="number"
+      min="0"
+      step="0.01"
+      inputMode="decimal"
+      value={draft}
+      autoFocus
+      disabled={saving}
+      placeholder="₹"
+      aria-label={`Price for ${label}`}
+      aria-invalid={invalid}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") setEditing(false);
+      }}
+    />
   );
 }

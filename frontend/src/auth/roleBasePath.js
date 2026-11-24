@@ -73,6 +73,8 @@ const LOGIN_HOME = {
   // The Accounts department starts in Billing (invoice generation); Task Management is one click away.
   "Accounts Head": "/billing",
   "Accounts Executive": "/billing",
+  // The Brigade Executive starts on the Brigade dashboard (the panel and its job links stay /brigade).
+  brigade_executive: "/brigade/dashboard",
 };
 
 export const loginHomePath = (role) => LOGIN_HOME[role] || roleBasePath(role);

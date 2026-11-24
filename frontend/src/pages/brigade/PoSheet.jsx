@@ -154,7 +154,7 @@ function formFrom(po) {
   };
 }
 
-export default function PoSheet({ number, mode, onBack, onOpen }) {
+export default function PoSheet({ number, mode, onBack, onOpen, inBilling = false }) {
   const manage = mode === "manage";
   const navigate = useNavigate();
   const [po, setPo] = useState(null);
@@ -330,7 +330,7 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
           </div>
         </div>
         <div className="bgb-topbar-actions">
-          {!manage && (
+          {!manage && !inBilling && (
             po && (
               <button
                 type="button"
@@ -542,9 +542,13 @@ export default function PoSheet({ number, mode, onBack, onOpen }) {
                               <td>
                                 <div className="bgb-strong">{r.sub_service}</div>
                                 <div className="bgb-sub">
-                                  <button type="button" className="bgb-code" onClick={() => navigate(`${jobBase}/jobs/${r.job_id}`)}>
-                                    {r.code}
-                                  </button>
+                                  {inBilling ? (
+                                    <span className="bgb-code">{r.code}</span>
+                                  ) : (
+                                    <button type="button" className="bgb-code" onClick={() => navigate(`${jobBase}/jobs/${r.job_id}`)}>
+                                      {r.code}
+                                    </button>
+                                  )}
                                   {r.start_date && <> · {formatDate(r.start_date)}</>}
                                   {r.from_booking && <> · <span className="bgb-tag"><LockIcon /> Booked on this PO</span></>}
                                   {r.added && <> · <span className="bgb-tag new">New line</span></>}

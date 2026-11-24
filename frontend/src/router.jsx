@@ -107,6 +107,8 @@ import BrigadeMasters from "./pages/brigade/BrigadeMasters";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
 import BrigadeImport from "./pages/brigade/BrigadeImport";
+import BrigadeNoPo from "./pages/brigade/BrigadeNoPo";
+import BrigadeHome from "./pages/brigade/BrigadeHome";
 // Customer Feedback desk + the customer's form — see pages/feedback/
 import FeedbackLayout from "./pages/feedback/FeedbackLayout";
 import FeedbackCallList from "./pages/feedback/CallList";
@@ -233,6 +235,8 @@ const router = createBrowserRouter([
       { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "masters", element: <BrigadeMasters /> },
       { path: "pos", element: <BrigadePos /> },
+      { path: "no-po", element: <BrigadeNoPo /> },
+      { path: "dashboard", element: <BrigadeHome /> },
       { path: "billing", element: <BrigadeBilling /> },
       { path: "import", element: <BrigadeImport /> },
       { path: "jobs/:jobId", element: <JobPage /> },
@@ -485,6 +489,8 @@ const router = createBrowserRouter([
       { path: "drafts", element: <BillingDraftInvoices /> },
       // Generate Invoice (manual): an extra bill from the contract's prices, issued at once.
       { path: "generate", element: <BillingManualInvoice /> },
+      // Brigade invoices for Accounts: the Brigade Billing screens (POs -> completed services -> generate).
+      { path: "brigade", element: <BrigadeBilling inBilling /> },
       { path: "drafts/manual", element: <Navigate to="/billing/generate" replace /> },
       { path: "drafts/:id", element: <BillingDraftEditor /> },
       { path: "invoices", element: <BillingIssuedInvoices /> },

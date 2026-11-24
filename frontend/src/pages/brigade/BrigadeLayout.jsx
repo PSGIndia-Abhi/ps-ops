@@ -4,18 +4,21 @@ import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import NotificationsMenu from "../../components/NotificationsMenu";
 import UserMenu from "../../components/UserMenu";
+import { brigadeRequest } from "./brigadeShared";
 import "./brigade.css";
 
 // Brigade Executive panel. Same shell classes as AdminLayout; the backend
 // limits every list here to Brigade Group.
 // Same flat sidebar as the admin panel.
 const NAV = [
-  // The jobs list (with Pending and Flats). A by-property Dashboard is added above it later.
+  // By-property dashboard (booked -> completed -> on PO -> invoiced -> paid), then the jobs list (with Pending and Flats).
+  { path: "/brigade/dashboard", label: "Dashboard" },
   { path: "/brigade", label: "Jobs", exact: true },
   { path: "/brigade/companies", label: "Companies" },
   { path: "/brigade/contacts", label: "Contacts" },
   { path: "/brigade/group-management", label: "Group Management" },
   { path: "/brigade/masters", label: "Prices & BHK" },
+  { path: "/brigade/no-po", label: "Services without PO", badge: "noPo" },
   { path: "/brigade/pos", label: "PO" },
   { path: "/brigade/billing", label: "Billing" },
   { path: "/brigade/import", label: "Import" },
@@ -28,6 +31,16 @@ export default function BrigadeLayout() {
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [menuOpen, setMenuOpen] = useState(false);
+  // How many services are waiting for a PO (the badge on "Services without PO"), refreshed per page.
+  const [noPo, setNoPo] = useState(0);
+  useEffect(() => {
+    let live = true;
+    brigadeRequest("/api/brigade/billing/unassigned-services")
+      .then((list) => live && setNoPo(Array.isArray(list) ? list.length : 0))
+      .catch(() => {});
+    return () => { live = false; };
+  }, [location.pathname]);
+  const badgeOf = (item) => (item.badge === "noPo" && noPo > 0 ? (noPo > 99 ? "99+" : noPo) : null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -54,7 +67,7 @@ export default function BrigadeLayout() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <button type="button" className="header-left header-left-btn" onClick={() => navigate("/brigade")}>
+        <button type="button" className="header-left header-left-btn" onClick={() => navigate("/brigade/dashboard")}>
           <img src={logo} alt="BestServe" className="logo" />
           <span className="header-title">Brigade Panel</span>
         </button>
@@ -81,6 +94,7 @@ export default function BrigadeLayout() {
                   onClick={() => navigate(item.path)}
                 >
                   {item.label}
+                  {badgeOf(item) && <span className="bgn-nav-badge" aria-label={`${noPo} waiting`}>{badgeOf(item)}</span>}
                 </button>
               ))}
             </nav>
@@ -109,7 +123,7 @@ export default function BrigadeLayout() {
             onClick={() => go("/brigade")}
             className={location.pathname === "/brigade" && !menuOpen ? "active" : ""}
           >
-            Dashboard
+            Jobs
           </button>
           <button
             onClick={() => go("/brigade/masters")}

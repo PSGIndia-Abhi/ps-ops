@@ -31,6 +31,7 @@ const {
   canOverrideVisit,
 } = require("../services/brigade.service");
 const PERMISSIONS = require("../access/permissions");
+const { brigadeDashboard, dashboardOptions } = require("../services/brigadeDashboard.service");
 
 const FLAT_FORMAT_MESSAGE =
   "Flat number must be one capital letter, a hyphen and 4 digits (e.g. L-0123)";
@@ -1606,6 +1607,95 @@ async function listAllPos(req, res) {
   }
 }
 
+// GET /api/brigade/dashboard?month=YYYY-MM - per property booked -> completed -> on PO -> invoiced -> paid,
+// the totals, and the POs that need attention (used up / over, nearly used up, no amount).
+async function getDashboard(req, res) {
+  try {
+    const q = req.query || {};
+    const month = trimString(q.month);
+    if (month && !/^\d{4}-\d{2}$/.test(month)) throw withStatus("month must be YYYY-MM", 400);
+    const day = (v, name) => {
+      const s = trimString(v);
+      if (s && !/^\d{4}-\d{2}-\d{2}$/.test(s)) throw withStatus(`${name} must be YYYY-MM-DD`, 400);
+      return s || null;
+    };
+    const list = (v) => String(v || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100);
+    const po = ["with", "without"].includes(q.po) ? q.po : null;
+    const status = ["done", "open"].includes(q.status) ? q.status : null;
+    const companyIds = list(q.company_ids);
+    const data = await brigadeDashboard({
+      month: month || null, from: day(q.from, "from"), to: day(q.to, "to"),
+      companyIds, services: list(q.services), po, status,
+    });
+    // POs to watch: those with services of the chosen properties (all POs when no property is chosen)
+    let pos = await listPos({ allStatuses: true });
+    if (companyIds.length) {
+      const names = new Set(data.properties.map((p) => p.property));
+      pos = pos.filter((p) => (p.properties || []).some((n) => names.has(n)));
+    }
+    const alerts = [];
+    for (const p of pos) {
+      const amount = p.totals.po_amount;
+      if (amount === null || amount === undefined) {
+        if (p.totals.services) alerts.push({ po_number: p.po_number, kind: "NO_AMOUNT", properties: p.properties, po_amount: null, invoiced: p.totals.invoiced, balance: null });
+        continue;
+      }
+      const balance = p.totals.balance;
+      if (balance <= 0.5) alerts.push({ po_number: p.po_number, kind: balance < -0.5 ? "OVER" : "USED_UP", properties: p.properties, po_amount: amount, invoiced: p.totals.invoiced, balance });
+      else if (balance < amount * 0.1) alerts.push({ po_number: p.po_number, kind: "NEARLY_USED", properties: p.properties, po_amount: amount, invoiced: p.totals.invoiced, balance });
+    }
+    const order = { OVER: 0, USED_UP: 1, NEARLY_USED: 2, NO_AMOUNT: 3 };
+    alerts.sort((a, b) => order[a.kind] - order[b.kind] || String(a.po_number).localeCompare(String(b.po_number)));
+    // Every PO with its money (all incl. GST): amount, invoiced, on the PO but not invoiced yet
+    // (services on it + pending flats, with GST, less what is invoiced), balance (amount - invoiced)
+    // and what is free after the work already on it.
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const state = (amount, balance, free) =>
+      amount === null || amount === undefined ? "NO_AMOUNT"
+        : balance < -0.5 ? "OVER" : balance <= 0.5 ? "USED_UP" : balance < amount * 0.1 ? "NEARLY_USED" : free < -0.5 ? "OVER_COMMITTED" : "OK";
+    const poList = pos.map((p) => {
+      const amount = p.totals.po_amount;
+      const invoiced = r2(p.totals.invoiced);
+      const onPo = r2((p.totals.billed_incl ?? 0) + (p.totals.pending_incl || 0));
+      const notInvoiced = r2(Math.max(onPo - invoiced, 0));
+      const balance = amount === null || amount === undefined ? null : r2(amount - invoiced);
+      const free = balance === null ? null : r2(balance - notInvoiced);
+      return {
+        po_number: p.po_number, po_date: p.po_date, properties: p.properties || [], services: p.totals.services,
+        po_amount: amount, invoiced, not_invoiced: notInvoiced, balance, free,
+        used_pct: amount ? Math.round((invoiced / amount) * 100) : null, state: state(amount, balance, free),
+      };
+    });
+    const withAmount = poList.filter((p) => p.po_amount !== null && p.po_amount !== undefined);
+    const sumOf = (rows, k) => r2(rows.reduce((t, p) => t + (Number(p[k]) || 0), 0));
+    const summary = {
+      count: poList.length,
+      with_amount: withAmount.length,
+      no_amount: poList.length - withAmount.length,
+      po_amount: sumOf(withAmount, "po_amount"),
+      invoiced: sumOf(withAmount, "invoiced"),
+      not_invoiced: sumOf(withAmount, "not_invoiced"),
+      balance: sumOf(withAmount, "balance"),
+      free: r2(withAmount.reduce((t, p) => t + Math.max(p.free, 0), 0)),
+      over: poList.filter((p) => ["OVER", "USED_UP"].includes(p.state)).length,
+      nearly: poList.filter((p) => p.state === "NEARLY_USED").length,
+      over_committed: poList.filter((p) => p.state === "OVER_COMMITTED").length,
+    };
+    res.json({ ...data, pos: { count: pos.length, value: summary.po_amount, alerts, summary, list: poList } });
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load the dashboard");
+  }
+}
+
+// GET /api/brigade/dashboard/options - the properties and service names the dashboard filters offer.
+async function getDashboardOptions(req, res) {
+  try {
+    res.json(await dashboardOptions());
+  } catch (err) {
+    sendBillingError(res, err, "Failed to load the filters");
+  }
+}
+
 // GET /api/brigade/pos/detail?number= — one PO with all its services (any status) and amounts.
 async function getPoDetail(req, res) {
   try {
@@ -1644,7 +1734,7 @@ async function listUnassignedServices(req, res) {
       params.push(`%${flatNumber}%`);
     }
     const [rows] = await pool.query(
-      `${BILLING_SERVICE_SELECT} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 500`,
+      `${BILLING_SERVICE_SELECT} ${filter} ${BILLING_SERVICE_ORDER} LIMIT 5000`,
       params
     );
     res.json(rows.map(toBillingService));
@@ -1741,6 +1831,30 @@ async function saveBillingPo(req, res) {
       );
     }
 
+    await upsertPoLines(conn, poId, poNumber, lines, req.user.id);
+
+    if (removeIds.length) {
+      await conn.query("DELETE FROM brigade_po_lines WHERE po_id = ? AND job_id IN (?)", [poId, removeIds]);
+    }
+
+    await conn.commit();
+    res.json(await loadBillingPo(pool, poNumber));
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "This PO or service was just changed by someone else. Please reload." });
+    }
+    sendBillingError(res, err, "Failed to save PO");
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+/**
+ * Puts services on a PO (or updates their price on it), in the caller's transaction. A service already
+ * under another PO, a canceled one or a non-Brigade job is refused.
+ */
+async function upsertPoLines(conn, poId, poNumber, lines, userId) {
     if (lines.length) {
       const [jobs] = await conn.query(
         `SELECT j.id, j.code, j.status, bd.booking_id AS brigade_booking,
@@ -1766,30 +1880,40 @@ async function saveBillingPo(req, res) {
         if (job.line_id) {
           await conn.query(
             "UPDATE brigade_po_lines SET amount = ?, updated_by_user_id = ? WHERE id = ?",
-            [line.amount, req.user.id, job.line_id]
+            [line.amount, userId, job.line_id]
           );
         } else {
           await conn.query(
             `INSERT INTO brigade_po_lines (id, po_id, job_id, amount, updated_by_user_id)
              VALUES (?, ?, ?, ?, ?)`,
-            [uuid(), poId, line.jobId, line.amount, req.user.id]
+            [uuid(), poId, line.jobId, line.amount, userId]
           );
         }
       }
     }
+}
 
-    if (removeIds.length) {
-      await conn.query("DELETE FROM brigade_po_lines WHERE po_id = ? AND job_id IN (?)", [poId, removeIds]);
-    }
-
+// POST /api/brigade/billing/po/services { po_number, lines: [{ job_id, amount }] }
+// Services without a PO -> an existing PO (Brigade -> Services without PO). The PO's details are not
+// touched; a number only typed on a booking gets its PO row first.
+async function addServicesToPo(req, res) {
+  let conn;
+  try {
+    const number = readPoNumber(req.body?.po_number);
+    const { lines } = readBillingLines({ lines: req.body?.lines });
+    if (!lines.length) throw withStatus("Tick the services to add to the PO", 400);
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const po = await ensureBrigadePo(conn, number, req.user.id);
+    await upsertPoLines(conn, po.id, po.po_number, lines, req.user.id);
     await conn.commit();
-    res.json(await loadBillingPo(pool, poNumber));
+    res.json(await loadBillingPo(pool, po.po_number, { allStatuses: true }));
   } catch (err) {
     if (conn) await conn.rollback().catch(() => {});
     if (err?.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({ error: "This PO or service was just changed by someone else. Please reload." });
+      return res.status(409).json({ error: "One of these services was just put on a PO by someone else. Please reload." });
     }
-    sendBillingError(res, err, "Failed to save PO");
+    sendBillingError(res, err, "Failed to add the services to the PO");
   } finally {
     if (conn) conn.release();
   }
@@ -2136,6 +2260,7 @@ module.exports = {
   listBillingPos,
   getBillingPo,
   listUnassignedServices,
+  addServicesToPo,
   saveBillingPo,
   getFlatHistory,
   getFlatsStatus,
@@ -2146,6 +2271,8 @@ module.exports = {
   listFlatRequests,
   cancelFlatRequest,
   listAllPos,
+  getDashboard,
+  getDashboardOptions,
   getPoDetail,
   // Shared with brigadeInvoices.controller / brigadePoFiles.controller.
   ensureBrigadePo,
