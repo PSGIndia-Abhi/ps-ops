@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { billingPost, billingPut, openPdf, qs, useBilling } from "./billingApi";
 import { amountInWords, gstRateOf, lineAmount, totalsFor } from "./calc";
-import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, typeLabel } from "./format";
+import { CATEGORY_LABEL, amount, dmy, monthLabel, periodLabel, rupees, today as todayIso, typeLabel } from "./format";
 import IssueDialog from "./IssueDialog";
 import { Field, Msg, ServicesChip, BackButton } from "./ui";
 import { InvoiceSkeleton } from "./Skeletons";
@@ -189,9 +189,16 @@ export default function DraftEditor() {
             <div className="bl-grid g4">
               <Field label="Customer"><input className="ac-input" readOnly value={inv.customer.name} /></Field>
               <Field label="Category"><input className="ac-input" readOnly value={`${CATEGORY_LABEL[inv.customer.category] || "—"} · ${inv.tax_mode === "NONE" ? "No GST" : inv.tax_mode === "IGST" ? "IGST" : "GST"}`} /></Field>
-              <Field label="Invoice date" required>
-                <input type="date" className="ac-input" value={form.invoice_date || ""} disabled={!editable} onChange={(e) => set({ invoice_date: e.target.value })} />
-              </Field>
+              {/* A Bill Run invoice is dated the day it is issued (the draft's date is only a preview). */}
+              {inv.status === "DRAFT" && !inv.is_manual ? (
+                <Field label="Invoice date" hint={`Set when issued (today: ${dmy(todayIso())})`}>
+                  <input type="text" className="ac-input" readOnly value="On issue" title="The invoice is dated the day it is issued" />
+                </Field>
+              ) : (
+                <Field label="Invoice date" required>
+                  <input type="date" className="ac-input" value={form.invoice_date || ""} disabled={!editable} onChange={(e) => set({ invoice_date: e.target.value })} />
+                </Field>
+              )}
               <Field label="Bill To" className="bl-span2">
                 <input className="ac-input" readOnly value={[inv.bill_to.name, inv.bill_to.address.replace(/\n/g, ", "), inv.bill_to.state].filter(Boolean).join(", ")} />
               </Field>

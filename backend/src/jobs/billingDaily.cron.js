@@ -60,19 +60,17 @@ async function poExpiryAlerts() {
   }
 }
 
-// 09:30 - customers past their bill-by day (billing profile) with an invoice still not issued this
-// month: one notification per customer per month to Accounts. Uses the Bill Run's due list.
+// 09:30 - bills that missed their contract's Bill date (the date has passed and it is not issued yet):
+// one notification per customer per month to Accounts. Uses the Bill Run's due list (missed_days).
 async function lateBillingAlerts() {
   try {
     const { dueList } = require("../services/billing/draft.service");
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     const month = today.slice(0, 7);
-    const day = Number(today.slice(8, 10));
-    const [profiles] = await pool.query("SELECT company_id, bill_by_day FROM billing_profiles WHERE bill_by_day IS NOT NULL AND bill_by_day < ?", [day]);
-    if (!profiles.length) return;
-    const by = new Map(profiles.map((p) => [p.company_id, Number(p.bill_by_day)]));
-    const due = (await dueList(pool, month)).rows.filter((r) => by.has(r.company_id));
+    // still not issued (a draft waiting to be issued counts too, as on the Accounts dashboard)
+    const due = (await dueList(pool, month)).rows.filter((r) => r.missed_days > 0);
     if (!due.length) return;
+    const dmy = (d) => `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}`;
     const [users] = await pool.query(
       "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name IN (?) AND (u.is_active IS NULL OR u.is_active = 1)",
       [ACCOUNTS_ROLES]
@@ -86,10 +84,12 @@ async function lateBillingAlerts() {
       const [claimed] = await pool.query("INSERT IGNORE INTO billing_late_alerts (company_id, month) VALUES (?, ?)", [companyId, `${month}-01`]);
       if (!claimed.affectedRows) continue; // already alerted this month
       const waiting = rows.some((r) => r.sos === "PENDING");
+      const first = rows.reduce((a, r) => (r.bill_date < a.bill_date ? r : a), rows[0]);
+      const late = first.missed_days;
       await notifyUsers(users.map((u) => u.id), {
         type: "BILLING_LATE",
-        title: `Invoice overdue: ${rows[0].customer}`,
-        message: `Bill by day ${by.get(companyId)} has passed and ${rows.map((r) => r.contract_code).join(", ")} ${rows.length > 1 ? "are" : "is"} not invoiced${waiting ? " (waiting for the Service Coordinator's SOS)" : ""}.`,
+        title: `Missed bill date: ${rows[0].customer}`,
+        message: `Bill date ${dmy(first.bill_date)} has passed (${late} day${late === 1 ? "" : "s"} late) and ${rows.map((r) => r.contract_code).join(", ")} ${rows.length > 1 ? "are" : "is"} not billed yet${waiting ? " - waiting for the Service Coordinator's SOS" : ""}. Open the Bill Run.`,
         entityType: "billing_contract",
         entityId: rows[0].contract_id,
       });

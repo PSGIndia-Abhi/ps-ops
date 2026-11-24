@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiAlertTriangle, FiCalendar, FiEdit3, FiPlayCircle, FiSearch, FiTrendingUp } from "react-icons/fi";
+import { FiAlertTriangle, FiCalendar, FiChevronLeft, FiChevronRight, FiEdit3, FiPlayCircle, FiSearch, FiTrendingUp } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, qs, useBilling, useCustomerOptions } from "./billingApi";
-import { CATEGORY_LABEL, amount, monthLabel, periodLabel, rupeesShort, thisMonth } from "./format";
+import { CATEGORY_LABEL, amount, monthLabel, periodLabel, rupeesShort, thisMonth, today } from "./format";
 import { Kpi, Modal, Msg, ServicesChip, TypeBadge, MonthPicker } from "./ui";
 import useDebounced from "./useDebounced";
 import CustomerFilter from "./CustomerFilter";
@@ -12,15 +12,55 @@ import CustomerFilter from "./CustomerFilter";
 // drafts; drafts are checked and issued from Draft Invoices. When nothing was skipped and no
 // quantities are needed, it goes straight to the draft (one) or to Draft Invoices (several).
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Days in a "YYYY-MM" month. */
+const daysIn = (m) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate();
+/** "YYYY-MM-DD" moved by n days. */
+const shiftDay = (d, n) => {
+  const t = new Date(`${d}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+};
+/** "2026-11-25" -> "25 Nov 2026". */
+const dateLabel = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+
 export default function BillRun() {
   const { me } = useOutletContext();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  // ?month= when coming back from an SOS opened here
-  const [month, setMonth] = useState(/^(\d{4}-\d{2}|ALL)$/.test(params.get("month") || "") ? params.get("month") : thisMonth());
+  // Three views:
+  //   Date (default, today)  the contracts due in that date's month whose Bill date is that day, plus
+//                          every bill that missed an earlier Bill date (shown first, "Missed · n days late")
+  //   Whole month            every contract due in the month (?month=YYYY-MM&view=month)
+  //   All months             every active contract's next bill (?month=ALL)
+  // Coming back from an SOS opened here keeps the view (?date= / ?month=).
+  const [view, setView] = useState(() => {
+    if (DATE_RE.test(params.get("date") || "")) return "date";
+    if (params.get("month") === "ALL") return "all";
+    return params.get("view") === "month" && /^\d{4}-\d{2}$/.test(params.get("month") || "") ? "month" : "date";
+  });
+  const [date, setDate] = useState(() => (DATE_RE.test(params.get("date") || "") ? params.get("date") : today()));
+  const [pickedMonth, setPickedMonth] = useState(() => (/^\d{4}-\d{2}$/.test(params.get("month") || "") ? params.get("month") : thisMonth()));
   // All months: every active contract's next bill, each with the month it is billed in. Only bills due
   // by this month can be ticked; they are generated in this month's run.
-  const allMonths = month === "ALL";
+  const allMonths = view === "all";
+  const dateView = view === "date";
+  const month = allMonths ? "ALL" : dateView ? date.slice(0, 7) : pickedMonth;
+  // Up to the end of next month: a period is billed after it ends (November services, day 10 -> 10 Dec).
+  const nextMonthStr = (() => {
+    const d = new Date(Date.UTC(Number(thisMonth().slice(0, 4)), Number(thisMonth().slice(5, 7)), 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  })();
+  const maxDate = `${nextMonthStr}-${String(daysIn(nextMonthStr)).padStart(2, "0")}`;
+  const setMonth = (m) => { setPickedMonth(m); setView("month"); };
+  const changeView = (v) => {
+    if (v === view) return;
+    // Date view from a month: today in the current month, else the 1st of the month shown.
+    if (v === "date" && !allMonths) setDate(pickedMonth === thisMonth() ? today() : `${pickedMonth}-01`);
+    if (v === "month" && dateView) setPickedMonth(date.slice(0, 7));
+    setView(v);
+    setPicked(null);
+  };
   const [type, setType] = useState("");
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
@@ -34,9 +74,20 @@ export default function BillRun() {
 
   const customerOptions = useCustomerOptions();
   const [customers, setCustomers] = useState([]); // customer filter: [] = all
-  const byCustomer = useMemo(() => (data?.rows || []).filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers]);
+  // Date view: contracts billed on that day, plus every bill that missed an earlier Bill date (carried
+  // forward until it is made). A Bill date past the month's end (e.g. 31 in November) is its last day
+  // (bill_date, from the server); contracts without a Bill date show in Whole month only.
+  const [onlyMissed, setOnlyMissed] = useState(false);
+  const byCustomer = useMemo(() => (data?.rows || [])
+    .filter((r) => !dateView || (r.bill_date && (r.bill_date === date || (r.missed_days > 0 && r.bill_date < date))))
+    .filter((r) => !customers.length || customers.includes(r.company_id) || (r.billing_group?.companies || []).some((c) => customers.includes(c.company_id))), [data, customers, dateView, date]);
   // A contract whose draft is made leaves the list (it is in Draft Invoices); the card counts them.
-  const rows = byCustomer.filter((r) => !r.already_drafted);
+  // Missed bills first (the longest overdue on top), then the rest in the server's order.
+  const open = byCustomer.filter((r) => !r.already_drafted);
+  const missed = open.filter((r) => r.missed_days > 0);
+  const oldestMissed = missed.reduce((t, r) => Math.max(t, r.missed_days), 0);
+  const showOnlyMissed = onlyMissed && missed.length > 0; // nothing missed any more: back to everything
+  const rows = (showOnlyMissed ? missed : open).map((r, i) => [r, i]).sort(([a, i], [b, j]) => (b.missed_days || 0) - (a.missed_days || 0) || i - j).map(([r]) => r);
   const selectable = (r) => !r.blocking && !r.already_drafted && r.due_now !== false;
   const runMonth = allMonths ? data?.this_month || thisMonth() : month; // the month the drafts are made in
   // Nothing is ticked by default: Accounts tick each contract (or "select all") themselves.
@@ -51,13 +102,17 @@ export default function BillRun() {
   const allOn = allSelectable.length > 0 && allSelectable.every((r) => selected.has(r.contract_id));
   // The cards follow the customer filter.
   const s = data ? {
-    due: rows.length,
-    ready: rows.filter((r) => !r.warnings.length && !r.already_drafted).length,
-    with_warnings: rows.filter((r) => r.warnings.length).length,
+    due: open.length,
+    ready: open.filter((r) => !r.warnings.length && !r.already_drafted).length,
+    missed: missed.length,
     already_drafted: byCustomer.filter((r) => r.already_drafted).length,
-    estimated_total: rows.reduce((t, r) => t + (r.estimated_total || 0), 0),
+    estimated_total: open.reduce((t, r) => t + (r.estimated_total || 0), 0),
   } : null;
+  const lateText = (n) => `${n} day${n === 1 ? "" : "s"} late`;
   const canGenerate = me.can("GENERATE_INVOICE");
+  const todayStr = today();
+  // An SOS opened from here returns to the same view (SosEntry's back arrow).
+  const backQuery = dateView ? `&rundate=${date}` : allMonths ? "&runmonth=ALL" : `&runmonth=${pickedMonth}`;
 
   async function generate() {
     // An extra SOS service without a rate: enter it first on the Before generating page (laid out like
@@ -94,9 +149,21 @@ export default function BillRun() {
           <h1 className="ac-title">Bill Run</h1>
         </div>
         <div className="ac-actions">
-          <button type="button" className={`bl-allbtn ${allMonths ? "on" : ""}`} aria-pressed={allMonths}
-            onClick={() => { setMonth(allMonths ? thisMonth() : "ALL"); setPicked(null); }} title={allMonths ? "Back to one month" : "See every contract's next bill"}>All months</button>
-          <MonthPicker value={allMonths ? "" : month} allowEmpty fallback={thisMonth()} onChange={(m) => { setMonth(m || thisMonth()); setPicked(null); }} />
+          <div className="bl-seg2" role="group" aria-label="View">
+            <button type="button" className={allMonths ? "active" : ""} aria-pressed={allMonths} onClick={() => changeView("all")} title="See every contract's next bill">All months</button>
+            <button type="button" className={dateView ? "active" : ""} aria-pressed={dateView} onClick={() => changeView("date")} title="Contracts whose Bill date is the chosen day">Date</button>
+            <button type="button" className={view === "month" ? "active" : ""} aria-pressed={view === "month"} onClick={() => changeView("month")} title="Every contract due in the month">Whole month</button>
+          </div>
+          {dateView ? (
+            <div className="bl-monthnav">
+              <button type="button" className="bl-monthnav-btn" onClick={() => { setDate(shiftDay(date, -1)); setPicked(null); }} aria-label="Previous day" title="Previous day"><FiChevronLeft /></button>
+              <input type="date" className="ac-input" style={{ width: 170 }} value={date} max={maxDate}
+                onChange={(e) => { if (DATE_RE.test(e.target.value)) { setDate(e.target.value); setPicked(null); } }} aria-label="Date" />
+              <button type="button" className="bl-monthnav-btn" disabled={date >= maxDate} onClick={() => { setDate(shiftDay(date, 1)); setPicked(null); }} aria-label="Next day" title="Next day"><FiChevronRight /></button>
+            </div>
+          ) : (
+            <MonthPicker value={allMonths ? "" : pickedMonth} allowEmpty fallback={thisMonth()} onChange={(m) => { setMonth(m || thisMonth()); setPicked(null); }} />
+          )}
           {canGenerate && (
             <button type="button" className="ac-btn ac-btn-primary" disabled={busy || !selected.size} onClick={generate}>
               {busy ? "Generating…" : `Generate drafts (${selected.size} selected)`}
@@ -107,9 +174,10 @@ export default function BillRun() {
       <Msg error={runError} />
 
       <div className="ac-kpis bl-kpis-5">
-        <Kpi color="blue" label="Due this month" icon={FiCalendar} value={s?.due ?? "—"} note="contracts" />
+        <Kpi color="blue" label={dateView ? "Due on this date" : "Due this month"} icon={FiCalendar} value={s?.due ?? "—"} note={dateView ? `bill date ${dateLabel(date)}` : "contracts"} />
         <Kpi color="green" label="Ready to generate" icon={FiPlayCircle} value={s?.ready ?? "—"} note="no warnings" />
-        <Kpi color="orange" label="With warnings" icon={FiAlertTriangle} value={s?.with_warnings ?? "—"} note="PO, profile or service shortfall" />
+        <Kpi color="red" label="Missed bill date" icon={FiAlertTriangle} value={s?.missed ?? "—"}
+          note={s?.missed ? `oldest ${lateText(oldestMissed)}` : "all on time"} onClick={s?.missed ? () => { setOnlyMissed((v) => !v); setPicked(null); } : undefined} active={showOnlyMissed} />
         <Kpi color="purple" label="Already drafted" icon={FiEdit3} value={s?.already_drafted ?? "—"} note="in Draft Invoices" onClick={() => navigate("/billing/drafts")} />
         <Kpi color="teal" label="Estimated value" icon={FiTrendingUp} value={s ? rupeesShort(s.estimated_total) : "—"} note="incl. GST" />
       </div>
@@ -135,6 +203,19 @@ export default function BillRun() {
           </select>
         </div>
         <Msg error={error} />
+        {/* Bills whose Bill date has passed with no bill made: carried forward and shown first. */}
+        {s?.missed > 0 && (
+          <div className="br-missed-banner" role="status">
+            <span className="br-missed-ic"><FiAlertTriangle /></span>
+            <div className="br-missed-text">
+              <b>{s.missed} bill{s.missed === 1 ? "" : "s"} missed {s.missed === 1 ? "its" : "their"} bill date</b>
+              <span>{s.missed === 1 ? `${lateText(oldestMissed)}.` : `The oldest is ${lateText(oldestMissed)}.`} Generate {s.missed === 1 ? "it" : "them"} as soon as possible - missed bills stay listed on every date until they are made.</span>
+            </div>
+            <button type="button" className={`br-missed-btn ${showOnlyMissed ? "on" : ""}`} aria-pressed={showOnlyMissed} onClick={() => { setOnlyMissed((v) => !v); setPicked(null); }}>
+              {showOnlyMissed ? "Show all" : "Show only missed"}
+            </button>
+          </div>
+        )}
         <div className="ac-table-wrap">
           <table className="ac-table ac-stack bl-tabstack">
             <thead>
@@ -143,20 +224,23 @@ export default function BillRun() {
                   <input type="checkbox" className="bl-cb" checked={allOn} disabled={!allSelectable.length}
                     onChange={() => setPicked(allOn ? new Set() : new Set(allSelectable.map((r) => r.contract_id)))} aria-label="Select all" />
                 </th>
-                <th>Customer</th><th>Contract</th><th>Type</th><th>Services (done / plan)</th><th>Period</th>{allMonths && <th>Billed in</th>}
+                <th>Customer</th><th>Contract</th><th>Type</th><th>Bill date</th><th>Services (done / plan)</th><th>Period</th>{allMonths && <th>Billed in</th>}
                 <th className="ac-num">Estimated (₹)</th><th>Needs input</th><th>Warnings</th>
               </tr>
             </thead>
             <tbody>
               {loading || !rows.length ? (
-                <EmptyRow cols={allMonths ? 10 : 9} loading={loading} text={s?.already_drafted ? `Nothing left to generate this month. ${s.already_drafted} draft${s.already_drafted === 1 ? " is" : "s are"} waiting in Draft Invoices.` : "Nothing is due for billing in this month. A contract billed in arrears appears in the month its period ends (each contract page shows which month)."} />
+                <EmptyRow cols={allMonths ? 11 : 10} loading={loading} text={
+                  s?.already_drafted ? `Nothing left to generate ${dateView ? "for this date" : "this month"}. ${s.already_drafted} draft${s.already_drafted === 1 ? " is" : "s are"} waiting in Draft Invoices.`
+                    : dateView ? `Nothing to bill on ${dateLabel(date)} and no missed bills. Pick another date or see the whole month (contracts without a Bill date show there).`
+                      : "Nothing is due for billing in this month. A contract billed in arrears appears in the month its period ends (each contract page shows which month)."} />
               ) : (
                 rows.map((r) => {
                   const short = r.services && r.services.done < r.services.planned;
                   return (
                     // Clicking the row opens its SOS (back returns here); the tick box only selects.
-                    <tr key={r.contract_id} className={`${short ? "bl-short" : ""} ${selected.has(r.contract_id) ? "bl-sel" : ""} ${r.sos ? "bl-click" : ""}`}
-                      onClick={r.sos ? () => navigate(`/billing/sos/${encodeURIComponent(r.company_id)}?month=${String(r.period_start).slice(0, 7)}&from=run`) : undefined}
+                    <tr key={r.contract_id} className={`${short ? "bl-short" : ""} ${selected.has(r.contract_id) ? "bl-sel" : ""} ${r.sos ? "bl-click" : ""} ${r.missed_days > 0 ? "br-missed-row" : ""}`}
+                      onClick={r.sos ? () => navigate(`/billing/sos/${encodeURIComponent(r.company_id)}?month=${String(r.period_start).slice(0, 7)}&from=run${backQuery}`) : undefined}
                       title={r.sos ? "Open the SOS" : undefined}>
                       <td onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" className="bl-cb" checked={selected.has(r.contract_id)} disabled={!selectable(r)} onChange={() => toggle(r.contract_id)} aria-label={`Select ${r.customer}`} />
@@ -174,6 +258,18 @@ export default function BillRun() {
                       <td>
                         <TypeBadge type={r.billing_type} frequency={r.frequency_months} unit={r.frequency_unit} />
                         {r.separate_bills && <div className="bl-sub" style={{ marginTop: 4 }} title="Separate bills: a services invoice and a chemicals invoice each period">2 bills · services + chemicals</div>}
+                      </td>
+                      <td>
+                        {r.bill_date ? (
+                          <>
+                            <span className="br-billdate">{dateLabel(r.bill_date)}</span>
+                            {r.missed_days > 0 ? (
+                              <span className="br-tag missed" title={`Bill date ${dateLabel(r.bill_date)} has passed - not billed yet`}><FiAlertTriangle /> Missed · {lateText(r.missed_days)}</span>
+                            ) : r.bill_date === todayStr ? (
+                              <span className="br-tag today" title="Bill today">Due today</span>
+                            ) : null}
+                          </>
+                        ) : <span className="ac-sub" title="No Bill date on the contract: never marked missed">—</span>}
                       </td>
                       <td>{r.services ? <ServicesChip done={r.services.done} planned={r.services.planned} /> : <span className="bl-svc none">—</span>}</td>
                       <td>
@@ -244,7 +340,7 @@ export default function BillRun() {
             <div className="ac-actions">
               <button type="button" className="ac-btn" onClick={() => setWarnRow(null)}>Close</button>
               {warnRow.sos && (
-                <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/sos/${encodeURIComponent(warnRow.company_id)}?month=${String(warnRow.period_start).slice(0, 7)}&from=run`)}>Open SOS</button>
+                <button type="button" className="ac-btn ac-btn-primary" onClick={() => navigate(`/billing/sos/${encodeURIComponent(warnRow.company_id)}?month=${String(warnRow.period_start).slice(0, 7)}&from=run${backQuery}`)}>Open SOS</button>
               )}
             </div>
           </div>

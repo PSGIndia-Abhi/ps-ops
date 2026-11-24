@@ -261,6 +261,35 @@ async function periodsToBill(db, contract, monthEnd) {
  * active contract's next bill up to 12 months ahead, each with the month it is billed in (bill_month);
  * only those due by this month can be generated (due_now).
  */
+/**
+ * When a period is billed (its Bill date), from the contract's Bill date day (null = no day set):
+ *   billed after the period (arrears) - that day on or after the period ends, i.e. usually the next month
+ *   billed in advance                 - that day in the month the period starts
+ * A day past a month's end is that month's last day.
+ */
+function billDateFor(contract, period) {
+  const day = Number(contract.bill_day);
+  if (!(day >= 1 && day <= 31) || !period || P.isShortPeriod(contract)) return null; // weekly / daily Termite: no deadline
+  if (contract.bill_timing === "ADVANCE") return dayInMonth(period.start.slice(0, 7), day);
+  // Billed after the period: the first date on that day on or after the period's last day
+  // (1-30 Nov, day 10 -> 10 Dec; day 30 or 31 -> 30 Nov; a quarter 1 Nov-31 Jan, day 10 -> 10 Feb).
+  const endMonth = period.end.slice(0, 7);
+  const same = dayInMonth(endMonth, day);
+  return same >= period.end ? same : dayInMonth(C.addMonths(`${endMonth}-01`, 1).slice(0, 7), day);
+}
+
+/** "YYYY-MM" + day -> that date, or the month's last day when the month is shorter. */
+function dayInMonth(month, day) {
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${month}-${String(Math.min(day, last)).padStart(2, "0")}`;
+}
+
+/** Days since the Bill date passed (0 = not missed: no date, or today or later). */
+function missedDaysFor(billDate, today = C.todayIst()) {
+  return billDate && billDate < today ? C.daysBetween(billDate, today) : 0;
+}
+
 async function dueList(db, month, { type = null, category = null, q = null } = {}) {
   const allMonths = month === "ALL";
   const thisMonth = C.todayIst().slice(0, 7);
@@ -381,11 +410,21 @@ async function dueList(db, month, { type = null, category = null, q = null } = {
     // The month this bill is made in: billed in advance - the month the period starts; billed after
     // (arrears) - the month it ends.
     const billMonth = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
+    const rowBillMonth = short ? (toBill[0] ? (contract.bill_timing === "ADVANCE" ? toBill[0].start : toBill[0].end).slice(0, 7) : billMonth) : billMonth;
+    const billDay = Number(raw.bill_day) >= 1 && Number(raw.bill_day) <= 31 ? Number(raw.bill_day) : null;
+    // weekly / daily Termite rows hold several periods: no Bill date deadline (billed as each one ends)
+    const billDate = billDateFor(contract, short ? null : period);
     rows.push({
       contract_id: contract.id,
-      bill_month: short ? (toBill[0] ? (contract.bill_timing === "ADVANCE" ? toBill[0].start : toBill[0].end).slice(0, 7) : billMonth) : billMonth,
+      bill_month: rowBillMonth,
       due_now: !allMonths || (short ? true : billMonth <= thisMonth),
       contract_code: contract.contract_code,
+      // Bill date: the day of the month to bill (null = no deadline). bill_date is when this period is
+      // billed (billDateFor: after the period ends, usually the next month); missed_days > 0 once it has
+      // passed with no bill made.
+      bill_day: billDay,
+      bill_date: billDate,
+      missed_days: missedDaysFor(billDate),
       company_id: contract.company_id,
       customer: raw.customer,
       // group based contract: billed in the group's name, its companies are the invoice lines
@@ -482,14 +521,10 @@ async function draftContract(conn, contractId, month, runId, userId, extraQty = 
 /** The drafts of one period of a contract (one per outlet when the invoice is split). */
 /** The invoice date of a drafted period: the contract's bill day in the bill month (not after today), else today. */
 function invoiceDateFor(contract, period) {
+  // Only the draft's preview: a Bill Run invoice is dated the day it is issued (issue.service.js).
   const today = C.todayIst();
-  const day = Number(contract.bill_day);
-  if (!(day >= 1 && day <= 31)) return today;
-  const month = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
-  const [y, m] = month.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const date = `${month}-${String(Math.min(day, last)).padStart(2, "0")}`;
-  return date < today ? date : today;
+  const date = billDateFor(contract, period);
+  return date && date < today ? date : today;
 }
 
 async function draftPeriod(conn, contract, ctx, period, runId, userId, extraQty = new Map()) {
@@ -1162,8 +1197,13 @@ async function checkInvoice(db, id) {
       missing.length ? `SOS not submitted for ${missing.map((m) => C.monthName(m)).join(", ")}. The Service Coordinator submits it in Monthly SOS.` : "SOS submitted for the period"
     );
   }
-  check("FY", inv.invoice_date <= today, inv.invoice_date <= today ? `Invoice date ${C.dmy(inv.invoice_date)}` : "The invoice date cannot be in the future");
-  if (inv.invoice_date < today) {
+  if (!inv.is_manual && inv.status === "DRAFT") {
+    // A Bill Run invoice is dated the day it is issued (issue.service.js), so its draft date never blocks or warns.
+    check("FY", true, `Invoice dated when issued (today: ${C.dmy(today)})`);
+  } else {
+    check("FY", inv.invoice_date <= today, inv.invoice_date <= today ? `Invoice date ${C.dmy(inv.invoice_date)}` : "The invoice date cannot be in the future");
+  }
+  if (inv.is_manual && inv.invoice_date < today) {
     warnings.push(
       `The invoice is dated ${C.dmy(inv.invoice_date)}, before today. Change the date to today on the draft unless it must be back-dated - ` +
         `the GST return for ${C.monthName(inv.invoice_date)} may already be filed.`
@@ -1247,6 +1287,8 @@ module.exports = {
   describe,
   buildLines,
   dueList,
+  billDateFor,
+  missedDaysFor,
   previewDrafts,
   generateDrafts,
   loadInvoice,

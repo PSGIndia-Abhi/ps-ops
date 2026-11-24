@@ -1,9 +1,10 @@
 import { Field } from "./ui";
 
-// Bill date of a contract: the day of the month its bill is raised (1-31, typed or stepped like the
-// late alert day on Print & email). The Bill Run dates the invoice on that day of the
-// bill month (its last day in a shorter month), or today when the day is still to come.
-// Empty day: dated the day the Bill Run makes the invoice (as before).
+// Bill date of a contract: the day of the month its bill is raised (1-31). A period billed after it
+// ends is billed on that day once the period is over - usually the next month (November services,
+// day 10 -> 10 Dec); billed in advance, on that day of the period's first month. A day past a month's
+// end is its last day. The Bill Run's Date view lists the bill on that date and marks it missed after;
+// the SOS of a month is due the same day. The invoice is dated the day it is issued (issue.service.js).
 
 const LAST_BILL_DAY = 31;
 const dayIn = (v) => (v === "" || v === null || v === undefined ? "" : Math.min(LAST_BILL_DAY, Math.max(1, Math.round(Number(v)) || 1)));
@@ -13,8 +14,10 @@ const ordinalDay = (d) => `${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 
 export default function BillDayField({ day, onDay, disabled = false }) {
   const n = Number(day) || 0;
   const hint = n
-    ? `Invoice dated the ${ordinalDay(n)} of the month${n > 28 ? " (or the month's last day)" : ""} · day 1–31`
-    : "Type a day from 1 to 31. Empty: dated the day the Bill Run makes the invoice";
+    ? n >= 28
+      ? `Billed on the ${ordinalDay(n)} (or the month's last day) once the period is over · day 1–31`
+      : `Billed on the ${ordinalDay(n)} of the next month, after the services (e.g. Nov services → ${n} Dec) · day 1–31`
+    : "Day to raise the bill (1 to 31). Empty: no bill date - never marked missed";
   return (
     <Field label="Bill date" hint={hint}>
       <div className="nc-billday">

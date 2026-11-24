@@ -49,7 +49,7 @@ export default function CoordinatorDashboard() {
       extra: sub.reduce((t, r) => t + r.extra, 0),
     };
   }, [data, rows]);
-  const pending = rows.filter((r) => r.status !== "SUBMITTED").sort((a, b) => (a.bill_by_day ?? 99) - (b.bill_by_day ?? 99) || a.customer.localeCompare(b.customer));
+  const pending = rows.filter((r) => r.status !== "SUBMITTED").sort((a, b) => (a.bill_day ?? 99) - (b.bill_day ?? 99) || a.customer.localeCompare(b.customer));
   const recent = rows.filter((r) => r.status === "SUBMITTED").sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at))).slice(0, 6);
   const lastPending = (lastData?.rows || []).filter((r) => r.status !== "SUBMITTED" && (!picked.length || picked.includes(r.company_id)));
   const pct = s && s.customers ? Math.round((s.submitted * 100) / s.customers) : 0;
@@ -101,7 +101,7 @@ export default function CoordinatorDashboard() {
                   <button key={r.company_id} type="button" className="cd-item" onClick={() => open(r)}>
                     <span className="cd-item-main"><b>{r.customer}</b><span className="ac-sub">{r.group ? `${r.group} · ` : ""}{r.outlets || 1} outlet{r.outlets === 1 ? "" : "s"} · {r.assigned} services</span></span>
                     <span className={`bl-tag ${cls}`}>{label}</span>
-                    {r.bill_by_day && <span className="bl-tag">bill by day {r.bill_by_day}</span>}
+                    {r.bill_day && <span className="bl-tag">bill date {r.bill_day}</span>}
                     <span className="ac-btn sm ac-btn-primary"><FiEdit3 /> Fill</span>
                   </button>
                 );

@@ -127,6 +127,17 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
     }
     const inv = chk.invoice;
 
+    // 1b. A Bill Run invoice is dated the day it is issued (the draft's date was only a preview); the
+    // due date keeps the same payment terms (days after the invoice date). A manual invoice keeps the
+    // date typed for it.
+    if (!inv.is_manual) {
+      const today = C.todayIst();
+      const termsDays = inv.invoice_date && inv.due_date ? Math.max(0, C.daysBetween(inv.invoice_date, inv.due_date)) : 0;
+      inv.invoice_date = today;
+      inv.due_date = C.addDays(today, termsDays);
+      await conn.query("UPDATE billing_invoices SET invoice_date = ?, due_date = ? WHERE id = ?", [inv.invoice_date, inv.due_date, id]);
+    }
+
     // 2. the next number in the main series, carrying on from Vyapar's last invoice (numbering.js)
     const { fy, seq, number } = await nextInvoiceNumber(conn, inv.invoice_date);
 

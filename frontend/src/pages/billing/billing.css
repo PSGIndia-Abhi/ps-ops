@@ -1972,6 +1972,27 @@
 .nc-rv-clamp { display: block; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nc-rv-line.nc-rv-addr small { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #94a3b8; margin-bottom: 1px; }
 
+/* Missed bill date (Bill Run, Monthly SOS): the Bill date passed and nothing is billed / submitted yet */
+.br-missed-banner { display: flex; align-items: center; gap: 14px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; border-radius: 12px; background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%); }
+.br-missed-ic { width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; border-radius: 10px; background: #fef3c7; color: #b45309; font-size: 17px; }
+.br-missed-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.br-missed-text b { font-size: 14px; color: #92400e; }
+.br-missed-text span { font-size: 12.5px; color: #78716c; }
+.br-missed-btn { flex-shrink: 0; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid #f59e0b; background: #fff; color: #b45309; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: all .15s; }
+.br-missed-btn:hover { background: #fffbeb; }
+.br-missed-btn.on { background: #f59e0b; color: #fff; }
+.ac-table tr.br-missed-row > td { background: #fffdf5; }
+.ac-table tr.br-missed-row > td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.br-billdate { display: block; font-weight: 600; color: #0f172a; white-space: nowrap; }
+.br-tag { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.br-tag svg { font-size: 12px; }
+.br-tag.missed { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+.br-tag.today { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+@media (max-width: 640px) {
+  .br-missed-banner { flex-wrap: wrap; }
+  .br-missed-btn { width: 100%; }
+}
+
 /* SOS attachments (SosFiles.jsx): the SOS page, the draft and the issued invoice */
 .sosf-card { margin: 14px 0; }
 .bl-stack .sosf-card, .iv-side .sosf-card { margin: 0; }
