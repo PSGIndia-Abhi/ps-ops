@@ -13,6 +13,7 @@ import { modeLabel } from "./payModes";
 import { Modal, Msg, StatusBadge, TypeBadge } from "./ui";
 import { BILLING_HOME } from "./access";
 import { InvoiceSkeleton } from "./Skeletons";
+import SosFiles from "./SosFiles";
 
 // One issued invoice, everything an accountant needs: who it is for, what it bills, the tax, the
 // money (paid / pending, payments recorded in Billing with TDS and proof), and every print and share.
@@ -253,6 +254,9 @@ export default function InvoiceView() {
               </>
             )}
           </section>
+
+          {/* Files from the SOS of this period: they go with the invoice email. */}
+          <SosFiles invoiceId={id} />
 
           <section className="ac-card iv-card">
             <h3 className="ac-card-title">Activity</h3>

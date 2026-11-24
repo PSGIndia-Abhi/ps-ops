@@ -56,6 +56,13 @@ router.post("/sos/submit-many", can(P.MANAGE_SERVICE_PLANS), sos.submitMany);
 router.put("/sos/:companyId", can(P.MANAGE_SERVICE_PLANS), sos.save);
 router.post("/sos/:companyId/submit", can(P.MANAGE_SERVICE_PLANS), sos.submit);
 router.post("/sos/:companyId/reopen", canAny(P.MANAGE_SERVICE_PLANS, P.GENERATE_INVOICE), sos.reopen);
+// Files attached to the SOS (optional): the Service Coordinator attaches, Accounts read them and
+// they go with the invoice email.
+router.get("/sos/:companyId/files", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.listFiles);
+router.post("/sos/:companyId/files", can(P.MANAGE_SERVICE_PLANS), sos.acceptFile, sos.uploadFile);
+router.delete("/sos/:companyId/files/:fileId", can(P.MANAGE_SERVICE_PLANS), sos.deleteFile);
+router.get("/sos-files/:fileId", canAny(P.VIEW_SERVICE_TRACKER, P.VIEW_BILLING), sos.openFile);
+router.get("/invoices/:id/sos-files", can(P.VIEW_BILLING), sos.invoiceFiles);
 
 // Customer Billing Profile (one screen per customer: details, outlets, services, POs, invoice settings)
 router.get("/customer-options", can(P.VIEW_BILLING), customers.listOptions);

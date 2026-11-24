@@ -12,8 +12,9 @@ export async function emailInvoice(id) {
   const opt = await billingGet(`/invoices/${id}/share-options`);
   const to = opt.profile_emails || [];
   if (to.length) {
-    await billingPost(`/invoices/${id}/share/email`, { to, attach: "ORIGINAL" });
-    return `Invoice ${opt.invoice_number} sent by email to ${to.join(", ")}.`;
+    const r = await billingPost(`/invoices/${id}/share/email`, { to, attach: "ORIGINAL" });
+    const extra = r?.sos_files ? ` with ${r.sos_files} SOS attachment${r.sos_files === 1 ? "" : "s"}` : "";
+    return `Invoice ${opt.invoice_number} sent by email${extra} to ${to.join(", ")}.`;
   }
 
   // The tab is opened right away (still within the click), so the browser does not block it.
