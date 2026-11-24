@@ -19,6 +19,11 @@ const copiesIn = (v) => (v === "" ? "" : Math.min(MAX_COPIES, Math.max(0, Math.r
 // showAlert: false where the late alert is asked elsewhere (New Contract shows it beside the Bill date).
 export function DeliveryFields({ form, setForm, readOnly = false, showAlert = true }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  // Emails: each part is its own email with its own To and CC; "+ Add email" adds a part
+  const parts = form.parts?.length ? form.parts : [{ to: "", cc: "" }];
+  const setParts = (list) => set({ parts: list.length ? list : [{ to: "", cc: "" }] });
+  const setPart = (i, patch) => setParts(parts.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const [focusNew, setFocusNew] = useState(false); // focus the To of the part just added
   return (
     <div className="dl-wrap">
       <div className="bl-grid g4">
@@ -32,8 +37,35 @@ export function DeliveryFields({ form, setForm, readOnly = false, showAlert = tr
             <button type="button" disabled={readOnly || (Number(form.print_copies) || 1) >= MAX_COPIES} onClick={() => set({ print_copies: copiesIn((Number(form.print_copies) || 0) + 1) })} aria-label="More copies">+</button>
           </div>
         </Field>
-        <Field label="Email invoice to" className={showAlert ? "bl-span2" : "bl-span3"} hint="Separate several addresses with commas">
-          <input className="ac-input" type="text" inputMode="email" value={form.invoice_emails} disabled={readOnly} placeholder="accounts@customer.com, manager@customer.com" onChange={(e) => set({ invoice_emails: e.target.value })} />
+        <Field label="Email invoice to" className={showAlert ? "bl-span2" : "bl-span3"}
+          hint={parts.length > 1 ? `${parts.length} separate emails · each To gets the invoice with only its own CC` : "Several addresses in a box: separate them with commas · + Add email for a separate email"}>
+          {/* Each part = one email: its To and its CC */}
+          <div className="dl-parts">
+            {parts.map((x, i) => (
+              <div key={i} className="dl-part">
+                {parts.length > 1 && (
+                  <div className="dl-part-h">
+                    <b>Email {i + 1}</b>
+                    {!readOnly && <button type="button" className="dl-cc-rm" aria-label={`Remove email ${i + 1}`} onClick={() => setParts(parts.filter((_, j) => j !== i))}>✕</button>}
+                  </div>
+                )}
+                <div className="dl-cc">
+                  <span>To</span>
+                  <input className="ac-input" type="text" inputMode="email" value={x.to} disabled={readOnly} placeholder="accounts@customer.com" aria-label={`Email ${i + 1} To`}
+                    autoFocus={focusNew && i === parts.length - 1 && !x.to}
+                    onChange={(e) => setPart(i, { to: e.target.value })} />
+                </div>
+                <div className="dl-cc">
+                  <span>CC</span>
+                  <input className="ac-input" type="text" inputMode="email" value={x.cc} disabled={readOnly} placeholder="manager@customer.com (optional)" aria-label={`Email ${i + 1} CC`}
+                    onChange={(e) => setPart(i, { cc: e.target.value })} />
+                </div>
+              </div>
+            ))}
+            {!readOnly && parts.length < 10 && (
+              <button type="button" className="dl-part-add" onClick={() => { setFocusNew(true); setParts([...parts, { to: "", cc: "" }]); }}>+ Add email (To + CC)</button>
+            )}
+          </div>
         </Field>
         {showAlert && <LateAlertField value={form.bill_by_day ?? ""} readOnly={readOnly} onChange={(v) => set({ bill_by_day: v })} />}
       </div>

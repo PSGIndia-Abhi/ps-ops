@@ -47,11 +47,7 @@ const PO_SQL = `
               ELSE (SELECT COALESCE(SUM(bi.total), 0) FROM billing_invoice_pos bp
                       JOIN billing_invoices bi ON bi.id = bp.invoice_id AND bi.status = 'ISSUED'
                      WHERE bp.po_id = po.id)
-         END AS invoiced,
-         (SELECT COALESCE(SUM(bil.quantity), 0) FROM billing_invoice_pos bp
-            JOIN billing_invoices bi ON bi.id = bp.invoice_id AND bi.status = 'ISSUED'
-            JOIN billing_invoice_lines bil ON bil.invoice_id = bi.id
-           WHERE bp.po_id = po.id AND ${AREA_LINE_SQL} AND (po.po_area_unit IS NULL OR bil.unit = po.po_area_unit)) AS area_used
+         END AS invoiced
     FROM customer_pos po
     JOIN companies c ON c.id = po.company_id
     LEFT JOIN billing_contracts bc ON bc.id = po.contract_id`;
@@ -80,17 +76,76 @@ function poOut(r) {
     po_amount: amount,
     invoiced: calc.round2(invoiced),
     balance: amount === null ? null : calc.round2(amount - invoiced),
-    // Termite: the area the PO covers, the area billed on issued invoices carrying it, and what is left
-    po_area: C.n2(r.po_area),
-    po_area_unit: r.po_area_unit || null,
-    area_used: calc.round2(Number(r.area_used || 0)),
-    area_balance: r.po_area === null || r.po_area === undefined ? null : calc.round2(Number(r.po_area) - Number(r.area_used || 0)),
+    // Termite: per unit (sq. ft / sq. m) the area the PO covers, its rate, the area billed on issued
+    // invoices carrying the PO and what is left: [{ unit, area, rate, used, balance }]
+    areas: r.areas || [],
     status: r.status,
     display_status: display,
     expires_in_days: expires,
     remarks: r.remarks,
     file_name: r.file_name || null,
   };
+}
+
+/** The PO area's unit: "sq.ft" / "sq.m" (lower case, as on the contract lines), or null. */
+function readAreaUnit(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const v = String(value).trim().toLowerCase().replace(/\s+/g, "");
+  if (v === "sq.ft" || v === "sqft") return "sq.ft";
+  if (v === "sq.m" || v === "sqm") return "sq.m";
+  throw C.bad("PO area unit must be sq.ft or sq.m");
+}
+const unitName = (u) => (u === "sq.ft" ? "sq. ft" : "sq. m");
+
+/** Areas and rates of a PO from the request: [{ unit, area, rate }], each unit at most once; undefined when not sent. */
+function readAreas(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return [];
+  if (!Array.isArray(raw)) throw C.bad("areas must be a list");
+  const out = [];
+  for (const a of raw) {
+    const unit = readAreaUnit(a?.unit);
+    if (!unit) throw C.bad("Choose square feet or square meter for each PO area");
+    if (out.some((x) => x.unit === unit)) throw C.bad(`${unitName(unit)} is listed twice`);
+    const area = C.num(a.area, `PO area in ${unitName(unit)}`, { required: true, min: 0.01, max: 999999999999 });
+    const rate = C.num(a.rate, `Rate per ${unitName(unit)}`, { required: true, min: 0.0001, max: 9999999999 });
+    out.push({ unit, area: Math.round(area * 100) / 100, rate: Math.round(rate * 10000) / 10000 });
+  }
+  return out;
+}
+
+/** Replaces a PO's areas and rates (nothing to do when they were not sent). */
+async function saveAreas(db, poId, areas) {
+  if (areas === undefined) return;
+  await db.query("DELETE FROM customer_po_area_rates WHERE po_id = ?", [poId]);
+  for (const a of areas) {
+    await db.query("INSERT INTO customer_po_area_rates (po_id, unit, area, rate) VALUES (?, ?, ?, ?)", [poId, a.unit, a.area, a.rate]);
+  }
+}
+
+/** PO rows with areas: [{ unit, area, rate, used, balance }] - used = the area billed in that unit on issued Termite invoices carrying the PO. */
+async function withAreas(db, rows) {
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return rows;
+  const [areas] = await db.query("SELECT po_id, unit, area, rate FROM customer_po_area_rates WHERE po_id IN (?) ORDER BY unit", [ids]);
+  if (!areas.length) return rows;
+  const [used] = await db.query(
+    `SELECT bp.po_id, bil.unit, SUM(bil.quantity) AS used
+       FROM billing_invoice_pos bp
+       JOIN billing_invoices bi ON bi.id = bp.invoice_id AND bi.status = 'ISSUED'
+       JOIN billing_invoice_lines bil ON bil.invoice_id = bi.id
+      WHERE bp.po_id IN (?) AND ${AREA_LINE_SQL}
+      GROUP BY bp.po_id, bil.unit`,
+    [ids]
+  );
+  const usedOf = new Map(used.map((u) => [`${u.po_id}|${String(u.unit).toLowerCase()}`, Number(u.used || 0)]));
+  return rows.map((r) => ({
+    ...r,
+    areas: areas.filter((a) => a.po_id === r.id).map((a) => {
+      const u = calc.round2(usedOf.get(`${r.id}|${a.unit}`) || 0);
+      return { unit: a.unit, area: Number(a.area), rate: Number(a.rate), used: u, balance: calc.round2(Number(a.area) - u) };
+    }),
+  }));
 }
 
 /** PO fields from the request (create and update). */
@@ -114,8 +169,8 @@ async function readPo(db, b, { existing = null } = {}) {
     valid_from: C.date(merged.valid_from, "valid_from"),
     expiry_date: C.date(merged.expiry_date, "expiry_date"),
     po_amount: C.num(merged.po_amount, "po_amount", { min: 0, max: 99999999999 }),
-    po_area: C.num(merged.po_area, "PO area", { min: 0, max: 999999999999 }) || null,
-    po_area_unit: C.oneOf(merged.po_area_unit, "PO area unit", ["sq.ft", "sq.m"], { required: false }) || null,
+    // only when sent: [{ unit, area, rate }] (an update without it keeps the PO's areas)
+    areas: readAreas(b.areas),
     po_kind: C.oneOf(merged.kind ?? merged.po_kind, "kind", ["STANDARD", "ADVANCE"], { fallback: "STANDARD" }),
     po_source: C.str(merged.po_source, "po_source", { max: 255 }),
     status: C.oneOf(merged.status, "status", ["ACTIVE", "CLOSED"], { fallback: "ACTIVE" }),
@@ -123,8 +178,6 @@ async function readPo(db, b, { existing = null } = {}) {
   };
   if (po.expiry_date && po.expiry_date < (po.valid_from || po.po_date)) throw C.bad("expiry_date cannot be before the PO starts");
   // The PO amount is required on every PO (an advance PO always needed it).
-  if (po.po_area && !po.po_area_unit) throw C.bad("Choose square feet or square metre for the PO area");
-  if (!po.po_area) po.po_area_unit = null;
   if (po.po_amount === null || po.po_amount <= 0) throw C.bad(po.po_kind === "ADVANCE" ? "An advance PO needs the PO amount" : "Enter the PO amount");
   return po;
 }
@@ -146,7 +199,7 @@ const listPos = C.handle("Failed to load purchase orders", async (req, res) => {
       ORDER BY (po.expiry_date IS NULL), po.expiry_date, po.po_date DESC`,
     [companyId, companyId, contractId, contractId, kind, kind, status, status, expiring, expiring, q, q, q]
   );
-  let out = rows.map(poOut);
+  let out = (await withAreas(pool, rows)).map(poOut);
   if (C.bool(req.query.open_po)) out = out.filter((p) => p.is_open_po);
   if (C.bool(req.query.expired)) out = out.filter((p) => p.display_status === "EXPIRED");
 
@@ -195,7 +248,7 @@ async function poDetail(db, id) {
     [id]
   );
   return {
-    ...poOut(row),
+    ...poOut((await withAreas(db, [row]))[0]),
     invoices: invoices.map((i) => ({ ...i, amount: Number(i.amount), advance_adjusted: Number(i.advance_adjusted) })),
     advances: advances.map((a) => ({ ...a, received: Number(a.received), adjusted: Number(a.adjusted), remaining: calc.round2(a.remaining) })),
     file: row.file_name ? { name: row.file_name, url: `/api/billing/pos/${id}/file` } : null,
@@ -208,10 +261,11 @@ const createPo = C.handle("Failed to save the PO", async (req, res) => {
   const id = uuid();
   try {
     await pool.query(
-      `INSERT INTO customer_pos (id, company_id, contract_id, po_number, po_date, valid_from, expiry_date, po_amount, po_area, po_area_unit, po_kind, po_source, status, remarks, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, po.company_id, po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_area, po.po_area_unit, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.user.id]
+      `INSERT INTO customer_pos (id, company_id, contract_id, po_number, po_date, valid_from, expiry_date, po_amount, po_kind, po_source, status, remarks, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, po.company_id, po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.user.id]
     );
+    await saveAreas(pool, id, po.areas);
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") throw C.conflict(`PO ${po.po_number} already exists for this customer`);
     throw err;
@@ -240,10 +294,11 @@ const updatePo = C.handle("Failed to update the PO", async (req, res) => {
   }
   try {
     await pool.query(
-      `UPDATE customer_pos SET contract_id = ?, po_number = ?, po_date = ?, valid_from = ?, expiry_date = ?, po_amount = ?, po_area = ?, po_area_unit = ?, po_kind = ?,
+      `UPDATE customer_pos SET contract_id = ?, po_number = ?, po_date = ?, valid_from = ?, expiry_date = ?, po_amount = ?, po_kind = ?,
               po_source = ?, status = ?, remarks = ?, updated_by = ? WHERE id = ?`,
-      [po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_area, po.po_area_unit, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.params.id]
+      [po.contract_id, po.po_number, po.po_date, po.valid_from, po.expiry_date, po.po_amount, po.po_kind, po.po_source, po.status, po.remarks, req.user.id, req.params.id]
     );
+    await saveAreas(pool, req.params.id, po.areas);
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") throw C.conflict(`PO ${po.po_number} already exists for this customer`);
     throw err;

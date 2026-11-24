@@ -29,6 +29,34 @@ function readEmails(raw, field) {
 const copiesOf = (raw, field) => C.num(raw, field, { min: 0, max: 65535, integer: true }) ?? 1; // 65535 = the column limit
 const emailList = (s) => String(s || "").split(",").map((e) => e.trim()).filter(Boolean);
 
+/** The profile's email parts: [{ to, cc }] - one email each. */
+function partsOut(p) {
+  const saved = C.json(p.invoice_email_parts, null);
+  if (Array.isArray(saved) && saved.length) {
+    return saved.map((x) => ({ to: Array.isArray(x?.to) ? x.to : emailList(x?.to), cc: Array.isArray(x?.cc) ? x.cc : emailList(x?.cc) }));
+  }
+  const to = emailList(p.invoice_emails);
+  const cc = emailList(p.invoice_cc_emails);
+  return to.length || cc.length ? [{ to, cc }] : [];
+}
+
+/** Email parts from the request: [{ to, cc }], each with a To; at most 10 parts. undefined when not sent. */
+function readParts(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return [];
+  if (!Array.isArray(raw)) throw C.bad("email_parts must be a list");
+  const out = [];
+  raw.forEach((x, i) => {
+    const to = readEmails(x?.to, `Email ${i + 1}: To`);
+    const cc = readEmails(x?.cc, `Email ${i + 1}: CC`);
+    if (!to && !cc) return; // an empty part is dropped
+    if (!to) throw C.bad(`Email ${i + 1}: type the To address (CC alone cannot be sent)`);
+    out.push({ to: emailList(to), cc: emailList(cc) });
+  });
+  if (out.length > 10) throw C.bad("At most 10 emails per invoice");
+  return out;
+}
+
 // Price lines in force today, with what a month comes to.
 const LINES_SQL = `
   SELECT l.id, l.contract_id, l.site_id, s.name AS site, l.item_name, l.item_kind, l.invoice_group, l.pricing_basis,
@@ -150,7 +178,7 @@ async function profileDetail(db, companyId) {
   );
   const [lines] = await db.query(LINES_SQL, [companyId]);
   const [pos] = await db.query(
-    `SELECT id, po_number, po_date, expiry_date, po_amount, po_area, po_area_unit, po_kind, status, contract_id FROM customer_pos
+    `SELECT id, po_number, po_date, expiry_date, po_amount, po_kind, status, contract_id FROM customer_pos
       WHERE company_id = ? ORDER BY (status = 'ACTIVE') DESC, po_date DESC`,
     [companyId]
   );
@@ -179,6 +207,10 @@ async function profileDetail(db, companyId) {
     settings: {
       print_copies: p ? Number(p.print_copies) : 1,
       invoice_emails: p ? emailList(p.invoice_emails) : [],
+      // copied (CC) on the invoice email
+      invoice_cc_emails: p ? emailList(p.invoice_cc_emails) : [],
+      // one email per part: [{ to: [...], cc: [...] }] (saved before parts: one part from the above)
+      email_parts: p ? partsOut(p) : [],
       auto_email: p ? Boolean(Number(p.auto_email)) : false,
       bill_by_day: p && p.bill_by_day !== null ? Number(p.bill_by_day) : null,
     },
@@ -220,8 +252,6 @@ async function profileDetail(db, companyId) {
       po_date: C.ymd(po.po_date),
       expiry_date: C.ymd(po.expiry_date),
       po_amount: po.po_amount === null ? null : Number(po.po_amount),
-      po_area: po.po_area === null || po.po_area === undefined ? null : Number(po.po_area),
-      po_area_unit: po.po_area_unit || null,
       kind: po.po_kind,
       status: po.status !== "ACTIVE" ? "CLOSED" : po.expiry_date && C.ymd(po.expiry_date) < today ? "EXPIRED" : "ACTIVE",
       contract_id: po.contract_id,
@@ -235,7 +265,7 @@ const getCustomerProfile = C.handle("Failed to load the customer profile", async
 });
 
 // PUT /customer-profiles/:companyId/settings
-// { print_copies, invoice_emails, auto_email, bill_by_day, outlets: [{ site_id, print_copies, emails }] }
+// { print_copies, invoice_emails, invoice_cc_emails, auto_email, bill_by_day, outlets: [{ site_id, print_copies, emails }] }
 const saveCustomerSettings = C.handle("Failed to save the invoice settings", async (req, res) => {
   const companyId = C.str(req.params.companyId, "companyId", { required: true, max: 20 });
   const b = req.body || {};
@@ -246,7 +276,12 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
   const forGroup = C.bool(b.for_group);
   if (!profile && !forGroup) throw C.bad("Save the billing details (Bill To) first");
   const printCopies = copiesOf(b.print_copies, "print_copies");
-  const invoiceEmails = readEmails(b.invoice_emails, "Invoice emails");
+  let invoiceEmails = readEmails(b.invoice_emails, "Invoice emails");
+  // Email parts (one email each): when sent, they decide invoice_emails / invoice_cc_emails too
+  // (every To / every CC, for the screens and the Share dialog).
+  const parts = readParts(b.email_parts);
+  const joined = (key) => [...new Set(parts.flatMap((x) => x[key]))].join(", ") || null;
+  const ccEmails = parts !== undefined ? joined("cc") : b.invoice_cc_emails === undefined ? undefined : readEmails(b.invoice_cc_emails, "CC emails");
   const billBy = C.num(b.bill_by_day, "bill_by_day", { min: 1, max: 30, integer: true });
   const autoEmail = C.bool(b.auto_email);
   const outlets = Array.isArray(b.outlets) ? b.outlets : [];
@@ -257,6 +292,10 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
     if (!known.has(siteId)) throw C.bad("An outlet does not belong to this customer");
     return { siteId, copies: copiesOf(o.print_copies, "Outlet print copies"), emails: readEmails(o.emails, "Outlet emails") };
   });
+  if (parts !== undefined) {
+    invoiceEmails = joined("to");
+    if ((invoiceEmails || "").length > 1000 || (ccEmails || "").length > 1000) throw C.bad("Too many email addresses");
+  }
   // Auto-send needs somewhere to send to.
   if (autoEmail && !invoiceEmails && !outletRows.some((o) => o.emails)) {
     throw C.bad("Add at least one email, or untick \"Send invoices by email automatically\"");
@@ -274,6 +313,11 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
       "UPDATE billing_profiles SET print_copies = ?, invoice_emails = ?, auto_email = ?, bill_by_day = ?, updated_by = ? WHERE company_id = ?",
       [printCopies, invoiceEmails, autoEmail ? 1 : 0, billBy, req.user.id, companyId]
     );
+    // CC: saved only when sent (older screens leave it as it is)
+    if (ccEmails !== undefined) await conn.query("UPDATE billing_profiles SET invoice_cc_emails = ? WHERE company_id = ?", [ccEmails, companyId]);
+    if (parts !== undefined) {
+      await conn.query("UPDATE billing_profiles SET invoice_email_parts = ? WHERE company_id = ?", [parts.length ? JSON.stringify(parts) : null, companyId]);
+    }
     for (const o of outletRows) {
       await conn.query(
         `INSERT INTO billing_outlet_settings (company_id, site_id, print_copies, emails, updated_by) VALUES (?, ?, ?, ?, ?)
