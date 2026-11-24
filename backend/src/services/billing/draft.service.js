@@ -480,6 +480,18 @@ async function draftContract(conn, contractId, month, runId, userId, extraQty = 
 }
 
 /** The drafts of one period of a contract (one per outlet when the invoice is split). */
+/** The invoice date of a drafted period: the contract's bill day in the bill month (not after today), else today. */
+function invoiceDateFor(contract, period) {
+  const today = C.todayIst();
+  const day = Number(contract.bill_day);
+  if (!(day >= 1 && day <= 31)) return today;
+  const month = (contract.bill_timing === "ADVANCE" ? period.start : period.end).slice(0, 7);
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const date = `${month}-${String(Math.min(day, last)).padStart(2, "0")}`;
+  return date < today ? date : today;
+}
+
 async function draftPeriod(conn, contract, ctx, period, runId, userId, extraQty = new Map()) {
   const periodName = P.isShortPeriod(contract) ? C.dmy(period.start) : C.monthName(period.start);
   const byKind = Boolean(contract.separate_bills);
@@ -539,7 +551,9 @@ async function draftPeriod(conn, contract, ctx, period, runId, userId, extraQty 
   // The invoice is dated the day it is made (it can be changed on the draft). Dating it back to the
   // period end could put it in a GST month whose return is already filed; the description and the
   // period on the invoice still say which months it bills.
-  const invoiceDate = C.todayIst();
+  // A contract with a bill day (1-31) is dated that day of its bill month (the month's last day when
+  // it is shorter), unless that day is still to come: then today.
+  const invoiceDate = invoiceDateFor(contract, period);
   const dueDate = C.addDays(invoiceDate, Number(ctx.profile.payment_terms_days) || 0);
   const taxMode = calc.taxModeFor(ctx.category, ctx.profile.state_code, contract.gst_applicable !== 0);
   const pos = contract.po_required ? await validPos(conn, contract, period) : [];

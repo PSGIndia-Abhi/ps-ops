@@ -1991,3 +1991,9 @@
   .sosf-name { flex-basis: calc(100% - 30px); }
   .sosf-meta { flex: 1; }
 }
+
+/* Bill date: calendar box + day stepper (− n +) side by side */
+.nc-billday { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* New Contract: Bill date and the late alert side by side in one column */
+.nc-billday-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .nc-billday-pair { grid-template-columns: 1fr; } }

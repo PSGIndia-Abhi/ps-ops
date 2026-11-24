@@ -211,6 +211,8 @@ function contractOut(c) {
     frequency_unit: c.billing_type === "TERMITE" && (c.frequency_unit === "WEEK" || c.frequency_unit === "DAY") ? c.frequency_unit : "MONTH",
     cycle_start_day: Number(c.cycle_start_day),
     bill_timing: c.bill_timing,
+    // the day of the month the bill is raised (1-31); null = the day the Bill Run makes it
+    bill_day: c.bill_day === null || c.bill_day === undefined ? null : Number(c.bill_day),
     start_date: C.ymd(c.start_date),
     end_date: C.ymd(c.end_date),
     next_period_start: C.ymd(c.next_period_start),
@@ -340,6 +342,8 @@ function readContractHeader(b, sites, billingType, startDate) {
     frequency_unit: unit,
     cycle_start_day: C.num(b.cycle_start_day, "cycle_start_day", { min: 1, max: 31, integer: true }) ?? (startDate ? Number(startDate.slice(8, 10)) : 1),
     bill_timing: C.oneOf(b.bill_timing, "bill_timing", ["ARREARS", "ADVANCE"], { fallback: "ARREARS" }),
+    // Bill date: the day of the month the bill is raised (Termite billed once has none).
+    bill_day: termiteOnce ? null : C.num(b.bill_day, "Bill date", { integer: true, min: 1, max: 31 }) ?? null,
     end_date: endDate,
     invoice_grouping: grouping,
     site_id: siteId,
@@ -545,12 +549,12 @@ const createContract = C.handle("Failed to create the contract", async (req, res
     const id = uuid();
     await conn.query(
       `INSERT INTO billing_contracts
-         (id, contract_code, contract_kind, company_id, group_id, billing_type, frequency_months, frequency_unit, cycle_start_day, bill_timing, start_date, end_date,
+         (id, contract_code, contract_kind, company_id, group_id, billing_type, frequency_months, frequency_unit, cycle_start_day, bill_timing, bill_day, start_date, end_date,
           next_period_start, invoice_grouping, site_id, po_required, gst_applicable, gst_rate, shortfall_billing, description_template,
           separate_bills, chemical_description_template, notes, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, code, kind, companyId, groupId, billingType, header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, startDate, header.end_date,
+        id, code, kind, companyId, groupId, billingType, header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, header.bill_day, startDate, header.end_date,
         firstBill, header.invoice_grouping, header.site_id, header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.separate_bills, header.chemical_description_template, header.notes, req.user.id, req.user.id,
       ]
@@ -605,13 +609,13 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     }
     await conn.query(
       `UPDATE billing_contracts
-          SET frequency_months = ?, frequency_unit = ?, cycle_start_day = ?, bill_timing = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
+          SET frequency_months = ?, frequency_unit = ?, cycle_start_day = ?, bill_timing = ?, bill_day = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
               po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?,
               separate_bills = ?, chemical_description_template = ?, notes = ?,
               next_period_start = ?, updated_by = ?
         WHERE id = ?`,
       [
-        header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, header.end_date, header.invoice_grouping, header.site_id,
+        header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, header.bill_day, header.end_date, header.invoice_grouping, header.site_id,
         header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.separate_bills, header.chemical_description_template, header.notes,
         nextStart, req.user.id, req.params.id,

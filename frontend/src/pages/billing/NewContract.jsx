@@ -11,6 +11,8 @@ import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { STATES } from "./states";
 import { Field, Msg, BackButton } from "./ui";
 import ServiceToField from "./ServiceToField";
+import BillDayField from "./BillDayField";
+import LateAlertField from "./LateAlertField";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -130,7 +132,7 @@ export default function NewContract() {
 
   // 2. contract terms
   const [terms, setTerms] = useState({
-    billing_type: "AMC", frequency_months: 1, frequency_unit: "MONTH", bill_timing: "ARREARS", start_date: today(), end_date: "", first_bill_from: "",
+    billing_type: "AMC", frequency_months: 1, frequency_unit: "MONTH", bill_timing: "ARREARS", bill_day: 31, start_date: today(), end_date: "", first_bill_from: "",
     shortfall_billing: "PRO_RATA", gst_applicable: true, gst_rate: 18, po_required: false, description_template: null, notes: "",
     separate_bills: null, chemical_description_template: null,
   });
@@ -403,8 +405,10 @@ export default function NewContract() {
   }, [companyId]);
 
   // The customer's invoice delivery settings (defaults when it has none yet). A new contract
-  // starts with the late alert on (bill by the 25th) unless the customer already has a day.
-  const withBillByDefault = (f) => ({ ...f, bill_by_day: f.bill_by_day || 25 });
+  // starts with the late alert on (bill by the 25th) unless the customer already has a day, and with
+  // "Email invoices automatically" ticked unless the customer already has its emails set up (then its
+  // own choice stays).
+  const withBillByDefault = (f, data) => ({ ...f, bill_by_day: f.bill_by_day || 25, auto_email: f.auto_email || !data?.settings?.invoice_emails?.length });
   // Group contract: print copies and email for the group's invoice, kept with the main company (the
   // first ticked one, which the invoice is made under); no per-outlet settings (one invoice for the group).
   useEffect(() => {
@@ -414,7 +418,7 @@ export default function NewContract() {
     billingGet(`/customer-profiles/${encodeURIComponent(companyId)}`)
       .then((d) => {
         if (!live) return;
-        const form = withBillByDefault(deliveryFrom(d));
+        const form = withBillByDefault(deliveryFrom(d), d);
         setDelivery(groupMode ? { ...form, outlets: [] } : form);
       })
       .catch(() => live && setDelivery(withBillByDefault(deliveryFrom(null))));
@@ -690,6 +694,7 @@ export default function NewContract() {
         frequency_months: ["ONE_TIME", "TERMITE"].includes(terms.billing_type) ? null : Number(terms.frequency_months) || 1,
         frequency_unit: unitOf(terms),
         bill_timing: terms.bill_timing,
+        bill_day: terms.billing_type === "TERMITE" || terms.bill_day === "" ? null : Number(terms.bill_day),
         start_date: terms.start_date,
         end_date: terms.end_date || null,
         first_bill_from: terms.first_bill_from || null,
@@ -758,7 +763,7 @@ export default function NewContract() {
               <div className="nc-sum-head"><FiFileText /> What was set up</div>
               <dl className="nc-success-dl">
                 {groupMode ? <><dt>Group</dt><dd>{group?.name} · {pickedCompanies.length} companies</dd></> : <><dt>Customer</dt><dd>{customer?.name}</dd></>}
-                <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}{termite ? "" : ` · ${terms.bill_timing === "ADVANCE" ? "start" : "end"} of the month`}</dd>
+                <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? `, ${frequencyText(terms).toLowerCase()}` : ""}{termite || !terms.bill_day ? "" : ` · bill on the ${ordinalDay(Number(terms.bill_day))}`}</dd>
                 <dt>Structure</dt><dd>{termite ? `Per ${areaLabel} of treated area` : terms.shortfall_billing === "FULL" ? "Fixed amount - the agreed services every month" : "Service based - the services completed"}</dd>
                 <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
                 {terms.first_bill_from && terms.first_bill_from !== terms.start_date && <><dt>First bill from</dt><dd>{dmy(terms.first_bill_from)}</dd></>}
@@ -999,7 +1004,7 @@ export default function NewContract() {
                         billing_type: v, frequency_months: v === "ONE_TIME" || v === "TERMITE" ? null : terms.frequency_months || 1, po_required: PO_TYPES.includes(v) ? true : terms.po_required,
                         frequency_unit: "MONTH",
                         // Termite is billed once: no frequency, bill date or term dates (start = the day it is saved).
-                        ...(v === "TERMITE" ? { bill_timing: "ARREARS", start_date: today(), end_date: "" } : {}),
+                        ...(v === "TERMITE" ? { bill_timing: "ARREARS", bill_day: "", start_date: today(), end_date: "" } : termite ? { bill_day: 31 } : {}),
                       });
                       // Termite always starts from its one area line; other types keep typed lines.
                       if (v === "TERMITE" ? !termite : lines.every((l) => l.rate === "")) setLines([newLine(v === "TERMITE")]);
@@ -1014,12 +1019,11 @@ export default function NewContract() {
                   <Field label="Billing frequency" required>
                     <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
                   </Field>
-                  <Field label="Bill date" required>
-                    <select className="ac-select" value={terms.bill_timing} onChange={(e) => setT({ bill_timing: e.target.value })}>
-                      <option value="ADVANCE">Start of the month</option>
-                      <option value="ARREARS">End of the month</option>
-                    </select>
-                  </Field>
+                  {/* Bill date and the late alert side by side (the alert is saved with the Print & email settings) */}
+                  <div className="nc-billday-pair">
+                    <BillDayField day={terms.bill_day} onDay={(v) => setT({ bill_day: v })} />
+                    {delivery && <LateAlertField value={delivery.bill_by_day ?? ""} onChange={(v) => setDelivery((d) => ({ ...d, bill_by_day: v }))} />}
+                  </div>
                   <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
                   <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
                 </>
@@ -1475,7 +1479,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Print &amp; email</h3>
             {delivery ? (
-              <DeliveryFields form={delivery} setForm={setDelivery} />
+              <DeliveryFields form={delivery} setForm={setDelivery} showAlert={false} />
             ) : (
               <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
             )}
@@ -1518,7 +1522,7 @@ export default function NewContract() {
                 <div className="nc-rv-tagline">
                   <span className="nc-rv-t blue">{TYPES.find(([v]) => v === terms.billing_type)?.[1]}</span>
                   {terms.billing_type !== "ONE_TIME" && <span className="nc-rv-t">{frequencyText(terms)}</span>}
-                  {!termite && <span className="nc-rv-t">{terms.bill_timing === "ADVANCE" ? "Start of month" : "End of month"}</span>}
+                  {!termite && terms.bill_day && <span className="nc-rv-t">{`Bill on the ${ordinalDay(Number(terms.bill_day))}`}</span>}
                   <span className="nc-rv-t green">{gstOn ? `GST ${terms.gst_rate}%` : "No GST"}</span>
                 </div>
                 <ol className="nc-rv-time">
@@ -1649,7 +1653,7 @@ export default function NewContract() {
               <><dt>Customer</dt><dd>{customer?.name || <span className="ac-sub">Not chosen</span>}</dd></>
             )}
             <dt>Billing</dt><dd>{TYPES.find(([v]) => v === terms.billing_type)?.[1]}{terms.billing_type !== "ONE_TIME" ? ` · ${frequencyText(terms).toLowerCase()}` : ""}</dd>
-            {!termite && <><dt>Bill date</dt><dd>{terms.bill_timing === "ADVANCE" ? "Start of the month" : "End of the month"}</dd></>}
+            {!termite && <><dt>Bill date</dt><dd>{terms.bill_day ? `${ordinalDay(Number(terms.bill_day))} of the month` : "The Bill Run day"}</dd></>}
             <dt>Structure</dt><dd>{termite ? `Per ${areaLabel}` : terms.shortfall_billing === "FULL" ? "Fixed amount" : "Service based"}</dd>
             <dt>GST</dt><dd>{gstOn ? `${terms.gst_rate}%` : "No GST"}</dd>
             {next && <><dt>{termite ? "Invoice" : "First invoice"}</dt><dd>{termite ? "One invoice" : next.start === next.end ? dmy(next.start) : `${dmy(next.start)} – ${dmy(next.end)}`}<span className="nc-sum-sub">Bill Run {monthLabel(next.billMonth)}</span></dd></>}
