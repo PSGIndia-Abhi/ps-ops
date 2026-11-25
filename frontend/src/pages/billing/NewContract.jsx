@@ -103,6 +103,20 @@ export default function NewContract() {
   // Opened from a customer's profile (?company=COMP12): that customer is chosen already.
   const [searchParams] = useSearchParams();
   const [companyId, setCompanyId] = useState(searchParams.get("company") || "");
+  // Customer dropdown: the display name (else the name), each name once - a second company with the
+  // same display name is left out (the one already chosen, e.g. from a draft, always stays).
+  const customerOptions = (() => {
+    const seen = new Set();
+    const out = [];
+    for (const c of customers || []) {
+      const label = (c.display_name || "").trim() || String(c.name || "").trim();
+      const key = label.toLowerCase();
+      if (seen.has(key) && c.company_id !== companyId) continue;
+      seen.add(key);
+      out.push({ ...c, label });
+    }
+    return out;
+  })();
   // Group based contract (?type=group): a group, the ticked companies of it, one Bill To for the
   // group. The first ticked company is the contract's main company (the later steps use it).
   const groupMode = searchParams.get("type") === "group";
@@ -413,7 +427,12 @@ export default function NewContract() {
   // starts with the late alert on (bill by the 25th) unless the customer already has a day, and with
   // "Email invoices automatically" ticked unless the customer already has its emails set up (then its
   // own choice stays).
-  const withBillByDefault = (f, data) => ({ ...f, bill_by_day: f.bill_by_day || 25, auto_email: f.auto_email || !data?.settings?.invoice_emails?.length });
+  const withBillByDefault = (f, data) => ({ ...f, bill_by_day: f.bill_by_day || 25, auto_email: f.auto_email || !data?.settings?.email_parts?.some((x) => x?.to?.length) });
+  // Review: the emails as typed - each email's To, with its CC in brackets ("" when none has a To).
+  const emailText = (delivery?.parts || [])
+    .filter((x) => (x.to || "").trim())
+    .map((x) => `${x.to.trim()}${(x.cc || "").trim() ? ` (cc ${x.cc.trim()})` : ""}`)
+    .join("; ");
   // Group contract: print copies and email for the group's invoice, kept with the main company (the
   // first ticked one, which the invoice is made under); no per-outlet settings (one invoice for the group).
   useEffect(() => {
@@ -964,7 +983,7 @@ export default function NewContract() {
             <Field label="Customer" required>
               <select ref={customerSelect} className="ac-select" value={companyId} onChange={(e) => chooseCustomer(e.target.value)}>
                 <option value="">Choose a customer…</option>
-                {(customers || []).map((c) => <option key={c.company_id} value={c.company_id}>{c.name}{!c.category ? " (customer type not set)" : ""}</option>)}
+                {customerOptions.map((c) => <option key={c.company_id} value={c.company_id}>{c.label}{!c.category ? " (customer type not set)" : ""}</option>)}
               </select>
             </Field>
             {customer && !customer.category && (
@@ -1594,10 +1613,9 @@ export default function NewContract() {
                   <div className="nc-rv-box-h">Print &amp; email <EditStep label="print and email" onClick={() => editStep(6)} /></div>
                   <div className="nc-rv-stats">
                     <div className="nc-rv-stat"><FiPrinter aria-hidden="true" /><b>{delivery.print_copies}</b><span>cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}</span></div>
-                    <div className="nc-rv-stat"><FiClock aria-hidden="true" /><b>{delivery.bill_by_day ? ordinalDay(Number(delivery.bill_by_day)) : "Off"}</b><span>late alert</span></div>
                   </div>
-                  <div className="nc-rv-line"><FiMail aria-hidden="true" /><span>{delivery.invoice_emails.trim() || "No email"}</span></div>
-                  {delivery.invoice_emails.trim() && (
+                  <div className="nc-rv-line"><FiMail aria-hidden="true" /><span>{emailText || "No email"}</span></div>
+                  {emailText && (
                     <div className="nc-rv-tagline"><span className={`nc-rv-t ${delivery.auto_email ? "green" : ""}`}>● {delivery.auto_email ? "Auto email on issue" : "Not emailed automatically"}</span></div>
                   )}
                 </div>
