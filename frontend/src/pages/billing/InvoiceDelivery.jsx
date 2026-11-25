@@ -36,7 +36,7 @@ export function DeliveryFields({ form, setForm, readOnly = false }) {
             <button type="button" disabled={readOnly || (Number(form.print_copies) || 1) >= MAX_COPIES} onClick={() => set({ print_copies: copiesIn((Number(form.print_copies) || 0) + 1) })} aria-label="More copies">+</button>
           </div>
         </Field>
-        <Field label="Email invoice to" className={showAlert ? "bl-span2" : "bl-span3"}
+        <Field label="Email invoice to" className="bl-span3"
           hint={parts.length > 1 ? `${parts.length} separate emails · each To gets the invoice with only its own CC` : "Several addresses in a box: separate them with commas · + Add email for a separate email"}>
           {/* Each part = one email: its To and its CC */}
           <div className="dl-parts">
