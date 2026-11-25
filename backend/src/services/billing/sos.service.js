@@ -245,8 +245,9 @@ async function groupBillingFor(db, companyIds) {
 async function sosView(db, companyId, month) {
   const m = monthStart(month);
   const [[company]] = await db.query(
-    `SELECT c.id, c.name, g.name AS group_name, bp.bill_by_day FROM companies c
-       LEFT JOIN group_name g ON g.id = c.group_id LEFT JOIN billing_profiles bp ON bp.company_id = c.id WHERE c.id = ?`,
+    `SELECT c.id, c.name, g.name AS group_name,
+            (SELECT MIN(bc.bill_day) FROM billing_contracts bc WHERE bc.company_id = c.id AND bc.status = 'ACTIVE') AS bill_day
+       FROM companies c LEFT JOIN group_name g ON g.id = c.group_id WHERE c.id = ?`,
     [companyId]
   );
   if (!company) throw C.notFound("Customer not found");
@@ -322,7 +323,8 @@ async function sosView(db, companyId, month) {
     group: company.group_name || null,
     // group based contract: shown as the group, its companies are the lines
     billing_group: billingGroup,
-    bill_by_day: company.bill_by_day === null ? null : Number(company.bill_by_day),
+    // the earliest Bill date of its contracts (missed once passed with the SOS not submitted)
+    ...billDateInfo(m, company.bill_day, so ? so.status : "NOT_STARTED"),
     month: m,
     status: so ? so.status : "NOT_STARTED",
     notes: so?.notes || "",
@@ -583,12 +585,34 @@ async function submittedFor(db, companyId, months) {
   return out;
 }
 
+/**
+ * When a customer's SOS for a month is due: { bill_day, bill_date, missed_days }. bill_day = the earliest
+ * Bill date of its contracts (null = none set). The SOS reports the month's completed services, so it is
+ * due on that day after the month ends - the same day the bill is raised: November SOS, day 10 -> 10 Dec
+ * (day 30 / 31 -> the month's last day). missed_days > 0 once that date has passed and the SOS is still
+ * not submitted.
+ */
+function billDateInfo(month, day, status) {
+  const d = Number(day);
+  if (!(d >= 1 && d <= 31)) return { bill_day: null, bill_date: null, missed_days: 0 };
+  const m = monthStart(month).slice(0, 7);
+  const dayIn = (ym) => {
+    const [y, mm] = ym.split("-").map(Number);
+    return `${ym}-${String(Math.min(d, new Date(Date.UTC(y, mm, 0)).getUTCDate())).padStart(2, "0")}`;
+  };
+  const monthEnd = C.monthRange(m).end;
+  const same = dayIn(m);
+  const billDate = same >= monthEnd ? same : dayIn(C.addMonths(`${m}-01`, 1).slice(0, 7));
+  const today = C.todayIst();
+  return { bill_day: d, bill_date: billDate, missed_days: status !== "SUBMITTED" && billDate < today ? C.daysBetween(billDate, today) : 0 };
+}
+
 /** Month overview: every customer with services to report, and where its SOS stands. */
 async function monthOverview(db, month, { q = null, groupId = null, companyIds = [] } = {}) {
   const m = monthStart(month);
   const end = C.monthRange(m.slice(0, 7)).end;
   const [rows] = await db.query(
-    `SELECT c.id AS company_id, c.name, g.name AS group_name, bp.bill_by_day,
+    `SELECT c.id AS company_id, c.name, g.name AS group_name, MIN(bc.bill_day) AS bill_day,
             COUNT(DISTINCT l.id) AS services, COUNT(DISTINCT l.site_id) AS outlets, COALESCE(SUM(IF(l.pricing_basis = 'PER_SERVICE', l.default_qty, 0)), 0) AS assigned,
             SUM(l.pricing_basis = 'PER_SERVICE') AS counted_lines,
             so.id AS sos_id, so.status, so.submitted_at, su.name AS submitted_by,
@@ -599,19 +623,21 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
        JOIN billing_contracts bc ON bc.id = l.contract_id
        JOIN companies c ON c.id = bc.company_id
        LEFT JOIN group_name g ON g.id = c.group_id
-       LEFT JOIN billing_profiles bp ON bp.company_id = c.id
        LEFT JOIN billing_sos so ON so.company_id = c.id AND so.month = ?
        LEFT JOIN users su ON su.id = so.submitted_by
       WHERE bc.status = 'ACTIVE' AND bc.start_date <= ? AND (bc.end_date IS NULL OR bc.end_date >= ?)
         AND l.is_active = 1 AND l.item_kind = 'SERVICE'
         AND (l.pricing_basis = 'PER_SERVICE' OR (bc.billing_type = 'TERMITE' AND l.pricing_basis = 'PER_UNIT' AND l.unit LIKE 'sq%'))
         AND l.effective_from <= ? AND (l.effective_to IS NULL OR l.effective_to >= ?)
+        -- not the months billed before this software ("First bill from", e.g. in Vyapar): a month is
+        -- listed once it is still to be billed here, or when an SOS was made for it
+        AND (so.id IS NOT NULL OR bc.next_period_start <= ?)
         AND (? IS NULL OR c.group_id = ?)
         ${companyIds.length ? "AND c.id IN (?)" : ""}
         AND (? IS NULL OR c.name LIKE CONCAT('%', ?, '%') OR g.name LIKE CONCAT('%', ?, '%'))
-      GROUP BY c.id, c.name, g.name, bp.bill_by_day, so.id, so.status, so.submitted_at, su.name
+      GROUP BY c.id, c.name, g.name, so.id, so.status, so.submitted_at, su.name
       ORDER BY c.name`,
-    [m, end, m, end, m, groupId, groupId, ...(companyIds.length ? [companyIds] : []), q, q, q]
+    [m, end, m, end, m, end, groupId, groupId, ...(companyIds.length ? [companyIds] : []), q, q, q]
   );
   const groups = await groupBillingFor(db, rows.map((r) => r.company_id));
   const list = rows.map((r) => ({
@@ -619,7 +645,8 @@ async function monthOverview(db, month, { q = null, groupId = null, companyIds =
     customer: r.name,
     group: r.group_name || null,
     billing_group: groups.get(r.company_id) || null,
-    bill_by_day: r.bill_by_day === null ? null : Number(r.bill_by_day),
+    // the earliest Bill date of its contracts in this month; missed once passed with the SOS not submitted
+    ...billDateInfo(m, r.bill_day, r.sos_id ? r.status : "NOT_STARTED"),
     services: Number(r.services),
     outlets: Number(r.outlets),
     outlet_names: r.outlet_names || "",

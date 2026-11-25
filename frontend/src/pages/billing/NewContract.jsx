@@ -12,8 +12,8 @@ import { STATES } from "./states";
 import { Field, Msg, BackButton } from "./ui";
 import ServiceToField from "./ServiceToField";
 import BillDayField from "./BillDayField";
-import LateAlertField from "./LateAlertField";
 import PoAreaField from "./PoAreaField";
+import { poAreasBody, poAreasProblem, poAreasText } from "./poAreas";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
 
 // New contract, one step at a time, with everything billing needs in one place:
@@ -53,8 +53,8 @@ const STEP_NAMES = { 1: "Customer", 2: "Contract", 3: "Purchase order", 4: "Serv
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z][0-9A-Z][0-9A-Z]$/;
 const SQM = "sq.m";
 const SQFT = "sq.ft";
-// Termite bill structure: priced per square metre or per square foot of treated area (the line's unit)
-const AREA_UNITS = [[SQM, "Square metre (sq. m)"], [SQFT, "Square feet (sq. ft)"]];
+// Termite bill structure: priced per square meter or per square foot of treated area (the line's unit)
+const AREA_UNITS = [[SQM, "Square meter (sq. m)"], [SQFT, "Square feet (sq. ft)"]];
 
 let lineKey = 0;
 // kind: SERVICE (from the service list) or CHEMICAL (typed; remembered for other customers).
@@ -150,18 +150,18 @@ export default function NewContract() {
   // 3. purchase order
   const [poId, setPoId] = useState("");
   const [addingPo, setAddingPo] = useState(false);
-  const [po, setPo] = useState({ po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", po_area: "", po_area_unit: "", kind: "STANDARD", remarks: "" });
+  const [po, setPo] = useState({ po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", areas: [], kind: "STANDARD", remarks: "" });
   const setP = (patch) => setPo((p) => ({ ...p, ...patch }));
   const { data: poData, reload: reloadPos } = useBilling(companyId && needsPo ? `/pos${qs({ company_id: companyId, status: "ACTIVE" })}` : null);
   const poRows = (poData?.rows || []).filter((p) => p.display_status !== "EXPIRED" && !p.contract_id);
-  const emptyPo = { po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", po_area: "", po_area_unit: "", kind: "STANDARD", remarks: "" };
+  const emptyPo = { po_number: "", po_date: today(), valid_from: "", expiry_date: "", open: false, po_amount: "", areas: [], kind: "STANDARD", remarks: "" };
   // Picking an existing PO fills in its details (shown, not edited, here).
   function choosePo(id) {
     const p = poRows.find((x) => x.id === id);
     setPoId(id);
     setAddingPo(false);
     setPo(p
-      ? { po_number: p.po_number, po_date: p.po_date || "", valid_from: p.valid_from || "", expiry_date: p.expiry_date || "", open: Boolean(p.is_open_po), po_amount: p.po_amount ?? "", po_area: p.po_area ?? "", po_area_unit: p.po_area_unit || "", area_used: p.area_used ?? 0, kind: p.kind || "STANDARD", remarks: p.remarks || "" }
+      ? { po_number: p.po_number, po_date: p.po_date || "", valid_from: p.valid_from || "", expiry_date: p.expiry_date || "", open: Boolean(p.is_open_po), po_amount: p.po_amount ?? "", areas: p.areas || [], kind: p.kind || "STANDARD", remarks: p.remarks || "" }
       : emptyPo);
   }
   function startNewPo() {
@@ -179,6 +179,10 @@ export default function NewContract() {
   const [lines, setLines] = useState([newLine(false)]);
   const termiteUnits = termite ? [...new Set(lines.filter((l) => l.kind === "SERVICE").map(lineUnit))] : [];
   // one unit for all the items: that unit; mixed: "sq. m / sq. ft"
+  // Termite: the rates per sq. ft / sq. m come from the PO (its "PO area and rate"); the Price step
+  // then only names the items and picks their unit.
+  const poRates = termite ? (po.areas || []).filter((a) => Number(a.rate) > 0) : [];
+  const poRateFor = (u) => poRates.find((a) => a.unit === u)?.rate;
   const areaLabel = termiteUnits.length > 1 ? "sq. m / sq. ft" : unitText(termiteUnits[0] || areaUnit);
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   // Services and / or chemicals: lines of a kind that is switched off are kept but not saved.
@@ -439,8 +443,9 @@ export default function NewContract() {
         if (!live) return;
         setProfileSaved(Boolean(p));
         setProfile(p
-          ? { billing_name: group?.name || p.billing_name || "", gst_number: p.gst_number || "", billing_address: p.billing_address || "", state_code: p.state_code || "29", payment_terms_days: p.payment_terms_days ?? 30 }
-          : { billing_name: group?.name || "", gst_number: "", billing_address: "", state_code: "29", payment_terms_days: 30 });
+          ? { billing_name: group?.name || p.billing_name || "", gst_number: p.gst_number || "", billing_address: p.billing_address || "", state_code: p.state_code || "29", payment_terms_days: p.payment_terms_days ?? 30,
+              service_offered_to: p.service_offered_to || "", service_to_on: Boolean(p.service_offered_to) }
+          : { billing_name: group?.name || "", gst_number: "", billing_address: "", state_code: "29", payment_terms_days: 30, service_offered_to: "", service_to_on: false });
       })
       .catch((err) => live && setMsg({ error: err.message }));
     return () => {
@@ -531,6 +536,7 @@ export default function NewContract() {
       if (pickedCompanies[0].category !== "RESIDENTIAL" && !gg) return "Type the GSTIN (Commercial customers are billed with GST).";
       if (gg && !GSTIN_RE.test(gg)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (gg && gg.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${gg.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
+      if (profile.service_to_on && !(profile.service_offered_to || "").trim()) return "Type the Service Offered To address, or untick it.";
       return "";
     }
     if (at_ === 1 && blockingDraft) return `${blockingDraft.customerName || "This customer"} has an unfinished contract. Continue it or discard it first.`;
@@ -568,7 +574,7 @@ export default function NewContract() {
         if (!po.po_number.trim()) return "Type the PO number.";
         if (!po.po_date) return "Choose the PO date.";
         if (po.po_amount === "" || Number(po.po_amount) <= 0) return "Type the PO amount.";
-        if (termite && po.po_area_unit && !(Number(po.po_area) > 0)) return "Type the PO area, or choose No area.";
+        if (termite && poAreasProblem(po.areas)) return poAreasProblem(po.areas);
       } else if (!poId) return "Choose a purchase order, or add a new one.";
     }
     if (at_ === 4) {
@@ -630,6 +636,7 @@ export default function NewContract() {
         await billingPut(`/group-profiles/${encodeURIComponent(groupId)}`, {
           billing_name: group.name, billing_address: profile.billing_address.trim(), state_code: profile.state_code,
           payment_terms_days: Number(profile.payment_terms_days) || 0, gst_number: profile.gst_number.trim().toUpperCase(),
+          service_offered_to: profile.service_to_on ? (profile.service_offered_to || "").trim() : null,
         });
         setProfileSaved(true);
       } else if (step === 1) {
@@ -649,7 +656,7 @@ export default function NewContract() {
         const created = await billingPost("/pos", {
           company_id: companyId, contract_id: null, po_number: po.po_number.trim(), po_date: po.po_date,
           valid_from: po.valid_from || null, expiry_date: po.open ? null : po.expiry_date || null,
-          po_amount: po.po_amount === "" ? null : po.po_amount, po_area: termite && po.po_area_unit && po.po_area !== "" ? po.po_area : null, po_area_unit: termite && po.po_area_unit ? po.po_area_unit : null, kind: po.kind, remarks: po.remarks || null,
+          po_amount: po.po_amount === "" ? null : po.po_amount, areas: termite ? poAreasBody(po.areas) : [], kind: po.kind, remarks: po.remarks || null,
         });
         // the PO copy (optional), uploaded once the PO exists
         if (poFile) {
@@ -665,6 +672,15 @@ export default function NewContract() {
         setPoId(created.id);
         setAddingPo(false);
         reloadPos();
+      }
+      // Termite: the PO's rate per sq. ft / sq. m fills the price items that have no rate yet.
+      // Every item takes the PO's rate for its unit (an item in a unit the PO lacks moves to the PO's first unit).
+      if (step === 3 && poRates.length) {
+        setLines((ls) => ls.map((l) => {
+          if (l.kind !== "SERVICE") return l;
+          const same = poRates.find((a) => a.unit === lineUnit(l)) || poRates[0];
+          return { ...l, rate: String(same.rate), unit: same.unit };
+        }));
       }
       setStep(nextAfter());
     } catch (err) {
@@ -924,9 +940,12 @@ export default function NewContract() {
                     setProfile({ ...shown, gst_number: g, ...(STATES.some(([c]) => c === code) ? { state_code: code } : {}) });
                   }} />
               </Field>
-              <Field label="Billing address" required className="bl-span2">
+              <Field label="Billing address" required>
                 <textarea className="ac-textarea" rows={3} disabled={locked} value={shown.billing_address} maxLength={1000} placeholder="As printed under Bill To" onChange={(e) => setProfile({ ...shown, billing_address: e.target.value })} />
               </Field>
+              {/* Service Offered To: a different address for the invoice's "Service Offered To" column, typed only when ticked. */}
+              <ServiceToField disabled={locked} on={Boolean(shown.service_to_on)} value={shown.service_offered_to || ""}
+                onToggle={(v) => setProfile({ ...shown, service_to_on: v })} onChange={(v) => setProfile({ ...shown, service_offered_to: v })} />
               <Field label="State (GST)" required hint={shown.state_code === "29" ? "Karnataka: CGST + SGST" : "Outside Karnataka: IGST"}>
                 <select className="ac-select" disabled={locked} value={shown.state_code} onChange={(e) => setProfile({ ...shown, state_code: e.target.value })}>
                   {STATES.map(([code, name]) => <option key={code} value={code}>{code} – {name}</option>)}
@@ -1048,11 +1067,8 @@ export default function NewContract() {
                   <Field label="Billing frequency" required>
                     <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
                   </Field>
-                  {/* Bill date and the late alert side by side (the alert is saved with the Print & email settings) */}
-                  <div className="nc-billday-pair">
-                    <BillDayField day={terms.bill_day} onDay={(v) => setT({ bill_day: v })} />
-                    {delivery && <LateAlertField value={delivery.bill_by_day ?? ""} onChange={(v) => setDelivery((d) => ({ ...d, bill_by_day: v }))} />}
-                  </div>
+                  {/* Bill date: the day to bill; once it passes unbilled, the Bill Run shows it as missed */}
+                  <BillDayField day={terms.bill_day} onDay={(v) => setT({ bill_day: v })} />
                   <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
                   <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
                 </>
@@ -1159,7 +1175,7 @@ export default function NewContract() {
                     <option value="">{!poData ? "Loading…" : poRows.length ? "Choose a PO…" : "No purchase orders yet"}</option>
                     {poRows.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.po_number} · {p.is_open_po ? "Open PO" : p.expiry_date ? `till ${dmy(p.expiry_date)}` : `from ${dmy(p.po_date)}`}{p.kind === "ADVANCE" ? " · Advance" : ""}{p.po_amount !== null ? ` · ₹${amount(p.po_amount)}` : ""}{termite && p.po_area !== null && p.po_area !== undefined ? ` · ${amount(p.area_balance)} of ${amount(p.po_area)} ${p.po_area_unit === "sq.ft" ? "sq. ft" : p.po_area_unit === "sq.m" ? "sq. m" : ""} left` : ""}
+                        {p.po_number} · {p.is_open_po ? "Open PO" : p.expiry_date ? `till ${dmy(p.expiry_date)}` : `from ${dmy(p.po_date)}`}{p.kind === "ADVANCE" ? " · Advance" : ""}{p.po_amount !== null ? ` · ₹${amount(p.po_amount)}` : ""}{termite && p.areas?.length ? ` · ${poAreasText(p.areas, { left: true })}` : ""}
                       </option>
                     ))}
                   </select>
@@ -1182,8 +1198,8 @@ export default function NewContract() {
               </Field>
               {/* Termite: the treated area the PO covers; each issued invoice's billed area is deducted from it, like the amount. */}
               {termite && (
-                <PoAreaField className="bl-span2" unit={po.po_area_unit} area={po.po_area} disabled={!addingPo} onChange={setP}
-                  hint={poId ? (po.po_area === "" ? "No area on this PO" : `${amount(Number(po.po_area) - Number(po.area_used || 0))} left · ${amount(po.area_used || 0)} billed`) : undefined} />
+                <PoAreaField className="bl-span2" areas={po.areas} disabled={!addingPo} onChange={(areas) => setP({ areas })}
+                  hint={poId && !po.areas?.length ? "No area on this PO" : undefined} />
               )}
               <Field label="Remarks" className="bl-span2"><input className="ac-input" value={po.remarks} disabled={!addingPo} maxLength={1000} onChange={(e) => setP({ remarks: e.target.value })} /></Field>
               {addingPo && (
@@ -1203,7 +1219,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">{termite ? "Price" : "Services and prices"}</h3>
             <p className="ac-sub" style={{ margin: "-6px 0 14px" }}>
-              {termite ? `Fix the rate per ${areaLabel} for each item; each invoice bills the treated area from the monthly SOS × the item's rate` : "Amount = quantity × rate"}
+              {termite ? (poRates.length ? `Name each item and pick its unit; the rate comes from the PO (${poRates.map((r) => `₹${amount(Number(r.rate))} per ${unitText(r.unit)}`).join(", ")}). Each invoice bills the treated area from the monthly SOS × that rate` : `Fix the rate per ${areaLabel} for each item; each invoice bills the treated area from the monthly SOS × the item's rate`) : "Amount = quantity × rate"}
               {residential || terms.gst_applicable === false ? ", no GST." : ", excluding GST (added on the invoice)."}
               {!termite && (terms.shortfall_billing === "FULL"
                 ? " Fixed amount: every month bills the services per month agreed here, even if fewer were done."
@@ -1217,14 +1233,20 @@ export default function NewContract() {
             {termite && (() => {
               const items = lines.filter((l) => l.kind === "SERVICE");
               const rows = items.length ? items : [null];
-              const setItem = (t, patch) => (t ? setLine(t.key, patch) : setLines([{ ...newLine(true), unit: areaUnit, ...patch }]));
+              const fromPo = poRates.length > 0;
+              // with the PO's rates: changing the unit takes the PO's rate for it
+              const withRate = (patch) => (fromPo && patch.unit ? { ...patch, rate: String(poRateFor(patch.unit) ?? "") } : patch);
+              const firstUnit = fromPo ? poRates[0].unit : areaUnit;
+              const setItem = (t, patch) => (t ? setLine(t.key, withRate(patch)) : setLines([{ ...newLine(true), ...withRate({ unit: firstUnit }), ...withRate(patch) }]));
               const many = rows.length > 1;
-              const grid = { display: "grid", gridTemplateColumns: many ? "2fr 1fr 1fr 32px" : "2fr 1fr 1fr", gap: 16 };
+              const cols = fromPo ? "2fr 1fr" : "2fr 1fr 1fr";
+              const grid = { display: "grid", gridTemplateColumns: many ? `${cols} 32px` : cols, gap: 16 };
+              const unitChoices = fromPo ? AREA_UNITS.filter(([v]) => poRateFor(v) !== undefined) : AREA_UNITS;
               // a new item takes the unit of the last item (one click for the common case)
               const addItem = () => {
-                const base = items.length ? lines : [{ ...newLine(true), unit: areaUnit }];
+                const base = items.length ? lines : [{ ...newLine(true), ...withRate({ unit: firstUnit }) }];
                 const last = base.filter((l) => l.kind === "SERVICE").pop();
-                setLines([...base, { ...newLine(true), unit: lineUnit(last) }]);
+                setLines([...base, { ...newLine(true), ...withRate({ unit: lineUnit(last) }) }]);
               };
               return (
                 <section className="nc-sec">
@@ -1233,15 +1255,15 @@ export default function NewContract() {
                     const name = <input className="ac-input" value={t?.item_name ?? ""} maxLength={255} placeholder={i === 0 ? "e.g. Termite Post-Construction Treatment" : "e.g. Termite Pre-Construction Treatment"} onChange={(e) => setItem(t, { item_name: e.target.value })} aria-label={`Item ${i + 1} name`} />;
                     const unit = (
                       <select className="ac-select" value={u} onChange={(e) => setItem(t, { unit: e.target.value })} aria-label={`Item ${i + 1} bill structure`}>
-                        {AREA_UNITS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        {unitChoices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     );
-                    const rate = <input type="number" min="0" step="0.01" className="ac-input" value={t?.rate ?? ""} placeholder="0.00" onChange={(e) => setItem(t, { rate: e.target.value })} aria-label={`Item ${i + 1} rate per ${u === SQFT ? "square foot" : "square metre"}`} />;
+                    const rate = <input type="number" min="0" step="0.01" className="ac-input" value={t?.rate ?? ""} placeholder="0.00" onChange={(e) => setItem(t, { rate: e.target.value })} aria-label={`Item ${i + 1} rate per ${u === SQFT ? "square foot" : "square meter"}`} />;
                     return (
                       <div key={t?.key ?? "new"} style={{ ...grid, alignItems: "end", marginBottom: 10 }}>
                         {i === 0 ? <Field label="Item name" required>{name}</Field> : name}
                         {i === 0 ? <Field label="Bill structure" required>{unit}</Field> : unit}
-                        {i === 0 ? <Field label={many ? "Rate (₹)" : `Rate per ${unitText(u)} (₹)`} required>{rate}</Field> : rate}
+                        {!fromPo && (i === 0 ? <Field label={many ? "Rate (₹)" : `Rate per ${unitText(u)} (₹)`} required>{rate}</Field> : rate)}
                         {many && (
                           <button type="button" className="bl-x" style={{ marginBottom: 8 }} onClick={() => setLines(lines.filter((x) => x.key !== t.key))} aria-label={`Remove item ${i + 1}`}>✕</button>
                         )}
@@ -1250,8 +1272,8 @@ export default function NewContract() {
                   })}
                   <div style={{ ...grid, color: "#64748b", fontSize: 12 }}>
                     <span>Printed on the invoice line</span>
-                    <span>Rate per sq. m or per sq. ft</span>
-                    <span>The amount for 1 unit. The Service Coordinator enters each item's treated area on the monthly SOS.</span>
+                    <span>{fromPo ? "Priced at the PO's rate for this unit" : "Rate per sq. m or per sq. ft"}</span>
+                    {!fromPo && <span>The amount for 1 unit. The Service Coordinator enters each item's treated area on the monthly SOS.</span>}
                   </div>
                   <button type="button" className="sp-add" style={{ marginTop: 12 }} onClick={addItem}>+ Add item</button>
                 </section>
@@ -1406,8 +1428,8 @@ export default function NewContract() {
                             {l.item_name && !serviceGroups.some(([, names]) => names.includes(l.item_name)) && <option value={l.item_name}>{l.item_name}</option>}
                           </select>
                         </div>
-                        <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={termite ? "Rate per square metre" : "Amount"} />
-                        {termite && <input type="number" min="0" step="0.01" className="ac-input" value={l.area} placeholder={areaLabel} onChange={(e) => setLine(l.key, { area: e.target.value })} aria-label={`Area in ${areaUnit === SQFT ? "square feet" : "square metres"}`} />}
+                        <input type="number" min="0" step="0.01" className="ac-input" value={l.rate} placeholder="0.00" onChange={(e) => setLine(l.key, { rate: e.target.value })} aria-label={termite ? "Rate per square meter" : "Amount"} />
+                        {termite && <input type="number" min="0" step="0.01" className="ac-input" value={l.area} placeholder={areaLabel} onChange={(e) => setLine(l.key, { area: e.target.value })} aria-label={`Area in ${areaUnit === SQFT ? "square feet" : "square meters"}`} />}
                         {canPlan && !termite && (
                           <div className="bl-stp sp-stp">
                             <button type="button" onClick={() => setLine(l.key, { visits: Math.max(1, (Number(l.visits) || 1) - 1) })} aria-label="Fewer per month">−</button>
@@ -1513,7 +1535,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Print &amp; email</h3>
             {delivery ? (
-              <DeliveryFields form={delivery} setForm={setDelivery} showAlert={false} />
+              <DeliveryFields form={delivery} setForm={setDelivery} />
             ) : (
               <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
             )}
@@ -1543,7 +1565,7 @@ export default function NewContract() {
                 {profile?.billing_address?.trim() && (
                   <div className="nc-rv-line nc-rv-addr"><FiMapPin aria-hidden="true" /><span title={profile.billing_address.trim()}><small>Billing address</small><em className="nc-rv-clamp">{oneLine(profile.billing_address)}</em></span></div>
                 )}
-                {!groupMode && profile?.service_to_on && profile?.service_offered_to?.trim() && (
+                {profile?.service_to_on && profile?.service_offered_to?.trim() && (
                   <div className="nc-rv-line nc-rv-addr"><FiMapPin aria-hidden="true" /><span title={profile.service_offered_to.trim()}><small>Service offered to</small><em className="nc-rv-clamp">{oneLine(profile.service_offered_to)}</em></span></div>
                 )}
                 {profile?.gst_number && <div className="nc-rv-line"><FiCreditCard aria-hidden="true" /><span className="nc-rv-mono" title="GSTIN">{profile.gst_number}</span></div>}

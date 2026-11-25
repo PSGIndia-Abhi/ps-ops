@@ -96,8 +96,8 @@ function buildContent(inv, number) {
     ship_to: inv.service_offered_to
       ? [{ name: "", addresses: String(inv.service_offered_to).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) }]
       : [],
-    // No "Service Offered To" column unless it is set; a group based contract never has one.
-    hide_ship_to: inv.contract.contract_kind === "GROUP" || !inv.service_offered_to,
+    // No "Service Offered To" column unless it is set (the customer's, or the group's for a group contract).
+    hide_ship_to: !inv.service_offered_to,
     // Termite invoices print Bill To + Invoice Details only (no Service Offered To) and no Bill Value column
     termite: inv.contract.billing_type === "TERMITE",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),
@@ -126,6 +126,17 @@ async function issueOne(pool, id, req, { confirmWarnings = false } = {}) {
       throw C.bad("Confirm the warnings before issuing (send confirm_warnings: true)", { errors: chk.warnings });
     }
     const inv = chk.invoice;
+
+    // 1b. A Bill Run invoice is dated the day it is issued (the draft's date was only a preview); the
+    // due date keeps the same payment terms (days after the invoice date). A manual invoice keeps the
+    // date typed for it.
+    if (!inv.is_manual) {
+      const today = C.todayIst();
+      const termsDays = inv.invoice_date && inv.due_date ? Math.max(0, C.daysBetween(inv.invoice_date, inv.due_date)) : 0;
+      inv.invoice_date = today;
+      inv.due_date = C.addDays(today, termsDays);
+      await conn.query("UPDATE billing_invoices SET invoice_date = ?, due_date = ? WHERE id = ?", [inv.invoice_date, inv.due_date, id]);
+    }
 
     // 2. the next number in the main series, carrying on from Vyapar's last invoice (numbering.js)
     const { fy, seq, number } = await nextInvoiceNumber(conn, inv.invoice_date);

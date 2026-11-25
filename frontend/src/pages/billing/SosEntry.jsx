@@ -38,6 +38,15 @@ export default function SosEntry() {
   const month = params.get("month") || thisMonth();
   // Opened from the Bill Run ("SOS submitted - view"): the back arrow returns there, not to Monthly SOS.
   const fromRun = params.get("from") === "run";
+  // Opened from the Bill Run: back to the same view there (a date, a month or All months).
+  const runDate = params.get("rundate");
+  const runMonth = params.get("runmonth");
+  const runBack = /^\d{4}-\d{2}-\d{2}$/.test(runDate || "") ? `?date=${runDate}`
+    : runMonth === "ALL" ? "?month=ALL"
+      : /^\d{4}-\d{2}$/.test(runMonth || "") ? `?month=${runMonth}&view=month` : `?month=${month}&view=month`;
+  // Opened from Monthly SOS on a date: the back arrow returns to that date (an SOS is due after its
+  // month, so the date is often in the next month: November SOS opened on 10 Dec).
+  const backDate = /^\d{4}-\d{2}-\d{2}$/.test(params.get("date") || "") ? params.get("date") : null;
   const { me } = useOutletContext();
   const canFill = me.can("MANAGE_SERVICE_PLANS");
   const canSendBack = me.can("GENERATE_INVOICE");
@@ -213,7 +222,7 @@ export default function SosEntry() {
   return (
     <div className="ac-page sos-page">
       <div className="sos-top">
-        <button type="button" className="sos-back" onClick={() => navigate(fromRun ? `${BILLING_HOME}/run?month=${month}` : `${BILLING_HOME}/sos?month=${month}`)}
+        <button type="button" className="sos-back" onClick={() => navigate(fromRun ? `${BILLING_HOME}/run${runBack}` : backDate ? `${BILLING_HOME}/sos?date=${backDate}` : `${BILLING_HOME}/sos?month=${month}${params.get("view") === "month" ? "&view=month" : ""}`)}
           aria-label={fromRun ? "Back to Bill Run" : "Back to Monthly SOS"} title={fromRun ? "Bill Run" : "Monthly SOS"}><FiArrowLeft /></button>
         <div className="sos-top-main">
           <h1>{data.billing_group ? data.billing_group.group : data.customer}</h1>
@@ -221,7 +230,12 @@ export default function SosEntry() {
             <span className={`bl-status ${STATUS_TONE[statusCls] || "grey"}`}><span className="bl-status-dot" />{statusLabel}</span>
             {data.structures.map((st) => <span key={st}><FiLayers /> {st === "FIXED" ? "Fixed amount" : "Service based"}</span>)}
             {data.group && <span><FiUsers /> {data.group}</span>}
-            {data.bill_by_day && <span><FiCalendar /> Bill by day {data.bill_by_day}</span>}
+            {data.bill_date && <span><FiCalendar /> Bill date {new Date(`${data.bill_date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" })}</span>}
+            {data.missed_days > 0 && (
+              <span className="br-tag missed" style={{ marginTop: 0 }} title="The Bill date has passed and this SOS is not submitted yet - Accounts are waiting for it">
+                <FiAlertTriangle /> Missed · {data.missed_days} day{data.missed_days === 1 ? "" : "s"} late
+              </span>
+            )}
           </div>
         </div>
         <div className="sos-monthpill">

@@ -195,12 +195,12 @@ export default function AccountsDashboard() {
         </section>
 
         <section className="ac-card ad-panel ad-late">
-          <div className="bl-panel-title"><h3 className="ac-card-title" style={{ margin: 0 }}><FiAlertTriangle /> Late - bill-by day passed</h3><span className="bl-tag err">{data?.late.length ?? 0}</span></div>
+          <div className="bl-panel-title"><h3 className="ac-card-title" style={{ margin: 0 }}><FiAlertTriangle /> Missed bill date</h3><span className="bl-tag err">{data?.late.length ?? 0}</span></div>
           {loading && !data ? <RowsSkeleton rows={3} avatar /> : !data?.late.length ? <div className="ad-empty ok"><FiCheckCircle /> Nobody is late.</div> : (
             <div className="cd-list">
               {data.late.slice(0, 8).map((r) => (
                 <button key={r.contract_id} type="button" className="cd-item" onClick={() => (r.sos === "PENDING" ? goSos(r) : goRun())}>
-                  <span className="cd-item-main"><b>{r.customer}</b><span className="ac-sub">{r.contract_code} · {periodLabel(r.period_start, r.period_end)}{r.bill_by_day ? ` · bill by day ${r.bill_by_day}` : ""}</span></span>
+                  <span className="cd-item-main"><b>{r.customer}</b><span className="ac-sub">{r.contract_code} · {periodLabel(r.period_start, r.period_end)}{r.missed_days > 0 ? ` · ${r.missed_days} day${r.missed_days === 1 ? "" : "s"} late` : ""}</span></span>
                   <span className={`bl-tag ${r.sos === "PENDING" ? "warn" : r.already_drafted ? "info" : "err"}`}>{r.sos === "PENDING" ? "Waiting for SOS" : r.already_drafted ? "Draft - issue it" : "Not billed"}</span>
                 </button>
               ))}

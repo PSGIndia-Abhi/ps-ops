@@ -48,7 +48,7 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
   const others = group ? 0 : Math.max(0, Number(customer.active_contracts || 0) - 1);
 
   async function save() {
-    if (!group && serviceToOn && !(form.service_offered_to || "").trim()) {
+    if (serviceToOn && !(form.service_offered_to || "").trim()) {
       setMsg({ error: "Type the Service Offered To address, or untick it." });
       return;
     }
@@ -59,8 +59,8 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
         billing_name: form.billing_name, billing_address: form.billing_address, state_code: form.state_code,
         payment_terms_days: Number(form.payment_terms_days) || 0, is_active: form.is_active,
         gst_number: (form.gst_number || "").trim().toUpperCase(),
-        // the customer's own Service Offered To (a group contract has none)
-        ...(group ? {} : { service_offered_to: serviceToOn ? (form.service_offered_to || "").trim() : null }),
+        // Service Offered To: the customer's own, or the group's for a group contract
+        service_offered_to: serviceToOn ? (form.service_offered_to || "").trim() : null,
       });
       setLoaded(saved);
       setEdits(null);
@@ -108,7 +108,7 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
             <b>{form.billing_name}</b>
             <div className="bl-addr">{form.billing_address}</div>
           </dd>
-          {!group && form.service_offered_to && (
+          {form.service_offered_to && (
             <>
               <dt>Service Offered To</dt>
               <dd><div className="bl-addr">{form.service_offered_to}</div></dd>
@@ -148,15 +148,13 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
               />
             </Field>
           </div>
-          {/* Billing address and Service Offered To side by side (a group has no Service Offered To). */}
-          <div className={group ? "" : "bl-grid g2"}>
+          {/* Billing address and Service Offered To side by side. */}
+          <div className="bl-grid g2">
             <Field label="Billing address" required>
               <textarea className="ac-textarea" rows={3} value={form.billing_address} disabled={!canEdit} maxLength={1000} onChange={(e) => set({ billing_address: e.target.value })} placeholder="One line per row, as printed under Bill To" />
             </Field>
-            {!group && (
-              <ServiceToField disabled={!canEdit} on={serviceToOn} value={form.service_offered_to || ""}
-                onToggle={(v) => set({ service_to_on: v })} onChange={(v) => set({ service_offered_to: v })} />
-            )}
+            <ServiceToField disabled={!canEdit} on={serviceToOn} value={form.service_offered_to || ""}
+              onToggle={(v) => set({ service_to_on: v })} onChange={(v) => set({ service_offered_to: v })} />
           </div>
           <div className="bl-grid g2">
             <Field label="State (GST)" required hint={form.state_code === "29" ? "Karnataka: CGST + SGST" : "Outside Karnataka: IGST"}>

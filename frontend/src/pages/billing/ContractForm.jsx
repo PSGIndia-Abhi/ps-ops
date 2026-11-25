@@ -26,13 +26,13 @@ const TYPES = [["AMC", "AMC"], ["ONE_TIME", "One-time"], ["TERMITE", "Termite"],
 const PO_TYPES = ["CHEMICAL", "TERMITE"]; // always billed against a PO
 const SQM = "sq.m";
 const SQFT = "sq.ft";
-// Termite bill structure: priced per square metre or per square foot of treated area (the line's unit)
-const AREA_UNITS = [[SQM, "Square metre (sq. m)"], [SQFT, "Square feet (sq. ft)"]];
+// Termite bill structure: priced per square meter or per square foot of treated area (the line's unit)
+const AREA_UNITS = [[SQM, "Square meter (sq. m)"], [SQFT, "Square feet (sq. ft)"]];
 
 const emptyLine = (siteId = "", type = "", kind = "SERVICE") => ({
   key: `n${Date.now()}${Math.random()}`, site_id: siteId, sac_code: kind === "CHEMICAL" ? "" : "998531", rate: "", default_qty: "", plan_service_type: "", plan_sub_service: "",
   item_kind: kind, invoice_group: "",
-  // Termite work is priced per square metre or square foot (Bill structure): area x rate, set for each customer.
+  // Termite work is priced per square meter or square foot (Bill structure): area x rate, set for each customer.
   ...(type === "TERMITE" && kind === "SERVICE" ? { item_name: "Termite Post-Construction Treatment", pricing_basis: "PER_UNIT", unit: SQM } : { item_name: "", pricing_basis: "FIXED", unit: "Nos", default_qty: 1 }),
 });
 const isSqm = (l) => l.pricing_basis === "PER_UNIT" && /^sq/i.test(l.unit || "");
@@ -221,7 +221,7 @@ export default function ContractForm() {
   const linesShown = isNew ? newLines : contract.lines;
   const sqmMode = typeIs("TERMITE") || linesShown.some(isSqm);
   const cols = 7;
-  // Termite bill structure: per square metre or per square foot (the unit of its area lines). A saved
+  // Termite bill structure: per square meter or per square foot (the unit of its area lines). A saved
   // contract keeps the unit of its price lines; new lines added to it use the same unit.
   const areaUnit = isNew ? (form.area_unit === SQFT ? SQFT : SQM) : linesShown.find(isSqm)?.unit === SQFT ? SQFT : SQM;
   // Termite items can each be priced per sq. m or per sq. ft: with both, the labels say so and each
@@ -397,14 +397,10 @@ export default function ContractForm() {
           <section className="ct-sec">
             <h3><span className="ct-sec-ic purple"><FiFileText /></span>Invoice</h3>
             <div className="bl-grid g2">
-              <Field label="Invoice grouping">
-                <select className="ac-select" value={form.invoice_grouping} disabled={readOnly} onChange={(e) => set({ invoice_grouping: e.target.value })}>
-                  <option value="PER_CUSTOMER">One invoice for the customer</option>
-                  <option value="PER_SITE">One invoice per outlet</option>
-                </select>
-              </Field>
+              {/* Invoice grouping is not asked (New Contract always makes one invoice for the customer);
+                  the saved value is kept and sent back unchanged on save. */}
               {typeIs("TERMITE") ? (
-                // Termite is billed on the treated area: rate per square metre or per square foot × area
+                // Termite is billed on the treated area: rate per square meter or per square foot × area
                 <Field label="Bill structure" required hint={isNew ? `Rate per ${areaLabel} × treated area` : "Set by the contract's price lines"}>
                   <select
                     className="ac-select"
@@ -688,10 +684,10 @@ function LineRow({ line, sqmMode, sites, groups, catalog, onChange, onRemove, on
           </select>
         )}
       </td>
-      {sqmMode && <td>{sqm ? rateInput(line.unit === SQFT ? "Rate per square foot" : "Rate per square metre") : <span className="ac-sub">—</span>}</td>}
+      {sqmMode && <td>{sqm ? rateInput(line.unit === SQFT ? "Rate per square foot" : "Rate per square meter") : <span className="ac-sub">—</span>}</td>}
       {sqmMode && (
         <td>
-          {sqm ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.default_qty ?? ""} placeholder={line.unit === SQFT ? "sq. ft" : "sq. m"} onChange={(e) => onChange({ default_qty: e.target.value })} aria-label={line.unit === SQFT ? "Area in square feet" : "Area in square metres"} />
+          {sqm ? <input type="number" min="0" step="0.01" className="bl-cell-input num" value={line.default_qty ?? ""} placeholder={line.unit === SQFT ? "sq. ft" : "sq. m"} onChange={(e) => onChange({ default_qty: e.target.value })} aria-label={line.unit === SQFT ? "Area in square feet" : "Area in square meters"} />
             : <span className="ac-sub">—</span>}
         </td>
       )}
