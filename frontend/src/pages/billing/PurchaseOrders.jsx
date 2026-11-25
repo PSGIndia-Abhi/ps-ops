@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import { FiPaperclip, FiUploadCloud, FiX } from "react-icons/fi";
 import { EmptyRow } from "../accountant/ui";
 import { billingPost, billingPut, billingUpload, openPdf, qs, useBilling } from "./billingApi";
@@ -7,8 +7,7 @@ import { amount, dmy, rupees, rupeesShort } from "./format";
 import { Field, Kpi, Modal, Msg, StatusBadge, BackButton } from "./ui";
 import useDebounced from "./useDebounced";
 import PoAreaField from "./PoAreaField";
-
-const unitShort = (u) => (u === "sq.ft" ? "sq. ft" : u === "sq.m" ? "sq. m" : "");
+import { poAreasBody, poAreasProblem, poAreasText } from "./poAreas";
 
 // Purchase Orders: standard POs, Open POs (no expiry) and advance POs (Termite: an advance the
 // customer paid, adjusted against each invoice). Expiry is tracked here and alerted daily.
@@ -97,8 +96,8 @@ export default function PurchaseOrders() {
                           </>
                         )}
                         {/* Termite PO with an area: area left after the issued invoices */}
-                        {p.po_area !== null && p.po_area !== undefined && (
-                          <div className="ac-sub" style={{ fontSize: 12, marginTop: 4, ...(p.area_balance < 0 ? { color: "#dc2626" } : {}) }}>Area: {amount(p.area_balance)} of {amount(p.po_area)} {unitShort(p.po_area_unit)} left</div>
+                        {p.areas?.length > 0 && (
+                          <div className="ac-sub" style={{ fontSize: 12, marginTop: 4, ...(p.areas.some((a) => a.balance < 0) ? { color: "#dc2626" } : {}) }}>Area: {poAreasText(p.areas, { left: true })}</div>
                         )}
                       </td>
                       <td>
@@ -123,7 +122,7 @@ export default function PurchaseOrders() {
 
 function PoForm({ po, onClose, onSaved }) {
   const { data: customers } = useBilling(po ? null : "/customers");
-  const [form, setForm] = useState(po ? { ...po, expiry_date: po.expiry_date || "", valid_from: po.valid_from || "", po_amount: po.po_amount ?? "", po_area: po.po_area ?? "", po_area_unit: po.po_area_unit || "", remarks: po.remarks || "" } : { company_id: "", contract_id: "", po_number: "", po_date: "", valid_from: "", expiry_date: "", po_amount: "", po_area: "", po_area_unit: "", kind: "STANDARD", remarks: "" });
+  const [form, setForm] = useState(po ? { ...po, expiry_date: po.expiry_date || "", valid_from: po.valid_from || "", po_amount: po.po_amount ?? "", areas: po.areas || [], remarks: po.remarks || "" } : { company_id: "", contract_id: "", po_number: "", po_date: "", valid_from: "", expiry_date: "", po_amount: "", areas: [], kind: "STANDARD", remarks: "" });
   const [openPo, setOpenPo] = useState(po ? po.is_open_po : false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -146,8 +145,8 @@ function PoForm({ po, onClose, onSaved }) {
       setError("Type the PO amount.");
       return;
     }
-    if (form.po_area_unit && !(Number(form.po_area) > 0)) {
-      setError("Type the PO area, or choose No area.");
+    if (poAreasProblem(form.areas)) {
+      setError(poAreasProblem(form.areas));
       return;
     }
     setBusy(true);
@@ -155,7 +154,7 @@ function PoForm({ po, onClose, onSaved }) {
     const body = {
       company_id: form.company_id, contract_id: form.contract_id || null, po_number: form.po_number, po_date: form.po_date,
       valid_from: form.valid_from || null, expiry_date: openPo ? null : form.expiry_date || null,
-      po_amount: form.po_amount === "" ? null : form.po_amount, po_area: form.po_area_unit && form.po_area !== "" && form.po_area !== null ? form.po_area : null, po_area_unit: form.po_area_unit || null, kind: form.kind, remarks: form.remarks || null,
+      po_amount: form.po_amount === "" ? null : form.po_amount, areas: poAreasBody(form.areas), kind: form.kind, remarks: form.remarks || null,
       ...(po ? { status: form.status } : {}),
     };
     try {
@@ -201,7 +200,7 @@ function PoForm({ po, onClose, onSaved }) {
           <Field label="PO amount (₹, incl. GST)" required>
             <input type="number" min="0" step="0.01" className="ac-input" value={form.po_amount} onChange={(e) => set({ po_amount: e.target.value })} />
           </Field>
-          <PoAreaField className="bl-span2" unit={form.po_area_unit} area={form.po_area} onChange={set} hint={form.po_area_unit ? undefined : "Termite only, optional · choose square feet or square metre, then type the area"} />
+          <PoAreaField className="bl-span2" areas={form.areas} onChange={(areas) => set({ areas })} hint={form.areas?.length ? undefined : "Termite only, optional · tick square feet, square meter or both, then type the area and the rate"} />
           {po && (
             <Field label="Status">
               <select className="ac-select" value={form.status} onChange={(e) => set({ status: e.target.value })}>
@@ -273,8 +272,8 @@ function PoDetail({ id, canEdit, onClose, onEdit, onChanged }) {
               <div className="ac-stat blue"><div className="ac-stat-label">PO amount</div><div className="ac-stat-value">{po.po_amount === null ? "No limit" : rupees(po.po_amount)}</div></div>
               <div className="ac-stat orange"><div className="ac-stat-label">{po.kind === "ADVANCE" ? "Adjusted" : "Invoiced"}</div><div className="ac-stat-value">{rupees(po.invoiced)}</div></div>
               <div className="ac-stat green"><div className="ac-stat-label">Balance</div><div className="ac-stat-value">{po.balance === null ? "—" : rupees(po.balance)}</div></div>
-              {po.po_area !== null && po.po_area !== undefined && (
-                <div className="ac-stat"><div className="ac-stat-label">Area · used / left</div><div className="ac-stat-value" style={{ fontSize: 16 }}>{amount(po.po_area)} {unitShort(po.po_area_unit)} · {amount(po.area_used)} / {amount(po.area_balance)}</div></div>
+              {po.areas?.length > 0 && (
+                <div className="ac-stat"><div className="ac-stat-label">Area left</div><div className="ac-stat-value" style={{ fontSize: 15 }}>{poAreasText(po.areas, { left: true })}</div><div className="ac-sub" style={{ fontSize: 12 }}>{poAreasText(po.areas)}</div></div>
               )}
               <div className="ac-stat"><div className="ac-stat-label">Status</div><div className="ac-stat-value" style={{ fontSize: 16 }}><StatusBadge value={po.display_status} /></div></div>
             </div>
@@ -285,7 +284,7 @@ function PoDetail({ id, canEdit, onClose, onEdit, onChanged }) {
                 <thead><tr><th>Invoice</th><th>Date</th><th className="ac-num">Amount (₹)</th><th>Status</th></tr></thead>
                 <tbody>
                   {!po.invoices.length ? <EmptyRow cols={4} text="No invoices yet" /> : po.invoices.map((i) => (
-                    <tr key={i.id}><td>{i.invoice_number}</td><td>{dmy(i.date)}</td><td className="bl-num">{amount(i.amount)}</td><td><StatusBadge value={i.status} /></td></tr>
+                    <tr key={i.id}><td><Link className="bl-link" style={{ fontSize: "inherit" }} to={`/billing/invoices/${i.id}`} title="Open this invoice">{i.invoice_number}</Link></td><td>{dmy(i.date)}</td><td className="bl-num">{amount(i.amount)}</td><td><StatusBadge value={i.status} /></td></tr>
                   ))}
                 </tbody>
               </table>

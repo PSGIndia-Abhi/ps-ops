@@ -96,8 +96,8 @@ function buildContent(inv, number) {
     ship_to: inv.service_offered_to
       ? [{ name: "", addresses: String(inv.service_offered_to).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) }]
       : [],
-    // No "Service Offered To" column unless it is set; a group based contract never has one.
-    hide_ship_to: inv.contract.contract_kind === "GROUP" || !inv.service_offered_to,
+    // No "Service Offered To" column unless it is set (the customer's, or the group's for a group contract).
+    hide_ship_to: !inv.service_offered_to,
     // Termite invoices print Bill To + Invoice Details only (no Service Offered To) and no Bill Value column
     termite: inv.contract.billing_type === "TERMITE",
     pos: inv.pos.map((p) => ({ po_number: p.po_number, po_date: p.po_date })),

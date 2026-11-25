@@ -45,6 +45,8 @@ function profileOut(p, groupName) {
     // the group's name (kept in step if the group is renamed later)
     billing_name: groupName ? String(groupName).trim() : p.billing_name,
     billing_address: p.billing_address,
+    // the group's own "Service Offered To" address (null = not printed)
+    service_offered_to: p.service_offered_to || null,
     state_code: p.state_code,
     state_name: p.state_name,
     gst_number: p.gst_number || "",
@@ -97,6 +99,11 @@ const saveGroupProfile = C.handle("Failed to save the group's billing details", 
        is_active = 1, updated_by = VALUES(updated_by)`,
     row
   );
+  // Service Offered To: saved only when sent (null / "" clears it).
+  if (b.service_offered_to !== undefined) {
+    const serviceTo = C.str(b.service_offered_to, "Service Offered To", { max: 1000 }) || null;
+    await pool.query("UPDATE billing_group_profiles SET service_offered_to = ? WHERE group_id = ?", [serviceTo, groupId]);
+  }
   await logAudit(pool, req, {
     module: "BILLING",
     action: "GROUP_PROFILE_SAVED",
