@@ -414,8 +414,6 @@ export default function NewContract() {
   // "Email invoices automatically" ticked unless the customer already has its emails set up (then its
   // own choice stays).
   const withBillByDefault = (f, data) => ({ ...f, bill_by_day: f.bill_by_day || 25, auto_email: f.auto_email || !data?.settings?.invoice_emails?.length });
-  const toText = (d) => (d?.parts || []).map((x) => x.to.trim()).filter(Boolean).join(", ");
-  const filledParts = (d) => (d?.parts || []).filter((x) => x.to.trim());
   // Group contract: print copies and email for the group's invoice, kept with the main company (the
   // first ticked one, which the invoice is made under); no per-outlet settings (one invoice for the group).
   useEffect(() => {
