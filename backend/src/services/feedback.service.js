@@ -981,10 +981,13 @@ async function callList(req) {
 
   const inner = `
     SELECT r.id AS request_id, DATE_FORMAT(r.period_month, '%Y-%m') AS call_month, ${CALL_WINDOW},
-           -- Overdue: past its due date, not done, and nobody has tried calling yet (a call not
-           -- answered, busy or a wrong number is not overdue).
+           -- Overdue: past its due date, not done, and no action taken on it yet. Any action ends
+           -- it: a call result saved (answered, no answer, busy, wrong number), the feedback form
+           -- sent, or the right number asked from the service coordinator.
            r.due_date, (r.due_date < CURDATE() AND r.status <> 'DONE'
-             AND NOT EXISTS (SELECT 1 FROM feedback_call_attempts oa WHERE oa.request_id = r.id)) AS overdue,
+             AND NOT EXISTS (SELECT 1 FROM feedback_call_attempts oa WHERE oa.request_id = r.id)
+             AND NOT EXISTS (SELECT 1 FROM feedback_form_links ol WHERE ol.request_id = r.id)
+             AND NOT EXISTS (SELECT 1 FROM feedback_number_requests onr WHERE onr.request_id = r.id)) AS overdue,
            s.id AS site_id, s.name AS site_name, s.city AS site_city,
            co.id AS company_id, co.name AS company_name,
            ${CALL_VISITS("COUNT(DISTINCT v.id)")} AS visit_count,

@@ -97,6 +97,7 @@ import FeedbackCallPage from "./pages/feedback/CallPage";
 import FeedbackTicketList from "./pages/feedback/TicketList";
 import FeedbackTicketPage from "./pages/feedback/TicketPage";
 import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
+import FeedbackAlerts from "./pages/feedback/Alerts";
 import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
 import FeedbackIssues from "./pages/feedback/IssuesMaster";
 import FeedbackTicketsShell from "./pages/feedback/FeedbackTicketsShell";
@@ -414,6 +415,7 @@ const router = createBrowserRouter([
       { path: "tickets", element: <FeedbackTicketList /> },
       { path: "tickets/:id", element: <FeedbackTicketPage /> },
       { path: "report", element: <FeedbackCustomerReport /> },
+      { path: "alerts", element: <FeedbackAlerts /> },
       { path: "questions", element: <FeedbackQuestions /> },
       { path: "issues", element: <FeedbackIssues /> },
           { path: "schedule", element: <FeedbackSchedule /> },

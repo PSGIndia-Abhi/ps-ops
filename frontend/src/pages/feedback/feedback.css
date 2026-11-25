@@ -1328,3 +1328,21 @@ button.fb-fchip { font: inherit; font-size: 13px; padding-right: 34px; }
 .fb-done-ticket-no { font-weight: 800; color: var(--fb-primary); }
 .fb-done-ticket-t { flex: 1 1 140px; min-width: 0; color: #334155; overflow-wrap: anywhere; }
 .fb-done-ticket-go { margin-left: auto; color: var(--fb-muted); }
+
+/* Sidebar: the Alerts item in red (dark red when open) */
+.nav-btn.fb-nav-alert { color: #dc2626; font-weight: 700; background: #fef2f2; border: 1px solid #fecaca; }
+.nav-btn.fb-nav-alert:hover { background: #fee2e2; }
+.nav-btn.fb-nav-alert.active { background: #dc2626; color: #fff; border-color: #dc2626; }
+.nav-btn.fb-nav-alert.active .fb-nav-count { background: #fff; color: #dc2626; }
+
+/* Call schedule: rows with no schedule (Not scheduled / All views) */
+.fb-row-unscheduled td { background: #fffdf5; }
+.fb-ns-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #b45309; font-size: 12px; font-weight: 600; }
+.fb-check-col { width: 36px; text-align: center; }
+.fb-check-col input { width: 16px; height: 16px; cursor: pointer; accent-color: #0284c7; }
+.fb-row-unscheduled { cursor: pointer; }
+.fb-row-unscheduled.is-picked td { background: #e0f2fe; }
+/* Pager: page number buttons */
+.fb-page-no { min-width: 32px; padding: 0 8px; }
+.fb-page-no.is-on { background: #0284c7; border-color: #0284c7; color: #fff; }
+.fb-page-gap { padding: 0 4px; color: #64748b; font-weight: 700; letter-spacing: 1px; }

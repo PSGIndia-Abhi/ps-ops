@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FiAlertCircle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
 import { deleteSchedule, formatDay, getScheduleOptions, getSchedules, saveSchedule } from "./feedbackApi";
-import { Card, Chip, Empty, ErrorBox, Loading, Modal, PageHead, Switch, Toast } from "./ui";
+import { Card, Chip, Empty, ErrorBox, Loading, Modal, PageHead, Segmented, Switch, Toast } from "./ui";
 
 // Feedback Desk › Masters › Call schedule (admin, service coordinators, operations managers): which
 // customers and sites get feedback calls, and how often. Sites without a schedule get no calls.
@@ -140,7 +140,6 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
   // Already scheduled: the whole customer, or single sites of it.
   const takenWhole = useMemo(() => new Set(taken.filter((t) => !t.site_id).map((t) => t.company_id)), [taken]);
   const takenSites = useMemo(() => new Set(taken.filter((t) => t.site_id).map((t) => t.site_id)), [taken]);
-  const siteTaken = (cid, sid) => takenWhole.has(cid) || takenSites.has(sid);
   // The "all sites" row is blocked when the customer, or any of its sites, already has a schedule
   // (a whole-customer schedule would call those sites twice).
   const customerTaken = (c) => takenWhole.has(c.id) || c.sites.some((st) => takenSites.has(st.id));
@@ -156,6 +155,25 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
       })
       .filter(Boolean);
   }, [q, customers]);
+
+  // Already scheduled customers and sites are not listed at all (edit those on their schedule).
+  // A customer with some sites scheduled shows only its free sites (no "All sites" row: that would
+  // call the scheduled ones twice); a customer with nothing left to schedule is left out.
+  const visible = useMemo(
+    () =>
+      matches
+        .map(({ c, sites }) => {
+          if (takenWhole.has(c.id)) return null;
+          const showAll = !customerTaken(c);
+          if (c.sites.length <= 1) return showAll ? { c, sites, showAll } : null;
+          const free = sites.filter((st) => !takenSites.has(st.id));
+          return showAll || free.length ? { c, sites: free, showAll } : null;
+        })
+        .filter(Boolean),
+    // customerTaken reads takenWhole / takenSites
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [matches, takenWhole, takenSites]
+  );
 
   // After a pick the list closes, so the rest of the form is reachable at once;
   // clicking the field opens it again to add more.
@@ -218,37 +236,34 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
       </div>
       {open && (
         <div className="fb-tp-menu" role="group" aria-label="Customers and sites">
-          {!matches.length && <div className="fb-tp-empty">No customer or site matches “{q}”.</div>}
-          {matches.map(({ c, sites }) => {
+          {!visible.length && (
+            <div className="fb-tp-empty">{q.trim() ? `No customer or site to schedule matches “${q}”.` : "Every customer and site already has a call schedule."}</div>
+          )}
+          {visible.map(({ c, sites, showAll }) => {
             const whole = wholeCustomer(c.id);
-            const cTaken = customerTaken(c);
             // A one-site customer is just its customer row.
             const siteRows = c.sites.length > 1 ? sites : [];
-            const scheduledNote = takenWhole.has(c.id) ? "Already scheduled · edit it below" : "Some sites already scheduled";
             return (
               <div key={c.id} className="fb-tp-group">
-                <label className={`fb-tp-opt ${whole ? "is-on" : ""} ${cTaken ? "is-disabled" : ""}`}>
-                  <input type={single ? "radio" : "checkbox"} checked={whole} disabled={cTaken} onChange={() => toggle(c.id, null)} />
-                  <span className="fb-tp-text">
-                    <span className="fb-tp-name">{c.name}</span>
-                    <span className="fb-tp-meta">
-                      {c.sites.length > 1 ? `All ${c.sites.length} sites` : [c.sites[0]?.name, c.sites[0]?.city].filter(Boolean).join(" · ") || "All sites"}
-                      {cTaken && ` · ${c.sites.length > 1 ? scheduledNote : "Already scheduled · edit it below"}`}
+                {showAll && (
+                  <label className={`fb-tp-opt ${whole ? "is-on" : ""}`}>
+                    <input type={single ? "radio" : "checkbox"} checked={whole} onChange={() => toggle(c.id, null)} />
+                    <span className="fb-tp-text">
+                      <span className="fb-tp-name">{c.name}</span>
+                      <span className="fb-tp-meta">
+                        {c.sites.length > 1 ? `All ${c.sites.length} sites` : [c.sites[0]?.name, c.sites[0]?.city].filter(Boolean).join(" · ") || "All sites"}
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+                )}
                 {siteRows.map((st) => {
                   const on = whole || has(c.id, st.id);
-                  const sTaken = siteTaken(c.id, st.id);
                   return (
-                    <label key={st.id} className={`fb-tp-opt ${on ? "is-on" : ""} ${whole || sTaken ? "is-disabled" : ""}`}>
-                      <input type={single ? "radio" : "checkbox"} checked={on} disabled={whole || sTaken} onChange={() => toggle(c.id, st.id)} />
+                    <label key={st.id} className={`fb-tp-opt ${on ? "is-on" : ""} ${whole ? "is-disabled" : ""}`}>
+                      <input type={single ? "radio" : "checkbox"} checked={on} disabled={whole} onChange={() => toggle(c.id, st.id)} />
                       <span className="fb-tp-text">
                         <span className="fb-tp-name">{c.name}</span>
-                        <span className="fb-tp-meta">
-                          {[st.name, st.city].filter(Boolean).join(" · ")}
-                          {sTaken && " · Already scheduled"}
-                        </span>
+                        <span className="fb-tp-meta">{[st.name, st.city].filter(Boolean).join(" · ")}</span>
                       </span>
                     </label>
                   );
@@ -264,8 +279,9 @@ function TargetPicker({ customers, value, onChange, single, taken = [] }) {
 
 // schedules: the existing schedules - their customers / sites cannot be picked again here
 // (except the one being edited).
-function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, schedules = [] }) {
-  const [f, setF] = useState(() => (renew ? renewForm(schedule) : formOf(schedule)));
+function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, schedules = [], targets = null }) {
+  // targets: a new schedule started from "Not scheduled" (the customer / sites already picked)
+  const [f, setF] = useState(() => (renew ? renewForm(schedule) : { ...formOf(schedule), ...(targets && !schedule ? { targets } : {}) }));
   const taken = useMemo(
     () => schedules.filter((s) => s.id !== schedule?.id).map((s) => ({ company_id: s.customer.id, site_id: s.site?.id || null })),
     [schedules, schedule]
@@ -581,6 +597,49 @@ export function EndedSchedules({ schedules: given, onChanged }) {
   );
 }
 
+/**
+ * Customers and sites with no call schedule: a customer with nothing scheduled (all its sites), or
+ * the sites of a customer that has only some scheduled. "Schedule" opens Add schedule for them.
+ */
+function notScheduled(customers, schedules) {
+  const whole = new Set(schedules.filter((s) => !s.site).map((s) => s.customer.id));
+  const sites = new Set(schedules.filter((s) => s.site).map((s) => s.site.id));
+  return customers
+    .filter((c) => !whole.has(c.id))
+    .map((c) => {
+      const free = c.sites.filter((st) => !sites.has(st.id));
+      return free.length ? { c, free, all: free.length === c.sites.length } : null;
+    })
+    .filter(Boolean);
+}
+
+/** The not scheduled rows for the table: a customer with nothing scheduled (one row), else one row per free site. */
+function notScheduledRows(customers, schedules) {
+  return notScheduled(customers, schedules).flatMap(({ c, free, all }) =>
+    all
+      ? [{ key: c.id, customer: c, site: c.sites.length === 1 ? c.sites[0] : null, sites: c.sites.length, targets: [{ company_id: c.id, site_id: null }] }]
+      : free.map((st) => ({ key: `${c.id}|${st.id}`, customer: c, site: st, sites: 1, targets: [{ company_id: c.id, site_id: st.id }] }))
+  );
+}
+
+const PAGE_SIZE = 25; // rows a page on the Call schedule list
+
+/**
+ * 5 page numbers around the open page, plus the first and last pages with "…" for the gaps:
+ * 1 2 3 4 5 … 20 / 1 … 6 7 8 9 10 … 20 / 1 … 16 17 18 19 20.
+ */
+function pageNumbers(at, pages) {
+  const first = Math.max(1, Math.min(at - 2, pages - 4));
+  const nums = Array.from({ length: Math.min(5, pages) }, (_, i) => first + i);
+  const out = [];
+  if (nums[0] > 1) out.push(1);
+  if (nums[0] > 2) out.push("…start");
+  out.push(...nums);
+  if (nums[nums.length - 1] < pages - 1) out.push("…end");
+  if (nums[nums.length - 1] < pages) out.push(pages);
+  return out;
+}
+
 export default function ScheduleMaster() {
   const [schedules, setSchedules] = useState(null);
   const [options, setOptions] = useState(null);
@@ -588,6 +647,14 @@ export default function ScheduleMaster() {
   const [notice, setNotice] = useState("");
   const clearNotice = useCallback(() => setNotice(""), []);
   const [editing, setEditing] = useState(null); // a schedule, or "new"
+  const [newTargets, setNewTargets] = useState(null); // "new" started from Not scheduled
+  // Scheduled (default) / Not scheduled / All
+  const [view, setViewRaw] = useState("NOT"); // opens on Not scheduled
+  // 25 rows a page (scheduled first, then not scheduled); a new view or search starts on page 1
+  const [page, setPage] = useState(1);
+  const setView = (v) => { setViewRaw(v); setPage(1); };
+  // Not scheduled rows ticked for a new schedule (keys); "Add schedule" shows only with some ticked
+  const [picked, setPicked] = useState(() => new Set());
   const [removing, setRemoving] = useState(null);
   const [q, setQ] = useState("");
 
@@ -604,10 +671,24 @@ export default function ScheduleMaster() {
 
   if (!schedules || !options) return error ? <ErrorBox error={error} onRetry={load} /> : <Loading />;
 
-  const shown = schedules.filter((s) => {
-    const t = q.trim().toLowerCase();
-    return !t || s.customer.name.toLowerCase().includes(t) || (s.site?.name || "").toLowerCase().includes(t);
-  });
+  const t = q.trim().toLowerCase();
+  const hit = (customer, site) => !t || customer.name.toLowerCase().includes(t) || `${site?.name || ""} ${site?.city || ""}`.toLowerCase().includes(t);
+  // Customers / sites with no schedule (Not scheduled view)
+  const unscheduled = notScheduledRows(options.customers || [], schedules);
+  const shown = view === "NOT" ? [] : schedules.filter((s) => hit(s.customer, s.site));
+  const shownNot = view === "SCHEDULED" ? [] : unscheduled.filter((r) => hit(r.customer, r.site));
+  // this page's rows: scheduled ones first, then the not scheduled ones
+  const total = shown.length + shownNot.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const at = Math.min(page, pages);
+  const from = (at - 1) * PAGE_SIZE;
+  const pageShown = shown.slice(from, from + PAGE_SIZE);
+  const pageNot = shownNot.slice(Math.max(0, from - shown.length), Math.max(0, from + PAGE_SIZE - shown.length));
+  // ticked rows that still have no schedule
+  const pickedRows = unscheduled.filter((r) => picked.has(r.key));
+  const allShownPicked = pageNot.length > 0 && pageNot.every((r) => picked.has(r.key));
+  const pick = (key, on) => setPicked((prev) => { const next = new Set(prev); if (on) next.add(key); else next.delete(key); return next; });
+  const pickAllShown = (on) => setPicked((prev) => { const next = new Set(prev); pageNot.forEach((r) => (on ? next.add(r.key) : next.delete(r.key))); return next; });
 
   async function toggle(s, on) {
     setError("");
@@ -637,46 +718,77 @@ export default function ScheduleMaster() {
         title="Call schedule"
         sub="Only the customers and sites set here get feedback calls. Each call shows on the Dashboard on its due date."
         actions={
-          <button type="button" className="fb-btn fb-btn-primary" onClick={() => setEditing("new")}>
-            <FiPlus aria-hidden="true" /> Add schedule
-          </button>
+          pickedRows.length > 0 && (
+            <button type="button" className="fb-btn fb-btn-primary" onClick={() => { setNewTargets(pickedRows.flatMap((r) => r.targets)); setEditing("new"); }}>
+              <FiPlus aria-hidden="true" /> Add schedule ({pickedRows.length})
+            </button>
+          )
         }
       />
       <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
       <ErrorBox error={error} />
-      <EndedSchedules schedules={schedules} onChanged={load} />
+      {/* Ended schedules are handled on the Alerts page. */}
 
       <Card bodyClass="is-flush">
         <div className="fb-filters">
           <label className="fb-row" style={{ gap: 6, flex: "1 1 220px", maxWidth: 320 }}>
             <FiSearch aria-hidden="true" className="fb-muted" />
-            <input className="fb-input" placeholder="Search customer or site" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search customer or site" />
+            <input className="fb-input" placeholder="Search customer or site" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} aria-label="Search customer or site" />
           </label>
           <span className="fb-small fb-muted">
-            {schedules.filter((s) => s.is_active).length} on · {schedules.length} in all
+            {view === "NOT" ? `${unscheduled.length} with no calls` : `${schedules.filter((s) => s.is_active).length} on · ${schedules.length} scheduled`}
           </span>
+          {/* Scheduled / Not scheduled / All - in the right corner */}
+          <div style={{ marginLeft: "auto" }}>
+            <Segmented
+              label="Show"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "NOT", label: `Not scheduled (${unscheduled.length})` },
+                { value: "SCHEDULED", label: `Scheduled (${schedules.length})` },
+                { value: "ALL", label: "All" },
+              ]}
+            />
+          </div>
         </div>
-        {!shown.length ? (
+        {!shown.length && !shownNot.length ? (
           <Empty
-            title={schedules.length ? "No schedule matches" : "No schedules yet"}
-            text={schedules.length ? "Clear the search." : "Add one: pick a customer (or one of its sites) and how often to call. Sites without a schedule get no feedback calls."}
+            title={t ? "Nothing matches" : view === "NOT" ? "Everything is scheduled" : "No schedules yet"}
+            text={t ? "Clear the search." : view === "NOT" ? "Every customer and site has a call schedule." : "Add one: pick a customer (or one of its sites) and how often to call. Sites without a schedule get no feedback calls."}
           />
         ) : (
           <div className="fb-table-wrap">
             <table className="fb-table">
               <thead>
                 <tr>
+                  {pageNot.length > 0 && (
+                    <th className="fb-check-col">
+                      <input type="checkbox" checked={allShownPicked} onChange={(e) => pickAllShown(e.target.checked)} aria-label="Tick every not scheduled row on this page" />
+                    </th>
+                  )}
                   <th>Customer · Site</th>
-                  <th>When to call</th>
-                  <th>From</th>
-                  <th>Calls made</th>
-                  <th>On</th>
-                  <th aria-label="Actions" />
+                  {view === "NOT" ? (
+                    // Not scheduled only: no call columns (they would all be empty)
+                    <>
+                      <th>Sites</th>
+                      <th>Status</th>
+                    </>
+                  ) : (
+                    <>
+                      <th>When to call</th>
+                      <th>From</th>
+                      <th>Calls made</th>
+                      <th>On</th>
+                      <th aria-label="Actions" />
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {shown.map((s) => (
+                {pageShown.map((s) => (
                   <tr key={s.id} className={s.is_active ? "" : "fb-row-off"}>
+                    {pageNot.length > 0 && <td className="fb-check-col" />}
                     <td>
                       <div className="fb-strong">{s.customer.name}</div>
                       <div className="fb-small fb-muted">{s.site ? `${s.site.name}${s.site.city ? ` · ${s.site.city}` : ""}` : "All sites"}</div>
@@ -716,8 +828,51 @@ export default function ScheduleMaster() {
                     </td>
                   </tr>
                 ))}
+                {/* Not scheduled: no calls are made; Schedule opens Add schedule with it picked */}
+                {pageNot.map((r) => (
+                  <tr key={`not-${r.key}`} className={`fb-row-unscheduled ${picked.has(r.key) ? "is-picked" : ""}`} onClick={() => pick(r.key, !picked.has(r.key))}>
+                    <td className="fb-check-col" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={picked.has(r.key)} onChange={(e) => pick(r.key, e.target.checked)} aria-label={`Tick ${r.customer.name}${r.site ? ` ${r.site.name}` : ""}`} />
+                    </td>
+                    <td>
+                      <div className="fb-strong">{r.customer.name}</div>
+                      <div className="fb-small fb-muted">{r.site ? `${r.site.name}${r.site.city ? ` · ${r.site.city}` : ""}` : `All ${r.sites} sites`}</div>
+                    </td>
+                    {view === "NOT" && (
+                      <td className="fb-small">{r.site ? "1 site" : `${r.sites} site${r.sites === 1 ? "" : "s"}`}</td>
+                    )}
+                    {/* one cell across the call columns: nothing to show until it is scheduled */}
+                    <td className="fb-small" colSpan={view === "NOT" ? 1 : 5}>
+                      <span className="fb-ns-chip">Not scheduled</span>
+                      <span className="fb-muted" style={{ marginLeft: 8 }}>No feedback calls are made · tick it, then Add schedule</span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {total > PAGE_SIZE && (
+          <div className="fb-pager">
+            <span>
+              {from + 1}–{Math.min(from + PAGE_SIZE, total)} of {total}
+            </span>
+            <div className="fb-row" style={{ gap: 8 }}>
+              <button type="button" className="fb-btn fb-btn-sm" disabled={at <= 1} onClick={() => setPage(at - 1)}>
+                Previous
+              </button>
+              {/* page numbers: 5 around the open page, the first / last, "…" between */}
+              {pageNumbers(at, pages).map((n) => typeof n === "string" ? (
+                <span key={n} className="fb-page-gap" aria-hidden="true">…</span>
+              ) : (
+                <button key={n} type="button" className={`fb-btn fb-btn-sm fb-page-no ${n === at ? "is-on" : ""}`} aria-current={n === at ? "page" : undefined} onClick={() => setPage(n)}>
+                  {n}
+                </button>
+              ))}
+              <button type="button" className="fb-btn fb-btn-sm" disabled={at >= pages} onClick={() => setPage(at + 1)}>
+                Next
+              </button>
+            </div>
           </div>
         )}
       </Card>
@@ -727,10 +882,12 @@ export default function ScheduleMaster() {
           schedule={editing === "new" ? null : editing}
           schedules={schedules}
           options={options}
+          targets={editing === "new" ? newTargets : null}
           onClose={() => setEditing(null)}
           onSaved={(text) => {
             setEditing(null);
             setNotice(text);
+            setPicked(new Set());
             load();
           }}
         />
