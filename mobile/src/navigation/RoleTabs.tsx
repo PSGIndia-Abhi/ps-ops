@@ -17,7 +17,6 @@ import { feedbackSwitchCount, taskSwitchCount } from './switchCounts';
 import { useUnseen } from '../feedback/unseen';
 import { SupervisorTabNavigator } from './SupervisorTabNavigator';
 import { TechnicianTabNavigator } from './TechnicianTabNavigator';
-import { ClientNavigator } from './ClientNavigator';
 import { UnsupportedRoleScreen } from '../screens/misc/UnsupportedRoleScreen';
 import { colors } from '../theme';
 
@@ -34,8 +33,8 @@ import { colors } from '../theme';
  * ASSIGN_BRANCH_ADMIN - that supervisor never has), so it is not a
  * supervisor-equivalent role and must not be mapped to Supervisor here.
  *
- * Any other role without a dedicated mobile dashboard (client,
- * temporary_worker, or nothing decoded yet) gets the same safe fallback -
+ * Any other role without a dedicated mobile dashboard
+ * (temporary_worker, or nothing decoded yet) gets the same safe fallback -
  * never a crash, never the wrong role's dashboard.
  */
 /** How long the screen stays blank between unmounting one app and mounting the other. */
@@ -259,8 +258,8 @@ export function RoleTabs() {
       );
     }
 
-    // Client Portal logins (company admin or outlet user) get the client app.
-    if ((rawRole || '').toLowerCase().trim() === 'client') return <ClientNavigator />;
+    // Client logins use the separate BestServe Client app (client-app/); AuthContext refuses them at
+    // sign-in and drops an old saved client session, so "client" never reaches here.
 
     switch (role) {
       case 'supervisor':

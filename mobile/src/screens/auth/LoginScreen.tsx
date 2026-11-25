@@ -20,7 +20,7 @@ import { Banner } from '../../components/Banner';
 import { ArrowButton } from '../../components/ArrowButton';
 import { TextField } from '../../components/TextField';
 import { LockIcon, PersonIcon } from '../../components/icons';
-import { useAuth } from '../../auth/AuthContext';
+import { useAuth, WRONG_APP_CODE } from '../../auth/AuthContext';
 import { ApiError } from '../../api';
 import { colors, radii, shadows, spacing, typography } from '../../theme';
 import type { RootStackParamList } from '../../navigation/types';
@@ -162,6 +162,10 @@ export function LoginScreen({ navigation }: Props) {
     } catch (err) {
       if (err instanceof ApiError && err.isNetworkError) {
         setFormErrorVariant('network');
+        setFormError(err.message);
+      } else if (err instanceof ApiError && err.code === WRONG_APP_CODE) {
+        // Right password, wrong app (a client login) - say so instead of "incorrect password".
+        setFormErrorVariant('error');
         setFormError(err.message);
       } else {
         // Covers both a real 401 and any other unexpected failure - a login

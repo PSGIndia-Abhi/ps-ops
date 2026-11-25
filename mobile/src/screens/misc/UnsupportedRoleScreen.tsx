@@ -13,7 +13,8 @@ import { colors, radii, spacing, typography } from '../../theme';
  * on the web app - see roleBasePath.js routing branch_admin to the same
  * "/admin" experience as admin on web, which is why it's grouped with admin
  * here rather than treated as a supervisor-equivalent role) and any other
- * role the app has never had a dashboard for (client, temporary_worker).
+ * role the app has never had a dashboard for (e.g. temporary_worker). Client logins use the
+ * separate BestServe Client app and are refused at sign-in, so they never reach this screen.
  *
  * Deliberately not a silent blank screen or a reused Profile screen - a
  * clear explanation plus the one action available (sign out), so nobody

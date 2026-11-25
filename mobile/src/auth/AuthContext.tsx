@@ -13,6 +13,14 @@ import { clearSession, loadSession, saveSession } from './tokenStorage';
 import { forgetUploadAuth } from '../leads/fieldTracking';
 import type { AuthSession, CurrentUser } from '../types/auth';
 
+/**
+ * Client logins (company admin / outlet user) use the separate BestServe Client app (client-app/).
+ * Their password is valid, but this staff app refuses them at sign-in with a pointer to that app.
+ */
+export const WRONG_APP_CODE = 'WRONG_APP';
+export const WRONG_APP_MESSAGE = 'This is the BestServe staff app. Clients, please use the BestServe Client app.';
+const isClientRole = (role: string | undefined | null) => String(role ?? '').toLowerCase().trim() === 'client';
+
 type AuthStatus = 'bootstrapping' | 'signedOut' | 'signingIn' | 'signedIn';
 
 interface AuthContextValue {
@@ -67,7 +75,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       const stored = await loadSession();
-      if (!stored) {
+      if (!stored || isClientRole(stored.role)) {
+        // Nothing saved, or a client session from before the client app was split out - signed out
+        // (and this phone stops getting that client's pushes; best effort, short).
+        if (stored) {
+          await Promise.race([unregisterFromPush(), new Promise<void>((r) => setTimeout(() => r(), 3000))]);
+          await clearSession();
+        }
         setStatus('signedOut');
         return;
       }
@@ -91,6 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       const response = await authApi.login(email.trim(), password);
+      // Correct password, but a client account: nothing is saved on the phone.
+      if (isClientRole(response.role)) {
+        throw new ApiError(WRONG_APP_MESSAGE, 403, WRONG_APP_CODE);
+      }
       const newSession: AuthSession = {
         token: response.token,
         role: response.role,

@@ -7,6 +7,8 @@ const bcrypt = require("bcrypt");
 const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 const { v4: uuid } = require("uuid");
+const multer = require("multer");
+const minioClient = require("../lib/minio");
 const { recordLogin } = require("../utils/userActivity");
 
 async function ensureTemporaryAccessIssuerCanManageJob(req, job) {
@@ -634,8 +636,21 @@ WHERE u.id = ?
 
 
     const user = rows[0];
+    // Profile photo (migration 20261125_user_avatar.sql). Read separately so /me keeps working
+    // where that migration has not been run yet - then there is simply no photo.
+    let avatar = { has_avatar: false, avatar_updated_at: null };
+    try {
+      const [[a]] = await pool.query(
+        "SELECT avatar_object_key, DATE_FORMAT(avatar_updated_at, '%Y-%m-%d %H:%i:%s') AS avatar_updated_at FROM users WHERE id = ?",
+        [req.user.id]
+      );
+      if (a?.avatar_object_key) avatar = { has_avatar: true, avatar_updated_at: a.avatar_updated_at };
+    } catch (avatarErr) {
+      if (avatarErr?.code !== "ER_BAD_FIELD_ERROR") console.error("ME avatar lookup failed:", avatarErr);
+    }
     res.json({
       ...user,
+      ...avatar,
       branch_id: user.branch_id || null,
       branch: user.branch_id
         ? { id: user.branch_id, name: user.branch_name }
@@ -736,6 +751,105 @@ router.patch("/me", auth, async (req, res) => {
   } catch (err) {
     console.error("Profile update failed:", err);
     res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+// ---------- Profile photo (any signed-in user; first used by the Client app) ----------
+// Stored in MinIO like company logos (companies.routes.js), pointed at by users.avatar_*.
+
+const AVATAR_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) =>
+    AVATAR_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error("Please choose a JPG, PNG or WEBP image.")),
+});
+
+// Runs multer and turns its errors into 400 responses.
+function acceptAvatar(req, res, next) {
+  avatarUpload.single("file")(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === "LIMIT_FILE_SIZE";
+    return res.status(400).json({ error: tooBig ? "The photo must be 5 MB or smaller." : err.message || "Invalid photo" });
+  });
+}
+
+const minioReady = () =>
+  !!(process.env.MINIO_ENDPOINT && process.env.MINIO_PORT && process.env.MINIO_ACCESS_KEY && process.env.MINIO_SECRET_KEY && process.env.MINIO_BUCKET);
+
+const missingAvatarColumns = (err) => err?.code === "ER_BAD_FIELD_ERROR";
+const AVATAR_MIGRATION_HINT = "Profile photo columns are missing in the database. Please run migration 20261125_user_avatar.sql.";
+
+// POST /api/auth/me/avatar  (multipart: file) -> { success, avatar_updated_at }
+router.post("/me/avatar", auth, acceptAvatar, async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: "Please choose a photo." });
+  if (!minioReady()) return res.status(500).json({ error: "File storage is not configured." });
+
+  try {
+    const [[current]] = await pool.query("SELECT avatar_object_key FROM users WHERE id = ?", [req.user.id]);
+    const ext = (file.mimetype.split("/")[1] || "jpg").replace("jpeg", "jpg");
+    const objectKey = `users/${req.user.id}/avatar/${uuid()}.${ext}`;
+
+    const exists = await minioClient.bucketExists(process.env.MINIO_BUCKET);
+    if (!exists) await minioClient.makeBucket(process.env.MINIO_BUCKET, process.env.MINIO_REGION || "us-east-1");
+    await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, file.buffer, file.size, { "Content-Type": file.mimetype });
+
+    await pool.query(
+      "UPDATE users SET avatar_object_key = ?, avatar_file_type = ?, avatar_updated_at = NOW() WHERE id = ?",
+      [objectKey, file.mimetype, req.user.id]
+    );
+
+    // The old photo is no longer referenced - remove it (best effort).
+    if (current?.avatar_object_key) {
+      minioClient.removeObject(process.env.MINIO_BUCKET, current.avatar_object_key).catch(() => {});
+    }
+
+    const [[row]] = await pool.query(
+      "SELECT DATE_FORMAT(avatar_updated_at, '%Y-%m-%d %H:%i:%s') AS avatar_updated_at FROM users WHERE id = ?",
+      [req.user.id]
+    );
+    res.json({ success: true, avatar_updated_at: row?.avatar_updated_at || null });
+  } catch (err) {
+    if (missingAvatarColumns(err)) return res.status(500).json({ error: AVATAR_MIGRATION_HINT });
+    console.error("Avatar upload failed:", err);
+    res.status(500).json({ error: "Could not upload the photo" });
+  }
+});
+
+// GET /api/auth/me/avatar -> the signed-in user's photo (404 when there is none)
+router.get("/me/avatar", auth, async (req, res) => {
+  try {
+    const [[row]] = await pool.query("SELECT avatar_object_key, avatar_file_type FROM users WHERE id = ?", [req.user.id]);
+    if (!row?.avatar_object_key) return res.status(404).json({ error: "No photo" });
+    const stream = await minioClient.getObject(process.env.MINIO_BUCKET, row.avatar_object_key);
+    res.setHeader("Content-Type", row.avatar_file_type || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    stream.on("error", () => res.end());
+    stream.pipe(res);
+  } catch (err) {
+    if (missingAvatarColumns(err)) return res.status(404).json({ error: "No photo" });
+    console.error("Avatar load failed:", err);
+    res.status(500).json({ error: "Could not load the photo" });
+  }
+});
+
+// DELETE /api/auth/me/avatar -> removes the photo
+router.delete("/me/avatar", auth, async (req, res) => {
+  try {
+    const [[row]] = await pool.query("SELECT avatar_object_key FROM users WHERE id = ?", [req.user.id]);
+    await pool.query(
+      "UPDATE users SET avatar_object_key = NULL, avatar_file_type = NULL, avatar_updated_at = NULL WHERE id = ?",
+      [req.user.id]
+    );
+    if (row?.avatar_object_key && minioReady()) {
+      minioClient.removeObject(process.env.MINIO_BUCKET, row.avatar_object_key).catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (err) {
+    if (missingAvatarColumns(err)) return res.status(500).json({ error: AVATAR_MIGRATION_HINT });
+    console.error("Avatar delete failed:", err);
+    res.status(500).json({ error: "Could not remove the photo" });
   }
 });
 
