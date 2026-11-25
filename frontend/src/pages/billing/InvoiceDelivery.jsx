@@ -4,10 +4,9 @@ import { billingPut, useBilling } from "./billingApi";
 import { deliveryBody, deliveryFrom, deliveryProblem } from "./delivery";
 import { Field, Msg } from "./ui";
 import { RowsSkeleton } from "./Skeletons";
-import LateAlertField from "./LateAlertField";
 
 // Invoice delivery: how many copies are printed and where the invoice is emailed, for the whole
-// customer and per outlet, plus the bill-by day. Asked on New Contract (step 1) and edited on the
+// customer and per outlet. Asked on New Contract (step 1) and edited on the
 // contract page (Billing details). Stored on the customer's billing profile
 // (PUT /customer-profiles/:companyId/settings), so every contract of the customer uses it.
 
@@ -16,8 +15,8 @@ const MAX_COPIES = 65535;
 // 0 = nothing is printed when an invoice is issued.
 const copiesIn = (v) => (v === "" ? "" : Math.min(MAX_COPIES, Math.max(0, Math.round(Number(v)) || 0)));
 /** The fields only: the parent holds the form and saves it. */
-// showAlert: false where the late alert is asked elsewhere (New Contract shows it beside the Bill date).
-export function DeliveryFields({ form, setForm, readOnly = false, showAlert = true }) {
+// (The "Bill by (late alert)" day was removed: a bill is late once its contract's Bill date passes.)
+export function DeliveryFields({ form, setForm, readOnly = false }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   // Emails: each part is its own email with its own To and CC; "+ Add email" adds a part
   const parts = form.parts?.length ? form.parts : [{ to: "", cc: "" }];
@@ -67,7 +66,6 @@ export function DeliveryFields({ form, setForm, readOnly = false, showAlert = tr
             )}
           </div>
         </Field>
-        {showAlert && <LateAlertField value={form.bill_by_day ?? ""} readOnly={readOnly} onChange={(v) => set({ bill_by_day: v })} />}
       </div>
       <label className={`bl-autoemail ${form.auto_email ? "on" : ""}`}>
         <input type="checkbox" className="bl-cb" checked={form.auto_email} disabled={readOnly} onChange={(e) => set({ auto_email: e.target.checked })} />

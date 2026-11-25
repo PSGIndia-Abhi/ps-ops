@@ -309,9 +309,11 @@ const saveCustomerSettings = C.handle("Failed to save the invoice settings", asy
         [companyId, String(co.name || "").trim().slice(0, 255), req.user.id, req.user.id]
       );
     }
+    // bill_by_day (old "Bill by (late alert)") is no longer asked: lateness follows each contract's Bill
+    // date. It is changed only when a caller still sends it.
     await conn.query(
-      "UPDATE billing_profiles SET print_copies = ?, invoice_emails = ?, auto_email = ?, bill_by_day = ?, updated_by = ? WHERE company_id = ?",
-      [printCopies, invoiceEmails, autoEmail ? 1 : 0, billBy, req.user.id, companyId]
+      `UPDATE billing_profiles SET print_copies = ?, invoice_emails = ?, auto_email = ?${b.bill_by_day !== undefined ? ", bill_by_day = ?" : ""}, updated_by = ? WHERE company_id = ?`,
+      [printCopies, invoiceEmails, autoEmail ? 1 : 0, ...(b.bill_by_day !== undefined ? [billBy] : []), req.user.id, companyId]
     );
     // CC: saved only when sent (older screens leave it as it is)
     if (ccEmails !== undefined) await conn.query("UPDATE billing_profiles SET invoice_cc_emails = ? WHERE company_id = ?", [ccEmails, companyId]);

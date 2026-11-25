@@ -1,7 +1,7 @@
 // Accounts dashboard: GET /dashboard?month=2026-11&group_id=&q=
 // One call with everything the Accounts team needs for a month: SOS received, what is ready to bill,
-// waiting for an SOS or blocked, drafts, issued invoices and their collection, customers billed late
-// (past the bill-by day of their profile), and the last 6 months issued.
+// waiting for an SOS or blocked, drafts, issued invoices and their collection, bills that missed
+// their contract's Bill date, and the last 6 months issued.
 
 const { pool } = require("../../../db");
 const C = require("../../services/billing/common");
@@ -21,30 +21,25 @@ const dashboard = C.handle("Failed to load the dashboard", async (req, res) => {
   const q = C.str(req.query.q, "q", { max: 100 });
   const today = C.todayIst();
   const thisMonth = today.slice(0, 7);
-  const day = Number(today.slice(8, 10));
 
-  // Customers (group + bill-by day) to filter and to judge lateness.
+  // Customers (group) to filter.
   const [customers] = await pool.query(
-    `SELECT c.id, c.group_id, g.name AS group_name, bp.bill_by_day FROM companies c
-       LEFT JOIN group_name g ON g.id = c.group_id LEFT JOIN billing_profiles bp ON bp.company_id = c.id`
+    `SELECT c.id, c.group_id, g.name AS group_name FROM companies c LEFT JOIN group_name g ON g.id = c.group_id`
   );
   const cust = new Map(customers.map((c) => [c.id, c]));
   const inGroup = (companyId) => (!groupId || cust.get(companyId)?.group_id === groupId) && (!picked || picked.has(companyId));
 
   // Bill Run for the month (what is due), with the lateness rule:
-  //   a past month: anything still not issued is late
-  //   this month:   late once the customer's bill-by day has passed
+  //   with a Bill date:    late once it has passed and the bill is still not issued (usually in the
+  //                        month after the services; a draft waiting to be issued is late too)
+  //   without a Bill date: late when its month is over and it is still not issued
   const due = (await D.dueList(pool, month, { q })).rows.filter((r) => inGroup(r.company_id));
-  const isLate = (r) => {
-    const by = cust.get(r.company_id)?.bill_by_day;
-    if (month < thisMonth) return true;
-    return month === thisMonth && by !== null && by !== undefined && day > Number(by);
-  };
+  const isLate = (r) => (r.bill_date ? r.missed_days > 0 : month < thisMonth);
   const rowOut = (r) => ({
     contract_id: r.contract_id, contract_code: r.contract_code, company_id: r.company_id, customer: r.customer,
     group: cust.get(r.company_id)?.group_name || null, billing_type: r.billing_type, structure: r.structure,
     period_start: r.period_start, period_end: r.period_end, estimated_total: r.estimated_total, sos: r.sos,
-    already_drafted: r.already_drafted, bill_by_day: cust.get(r.company_id)?.bill_by_day ?? null,
+    already_drafted: r.already_drafted, bill_day: r.bill_day, bill_date: r.bill_date, missed_days: r.missed_days,
     warnings: r.warnings.map((w) => w.message), blocking: r.blocking,
   });
   const ready = due.filter((r) => !r.blocking && !r.already_drafted);

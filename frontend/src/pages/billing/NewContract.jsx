@@ -12,7 +12,6 @@ import { STATES } from "./states";
 import { Field, Msg, BackButton } from "./ui";
 import ServiceToField from "./ServiceToField";
 import BillDayField from "./BillDayField";
-import LateAlertField from "./LateAlertField";
 import PoAreaField from "./PoAreaField";
 import { poAreasBody, poAreasProblem, poAreasText } from "./poAreas";
 import { deepCleaningServices, pestServices } from "../../components/CreateBookingModal";
@@ -1070,11 +1069,8 @@ export default function NewContract() {
                   <Field label="Billing frequency" required>
                     <FrequencySelect value={terms.frequency_months} oneTime={terms.billing_type === "ONE_TIME"} onChange={(v) => setT({ frequency_months: v })} />
                   </Field>
-                  {/* Bill date and the late alert side by side (the alert is saved with the Print & email settings) */}
-                  <div className="nc-billday-pair">
-                    <BillDayField day={terms.bill_day} onDay={(v) => setT({ bill_day: v })} />
-                    {delivery && <LateAlertField value={delivery.bill_by_day ?? ""} onChange={(v) => setDelivery((d) => ({ ...d, bill_by_day: v }))} />}
-                  </div>
+                  {/* Bill date: the day to bill; once it passes unbilled, the Bill Run shows it as missed */}
+                  <BillDayField day={terms.bill_day} onDay={(v) => setT({ bill_day: v })} />
                   <Field label="Term start date" required><input type="date" className="ac-input" value={terms.start_date} onChange={(e) => setT({ start_date: e.target.value })} /></Field>
                   <Field label="Term end date" hint="Leave empty if it runs until ended"><input type="date" className="ac-input" value={terms.end_date} onChange={(e) => setT({ end_date: e.target.value })} /></Field>
                 </>
@@ -1541,7 +1537,7 @@ export default function NewContract() {
           <>
             <h3 className="nc-title">Print &amp; email</h3>
             {delivery ? (
-              <DeliveryFields form={delivery} setForm={setDelivery} showAlert={false} />
+              <DeliveryFields form={delivery} setForm={setDelivery} />
             ) : (
               <div className="mi-skel">{[0, 1].map((i) => <div key={i} className="mi-skel-row" />)}</div>
             )}
@@ -1602,11 +1598,8 @@ export default function NewContract() {
                     <div className="nc-rv-stat"><FiPrinter aria-hidden="true" /><b>{delivery.print_copies}</b><span>cop{Number(delivery.print_copies) === 1 ? "y" : "ies"}</span></div>
                     <div className="nc-rv-stat"><FiClock aria-hidden="true" /><b>{delivery.bill_by_day ? ordinalDay(Number(delivery.bill_by_day)) : "Off"}</b><span>late alert</span></div>
                   </div>
-                  {/* one line per email: its To, and its CC */}
-                  {filledParts(delivery).length ? filledParts(delivery).map((x, i) => (
-                    <div key={i} className="nc-rv-line"><FiMail aria-hidden="true" /><span>{x.to.trim()}{x.cc.trim() && <><br /><small>CC {x.cc.trim()}</small></>}</span></div>
-                  )) : <div className="nc-rv-line"><FiMail aria-hidden="true" /><span>No email</span></div>}
-                  {toText(delivery) && (
+                  <div className="nc-rv-line"><FiMail aria-hidden="true" /><span>{delivery.invoice_emails.trim() || "No email"}</span></div>
+                  {delivery.invoice_emails.trim() && (
                     <div className="nc-rv-tagline"><span className={`nc-rv-t ${delivery.auto_email ? "green" : ""}`}>● {delivery.auto_email ? "Auto email on issue" : "Not emailed automatically"}</span></div>
                   )}
                 </div>

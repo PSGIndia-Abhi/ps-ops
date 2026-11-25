@@ -10,7 +10,6 @@ export function deliveryFrom(data) {
       ? s.email_parts.map((x) => ({ to: (x.to || []).join(", "), cc: (x.cc || []).join(", ") }))
       : [{ to: "", cc: "" }],
     auto_email: Boolean(s.auto_email),
-    bill_by_day: s.bill_by_day || "",
     outlets: (data?.outlets || []).map((o) => ({ site_id: o.site_id, print_copies: o.print_copies ?? s.print_copies ?? 1, emails: (o.emails || []).join(", ") })),
   };
 }
@@ -22,7 +21,7 @@ export function deliveryBody(form) {
     // one email per part (empty parts are dropped by the server)
     email_parts: (form.parts || []).map((x) => ({ to: x.to.trim(), cc: x.cc.trim() })).filter((x) => x.to || x.cc),
     auto_email: form.auto_email,
-    bill_by_day: form.bill_by_day ? Number(form.bill_by_day) : null,
+    // No "Bill by (late alert)" any more: lateness follows each contract's Bill date.
     // No per-outlet settings any more: every outlet follows the customer's copies and emails (saving
     // clears any outlet setting made earlier).
     outlets: form.outlets.map((o) => ({ site_id: o.site_id, print_copies: Number(form.print_copies), emails: "" })),
