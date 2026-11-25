@@ -62,9 +62,12 @@ export async function getAssignablePeople(): Promise<{ supervisors: AssignablePe
   return { supervisors: data.supervisors || [], sales: data.sales || [] };
 }
 
-/** After a wrong number: ask the service coordinator for the right one. */
-export async function sendNumberRequest(callId: string, note: string | null): Promise<void> {
-  await httpClient.post(`/api/feedback/calls/${callId}/number-request`, { note });
+/**
+ * Ask the service coordinator for a number: after a wrong number, or (reason REQUEST) whenever -
+ * the site has no number saved, or Request number was picked. REQUEST saves no call result.
+ */
+export async function sendNumberRequest(callId: string, note: string | null, reason?: 'REQUEST'): Promise<void> {
+  await httpClient.post(`/api/feedback/calls/${callId}/number-request`, reason ? { note, reason } : { note });
 }
 
 /** The collector's requests for the right number (status OPEN | DONE, '' = all), and the counts. */
@@ -144,13 +147,18 @@ export async function markPartDone(ticketId: string, kind: DepartmentKind, note:
   await httpClient.post(`/api/feedback/tickets/${ticketId}/parts/${kind}/done`, { note });
 }
 
-/** due = 'today' (due today + overdue, the default) or 'all'; month = one month's calls; from / to = due dates between. */
-export async function listCalls(params: { month?: string; from?: string; to?: string; due?: string; status?: string; q?: string; mine?: boolean }): Promise<CallList> {
+/**
+ * due = 'today' (due today + overdue, the default) or 'all'; month = one month's calls; from / to = due
+ * dates between; ahead = 1-7: the calls due that many days from today (Upcoming), forecast ones included.
+ */
+export async function listCalls(params: { month?: string; from?: string; to?: string; due?: string; ahead?: number; status?: string; q?: string; mine?: boolean }): Promise<CallList> {
   const range = !!(params.from || params.to);
+  const ahead = params.ahead && !range && !params.month ? params.ahead : undefined;
   const { data } = await httpClient.get<CallList>('/api/feedback/calls', {
     params: {
+      ahead,
       month: range ? undefined : params.month,
-      due: range || params.month ? undefined : params.due,
+      due: range || params.month || ahead ? undefined : params.due,
       from: params.from || undefined,
       to: params.to || undefined,
       status: params.status || undefined,
@@ -165,6 +173,12 @@ export async function listCalls(params: { month?: string; from?: string; to?: st
 /** Takes a call from the list (Masters > Call schedule made it). */
 export async function takeCall(requestId: string): Promise<{ id: string }> {
   const { data } = await httpClient.post<{ id: string }>('/api/feedback/calls', { request_id: requestId });
+  return data;
+}
+
+/** Takes an upcoming call early (ahead = 1-7 days): it is made now with its real due date. */
+export async function takeUpcomingCall(siteId: string, ahead: number): Promise<{ id: string }> {
+  const { data } = await httpClient.post<{ id: string }>('/api/feedback/calls/upcoming/take', { site_id: siteId, ahead });
   return data;
 }
 

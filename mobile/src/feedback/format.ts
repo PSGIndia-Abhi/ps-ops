@@ -48,9 +48,8 @@ export const CALL_OUTCOMES: { value: CallOutcome; label: string }[] = [
   { value: 'WRONG_NUMBER', label: 'Wrong no.' },
 ];
 
-/** The call list's filters - "All" first, as on the web. */
+/** The call list's filters - "All" last, as on the web. */
 export const CALL_FILTERS: { value: string; label: string }[] = [
-  { value: '', label: 'All' },
   { value: 'TO_CALL', label: 'To call' },
   { value: 'NOT_ANSWERED', label: 'Not answered' },
   { value: 'WRONG_NUMBER', label: 'Wrong number' },
@@ -58,6 +57,7 @@ export const CALL_FILTERS: { value: string; label: string }[] = [
   { value: 'FORM_RECEIVED', label: 'Form received' },
   { value: 'TICKET_OPEN', label: 'Ticket open' },
   { value: 'DONE', label: 'Completed' },
+  { value: '', label: 'All' },
 ];
 
 /* ---- months and dates ---- */
@@ -109,10 +109,24 @@ export function isPast(value: string | null | undefined): boolean {
 /* ---- the period a list covers: due today, all, one month, or From - To dates ---- */
 export interface Period {
   /** today / all: the call list only (calls due today + overdue, or every call). */
-  mode: 'today' | 'all' | 'month' | 'range';
+  /** upcoming: the calls due `ahead` days from today (1-7), the call list only. */
+  mode: 'today' | 'all' | 'month' | 'range' | 'upcoming';
   month: string;
   from: string;
   to: string;
+  ahead?: number;
+}
+
+/** The day `n` days from today as "2026-11-03". */
+export function dayAhead(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** "Tomorrow" or "In 3 days · 26 Nov" - the Upcoming picker's choices. */
+export function aheadLabel(n: number): string {
+  return n === 1 ? `Tomorrow · ${formatDay(dayAhead(1))}` : `In ${n} days · ${formatDay(dayAhead(n))}`;
 }
 
 /** Today as "2026-11-03". */
@@ -127,7 +141,8 @@ export function defaultPeriod(mode: Period['mode'] = 'month'): Period {
 }
 
 /** The call list's query for a period. */
-export function periodQuery(p: Period): { month?: string; from?: string; to?: string; due?: string } {
+export function periodQuery(p: Period): { month?: string; from?: string; to?: string; due?: string; ahead?: number } {
+  if (p.mode === 'upcoming') return { ahead: p.ahead || 1 };
   if (p.mode === 'today' || p.mode === 'all') return { due: p.mode };
   return p.mode === 'month' ? { month: p.month } : { from: p.from, to: p.to };
 }
@@ -147,6 +162,7 @@ export function longDay(iso: string): string {
 export function periodLabel(p: Period): string {
   if (p.mode === 'today') return 'Due today';
   if (p.mode === 'all') return 'All calls';
+  if (p.mode === 'upcoming') return (p.ahead || 1) === 1 ? `Due tomorrow · ${longDay(dayAhead(1))}` : `Due ${longDay(dayAhead(p.ahead || 1))}`;
   return p.mode === 'month' ? monthLabel(p.month) : `${longDay(p.from)} – ${longDay(p.to)}`;
 }
 
