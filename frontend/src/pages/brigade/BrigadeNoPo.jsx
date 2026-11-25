@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { brigadeRequest, formatDate, formatInr, gstOn, poFileProblem, round2, statusLabel, toNumber, uploadPoFile } from "./brigadeShared";
-import KpiTile from "./KpiTile";
 import { SearchIcon } from "./PoSheet";
 import "./brigade.css";
 
@@ -60,67 +59,91 @@ export default function BrigadeNoPo() {
     });
   }
 
+  const doneCount = rows.filter((r) => r.status === "COMPLETED").length;
+  const doneValue = value(rows.filter((r) => r.status === "COMPLETED"));
+  const byProperty = properties.map((p) => ({ name: p, count: rows.filter((r) => r.property === p).length }));
+
   return (
-    <div className="bg-page bgb">
-      <div className="bgb-topbar">
-        <div>
-          <h2 className="bgb-h1">Services without PO</h2>
-          <p className="bgb-lede">Services booked before the client&apos;s PO came. When the PO arrives, tick its services and add them to it - then they can be invoiced once completed.</p>
+    <div className="bg-page bdz bnp">
+      <section className="bdz-hero">
+        <div className="bdz-hero-top">
+          <div>
+            <span className="bdz-eyebrow">Brigade · Purchase orders</span>
+            <h1>Services without PO</h1>
+            <p>Booked before the client&apos;s PO came. Tick them and add them to a PO, then they can be invoiced.</p>
+          </div>
         </div>
-      </div>
+        {loading && !rows.length ? (
+          <div className="bdz-hero-kpis bnp-kpis">{[0, 1, 2, 3].map((i) => <span key={i} className="bdz-skel dark" />)}</div>
+        ) : (
+          <div className="bdz-hero-kpis bnp-kpis">
+            <div className="bdz-hstat red"><span>Waiting for a PO</span><b>{rows.length.toLocaleString("en-IN")}</b><em>{properties.length} propert{properties.length === 1 ? "y" : "ies"}</em></div>
+            <div className="bdz-hstat aqua"><span>Completed · can bill once on a PO</span><b>{doneCount.toLocaleString("en-IN")}</b><em>{formatInr(gstOn(doneValue).total)} incl. GST</em></div>
+            <div className="bdz-hstat"><span>Not done yet</span><b>{(rows.length - doneCount).toLocaleString("en-IN")}</b><em>Booked or in progress</em></div>
+            <div className="bdz-hstat blue"><span>Total value</span><b title={formatInr(gstOn(value(rows)).total)}>{shortInr(gstOn(value(rows)).total)}</b><em>incl. GST · at booked prices</em></div>
+          </div>
+        )}
+      </section>
 
       {error && <div className="bg-error">{error}</div>}
       {done && (
-        <div className="bgn-done" role="status">
-          <span aria-hidden="true">✓</span>
+        <div className="bnp-done" role="status">
+          <span className="bnp-done-icon" aria-hidden="true">✓</span>
           <div>
             <strong>{done.count} service{done.count === 1 ? "" : "s"} added to PO {done.po_number}</strong>
-            <button type="button" className="bg-link-btn" onClick={() => navigate(`/brigade/pos?po=${encodeURIComponent(done.po_number)}`)}>Open the PO</button>
+            <span>They are no longer in this list.</span>
           </div>
-          <button type="button" className="bgn-done-x" aria-label="Close" onClick={() => setDone(null)}>×</button>
+          <button type="button" className="bnp-done-open" onClick={() => navigate(`/brigade/pos?po=${encodeURIComponent(done.po_number)}`)}>Open the PO →</button>
+          <button type="button" className="bnp-done-x" aria-label="Close" onClick={() => setDone(null)}>×</button>
         </div>
       )}
 
-      <section className="bgk-grid" aria-label="Services without PO">
-        <KpiTile icon="alert" tone="amber" label="Services without PO" value={rows.length} note={`${properties.length} propert${properties.length === 1 ? "y" : "ies"}`} />
-        <KpiTile icon="check" tone="green" label="Completed - waiting for PO" value={rows.filter((r) => r.status === "COMPLETED").length} note="Can be invoiced once on a PO" />
-        <KpiTile icon="calendar" tone="blue" label="Not done yet" value={rows.filter((r) => r.status !== "COMPLETED").length} note="Booked or in progress" />
-        <KpiTile icon="rupee" tone="violet" label="Value incl. GST" value={formatInr(gstOn(value(rows)).total)} note="At the booked prices" />
-      </section>
-
-      <section className="bgb-sheet">
-        <div className="bgb-sheet-toolbar bgn-toolbar">
-          <div className="bgb-tabs" role="tablist" aria-label="Filter by status">
-            {STATUS_TABS.map((t) => (
-              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={`bgb-tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
-                {t.label}<span>{counts[t.key]}</span>
+      <section className="bdz-panel bnp-panel">
+        {byProperty.length > 1 && (
+          <div className="bnp-props" role="radiogroup" aria-label="Property">
+            <button type="button" role="radio" aria-checked={!property} className={!property ? "on" : ""} onClick={() => setProperty("")}>
+              All properties <span>{rows.length}</span>
+            </button>
+            {byProperty.map((p) => (
+              <button key={p.name} type="button" role="radio" aria-checked={property === p.name} className={property === p.name ? "on" : ""} onClick={() => setProperty(property === p.name ? "" : p.name)}>
+                <i aria-hidden="true">{initials(p.name)}</i>{p.name} <span>{p.count}</span>
               </button>
             ))}
           </div>
-          <div className="bgn-filters">
-            <select className="bgn-select" value={property} onChange={(e) => setProperty(e.target.value)} aria-label="Property">
-              <option value="">All properties</option>
-              {properties.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <div className="bgb-search">
-              <SearchIcon />
-              <input value={query} maxLength={100} placeholder="Flat, service or job code" aria-label="Search services" onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
-            </div>
+        )}
+
+        <div className="bnp-toolbar">
+          <div className="bpm-seg" role="tablist" aria-label="Filter by status">
+            {STATUS_TABS.map((t) => (
+              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
+                {t.label} <b>{counts[t.key]}</b>
+              </button>
+            ))}
+          </div>
+          <div className="bnp-search">
+            <SearchIcon />
+            <input value={query} maxLength={100} placeholder="Flat, service or job code" aria-label="Search services" onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
           </div>
         </div>
 
         {loading ? (
-          <div className="bg-loading bgb-pad">Loading services…</div>
+          <div className="bpm-skel-grid" role="status" aria-label="Loading services">
+            {Array.from({ length: 7 }).map((_, i) => <span key={i} className="bdz-skel" style={{ height: 56, borderRadius: 12 }} />)}
+          </div>
         ) : !rows.length ? (
-          <div className="bg-empty-state"><strong>Every service is on a PO</strong>Nothing is waiting for a PO.</div>
+          <div className="bnp-empty">
+            <span aria-hidden="true">✓</span>
+            <strong>Every service is on a PO</strong>
+            <p>Nothing is waiting for a PO.</p>
+          </div>
         ) : !shown.length ? (
-          <div className="bg-empty-state"><strong>No matching services</strong>Try another property, status or search.</div>
+          <div className="bnp-empty muted"><strong>No matching services</strong><p>Try another property, status or search.</p></div>
         ) : (
-          <div className="bg-table-wrap">
-            <table className="bgb-ledger bgn-table">
+          <div className="bnp-scroll">
+            <table className="bnp-table">
               <thead>
                 <tr>
-                  <th className="bgn-check"><input type="checkbox" checked={allShownPicked} onChange={toggleShown} aria-label="Tick every service shown" /></th>
+                  <th className="bnp-check"><input type="checkbox" checked={allShownPicked} onChange={toggleShown} aria-label="Tick every service shown" /></th>
                   <th>Property · flat</th>
                   <th>Service</th>
                   <th>Status</th>
@@ -131,14 +154,19 @@ export default function BrigadeNoPo() {
               <tbody>
                 {shown.map((r) => (
                   <tr key={r.job_id} className={picked.has(r.job_id) ? "picked" : ""} onClick={() => toggle(r.job_id)}>
-                    <td className="bgn-check" onClick={(e) => e.stopPropagation()}>
+                    <td className="bnp-check" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={picked.has(r.job_id)} onChange={() => toggle(r.job_id)} aria-label={`Tick ${r.sub_service}, flat ${r.flat_number}`} />
                     </td>
-                    <td><div>{r.property || "—"}</div><div className="bgb-sub">Flat {r.flat_number}{r.bhk ? ` · ${r.bhk}` : ""}</div></td>
-                    <td><div>{r.sub_service}</div><div className="bgb-sub">{r.code}</div></td>
-                    <td><span className={`bgn-status ${r.status === "COMPLETED" ? "done" : "open"}`}>{statusLabel(r.status)}</span></td>
-                    <td className="bgb-nowrap">{r.start_date ? formatDate(r.start_date) : <span className="bgb-muted">—</span>}</td>
-                    <td className="num">{r.amount === null || r.amount === undefined ? <span className="bgb-muted">No price</span> : formatInr(r.amount)}</td>
+                    <td>
+                      <div className="bnp-who">
+                        <span className="bnp-avatar" aria-hidden="true">{initials(r.property)}</span>
+                        <span><strong>Flat {r.flat_number}{r.bhk ? <em> · {r.bhk}</em> : null}</strong><small>{r.property || "—"}</small></span>
+                      </div>
+                    </td>
+                    <td><strong className="bnp-svc">{r.sub_service}</strong><small className="bnp-code">{r.code}</small></td>
+                    <td><span className={`bnp-status ${r.status === "COMPLETED" ? "done" : "open"}`}><i aria-hidden="true" />{statusLabel(r.status)}</span></td>
+                    <td className="bnp-date">{r.start_date ? formatDate(r.start_date) : <span className="bnp-muted">—</span>}</td>
+                    <td className="num bnp-price">{r.amount === null || r.amount === undefined ? <span className="bnp-noprice">No price</span> : formatInr(r.amount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -148,13 +176,14 @@ export default function BrigadeNoPo() {
       </section>
 
       {pickedRows.length > 0 && (
-        <div className="bgn-bar" role="region" aria-label="Selected services">
+        <div className="bnp-bar" role="region" aria-label="Selected services">
+          <span className="bnp-bar-count">{pickedRows.length}</span>
           <div>
-            <strong>{pickedRows.length} service{pickedRows.length === 1 ? "" : "s"} selected</strong>
+            <strong>service{pickedRows.length === 1 ? "" : "s"} selected</strong>
             <span>{formatInr(gstOn(value(pickedRows)).total)} incl. GST · {[...new Set(pickedRows.map((r) => r.property))].join(", ")}</span>
           </div>
-          <button type="button" className="bgb-btn-ghost" onClick={() => setPicked(new Set())}>Clear</button>
-          <button type="button" className="primary" onClick={() => setAdding(true)}>Add to PO</button>
+          <button type="button" className="bnp-bar-clear" onClick={() => setPicked(new Set())}>Clear</button>
+          <button type="button" className="bnp-bar-go" onClick={() => setAdding(true)}>Add to PO →</button>
         </div>
       )}
 
@@ -172,6 +201,14 @@ export default function BrigadeNoPo() {
       )}
     </div>
   );
+}
+
+const initials = (name) => String(name || "?").replace(/^brigade\s+/i, "").trim().slice(0, 2).toUpperCase();
+function shortInr(n) {
+  const v = Number(n) || 0;
+  if (Math.abs(v) >= 1e7) return `₹${(v / 1e7).toFixed(2)} Cr`;
+  if (Math.abs(v) >= 1e5) return `₹${(v / 1e5).toFixed(1)} L`;
+  return formatInr(v);
 }
 
 /** Add the ticked services to an existing PO or a new one, each at a price on the PO. */

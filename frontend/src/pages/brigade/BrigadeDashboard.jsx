@@ -5,7 +5,7 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import BrigadeBookingModal from "./BrigadeBookingModal";
 import { apiFetch } from "../../api";
 import { brigadeRequest, formatDate, formatInr, gstOn, statusLabel } from "./brigadeShared";
-import KpiTile from "./KpiTile";
+import { SearchIcon } from "./PoSheet";
 import "./brigade.css";
 
 // Brigade Executive dashboard: the shared jobs dashboard (backend limits it to
@@ -152,161 +152,119 @@ function FlatsBoard() {
     [data.flats]
   );
 
+  const donePct = totals.completed + totals.booked ? Math.round((totals.completed / (totals.completed + totals.booked)) * 100) : null;
+  const propCounts = useMemo(() => data.flats.reduce((m, f) => { m[f.company_id] = (m[f.company_id] || 0) + 1; return m; }, {}), [data.flats]);
+
   return (
-    <div className="bg-page bgb">
-      <div className="bgb-topbar">
-        <div>
-          <h2 className="bgb-h1">Flats</h2>
-          <p className="bgb-lede">Every booked flat and what has been done for each Deep Cleaning service.</p>
+    <div className="bg-page bdz bdz-embedded bfl">
+      <section className="bdz-hero">
+        <div className="bdz-hero-top">
+          <div>
+            <span className="bdz-eyebrow">Brigade · Flats</span>
+            <h1>Flats</h1>
+            <p>Every booked flat and what has been done for each Deep Cleaning service</p>
+          </div>
+          <button type="button" className="bpo-new" onClick={downloadReport} disabled={downloading || loading || !data.flats.length}
+            title="Excel report of the flats shown (property + tab filters apply)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+            </svg>
+            {downloading ? "Preparing…" : "Download Excel"}
+          </button>
         </div>
-        <button
-          type="button"
-          className="bgf-download"
-          onClick={downloadReport}
-          disabled={downloading || loading || !data.flats.length}
-          title="Excel report of the flats shown (property + tab filters apply)"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
-            <path d="M14 3v5h5M9 13l2 2 4-4" />
-          </svg>
-          {downloading ? "Preparing…" : "Download Excel"}
-        </button>
-      </div>
+        {loading ? (
+          <div className="bdz-hero-kpis bnp-kpis">{[0, 1, 2, 3].map((i) => <span key={i} className="bdz-skel dark" />)}</div>
+        ) : (
+          <div className="bdz-hero-kpis bnp-kpis">
+            <div className="bdz-hstat blue"><span>Flats booked</span><b>{totals.flats.toLocaleString("en-IN")}</b><em>Across {properties.length} propert{properties.length === 1 ? "y" : "ies"}</em></div>
+            <div className="bdz-hstat aqua"><span>Services done</span><b>{totals.completed.toLocaleString("en-IN")}</b><em>{donePct === null ? "Nothing booked yet" : `${donePct}% of booked work`}</em></div>
+            <div className="bdz-hstat"><span>Services booked</span><b>{totals.booked.toLocaleString("en-IN")}</b><em>Scheduled or in progress</em></div>
+            <div className={`bdz-hstat ${totals.open ? "red" : ""}`}><span>Flats with open work</span><b>{totals.open.toLocaleString("en-IN")}</b><em>{(totals.flats - totals.open).toLocaleString("en-IN")} with nothing pending</em></div>
+          </div>
+        )}
+      </section>
 
       {error && <div className="bg-error">{error}</div>}
 
-      <section className="bgk-grid" aria-label="Flats summary">
-        <KpiTile
-          icon="home"
-          tone="blue"
-          label="Flats booked"
-          value={totals.flats}
-          note={`Across ${properties.length} propert${properties.length === 1 ? "y" : "ies"}`}
-        />
-        <KpiTile
-          icon="check"
-          tone="green"
-          label="Services done"
-          value={totals.completed}
-          progress={totals.completed + totals.booked ? (totals.completed / (totals.completed + totals.booked)) * 100 : null}
-          note={totals.completed + totals.booked ? `${Math.round((totals.completed / (totals.completed + totals.booked)) * 100)}% of booked work` : "Nothing booked yet"}
-        />
-        <KpiTile
-          icon="calendar"
-          tone="amber"
-          label="Services booked"
-          value={totals.booked}
-          note="Scheduled or in progress"
-        />
-        <KpiTile
-          icon="alert"
-          tone="violet"
-          label="Flats with open work"
-          value={totals.open}
-          note={`${totals.flats - totals.open} with nothing pending`}
-        />
-      </section>
-
-      <section className="bgb-sheet">
-        <div className="bgb-sheet-toolbar">
-          <div className="bgb-tabs" role="tablist" aria-label="Filter flats">
-            {[
-              ["all", "All flats", data.flats.length],
-              ["open", "Open work", totals.open],
-              ["done", "Nothing pending", totals.flats - totals.open],
-            ].map(([key, label, count]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={filter === key}
-                className={`bgb-tab ${filter === key ? "active" : ""}`}
-                onClick={() => setFilter(key)}
-              >
-                {label}
-                <span>{count}</span>
+      <section className="bdz-panel bnp-panel">
+        {properties.length > 1 && (
+          <div className="bnp-props" role="radiogroup" aria-label="Property">
+            <button type="button" role="radio" aria-checked={!property} className={!property ? "on" : ""} onClick={() => setProperty("")}>All properties <span>{data.flats.length}</span></button>
+            {properties.map(([id, name]) => (
+              <button key={id} type="button" role="radio" aria-checked={property === id} className={property === id ? "on" : ""} onClick={() => setProperty(property === id ? "" : id)}>
+                <i aria-hidden="true">{initials(name)}</i>{name} <span>{propCounts[id] || 0}</span>
               </button>
             ))}
           </div>
-          <div className="bgf-filters">
-            <select value={property} onChange={(e) => setProperty(e.target.value)} aria-label="Property">
-              <option value="">All properties</option>
-              {properties.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
-            <input
-              value={query}
-              placeholder="Search flat, e.g. L-0123"
-              aria-label="Search flat"
-              onChange={(e) => setQuery(e.target.value)}
-              autoComplete="off"
-            />
+        )}
+
+        <div className="bnp-toolbar">
+          <div className="bpm-seg" role="tablist" aria-label="Filter flats">
+            {[["all", "All flats", data.flats.length], ["open", "Open work", totals.open], ["done", "Nothing pending", totals.flats - totals.open]].map(([key, label, count]) => (
+              <button key={key} type="button" role="tab" aria-selected={filter === key} className={filter === key ? "on" : ""} onClick={() => setFilter(key)}>{label} <b>{count}</b></button>
+            ))}
+          </div>
+          <div className="bnp-search">
+            <SearchIcon />
+            <input value={query} placeholder="Search flat, e.g. L-0123" aria-label="Search flat" onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
           </div>
         </div>
 
         {loading ? (
-          <div className="bg-loading bgb-pad">Loading flats…</div>
+          <div className="bpm-skel-grid" role="status" aria-label="Loading flats">
+            {Array.from({ length: 7 }).map((_, i) => <span key={i} className="bdz-skel" style={{ height: 60, borderRadius: 12 }} />)}
+          </div>
         ) : !data.flats.length ? (
-          <div className="bg-empty-state">
-            <strong>No flats booked yet</strong>
-            Flats appear here after their first Brigade booking.
-          </div>
+          <div className="bnp-empty muted"><strong>No flats booked yet</strong><p>Flats appear here after their first Brigade booking.</p></div>
         ) : !shown.length ? (
-          <div className="bg-empty-state">
-            <strong>No matching flats</strong>
-            Try another property, filter or search.
-          </div>
+          <div className="bnp-empty muted"><strong>No matching flats</strong><p>Try another property, filter or search.</p></div>
         ) : (
-          <div className="bg-table-wrap">
-            <table className="bgb-ledger bgf-table">
+          <div className="bnp-scroll">
+            <table className="bnp-table bfl-table">
               <thead>
                 <tr>
-                  <th style={{ width: 28 }} aria-label="Expand" />
                   <th>Flat</th>
-                  <th>Property</th>
                   <th>Services</th>
-                  <th className="num">Done</th>
-                  <th className="num">Booked</th>
+                  <th className="num">Progress</th>
                   <th>Last booking</th>
+                  <th aria-label="Expand" />
                 </tr>
               </thead>
               {shown.map((f) => {
                 const key = `${f.company_id}|${f.flat_number}`;
                 const open = openKey === key;
+                const total = f.completed + f.booked;
                 return (
                   <tbody key={key} className={open ? "open" : undefined}>
-                    <tr
-                      tabIndex={0}
-                      aria-expanded={open}
-                      onClick={() => setOpenKey(open ? null : key)}
-                      onKeyDown={(e) => e.key === "Enter" && setOpenKey(open ? null : key)}
-                    >
-                      <td className="bgf-caret">{open ? "▾" : "▸"}</td>
+                    <tr tabIndex={0} aria-expanded={open} onClick={() => setOpenKey(open ? null : key)} onKeyDown={(e) => e.key === "Enter" && setOpenKey(open ? null : key)}>
                       <td>
-                        <span className="bgb-po-no">{f.flat_number}</span>
-                        <span className="bgf-bhk">{f.bhk}</span>
+                        <div className="bnp-who">
+                          <span className="bnp-avatar" aria-hidden="true">{initials(f.property)}</span>
+                          <span><strong>{f.flat_number}{f.bhk ? <em> · {f.bhk}</em> : null}</strong><small>{f.property || "—"}</small></span>
+                        </div>
                       </td>
-                      <td>{f.property || "—"}</td>
                       <td>
-                        <div className="bgf-chips">
+                        <div className="bfl-chips">
                           {f.services.map((s) => (
-                            <span key={s.sub_service} className={`bgf-chip ${s.state}`} title={`${s.sub_service}: ${STATE_LABEL[s.state]}`}>
-                              {s.state === "completed" ? "✓ " : "● "}
-                              {s.sub_service}
+                            <span key={s.sub_service} className={`bfl-chip ${s.state}`} title={`${s.sub_service}: ${STATE_LABEL[s.state]}`}>
+                              <i aria-hidden="true" />{s.sub_service}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td className="num">{f.completed}</td>
-                      <td className="num">{f.booked}</td>
-                      <td className="bgb-nowrap">{formatDate(f.last_activity)}</td>
+                      <td className="num">
+                        <span className="bfl-prog" title={`${f.completed} done, ${f.booked} booked`}>
+                          <b>{f.completed}<small>/{total}</small></b>
+                          <span className="bfl-prog-bar"><i style={{ width: `${total ? (f.completed / total) * 100 : 0}%` }} /></span>
+                          {f.booked > 0 ? <em className="open">{f.booked} open</em> : <em>all done</em>}
+                        </span>
+                      </td>
+                      <td className="bnp-date">{formatDate(f.last_activity)}</td>
+                      <td className="bfl-caret" aria-hidden="true">{open ? "▴" : "▾"}</td>
                     </tr>
                     {open && (
-                      <tr className="bgf-detail">
-                        <td />
-                        <td colSpan={6}>
+                      <tr className="bfl-detail">
+                        <td colSpan={5}>
                           <FlatDetail
                             flat={f}
                             allServices={data.sub_services}
@@ -331,6 +289,7 @@ function FlatsBoard() {
             </table>
           </div>
         )}
+        <div className="bpo-legend"><span><i className="bfl-dot completed" />Done</span><span><i className="bfl-dot booked" />Booked, not done yet</span></div>
       </section>
 
       {addFor && (
@@ -344,6 +303,8 @@ function FlatsBoard() {
     </div>
   );
 }
+
+const initials = (name) => String(name || "?").replace(/^brigade\s+/i, "").trim().slice(0, 2).toUpperCase();
 
 // Opened flat: one card per service — work first (booked, then done), and the
 // never-booked ones as quiet cards at the end.
@@ -432,69 +393,91 @@ function PendingFlats({ onChanged }) {
     }
   }
 
+  const [property, setProperty] = useState("");
   const term = query.trim().toLowerCase();
   const shown = rows.filter(
     (r) =>
-      !term ||
-      [r.flat_number, r.property, r.contact_name, r.client_po_number].some((v) => String(v || "").toLowerCase().includes(term))
+      (!property || r.property === property) &&
+      (!term || [r.flat_number, r.property, r.contact_name, r.client_po_number].some((v) => String(v || "").toLowerCase().includes(term)))
   );
   const oldest = rows.length ? rows[rows.length - 1].created_at : null;
+  const props = [...new Set(rows.map((r) => r.property).filter(Boolean))].sort();
+  const propCount = (p) => rows.filter((r) => r.property === p).length;
+  const totalIncl = rows.reduce((s, r) => s + gstOn(r.services_total || 0).total, 0);
+  const noServices = rows.filter((r) => !(r.services || []).length).length;
+  const noPo = rows.filter((r) => !r.client_po_number).length;
 
   return (
-    <div className="bg-page bgb">
-      <div className="bgb-topbar">
-        <div>
-          <h2 className="bgb-h1">Pending</h2>
-          <p className="bgb-lede">Brigade bookings waiting to be scheduled. Set the visit date and team to create the jobs.</p>
+    <div className="bg-page bdz bdz-embedded bpe">
+      <section className="bdz-hero">
+        <div className="bdz-hero-top">
+          <div>
+            <span className="bdz-eyebrow">Brigade · Pending</span>
+            <h1>Pending</h1>
+            <p>Bookings waiting to be scheduled · set the visit date and team to create the jobs</p>
+          </div>
+          <button type="button" className="bpo-new" onClick={() => setCreating(true)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            New booking
+          </button>
         </div>
-        <button type="button" className="primary bgf-new-flat" onClick={() => setCreating(true)}>
-          + New booking
-        </button>
-      </div>
+        {loading ? (
+          <div className="bdz-hero-kpis bnp-kpis">{[0, 1, 2, 3].map((i) => <span key={i} className="bdz-skel dark" />)}</div>
+        ) : (
+          <div className="bdz-hero-kpis bnp-kpis">
+            <div className="bdz-hstat red"><span>Flats waiting</span><b>{rows.length.toLocaleString("en-IN")}</b><em>{props.length} propert{props.length === 1 ? "y" : "ies"}</em></div>
+            <div className="bdz-hstat aqua"><span>Value of the work</span><b title={formatInr(totalIncl)}>{totalIncl >= 1e5 ? `₹${(totalIncl / 1e5).toFixed(1)} L` : formatInr(totalIncl)}</b><em>incl. GST</em></div>
+            <div className="bdz-hstat blue"><span>Without a PO</span><b>{noPo.toLocaleString("en-IN")}</b><em>{noServices ? `${noServices} with no services picked` : "All have services picked"}</em></div>
+            <div className="bdz-hstat"><span>Oldest saved</span><b>{oldest ? formatDate(oldest) : "—"}</b><em>Schedule the oldest first</em></div>
+          </div>
+        )}
+      </section>
 
       {error && <div className="bg-error">{error}</div>}
 
-      <section className="bgb-sheet">
-        <div className="bgb-sheet-toolbar">
-          <div className="bgf-pending-count">
-            <strong>{rows.length}</strong> flat{rows.length === 1 ? "" : "s"} waiting to be scheduled
-            {oldest && <span className="bgb-muted"> · oldest saved {formatDate(oldest)}</span>}
+      <section className="bdz-panel bnp-panel">
+        {props.length > 1 && (
+          <div className="bnp-props" role="radiogroup" aria-label="Property">
+            <button type="button" role="radio" aria-checked={!property} className={!property ? "on" : ""} onClick={() => setProperty("")}>All properties <span>{rows.length}</span></button>
+            {props.map((p) => (
+              <button key={p} type="button" role="radio" aria-checked={property === p} className={property === p ? "on" : ""} onClick={() => setProperty(property === p ? "" : p)}>
+                <i aria-hidden="true">{initials(p)}</i>{p} <span>{propCount(p)}</span>
+              </button>
+            ))}
           </div>
-          <div className="bgf-filters">
-            <input
-              value={query}
-              placeholder="Search flat, property, person or PO"
-              aria-label="Search pending flats"
-              onChange={(e) => setQuery(e.target.value)}
-              autoComplete="off"
-            />
+        )}
+
+        <div className="bnp-toolbar">
+          <div className="bpe-count"><b>{shown.length}</b> flat{shown.length === 1 ? "" : "s"} waiting to be scheduled{property ? ` at ${property}` : ""}</div>
+          <div className="bnp-search">
+            <SearchIcon />
+            <input value={query} placeholder="Search flat, property, person or PO" aria-label="Search pending flats" onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
           </div>
         </div>
 
         {loading ? (
-          <div className="bg-loading bgb-pad">Loading pending flats…</div>
+          <div className="bpm-skel-grid" role="status" aria-label="Loading pending flats">
+            {Array.from({ length: 6 }).map((_, i) => <span key={i} className="bdz-skel" style={{ height: 72, borderRadius: 12 }} />)}
+          </div>
         ) : !rows.length ? (
-          <div className="bg-empty-state">
+          <div className="bnp-empty">
+            <span aria-hidden="true">✓</span>
             <strong>Nothing waiting to be scheduled</strong>
-            New Brigade bookings land here. Use “+ New booking” to add one.
+            <p>New Brigade bookings land here. Use “New booking” to add one.</p>
           </div>
         ) : !shown.length ? (
-          <div className="bg-empty-state">
-            <strong>No matching flats</strong>
-            Try another search.
-          </div>
+          <div className="bnp-empty muted"><strong>No matching flats</strong><p>Try another property or search.</p></div>
         ) : (
-          <div className="bg-table-wrap">
-            <table className="bgb-ledger">
+          <div className="bnp-scroll">
+            <table className="bnp-table bpe-table">
               <thead>
                 <tr>
                   <th>Flat</th>
-                  <th>Services Brigade asked for</th>
+                  <th>Services asked for</th>
                   <th className="num">Value incl. GST</th>
                   <th>Client PO</th>
-                  <th>Requested by</th>
-                  <th>Booked</th>
-                  <th className="num" style={{ width: 250 }} aria-label="Actions" />
+                  <th>Requested</th>
+                  <th className="num" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -502,83 +485,77 @@ function PendingFlats({ onChanged }) {
                   const services = r.services || [];
                   const money = gstOn(r.services_total || 0);
                   return (
-                  <tr key={r.id}>
-                    <td>
-                      <span className="bgb-po-no">{r.flat_number}</span>
-                      <span className="bgf-bhk">{r.bhk}</span>
-                      <div className="bgb-sub">{r.property}{r.site_name && r.site_name !== r.property ? ` · ${r.site_name}` : ""}</div>
-                      {r.notes && <div className="bgb-sub" title={r.notes}>{r.notes.length > 60 ? `${r.notes.slice(0, 60)}…` : r.notes}</div>}
-                    </td>
-                    <td>
-                      {services.length ? (
-                        <div className="bgf-chips">
-                          {services.map((x) => (
-                            <span key={x.sub_service} className="bgf-chip asked" title={x.price === null ? "No price" : formatInr(x.price)}>
-                              {x.sub_service}
-                            </span>
-                          ))}
+                    <tr key={r.id} className="bpe-row">
+                      <td>
+                        <div className="bnp-who">
+                          <span className="bnp-avatar" aria-hidden="true">{initials(r.property)}</span>
+                          <span>
+                            <strong>{r.flat_number}{r.bhk ? <em> · {r.bhk}</em> : null}</strong>
+                            <small>{r.property}{r.site_name && r.site_name !== r.property ? ` · ${r.site_name}` : ""}</small>
+                            {r.notes && <small className="bpe-note" title={r.notes}>{r.notes.length > 50 ? `${r.notes.slice(0, 50)}…` : r.notes}</small>}
+                          </span>
                         </div>
-                      ) : (
-                        <span className="bgf-no-services">No services yet — pick them when scheduling</span>
-                      )}
-                    </td>
-                    <td className="num">
-                      {services.length ? (
-                        <>
-                          <div className="bgb-strong">{formatInr(money.total)}</div>
-                          <div className="bgb-sub">{formatInr(money.base)} + GST {formatInr(money.gst)}</div>
-                        </>
-                      ) : (
-                        <span className="bgb-muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {r.client_po_number ? (
-                        <>
-                          <div>{r.client_po_number}</div>
-                          {r.po_amount !== null && <div className="bgb-sub">PO {formatInr(r.po_amount)} incl. GST</div>}
-                        </>
-                      ) : (
-                        <span className="bgb-muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <div>{r.contact_name || "—"}</div>
-                      {r.contact_phone && <div className="bgb-sub">{r.contact_phone}</div>}
-                    </td>
-                    <td className="bgb-nowrap">
-                      <div>{formatDate(r.created_at)}</div>
-                      {r.created_by && <div className="bgb-sub">by {r.created_by}</div>}
-                    </td>
-                    <td className="num">
-                      <div className="bgf-row-actions">
-                        <button type="button" className="bgb-btn-ghost bgf-cancel" onClick={() => setCancelling(r)}>
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="primary bgf-add-services"
-                          onClick={() =>
-                            setAddFor({
-                              request_id: r.id,
-                              company_id: r.company_id,
-                              site_id: r.site_id,
-                              contact_id: r.contact_id,
-                              contact_name: r.contact_name,
-                              flat_number: r.flat_number,
-                              bhk: r.bhk,
-                              property: r.property,
-                              address: r.address,
-                              po_number: r.client_po_number,
-                              services,
-                            })
-                          }
-                        >
-                          Schedule &amp; assign
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      <td>
+                        {services.length ? (
+                          <div className="bfl-chips">
+                            {services.map((x) => (
+                              <span key={x.sub_service} className="bfl-chip asked" title={x.price === null ? "No price" : formatInr(x.price)}>{x.sub_service}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="bpe-none">No services yet · pick them when scheduling</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {services.length ? (
+                          <>
+                            <strong className="bnp-price">{formatInr(money.total)}</strong>
+                            <small className="bpo-sub">{formatInr(money.base)} + GST</small>
+                          </>
+                        ) : <span className="bnp-muted">—</span>}
+                      </td>
+                      <td>
+                        {r.client_po_number ? (
+                          <span className="bpe-po">
+                            <strong>{r.client_po_number}</strong>
+                            {r.po_amount !== null && <small>PO {formatInr(r.po_amount)}</small>}
+                          </span>
+                        ) : <span className="bpo-pill warn">No PO</span>}
+                      </td>
+                      <td>
+                        <strong className="bpe-who">{r.contact_name || "—"}</strong>
+                        <small className="bpo-sub">{formatDate(r.created_at)}{r.created_by ? ` · by ${r.created_by}` : ""}</small>
+                      </td>
+                      <td className="num">
+                        <div className="bpe-actions">
+                          <button type="button" className="bpe-cancel" onClick={() => setCancelling(r)} aria-label={`Cancel flat ${r.flat_number}`} title="Cancel this flat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="bpe-go"
+                            onClick={() =>
+                              setAddFor({
+                                request_id: r.id,
+                                company_id: r.company_id,
+                                site_id: r.site_id,
+                                contact_id: r.contact_id,
+                                contact_name: r.contact_name,
+                                flat_number: r.flat_number,
+                                bhk: r.bhk,
+                                property: r.property,
+                                address: r.address,
+                                po_number: r.client_po_number,
+                                services,
+                              })
+                            }
+                          >
+                            Schedule &amp; assign
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>

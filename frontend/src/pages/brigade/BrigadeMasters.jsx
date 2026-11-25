@@ -97,7 +97,7 @@ export default function BrigadeMasters() {
         <div className="bdz-panel">
           <div className="bg-empty-state">
             <strong>No Brigade properties yet</strong>
-            Add a company under “Brigade Group” in Companies, with a site, then come back here.
+            Ask the Admin to add the property under “Brigade Group” in Companies, with a site.
           </div>
         </div>
       )}

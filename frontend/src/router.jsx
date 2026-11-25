@@ -229,10 +229,6 @@ const router = createBrowserRouter([
     children: [
       // Jobs (same dashboard as admin, limited to Brigade Group by the backend) + Flats view.
       { index: true, element: <BrigadeDashboard /> },
-      { path: "companies", element: <AdminCompanies /> },
-      { path: "group-management", element: <AdminGroupManagement /> },
-      { path: "contacts", element: <ContactsPage /> },
-      { path: "contacts/:contactId", element: <ContactsPage /> },
       { path: "masters", element: <BrigadeMasters /> },
       { path: "pos", element: <BrigadePos /> },
       { path: "no-po", element: <BrigadeNoPo /> },

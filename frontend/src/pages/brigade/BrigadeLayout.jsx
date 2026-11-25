@@ -14,9 +14,6 @@ const NAV = [
   // By-property dashboard (booked -> completed -> on PO -> invoiced -> paid), then the jobs list (with Pending and Flats).
   { path: "/brigade/dashboard", label: "Dashboard" },
   { path: "/brigade", label: "Jobs", exact: true },
-  { path: "/brigade/companies", label: "Companies" },
-  { path: "/brigade/contacts", label: "Contacts" },
-  { path: "/brigade/group-management", label: "Group Management" },
   { path: "/brigade/masters", label: "Prices & BHK" },
   { path: "/brigade/no-po", label: "Services without PO", badge: "noPo" },
   { path: "/brigade/pos", label: "PO" },
