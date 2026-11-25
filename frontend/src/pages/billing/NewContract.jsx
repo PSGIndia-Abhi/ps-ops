@@ -103,20 +103,6 @@ export default function NewContract() {
   // Opened from a customer's profile (?company=COMP12): that customer is chosen already.
   const [searchParams] = useSearchParams();
   const [companyId, setCompanyId] = useState(searchParams.get("company") || "");
-  // Customer dropdown: the display name (else the name), each name once - a second company with the
-  // same display name is left out (the one already chosen, e.g. from a draft, always stays).
-  const customerOptions = (() => {
-    const seen = new Set();
-    const out = [];
-    for (const c of customers || []) {
-      const label = (c.display_name || "").trim() || String(c.name || "").trim();
-      const key = label.toLowerCase();
-      if (seen.has(key) && c.company_id !== companyId) continue;
-      seen.add(key);
-      out.push({ ...c, label });
-    }
-    return out;
-  })();
   // Group based contract (?type=group): a group, the ticked companies of it, one Bill To for the
   // group. The first ticked company is the contract's main company (the later steps use it).
   const groupMode = searchParams.get("type") === "group";
@@ -983,7 +969,7 @@ export default function NewContract() {
             <Field label="Customer" required>
               <select ref={customerSelect} className="ac-select" value={companyId} onChange={(e) => chooseCustomer(e.target.value)}>
                 <option value="">Choose a customer…</option>
-                {customerOptions.map((c) => <option key={c.company_id} value={c.company_id}>{c.label}{!c.category ? " (customer type not set)" : ""}</option>)}
+                {(customers || []).map((c) => <option key={c.company_id} value={c.company_id}>{c.name}{!c.category ? " (customer type not set)" : ""}</option>)}
               </select>
             </Field>
             {customer && !customer.category && (
