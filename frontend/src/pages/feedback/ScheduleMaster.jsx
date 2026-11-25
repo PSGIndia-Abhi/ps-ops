@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiAlertCircle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
+import { FEEDBACK_HOME } from "./access";
+import { FiAlertCircle, FiBell, FiCalendar, FiCheckCircle, FiMapPin, FiPhoneCall, FiCheck, FiChevronDown, FiEdit2, FiPlus, FiRefreshCw, FiRepeat, FiSearch, FiTool, FiTrash2, FiX, FiXCircle } from "react-icons/fi";
 import { deleteSchedule, formatDay, getScheduleOptions, getSchedules, saveSchedule } from "./feedbackApi";
 import { Card, Chip, Empty, ErrorBox, Loading, Modal, PageHead, Segmented, Switch, Toast } from "./ui";
 
@@ -309,6 +311,7 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
   return (
     <Modal
       wide
+      className="fb-sched-modal"
       title={renew ? "Schedule again" : schedule ? "Edit schedule" : "Add a schedule"}
       onClose={onClose}
       footer={
@@ -327,15 +330,22 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
 
         <section className="fb-sched-sec">
           <div className="fb-sched-label">
-            Customers & sites <span className="fb-req">*</span>
-            <small>{schedule ? "One customer (all sites) or one site" : "Pick a customer for all its sites, or single sites. Each gets its own schedule."}</small>
+            <span className="fb-sched-step">1</span>
+            <span className="fb-sched-label-text">
+              <span>Customers & sites <span className="fb-req">*</span></span>
+              <small>{schedule ? "One customer (all sites) or one site" : "Pick a customer for all its sites, or single sites. Each gets its own schedule."}</small>
+            </span>
           </div>
           <TargetPicker customers={options.customers} value={f.targets} onChange={(targets) => setF((x) => ({ ...x, targets }))} single={Boolean(schedule)} taken={taken} />
         </section>
 
         <section className="fb-sched-sec">
           <div className="fb-sched-label">
-            When to call <small>Pick one or more. Each one becomes its own schedule; a site never gets two calls at once.</small>
+            <span className="fb-sched-step">2</span>
+            <span className="fb-sched-label-text">
+              <span>When to call</span>
+              <small>Pick one or more. Each one becomes its own schedule; a site never gets two calls at once.</small>
+            </span>
           </div>
           <div className="fb-sched-modes" role="group" aria-label="When to call">
             {MODES.map((m) => {
@@ -454,6 +464,13 @@ function ScheduleForm({ schedule, options, onSaved, onClose, renew = false, sche
           )}
         </section>
 
+        <div className="fb-sched-label">
+          <span className="fb-sched-step">3</span>
+          <span className="fb-sched-label-text">
+            <span>Dates</span>
+            <small>When the calls start, and stop (optional)</small>
+          </span>
+        </div>
         <section className="fb-sched-sec fb-sched-grid is-3">
           <label className="fb-field" htmlFor="fb-sc-start">
             <span>
@@ -624,6 +641,26 @@ function notScheduledRows(customers, schedules) {
 
 const PAGE_SIZE = 25; // rows a page on the Call schedule list
 
+const AVATAR_TONES = ["#0284c7", "#7c3aed", "#059669", "#d97706", "#db2777", "#4f46e5", "#0d9488", "#dc2626"];
+const initialsOf = (name) => String(name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+const toneOf = (key) => AVATAR_TONES[[...String(key || "")].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % AVATAR_TONES.length];
+
+/** Customer + site cell: initials avatar, name, and the site (or "All N sites") with a pin. */
+function WhoCell({ customer, site, allSites }) {
+  return (
+    <div className="cs-who">
+      <span className="cs-avatar" style={{ background: toneOf(customer.id || customer.name) }} aria-hidden="true">{initialsOf(customer.name)}</span>
+      <span className="cs-who-text">
+        <span className="cs-name">{customer.name}</span>
+        <span className="cs-site">
+          <FiMapPin aria-hidden="true" />
+          {site ? [site.name, site.city].filter(Boolean).join(" · ") : allSites}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 /**
  * 5 page numbers around the open page, plus the first and last pages with "…" for the gaps:
  * 1 2 3 4 5 … 20 / 1 … 6 7 8 9 10 … 20 / 1 … 16 17 18 19 20.
@@ -641,6 +678,7 @@ function pageNumbers(at, pages) {
 }
 
 export default function ScheduleMaster() {
+  const navigate = useNavigate();
   const [schedules, setSchedules] = useState(null);
   const [options, setOptions] = useState(null);
   const [error, setError] = useState("");
@@ -690,17 +728,6 @@ export default function ScheduleMaster() {
   const pick = (key, on) => setPicked((prev) => { const next = new Set(prev); if (on) next.add(key); else next.delete(key); return next; });
   const pickAllShown = (on) => setPicked((prev) => { const next = new Set(prev); pageNot.forEach((r) => (on ? next.add(r.key) : next.delete(r.key))); return next; });
 
-  async function toggle(s, on) {
-    setError("");
-    try {
-      const body = { ...bodyOf(formOf(s)), is_active: on };
-      setSchedules((await saveSchedule(s.id, body)).schedules);
-      setNotice(on ? "Schedule switched on." : "Schedule switched off. No new calls for it.");
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
   async function remove() {
     setError("");
     try {
@@ -717,26 +744,43 @@ export default function ScheduleMaster() {
       <PageHead
         title="Call schedule"
         sub="Only the customers and sites set here get feedback calls. Each call shows on the Dashboard on its due date."
-        actions={
-          pickedRows.length > 0 && (
-            <button type="button" className="fb-btn fb-btn-primary" onClick={() => { setNewTargets(pickedRows.flatMap((r) => r.targets)); setEditing("new"); }}>
-              <FiPlus aria-hidden="true" /> Add schedule ({pickedRows.length})
-            </button>
-          )
-        }
       />
       <Toast notice={notice ? { text: notice } : null} onClose={clearNotice} />
       <ErrorBox error={error} />
       {/* Ended schedules are handled on the Alerts page. */}
 
+      {/* At a glance: click a tile to open that list */}
+      <div className="cs-stats">
+        {[
+          { key: "NOT", tone: "amber", icon: FiAlertCircle, value: unscheduled.length, label: "Not scheduled", sub: "No feedback calls yet", onClick: () => setView("NOT"), on: view === "NOT" },
+          { key: "SCHEDULED", tone: "blue", icon: FiCalendar, value: schedules.length, label: "Scheduled", sub: "Customers & sites with a plan", onClick: () => setView("SCHEDULED"), on: view === "SCHEDULED" },
+          { key: "ENDED", tone: "red", icon: FiBell, value: schedules.filter((x) => x.ended).length, label: "Ended", sub: "Open Alerts to act", onClick: () => navigate(`${FEEDBACK_HOME}/alerts`, { state: { from: "schedule" } }) },
+        ].map(({ key, tone, icon, value, label, sub, onClick, on }) => {
+          const Icon = icon;
+          const Tag = onClick ? "button" : "div";
+          return (
+            <Tag key={key} {...(onClick ? { type: "button", onClick } : {})} className={`cs-stat ${tone} ${on ? "is-on" : ""} ${key === "ENDED" && !value ? "is-calm" : ""}`}>
+              <Icon className="cs-stat-bg" aria-hidden="true" />
+              <span className="cs-stat-ic"><Icon /></span>
+              <span className="cs-stat-text">
+                <small>{label}</small>
+                <b>{value}</b>
+                <em>{sub}</em>
+              </span>
+            </Tag>
+          );
+        })}
+      </div>
+
       <Card bodyClass="is-flush">
         <div className="fb-filters">
-          <label className="fb-row" style={{ gap: 6, flex: "1 1 220px", maxWidth: 320 }}>
-            <FiSearch aria-hidden="true" className="fb-muted" />
-            <input className="fb-input" placeholder="Search customer or site" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} aria-label="Search customer or site" />
+          <label className="cs-search">
+            <FiSearch aria-hidden="true" />
+            <input placeholder="Search customer or site" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} aria-label="Search customer or site" />
+            {q && <button type="button" onClick={() => { setQ(""); setPage(1); }} aria-label="Clear search"><FiX /></button>}
           </label>
-          <span className="fb-small fb-muted">
-            {view === "NOT" ? `${unscheduled.length} with no calls` : `${schedules.filter((s) => s.is_active).length} on · ${schedules.length} scheduled`}
+          <span className="cs-hint">
+            {view === "NOT" ? "Tick customers or sites, then Add schedule" : `${schedules.filter((s) => s.is_active).length} on · ${schedules.length} scheduled`}
           </span>
           {/* Scheduled / Not scheduled / All - in the right corner */}
           <div style={{ marginLeft: "auto" }}>
@@ -759,7 +803,7 @@ export default function ScheduleMaster() {
           />
         ) : (
           <div className="fb-table-wrap">
-            <table className="fb-table">
+            <table className="fb-table cs-table">
               <thead>
                 <tr>
                   {pageNot.length > 0 && (
@@ -779,7 +823,6 @@ export default function ScheduleMaster() {
                       <th>When to call</th>
                       <th>From</th>
                       <th>Calls made</th>
-                      <th>On</th>
                       <th aria-label="Actions" />
                     </>
                   )}
@@ -790,12 +833,11 @@ export default function ScheduleMaster() {
                   <tr key={s.id} className={s.is_active ? "" : "fb-row-off"}>
                     {pageNot.length > 0 && <td className="fb-check-col" />}
                     <td>
-                      <div className="fb-strong">{s.customer.name}</div>
-                      <div className="fb-small fb-muted">{s.site ? `${s.site.name}${s.site.city ? ` · ${s.site.city}` : ""}` : "All sites"}</div>
+                      <WhoCell customer={s.customer} site={s.site} allSites="All sites" />
                     </td>
                     <td className="fb-small" style={{ maxWidth: 320 }}>
-                      {s.text}
-                      {s.note && <div className="fb-muted">{s.note}</div>}
+                      <span className="cs-rule"><FiRepeat aria-hidden="true" /> {s.text}</span>
+                      {s.note && <div className="fb-muted" style={{ marginTop: 4 }}>{s.note}</div>}
                     </td>
                     <td className="fb-small" style={{ whiteSpace: "nowrap" }}>
                       {formatDay(s.start_date)}
@@ -808,15 +850,10 @@ export default function ScheduleMaster() {
                     </td>
                     <td className="fb-small">
                       {s.calls_made ? (
-                        <>
-                          {s.calls_made} · last due {formatDay(s.last_due_date)}
-                        </>
+                        <span className="cs-calls"><b>{s.calls_made}</b> · last due {formatDay(s.last_due_date)}</span>
                       ) : (
                         <Chip>None yet</Chip>
                       )}
-                    </td>
-                    <td>
-                      <Switch checked={s.is_active} onChange={(v) => toggle(s, v)} label={`${s.customer.name} schedule on`} />
                     </td>
                     <td className="fb-right" style={{ whiteSpace: "nowrap" }}>
                       <button type="button" className="fb-btn fb-btn-sm" onClick={() => setEditing(s)} aria-label="Edit">
@@ -835,16 +872,14 @@ export default function ScheduleMaster() {
                       <input type="checkbox" checked={picked.has(r.key)} onChange={(e) => pick(r.key, e.target.checked)} aria-label={`Tick ${r.customer.name}${r.site ? ` ${r.site.name}` : ""}`} />
                     </td>
                     <td>
-                      <div className="fb-strong">{r.customer.name}</div>
-                      <div className="fb-small fb-muted">{r.site ? `${r.site.name}${r.site.city ? ` · ${r.site.city}` : ""}` : `All ${r.sites} sites`}</div>
+                      <WhoCell customer={r.customer} site={r.site} allSites={`All ${r.sites} sites`} />
                     </td>
                     {view === "NOT" && (
-                      <td className="fb-small">{r.site ? "1 site" : `${r.sites} site${r.sites === 1 ? "" : "s"}`}</td>
+                      <td><span className="cs-sites">{r.site ? "1 site" : `${r.sites} sites`}</span></td>
                     )}
                     {/* one cell across the call columns: nothing to show until it is scheduled */}
-                    <td className="fb-small" colSpan={view === "NOT" ? 1 : 5}>
-                      <span className="fb-ns-chip">Not scheduled</span>
-                      <span className="fb-muted" style={{ marginLeft: 8 }}>No feedback calls are made · tick it, then Add schedule</span>
+                    <td colSpan={view === "NOT" ? 1 : 4}>
+                      <span className="cs-status"><i aria-hidden="true" />No calls yet</span>
                     </td>
                   </tr>
                 ))}
@@ -876,6 +911,17 @@ export default function ScheduleMaster() {
           </div>
         )}
       </Card>
+
+      {/* Ticked rows: a bar at the bottom to schedule them together */}
+      {pickedRows.length > 0 && !editing && (
+        <div className="cs-selbar" role="region" aria-label="Ticked customers and sites">
+          <span className="cs-selbar-n"><FiCheckCircle aria-hidden="true" /> {pickedRows.length} selected</span>
+          <button type="button" className="cs-selbar-clear" onClick={() => setPicked(new Set())}>Clear</button>
+          <button type="button" className="fb-btn fb-btn-primary" onClick={() => { setNewTargets(pickedRows.flatMap((r) => r.targets)); setEditing("new"); }}>
+            <FiPlus aria-hidden="true" /> Add schedule
+          </button>
+        </div>
+      )}
 
       {editing && (
         <ScheduleForm
