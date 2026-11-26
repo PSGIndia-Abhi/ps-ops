@@ -589,10 +589,19 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     if (b.updated_at && String(b.updated_at) !== current.updated_at) throw C.conflict("This contract was changed by someone else. Reload and try again.");
     if (current.status === "ENDED") throw C.bad("An ended contract cannot be changed");
     const sites = await contractSiteIdsOf(conn, current.id, current.company_id);
-    const merged = { ...current, ...b };
+    // Term start date: can be changed only while nothing is drafted or issued on the contract (the
+    // periods are counted from it). The cycle day then follows the new start date.
+    let startDate = current.start_date;
+    const startSent = b.start_date !== undefined && b.start_date !== null && b.start_date !== "" ? C.date(b.start_date, "Term start date") : null;
+    const startMoved = Boolean(startSent) && startSent !== current.start_date;
+    if (startMoved) {
+      if (!current.next_period_editable) throw C.bad("The term start date cannot be changed once an invoice is drafted or issued on this contract");
+      startDate = startSent;
+    }
+    const merged = { ...current, ...b, ...(startMoved && (b.cycle_start_day === undefined || Number(b.cycle_start_day) === Number(current.cycle_start_day)) ? { cycle_start_day: undefined } : {}) };
     // A listed, active description - or the one the contract already has, even if switched off since.
     await assertDescription(conn, C.str(merged.description_template, "description_template", { max: 500 }), current.description_template, req.user.id);
-    const header = readContractHeader(merged, sites, current.billing_type, current.start_date);
+    const header = readContractHeader(merged, sites, current.billing_type, startDate);
     if (header.separate_bills) await assertDescription(conn, header.chemical_description_template, current.chemical_description_template, req.user.id);
     // A listed, active frequency - or the one the contract already has, even if switched off since.
     if (header.frequency_unit === "MONTH") await assertFrequency(conn, header.frequency_months, current.frequency_months);
@@ -605,20 +614,30 @@ const updateContract = C.handle("Failed to update the contract", async (req, res
     let nextStart = current.next_period_start;
     if (b.next_period_start !== undefined && b.next_period_start !== current.next_period_start) {
       if (!current.next_period_editable) throw C.bad("The next billing date cannot be changed once an invoice is drafted or issued on this contract");
-      nextStart = readFirstBill(b.next_period_start, current.start_date, header.end_date, "next_period_start") || current.start_date;
+      nextStart = readFirstBill(b.next_period_start, startDate, header.end_date, "next_period_start") || startDate;
+    }
+    if (startMoved) {
+      // Billing from the start date (as before the change), or from a date now before it: from the new start.
+      if (!nextStart || nextStart === current.start_date || nextStart < startDate) nextStart = startDate;
+      if (header.end_date && header.end_date < startDate) throw C.bad("The term end date cannot be before the start date");
+      // Price lines that began with the old start date begin with the new one.
+      await conn.query(
+        "UPDATE billing_contract_lines SET effective_from = ? WHERE contract_id = ? AND effective_from = ? AND effective_to IS NULL",
+        [startDate, req.params.id, current.start_date]
+      );
     }
     await conn.query(
       `UPDATE billing_contracts
           SET frequency_months = ?, frequency_unit = ?, cycle_start_day = ?, bill_timing = ?, bill_day = ?, end_date = ?, invoice_grouping = ?, site_id = ?,
               po_required = ?, gst_applicable = ?, gst_rate = ?, shortfall_billing = ?, description_template = ?,
               separate_bills = ?, chemical_description_template = ?, notes = ?,
-              next_period_start = ?, updated_by = ?
+              start_date = ?, next_period_start = ?, updated_by = ?
         WHERE id = ?`,
       [
         header.frequency_months, header.frequency_unit, header.cycle_start_day, header.bill_timing, header.bill_day, header.end_date, header.invoice_grouping, header.site_id,
         header.po_required, header.gst_applicable, header.gst_rate, header.shortfall_billing, header.description_template,
         header.separate_bills, header.chemical_description_template, header.notes,
-        nextStart, req.user.id, req.params.id,
+        startDate, nextStart, req.user.id, req.params.id,
       ]
     );
     if (b.po_ids !== undefined) await linkContractPos(conn, req.params.id, current.company_id, b.po_ids, current.billing_type);
