@@ -377,8 +377,14 @@ export default function ContractForm() {
                 )}
               </Field>
               <BillDayField day={form.bill_day ?? ""} timing={form.bill_timing} disabled={readOnly} onDay={(v) => set({ bill_day: v })} />
-              <Field label="Term start date" required>
-                <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew} onChange={(e) => set({ start_date: e.target.value })} />
+              {/* Editable on a saved contract until an invoice is drafted or issued (periods count from it) */}
+              <Field label="Term start date" required hint={isNew ? undefined : nextEditable ? "Can be changed until the first invoice is made; the next bill date follows it" : readOnly ? undefined : "Fixed once an invoice is drafted or issued"}>
+                <input type="date" className="ac-input" value={form.start_date || ""} disabled={!isNew && !nextEditable} max={form.end_date || undefined}
+                  onChange={(e) => set({
+                    start_date: e.target.value,
+                    // billing still from the old start date: it moves with the start date
+                    ...(!isNew && (!form.next_period_start || form.next_period_start === contract?.start_date || form.next_period_start < e.target.value) ? { next_period_start: e.target.value } : {}),
+                  })} />
               </Field>
               <Field label="Term end date" hint="Leave empty for an open-ended contract">
                 <input type="date" className="ac-input" value={form.end_date || ""} disabled={readOnly} onChange={(e) => set({ end_date: e.target.value })} />

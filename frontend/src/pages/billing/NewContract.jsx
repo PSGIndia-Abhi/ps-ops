@@ -399,7 +399,7 @@ export default function NewContract() {
         setProfile(p
           ? { billing_name: p.billing_name || "", gst_number: p.gst_number || "", billing_address: p.billing_address || "", state_code: p.state_code || "29", payment_terms_days: p.payment_terms_days ?? 30,
               service_offered_to: p.service_offered_to || "", service_to_on: Boolean(p.service_offered_to) }
-          : { billing_name: customer?.display_name || customer?.name || "", gst_number: customer?.gst_number || "", billing_address: "", state_code: "29", payment_terms_days: 30, service_offered_to: "", service_to_on: false });
+          : { billing_name: "", gst_number: customer?.gst_number || "", billing_address: "", state_code: "29", payment_terms_days: 30, service_offered_to: "", service_to_on: false });
       })
       .catch((err) => live && setMsg({ error: err.message }));
     return () => {
@@ -533,7 +533,6 @@ export default function NewContract() {
       if (!profile.billing_name.trim()) return "Type the billing name.";
       if (!profile.billing_address.trim()) return "Type the billing address.";
       const gg = profile.gst_number.trim();
-      if (pickedCompanies[0].category !== "RESIDENTIAL" && !gg) return "Type the GSTIN (Commercial customers are billed with GST).";
       if (gg && !GSTIN_RE.test(gg)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (gg && gg.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${gg.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
       if (profile.service_to_on && !(profile.service_offered_to || "").trim()) return "Type the Service Offered To address, or untick it.";
@@ -548,7 +547,6 @@ export default function NewContract() {
       if (!profile.billing_name.trim()) return "Type the billing name.";
       if (!profile.billing_address.trim()) return "Type the billing address.";
       const g = profile.gst_number.trim();
-      if (!residential && !g) return "Type the GSTIN (Commercial customers are billed with GST).";
       if (g && !GSTIN_RE.test(g)) return "GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5.";
       if (g && g.slice(0, 2) !== profile.state_code) return `The GSTIN starts with ${g.slice(0, 2)} but the state is ${profile.state_code}; they must match.`;
       if (profile.service_to_on && !(profile.service_offered_to || "").trim()) return "Type the Service Offered To address, or untick it.";
@@ -932,7 +930,7 @@ export default function NewContract() {
               <Field label="Billing name" required hint="The group name: a group contract is billed in the group’s name">
                 <input className="ac-input" disabled value={group?.name || ""} readOnly />
               </Field>
-              <Field label="GSTIN" required={pickedCompanies[0]?.category !== "RESIDENTIAL"} hint="15 characters; the state follows its first 2 digits">
+              <Field label="GSTIN" hint="Optional · 15 characters; the state follows its first 2 digits">
                 <input className="ac-input" disabled={locked} value={shown.gst_number} maxLength={15} placeholder="e.g. 29ABCDE1234F1Z5" style={{ textTransform: "uppercase" }}
                   onChange={(e) => {
                     const g = e.target.value.replace(/\s+/g, "").toUpperCase();
@@ -1010,10 +1008,10 @@ export default function NewContract() {
             )}
             <div className="bl-grid g2" style={{ marginTop: 6 }}>
               <Field label="Billing name" required>
-                <input className="ac-input" disabled={locked} value={shown.billing_name} maxLength={255} onChange={(e) => setProfile({ ...shown, billing_name: e.target.value })} />
+                <input className="ac-input" disabled={locked} value={shown.billing_name} maxLength={255} placeholder="Type the name printed under Bill To" onChange={(e) => setProfile({ ...shown, billing_name: e.target.value })} />
               </Field>
               {!residential ? (
-                <Field label="GSTIN" required hint={customer?.gst_number && shown.gst_number === customer.gst_number ? "From the customer record; the state follows its first 2 digits" : "15 characters; the state follows its first 2 digits"}>
+                <Field label="GSTIN" hint={customer?.gst_number && shown.gst_number === customer.gst_number ? "Optional · from the customer record; the state follows its first 2 digits" : "Optional · 15 characters; the state follows its first 2 digits"}>
                   <input className="ac-input" disabled={locked} value={shown.gst_number} maxLength={15} placeholder="e.g. 29ABCDE1234F1Z5" style={{ textTransform: "uppercase" }}
                     onChange={(e) => {
                       const g = e.target.value.replace(/\s+/g, "").toUpperCase();

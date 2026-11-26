@@ -12,7 +12,7 @@ import ServiceToField from "./ServiceToField";
 // group: { group_id, name, companies } for a group based contract - the card then shows and saves the
 // group's Bill To (the same details as New Contract step 1), billed in the group's name.
 
-const blank = (customer) => ({ billing_name: customer.display_name || "", billing_address: "", state_code: "29", payment_terms_days: 30, is_active: true, gst_number: customer.gst_number || "", isNew: true });
+const blank = (customer) => ({ billing_name: "", billing_address: "", state_code: "29", payment_terms_days: 30, is_active: true, gst_number: customer.gst_number || "", isNew: true });
 const stateName = (code) => STATES.find(([c]) => c === code)?.[1] || "";
 
 export default function BillingProfileCard({ customer, canEdit, onSaved, group = null }) {
@@ -130,9 +130,9 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
           {form.isNew && <div className="bl-msg err">{group ? "This group has no billing details yet, so its contract cannot be invoiced. Fill them in and save." : "This customer has no billing details yet, so it cannot be invoiced. Fill them in and save."}</div>}
           <div className="bl-grid g2">
             <Field label="Billing name" required hint={group ? "The group name: a group contract is billed in the group's name" : undefined}>
-              <input className="ac-input" value={form.billing_name} disabled={!canEdit || Boolean(group)} maxLength={255} placeholder="No display name set for this customer. Type the billing name" onChange={(e) => set({ billing_name: e.target.value })} />
+              <input className="ac-input" value={form.billing_name} disabled={!canEdit || Boolean(group)} maxLength={255} placeholder="Type the name printed under Bill To" onChange={(e) => set({ billing_name: e.target.value })} />
             </Field>
-            <Field label="GSTIN" required={commercial} hint={customer.category === "RESIDENTIAL" ? "Residential customers are billed without GST; leave blank" : "15 characters, e.g. 29ABCDE1234F1Z5. The state follows its first 2 digits."}>
+            <Field label="GSTIN" hint={customer.category === "RESIDENTIAL" ? "Residential customers are billed without GST; leave blank" : "15 characters, e.g. 29ABCDE1234F1Z5. The state follows its first 2 digits."}>
               <input
                 className="ac-input"
                 value={form.gst_number || ""}
@@ -185,7 +185,7 @@ export default function BillingProfileCard({ customer, canEdit, onSaved, group =
                   Cancel
                 </button>
               )}
-              <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (!edits && !form.isNew) || !form.billing_name?.trim() || !form.billing_address?.trim() || (commercial && !(form.gst_number || "").trim())} onClick={save}>
+              <button type="button" className="ac-btn ac-btn-primary" disabled={busy || (!edits && !form.isNew) || !form.billing_name?.trim() || !form.billing_address?.trim()} onClick={save}>
                 {busy ? "Saving…" : "Save billing details"}
               </button>
             </div>
