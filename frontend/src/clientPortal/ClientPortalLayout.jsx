@@ -4,7 +4,6 @@ import {
   HiOutlineSquares2X2, HiOutlineBuildingStorefront, HiOutlineClipboardDocumentList, HiOutlineChatBubbleLeftRight,
   HiOutlineFolderOpen, HiOutlineShieldCheck, HiOutlineSparkles, HiOutlineUserCircle, HiOutlineBars3,
   HiOutlineArrowRightOnRectangle, HiOutlinePhone, HiOutlineEnvelope, HiOutlineMapPin, HiOutlinePlus,
-  HiOutlineLifebuoy,
 } from "react-icons/hi2";
 import logo from "../assets/logo.png";
 import { apiFetch, safeJson } from "../api";
@@ -13,6 +12,7 @@ import NotificationsMenu from "../components/NotificationsMenu";
 import UserMenu from "../components/UserMenu";
 import { loadSavedOutlet, saveOutlet, SUPPORT_CONTACT } from "./portalUtils";
 import CompanyAvatar from "../pages/clientAccounts/CompanyAvatar";
+import PortalLoader from "./PortalLoader";
 import OutletPicker from "./OutletPicker";
 import "./clientPortal.css";
 
@@ -148,12 +148,37 @@ export default function ClientPortalLayout() {
   );
   const pageTitle = current?.label || "Client Portal";
 
+  // First load: show the real page frame (sidebar, top bar) with shimmering placeholders
+  // instead of a blank screen, so the portal feels instant.
   if (loading && !portal) {
     return (
-      <div className="cp-fullscreen">
-        <div className="cp-loader">
-          <img src={logo} alt="" />
-          <div className="cp-spinner" aria-label="Loading" />
+      <div className={`cp-shell cp-shell-loading ${collapsed ? "collapsed" : ""}`} aria-busy="true" aria-label="Loading your portal">
+        <aside className="cp-sidebar">
+          <div className="cp-brand">
+            <span className="cp-brand-mark"><img src={logo} alt="" /></span>
+            <span className="cp-brand-text">
+              <strong>BestServe</strong>
+              <small>Client Portal</small>
+            </span>
+          </div>
+          <div className="cp-sk-side cp-sk-company" />
+          <div className="cp-sk-nav">
+            {Array.from({ length: 7 }).map((_, i) => <div key={i} className="cp-sk-side cp-sk-link" />)}
+          </div>
+          <div className="cp-sk-side cp-sk-card" />
+        </aside>
+        <div className="cp-main">
+          <header className="cp-topbar">
+            <div className="cp-sk-line w-160" />
+            <div className="cp-topbar-right">
+              <div className="cp-sk-line w-140 tall" />
+              <div className="cp-sk-dot" />
+              <div className="cp-sk-dot" />
+            </div>
+          </header>
+          <main className="cp-content">
+            <PortalLoader label="Loading your portal…" />
+          </main>
         </div>
       </div>
     );
@@ -215,7 +240,7 @@ export default function ClientPortalLayout() {
 
         <div className="cp-manager cp-support">
           <div className="cp-manager-top">
-            <span className="cp-manager-avatar"><HiOutlineLifebuoy aria-hidden="true" /></span>
+            <span className="cp-manager-avatar cp-support-logo"><img src={logo} alt="" /></span>
             <div>
               <small>Contact BestServe</small>
               <strong>We’re here to help</strong>
@@ -249,8 +274,13 @@ export default function ClientPortalLayout() {
             <small>{companyName}</small>
           </div>
 
-          {outlets.length > 0 && (
-            <OutletPicker outlets={outlets} value={validOutletId} onChange={setOutletId} className="cp-picker-top" />
+          {/* Dashboard only: outlet filter beside the title. */}
+          {(location.pathname === "/client" || location.pathname === "/client/") && (
+            <div className="cp-topbar-tools">
+              {(portal.outlets || []).length > 0 && (
+                <OutletPicker outlets={portal.outlets} value={validOutletId} onChange={setOutletId} className="cp-picker-top" />
+              )}
+            </div>
           )}
 
           <div className="cp-topbar-right">

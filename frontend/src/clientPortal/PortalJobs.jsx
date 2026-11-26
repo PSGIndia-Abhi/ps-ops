@@ -1,31 +1,107 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiSearch, FiRefreshCw, FiChevronRight, FiUser, FiX } from "react-icons/fi";
+import {
+  FiSearch, FiRefreshCw, FiChevronRight, FiUser, FiX,
+  FiClipboard, FiCalendar, FiZap, FiCheck, FiAlertCircle, FiShield, FiTool, FiDroplet, FiList, FiClock, FiMapPin,
+} from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
-import { formatDate, relativeDay, serviceLabel, statusInfo } from "./portalUtils";
+import { formatDate, relativeDay, serviceLabel } from "./portalUtils";
+import PortalLoader from "./PortalLoader";
+import OutletPicker from "./OutletPicker";
 
-const JOB_CHIPS = [
-  { key: "", label: "All", count: "all" },
-  { key: "active", label: "Active", count: "active" },
-  { key: "in_progress", label: "In progress", count: "in_progress" },
-  { key: "completed", label: "Completed", count: "completed" },
+// Coloured status tiles. `tone` picks the tile colour (see .cp-jv-tile.tone-* in clientPortal.css).
+const JOB_TILES = [
+  { key: "", label: "All jobs", count: "all", tone: "slate", Icon: FiClipboard },
+  { key: "active", label: "Active", count: "active", tone: "blue", Icon: FiCalendar },
+  { key: "in_progress", label: "In progress", count: "in_progress", tone: "violet", Icon: FiZap },
+  { key: "completed", label: "Completed", count: "completed", tone: "green", Icon: FiCheck },
 ];
 
-const VISIT_CHIPS = [
-  { key: "upcoming", label: "Upcoming" },
-  { key: "in_progress", label: "In progress" },
-  { key: "completed", label: "Completed" },
-  { key: "missed", label: "Missed" },
-  { key: "all", label: "All" },
+const VISIT_TILES = [
+  { key: "upcoming", label: "Upcoming", tone: "blue", Icon: FiCalendar },
+  { key: "in_progress", label: "In progress", tone: "violet", Icon: FiZap },
+  { key: "completed", label: "Completed", tone: "green", Icon: FiCheck },
+  { key: "missed", label: "Missed", tone: "red", Icon: FiAlertCircle },
+  { key: "all", label: "All visits", tone: "slate", Icon: FiList },
 ];
+
+// Status pill: label + colour for a job or visit status.
+const STATUS_PILL = {
+  NOT_STARTED: { label: "Scheduled", tone: "blue" },
+  SCHEDULED: { label: "Scheduled", tone: "blue" },
+  CREATED: { label: "Scheduled", tone: "blue" },
+  IN_PROGRESS: { label: "In progress", tone: "violet" },
+  AWAITING_APPROVAL: { label: "Under review", tone: "violet" },
+  PAUSED: { label: "Paused", tone: "slate" },
+  COMPLETED: { label: "Completed", tone: "green" },
+  MISSED: { label: "Missed", tone: "red" },
+  CANCELED: { label: "Cancelled", tone: "slate" },
+};
+const pillFor = (s) => STATUS_PILL[String(s || "").toUpperCase()] || { label: s || "—", tone: "slate" };
+const ACTIVE_JOB = ["NOT_STARTED", "CREATED", "IN_PROGRESS", "PAUSED"];
+
+// "OPERATION" -> "Operation"; known codes (PEST, DEEP...) keep their nice label.
+function niceService(code) {
+  const label = serviceLabel(code);
+  return /^[A-Z_]+$/.test(label) ? label.charAt(0) + label.slice(1).toLowerCase().replace(/_/g, " ") : label;
+}
+
+// Icon + colour per service type.
+function serviceIcon(code) {
+  const c = String(code || "").toUpperCase();
+  if (c === "PEST" || c === "BOTH") return { tone: "green", Icon: FiShield };
+  if (c === "DEEP") return { tone: "violet", Icon: FiDroplet };
+  return { tone: "blue", Icon: FiTool };
+}
+
+const time = (v) => (v ? new Date(v).getTime() : 0);
+const short = { day: "2-digit", month: "short" };
+
+// Group a list by calendar month (each month appears once). `dir` 1 = oldest first, -1 = newest first.
+function groupByMonth(list, dateOf, dir = -1) {
+  const sorted = [...list].sort((a, b) => dir * (time(dateOf(a)) - time(dateOf(b))));
+  const groups = [];
+  for (const item of sorted) {
+    const v = dateOf(item);
+    const d = v ? new Date(v) : null;
+    const month = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : "No date";
+    const last = groups[groups.length - 1];
+    if (last && last.month === month) last.items.push(item);
+    else groups.push({ month, items: [item] });
+  }
+  return groups;
+}
+
+// Small progress ring for jobs with several visits ("2/4").
+function VisitRing({ done, total }) {
+  const r = 13;
+  const c = 2 * Math.PI * r;
+  const pct = total ? Math.min(1, done / total) : 0;
+  return (
+    <span className="cp-jv-ring" title={`${done} of ${total} visits done`}>
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r={r} className="track" />
+        {pct > 0 && <circle cx="16" cy="16" r={r} className={`value ${pct >= 1 ? "done" : ""}`} strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 16 16)" />}
+      </svg>
+      <span>{done}/{total}</span>
+    </span>
+  );
+}
 
 export default function PortalJobs() {
   const navigate = useNavigate();
-  const { portal, outletId } = useOutletContext();
+  const { portal, outletId, setOutletId } = useOutletContext();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") === "visits" ? "visits" : "jobs";
 
-  const [status, setStatus] = useState(tab === "visits" ? "upcoming" : "active");
+  // Jobs tab opens on "All jobs"; Visits tab on "Upcoming".
+  // A link can open a given status, e.g. /client/jobs?tab=visits&status=missed (dashboard "visit missed" pill).
+  const [status, setStatus] = useState(() => {
+    const wanted = params.get("status");
+    const tiles = tab === "visits" ? VISIT_TILES : JOB_TILES;
+    if (wanted !== null && tiles.some((t) => t.key === wanted)) return wanted;
+    return tab === "visits" ? "upcoming" : "";
+  });
   const [service, setService] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -38,6 +114,7 @@ export default function PortalJobs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [focusOpen, setFocusOpen] = useState(false); // "Needs scheduling" strip: false = one row of 3
 
   // Debounce the search box.
   useEffect(() => {
@@ -91,40 +168,78 @@ export default function PortalJobs() {
 
   function switchTab(next) {
     setParams(next === "visits" ? { tab: "visits" } : {}, { replace: true });
-    setStatus(next === "visits" ? "upcoming" : "active");
+    setStatus(next === "visits" ? "upcoming" : "");
     setItems([]);
   }
 
   const hasDateFilter = from || to;
-  const outletName = outletId ? portal.outlets.find((o) => o.id === outletId)?.name : null;
-  const chips = tab === "jobs" ? JOB_CHIPS : VISIT_CHIPS;
+  const outlets = portal.outlets || [];
+  const manyOutlets = outlets.length > 1;
+  const tiles = tab === "jobs" ? JOB_TILES : VISIT_TILES;
+  const openJob = (id) => navigate(`/client/jobs/${encodeURIComponent(id)}`);
+
+  // Focus strip at the top:
+  //  - Jobs: active jobs still waiting for a visit date ("Needs scheduling").
+  //  - Visits: the next 3 upcoming visits.
+  let focus = [];
+  if (tab === "jobs" && (status === "" || status === "active")) {
+    focus = items.filter((j) => ACTIVE_JOB.includes(String(j.status).toUpperCase()) && !j.next_visit && j.visits_done < Math.max(1, j.visits_total));
+  } else if (tab === "visits" && (status === "upcoming" || status === "all")) {
+    focus = items
+      .filter((v) => String(v.status).toUpperCase() === "SCHEDULED" && time(v.scheduled_date) >= new Date().setHours(0, 0, 0, 0))
+      .sort((a, b) => time(a.scheduled_date) - time(b.scheduled_date))
+      .slice(0, 3);
+  }
+  const focusIds = new Set(focus.map((f) => f.id));
+  const rest = items.filter((i) => !focusIds.has(i.id));
+  const groups = tab === "jobs"
+    ? groupByMonth(rest, (j) => j.start_date || j.created_at, -1)
+    : groupByMonth(rest, (v) => v.scheduled_date, status === "upcoming" ? 1 : -1);
 
   return (
-    <div className="cp-page">
-      <section className="cp-hero">
+    <div className="cp-page cp-jv">
+      <section className="cp-jv-head">
         <div>
           <h2>Jobs &amp; Visits</h2>
-          <p>{outletName ? `Showing ${outletName}` : "Showing all outlets"} · change outlet from the top bar</p>
+          <p>{tab === "jobs" ? "Every service booked for your outlets" : "Each visit by our team, by date"}</p>
         </div>
-        <div className="cp-tabs" role="tablist">
+        <div className="cp-jv-switch" role="tablist" aria-label="Show">
           <button role="tab" aria-selected={tab === "jobs"} className={tab === "jobs" ? "active" : ""} onClick={() => switchTab("jobs")}>Jobs</button>
           <button role="tab" aria-selected={tab === "visits"} className={tab === "visits" ? "active" : ""} onClick={() => switchTab("visits")}>Visits</button>
         </div>
       </section>
 
-      <div className="cp-toolbar">
+      {/* Coloured status tiles: click to filter. */}
+      <div className={`cp-jv-tiles n${tiles.length}`} role="tablist" aria-label="Status">
+        {tiles.map((t) => {
+          const Icon = t.Icon;
+          const on = status === t.key;
+          return (
+            <button key={t.key || "all"} role="tab" aria-selected={on} className={`cp-jv-tile tone-${t.tone} ${on ? "active" : ""}`} onClick={() => setStatus(t.key)}>
+              <span className="cp-jv-tile-icon" aria-hidden="true"><Icon /></span>
+              <strong>{meta.counts[t.count || t.key] ?? 0}</strong>
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="cp-toolbar cp-jv-filters">
         {tab === "jobs" && (
           <label className="cp-search">
             <FiSearch aria-hidden="true" />
             <input type="search" placeholder="Search job number, service or outlet" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           </label>
         )}
+        {outlets.length > 0 && (
+          <OutletPicker outlets={outlets} value={outletId} onChange={setOutletId} align="right" className="cp-picker-box" />
+        )}
         {tab === "jobs" && meta.services.length > 1 && (
           <label className="cp-select">
             Service
             <select value={service} onChange={(e) => setService(e.target.value)}>
               <option value="">All services</option>
-              {meta.services.map((s) => <option key={s} value={s}>{serviceLabel(s)}</option>)}
+              {meta.services.map((s) => <option key={s} value={s}>{niceService(s)}</option>)}
             </select>
           </label>
         )}
@@ -139,14 +254,6 @@ export default function PortalJobs() {
         </div>
       </div>
 
-      <div className="cp-chips cp-chips-wide" role="tablist" aria-label="Status">
-        {chips.map((c) => (
-          <button key={c.key || "all"} role="tab" aria-selected={status === c.key} className={`cp-chip ${status === c.key ? "active" : ""}`} onClick={() => setStatus(c.key)}>
-            {c.label} <span className="cp-chip-count">{meta.counts[c.count || c.key] ?? 0}</span>
-          </button>
-        ))}
-      </div>
-
       {error && (
         <div className="cp-alert">
           {error}
@@ -154,65 +261,142 @@ export default function PortalJobs() {
         </div>
       )}
 
-      <section className="cp-card cp-card-flush">
-        {loading && page === 1 && items.length === 0 ? (
-          <div className="cp-rowlist">
-            {Array.from({ length: 5 }).map((_, i) => <div key={i} className="cp-row-skel cp-skeleton" />)}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="cp-empty">{tab === "jobs" ? "No jobs match these filters." : "No visits match these filters."}</div>
-        ) : tab === "jobs" ? (
-          <div className="cp-rowlist">
-            {items.map((j) => {
-              const st = statusInfo(j.status);
-              const pct = j.visits_total ? Math.round((j.visits_done / j.visits_total) * 100) : 0;
-              return (
-                <button key={j.id} className="cp-jobrow" onClick={() => navigate(`/client/jobs/${encodeURIComponent(j.id)}`)}>
-                  <div className="cp-jobrow-main">
-                    <strong>{serviceLabel(j.service_type)}{j.sub_service ? <span> · {j.sub_service}</span> : null}</strong>
-                    <small>#{j.code || "—"} · {j.site_name || "—"} · {formatDate(j.start_date || j.created_at)}</small>
-                  </div>
-                  <div className="cp-jobrow-progress">
-                    <div className="cp-progress"><span style={{ width: `${pct}%` }} /></div>
-                    <small>{j.visits_done}/{j.visits_total} visits</small>
-                  </div>
-                  <div className="cp-jobrow-next">
-                    {j.status === "COMPLETED"
-                      ? <small>Completed {formatDate(j.completed_at || j.last_visit)}</small>
-                      : j.next_visit ? <small>Next visit <strong>{relativeDay(j.next_visit)}</strong></small> : <small>No visit scheduled</small>}
-                  </div>
-                  <span className={`cp-status ${st.className}`}>{st.label}</span>
-                  <FiChevronRight className="cp-chevron" aria-hidden="true" />
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="cp-rowlist">
-            {items.map((v) => {
-              const st = statusInfo(v.status);
-              return (
-                <button key={v.id} className="cp-jobrow" onClick={() => navigate(`/client/jobs/${encodeURIComponent(v.job_id)}`)}>
-                  <div className="cp-visit-date">
-                    <strong>{formatDate(v.scheduled_date, { day: "2-digit" })}</strong>
-                    <small>{formatDate(v.scheduled_date, { month: "short" })}</small>
-                  </div>
-                  <div className="cp-jobrow-main">
-                    <strong>{serviceLabel(v.service_type)}{v.sub_service ? <span> · {v.sub_service}</span> : null}</strong>
-                    <small>Visit {v.visit_number || ""} · #{v.job_code || "—"} · {v.site_name || "—"}</small>
-                  </div>
-                  <div className="cp-jobrow-next">
-                    {v.technicians.length > 0 && <small><FiUser aria-hidden="true" /> {v.technicians.join(", ")}</small>}
-                    <small>{v.status === "COMPLETED" ? `Done ${formatDate(v.completed_at)}` : relativeDay(v.scheduled_date)}</small>
-                  </div>
-                  <span className={`cp-status ${st.className}`}>{st.label}</span>
-                  <FiChevronRight className="cp-chevron" aria-hidden="true" />
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </section>
+      {loading && page === 1 && items.length === 0 ? (
+        <section className="cp-card cp-jv-list"><PortalLoader compact label="Loading jobs & visits…" /></section>
+      ) : items.length === 0 ? (
+        <section className="cp-card cp-jv-list"><div className="cp-empty">{tab === "jobs" ? "No jobs match these filters." : "No visits match these filters."}</div></section>
+      ) : (
+        <>
+          {/* Focus strip */}
+          {focus.length > 0 && (
+            <section className={`cp-jv-focus ${tab === "jobs" ? "warn" : "info"}`}>
+              <header>
+                <span className="cp-jv-focus-icon" aria-hidden="true">{tab === "jobs" ? <FiClock /> : <FiCalendar />}</span>
+                <div>
+                  <h3>{tab === "jobs" ? "Needs scheduling" : "Coming up next"}</h3>
+                  <small>
+                    {tab === "jobs"
+                      ? `${focus.length} job${focus.length === 1 ? " is" : "s are"} waiting for a visit date — our team will confirm it with you.`
+                      : "Your next scheduled visits."}
+                  </small>
+                </div>
+              </header>
+              <div className={`cp-jv-focus-cards ${focusOpen ? "open" : ""} ${focus.length > 3 && !focusOpen ? "with-more" : ""}`}>
+                {(focusOpen ? focus : focus.slice(0, 3)).map((item) => {
+                  const isJob = tab === "jobs";
+                  const svc = serviceIcon(item.service_type);
+                  const Icon = svc.Icon;
+                  return (
+                    <button key={item.id} className="cp-jv-focus-card" onClick={() => openJob(isJob ? item.id : item.job_id)}>
+                      {isJob ? (
+                        <span className={`cp-jv-svc tone-${svc.tone}`} aria-hidden="true"><Icon /></span>
+                      ) : (
+                        <span className="cp-jv-date tone-blue">
+                          <strong>{formatDate(item.scheduled_date, { day: "2-digit" })}</strong>
+                          <small>{formatDate(item.scheduled_date, { month: "short" })}</small>
+                        </span>
+                      )}
+                      <span className="cp-jv-main">
+                        <strong>{niceService(item.service_type)}{item.sub_service ? <span> · {item.sub_service}</span> : null}</strong>
+                        <small>
+                          {isJob
+                            ? `Job #${item.code || "—"} · booked ${formatDate(item.start_date || item.created_at, short)}`
+                            : `${relativeDay(item.scheduled_date)} · Visit ${item.visit_number || ""} · #${item.job_code || "—"}`}
+                        </small>
+                      </span>
+                      <span className={`cp-jv-pill tone-${isJob ? "orange" : "blue"}`}><i />{isJob ? "Awaiting date" : relativeDay(item.scheduled_date)}</span>
+                    </button>
+                  );
+                })}
+                {focus.length > 3 && !focusOpen && (
+                  <button className="cp-jv-focus-more" onClick={() => setFocusOpen(true)} aria-label={`Show ${focus.length - 3} more`}>
+                    <strong>+{focus.length - 3}</strong>
+                    <small>more</small>
+                  </button>
+                )}
+              </div>
+              {focus.length > 3 && focusOpen && (
+                <button className="cp-jv-focus-less" onClick={() => setFocusOpen(false)}>Show less ▴</button>
+              )}
+            </section>
+          )}
+
+          {/* Month-grouped list (each month once) */}
+          {groups.length > 0 && (
+            <section className="cp-card cp-jv-list">
+              {groups.map((g) => (
+                <div key={g.month} className="cp-jv-group">
+                  <span className="cp-jv-month">{g.month} <i>{g.items.length}</i></span>
+                  <ul>
+                    {tab === "jobs"
+                      ? g.items.map((j) => {
+                          const pill = pillFor(j.status);
+                          const svc = serviceIcon(j.service_type);
+                          const SvcIcon = svc.Icon;
+                          const total = j.visits_total || 0;
+                          const doneDate = j.status === "COMPLETED" ? formatDate(j.completed_at || j.last_visit, short) : null;
+                          return (
+                            <li key={j.id}>
+                              <button className="cp-jv-row2" onClick={() => openJob(j.id)}>
+                                <span className={`cp-jv-svc tone-${svc.tone}`} aria-hidden="true"><SvcIcon /></span>
+                                <span className="cp-jv-main">
+                                  <strong>{niceService(j.service_type)}</strong>
+                                  <small>{j.sub_service || "—"}</small>
+                                </span>
+                                <span className="cp-jv-chips">
+                                  <span className="chip">#{j.code || "—"}</span>
+                                  <span className="chip"><FiCalendar aria-hidden="true" /> {formatDate(j.start_date || j.created_at, short)}</span>
+                                  {manyOutlets && j.site_name && <span className="chip"><FiMapPin aria-hidden="true" /> {j.site_name}</span>}
+                                  {total > 1
+                                    ? <VisitRing done={j.visits_done} total={total} />
+                                    : <span className="chip soft">{total === 1 ? "1 visit" : "No visits yet"}</span>}
+                                </span>
+                                <span className="cp-jv-end">
+                                  <span className={`cp-jv-pill tone-${pill.tone}`}><i />{pill.label}</span>
+                                  <small>
+                                    {doneDate ? `on ${doneDate}` : j.next_visit ? `next ${relativeDay(j.next_visit).toLowerCase()}` : "no visit date yet"}
+                                  </small>
+                                </span>
+                                <FiChevronRight className="cp-jv-chev" aria-hidden="true" />
+                              </button>
+                            </li>
+                          );
+                        })
+                      : g.items.map((v) => {
+                          const pill = pillFor(v.status);
+                          return (
+                            <li key={v.id}>
+                              <button className="cp-jv-row2" onClick={() => openJob(v.job_id)}>
+                                <span className={`cp-jv-date tone-${pill.tone}`}>
+                                  <strong>{formatDate(v.scheduled_date, { day: "2-digit" })}</strong>
+                                  <small>{formatDate(v.scheduled_date, { month: "short" })}</small>
+                                </span>
+                                <span className="cp-jv-main">
+                                  <strong>{niceService(v.service_type)}</strong>
+                                  <small>{v.sub_service || "—"}</small>
+                                </span>
+                                <span className="cp-jv-chips">
+                                  <span className="chip">Visit {v.visit_number || "—"}</span>
+                                  <span className="chip">#{v.job_code || "—"}</span>
+                                  {manyOutlets && v.site_name && <span className="chip"><FiMapPin aria-hidden="true" /> {v.site_name}</span>}
+                                  <span className="chip soft"><FiUser aria-hidden="true" /> {v.technicians.length ? v.technicians.join(", ") : "Team not assigned"}</span>
+                                </span>
+                                <span className="cp-jv-end">
+                                  <span className={`cp-jv-pill tone-${pill.tone}`}><i />{pill.label}</span>
+                                  <small>{v.status === "COMPLETED" ? `done ${formatDate(v.completed_at, short)}` : relativeDay(v.scheduled_date)}</small>
+                                </span>
+                                <FiChevronRight className="cp-jv-chev" aria-hidden="true" />
+                              </button>
+                            </li>
+                          );
+                        })}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          )}
+        </>
+      )}
 
       {items.length > 0 && (
         <div className="cp-loadmore">

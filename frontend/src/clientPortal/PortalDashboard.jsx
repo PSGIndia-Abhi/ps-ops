@@ -5,11 +5,13 @@ import {
   HiOutlineClipboardDocumentList, HiOutlineCalendarDays, HiOutlineCheckBadge, HiOutlineChatBubbleLeftRight,
   HiOutlineArrowPath, HiOutlineSparkles, HiOutlinePlus,
   HiOutlineArrowRight, HiOutlineMapPin, HiOutlineCamera, HiOutlineBolt, HiOutlineFlag, HiOutlineChevronRight,
+  HiOutlineCheck,
 } from "react-icons/hi2";
 import { apiFetch, safeJson } from "../api";
-import OutletPicker from "./OutletPicker";
+import PortalLoader from "./PortalLoader";
+import ColorGuide from "./ColorGuide";
 import {
-  PERIODS, periodRange, formatDate, formatDateTime, relativeDay, RISK_STYLE, serviceLabel,
+  PERIODS, periodRange, formatDate, relativeDay, RISK_STYLE, serviceLabel,
 } from "./portalUtils";
 
 function greeting() {
@@ -19,22 +21,75 @@ function greeting() {
   return "Good evening";
 }
 
-function activityIcon(message = "") {
+// Recent activity: friendly title, colour and icon for one job update.
+// tone: done = green ✓, new = blue +, photo = violet camera, issue = orange flag, status = blue bolt.
+function activityInfo(message = "") {
   const m = message.toLowerCase();
-  if (m.includes("photo")) return <HiOutlineCamera aria-hidden="true" />;
-  if (m.includes("complaint")) return <HiOutlineFlag aria-hidden="true" />;
-  if (m.includes("status")) return <HiOutlineBolt aria-hidden="true" />;
-  return <HiOutlineSparkles aria-hidden="true" />;
+  const status = /status changed from\s+(\w+)\s+to\s+(\w+)/i.exec(message);
+  if (status && status[2].toUpperCase() === "COMPLETED") return { title: "Job completed", tone: "done", icon: <HiOutlineCheck aria-hidden="true" /> };
+  if (status) {
+    const label = { IN_PROGRESS: "Work started", NOT_STARTED: "Job scheduled" }[status[2].toUpperCase()] || `Status: ${status[2]}`;
+    return { title: label, tone: "status", icon: <HiOutlineBolt aria-hidden="true" /> };
+  }
+  if (m.includes("created")) return { title: "New job created", tone: "new", icon: <HiOutlinePlus aria-hidden="true" /> };
+  if (m.includes("photo")) return { title: message, tone: "photo", icon: <HiOutlineCamera aria-hidden="true" /> };
+  if (m.includes("complaint")) return { title: message, tone: "issue", icon: <HiOutlineFlag aria-hidden="true" /> };
+  return { title: message, tone: "status", icon: <HiOutlineSparkles aria-hidden="true" /> };
 }
 
-function activityText(message = "") {
-  const m = /status changed from\s+(\w+)\s+to\s+(\w+)/i.exec(message);
-  if (!m) return message;
-  const label = { COMPLETED: "Completed", IN_PROGRESS: "In progress", NOT_STARTED: "Scheduled" }[m[2].toUpperCase()] || m[2];
-  return `Status changed to ${label}`;
+// "OPERATION" -> "Operation"; known codes (PEST, DEEP...) keep their nice label.
+function niceService(code) {
+  const label = serviceLabel(code);
+  return /^[A-Z_]+$/.test(label) ? label.charAt(0) + label.slice(1).toLowerCase().replace(/_/g, " ") : label;
 }
 
-const DONUT_COLORS = ["#16a34a", "#2563eb", "#7c3aed", "#f59e0b"];
+// Latest updates grouped by calendar day: [{ day: "12 Nov", items: [...] }]
+function groupActivity(list, limit = 5) {
+  const groups = [];
+  for (const a of list.slice(0, limit)) {
+    const day = formatDate(a.created_at, { day: "2-digit", month: "short" });
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.items.push(a);
+    else groups.push({ day, items: [a] });
+  }
+  return groups;
+}
+
+// Visit colours used everywhere on the dashboard: green = completed, red = missed.
+const VISIT_DONE = "#16a34a";
+const VISIT_MISSED = "#dc2626";
+const DONUT_COLORS = [VISIT_DONE, "#94a3b8", "#7c3aed", VISIT_MISSED];
+
+// Progress ring used in the welcome banner ("Service health").
+function HealthRing({ value }) {
+  const r = 50;
+  const c = 2 * Math.PI * r;
+  const pct = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <svg className="cp-ring" viewBox="0 0 120 120" role="img" aria-label={value == null ? "No visits yet" : `${pct}% of visits on schedule`}>
+      <circle cx="60" cy="60" r={r} fill="none" className="cp-ring-track" strokeWidth="12" />
+      {pct > 0 && (
+        <circle
+          cx="60" cy="60" r={r} fill="none" className="cp-ring-value" strokeWidth="12" strokeLinecap="round"
+          strokeDasharray={`${(c * pct) / 100} ${c}`} transform="rotate(-90 60 60)"
+        />
+      )}
+      <text x="60" y="68" textAnchor="middle" className="cp-ring-text">{value == null ? "—" : `${pct}%`}</text>
+    </svg>
+  );
+}
+
+// Thin segmented bar under a KPI number. segments: [{ value, color }]
+function KpiBar({ segments }) {
+  const total = segments.reduce((n, s) => n + (s.value || 0), 0);
+  return (
+    <span className="cp-kpi-bar" aria-hidden="true">
+      {total > 0 && segments.filter((s) => s.value > 0).map((s, i) => (
+        <span key={i} style={{ width: `${(s.value / total) * 100}%`, background: s.color }} />
+      ))}
+    </span>
+  );
+}
 
 export default function PortalDashboard() {
   const navigate = useNavigate();
@@ -115,31 +170,117 @@ export default function PortalDashboard() {
 
   const cards = k
     ? [
-        { key: "jobs", icon: <HiOutlineClipboardDocumentList />, tone: "blue", label: "Jobs", value: k.jobs_in_period, sub: k.jobs_in_period ? `${k.active_jobs} active · ${k.completed_jobs} completed` : "No jobs in this period", to: "/client/jobs" },
-        { key: "visits", icon: <HiOutlineCalendarDays />, tone: "violet", label: "Visits scheduled", value: k.visits_total, sub: k.visits_total ? `${k.upcoming_visits} upcoming · ${k.visits_in_progress} in progress` : "No visits in this period", to: "/client/jobs?tab=visits" },
-        { key: "done", icon: <HiOutlineCheckBadge />, tone: "green", label: "Services completed", value: k.visits_done, sub: completionRate != null ? `${completionRate}% on schedule · ${k.visits_missed} missed` : "None in this period", to: "/client/jobs?tab=visits" },
-        { key: "complaints", icon: <HiOutlineChatBubbleLeftRight />, tone: k.open_complaints ? "amber" : "slate", label: "Complaints", value: k.complaints_raised, sub: k.complaints_raised ? (k.open_complaints ? `${k.open_complaints} still open` : "All resolved") : "None raised", to: "/client/complaints" },
-        { key: "requests", icon: <HiOutlineSparkles />, tone: k.pending_requests ? "teal" : "slate", label: "Service requests", value: k.requests_sent, sub: k.requests_sent ? (k.pending_requests ? `${k.pending_requests} waiting to be scheduled` : "All scheduled") : "None sent", to: "/client/request-service" },
+        {
+          key: "jobs", icon: <HiOutlineClipboardDocumentList />, tone: "blue", label: "Jobs", value: k.jobs_in_period,
+          sub: k.jobs_in_period ? `${k.active_jobs} active · ${k.completed_jobs} completed` : "No jobs in this period", to: "/client/jobs",
+          bar: [{ value: k.active_jobs, color: "#2453e6" }, { value: k.completed_jobs, color: VISIT_DONE }],
+        },
+        {
+          key: "visits", icon: <HiOutlineCalendarDays />, tone: "violet", label: "Visits scheduled", value: k.visits_total,
+          sub: k.visits_total ? `${k.upcoming_visits} upcoming · ${k.visits_in_progress} in progress` : "No visits in this period", to: "/client/jobs?tab=visits",
+          bar: [
+            { value: k.visits_done, color: VISIT_DONE },
+            { value: k.visits_in_progress, color: "#7c3aed" },
+            { value: k.upcoming_visits, color: "#94a3b8" },
+            { value: k.visits_missed, color: VISIT_MISSED },
+          ],
+        },
+        {
+          key: "done", icon: <HiOutlineCheckBadge />, tone: "green", label: "Services completed", value: k.visits_done,
+          badge: completionRate != null ? { text: `${completionRate}% on time`, kind: completionRate >= 80 ? "good" : "warn" } : null,
+          sub: completionRate != null ? (k.visits_missed ? `${k.visits_missed} visit${k.visits_missed === 1 ? "" : "s"} missed this period` : "No visits missed") : "None in this period",
+          to: "/client/jobs?tab=visits",
+          bar: [{ value: k.visits_done, color: VISIT_DONE }, { value: k.visits_missed, color: VISIT_MISSED }],
+        },
+        {
+          key: "complaints", icon: <HiOutlineChatBubbleLeftRight />, tone: "amber", label: "Complaints", value: k.complaints_raised,
+          badge: k.open_complaints ? { text: `${k.open_complaints} open`, kind: "warn" } : { text: "All clear", kind: "good" },
+          sub: k.complaints_raised ? (k.open_complaints ? `${k.open_complaints} still open` : "All resolved") : "None raised", to: "/client/complaints",
+        },
+        {
+          key: "requests", icon: <HiOutlineSparkles />, tone: "teal", label: "Service requests", value: k.requests_sent,
+          cta: k.requests_sent ? null : "Request a service →",
+          sub: k.requests_sent ? (k.pending_requests ? `${k.pending_requests} waiting to be scheduled` : "All scheduled") : "None sent", to: "/client/request-service",
+        },
       ]
     : [];
+
+  // Banner status pills: one per issue (open complaints = red, missed visits = orange), each a link;
+  // a single green "All services on track" when there is nothing to look at.
+  const issues = !k ? [] : [
+    k.open_complaints > 0 && {
+      key: "complaints", tone: "red", to: "/client/complaints",
+      text: `${k.open_complaints} complaint${k.open_complaints === 1 ? "" : "s"} open`,
+    },
+    k.visits_missed > 0 && {
+      key: "missed", tone: "orange", to: "/client/jobs?tab=visits&status=missed",
+      text: `${k.visits_missed} visit${k.visits_missed === 1 ? "" : "s"} missed`,
+    },
+  ].filter(Boolean);
 
   return (
     <div className="cp-page cp-dash">
       {/* Welcome banner */}
       <section className="cp-welcome">
+        <svg className="cp-welcome-rings" viewBox="0 0 520 520" aria-hidden="true">
+          <circle cx="260" cy="260" r="250" /><circle cx="260" cy="260" r="190" /><circle cx="260" cy="260" r="130" />
+        </svg>
         <div className="cp-welcome-main">
-          <span className="cp-welcome-date">{today}</span>
+          <div className="cp-welcome-meta">
+            <span className="cp-welcome-date">{today}</span>
+            {k && issues.length === 0 && (
+              <span className="cp-welcome-status ok"><i aria-hidden="true" />All services on track</span>
+            )}
+            {issues.map((p) => (
+              <button
+                key={p.key} type="button" className={`cp-welcome-status issue tone-${p.tone}`}
+                onClick={() => navigate(p.to)} title="Open"
+              >
+                <i aria-hidden="true" />{p.text}<HiOutlineChevronRight aria-hidden="true" />
+              </button>
+            ))}
+          </div>
           <h2>{greeting()}{firstName ? `, ${firstName}` : ""}</h2>
-          <p>
+          <p className="cp-welcome-scope">
             {periodLabel ? `${periodLabel.charAt(0).toUpperCase()}${periodLabel.slice(1)}` : "In this period"}
-            {outletName ? <> at <strong>{outletName}</strong></> : <> across your {portal.outlets.length} outlet{portal.outlets.length === 1 ? "" : "s"}</>}: {summary || "…"}.
+            {outletName ? <> · {outletName}</> : <> · all {portal.outlets.length} outlet{portal.outlets.length === 1 ? "" : "s"}</>}
           </p>
+          {k ? (
+            <ul className="cp-welcome-stats">
+              <li>
+                <span className="cp-ws-icon done" aria-hidden="true"><HiOutlineCheckBadge /></span>
+                <span><strong>{k.visits_done}</strong><small>Service{k.visits_done === 1 ? "" : "s"} completed</small></span>
+              </li>
+              <li>
+                <span className="cp-ws-icon" aria-hidden="true"><HiOutlineCalendarDays /></span>
+                <span><strong>{k.visits_total}</strong><small>Visit{k.visits_total === 1 ? "" : "s"} scheduled</small></span>
+              </li>
+              <li>
+                <span className={`cp-ws-icon ${k.complaints_raised ? "warn" : ""}`} aria-hidden="true"><HiOutlineChatBubbleLeftRight /></span>
+                <span><strong>{k.complaints_raised}</strong><small>Complaint{k.complaints_raised === 1 ? "" : "s"} raised</small></span>
+              </li>
+            </ul>
+          ) : (
+            <p>{summary || "…"}</p>
+          )}
           <div className="cp-welcome-actions">
             <button className="cp-btn cp-btn-light" onClick={() => navigate("/client/request-service")}><HiOutlinePlus /> Request a service</button>
             <button className="cp-btn cp-btn-glass" onClick={() => navigate("/client/complaints?new=1")}><HiOutlineChatBubbleLeftRight /> Raise a complaint</button>
           </div>
         </div>
         <div className="cp-welcome-next">
+          <div className="cp-health">
+            <HealthRing value={completionRate} />
+            <div className="cp-health-text">
+              <span className="cp-welcome-next-label">Service health</span>
+              <strong>Visits on schedule</strong>
+              <small>
+                {k && k.visits_done + k.visits_missed > 0
+                  ? `${k.visits_done} completed · ${k.visits_missed} missed`
+                  : "No completed visits in this period yet"}
+              </small>
+            </div>
+          </div>
           <span className="cp-welcome-next-label">Next visit</span>
           {nextVisit ? (
             <button className="cp-next-card" onClick={() => navigate(`/client/jobs/${encodeURIComponent(nextVisit.job_id)}`)}>
@@ -156,8 +297,11 @@ export default function PortalDashboard() {
             </button>
           ) : (
             <div className="cp-next-card empty">
-              <HiOutlineCalendarDays aria-hidden="true" />
-              <span>No visit scheduled yet</span>
+              <span className="cp-next-icon"><HiOutlineCalendarDays aria-hidden="true" /></span>
+              <span className="cp-next-empty-text">No visit scheduled yet</span>
+              <button type="button" className="cp-next-book" onClick={() => navigate("/client/request-service")}>
+                Book one <HiOutlineArrowRight aria-hidden="true" />
+              </button>
             </div>
           )}
         </div>
@@ -170,7 +314,6 @@ export default function PortalDashboard() {
           <p>{outletName || "All outlets"} · {formatDate(range.from)} – {formatDate(range.to)}</p>
         </div>
         <div className="cp-filters">
-          <OutletPicker outlets={portal.outlets} value={outletId} onChange={setOutletId} align="right" className="cp-picker-box" />
           <div className="cp-segmented" role="tablist" aria-label="Period">
             {PERIODS.map((p) => (
               <button key={p.key} role="tab" aria-selected={period === p.key} className={period === p.key ? "active" : ""} onClick={() => setPeriod(p.key)}>
@@ -178,6 +321,7 @@ export default function PortalDashboard() {
               </button>
             ))}
           </div>
+          <ColorGuide />
           {period === "custom" && (
             <div className="cp-daterange cp-select">
               <input type="date" value={custom.from} max={custom.to} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} aria-label="From date" />
@@ -196,7 +340,7 @@ export default function PortalDashboard() {
       )}
 
       {!data && loading && (
-        <div className="cp-kpis">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="cp-kpi cp-skeleton" />)}</div>
+        <PortalLoader label="Loading your dashboard…" />
       )}
 
       {data && (
@@ -208,7 +352,13 @@ export default function PortalDashboard() {
                   <span className="cp-kpi-label">{c.label}</span>
                   <span className="cp-kpi-icon" aria-hidden="true">{c.icon}</span>
                 </span>
-                <span className={`cp-kpi-value ${c.small ? "sm" : ""}`}>{c.value}</span>
+                <span className="cp-kpi-valrow">
+                  <span className={`cp-kpi-value ${c.small ? "sm" : ""}`}>{c.value}</span>
+                  {c.badge && c.bar && <span className={`cp-kpi-badge ${c.badge.kind}`}>{c.badge.text}</span>}
+                </span>
+                {c.bar && <KpiBar segments={c.bar} />}
+                {c.badge && !c.bar && <span className={`cp-kpi-badge ${c.badge.kind}`}>{c.badge.text}</span>}
+                {c.cta && <span className="cp-kpi-cta">{c.cta}</span>}
                 <span className="cp-kpi-sub">{c.sub}</span>
               </button>
             ))}
@@ -222,8 +372,8 @@ export default function PortalDashboard() {
                   <small>{periodLabel ? `${periodLabel.charAt(0).toUpperCase()}${periodLabel.slice(1)}` : "Selected period"} · per {bucketWord}</small>
                 </div>
                 <div className="cp-chart-legend">
-                  <span><i style={{ background: "#2563eb" }} />Completed</span>
-                  <span><i style={{ background: "#f59e0b" }} />Missed</span>
+                  <span><i style={{ background: VISIT_DONE }} />Completed</span>
+                  <span><i style={{ background: VISIT_MISSED }} />Missed</span>
                 </div>
               </header>
               {trendTotal > 0 ? (
@@ -234,12 +384,12 @@ export default function PortalDashboard() {
                       <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} tick={{ fill: "#6b7a90" }} minTickGap={18} />
                       <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} tick={{ fill: "#6b7a90" }} />
                       <Tooltip
-                        cursor={{ fill: "rgba(37,99,235,0.06)" }}
+                        cursor={{ fill: "rgba(15,23,42,0.04)" }}
                         contentStyle={{ borderRadius: 12, border: "1px solid #e8ecf3", boxShadow: "0 8px 24px rgba(16,24,40,.08)", fontSize: 13 }}
                         labelFormatter={(l) => (granularity === "week" ? `Week of ${l}` : l)}
                       />
-                      <Bar name="Completed" dataKey="completed" stackId="v" fill="#2563eb" maxBarSize={34} />
-                      <Bar name="Missed" dataKey="missed" stackId="v" fill="#f59e0b" radius={[5, 5, 0, 0]} maxBarSize={34} />
+                      <Bar name="Completed" dataKey="completed" stackId="v" fill={VISIT_DONE} radius={[5, 5, 0, 0]} maxBarSize={34} />
+                      <Bar name="Missed" dataKey="missed" stackId="v" fill={VISIT_MISSED} radius={[5, 5, 0, 0]} maxBarSize={34} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -275,7 +425,7 @@ export default function PortalDashboard() {
                       <small>{completionRate != null ? "on schedule" : "visits"}</small>
                     </div>
                   </div>
-                  <ul className="cp-legend">
+                  <ul className="cp-legend cp-legend-tiles">
                     {donut.map((d, i) => (
                       <li key={d.name}><span style={{ background: DONUT_COLORS[i] }} />{d.name}<strong>{d.value}</strong></li>
                     ))}
@@ -298,7 +448,11 @@ export default function PortalDashboard() {
                 <button className="cp-link" onClick={() => navigate("/client/jobs?tab=visits")}>View all <HiOutlineChevronRight /></button>
               </header>
               {data.upcoming_visits.length === 0 ? (
-                <div className="cp-empty-state compact"><HiOutlineCalendarDays aria-hidden="true" /><strong>Nothing scheduled</strong><span>Need something done? Request a service.</span></div>
+                <div className="cp-empty-state compact cp-empty-dashed">
+                  <HiOutlineCalendarDays aria-hidden="true" />
+                  <strong>No visits on the calendar</strong>
+                  <span>Your next service will appear here once it is scheduled.</span>
+                </div>
               ) : (
                 <ul className="cp-list">
                   {data.upcoming_visits.map((v) => (
@@ -318,32 +472,55 @@ export default function PortalDashboard() {
               )}
             </section>
 
-            <section className="cp-card">
-              <header className="cp-card-head">
+            <section className="cp-card cp-activity">
+              <header className="cp-activity-head">
+                <span className="cp-activity-badge" aria-hidden="true"><HiOutlineBolt /></span>
                 <div><h3>Recent activity</h3><small>Updates on your jobs</small></div>
+                <button className="cp-link cp-activity-all" onClick={() => navigate("/client/jobs")}>All jobs <HiOutlineChevronRight /></button>
               </header>
               {data.activity.length === 0 ? (
-                <div className="cp-empty-state compact"><HiOutlineSparkles aria-hidden="true" /><strong>No updates in this period</strong><span>New job updates will appear here.</span></div>
+                <div className="cp-activity-empty"><strong>No updates in this period</strong><span>New job updates will appear here.</span></div>
               ) : (
-                <ul className="cp-timeline cp-timeline-icons">
-                  {data.activity.slice(0, 7).map((a) => (
-                    <li key={a.id} className="cp-clickable" onClick={() => navigate(`/client/jobs/${encodeURIComponent(a.job_id)}`)}>
-                      <span className="cp-timeline-icon">{activityIcon(a.message)}</span>
-                      <div>
-                        <p>{activityText(a.message)}</p>
-                        <small>{a.site_name || "—"} · {serviceLabel(a.service_type)} · {formatDateTime(a.created_at)}</small>
-                      </div>
-                    </li>
+                <>
+                  {groupActivity(data.activity).map((g) => (
+                    <div key={g.day} className="cp-activity-day">
+                      <span className="cp-activity-date">{g.day}</span>
+                      <ul>
+                        {g.items.map((a) => {
+                          const info = activityInfo(a.message);
+                          return (
+                            <li key={a.id}>
+                              <button type="button" className="cp-activity-item" onClick={() => navigate(`/client/jobs/${encodeURIComponent(a.job_id)}`)}>
+                                <span className={`cp-activity-icon tone-${info.tone}`}>{info.icon}</span>
+                                <span className="cp-activity-text">
+                                  <strong>{info.title}</strong>
+                                  <small>{a.site_name || "—"} · {niceService(a.service_type)}</small>
+                                </span>
+                                <span className="cp-activity-time">
+                                  {new Date(a.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                  <p className="cp-activity-foot">
+                    Showing the latest {Math.min(5, data.activity.length)} update{Math.min(5, data.activity.length) === 1 ? "" : "s"}
+                  </p>
+                </>
               )}
             </section>
           </div>
 
-          {data.outlets.length > 1 && (
+          {data.outlets.length > 0 && (
             <section className="cp-card cp-card-flush">
               <header className="cp-card-head cp-card-head-pad">
-                <div><h3>Outlets at a glance</h3><small>Click an outlet to focus the dashboard on it</small></div>
+                <div>
+                  <h3>{data.outlets.length > 1 ? "Outlets at a glance" : "Your outlet"}</h3>
+                  <small>{data.outlets.length > 1 ? "Click an outlet to focus the dashboard on it" : "Service and audit status for this location"}</small>
+                </div>
                 <button className="cp-link" onClick={() => navigate("/client/outlets")}>All outlets <HiOutlineChevronRight /></button>
               </header>
               <div className="cp-table-wrap">

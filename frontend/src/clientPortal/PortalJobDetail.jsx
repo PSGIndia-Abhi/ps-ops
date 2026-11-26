@@ -4,6 +4,7 @@ import { FiArrowLeft, FiMapPin, FiUser, FiRefreshCw, FiX, FiAlertCircle, FiCamer
 import { apiFetch, safeJson } from "../api";
 import PortalPhoto from "./PortalPhoto";
 import { formatDate, formatDateTime, relativeDay, serviceLabel, statusInfo } from "./portalUtils";
+import PortalLoader from "./PortalLoader";
 
 // Turns raw history entries into short client-friendly text.
 function describe(entry) {
@@ -72,8 +73,7 @@ export default function PortalJobDetail() {
     return (
       <div className="cp-page">
         {back}
-        <div className="cp-card cp-skeleton" style={{ minHeight: 160 }} />
-        <div className="cp-card cp-skeleton" style={{ minHeight: 260 }} />
+        <PortalLoader label="Loading job details…" />
       </div>
     );
   }

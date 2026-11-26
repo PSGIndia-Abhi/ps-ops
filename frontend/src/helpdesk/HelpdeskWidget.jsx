@@ -55,12 +55,30 @@ function savePos(p) {
 
 const clamp = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
 
+// The visible area WITHOUT the page scrollbar (window.innerWidth includes it, which put the
+// button partly under the scrollbar). Re-measured when the scrollbar appears or disappears too.
+function readViewport() {
+  const doc = document.documentElement;
+  return { w: doc.clientWidth || window.innerWidth, h: doc.clientHeight || window.innerHeight };
+}
+
 function useViewport() {
-  const [vp, setVp] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const [vp, setVp] = useState(readViewport);
   useEffect(() => {
-    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    const onResize = () => setVp((prev) => {
+      const next = readViewport();
+      return prev.w === next.w && prev.h === next.h ? prev : next;
+    });
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(onResize);
+      ro.observe(document.documentElement);
+    }
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (ro) ro.disconnect();
+    };
   }, []);
   return vp;
 }

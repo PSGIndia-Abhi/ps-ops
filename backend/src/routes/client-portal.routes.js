@@ -10,6 +10,7 @@ const multer = require("multer");
 const { v4: uuid } = require("uuid");
 const { sendTicketCreatedEmail } = require("../utils/mailer");
 const { requireClientAccess } = require("../services/clientPortal.service");
+const { writeInvoiceSummaryPdf } = require("../utils/clientInvoiceSummaryPdf");
 
 router.use(auth, requireClientAccess);
 
@@ -673,9 +674,13 @@ router.get("/attachments/:id", async (req, res) => {
 // Staff answer it from Admin > Tickets. A client sees a complaint when its outlet or linked job
 // is one of their outlets, or when they raised it.
 
+// Files per complaint message (new complaint or reply). Keep in step with MAX_FILES in
+// frontend/src/clientPortal/ComplaintForm.jsx and PortalComplaintDetail.jsx.
+const MAX_COMPLAINT_FILES = 10;
+
 const complaintUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 10 * 1024 * 1024, files: MAX_COMPLAINT_FILES },
   fileFilter: (req, file, cb) => {
     const ok = /^image\//.test(file.mimetype) || file.mimetype === "application/pdf";
     cb(ok ? null : Object.assign(new Error("Only photos and PDF files can be attached"), { status: 400 }), ok);
@@ -684,10 +689,10 @@ const complaintUpload = multer({
 
 // Runs multer and turns its errors into 400 responses.
 function acceptFiles(req, res, next) {
-  complaintUpload.array("files", 5)(req, res, (err) => {
+  complaintUpload.array("files", MAX_COMPLAINT_FILES)(req, res, (err) => {
     if (!err) return next();
     const message = err.code === "LIMIT_FILE_SIZE" ? "Each file must be 10 MB or smaller"
-      : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE" ? "You can attach up to 5 files"
+      : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE" ? `You can attach up to ${MAX_COMPLAINT_FILES} files`
       : err.message || "Upload failed";
     res.status(400).json({ error: message });
   });
@@ -1096,6 +1101,26 @@ async function sharedDocuments(req, siteFilter) {
   }));
 }
 
+// Posted payments allocated to each invoice ("Paid by"), oldest first.
+// Returns Map(invoice_id -> [{ date, mode, amount }]).
+async function invoicePayments(invoiceIds) {
+  const map = new Map();
+  if (!invoiceIds.length) return map;
+  const [rows] = await pool.query(
+    `SELECT pa.invoice_id, pa.allocated_amount, p.payment_date, p.payment_mode
+     FROM payment_allocations pa
+     JOIN payments p ON p.id = pa.payment_id
+     WHERE p.status = 'POSTED' AND pa.invoice_id IN (${placeholders(invoiceIds)})
+     ORDER BY p.payment_date ASC, pa.created_at ASC`,
+    invoiceIds
+  );
+  for (const r of rows) {
+    if (!map.has(r.invoice_id)) map.set(r.invoice_id, []);
+    map.get(r.invoice_id).push({ date: r.payment_date, mode: r.payment_mode, amount: Number(r.allocated_amount || 0) });
+  }
+  return map;
+}
+
 async function invoiceDocuments(req, siteFilter) {
   const inv = invoiceScope(req, siteFilter);
   const [rows] = await pool.query(
@@ -1108,6 +1133,7 @@ async function invoiceDocuments(req, siteFilter) {
      LIMIT ${DOC_SOURCE_LIMIT}`,
     inv.params
   );
+  const payments = await invoicePayments(rows.map((r) => r.id));
   return rows.map((i) => ({
     key: `invoice:${i.id}`,
     kind: "invoice",
@@ -1120,8 +1146,12 @@ async function invoiceDocuments(req, siteFilter) {
     paid: Number(i.paid_amount || 0),
     pending: Number(i.pending_amount || 0),
     due_date: i.due_date,
-    // Invoice files are not stored in the system yet; nothing to download.
-    download: null,
+    invoice_number: i.invoice_number || null,
+    payments: payments.get(i.id) || [],
+    // Invoice files from the accounting software are not stored, so the portal serves a generated
+    // invoice summary PDF instead (see GET /documents/invoice/:id/file).
+    download: `/api/client-portal/documents/invoice/${encodeURIComponent(i.id)}/file`,
+    file_name: `Invoice-summary-${String(i.invoice_number || i.id).replace(/[^\w.-]+/g, "_")}.pdf`,
     has_file: !!i.has_file,
   }));
 }
@@ -1296,6 +1326,36 @@ router.get("/documents/audit/:auditId/file", async (req, res) => {
     await streamFile(res, row.object_key, { type: "application/pdf", name, download: !!req.query.download });
   } catch (err) {
     sendError(res, err, "report");
+  }
+});
+
+// GET /api/client-portal/documents/invoice/:id/file?download=1 -> generated "Invoice summary" PDF.
+// Same visibility as the invoice list: company admin -> any invoice of their company,
+// outlet user -> invoices of their outlets only.
+router.get("/documents/invoice/:id/file", async (req, res) => {
+  try {
+    const scope = invoiceScope(req, { siteIds: req.clientAccess.siteIds, singleSite: null });
+    const [[invoice]] = await pool.query(
+      `SELECT i.id, i.invoice_number, i.invoice_date, i.due_date, i.invoice_amount, i.paid_amount, i.pending_amount, i.status,
+              COALESCE(NULLIF(c.display_name, ''), c.name) AS company_name, s.name AS site_name,
+              CONCAT_WS(', ', NULLIF(s.address, ''), NULLIF(s.city, '')) AS site_address
+       FROM invoices i
+       LEFT JOIN companies c ON c.id = i.customer_id
+       LEFT JOIN sites s ON s.id = i.site_id
+       WHERE i.id = ? AND ${scope.sql}`,
+      [req.params.id, ...scope.params]
+    );
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+
+    const payments = (await invoicePayments([invoice.id])).get(invoice.id) || [];
+    const name = `Invoice-summary-${String(invoice.invoice_number || invoice.id).replace(/[^\w.-]+/g, "_")}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `${req.query.download ? "attachment" : "inline"}; filename="${name}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    writeInvoiceSummaryPdf(res, invoice, payments, { email: "info@bestserve.in", phone: "+91 88844 42625" });
+  } catch (err) {
+    if (res.headersSent) return res.destroy();
+    sendError(res, err, "invoice");
   }
 });
 

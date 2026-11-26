@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiSearch, FiMapPin, FiCalendar, FiAlertCircle, FiBriefcase, FiRefreshCw, FiChevronRight } from "react-icons/fi";
+import {
+  FiSearch, FiMapPin, FiCalendar, FiAlertCircle, FiRefreshCw, FiChevronRight,
+  FiAlertTriangle, FiCheck, FiClipboard, FiClock, FiHome,
+} from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
-import { formatDate, relativeDay, RISK_STYLE, serviceLabel } from "./portalUtils";
+import { formatDate } from "./portalUtils";
+import PortalLoader from "./PortalLoader";
 
 const FILTERS = [
-  { key: "all", label: "All" },
+  { key: "all", label: "All outlets" },
   { key: "attention", label: "Needs attention" },
   { key: "upcoming", label: "Visit scheduled" },
-  { key: "active", label: "Active jobs" },
+  { key: "active", label: "With active jobs" },
 ];
+
+const FILTER_ICONS = { all: FiHome, attention: FiAlertTriangle, upcoming: FiCalendar, active: FiClipboard };
 
 const SORTS = [
   { key: "name", label: "Name" },
@@ -93,18 +99,29 @@ export default function PortalOutlets() {
         </div>
       </section>
 
+      {/* Coloured filter tiles (All / Needs attention / Visit scheduled / With active jobs). */}
+      <div className="cp-ol-filters" role="tablist" aria-label="Filter outlets">
+        {FILTERS.map((f) => {
+          const Icon = FILTER_ICONS[f.key];
+          return (
+            <button
+              key={f.key} role="tab" aria-selected={filter === f.key}
+              className={`cp-ol-filter tone-${f.key} ${filter === f.key ? "active" : ""}`}
+              onClick={() => setFilter(f.key)}
+            >
+              <span className="cp-ol-filter-icon" aria-hidden="true"><Icon /></span>
+              <strong>{counts[f.key]}</strong>
+              <span>{f.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="cp-toolbar">
         <label className="cp-search">
           <FiSearch aria-hidden="true" />
           <input type="search" placeholder="Search outlet, area or address" value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
-        <div className="cp-chips" role="tablist" aria-label="Filter outlets">
-          {FILTERS.map((f) => (
-            <button key={f.key} role="tab" aria-selected={filter === f.key} className={`cp-chip ${filter === f.key ? "active" : ""}`} onClick={() => setFilter(f.key)}>
-              {f.label} <span className="cp-chip-count">{counts[f.key]}</span>
-            </button>
-          ))}
-        </div>
         <label className="cp-select">
           Sort
           <select value={sort} onChange={(e) => setSort(e.target.value)}>
@@ -121,45 +138,46 @@ export default function PortalOutlets() {
       )}
 
       {loading && outlets.length === 0 && (
-        <div className="cp-outlet-grid">
-          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="cp-outlet-card cp-skeleton" style={{ minHeight: 200 }} />)}
-        </div>
+        <div className="cp-card"><PortalLoader compact label="Loading outlets…" /></div>
       )}
 
       {!loading && !error && shown.length === 0 && (
         <div className="cp-card cp-empty">{outlets.length ? "No outlets match these filters." : "No outlets are linked to your account yet."}</div>
       )}
 
-      <div className="cp-outlet-grid">
+      {/* Compact outlet cards: 3 per row on wide screens, so long lists stay easy to scan. */}
+      <div className="cp-ol-grid">
         {shown.map((o) => {
-          const risk = RISK_STYLE[String(o.audit_risk || "").toUpperCase()];
+          const site = encodeURIComponent(o.id);
+          const short = { day: "2-digit", month: "short" };
           return (
-            <button key={o.id} className="cp-outlet-card" onClick={() => navigate(`/client/outlets/${encodeURIComponent(o.id)}`)}>
-              <div className="cp-outlet-top">
-                <span className="cp-outlet-icon"><FiMapPin aria-hidden="true" /></span>
-                <div className="cp-outlet-title">
-                  <strong>{o.name || o.id}</strong>
-                  <small>{o.city || "—"}</small>
-                </div>
-                {risk ? <span className={`cp-risk ${risk.className}`}>{risk.label} risk</span> : null}
+            <article key={o.id} className="cp-ol-card">
+              <button type="button" className="cp-ol-main" onClick={() => navigate(`/client/outlets/${site}`)} aria-label={`Open ${o.name || o.id}`}>
+                <span className="cp-ol-top">
+                  <span className="cp-ol-pin" aria-hidden="true"><FiMapPin /></span>
+                  <span className="cp-ol-name">
+                    <strong>{o.name || o.id}</strong>
+                    <small title={o.address || o.city || ""}>{o.address || o.city || "—"}</small>
+                  </span>
+                  {needsAttention(o) && <span className="cp-ol-attn">Needs attention</span>}
+                </span>
+                <span className="cp-ol-stats">
+                  <span className="cp-ol-chip blue" title="Active jobs"><FiClipboard aria-hidden="true" /><b>{o.active_jobs}</b> job{o.active_jobs === 1 ? "" : "s"}</span>
+                  <span className="cp-ol-chip violet" title="Last visit"><FiClock aria-hidden="true" />{o.last_visit ? formatDate(o.last_visit, short) : "No visit yet"}</span>
+                  <span className="cp-ol-chip slate" title="Next visit"><FiCalendar aria-hidden="true" />{o.next_visit ? formatDate(o.next_visit, short) : "Not set"}</span>
+                  {o.open_complaints > 0 ? (
+                    <span className="cp-ol-chip orange" title="Open complaints"><FiAlertCircle aria-hidden="true" /><b>{o.open_complaints}</b> open</span>
+                  ) : (
+                    <span className="cp-ol-chip green" title="No open complaints"><FiCheck aria-hidden="true" />Clear</span>
+                  )}
+                </span>
+              </button>
+              <div className="cp-ol-foot">
+                <button type="button" onClick={() => navigate(`/client/request-service?site=${site}`)}>Request service</button>
+                <button type="button" onClick={() => navigate(`/client/complaints?site=${site}`)}>Complaint</button>
+                <button type="button" className="open" onClick={() => navigate(`/client/outlets/${site}`)}>Open <FiChevronRight aria-hidden="true" /></button>
               </div>
-
-              {o.address && <p className="cp-outlet-address">{o.address}</p>}
-
-              <div className="cp-outlet-stats">
-                <div><FiBriefcase aria-hidden="true" /><span><strong>{o.active_jobs}</strong> active job{o.active_jobs === 1 ? "" : "s"}</span></div>
-                <div><FiCalendar aria-hidden="true" /><span>{o.next_visit ? <>Next visit <strong>{relativeDay(o.next_visit)}</strong></> : "No visit scheduled"}</span></div>
-                <div><FiCalendar aria-hidden="true" /><span>Last visit {o.last_visit ? <strong>{formatDate(o.last_visit)}</strong> : "—"}</span></div>
-                <div className={o.open_complaints ? "warn" : ""}><FiAlertCircle aria-hidden="true" /><span><strong>{o.open_complaints}</strong> open complaint{o.open_complaints === 1 ? "" : "s"}</span></div>
-              </div>
-
-              <div className="cp-outlet-foot">
-                <div className="cp-tags">
-                  {o.services.length ? o.services.map((s) => <span key={s} className="cp-tag">{serviceLabel(s)}</span>) : <span className="cp-muted">No services yet</span>}
-                </div>
-                <FiChevronRight className="cp-chevron" aria-hidden="true" />
-              </div>
-            </button>
+            </article>
           );
         })}
       </div>

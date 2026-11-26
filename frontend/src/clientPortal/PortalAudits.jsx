@@ -4,6 +4,7 @@ import { FiShield, FiEye, FiDownload, FiRefreshCw, FiX } from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 import { formatDate, RISK_STYLE } from "./portalUtils";
 import { getPortalFile } from "./portalFiles";
+import PortalLoader from "./PortalLoader";
 
 // Audit reports made by our supervisors (the generated PDF of each submitted audit).
 export default function PortalAudits() {
@@ -69,7 +70,7 @@ export default function PortalAudits() {
       {fileError && <div className="cp-alert">{fileError}<button className="cp-icon-btn" onClick={() => setFileError(null)} aria-label="Dismiss"><FiX /></button></div>}
 
       {loading && reports.length === 0 ? (
-        <div className="cp-audit-grid">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="cp-card cp-skeleton" style={{ minHeight: 150 }} />)}</div>
+        <div className="cp-card"><PortalLoader compact label="Loading audit reports…" /></div>
       ) : reports.length === 0 ? (
         <div className="cp-card cp-empty-state">
           <FiShield aria-hidden="true" />
