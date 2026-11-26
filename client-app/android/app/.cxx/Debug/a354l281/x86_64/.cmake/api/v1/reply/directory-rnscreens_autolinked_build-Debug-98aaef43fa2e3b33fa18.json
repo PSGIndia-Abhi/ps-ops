@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "rnscreens_autolinked_build",
+		"source" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni"
+	}
+}

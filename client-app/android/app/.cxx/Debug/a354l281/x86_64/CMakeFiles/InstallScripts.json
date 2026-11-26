@@ -1,0 +1,17 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/rndocumentpickerCGen_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/RNFBAppTurboModules_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/RNFBMessagingTurboModules_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/ReactNativeBlobUtilSpec_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/rngesturehandler_codegen_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/RNImagePickerSpec_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/RNKeychainSpec_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/safeareacontext_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/rnscreens_autolinked_build/cmake_install.cmake",
+		"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/x86_64/rnsvg_autolinked_build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

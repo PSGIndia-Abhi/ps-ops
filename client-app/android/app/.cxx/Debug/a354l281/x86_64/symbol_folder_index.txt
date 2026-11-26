@@ -1,0 +1,1 @@
+C:\Users\abhip\ps-ops-platform-stable\client-app\android\app\build\intermediates\cxx\Debug\a354l281\obj\x86_64

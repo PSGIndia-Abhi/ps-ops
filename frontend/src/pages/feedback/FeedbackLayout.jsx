@@ -5,7 +5,7 @@ import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
-import { getBadges, getDepartments, getMyAccess } from "./feedbackApi";
+import { getBadges, getDepartments, getMyAccess, getSchedules } from "./feedbackApi";
 import { taskSwitchCount } from "../taskpro/tasksApi";
 import { useUnseenCounts } from "./unseenCounts";
 import { TASKPRO_HOME } from "../taskpro/access";
@@ -26,6 +26,8 @@ const NAV = [
   // Wrong numbers: collectors ask, service coordinators (and desk managers) add the right number.
   { path: `${FEEDBACK_HOME}/requests`, label: "Requests", needs: [...WORKERS, "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"], badge: "open_requests" },
   { path: `${FEEDBACK_HOME}/report`, label: "Customer report", needs: DESK },
+  // Ended call schedules to schedule again or close; the number stays until each one is dealt with.
+  { path: `${FEEDBACK_HOME}/alerts`, label: "Alerts", needs: ["FEEDBACK_ADMIN", "FEEDBACK_SCHEDULE"], alerts: true },
   { group: "MASTERS", needs: ["FEEDBACK_ADMIN", "FEEDBACK_ISSUES", "FEEDBACK_SCHEDULE"] },
   // Which customers / sites get calls, and how often: admin, service coordinators, operations managers.
   { path: `${FEEDBACK_HOME}/schedule`, label: "Call schedule", needs: ["FEEDBACK_ADMIN", "FEEDBACK_SCHEDULE"] },
@@ -65,11 +67,18 @@ export default function FeedbackLayout() {
   useEffect(loadDepartments, [loadDepartments]);
   // The numbers on the menu (Requests waiting), reloaded on each page and every minute.
   const [badges, setBadges] = useState({});
+  const [endedSchedules, setEndedSchedules] = useState(0); // the Alerts count
+  const seesAlerts = Boolean(access) && ["FEEDBACK_ADMIN", "FEEDBACK_SCHEDULE"].some((p) => (access.permissions || []).includes(p));
   const loadBadges = useCallback(() => {
     getBadges()
       .then(setBadges)
       .catch(() => {});
-  }, []);
+    if (seesAlerts) {
+      getSchedules()
+        .then((d) => setEndedSchedules((d.schedules || []).filter((x) => x.ended).length))
+        .catch(() => {});
+    }
+  }, [seesAlerts]);
   useEffect(() => {
     if (!access) return undefined;
     loadBadges();
@@ -194,7 +203,7 @@ export default function FeedbackLayout() {
                   ) : (
                     <button
                       key={item.path}
-                      className={`nav-btn ${isActive(item) ? "active" : ""}`}
+                      className={`nav-btn ${isActive(item) ? "active" : ""} ${item.alerts ? "fb-nav-alert" : ""}`}
                       aria-current={isActive(item) ? "page" : undefined}
                       onClick={() => {
                         if (item.badge) markSeen(item.badge);
@@ -203,6 +212,7 @@ export default function FeedbackLayout() {
                     >
                       <span>{item.label}</span>
                       {item.badge && unseen(item.badge) > 0 && <span className="fb-nav-count">{unseen(item.badge)}</span>}
+                      {item.alerts && endedSchedules > 0 && <span className="fb-nav-count">{endedSchedules}</span>}
                     </button>
                   ),
                 )}
@@ -257,6 +267,7 @@ export default function FeedbackLayout() {
             .map((item) => (
               <button key={item.path} onClick={() => go(item.path)}>
                 {item.label}
+                {item.alerts && endedSchedules > 0 ? ` (${endedSchedules})` : ""}
               </button>
             ))}
           {showSos && <button onClick={() => go(`${BILLING_HOME}/sos`)}>Monthly SOS</button>}

@@ -6,7 +6,6 @@ import { CALL_STATUS, formatDate, formatDay, isPast, listCalls, listCompletedSit
 import { CompletedFeedbackPanel, CompletedTable } from "./CompletedFeedback";
 import { useFeedbackAccess } from "./feedbackContext";
 import SiteDetailsPanel from "./SiteDetailsPanel";
-import { EndedSchedules } from "./ScheduleMaster";
 import { Card, Empty, ErrorBox, Loading, PageHead, Segmented, Switch, Tiles } from "./ui";
 
 // The Feedback Desk home (Dashboard): the calls the call schedules made (Masters › Call schedule), one
@@ -228,7 +227,6 @@ export default function CallList() {
   return (
     <>
       <PageHead title="Dashboard" />
-      {(can("FEEDBACK_ADMIN") || can("FEEDBACK_SCHEDULE")) && <EndedSchedules />}
 
       <PeriodFilter mode={mode} ahead={ahead} month={month} from={from} to={to} onChange={setParam} />
 
