@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { brigadeRequest, formatDate, formatInr } from "./brigadeShared";
 import PoSheet, { NewPoDialog, SearchIcon } from "./PoSheet";
 import "./brigade.css";
+import BrigadePager from "./BrigadePager";
+
+const PAGE_SIZE = 25; // POs a page
 
 // PO section (/brigade/pos): where client POs are managed. Create a PO (+ New PO) or open
 // one; inside it, change the PO details and files, add or remove services and set each
@@ -90,6 +93,12 @@ function PoTable({ onOpen }) {
         .sort(SORTS[sort][1]),
     [all, view, term, sort]
   );
+  // 25 a page; a new filter, search or sort starts again on page 1
+  const pageKey = JSON.stringify([view, term, sort]);
+  const [pageAt, setPageAt] = useState({ key: pageKey, n: 1 });
+  const page = pageAt.key === pageKey ? pageAt.n : 1;
+  const setPage = (n) => setPageAt({ key: pageKey, n });
+  const pageRows = shown.slice((Math.min(page, Math.max(1, Math.ceil(shown.length / PAGE_SIZE))) - 1) * PAGE_SIZE).slice(0, PAGE_SIZE);
 
   const summary = useMemo(() => {
     const withAmount = all.filter(({ f }) => f.amount !== null && f.amount !== undefined);
@@ -193,7 +202,7 @@ function PoTable({ onOpen }) {
                 </tr>
               </thead>
               <tbody>
-                {shown.map(({ p, f }) => {
+                {pageRows.map(({ p, f }) => {
                   const invPct = f.amount ? Math.min((f.invoiced / f.amount) * 100, 100) : 0;
                   const workPct = f.amount ? Math.min((Math.max(f.assigned - f.invoiced, 0) / f.amount) * 100, 100 - invPct) : 0;
                   return (
@@ -233,6 +242,7 @@ function PoTable({ onOpen }) {
             </table>
           </div>
         )}
+        <BrigadePager total={shown.length} page={page} size={PAGE_SIZE} onPage={setPage} />
         <div className="bpo-legend"><span><i className="inv" />Invoiced</span><span><i className="work" />Work on the PO, not invoiced yet</span></div>
       </section>
 

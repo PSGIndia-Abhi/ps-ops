@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { brigadeRequest, formatDate, formatInr, gstOn, poFileProblem, round2, statusLabel, toNumber, uploadPoFile } from "./brigadeShared";
 import { SearchIcon } from "./PoSheet";
 import "./brigade.css";
+import BrigadePager from "./BrigadePager";
+
+const PAGE_SIZE = 25; // services a page
 
 // Services without PO (/brigade/no-po): every Brigade service that is not under any PO yet (booked
 // before the client's PO came). Filter by property, flat and status, tick services and "Add to PO":
@@ -25,6 +28,8 @@ export default function BrigadeNoPo() {
   const [property, setProperty] = useState("");
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("all");
+  // 25 services a page; a new property, status tab or search starts again on page 1
+  const [page, setPage] = useState(1);
   const [picked, setPicked] = useState(() => new Set());
   const [adding, setAdding] = useState(false);
   const [done, setDone] = useState(null); // { po_number, count }
@@ -45,7 +50,12 @@ export default function BrigadeNoPo() {
   const shown = inScope.filter((r) => tab === "all" || (tab === "done" ? r.status === "COMPLETED" : r.status !== "COMPLETED"));
   const value = (list) => round2(list.reduce((t, r) => t + (Number(r.amount) || 0), 0));
   const pickedRows = rows.filter((r) => picked.has(r.job_id));
-  const allShownPicked = shown.length > 0 && shown.every((r) => picked.has(r.job_id));
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const at = Math.min(page, pages);
+  const from = (at - 1) * PAGE_SIZE;
+  const pageRows = shown.slice(from, from + PAGE_SIZE);
+  // the header tick: every service on this page
+  const allShownPicked = pageRows.length > 0 && pageRows.every((r) => picked.has(r.job_id));
 
   function toggle(id) {
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -53,8 +63,8 @@ export default function BrigadeNoPo() {
   function toggleShown() {
     setPicked((p) => {
       const n = new Set(p);
-      if (allShownPicked) shown.forEach((r) => n.delete(r.job_id));
-      else shown.forEach((r) => n.add(r.job_id));
+      if (allShownPicked) pageRows.forEach((r) => n.delete(r.job_id));
+      else pageRows.forEach((r) => n.add(r.job_id));
       return n;
     });
   }
@@ -101,11 +111,11 @@ export default function BrigadeNoPo() {
       <section className="bdz-panel bnp-panel">
         {byProperty.length > 1 && (
           <div className="bnp-props" role="radiogroup" aria-label="Property">
-            <button type="button" role="radio" aria-checked={!property} className={!property ? "on" : ""} onClick={() => setProperty("")}>
+            <button type="button" role="radio" aria-checked={!property} className={!property ? "on" : ""} onClick={() => { setProperty(""); setPage(1); }}>
               All properties <span>{rows.length}</span>
             </button>
             {byProperty.map((p) => (
-              <button key={p.name} type="button" role="radio" aria-checked={property === p.name} className={property === p.name ? "on" : ""} onClick={() => setProperty(property === p.name ? "" : p.name)}>
+              <button key={p.name} type="button" role="radio" aria-checked={property === p.name} className={property === p.name ? "on" : ""} onClick={() => { setProperty(property === p.name ? "" : p.name); setPage(1); }}>
                 <i aria-hidden="true">{initials(p.name)}</i>{p.name} <span>{p.count}</span>
               </button>
             ))}
@@ -115,14 +125,14 @@ export default function BrigadeNoPo() {
         <div className="bnp-toolbar">
           <div className="bpm-seg" role="tablist" aria-label="Filter by status">
             {STATUS_TABS.map((t) => (
-              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
+              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => { setTab(t.key); setPage(1); }}>
                 {t.label} <b>{counts[t.key]}</b>
               </button>
             ))}
           </div>
           <div className="bnp-search">
             <SearchIcon />
-            <input value={query} maxLength={100} placeholder="Flat, service or job code" aria-label="Search services" onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
+            <input value={query} maxLength={100} placeholder="Flat, service or job code" aria-label="Search services" onChange={(e) => { setQuery(e.target.value); setPage(1); }} autoComplete="off" />
           </div>
         </div>
 
@@ -143,7 +153,7 @@ export default function BrigadeNoPo() {
             <table className="bnp-table">
               <thead>
                 <tr>
-                  <th className="bnp-check"><input type="checkbox" checked={allShownPicked} onChange={toggleShown} aria-label="Tick every service shown" /></th>
+                  <th className="bnp-check"><input type="checkbox" checked={allShownPicked} onChange={toggleShown} aria-label="Tick every service on this page" /></th>
                   <th>Property · flat</th>
                   <th>Service</th>
                   <th>Status</th>
@@ -152,7 +162,7 @@ export default function BrigadeNoPo() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r) => (
+                {pageRows.map((r) => (
                   <tr key={r.job_id} className={picked.has(r.job_id) ? "picked" : ""} onClick={() => toggle(r.job_id)}>
                     <td className="bnp-check" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={picked.has(r.job_id)} onChange={() => toggle(r.job_id)} aria-label={`Tick ${r.sub_service}, flat ${r.flat_number}`} />
@@ -173,6 +183,7 @@ export default function BrigadeNoPo() {
             </table>
           </div>
         )}
+        <BrigadePager total={shown.length} page={at} size={PAGE_SIZE} onPage={setPage} />
       </section>
 
       {pickedRows.length > 0 && (

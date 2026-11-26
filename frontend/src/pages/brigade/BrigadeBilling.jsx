@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { brigadeRequest, formatDate, formatInr, poState, round2, usedPct } from "./brigadeShared";
 import PoSheet, { Money, SearchIcon } from "./PoSheet";
 import "./brigade.css";
+import BrigadePager from "./BrigadePager";
+
+const PAGE_SIZE = 25; // POs a page
 
 // Brigade billing (/brigade/billing): VIEW ONLY. Every PO with its completed services,
 // totals with GST and the balance (PO amount - invoices generated); inside a PO, tick completed services and
@@ -73,6 +76,12 @@ function PoList({ onOpen, inBilling }) {
       ),
     [pos, term, filter]
   );
+  // 25 a page; a new filter, search or sort starts again on page 1
+  const pageKey = JSON.stringify([filter, term]);
+  const [pageAt, setPageAt] = useState({ key: pageKey, n: 1 });
+  const page = pageAt.key === pageKey ? pageAt.n : 1;
+  const setPage = (n) => setPageAt({ key: pageKey, n });
+  const pageRows = shown.slice((Math.min(page, Math.max(1, Math.ceil(shown.length / PAGE_SIZE))) - 1) * PAGE_SIZE).slice(0, PAGE_SIZE);
 
   const summary = useMemo(() => {
     const withAmount = pos.filter((p) => p.totals.po_amount !== null);
@@ -163,7 +172,7 @@ function PoList({ onOpen, inBilling }) {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((p) => {
+                {pageRows.map((p) => {
                   const pct = usedPct(p.invoiced, p.totals.po_amount);
                   return (
                     <tr key={p.po_number} tabIndex={0} onClick={() => onOpen(p.po_number)} onKeyDown={(e) => e.key === "Enter" && onOpen(p.po_number)}>
@@ -201,6 +210,7 @@ function PoList({ onOpen, inBilling }) {
             </table>
           </div>
         )}
+        <BrigadePager total={shown.length} page={page} size={PAGE_SIZE} onPage={setPage} />
       </section>
     </div>
   );
