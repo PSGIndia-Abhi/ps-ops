@@ -6,6 +6,8 @@ import {
 import { apiFetch, safeJson } from "../api";
 import { formatDate, formatMoney, RISK_STYLE, statusInfo } from "./portalUtils";
 import { getPortalFile } from "./portalFiles";
+import PortalLoader from "./PortalLoader";
+import InvoiceDetailsModal from "./InvoiceDetailsModal";
 
 const KINDS = [
   { key: "", label: "All", count: "all" },
@@ -25,8 +27,10 @@ const DOC_TYPE_LABELS = {
 
 const INVOICE_STATUS = {
   PAID: { label: "Paid", className: "st-green" },
+  PARTIAL: { label: "Partly paid", className: "st-amber" },
   PENDING: { label: "Pending", className: "st-amber" },
   OVERDUE: { label: "Overdue", className: "st-red" },
+  CANCELLED: { label: "Cancelled", className: "st-slate" },
 };
 
 function fileSize(bytes) {
@@ -60,6 +64,17 @@ export default function PortalDocuments() {
   const [fileError, setFileError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [invoice, setInvoice] = useState(null); // invoice row picked with "View"
+
+  // Wide screens show invoice details beside the list; narrow ones use the pop-up.
+  const WIDE_QUERY = "(min-width: 1100px)";
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE_QUERY);
+    const onChange = () => setWide(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -120,6 +135,15 @@ export default function PortalDocuments() {
   const outletName = outletId ? portal.outlets.find((o) => o.id === outletId)?.name : null;
   const today = new Date(new Date().toDateString());
 
+  // Invoice details beside the list on wide screens: on the Invoices tab always (the picked
+  // invoice, else the first one); on other tabs once an invoice's "View" is clicked (closable).
+  // Audits, shared documents and photos keep plain View (open PDF) / Download buttons.
+  const picked = invoice ? items.find((d) => d.key === invoice.key) : null;
+  const shownInvoice = wide
+    ? picked || (kind === "invoice" ? items.find((d) => d.kind === "invoice") || null : null)
+    : null;
+  const split = !!shownInvoice;
+
   return (
     <div className="cp-page">
       <section className="cp-hero">
@@ -163,9 +187,10 @@ export default function PortalDocuments() {
       )}
       {fileError && <div className="cp-alert">{fileError}<button className="cp-icon-btn" onClick={() => setFileError(null)} aria-label="Dismiss"><FiX /></button></div>}
 
+      <div className={split ? "cp-inv-split" : "cp-inv-nosplit"}>
       <section className="cp-card cp-card-flush">
         {loading && page === 1 && items.length === 0 ? (
-          <div className="cp-rowlist">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="cp-row-skel cp-skeleton" />)}</div>
+          <PortalLoader compact label="Loading documents…" />
         ) : items.length === 0 ? (
           <div className="cp-empty-state">
             <FiFile aria-hidden="true" />
@@ -180,7 +205,7 @@ export default function PortalDocuments() {
               const risk = d.kind === "audit" ? RISK_STYLE[String(d.risk || "").toUpperCase()] : null;
               const inv = d.kind === "invoice" ? (INVOICE_STATUS[d.status] || statusInfo(d.status)) : null;
               return (
-                <div key={d.key} className={`cp-docrow kind-${d.kind}`}>
+                <div key={d.key} className={`cp-docrow kind-${d.kind} ${shownInvoice?.key === d.key ? "selected" : ""}`}>
                   <span className="cp-doc-icon"><KindIcon kind={d.kind} /></span>
                   <div className="cp-jobrow-main">
                     <strong>{d.title}</strong>
@@ -204,7 +229,20 @@ export default function PortalDocuments() {
                     {inv && <span className={`cp-status ${inv.className}`}>{inv.label}</span>}
                   </div>
                   <div className="cp-doc-actions">
-                    {d.download && (
+                    {d.kind === "invoice" && (
+                      <>
+                        <button
+                          className={`cp-btn cp-btn-ghost ${shownInvoice?.key === d.key ? "cp-btn-picked" : ""}`}
+                          onClick={() => setInvoice(d)} disabled={!!busy} aria-pressed={split ? shownInvoice?.key === d.key : undefined}
+                        >
+                          <FiEye /> View
+                        </button>
+                        <button className="cp-btn cp-btn-ghost" onClick={() => openFile(d, true)} disabled={!!busy} aria-label={`Download ${d.title}`}>
+                          <FiDownload /> {busy === `${d.key}:d` ? "…" : ""}
+                        </button>
+                      </>
+                    )}
+                    {d.kind !== "invoice" && d.download && (
                       <>
                         <button className="cp-btn cp-btn-ghost" onClick={() => openFile(d, false)} disabled={!!busy}>
                           <FiEye /> {busy === `${d.key}:v` ? "Opening…" : "View"}
@@ -217,7 +255,6 @@ export default function PortalDocuments() {
                     {d.kind === "photos" && (
                       <button className="cp-btn cp-btn-ghost" onClick={() => navigate(d.link)}>View photos <FiChevronRight /></button>
                     )}
-                    {d.kind === "invoice" && !d.download && <span className="cp-muted cp-doc-nofile">PDF not available online</span>}
                   </div>
                 </div>
               );
@@ -225,6 +262,29 @@ export default function PortalDocuments() {
           </div>
         )}
       </section>
+
+      {split && shownInvoice && (
+        <aside className="cp-inv-side" aria-label="Invoice details">
+          <InvoiceDetailsModal
+            variant="panel"
+            closable={kind !== "invoice"}
+            invoice={shownInvoice}
+            busy={busy && busy.startsWith(`${shownInvoice.key}:`) ? busy.slice(-1) : null}
+            onOpenFile={(download) => openFile(shownInvoice, download)}
+            onClose={() => setInvoice(null)}
+          />
+        </aside>
+      )}
+      </div>
+
+      {!wide && invoice && (
+        <InvoiceDetailsModal
+          invoice={invoice}
+          busy={busy && busy.startsWith(`${invoice.key}:`) ? busy.slice(-1) : null}
+          onOpenFile={(download) => openFile(invoice, download)}
+          onClose={() => setInvoice(null)}
+        />
+      )}
 
       {items.length > 0 && (
         <div className="cp-loadmore">

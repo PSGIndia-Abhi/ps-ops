@@ -4,6 +4,7 @@ import { FiPlus, FiSearch, FiRefreshCw, FiChevronRight, FiMessageSquare, FiMapPi
 import { apiFetch, safeJson } from "../api";
 import ComplaintForm from "./ComplaintForm";
 import { formatDate, relativeDay, statusInfo } from "./portalUtils";
+import PortalLoader from "./PortalLoader";
 
 const CHIPS = [
   { key: "open", label: "Open" },
@@ -111,7 +112,7 @@ export default function PortalComplaints() {
 
       <section className="cp-card cp-card-flush">
         {loading && page === 1 && items.length === 0 ? (
-          <div className="cp-rowlist">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="cp-row-skel cp-skeleton" />)}</div>
+          <PortalLoader compact label="Loading complaints…" />
         ) : items.length === 0 ? (
           <div className="cp-empty-state">
             <FiMessageSquare aria-hidden="true" />

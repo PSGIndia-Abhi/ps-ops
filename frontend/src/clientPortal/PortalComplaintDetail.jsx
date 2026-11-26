@@ -4,8 +4,9 @@ import { FiArrowLeft, FiMapPin, FiBriefcase, FiPaperclip, FiSend, FiX, FiRefresh
 import { apiFetch, safeJson } from "../api";
 import PortalPhoto from "./PortalPhoto";
 import { formatDateTime, serviceLabel, statusInfo } from "./portalUtils";
+import PortalLoader from "./PortalLoader";
 
-const MAX_FILES = 5;
+const MAX_FILES = 10; // per reply; the server allows the same (MAX_COMPLAINT_FILES)
 const MAX_SIZE = 10 * 1024 * 1024;
 
 export default function PortalComplaintDetail() {
@@ -117,7 +118,7 @@ export default function PortalComplaintDetail() {
   );
 
   if (loading && !data) {
-    return <div className="cp-page">{back}<div className="cp-card cp-skeleton" style={{ minHeight: 320 }} /></div>;
+    return <div className="cp-page">{back}<PortalLoader label="Loading complaint…" /></div>;
   }
   if (error && !data) {
     return (
