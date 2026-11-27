@@ -1,0 +1,670 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/intermediates/cxx/Debug/a354l281/obj/armeabi-v7a/libappmodules.so"
+		}
+	],
+	"backtrace" : 3,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"include",
+			"target_link_libraries",
+			"target_compile_options",
+			"target_compile_reactnative_options",
+			"target_compile_definitions",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake",
+			"CMakeLists.txt",
+			"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactCommon/cmake-utils/react-native-flags.cmake",
+			"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/CMakeLists.txt",
+			"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 31,
+				"parent" : 0
+			},
+			{
+				"file" : 0,
+				"parent" : 1
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 64,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 95,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 81,
+				"parent" : 2
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 71,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 30,
+				"parent" : 6
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 35,
+				"parent" : 6
+			},
+			{
+				"command" : 5,
+				"file" : 2,
+				"line" : 33,
+				"parent" : 6
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 66,
+				"parent" : 2
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 6,
+				"file" : 3,
+				"line" : 62,
+				"parent" : 11
+			},
+			{
+				"file" : 4
+			},
+			{
+				"command" : 6,
+				"file" : 4,
+				"line" : 63,
+				"parent" : 13
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -march=armv7-a -mthumb -Wformat -Werror=format-security   -fno-limit-debug-info  -flto=thin -fPIC"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-Werror"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-fexceptions"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-frtti"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-std=c++20"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-DFOLLY_NO_CONFIG=1"
+				},
+				{
+					"backtrace" : 7,
+					"fragment" : "-DLOG_TAG=\\\"ReactNative\\\""
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_HAVE_CLOCK_GETTIME=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_USE_LIBCPP=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_CFG_NO_COROUTINES=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_MOBILE=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_HAVE_RECVMMSG=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_HAVE_PTHREAD=1"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-DFOLLY_HAVE_XSI_STRERROR_R=1"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 8,
+					"define" : "HERMES_V1_ENABLED=1"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "RN_SERIALIZABLE_STATE"
+				},
+				{
+					"define" : "appmodules_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 10,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
+				},
+				{
+					"backtrace" : 10,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/generated/autolinking/src/main/jni"
+				},
+				{
+					"backtrace" : 12,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni"
+				},
+				{
+					"backtrace" : 14,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/react/renderer/components/RNFBAppTurboModules"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/react/renderer/components/RNFBMessagingTurboModules"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/../shared/shadowNodes"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../../common/cpp"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/."
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni"
+				},
+				{
+					"backtrace" : 5,
+					"isSystem" : true,
+					"path" : "C:/Users/abhip/.gradle/caches/9.4.1/transforms/7a9797ce9c56d73f66a7253f989bfd68/transformed/fbjni-0.7.0/prefab/modules/fbjni/include"
+				},
+				{
+					"backtrace" : 5,
+					"isSystem" : true,
+					"path" : "C:/Users/abhip/.gradle/caches/9.4.1/transforms/4f3f34b17b2cd2f26432be0c7a05098d/transformed/react-android-0.87.1-debug/prefab/modules/jsi/include"
+				},
+				{
+					"backtrace" : 5,
+					"isSystem" : true,
+					"path" : "C:/Users/abhip/.gradle/caches/9.4.1/transforms/4f3f34b17b2cd2f26432be0c7a05098d/transformed/react-android-0.87.1-debug/prefab/modules/reactnative/include"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				0,
+				1
+			],
+			"sysroot" : 
+			{
+				"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+			}
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rndocumentpickerCGen::@aac1846a245ca418eb66"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_RNFBAppTurboModules::@a0d44c1163aba7af3ea1"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_RNFBMessagingTurboModules::@23361e4831c0e3136ef6"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_RNImagePickerSpec::@f66ee9a2efecfb28bee4"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_ReactNativeBlobUtilSpec::@7d3cc6108106e04bb830"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_RNKeychainSpec::@f9a2cb36ebca2de4baf9"
+		},
+		{
+			"backtrace" : 4,
+			"id" : "react_codegen_rnsvg::@4f40eb209d0c0b4a3b65"
+		}
+	],
+	"id" : "appmodules::@6890427a1f51a3e7e1df",
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "-shared",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "-Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 4,
+				"fragment" : "C:\\Users\\abhip\\ps-ops-platform-stable\\client-app\\android\\app\\build\\intermediates\\cxx\\Debug\\a354l281\\obj\\armeabi-v7a\\libreact_codegen_rngesturehandler_codegen.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 4,
+				"fragment" : "C:\\Users\\abhip\\ps-ops-platform-stable\\client-app\\android\\app\\build\\intermediates\\cxx\\Debug\\a354l281\\obj\\armeabi-v7a\\libreact_codegen_safeareacontext.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 4,
+				"fragment" : "C:\\Users\\abhip\\ps-ops-platform-stable\\client-app\\android\\app\\build\\intermediates\\cxx\\Debug\\a354l281\\obj\\armeabi-v7a\\libreact_codegen_rnscreens.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 4,
+				"fragment" : "C:\\Users\\abhip\\ps-ops-platform-stable\\client-app\\android\\app\\build\\intermediates\\cxx\\Debug\\a354l281\\obj\\armeabi-v7a\\libreact_codegen_rnsvg.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "C:\\Users\\abhip\\.gradle\\caches\\9.4.1\\transforms\\7a9797ce9c56d73f66a7253f989bfd68\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.armeabi-v7a\\libfbjni.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "C:\\Users\\abhip\\.gradle\\caches\\9.4.1\\transforms\\4f3f34b17b2cd2f26432be0c7a05098d\\transformed\\react-android-0.87.1-debug\\prefab\\modules\\jsi\\libs\\android.armeabi-v7a\\libjsi.so",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "C:\\Users\\abhip\\.gradle\\caches\\9.4.1\\transforms\\4f3f34b17b2cd2f26432be0c7a05098d\\transformed\\react-android-0.87.1-debug\\prefab\\modules\\reactnative\\libs\\android.armeabi-v7a\\libreactnative.so",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-latomic -lm",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX",
+		"lto" : true,
+		"sysroot" : 
+		{
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+		}
+	},
+	"name" : "appmodules",
+	"nameOnDisk" : "libappmodules.so",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1
+			]
+		},
+		{
+			"name" : "Object Libraries",
+			"sourceIndexes" : 
+			[
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 3,
+			"compileGroupIndex" : 0,
+			"path" : "OnLoad.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/4d70defca3a237a829093d57a26dbffb/ComponentDescriptors.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/react/renderer/components/rndocumentpickerCGen/EventEmitters.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/react/renderer/components/rndocumentpickerCGen/Props.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/react/renderer/components/rndocumentpickerCGen/ShadowNodes.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/react/renderer/components/rndocumentpickerCGen/States.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/rndocumentpickerCGen_autolinked_build/CMakeFiles/react_codegen_rndocumentpickerCGen.dir/rndocumentpickerCGen-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNFBAppTurboModules_autolinked_build/CMakeFiles/react_codegen_RNFBAppTurboModules.dir/RNFBAppTurboModules-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNFBMessagingTurboModules_autolinked_build/CMakeFiles/react_codegen_RNFBMessagingTurboModules.dir/RNFBMessagingTurboModules-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/ReactNativeBlobUtilSpec-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/2361107e616b8ab90a9b526b4425e420/ComponentDescriptors.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/2361107e616b8ab90a9b526b4425e420/EventEmitters.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/react/renderer/components/ReactNativeBlobUtilSpec/Props.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/2361107e616b8ab90a9b526b4425e420/ShadowNodes.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/ReactNativeBlobUtilSpec_autolinked_build/CMakeFiles/react_codegen_ReactNativeBlobUtilSpec.dir/2361107e616b8ab90a9b526b4425e420/States.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/RNImagePickerSpec-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/EventEmitters.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/Props.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/ShadowNodes.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir/react/renderer/components/RNImagePickerSpec/States.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/RNKeychainSpec-generated.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/react/renderer/components/RNKeychainSpec/ComponentDescriptors.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/react/renderer/components/RNKeychainSpec/EventEmitters.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/react/renderer/components/RNKeychainSpec/Props.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/react/renderer/components/RNKeychainSpec/ShadowNodes.cpp.o",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 4,
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/armeabi-v7a/RNKeychainSpec_autolinked_build/CMakeFiles/react_codegen_RNKeychainSpec.dir/react/renderer/components/RNKeychainSpec/States.cpp.o",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "SHARED_LIBRARY"
+}

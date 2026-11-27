@@ -1,0 +1,1396 @@
+{
+	"globsDependent" : 
+	[
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/generated/autolinking/src/main/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/rndocumentpickerCGen-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/react/renderer/components/rndocumentpickerCGen/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/RNFBAppTurboModules-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/react/renderer/components/RNFBAppTurboModules/*.cpp",
+			"listDirectories" : true,
+			"paths" : []
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/RNFBMessagingTurboModules-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/react/renderer/components/RNFBMessagingTurboModules/*.cpp",
+			"listDirectories" : true,
+			"paths" : []
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/ReactNativeBlobUtilSpec-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/react/renderer/components/ReactNativeBlobUtilSpec/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/RNImagePickerSpec-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/react/renderer/components/RNImagePickerSpec/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/RNKeychainSpec-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/react/renderer/components/RNKeychainSpec/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : []
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../../common/cpp/react/renderer/components/safeareacontext/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../../common/cpp/react/renderer/components/safeareacontext/RNCSafeAreaViewShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../../common/cpp/react/renderer/components/safeareacontext/RNCSafeAreaViewState.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/safeareacontext-generated.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/safeareacontext/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/rnscreens.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSFormSheetHostShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSFormSheetHostState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSFullWindowOverlayShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSModalScreenShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSSafeAreaViewShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSSafeAreaViewState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenShadowNodeCommitHook.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderConfigShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderConfigState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderSubviewState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSScreenState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSSplitScreenShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderConfigShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderConfigState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderItemShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderItemState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderSubviewShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackHeaderSubviewState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackScreenShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSStackScreenState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSTabsBottomAccessoryShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSTabsHostShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/RNSTabsHostState.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnscreens/utils/*.cpp",
+			"listDirectories" : true,
+			"paths" : []
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnscreens/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/rnsvg.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnsvg/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnsvg/RNSVGImageShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnsvg/RNSVGImageState.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnsvg/RNSVGLayoutableShadowNode.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../../common/cpp/react/renderer/components/rnsvg/RNSVGShadowNodes.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/*cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/../../../build/generated/source/codegen/jni/react/renderer/components/rnsvg/States.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup/*.cpp",
+			"listDirectories" : true,
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup/OnLoad.cpp"
+			]
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/../shared/shadowNodes/*.cpp",
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/../shared/shadowNodes/react/renderer/components/rngesturehandler_codegen/RNGestureHandlerDetectorShadowNode.cpp"
+			],
+			"recurse" : true
+		},
+		{
+			"expression" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/*.cpp",
+			"paths" : 
+			[
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/ComponentDescriptors.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/EventEmitters.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/Props.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/ShadowNodes.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/react/renderer/components/rngesturehandler_codegen/States.cpp",
+				"C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/./build/generated/source/codegen/jni/rngesturehandler_codegen-generated.cpp"
+			],
+			"recurse" : true
+		}
+	],
+	"inputs" : 
+	[
+		{
+			"path" : "CMakeLists.txt"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineSystem.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/android.toolchain.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/android-legacy.toolchain.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/abis.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/platforms.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Determine.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/hooks/pre/Android-Determine.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeSystem.cmake.in"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a/CMakeFiles/4.1.2/CMakeSystem.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/android.toolchain.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeSystemSpecificInitialize.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Initialize.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/hooks/pre/Android-Initialize.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linux-Initialize.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Determine-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android/Determine-Compiler.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/hooks/pre/Determine-Compiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCompilerIdDetection.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ADSP-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ARMCC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ARMClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/AppleClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompilerInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Borland-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Bruce-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompilerInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Compaq-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Cray-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/CrayClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Diab-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Embarcadero-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Fujitsu-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/FujitsuClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/GHS-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/GNU-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/HP-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IAR-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMClang-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Intel-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IntelLLVM-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/LCC-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/MSVC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/NVHPC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/NVIDIA-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/OpenWatcom-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/OrangeC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/PGI-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/PathScale-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Renesas-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/SCO-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/SDCC-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/SunPro-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/TI-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/TIClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Tasking-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/TinyCC-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/VisualAge-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-C-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Watcom-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/XL-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-C-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/XLClang-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/zOS-C-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-C-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-FindBinUtils.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCCompiler.cmake.in"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a/CMakeFiles/4.1.2/CMakeCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCXXCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Determine-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android/Determine-Compiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerId.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCompilerIdDetection.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ADSP-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ARMCC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/ARMClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/AppleClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompilerInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Borland-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-DetermineCompilerInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Compaq-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Cray-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/CrayClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Diab-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Embarcadero-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Fujitsu-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/FujitsuClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/GHS-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/GNU-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/HP-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IAR-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMClang-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Intel-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IntelLLVM-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/LCC-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/MSVC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/NVHPC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/NVIDIA-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/OpenWatcom-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/OrangeC-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/PGI-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/PathScale-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Renesas-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/SCO-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/SunPro-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/TI-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/TIClang-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Tasking-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/VisualAge-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-CXX-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Watcom-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/XL-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-CXX-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/XLClang-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/zOS-CXX-DetermineCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/IBMCPP-CXX-DetermineVersionInternal.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeFindBinUtils.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-FindBinUtils.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompiler.cmake.in"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a/CMakeFiles/4.1.2/CMakeCXXCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeSystemSpecificInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeGenericSystem.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeInitializeConfigs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/hooks/pre/Android.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linux.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/UnixPaths.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Clang-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Clang.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/hooks/pre/Android-Clang.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/ndk/27.1.12297006/build/cmake/flags.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCompilerCommon.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeDetermineLinkerId.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseImplicitIncludeInfo.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseImplicitLinkInfo.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseLibraryArchitecture.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCompilerCommon.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCCompilerABI.c"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerSupport.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/FeatureTesting.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCCompiler.cmake.in"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a/CMakeFiles/4.1.2/CMakeCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeCLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/LLD-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/LLD.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Android-LLD-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Linux-LLD-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Linux-LLD.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Linux-GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeInspectCLinker.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCCompiler.cmake.in"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Clang-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Android-Clang.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCXXCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCompilerCommon.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerABI.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeDetermineLinkerId.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseImplicitIncludeInfo.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseImplicitLinkInfo.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeParseLibraryArchitecture.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeTestCompilerCommon.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompilerABI.cpp"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeDetermineCompilerSupport.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/FeatureTesting.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-CXX-CXXImportStd.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Compiler/Clang-CXX-CXXImportStd.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompiler.cmake.in"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a/CMakeFiles/4.1.2/CMakeCXXCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeCXXLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/LLD-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/LLD.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Linker/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Android-LLD-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Linux-LLD-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Platform/Linker/Linux-LLD.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/Internal/CMakeInspectCXXLinker.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CMakeCXXCompiler.cmake.in"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/folly-flags.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactCommon/cmake-utils/react-native-flags.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/CMakeLists-CXX.txt.in"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/foo.cpp"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/main.cpp"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/CMakeLists-C.txt.in"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/foo.c"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/AppData/Local/Android/Sdk/cmake/4.1.2/share/cmake-4.1/Modules/CheckIPOSupported/main.c"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/ReactAndroid/ReactAndroidConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/ReactAndroid/ReactAndroidConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/fbjni/fbjniConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/fbjni/fbjniConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/build/generated/autolinking/src/main/jni/Android-autolinking.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-documents/picker/android/build/generated/source/codegen/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/app/android/src/reactnative/java/io/invertase/firebase/app/generated/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/@react-native-firebase/messaging/android/src/main/java/io/invertase/firebase/messaging/generated/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-blob-util/android/build/generated/source/codegen/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-gesture-handler/android/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-keychain/android/build/generated/source/codegen/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-safe-area-context/android/src/main/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-screens/android/src/main/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native-svg/android/src/main/jni/CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/ReactAndroid/ReactAndroidConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/prefab/arm64-v8a/prefab/lib/aarch64-linux-android/cmake/ReactAndroid/ReactAndroidConfig.cmake"
+		}
+	],
+	"kind" : "cmakeFiles",
+	"paths" : 
+	{
+		"build" : "C:/Users/abhip/ps-ops-platform-stable/client-app/android/app/.cxx/Debug/a354l281/arm64-v8a",
+		"source" : "C:/Users/abhip/ps-ops-platform-stable/client-app/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
+	},
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 1
+	}
+}
