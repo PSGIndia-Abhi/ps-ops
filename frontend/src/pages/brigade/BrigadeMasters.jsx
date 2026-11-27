@@ -78,9 +78,9 @@ export default function BrigadeMasters() {
           <div className="bpm-props">{[0, 1, 2, 3].map((i) => <span key={i} className="bdz-skel dark" style={{ height: 60 }} />)}</div>
         ) : properties.length > 0 && (
           <div className="bpm-props" role="radiogroup" aria-label="Property">
-            {properties.map((p) => (
+            {properties.map((p, i) => (
               <button key={p.id} type="button" role="radio" aria-checked={p.id === companyId}
-                className={`bpm-prop ${p.id === companyId ? "on" : ""}`} onClick={() => setCompanyId(p.id)}>
+                className={`bpm-prop pt-${i % 6} ${p.id === companyId ? "on" : ""}`} onClick={() => setCompanyId(p.id)}>
                 <span className="bpm-avatar" aria-hidden="true">{initials(p.name)}</span>
                 <span className="bpm-prop-name">{p.name}</span>
                 {/* Only flag a property that cannot be booked yet. */}

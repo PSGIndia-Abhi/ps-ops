@@ -57,7 +57,7 @@ function poFacts(p) {
   return { amount, assigned, invoiced, balance, state };
 }
 const STATE = {
-  ok: ["ok", "Balance left"], work: ["warn", "Work > PO"], used: ["bad", "Used up"], over: ["bad", "Over PO"], none: ["muted", "No amount"],
+  ok: ["ok", "Balance left"], work: ["warn", "Needs revision"], used: ["bad", "Used up"], over: ["bad", "Over PO"], none: ["muted", "No amount"],
 };
 const SORTS = {
   newest: ["Newest first", (a, b) => String(b.p.po_date || "").localeCompare(String(a.p.po_date || ""))],
@@ -145,7 +145,7 @@ function PoTable({ onOpen }) {
       <section className="bdz-panel bnp-panel">
         <div className="bnp-toolbar">
           <div className="bpm-seg" role="tablist" aria-label="Filter POs">
-            {[["all", "All", pos.length], ["ok", "Balance left", counts.ok || 0], ["work", "Work > PO", counts.work || 0], ["used", "Used up", (counts.used || 0) + (counts.over || 0)], ["none", "No amount", counts.none || 0]].map(([k, l, n]) => (
+            {[["all", "All", pos.length], ["ok", "Balance left", counts.ok || 0], ["work", "Needs revision", counts.work || 0], ["used", "Used up", (counts.used || 0) + (counts.over || 0)], ["none", "No amount", counts.none || 0]].map(([k, l, n]) => (
               <button key={k} type="button" role="tab" aria-selected={view === k} className={view === k ? "on" : ""} onClick={() => setView(k)}>{l} <b>{n}</b></button>
             ))}
           </div>
@@ -197,16 +197,13 @@ function PoTable({ onOpen }) {
                   <th className="num">PO amount</th>
                   <th className="num">Invoiced</th>
                   <th className="num">Balance</th>
-                  <th style={{ width: 170 }}>Used</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map(({ p, f }) => {
-                  const invPct = f.amount ? Math.min((f.invoiced / f.amount) * 100, 100) : 0;
-                  const workPct = f.amount ? Math.min((Math.max(f.assigned - f.invoiced, 0) / f.amount) * 100, 100 - invPct) : 0;
                   return (
-                    <tr key={p.po_number} tabIndex={0} onClick={() => onOpen(p.po_number)} onKeyDown={(e) => e.key === "Enter" && onOpen(p.po_number)}>
+                    <tr key={p.po_number} className={f.state === "work" ? "bpo-row-warn" : undefined} tabIndex={0} onClick={() => onOpen(p.po_number)} onKeyDown={(e) => e.key === "Enter" && onOpen(p.po_number)}>
                       <td>
                         <div className="bnp-who">
                           <span className="bpo-icon" aria-hidden="true">
@@ -227,14 +224,8 @@ function PoTable({ onOpen }) {
                       <td className="num">{formatInr(f.invoiced)}</td>
                       <td className="num bnp-price"><Money value={f.balance} signed /></td>
                       <td>
-                        {f.amount ? (
-                          <span className="bpo-used" title={`Invoiced ${formatInr(f.invoiced)} · work on PO ${formatInr(f.assigned)} of ${formatInr(f.amount)}`}>
-                            <span className="bpo-used-bar"><i className="inv" style={{ width: `${invPct}%` }} /><i className="work" style={{ width: `${workPct}%` }} /></span>
-                            <small>{pctOf(f.invoiced, f.amount)}%</small>
-                          </span>
-                        ) : <span className="bnp-muted">—</span>}
+                        <span className={`bpo-pill ${STATE[f.state][0]}`} title={f.state === "work" ? `Work on this PO (${formatInr(f.assigned)} incl. GST) is more than the PO amount (${formatInr(f.amount)}). Increase the PO amount, or move the extra work to a new PO.` : undefined}>{STATE[f.state][1]}</span>
                       </td>
-                      <td><span className={`bpo-pill ${STATE[f.state][0]}`}>{STATE[f.state][1]}</span></td>
                     </tr>
                   );
                 })}
@@ -243,7 +234,6 @@ function PoTable({ onOpen }) {
           </div>
         )}
         <BrigadePager total={shown.length} page={page} size={PAGE_SIZE} onPage={setPage} />
-        <div className="bpo-legend"><span><i className="inv" />Invoiced</span><span><i className="work" />Work on the PO, not invoiced yet</span></div>
       </section>
 
       {newPo !== null && (

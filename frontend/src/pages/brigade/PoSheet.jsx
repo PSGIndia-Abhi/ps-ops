@@ -155,6 +155,8 @@ function formFrom(po) {
 }
 
 export default function PoSheet({ number, mode, onBack, onOpen, inBilling = false }) {
+  // "Needs revision": work on the PO (incl. GST) is more than the PO amount.
+  const [newPoFor, setNewPoFor] = useState(null); // null | [] existing POs while the New PO dialog is open
   const manage = mode === "manage";
   const navigate = useNavigate();
   const [po, setPo] = useState(null);
@@ -216,6 +218,21 @@ export default function PoSheet({ number, mode, onBack, onOpen, inBilling = fals
   const pct = usedPct(invoiced, poAmount);
   // Everything on the PO (with GST) against the PO amount (incl. GST) - a message, never a block.
   const poCheck = po && (rows.length || pendingFlats.length) ? poMatch({ poAmount, value: onPo }) : null;
+  const shortBy = manage && poAmount !== null && onPoIncl > poAmount + 0.5 ? round2(onPoIncl - poAmount) : 0;
+
+  function raiseAmount() {
+    setForm((f) => ({ ...f, po_amount: String(round2(onPoIncl)) }));
+    setTimeout(() => document.getElementById("bgb-amount")?.focus(), 0);
+  }
+
+  async function startNewPo() {
+    try {
+      const list = await brigadeRequest("/api/brigade/pos");
+      setNewPoFor(Array.isArray(list) ? list : []);
+    } catch {
+      setNewPoFor([]);
+    }
+  }
   const invalidIds = new Set(
     rows.filter((r) => toNumber(r.amountText) === null || toNumber(r.amountText) < 0).map((r) => r.job_id)
   );
@@ -371,6 +388,30 @@ export default function PoSheet({ number, mode, onBack, onOpen, inBilling = fals
               <span className="bgb-sub">{formatInr(onPoIncl)} incl. GST {manage ? "on this PO" : "completed"} (not taken off until invoiced)</span>
             </div>
           </header>
+
+          {shortBy > 0 && (
+            <section className="bgb-revise" role="status">
+              <div className="bgb-revise-text">
+                <strong>Needs revision · short by {formatInr(shortBy)}</strong>
+                <span>
+                  Work on this PO is {formatInr(onPoIncl)} incl. GST but the PO amount is {formatInr(poAmount)}.
+                  Revise it in one of two ways:
+                </span>
+              </div>
+              <div className="bgb-revise-actions">
+                <button type="button" onClick={raiseAmount}>
+                  <b>Edit this PO</b>
+                  <small>Set the amount to {formatInr(onPoIncl)}, then Save</small>
+                </button>
+                {onOpen && (
+                  <button type="button" className="add" onClick={startNewPo}>
+                    <b>+ Add a new PO</b>
+                    <small>For the extra work. Take those services off here, then add them to the new PO from Services without PO.</small>
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* PO details */}
           <section className="bgb-doc-meta">
@@ -692,6 +733,15 @@ export default function PoSheet({ number, mode, onBack, onOpen, inBilling = fals
         }}
         onCancel={() => setConfirmLeave(false)}
       />
+
+      {newPoFor && (
+        <NewPoDialog
+          initial=""
+          existing={newPoFor}
+          onClose={() => setNewPoFor(null)}
+          onCreate={(n) => { setNewPoFor(null); onOpen(n); }}
+        />
+      )}
 
       <StatusAlertModal status={status} onClose={() => setStatus(null)} />
     </div>

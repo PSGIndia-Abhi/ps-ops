@@ -423,7 +423,7 @@ export default function AdminDashboard() {
               Assign Work Order{selectedJobIds.length ? ` (${selectedJobIds.length})` : ""}
             </button>
             <button type="button" className="primary" onClick={() => setIsCreateOpen(true)}>
-              + New Booking
+              {isBrigadeExecutive ? "+ New Request" : "+ New Booking"}
             </button>
           </div>
         </div>
@@ -498,7 +498,7 @@ export default function AdminDashboard() {
                 Try another status{filtersActive || searchQuery ? ", clear the search or reset the filters" : ""}.
               </span>
             ) : (
-              <span>Create the first booking with “+ New Booking”.</span>
+              <span>Create the first booking with “{isBrigadeExecutive ? "+ New Request" : "+ New Booking"}”.</span>
             )}
           </div>
         ) : (

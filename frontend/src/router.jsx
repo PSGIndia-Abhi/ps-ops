@@ -104,6 +104,9 @@ import AuditDetail from "./pages/audits/AuditDetail";
 import BrigadeLayout from "./pages/brigade/BrigadeLayout";
 import BrigadeDashboard from "./pages/brigade/BrigadeDashboard";
 import BrigadeMasters from "./pages/brigade/BrigadeMasters";
+import BrigadeContacts from "./pages/brigade/BrigadeContacts";
+import BrigadeLocations from "./pages/brigade/BrigadeLocations";
+import BrigadeInvoices from "./pages/brigade/BrigadeInvoices";
 import BrigadeBilling from "./pages/brigade/BrigadeBilling";
 import BrigadePos from "./pages/brigade/BrigadePos";
 import BrigadeImport from "./pages/brigade/BrigadeImport";
@@ -230,10 +233,14 @@ const router = createBrowserRouter([
       // Jobs (same dashboard as admin, limited to Brigade Group by the backend) + Flats view.
       { index: true, element: <BrigadeDashboard /> },
       { path: "masters", element: <BrigadeMasters /> },
+      // Master Settings: contacts and locations of the Brigade properties.
+      { path: "masters/contacts", element: <BrigadeContacts /> },
+      { path: "masters/locations", element: <BrigadeLocations /> },
       { path: "pos", element: <BrigadePos /> },
       { path: "no-po", element: <BrigadeNoPo /> },
       { path: "dashboard", element: <BrigadeHome /> },
       { path: "billing", element: <BrigadeBilling /> },
+      { path: "invoices", element: <BrigadeInvoices /> },
       { path: "import", element: <BrigadeImport /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "profile", element: <ProfilePage /> },

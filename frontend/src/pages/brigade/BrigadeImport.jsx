@@ -110,17 +110,20 @@ export default function BrigadeImport() {
   const canImport = Boolean(report?.can_import) && !dirty && !running && !starting;
 
   return (
-    <div className="bg-page bgb">
-      <div className="bgb-topbar">
-        <div>
-          <h2 className="bgb-h1">Import from Excel</h2>
-          <p className="bgb-lede">
+    <div className="bg-page bgb bdz">
+      <section className="bdz-hero bgx-hero">
+        <div className="bdz-hero-top">
+          <div>
+            <span className="bdz-eyebrow">Brigade · Import</span>
+            <h1>Import from Excel</h1>
+            <p>
             Bring existing Brigade work from the project tracker into BestServe. One sheet per property, one row per flat.
             "Yes" means the service is done and becomes a completed job; a service listed in PO Items but not marked Yes goes to
             Pending. Checking saves nothing.
-          </p>
+            </p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {error && <div className="bg-error">{error}</div>}
       {notice && <div className="bgx-notice">{notice}</div>}

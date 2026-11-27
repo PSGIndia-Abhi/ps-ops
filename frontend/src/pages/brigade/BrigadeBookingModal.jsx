@@ -61,6 +61,8 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   const [address, setAddress] = useState("");
 
   const [showAssignModal, setShowAssignModal] = useState(false);
+  // New request: schedule + assign the team now (creates the jobs), or save to Pending for later.
+  const [planNow, setPlanNow] = useState(true);
   const [team, setTeam] = useState({ supervisorId: null, technicianIds: [] });
   const [people, setPeople] = useState({ supervisors: [], technicians: [] });
 
@@ -347,9 +349,10 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   else if (!bhk) missing.push("Choose the BHK");
   if (!contactId) missing.push("Choose who is requesting");
   const undated = selectedServices.filter((s) => !schedules[s]?.start_date);
-  // Jobs are made only when a pending flat is scheduled; a booking always goes to Pending.
-  const makesJobs = isServicesStep;
-  if (isServicesStep && flat && !selectedServices.length) missing.push("Pick at least one service");
+  // Jobs are made when a pending flat is scheduled, or when a new request is scheduled +
+  // assigned right away ("Schedule & assign now"); otherwise the request goes to Pending.
+  const makesJobs = isServicesStep || planNow;
+  if (makesJobs && flat && !selectedServices.length) missing.push("Pick at least one service");
   if (makesJobs) {
     if (undated.length) missing.push(`Set the visit date for ${undated.length === 1 ? undated[0] : `${undated.length} services`}`);
     if (!team.supervisorId) missing.push("Assign a supervisor");
@@ -533,7 +536,9 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
   // Section numbers for the step being shown.
   const order = isServicesStep
     ? ["services", "schedule", "team", "notes"]
-    : ["property", "services", "contact", "po", "files", "notes"];
+    : planNow
+      ? ["property", "services", "contact", "schedule", "team", "po", "notes"]
+      : ["property", "services", "contact", "po", "notes"];
   const num = (key) => order.indexOf(key) + 1;
 
   /* ---------- render ---------- */
@@ -543,12 +548,14 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
         <div className="bgm-header">
           <div>
             <h3 id="bgm-title">
-              {isServicesStep ? `Schedule & assign · Flat ${forFlat.flat_number}` : presetPo ? `Book a flat on PO ${presetPo}` : "New Brigade booking"}
+              {isServicesStep ? `Schedule & assign · Flat ${forFlat.flat_number}` : presetPo ? `Book a flat on PO ${presetPo}` : "New Request"}
             </h3>
             <p>
               {isServicesStep
                 ? "Set the visit date and team for the services Brigade asked for — this creates the jobs"
-                : "Flat, the services Brigade asked for and the PO. It goes to Pending; the visit date and team are set later."}
+                : planNow
+                  ? "Flat, services, visit date, team and the PO - this creates the jobs."
+                  : "Flat, the services Brigade asked for and the PO. It goes to Pending; the visit date and team are set later."}
             </p>
           </div>
           <button type="button" className="bgm-close" onClick={onClose} aria-label="Close" disabled={saving}>
@@ -558,6 +565,18 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
 
         <div className="bgm-content">
           <div className="bgm-main">
+            {!isServicesStep && (
+              <div className="bgm-plan" role="radiogroup" aria-label="When to schedule">
+                <button type="button" role="radio" aria-checked={planNow} className={planNow ? "on" : ""} onClick={() => setPlanNow(true)}>
+                  <b>Schedule &amp; assign now</b>
+                  <small>Pick visit dates and the team · creates the jobs</small>
+                </button>
+                <button type="button" role="radio" aria-checked={!planNow} className={!planNow ? "on" : ""} onClick={() => setPlanNow(false)}>
+                  <b>Save to Pending</b>
+                  <small>Set the date and team later</small>
+                </button>
+              </div>
+            )}
             {setupError && <div className="bg-error">{setupError}</div>}
 
             {isServicesStep && (
@@ -957,17 +976,15 @@ export default function BrigadeBookingModal({ isOpen, onClose, onCreated, forFla
                     : "Details saved on this PO are filled in; fill in the ones it is missing."}
                 </span>
               )}
-            </section>
-            )}
 
-            {/* UPLOAD FILES - its own card; files are kept with the Client PO number above */}
-            {showPo && (
-            <section className="bgm-section">
-              <SectionHead step={num("files")} title="Upload files" hint="Optional" />
-              <PoFiles pending={poFiles} onPendingChange={setPoFiles} />
-              {poFiles.length > 0 && !hasPoNumber && (
-                <span className="bg-field-error">Choose or create the Client PO above - the files are saved with that PO.</span>
-              )}
+              {/* Upload files - inside the Client PO card; files are kept with the PO number above */}
+              <div className="bgm-po-files">
+                <span className="bgm-po-files-label">Upload files <small>Optional</small></span>
+                <PoFiles pending={poFiles} onPendingChange={setPoFiles} />
+                {poFiles.length > 0 && !hasPoNumber && (
+                  <span className="bg-field-error">Choose or create the Client PO above - the files are saved with that PO.</span>
+                )}
+              </div>
             </section>
             )}
 

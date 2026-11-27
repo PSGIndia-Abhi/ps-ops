@@ -11,7 +11,7 @@ import "./brigade.css";
 // Colours (validated, fixed meaning everywhere): blue = invoiced / on a PO, aqua = ready to invoice /
 // collected, orange = without a PO, grey = not done yet.
 
-const C = { blue: "#2a78d6", aqua: "#1baf7a", orange: "#eb6834", grey: "#cbd5e1", grid: "#eef2f7", axis: "#94a3b8" };
+const C = { blue: "#2563eb", aqua: "#0f9488", orange: "#e8772e", grey: "#cbd5e1", grid: "#eef2f7", axis: "#94a3b8" };
 
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -113,12 +113,7 @@ export default function BrigadeHome() {
             <p>{periodText} · {props.length ? `${props.length} propert${props.length === 1 ? "y" : "ies"}` : "all properties"}</p>
           </div>
           <div className="bdz-filters" role="toolbar" aria-label="Filters">
-            <label className="bdz-chip">
-              <Icon name="calendar" />
-              <select value={preset} onChange={(e) => set({ period: e.target.value === "all" ? null : e.target.value, from: null, to: null })} aria-label="Period">
-                {PRESETS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-              </select>
-            </label>
+            <SinglePick icon="calendar" label="Period" items={PRESETS} value={preset} onChange={(v) => set({ period: v === "all" ? null : v, from: null, to: null })} />
             {preset === "custom" && (
               <span className="bdz-range">
                 <input type="date" value={customFrom} max={customTo || undefined} onChange={(e) => set({ from: e.target.value })} aria-label="From" />
@@ -283,8 +278,8 @@ function Ring({ value }) {
   const v = Math.max(0, Math.min(value, 100));
   return (
     <svg className="bdz-ring" viewBox="0 0 76 76" role="img" aria-label={`${v}% completed`}>
-      <defs><linearGradient id="bdzRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#5eead4" /><stop offset="100%" stopColor="#60a5fa" /></linearGradient></defs>
-      <circle cx="38" cy="38" r={r} fill="none" stroke="rgba(255,255,255,.12)" strokeWidth="8" />
+      <defs><linearGradient id="bdzRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#8b5cf6" /><stop offset="100%" stopColor="#2563eb" /></linearGradient></defs>
+      <circle className="bdz-ring-track" cx="38" cy="38" r={r} fill="none" stroke="#e8eef7" strokeWidth="8" />
       <circle cx="38" cy="38" r={r} fill="none" stroke="url(#bdzRing)" strokeWidth="8" strokeLinecap="round"
         strokeDasharray={`${(v / 100) * c} ${c}`} transform="rotate(-90 38 38)" />
       <text x="38" y="43" textAnchor="middle">{v}%</text>
@@ -472,36 +467,104 @@ function PropertyTable({ data, t }) {
 }
 
 /** Dropdown with check boxes: none ticked = all. */
-function MultiPick({ icon, all, items, value, onChange }) {
+// Closes a popover on an outside click or Esc.
+function usePopover() {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
     const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [open]);
-  const shown = value.length === 0 ? all : value.length === 1 ? items.find((i) => i.value === value[0])?.label || "1 selected" : `${value.length} selected`;
+  return [open, setOpen, ref];
+}
+
+const Chevron = () => (
+  <svg className="bdz-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+);
+const Tick = () => (
+  <svg className="bdz-tick" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+);
+
+// One choice from a short list (the period).
+function SinglePick({ icon, label, items, value, onChange }) {
+  const [open, setOpen, ref] = usePopover();
+  const shown = items.find(([k]) => k === value)?.[1] || items[0][1];
   return (
     <div className="bdz-pick" ref={ref}>
-      <button type="button" className={`bdz-chip ${value.length ? "on" : ""}`} aria-expanded={open} onClick={() => { setDraft(value); setOpen((o) => !o); }}>
+      <button type="button" className={`bdz-chip ${open ? "open" : ""}`} aria-haspopup="listbox" aria-expanded={open} aria-label={`${label}: ${shown}`} onClick={() => setOpen((o) => !o)}>
         <Icon name={icon} />
-        <span>{shown}</span><i aria-hidden="true">▾</i>
+        <span>{shown}</span>
+        <Chevron />
+      </button>
+      {open && (
+        <div className="bdz-pop bdz-pop-single" role="listbox" aria-label={label}>
+          <div className="bdz-pop-list">
+            {items.map(([k, l]) => (
+              <button key={k} type="button" role="option" aria-selected={k === value} className={`bdz-opt ${k === value ? "on" : ""}`} onClick={() => { onChange(k); setOpen(false); }}>
+                <span>{l.replace(/…$/, "")}</span>
+                {k === value && <Tick />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Several choices (properties, services): tick, then Apply.
+function MultiPick({ icon, all, items, value, onChange }) {
+  const [open, setOpen, ref] = usePopover();
+  const [draft, setDraft] = useState(value);
+  const [q, setQ] = useState("");
+  const shown = value.length === 0 ? all : value.length === 1 ? items.find((i) => i.value === value[0])?.label || "1 selected" : `${value.length} selected`;
+  const list = q.trim() ? items.filter((i) => i.label.toLowerCase().includes(q.trim().toLowerCase())) : items;
+  const allOn = items.length > 0 && draft.length === items.length;
+  return (
+    <div className="bdz-pick" ref={ref}>
+      <button type="button" className={`bdz-chip ${value.length ? "on" : ""} ${open ? "open" : ""}`} aria-expanded={open} onClick={() => { setDraft(value); setQ(""); setOpen((o) => !o); }}>
+        <Icon name={icon} />
+        <span>{shown}</span>
+        <Chevron />
       </button>
       {open && (
         <div className="bdz-pop">
+          <div className="bdz-pop-head">
+            <b>{all}</b>
+            {items.length > 0 && (
+              <button type="button" onClick={() => setDraft(allOn ? [] : items.map((i) => i.value))}>{allOn ? "Unselect all" : "Select all"}</button>
+            )}
+          </div>
+          {items.length > 7 && (
+            <div className="bdz-pop-search">
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" aria-label="Search" autoFocus />
+            </div>
+          )}
           <div className="bdz-pop-list">
-            {items.map((i) => (
-              <label key={i.value}>
-                <input type="checkbox" checked={draft.includes(i.value)} onChange={() => setDraft((d) => (d.includes(i.value) ? d.filter((x) => x !== i.value) : [...d, i.value]))} />
-                {i.label}
-              </label>
-            ))}
+            {!items.length ? (
+              <div className="bdz-pop-empty">Nothing to choose yet. It fills in once there are bookings.</div>
+            ) : !list.length ? (
+              <div className="bdz-pop-empty">No match</div>
+            ) : list.map((i) => {
+              const on = draft.includes(i.value);
+              return (
+                <label key={i.value} className={`bdz-opt ${on ? "on" : ""}`}>
+                  <input type="checkbox" checked={on} onChange={() => setDraft((d) => (d.includes(i.value) ? d.filter((x) => x !== i.value) : [...d, i.value]))} />
+                  <span className="bdz-box" aria-hidden="true">{on && <Tick />}</span>
+                  <span className="bdz-opt-text">{i.label}</span>
+                </label>
+              );
+            })}
           </div>
           <div className="bdz-pop-foot">
-            <button type="button" onClick={() => setDraft([])}>Clear</button>
-            <button type="button" className="primary" onClick={() => { onChange(draft); setOpen(false); }}>Apply</button>
+            <button type="button" onClick={() => setDraft([])} disabled={!draft.length}>Clear</button>
+            <button type="button" className="primary" onClick={() => { onChange(draft); setOpen(false); }} disabled={!items.length}>
+              Apply{draft.length ? ` (${draft.length})` : ""}
+            </button>
           </div>
         </div>
       )}
