@@ -8,10 +8,11 @@ export type ClientStackParamList = {
   ClientNewComplaint: { siteId?: string; jobId?: string; jobLabel?: string };
   ClientComplaintDetail: { complaintId: string; notice?: string };
   ClientRequestService: { siteId?: string; tab?: 'new' | 'mine' } | undefined;
-  ClientDocuments: undefined;
+  ClientDocuments: { kind?: 'shared' | 'invoice' | 'audit' | 'photos' } | undefined;
   ClientSearch: undefined;
   ClientAudits: undefined;
   ClientOutlets: undefined;
   ClientOutletDetail: { siteId: string };
   ChangePassword: undefined;
+  ClientNotifications: undefined;
 };

@@ -70,7 +70,7 @@ function metroHost(): string | null {
  * The PC's Wi-Fi address, for a test APK that has the app code inside it (no Metro):
  * phones on the same Wi-Fi then reach the backend here. Update it if the PC's address changes.
  */
-const DEV_PC_WIFI_IP = '192.168.31.194';
+const DEV_PC_WIFI_IP = '192.168.31.166';
 
 const devHost = metroHost();
 const fromMetro = devHost && devHost !== 'localhost' && devHost !== '127.0.0.1' ? devHost : null;

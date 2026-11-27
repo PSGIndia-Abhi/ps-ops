@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useRoute, type RouteProp } from '@react-navigation/native';
 import { AlertTriangleIcon } from '../components/icons';
 import { GlossyBadge } from '../components/GlossyBadge';
 import { useCrmTheme } from '../crm/theme';
@@ -22,13 +23,17 @@ import { ClientComplaintsScreen } from '../client/screens/ClientComplaintsScreen
 import { ClientNewComplaintScreen } from '../client/screens/ClientNewComplaintScreen';
 import { ClientComplaintDetailScreen } from '../client/screens/ClientComplaintDetailScreen';
 import { ClientSearchScreen } from '../client/screens/ClientSearchScreen';
+import { ClientNotificationsScreen } from '../client/screens/ClientNotificationsScreen';
 import { useClientPush } from '../client/push';
 import { ClientHomeSkeletonScreen } from '../client/ui/skeletons';
 import { ClientChangePasswordScreen } from '../client/screens/ClientChangePasswordScreen';
 import { spacing, typography } from '../theme';
 
-/** Route wrapper: the Documents page with every kind. */
-const ClientDocumentsScreenRoute = () => <ClientDocumentsScreen />;
+/** Route wrapper: the Documents page, optionally opened on one tab (e.g. invoices). */
+function ClientDocumentsScreenRoute() {
+  const { params } = useRoute<RouteProp<ClientStackParamList, 'ClientDocuments'>>();
+  return <ClientDocumentsScreen initialKind={params?.kind} />;
+}
 
 const Stack = createNativeStackNavigator<ClientStackParamList>();
 
@@ -91,6 +96,7 @@ export function ClientNavigator() {
           <Stack.Screen name="ClientOutletDetail" component={ClientOutletDetailScreen} />
           <Stack.Screen name="ClientSearch" component={ClientSearchScreen} options={{ animation: 'fade' }} />
           <Stack.Screen name="ChangePassword" component={ClientChangePasswordScreen} />
+          <Stack.Screen name="ClientNotifications" component={ClientNotificationsScreen} />
         </Stack.Navigator>
       </ClientGate>
       </ToastProvider>

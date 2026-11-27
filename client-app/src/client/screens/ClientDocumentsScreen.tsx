@@ -85,12 +85,12 @@ const factory = (t: CrmTheme) => ({
 });
 
 /** Documents (all kinds) or, with `fixedKind="audit"`, the Audit Reports page. */
-export function ClientDocumentsScreen({ fixedKind, title = 'Documents' }: { fixedKind?: DocKind; title?: string }) {
+export function ClientDocumentsScreen({ fixedKind, initialKind, title = 'Documents' }: { fixedKind?: DocKind; initialKind?: DocKind; title?: string }) {
   const navigation = useNavigation<NavigationProp<ClientStackParamList>>();
   const { styles, theme } = useCrmStyles(factory);
   const { outlets, outletId, setOutletId } = useClientPortal();
 
-  const [kind, setKind] = useState<DocKind | ''>(fixedKind ?? '');
+  const [kind, setKind] = useState<DocKind | ''>(fixedKind ?? initialKind ?? '');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<ClientDocument[]>([]);

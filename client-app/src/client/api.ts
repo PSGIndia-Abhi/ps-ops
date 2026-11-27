@@ -511,3 +511,35 @@ export async function listDocuments(p: { page?: number; siteId?: string; kind?: 
   });
   return data;
 }
+
+// ---------- Notifications (GET/PATCH/POST /api/notifications) ----------
+
+export interface ClientNotification {
+  id: string;
+  type: string | null;
+  title: string;
+  message: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+/** The signed-in user's latest notifications (newest first). */
+export async function listNotifications(limit = 50): Promise<ClientNotification[]> {
+  const { data } = await httpClient.get<ClientNotification[]>('/api/notifications', { params: { limit } });
+  return data;
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  const { data } = await httpClient.get<{ count: number }>('/api/notifications/unread-count');
+  return Number(data?.count) || 0;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await httpClient.patch(`/api/notifications/${id}/read`);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await httpClient.post('/api/notifications/read-all');
+}
