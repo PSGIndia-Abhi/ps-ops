@@ -23,6 +23,7 @@ import {
   FiSend,
   FiShare2,
   FiSmartphone,
+  FiThermometer,
   FiThumbsDown,
   FiUser,
   FiUserCheck,
@@ -43,7 +44,7 @@ import {
   ScheduleMeetingModal,
   VisitModal,
 } from "./dialogs";
-import { canSetConversionDate, fetchQuotationPdf, getConversion, getQuotationContent, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
+import { canSetConversionDate, canSetTemperature, fetchQuotationPdf, getConversion, getQuotationContent, listQuotations, providerName, setConversionContractType, useLeadData, userName } from "./leadsApi";
 import QuotationBuilder, { PreviewOverlay } from "./QuotationBuilder";
 import { downloadQuotationWord } from "./quotationWord";
 import { AgreementsTab } from "./Agreements";
@@ -52,6 +53,7 @@ import { download, shareFile } from "./shareFile";
 import { downloadCompanyProfile, gmailCompose, proposalEmail } from "./proposalEmail";
 import useMe from "../../hooks/useMe";
 import { useToast } from "./hooks";
+import { TemperaturePicker } from "./temperature";
 import { dateTime, dayLabel, money, stageOf } from "./format";
 import { Alert, Badge, Button, Card, Empty, StageBadge, Tabs, Who } from "./ui";
 import { useViewer, visibleLeads } from "./viewer";
@@ -70,6 +72,7 @@ const EVENT = {
   WON: { icon: <FiAward />, tone: "success" },
   AGREEMENT: { icon: <FiFileText />, tone: "teal" },
   LOST: { icon: <FiThumbsDown />, tone: "danger" },
+  TEMPERATURE: { icon: <FiThermometer />, tone: "warn" },
 };
 
 /**
@@ -790,6 +793,11 @@ export default function LeadDetail() {
         {lead.stage === "WON" && !provider && <ConversionCard lead={lead} isAdmin={viewer.canPick} canPerson={isHead} />}
         {lead.stage === "WON" && !lead.contractType && seesAgreements && <SetContractType lead={lead} />}
       </section>
+
+      {/* Hot / Warm / Cold: set by sales executives (own leads) and the heads of sales; others just see it. */}
+      {!provider && (
+        <TemperaturePicker lead={lead} canSet={canSetTemperature(lead, { role: localStorage.getItem("role"), myId, isHead })} />
+      )}
 
       {!provider && !closed && (
         <div className="lm-head-actions" style={{ margin: "18px 0 0" }}>

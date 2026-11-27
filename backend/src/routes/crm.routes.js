@@ -15,6 +15,7 @@ const {
   SALES_EXECUTIVE_ROLES, salesOwnLeadFilter, isHiddenSalesOwnLead, findLeadAssignee, assignmentFor,
   readCompetitor, COMPETITOR_SET_SQL, loadQuoteServices, quoteServiceNames, resolveLeadServices, isValidDate,
   isAllowedIndustryType,
+  leadTemperatures, temperatureFields,
 } = require("../utils/crmLeadManagement");
 const { notifyLead } = require("../utils/crmLeadNotifications");
 const { notifyUsers } = require("../services/notifications.service");
@@ -247,7 +248,8 @@ router.get("/leads", auth, requirePermission("CRM_VIEW_LEAD"), async (req, res) 
         params
       );
       const kinds = await contractTypesFor(rows.map((r) => r.id));
-      return res.json(rows.map((r) => ({ ...toLead(r), contract_type: kinds.get(r.id) || null })));
+      const temps = await leadTemperatures(pool, rows.map((r) => r.id)); // Hot / Warm / Cold
+      return res.json(rows.map((r) => ({ ...toLead(r), contract_type: kinds.get(r.id) || null, ...temperatureFields(temps, r.id) })));
     }
 
     const where = [];
@@ -285,7 +287,8 @@ router.get("/leads/:id", auth, requirePermission("CRM_VIEW_LEAD"), async (req, r
       }
       if (await isHiddenSalesOwnLead(pool, req, row)) return res.status(404).json({ error: "Lead not found" });
       const kinds = await contractTypesFor([row.id]);
-      return res.json({ ...toLead(row), contract_type: kinds.get(row.id) || null });
+      const temps = await leadTemperatures(pool, [row.id]); // Hot / Warm / Cold
+      return res.json({ ...toLead(row), contract_type: kinds.get(row.id) || null, ...temperatureFields(temps, row.id) });
     } else if (!canViewAllLeads(req) && Number(row.created_by_user_id) !== Number(req.user.id)) {
       return res.status(404).json({ error: "Lead not found" });
     }

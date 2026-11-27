@@ -113,6 +113,10 @@ function toLead(row, closingNote) {
     serviceNames: Array.isArray(row.services_requested_names) ? row.services_requested_names : [],
     contractType: row.contract_type || null, // "ONE_TIME" | "AMC" from the latest quotation
     convertedOn: row.converted_on || null, // "YYYY-MM-DD" - the day it became a customer
+    // Hot / Warm / Cold - how interested the customer is (null = not set), and who set it last.
+    temperature: TEMPERATURE_KEYS.includes(row.lead_temperature) ? row.lead_temperature : null,
+    temperatureBy: row.temperature_set_by_name || "",
+    temperatureAt: row.temperature_set_at || null,
     stage: stageOf(row.pipeline_stage),
     providerId: row.provider_id,
     createdBy: row.created_by_user_id,
@@ -212,6 +216,12 @@ function toActivity(row) {
       return { ...base, type: "STATUS", text: "Feedback sent to the lead provider", note };
     case "MARK_LOST":
       return { ...base, type: "LOST", text: `Marked as Lost${note ? ` - ${note}` : ""}` };
+    case "TEMPERATURE_SET": {
+      // Saved as "Hot", "Warm (was Hot)" or "Cleared (was Cold)".
+      const [now] = note.split(" (was ");
+      const text = now === "Cleared" ? `Hot / Warm / Cold cleared${who}` : `Marked ${now}${who}`;
+      return { ...base, type: "TEMPERATURE", temperature: now.toUpperCase(), text, note: note.includes(" (was ") ? `Was ${note.split(" (was ")[1].replace(/\)$/, "")}` : "" };
+    }
     case "CONVERTED":
       return { ...base, type: "WON", text: "Lead converted to customer", note };
     case "AGREEMENT_CREATED":
@@ -410,6 +420,26 @@ export const fetchAssignees = () => request("/api/crm/lead-assignees").then((lis
 /** POST /leads/{id}/assign - the sales manager gives the lead to someone; the lists reload. */
 export async function assignLead(leadId, userId) {
   await request(`/api/crm/leads/${leadId}/assign`, { method: "POST", body: { user_id: Number(userId) } });
+  await loadWorkspace();
+}
+
+// ---- Hot / Warm / Cold ---------------------------------------------------------
+
+export const TEMPERATURE_KEYS = ["HOT", "WARM", "COLD"];
+export const TEMPERATURE_LABEL = { HOT: "Hot", WARM: "Warm", COLD: "Cold" };
+/** Who may set it: the roles that own leads (the server checks the same, plus own-leads-only for a sales executive). */
+export const TEMPERATURE_ROLES = ["Sales Executive", "sales_manager", "Managing Director", "Personal Assistant", "admin"];
+
+/** True when this signed-in person may set it on this lead (the server checks the same). */
+export function canSetTemperature(lead, { role, myId, isHead }) {
+  if (!TEMPERATURE_ROLES.includes(role) || ["WON", "NOT_GENUINE", "LOST"].includes(lead.stage)) return false;
+  if (isHead || role === "admin") return true;
+  return [lead.createdBy, lead.salesId].some((id) => id && String(id) === String(myId));
+}
+
+/** POST /leads/{id}/temperature - "HOT" | "WARM" | "COLD", or null to clear; the lists reload. */
+export async function setLeadTemperature(leadId, temperature) {
+  await request(`/api/crm/leads/${leadId}/temperature`, { method: "POST", body: { temperature } });
   await loadWorkspace();
 }
 

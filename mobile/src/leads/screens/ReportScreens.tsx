@@ -210,6 +210,12 @@ function periodFigures(
 }
 
 const METRICS: { key: api.PerformanceMetric; label: string; tone: Tone }[][] = [
+  // Hot / Warm / Cold: open leads by today's tag (a snapshot - the dates do not apply).
+  [
+    { key: 'hotLeads', label: 'Hot leads', tone: 'danger' },
+    { key: 'warmLeads', label: 'Warm leads', tone: 'warning' },
+    { key: 'coldLeads', label: 'Cold leads', tone: 'info' },
+  ],
   [
     { key: 'leadsGenerated', label: 'Leads generated', tone: 'info' },
     { key: 'genuineLeads', label: 'Genuine leads', tone: 'success' },
@@ -333,7 +339,7 @@ export function PerformanceScreen() {
           METRICS.map((row, i) => (
             <View key={i} style={styles.tileRow}>
               {row.map((m) => (
-                <StatTile key={m.key} label={m.label} value={data[m.key]} tone={m.tone} onPress={() => openTile(m.key, m.label)} />
+                <StatTile key={m.key} label={m.label} value={data[m.key] ?? 0} tone={m.tone} onPress={() => openTile(m.key, m.label)} />
               ))}
             </View>
           ))

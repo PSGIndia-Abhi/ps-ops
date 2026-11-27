@@ -5,6 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const requirePermission = require("../middleware/permission.middleware");
 const {
   hasPerm, resolveVisibleUserIds, salesOwnLeadFilter, LEAD_ASSIGNEE_ROLES, loadQuoteServices, quoteServiceNames,
+  leadTemperatures, temperatureFields,
 } = require("../utils/crmLeadManagement");
 
 function sendError(res, err, fallback) {
@@ -81,6 +82,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       params
     );
     const leadIds = leadRows.map((l) => l.id);
+    const temps = await leadTemperatures(pool, leadIds); // Hot / Warm / Cold
 
     let meetings = [];
     let history = [];
@@ -150,6 +152,7 @@ router.get("/lead-workspace", auth, requirePermission("CRM_VIEW_LEAD"), async (r
       services_requested_names: l.services_requested ? quoteServiceNames(String(l.services_requested).split(",")) : [],
       contract_type: l.contract_type || null,
       converted_on: l.converted_on || null,
+      ...temperatureFields(temps, l.id),
       created_at: l.created_at,
       updated_at: l.updated_at,
     }));

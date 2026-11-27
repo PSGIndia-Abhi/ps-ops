@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiCheckSquare, FiChevronRight, FiPlus, FiSearch, FiX } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { AddLeadModal, CallVerifyModal, ScheduleMeetingModal } from "./dialogs";
-import { providerName, providerSources, useLeadData, userName } from "./leadsApi";
+import { TEMPERATURE_KEYS, TEMPERATURE_LABEL, providerName, providerSources, useLeadData, userName } from "./leadsApi";
+import { TemperatureChip } from "./temperature";
 import { compactMoney, dayLabel, nextAction } from "./format";
 import { useLoaded, usePaged } from "./hooks";
 import { Button, Card, Empty, Pager, SkeletonRows, StageBadge, Tabs } from "./ui";
@@ -75,7 +76,10 @@ export function LeadTable({ leads, persona, onCall, onSchedule, compact = false,
               {/* The provider never sees how their lead is progressing. */}
               {!provider && (
                 <td>
-                  <StageBadge stage={lead.stage} />
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <StageBadge stage={lead.stage} />
+                    <TemperatureChip value={lead.temperature} />
+                  </span>
                 </td>
               )}
               {full && showConverted && <td className="num muted">{lead.convertedOn ? dayLabel(`${lead.convertedOn}T12:00:00`) : "-"}</td>}
@@ -145,6 +149,8 @@ export default function LeadsList() {
   // Pre-set when opened from a card on the sales manager's dashboard with a person picked (?sales=<id>).
   const [salesPerson, setSalesPerson] = useState(params.get("sales") || "");
   const [created, setCreated] = useState("");
+  // Hot / Warm / Cold ("" = any, "NONE" = not marked yet).
+  const [temperature, setTemperature] = useState("");
   const [adding, setAdding] = useState(false);
   const [calling, setCalling] = useState(null);
   const [scheduling, setScheduling] = useState(null);
@@ -159,13 +165,14 @@ export default function LeadsList() {
     () => (manager ? { creators: peopleIn(mine, "createdBy"), telecallers: peopleIn(mine, "telecallerId"), sales: peopleIn(mine, "salesId") } : null),
     [manager, mine],
   );
-  const filtered = !!(source || creator || telecaller || salesPerson || created);
+  const filtered = !!(source || creator || telecaller || salesPerson || created || temperature);
   const clearFilters = () => {
     setSource("");
     setCreator("");
     setTelecaller("");
     setSalesPerson("");
     setCreated("");
+    setTemperature("");
     paged.onPage(1);
   };
 
@@ -178,9 +185,10 @@ export default function LeadsList() {
       .filter((l) => !telecaller || String(l.telecallerId) === telecaller)
       .filter((l) => !salesPerson || String(l.salesId) === salesPerson)
       .filter((l) => createdIn(created, l.createdAt))
+      .filter((l) => !temperature || (temperature === "NONE" ? !l.temperature : l.temperature === temperature))
       .filter((l) => !q || [l.company, l.contact, l.phone, l.number, l.area].some((v) => String(v).toLowerCase().includes(q)))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [mine, active, source, creator, telecaller, salesPerson, created, query]);
+  }, [mine, active, source, creator, telecaller, salesPerson, created, temperature, query]);
 
   const paged = usePaged(shown, 8);
   const staff = persona !== "lead_provider";
@@ -240,6 +248,25 @@ export default function LeadsList() {
               {sourceOptions.map((s) => (
                 <option key={s}>{s}</option>
               ))}
+            </select>
+          )}
+          {staff && (
+            <select
+              className="lm-select"
+              value={temperature}
+              onChange={(e) => {
+                setTemperature(e.target.value);
+                paged.onPage(1);
+              }}
+              aria-label="Filter by hot, warm or cold"
+            >
+              <option value="">Hot / Warm / Cold: all</option>
+              {TEMPERATURE_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {TEMPERATURE_LABEL[k]}
+                </option>
+              ))}
+              <option value="NONE">Not marked</option>
             </select>
           )}
           {manager && (

@@ -12,7 +12,8 @@ import { radii, spacing, typography } from '../../theme';
 import * as api from '../api';
 import type { LeadStackParamList } from '../navigation';
 import { countByGroup, inGroup, STAGE_GROUP_ORDER, STAGE_GROUPS, type StageGroup } from '../stage';
-import type { Person, PipelineLead } from '../types';
+import type { LeadTemperature, Person, PipelineLead } from '../types';
+import { TEMPERATURE_LABEL, TEMPERATURES } from '../Temperature';
 import { ActiveFilterChips, ANY_TIME, FilterButton, LeadFilterSheet, whenDay, whenLabel, whenRange, type WhenFilter, type WhoOption } from '../LeadFilterSheet';
 import { LeadRow, personTone, useLoad, useMe, LeadTopBar as TopBar, LeadScreen } from '../ui';
 
@@ -35,6 +36,8 @@ const factory = (t: CrmTheme) => ({
   chipOn: { backgroundColor: t.primary, borderColor: t.primary },
   chipText: { ...typography.captionMedium, color: t.textSecondary },
   chipTextOn: { color: t.textOnPrimary },
+  tempChip: { flexDirection: 'row' as const, gap: 6 },
+  tempDot: { width: 7, height: 7, borderRadius: 4 },
   taskRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: spacing.sm },
   taskIcon: { width: 38, height: 38, borderRadius: radii.pill, backgroundColor: t.warningBg, alignItems: 'center' as const, justifyContent: 'center' as const },
   taskBody: { flex: 1 },
@@ -70,13 +73,18 @@ export function LeadListScreen() {
   const pushed = (route.name as string) === 'LeadList';
   const { styles, theme } = useCrmStyles(factory);
   const [group, setGroup] = useState<StageGroup>(route.params?.group ?? 'all');
+  // Hot / Warm / Cold chips sit in the same row as the stages: picking one shows all leads with that tag.
+  const [temp, setTemp] = useState<LeadTemperature | null>(null);
   const [query, setQuery] = useState('');
 
   // A home tile re-opens this (already mounted) tab with a new group.
   const wanted = route.params?.group;
   const at = route.params?.at;
   useEffect(() => {
-    if (wanted) setGroup(wanted);
+    if (wanted) {
+      setGroup(wanted);
+      setTemp(null);
+    }
   }, [wanted, at]);
 
   const { persona, myId } = useMe();
@@ -135,13 +143,19 @@ export function LeadListScreen() {
     return (data ?? []).filter(
       (l: PipelineLead) =>
         inGroup(l, group) &&
+        (!temp || l.temperature === temp) &&
         (!q ||
           l.companyName.toLowerCase().includes(q) ||
           l.contactPerson.toLowerCase().includes(q) ||
           l.phone.includes(q) ||
           (l.leadNumber ?? '').toLowerCase().includes(q)),
     );
-  }, [data, group, query]);
+  }, [data, group, temp, query]);
+  const tempCounts = useMemo(() => {
+    const out: Record<LeadTemperature, number> = { HOT: 0, WARM: 0, COLD: 0 };
+    for (const l of data ?? []) if (l.temperature) out[l.temperature] += 1;
+    return out;
+  }, [data]);
 
   return (
     <LeadScreen edges={['top']}>
@@ -163,19 +177,48 @@ export function LeadListScreen() {
       <ActiveFilterChips items={activeFilters} />
       <View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {groups.map((g) => (
-            <Pressable
-              key={g}
-              onPress={() => setGroup(g)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: group === g }}
-              style={[styles.chip, group === g && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, group === g && styles.chipTextOn]}>
-                {STAGE_GROUPS[g].label} ({counts[g]})
-              </Text>
-            </Pressable>
-          ))}
+          {groups.map((g) => {
+            const on = !temp && group === g;
+            return (
+              <Pressable
+                key={g}
+                onPress={() => {
+                  setGroup(g);
+                  setTemp(null);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                style={[styles.chip, on && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                  {STAGE_GROUPS[g].label} ({counts[g]})
+                </Text>
+              </Pressable>
+            );
+          })}
+          {/* Not for telecallers - they do not mark Hot / Warm / Cold. */}
+          {persona !== 'telecaller' &&
+            TEMPERATURES.map((k) => {
+              const on = temp === k;
+              const c = toneColors(theme, k === 'HOT' ? 'danger' : k === 'WARM' ? 'warning' : 'info');
+              return (
+                <Pressable
+                  key={k}
+                  onPress={() => {
+                    setTemp(on ? null : k);
+                    setGroup('all');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={[styles.chip, styles.tempChip, on ? { backgroundColor: c.fg, borderColor: c.fg } : { borderColor: c.bg }]}
+                >
+                  <View style={[styles.tempDot, { backgroundColor: on ? '#FFFFFF' : c.fg }]} />
+                  <Text style={[styles.chipText, on ? styles.chipTextOn : { color: c.fg }]}>
+                    {TEMPERATURE_LABEL[k]} ({tempCounts[k]})
+                  </Text>
+                </Pressable>
+              );
+            })}
         </ScrollView>
       </View>
       <FlatList

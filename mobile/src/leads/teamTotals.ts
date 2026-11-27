@@ -20,6 +20,9 @@ const METRIC_KEYS: (keyof Performance)[] = [
   'leadsConverted',
   'leadsLost',
   'followUpsDue',
+  'hotLeads',
+  'warmLeads',
+  'coldLeads',
 ];
 
 /** Everyone's performance numbers added up. A person whose numbers cannot be read is left out. */

@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { FiAward, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiDownload, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThumbsDown, FiUserCheck } from "react-icons/fi";
+import { FiAward, FiBarChart2, FiCalendar, FiCheckCircle, FiChevronDown, FiDownload, FiFileText, FiInbox, FiMapPin, FiPhoneCall, FiThermometer, FiThumbsDown, FiUserCheck } from "react-icons/fi";
 import { LEADS_HOME } from "./access";
 import { downloadLeadReport, getPerformance, getPerformanceItems, getTargetHistory, getTargets, leadTeam, setTarget, useLeadData } from "./leadsApi";
 import { money } from "./format";
@@ -47,6 +47,10 @@ const METRICS = [
   { key: "quotationsSent", label: "Quotations Sent", icon: <FiFileText />, tone: "violet", foot: "Uploaded by them" },
   { key: "leadsConverted", label: "Converted", icon: <FiAward />, tone: "success", foot: "Became customers" },
   { key: "leadsLost", label: "Lost", icon: <FiThumbsDown />, tone: "danger", foot: "Closed without a deal" },
+  // Hot / Warm / Cold: their open leads by today's tag - a snapshot, the period does not apply.
+  { key: "hotLeads", label: "Hot Leads", icon: <FiThermometer />, tone: "danger", foot: "Open leads, today" },
+  { key: "warmLeads", label: "Warm Leads", icon: <FiThermometer />, tone: "warn", foot: "Open leads, today" },
+  { key: "coldLeads", label: "Cold Leads", icon: <FiThermometer />, tone: "info", foot: "Open leads, today" },
 ];
 
 const ROLE_LABEL = { telecaller: "Telecaller", sales: "Sales Executive", sales_manager: "Sales Manager", marketing: "Marketing", admin: "Admin" };
@@ -220,6 +224,9 @@ export default function Performance() {
                     <th>Quotes</th>
                     <th>Converted</th>
                     <th>Lost</th>
+                    <th title="Open leads marked Hot (today)">Hot</th>
+                    <th title="Open leads marked Warm (today)">Warm</th>
+                    <th title="Open leads marked Cold (today)">Cold</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -229,13 +236,13 @@ export default function Performance() {
                         <Who name={user.name} sub={ROLE_LABEL[user.role] || showRole(user.role) || ""} size={34} />
                       </td>
                       {data ? (
-                        ["leadsGenerated", "genuineLeads", "meetingsScheduled", "visitsCompleted", "quotationsSent", "leadsConverted", "leadsLost"].map((k) => (
+                        ["leadsGenerated", "genuineLeads", "meetingsScheduled", "visitsCompleted", "quotationsSent", "leadsConverted", "leadsLost", "hotLeads", "warmLeads", "coldLeads"].map((k) => (
                           <td key={k} className="num">
-                            {data[k]}
+                            {data[k] ?? 0}
                           </td>
                         ))
                       ) : (
-                        <td colSpan={7} className="muted">
+                        <td colSpan={10} className="muted">
                           Could not load
                         </td>
                       )}
