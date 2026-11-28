@@ -340,7 +340,10 @@ router.post("/logins/:userId/password", auth, requirePermission(PERMISSIONS.UPDA
 
 // ---------- Shared documents (client_documents) ----------
 
-const DOC_TYPES = ["CERTIFICATE", "CONTRACT", "MSDS", "REPORT", "OTHER"];
+// CONTRACT is shown as "Agreement"; QUOTATION = "Final quotation". In the Client Portal's Documents tabs:
+// CONTRACT -> Agreement, QUOTATION -> Final quotation, MSDS -> MSDS, the rest -> BestServe documents.
+const DOC_TYPES = ["CERTIFICATE", "CONTRACT", "QUOTATION", "MSDS", "REPORT", "OTHER"];
+const DOC_VISIBILITY = ["ALL", "HEAD_OFFICE", "SITES"];
 const DOC_MIME = /^(image\/|application\/pdf$|application\/msword$|application\/vnd\.openxmlformats-officedocument\.|application\/vnd\.ms-excel$)/;
 
 const docUpload = multer({
@@ -374,13 +377,37 @@ async function parseDocFields(body, companyId, partial = false) {
     const type = String(body.doc_type || "OTHER").toUpperCase();
     out.doc_type = DOC_TYPES.includes(type) ? type : "OTHER";
   }
-  if (!partial || body.site_id !== undefined) {
-    const siteId = String(body.site_id || "").trim();
-    if (siteId) {
-      const [[site]] = await pool.query("SELECT id FROM sites WHERE id = ? AND company_id = ?", [siteId, companyId]);
-      if (!site) throw httpError(400, "That outlet does not belong to this company");
+  // Who sees it: ALL (everyone in the company), HEAD_OFFICE (company logins only, confidential)
+  // or SITES (the ticked outlets in site_ids; head office sees them too). An old client sending
+  // only site_id still works: an outlet -> SITES with it, empty -> ALL.
+  if (!partial || body.visibility !== undefined || body.site_ids !== undefined || body.site_id !== undefined) {
+    let visibility = String(body.visibility || "").toUpperCase();
+    let siteIds = body.site_ids;
+    if (typeof siteIds === "string") {
+      try {
+        siteIds = JSON.parse(siteIds);
+      } catch {
+        siteIds = siteIds.split(",");
+      }
     }
-    out.site_id = siteId || null;
+    siteIds = Array.isArray(siteIds) ? [...new Set(siteIds.map((s) => String(s || "").trim()).filter(Boolean))] : [];
+    if (!DOC_VISIBILITY.includes(visibility)) {
+      const legacy = String(body.site_id || "").trim();
+      visibility = legacy ? "SITES" : "ALL";
+      if (legacy) siteIds = [legacy];
+    }
+    if (visibility !== "SITES") siteIds = [];
+    if (visibility === "SITES") {
+      if (!siteIds.length) throw httpError(400, "Tick at least one outlet");
+      const [rows] = await pool.query(
+        `SELECT id FROM sites WHERE company_id = ? AND id IN (${siteIds.map(() => "?").join(",")})`,
+        [companyId, ...siteIds]
+      );
+      if (rows.length !== siteIds.length) throw httpError(400, "An outlet does not belong to this company");
+    }
+    out.visibility = visibility;
+    out.site_id = siteIds.length === 1 ? siteIds[0] : null; // kept for older readers
+    out.site_ids = siteIds; // saved to client_document_sites (not a column)
   }
   if (!partial || body.valid_until !== undefined) {
     const v = String(body.valid_until || "").trim();
@@ -393,12 +420,40 @@ async function parseDocFields(body, companyId, partial = false) {
   return out;
 }
 
+// sites_json: the ticked outlets of a SITES document as [{ id, name }].
 const DOC_SELECT = `
-  SELECT d.id, d.company_id, d.site_id, s.name AS site_name, d.title, d.doc_type, d.file_name, d.file_type,
-         d.size_bytes, d.valid_until, d.notes, d.created_at, d.updated_at, u.name AS uploaded_by_name
+  SELECT d.id, d.company_id, d.visibility, d.title, d.doc_type, d.file_name, d.file_type,
+         d.size_bytes, d.valid_until, d.notes, d.created_at, d.updated_at, u.name AS uploaded_by_name,
+         (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', s.id, 'name', s.name))
+          FROM client_document_sites ds JOIN sites s ON s.id = ds.site_id
+          WHERE ds.document_id = d.id) AS sites_json
   FROM client_documents d
-  LEFT JOIN sites s ON s.id = d.site_id
   LEFT JOIN users u ON u.id = d.uploaded_by`;
+
+function shapeDoc(row) {
+  if (!row) return row;
+  let sites = row.sites_json;
+  if (typeof sites === "string") {
+    try {
+      sites = JSON.parse(sites);
+    } catch {
+      sites = [];
+    }
+  }
+  const { sites_json, ...rest } = row;
+  return { ...rest, sites: Array.isArray(sites) ? sites.sort((a, b) => String(a.name).localeCompare(String(b.name))) : [] };
+}
+
+// Replaces a document's ticked outlets (empty for ALL / HEAD_OFFICE).
+async function saveDocSites(executor, docId, siteIds) {
+  await executor.query("DELETE FROM client_document_sites WHERE document_id = ?", [docId]);
+  if (siteIds.length) {
+    await executor.query(
+      `INSERT INTO client_document_sites (document_id, site_id) VALUES ${siteIds.map(() => "(?, ?)").join(", ")}`,
+      siteIds.flatMap((s) => [docId, s])
+    );
+  }
+}
 
 async function loadManagedDocument(req, docId) {
   const [[doc]] = await pool.query(
@@ -418,14 +473,17 @@ router.get("/companies/:companyId/documents", auth, requirePermission(PERMISSION
       `${DOC_SELECT} WHERE d.company_id = ? AND d.is_active = 1 ORDER BY d.created_at DESC`,
       [company.id]
     );
-    res.json(docs);
+    res.json(docs.map(shapeDoc));
   } catch (err) {
     sendError(res, err, "Failed to load documents");
   }
 });
 
-// POST /api/client-accounts/companies/:companyId/documents  (multipart: file, title, doc_type, site_id?, valid_until?, notes?)
+// POST /api/client-accounts/companies/:companyId/documents
+// multipart: file, title, doc_type, visibility (ALL|HEAD_OFFICE|SITES), site_ids (JSON array, for SITES), valid_until?, notes?
 router.post("/companies/:companyId/documents", auth, requirePermission(PERMISSIONS.CREATE_USER), acceptDocument, async (req, res) => {
+  let connection;
+  let objectKey = null;
   try {
     const company = await assertCanManageCompany(req, req.params.companyId);
     if (!req.file) return res.status(400).json({ error: "Choose a file to upload" });
@@ -433,46 +491,59 @@ router.post("/companies/:companyId/documents", auth, requirePermission(PERMISSIO
 
     const id = uuid();
     const safeName = String(req.file.originalname || "document").replace(/[^\w.-]+/g, "_").slice(-120);
-    const objectKey = `client-documents/${company.id}/${id}_${safeName}`;
+    objectKey = `client-documents/${company.id}/${id}_${safeName}`;
     await minioClient.putObject(process.env.MINIO_BUCKET, objectKey, req.file.buffer, req.file.size, {
       "Content-Type": req.file.mimetype,
     });
-    try {
-      await pool.query(
-        `INSERT INTO client_documents
-           (id, company_id, site_id, title, doc_type, object_key, file_name, file_type, size_bytes, valid_until, notes, uploaded_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, company.id, fields.site_id, fields.title, fields.doc_type, objectKey, req.file.originalname || safeName,
-          req.file.mimetype, req.file.size, fields.valid_until, fields.notes, req.user.id]
-      );
-    } catch (err) {
-      await minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
-      throw err;
-    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.query(
+      `INSERT INTO client_documents
+         (id, company_id, site_id, visibility, title, doc_type, object_key, file_name, file_type, size_bytes, valid_until, notes, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, company.id, fields.site_id, fields.visibility, fields.title, fields.doc_type, objectKey, req.file.originalname || safeName,
+        req.file.mimetype, req.file.size, fields.valid_until, fields.notes, req.user.id]
+    );
+    await saveDocSites(connection, id, fields.site_ids);
+    await connection.commit();
+    objectKey = null; // saved: keep the file
+
     const [[doc]] = await pool.query(`${DOC_SELECT} WHERE d.id = ?`, [id]);
-    res.status(201).json(doc);
-    notifyDocumentShared({ companyId: company.id, siteId: fields.site_id, title: fields.title, docId: id });
+    res.status(201).json(shapeDoc(doc));
+    notifyDocumentShared({ companyId: company.id, visibility: fields.visibility, siteIds: fields.site_ids, title: fields.title, docId: id });
   } catch (err) {
+    if (connection) await connection.rollback().catch(() => {});
+    if (objectKey) await minioClient.removeObject(process.env.MINIO_BUCKET, objectKey).catch(() => {});
     sendError(res, err, "Failed to upload document");
+  } finally {
+    if (connection) connection.release();
   }
 });
 
-// PUT /api/client-accounts/documents/:docId  body: { title?, doc_type?, site_id?, valid_until?, notes? }
+// PUT /api/client-accounts/documents/:docId  body: { title?, doc_type?, visibility?, site_ids?, valid_until?, notes? }
 router.put("/documents/:docId", auth, requirePermission(PERMISSIONS.UPDATE_USER), async (req, res) => {
+  let connection;
   try {
     const doc = await loadManagedDocument(req, req.params.docId);
-    const fields = await parseDocFields(req.body || {}, doc.company_id, true);
+    const { site_ids: siteIds, ...fields } = await parseDocFields(req.body || {}, doc.company_id, true);
     const keys = Object.keys(fields);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
     if (keys.length) {
-      await pool.query(
+      await connection.query(
         `UPDATE client_documents SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`,
         [...keys.map((k) => fields[k]), doc.id]
       );
     }
+    if (siteIds) await saveDocSites(connection, doc.id, siteIds);
+    await connection.commit();
     const [[updated]] = await pool.query(`${DOC_SELECT} WHERE d.id = ?`, [doc.id]);
-    res.json(updated);
+    res.json(shapeDoc(updated));
   } catch (err) {
+    if (connection) await connection.rollback().catch(() => {});
     sendError(res, err, "Failed to update document");
+  } finally {
+    if (connection) connection.release();
   }
 });
 

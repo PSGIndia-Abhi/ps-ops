@@ -11,13 +11,28 @@ const { v4: uuid } = require("uuid");
 const { sendTicketCreatedEmail } = require("../utils/mailer");
 const { requireClientAccess } = require("../services/clientPortal.service");
 const { writeInvoiceSummaryPdf } = require("../utils/clientInvoiceSummaryPdf");
+const { BRIGADE_GROUP_NAME } = require("../services/brigade.service");
+const { AUTO_REPLY_TEXT, notifyComplaintDesk, withAutoReply } = require("../services/complaintDesk.service");
 
 router.use(auth, requireClientAccess);
+
+// Companies (of the given ids) in the Brigade Group: their outlets get Deep cleaning only;
+// every other client gets Pest control only.
+async function brigadeCompanyIds(companyIds) {
+  if (!companyIds.length) return new Set();
+  const [rows] = await pool.query(
+    `SELECT c.id FROM companies c JOIN group_name g ON g.id = c.group_id
+     WHERE c.id IN (${companyIds.map(() => "?").join(",")}) AND g.name = ?`,
+    [...companyIds, BRIGADE_GROUP_NAME]
+  );
+  return new Set(rows.map((r) => r.id));
+}
 
 // GET /api/client-portal/me -> the user, their company(ies) and the outlets they can see
 router.get("/me", async (req, res) => {
   try {
     const { companyIds, sites, isCompanyAdmin } = req.clientAccess;
+    const brigade = await brigadeCompanyIds(companyIds);
     const [[user]] = await pool.query(
       "SELECT id, name, email, phone FROM users WHERE id = ?",
       [req.user.id]
@@ -31,7 +46,8 @@ router.get("/me", async (req, res) => {
       user,
       access: isCompanyAdmin ? "company" : "sites",
       companies: companies.map((c) => ({ ...c, has_logo: !!c.has_logo })),
-      outlets: sites.map(({ branch_id, ...s }) => s),
+      // service_type: what the outlet can request (Brigade Group = Deep cleaning, else Pest control).
+      outlets: sites.map(({ branch_id, ...s }) => ({ ...s, service_type: brigade.has(s.company_id) ? "DEEP" : "PEST" })),
     });
   } catch (err) {
     console.error("client-portal /me failed:", err);
@@ -73,13 +89,16 @@ function resolveRange(req) {
 
 const placeholders = (list) => list.map(() => "?").join(",");
 
-// Invoice scope: a chosen outlet -> that outlet's invoices; company admin -> all company invoices
-// (including ones without a site); outlet user -> only their outlets' invoices.
+// Invoices are confidential: head-office (company-level) logins only. Outlet logins get none
+// (list, dashboard totals and files all go through this).
+// Head office: a chosen outlet -> that outlet's invoices; else all invoices of its companies
+// (including ones without a site).
 function invoiceScope(req, siteFilter) {
-  const { companyIds, isCompanyAdmin, siteIds } = req.clientAccess;
-  if (siteFilter.singleSite) return { sql: "i.site_id = ?", params: [siteFilter.singleSite] };
-  if (isCompanyAdmin) return { sql: `i.customer_id IN (${placeholders(companyIds)})`, params: [...companyIds] };
-  return { sql: `i.site_id IN (${placeholders(siteIds)})`, params: [...siteIds] };
+  const { headOfficeCompanyIds = [] } = req.clientAccess;
+  if (!headOfficeCompanyIds.length) return { sql: "1 = 0", params: [] };
+  const company = `i.customer_id IN (${placeholders(headOfficeCompanyIds)})`;
+  if (siteFilter.singleSite) return { sql: `${company} AND i.site_id = ?`, params: [...headOfficeCompanyIds, siteFilter.singleSite] };
+  return { sql: company, params: [...headOfficeCompanyIds] };
 }
 
 const inRangeSql = (col) => `${col} >= ? AND ${col} < DATE_ADD(?, INTERVAL 1 DAY)`;
@@ -139,7 +158,7 @@ async function buildOutletSummaries(sites, siteIds, from, to) {
      FROM job_tickets t
      LEFT JOIN job_ticket_links l ON l.ticket_id = t.id
      LEFT JOIN jobs j ON j.id = l.job_id
-     WHERE t.status IN ('OPEN','IN_PROGRESS') AND (t.site_id IN (${sp}) OR j.company_id IN (${sp}))
+     WHERE t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED') AND (t.site_id IN (${sp}) OR j.company_id IN (${sp}))
      GROUP BY COALESCE(t.site_id, j.company_id)`,
     [...siteIds, ...siteIds]
   );
@@ -228,7 +247,7 @@ router.get("/dashboard", async (req, res) => {
     // Complaints raised in the period; how many of those are still open.
     const cScope = complaintScope(req, siteFilter);
     const [[complaints]] = await pool.query(
-      `SELECT COUNT(*) AS raised, SUM(t.status IN ('OPEN','IN_PROGRESS')) AS open_complaints
+      `SELECT COUNT(*) AS raised, SUM(t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED')) AS open_complaints
        FROM job_tickets t
        WHERE ${cScope.sql} AND ${inRange("t.created_at")}`,
       [...cScope.params, from, to]
@@ -713,7 +732,7 @@ function complaintScope(req, siteFilter) {
 async function loadScopedComplaint(req, ticketId) {
   const scope = complaintScope(req, { siteIds: req.clientAccess.siteIds, singleSite: null });
   const [[ticket]] = await pool.query(
-    `SELECT t.id, t.subject, t.status, t.priority, t.site_id, t.created_at, t.updated_at, t.created_by_user_id,
+    `SELECT t.id, t.subject, t.status, t.priority, t.category, t.visit_date, t.visit_slot, t.site_id, t.created_at, t.updated_at, t.created_by_user_id,
             u.name AS raised_by_name, s.name AS site_name
      FROM job_tickets t
      JOIN users u ON u.id = t.created_by_user_id
@@ -778,7 +797,26 @@ async function notifyComplaint({ ticketId, subject, message, priority, siteId, j
   }
 }
 
-// GET /api/client-portal/complaints?site_id=&status=open|resolved|all&search=&page=
+// Complaint type from the form: "SERVICE", "ACCOUNTS", "SERVICE,ACCOUNTS" or a JSON array.
+// Nothing sent (older clients) -> SERVICE.
+const COMPLAINT_CATEGORIES = ["SERVICE", "ACCOUNTS"];
+function parseComplaintCategory(value) {
+  if (value === undefined || value === null || value === "") return ["SERVICE"];
+  let list = value;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = list.split(",");
+    }
+  }
+  if (!Array.isArray(list)) list = [list];
+  const picked = new Set(list.map((v) => String(v || "").trim().toUpperCase()));
+  return COMPLAINT_CATEGORIES.filter((c) => picked.has(c));
+}
+const categoryList = (value) => (value ? String(value).split(",").filter(Boolean) : ["SERVICE"]);
+
+// GET /api/client-portal/complaints?site_id=&status=open|resolved|all|OPEN|IN_PROGRESS|RESOLVED|CLOSED&priority=&search=&page=
 router.get("/complaints", async (req, res) => {
   try {
     const siteFilter = resolveSites(req);
@@ -793,17 +831,44 @@ router.get("/complaints", async (req, res) => {
       params.push(`%${search}%`);
     }
 
+    // ?category=SERVICE|ACCOUNTS (a "both" complaint matches either; no category = Service).
+    const categoryFilter = String(req.query.category || "").toUpperCase();
+    if (categoryFilter === "ACCOUNTS") {
+      base.push("FIND_IN_SET('ACCOUNTS', t.category) > 0");
+    } else if (categoryFilter === "SERVICE") {
+      base.push("(t.category IS NULL OR t.category = '' OR FIND_IN_SET('SERVICE', t.category) > 0)");
+    }
+
+    // ?priority=LOW|MEDIUM|HIGH|URGENT narrows the list and the counts.
+    const priority = String(req.query.priority || "").toUpperCase();
+    if (["LOW", "MEDIUM", "HIGH", "URGENT"].includes(priority)) {
+      base.push("t.priority = ?");
+      params.push(priority);
+    }
+
     const [[counts]] = await pool.query(
       `SELECT COUNT(*) AS all_count,
-              SUM(t.status IN ('OPEN','IN_PROGRESS')) AS open_count,
-              SUM(t.status IN ('RESOLVED','CLOSED')) AS resolved_count
+              SUM(t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED')) AS open_count,
+              SUM(t.status IN ('RESOLVED','CLOSED')) AS resolved_count,
+              SUM(t.status = 'OPEN') AS s_open,
+              SUM(t.status = 'IN_PROGRESS') AS s_in_progress,
+              SUM(t.status = 'VISIT_SCHEDULED') AS s_visit,
+              SUM(t.status = 'RESOLVED') AS s_resolved,
+              SUM(t.status = 'CLOSED') AS s_closed
        FROM job_tickets t WHERE ${base.join(" AND ")}`,
       params
     );
 
+    // status: open (open + in progress) | resolved (resolved + closed) | all, or one exact
+    // status (OPEN, IN_PROGRESS, RESOLVED, CLOSED) for the status cards.
     const where = [...base];
-    if (req.query.status === "open") where.push("t.status IN ('OPEN','IN_PROGRESS')");
+    const exactStatus = String(req.query.status || "").toUpperCase();
+    if (req.query.status === "open") where.push("t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED')");
     else if (req.query.status === "resolved") where.push("t.status IN ('RESOLVED','CLOSED')");
+    else if (["OPEN", "IN_PROGRESS", "VISIT_SCHEDULED", "RESOLVED", "CLOSED"].includes(exactStatus)) {
+      where.push("t.status = ?");
+      params.push(exactStatus);
+    }
 
     const [[{ total }]] = await pool.query(
       `SELECT COUNT(*) AS total FROM job_tickets t WHERE ${where.join(" AND ")}`,
@@ -811,7 +876,7 @@ router.get("/complaints", async (req, res) => {
     );
 
     const [rows] = await pool.query(
-      `SELECT t.id, t.subject, t.status, t.priority, t.created_at, t.updated_at,
+      `SELECT t.id, t.subject, t.status, t.priority, t.category, t.created_at, t.updated_at,
               u.name AS raised_by_name,
               COALESCE(s.id, js.id) AS site_id, COALESCE(s.name, js.name) AS site_name,
               (SELECT COUNT(*) FROM job_ticket_messages m WHERE m.ticket_id = t.id) AS message_count,
@@ -825,7 +890,7 @@ router.get("/complaints", async (req, res) => {
        LEFT JOIN sites s ON s.id = t.site_id
        LEFT JOIN sites js ON js.id = (SELECT cj.company_id FROM job_ticket_links cl JOIN jobs cj ON cj.id = cl.job_id WHERE cl.ticket_id = t.id LIMIT 1)
        WHERE ${where.join(" AND ")}
-       ORDER BY (t.status IN ('OPEN','IN_PROGRESS')) DESC, COALESCE(t.updated_at, t.created_at) DESC
+       ORDER BY (t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED')) DESC, COALESCE(t.updated_at, t.created_at) DESC
        LIMIT ? OFFSET ?`,
       [...params, size, offset]
     );
@@ -835,10 +900,15 @@ router.get("/complaints", async (req, res) => {
       page,
       page_size: size,
       total: n(total),
-      counts: { all: n(counts.all_count), open: n(counts.open_count), resolved: n(counts.resolved_count) },
+      counts: {
+        all: n(counts.all_count), open: n(counts.open_count), resolved: n(counts.resolved_count),
+        OPEN: n(counts.s_open), IN_PROGRESS: n(counts.s_in_progress), VISIT_SCHEDULED: n(counts.s_visit),
+        RESOLVED: n(counts.s_resolved), CLOSED: n(counts.s_closed),
+      },
       complaints: rows.map(({ last_author_role, ...r }) => ({
         ...r,
         message_count: n(r.message_count),
+        category: categoryList(r.category),
         // true when our team wrote the last message (the client may want to read/answer it)
         awaiting_you: !!last_author_role && last_author_role !== "client",
       })),
@@ -862,6 +932,13 @@ router.post("/complaints", acceptFiles, async (req, res) => {
   if (!siteId || !req.clientAccess.siteIds.includes(siteId)) {
     return res.status(400).json({ error: "Please choose the outlet" });
   }
+  // What it is about: SERVICE and/or ACCOUNTS. Accounts is for head-office logins only (they
+  // are the ones who see invoices). Older clients that send nothing get SERVICE.
+  const category = parseComplaintCategory(req.body?.category);
+  if (!category.length) return res.status(400).json({ error: "Please choose what the complaint is about" });
+  if (category.includes("ACCOUNTS") && !(req.clientAccess.headOfficeCompanyIds || []).length) {
+    return res.status(403).json({ error: "Accounts complaints can be raised by head office only" });
+  }
 
   try {
     let job = null;
@@ -880,9 +957,9 @@ router.post("/complaints", acceptFiles, async (req, res) => {
     try {
       await connection.beginTransaction();
       await connection.query(
-        `INSERT INTO job_tickets (id, subject, status, priority, site_id, created_by_user_id, created_at, updated_at)
-         VALUES (?, ?, 'OPEN', ?, ?, ?, NOW(), NOW())`,
-        [ticketId, subject, priority, siteId, req.user.id]
+        `INSERT INTO job_tickets (id, subject, status, priority, category, site_id, created_by_user_id, created_at, updated_at)
+         VALUES (?, ?, 'OPEN', ?, ?, ?, ?, NOW(), NOW())`,
+        [ticketId, subject, priority, category.join(","), siteId, req.user.id]
       );
       if (job) {
         await connection.query(
@@ -919,6 +996,12 @@ router.post("/complaints", acceptFiles, async (req, res) => {
 
     res.status(201).json({ id: ticketId, warning: fileError });
     notifyComplaint({ ticketId, subject, message, priority, siteId, job });
+    const outlet = req.clientAccess.sites.find((s) => s.id === siteId);
+    notifyComplaintDesk({
+      ticketId,
+      title: `New ${category.map((k) => (k === "ACCOUNTS" ? "Accounts" : "Service")).join(" + ")} complaint`,
+      message: `${outlet?.name || "Outlet"}: ${subject}`,
+    });
   } catch (err) {
     sendError(res, err, "complaint");
   }
@@ -967,9 +1050,11 @@ router.get("/complaints/:id", async (req, res) => {
         site_id: ticket.site_id || jobs[0]?.site_id || null,
         site_name: ticket.site_name || jobs[0]?.site_name || null,
         raised_by_me: String(raisedBy) === String(req.user.id),
+        category: categoryList(ticket.category),
       },
       jobs,
-      messages: messages.map((m) => {
+      // The automatic first answer ("our team will connect with you") follows the first message.
+      messages: withAutoReply(messages.map((m) => {
         const fromTeam = m.author_role !== "client";
         return {
           id: m.id,
@@ -981,7 +1066,16 @@ router.get("/complaints/:id", async (req, res) => {
           author: fromTeam ? String(m.author_name || "Support").trim().split(/\s+/)[0] : m.author_name,
           attachments: filesByMessage.get(m.id) || [],
         };
-      }),
+      }), (first) => ({
+        id: `auto-${req.params.id}`,
+        message: AUTO_REPLY_TEXT,
+        created_at: first.created_at,
+        mine: false,
+        from_team: true,
+        auto: true,
+        author: "BestServe",
+        attachments: [],
+      })),
     });
   } catch (err) {
     sendError(res, err, "complaint");
@@ -1017,6 +1111,12 @@ router.post("/complaints/:id/messages", acceptFiles, async (req, res) => {
       warning = "Your message was sent, but the attachments could not be uploaded.";
     }
     res.status(201).json({ id: messageId, reopened: reopen, warning });
+    notifyComplaintDesk({
+      ticketId: ticket.id,
+      title: "Client replied on a complaint",
+      message: `${ticket.site_name || "Outlet"}: ${message || "Sent a file"}`,
+      exceptUserId: req.user.id,
+    });
   } catch (err) {
     sendError(res, err, "reply");
   }
@@ -1067,31 +1167,73 @@ router.get("/complaint-files/:id", async (req, res) => {
 //   audit    audits + audit_reports (current generated report of a submitted audit)
 //   photos   job_attachments       (client-visible service photos, one entry per job)
 
-const DOC_KINDS = ["shared", "invoice", "audit", "photos"];
+// Documents tabs. Shared files (client_documents) are split by their doc_type:
+//   CONTRACT -> agreement, QUOTATION -> quotation, MSDS -> msds, anything else -> bestserve.
+// "audit" and "photos" are only returned when asked for (they have their own pages: Audit
+// Reports and Service photos); they are not part of "All".
+const DOC_KINDS = ["agreement", "bestserve", "quotation", "invoice", "msds", "photos", "audit"];
 const DOC_SOURCE_LIMIT = 500;
 
+function sharedKind(docType) {
+  const t = String(docType || "").toUpperCase();
+  if (t === "CONTRACT" || t === "AGREEMENT") return "agreement";
+  if (t === "QUOTATION") return "quotation";
+  if (t === "MSDS") return "msds";
+  return "bestserve";
+}
+
+// Who sees a shared document (client_documents.visibility, set by staff when sharing):
+//   ALL          every login of the company
+//   HEAD_OFFICE  only head-office (company-level) logins of that company
+//   SITES        logins of the ticked outlets (client_document_sites); head office has every
+//                outlet, so it sees these too
+// `sites` = the outlets being looked at (one picked outlet, or all of the login's outlets).
+function sharedVisibleSql(req, sites) {
+  const { companyIds, headOfficeCompanyIds = [] } = req.clientAccess;
+  const parts = ["d.visibility = 'ALL'"];
+  const params = [...companyIds];
+  if (headOfficeCompanyIds.length) {
+    parts.push(`(d.visibility = 'HEAD_OFFICE' AND d.company_id IN (${placeholders(headOfficeCompanyIds)}))`);
+    params.push(...headOfficeCompanyIds);
+  }
+  if (sites.length) {
+    parts.push(`(d.visibility = 'SITES' AND EXISTS (SELECT 1 FROM client_document_sites ds
+                 WHERE ds.document_id = d.id AND ds.site_id IN (${placeholders(sites)})))`);
+    params.push(...sites);
+  }
+  return {
+    sql: `d.is_active = 1 AND d.company_id IN (${placeholders(companyIds)}) AND (${parts.join(" OR ")})`,
+    params,
+  };
+}
+
 async function sharedDocuments(req, siteFilter) {
-  const { companyIds } = req.clientAccess;
   const sites = siteFilter.siteIds;
+  const vis = sharedVisibleSql(req, sites);
+  // Outlet names shown on a SITES document: only the outlets this login can see.
+  const nameSites = req.clientAccess.siteIds.length ? req.clientAccess.siteIds : [""];
   const [rows] = await pool.query(
     `SELECT d.id, d.title, d.doc_type, d.file_name, d.file_type, d.size_bytes, d.valid_until, d.notes, d.created_at,
-            d.site_id, s.name AS site_name
+            d.visibility,
+            (SELECT GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', ')
+             FROM client_document_sites ds JOIN sites s ON s.id = ds.site_id
+             WHERE ds.document_id = d.id AND ds.site_id IN (${placeholders(nameSites)})) AS site_names
      FROM client_documents d
-     LEFT JOIN sites s ON s.id = d.site_id
-     WHERE d.is_active = 1 AND d.company_id IN (${placeholders(companyIds)})
-       AND (d.site_id IS NULL OR d.site_id IN (${placeholders(sites)}))
+     WHERE ${vis.sql} AND COALESCE(d.file_type, '') NOT LIKE 'image/%'
      ORDER BY d.created_at DESC
      LIMIT ${DOC_SOURCE_LIMIT}`,
-    [...companyIds, ...sites]
+    [...nameSites, ...vis.params]
   );
   return rows.map((d) => ({
     key: `shared:${d.id}`,
-    kind: "shared",
+    kind: sharedKind(d.doc_type),
+    shared: true,
     id: d.id,
     title: d.title,
     doc_type: d.doc_type,
     date: d.created_at,
-    site_name: d.site_id ? d.site_name : null,
+    visibility: d.visibility,
+    site_name: d.visibility === "SITES" ? d.site_names : d.visibility === "HEAD_OFFICE" ? "Head office" : null,
     file_name: d.file_name,
     file_type: d.file_type,
     size_bytes: d.size_bytes,
@@ -1219,6 +1361,142 @@ async function photoDocuments(req, siteFilter) {
   }));
 }
 
+// GET /api/client-portal/photos?site_id=&search=&from=&to=&page=
+// Service photos page: one entry per job (newest photo first) with all its client-visible
+// photos (before / after / other). Each photo streams from /attachments/:id.
+router.get("/photos", async (req, res) => {
+  try {
+    const { siteIds } = resolveSites(req);
+    const { page, size, offset } = parsePaging(req, 12);
+    const { from, to } = optionalRange(req);
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+
+    const where = [`j.company_id IN (${placeholders(siteIds)})`, "COALESCE(j.is_archived, 0) = 0", CLIENT_HISTORY_FILTER];
+    const params = [...siteIds, ...CLIENT_SAFE_ACTIONS];
+    if (search) {
+      where.push("(j.code LIKE ? OR j.sub_service LIKE ? OR s.name LIKE ? OR s.city LIKE ?)");
+      const like = `%${search}%`;
+      params.push(like, like, like, like);
+    }
+    const having = [];
+    const havingParams = [];
+    if (from) {
+      having.push("DATE(MAX(h.created_at)) >= ?");
+      havingParams.push(from);
+    }
+    if (to) {
+      having.push("DATE(MAX(h.created_at)) <= ?");
+      havingParams.push(to);
+    }
+
+    const [jobs] = await pool.query(
+      `SELECT j.id AS job_id, j.code, j.service_type, j.sub_service, j.status,
+              s.id AS site_id, s.name AS site_name, s.city,
+              COUNT(DISTINCT a.id) AS photo_count, MAX(h.created_at) AS last_at
+       FROM job_attachments a
+       JOIN job_history h ON h.id = a.history_id
+       JOIN jobs j ON j.id = a.job_id
+       LEFT JOIN sites s ON s.id = j.company_id
+       WHERE ${where.join(" AND ")}
+       GROUP BY j.id, j.code, j.service_type, j.sub_service, j.status, s.id, s.name, s.city
+       ${having.length ? `HAVING ${having.join(" AND ")}` : ""}
+       ORDER BY last_at DESC
+       LIMIT ${DOC_SOURCE_LIMIT}`,
+      [...params, ...havingParams]
+    );
+
+    const pageJobs = jobs.slice(offset, offset + size);
+    const byJob = new Map(pageJobs.map((j) => [j.job_id, []]));
+    if (pageJobs.length) {
+      const ids = pageJobs.map((j) => j.job_id);
+      const [rows] = await pool.query(
+        `SELECT a.id, a.job_id, a.type, a.file_name, a.file_type, h.action, h.created_at
+         FROM job_attachments a
+         JOIN job_history h ON h.id = a.history_id
+         WHERE a.job_id IN (${placeholders(ids)}) AND ${CLIENT_HISTORY_FILTER}
+         ORDER BY h.created_at ASC, a.id ASC`,
+        [...ids, ...CLIENT_SAFE_ACTIONS]
+      );
+      for (const r of rows) {
+        byJob.get(r.job_id)?.push({
+          id: r.id,
+          type: r.type,
+          file_name: r.file_name,
+          file_type: r.file_type,
+          phase: r.action === "BEFORE_PHOTOS" ? "before" : r.action === "AFTER_PHOTOS" ? "after" : "other",
+          created_at: r.created_at,
+        });
+      }
+    }
+
+    // Photos staff shared from Admin > Client Accounts > Documents (images only), same visibility
+    // rules as documents. Shown above the visit photos on the first page.
+    let shared = [];
+    if (page === 1) {
+      const vis = sharedVisibleSql(req, siteIds);
+      const sw = [vis.sql, "COALESCE(d.file_type, '') LIKE 'image/%'"];
+      const sp = [...vis.params];
+      if (search) {
+        sw.push("(d.title LIKE ? OR d.notes LIKE ?)");
+        sp.push(`%${search}%`, `%${search}%`);
+      }
+      if (from) {
+        sw.push("DATE(d.created_at) >= ?");
+        sp.push(from);
+      }
+      if (to) {
+        sw.push("DATE(d.created_at) <= ?");
+        sp.push(to);
+      }
+      const nameSites = req.clientAccess.siteIds.length ? req.clientAccess.siteIds : [""];
+      const [rows] = await pool.query(
+        `SELECT d.id, d.title, d.notes, d.file_name, d.file_type, d.created_at, d.visibility,
+                (SELECT GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ', ')
+                 FROM client_document_sites ds JOIN sites s ON s.id = ds.site_id
+                 WHERE ds.document_id = d.id AND ds.site_id IN (${placeholders(nameSites)})) AS site_names
+         FROM client_documents d
+         WHERE ${sw.join(" AND ")}
+         ORDER BY d.created_at DESC
+         LIMIT 60`,
+        [...nameSites, ...sp]
+      );
+      shared = rows.map((d) => ({
+        id: d.id,
+        title: d.title,
+        notes: d.notes,
+        file_name: d.file_name,
+        file_type: d.file_type,
+        created_at: d.created_at,
+        site_name: d.visibility === "SITES" ? d.site_names : d.visibility === "HEAD_OFFICE" ? "Head office" : "All outlets",
+        path: `/api/client-portal/documents/shared/${d.id}/file`,
+      }));
+    }
+
+    res.json({
+      page,
+      page_size: size,
+      total: jobs.length,
+      photo_total: jobs.reduce((n, j) => n + Number(j.photo_count || 0), 0),
+      shared,
+      jobs: pageJobs.map((j) => ({
+        id: j.job_id,
+        code: j.code,
+        service_type: j.service_type,
+        sub_service: j.sub_service,
+        status: j.status,
+        site_id: j.site_id,
+        site_name: j.site_name,
+        city: j.city,
+        photo_count: Number(j.photo_count || 0),
+        last_at: j.last_at,
+        photos: byJob.get(j.job_id) || [],
+      })),
+    });
+  } catch (err) {
+    sendError(res, err, "photos");
+  }
+});
+
 // GET /api/client-portal/documents?site_id=&kind=shared|invoice|audit|photos&search=&from=&to=&page=
 router.get("/documents", async (req, res) => {
   try {
@@ -1248,14 +1526,18 @@ router.get("/documents", async (req, res) => {
         .some((v) => v && String(v).toLowerCase().includes(search));
     };
 
+    const sharedShown = shared.filter(inFilters);
     const byKind = {
-      shared: shared.filter(inFilters),
+      agreement: sharedShown.filter((d) => d.kind === "agreement"),
+      bestserve: sharedShown.filter((d) => d.kind === "bestserve"),
+      quotation: sharedShown.filter((d) => d.kind === "quotation"),
       invoice: invoices.filter(inFilters),
-      audit: audits.filter(inFilters),
-      photos: photos.filter(inFilters),
+      msds: sharedShown.filter((d) => d.kind === "msds"),
     };
+    // Own pages (Audit Reports, Service photos): only when asked for, never in "All".
+    const ownPages = { audit: audits.filter(inFilters), photos: photos.filter(inFilters) };
     const kind = DOC_KINDS.includes(req.query.kind) ? req.query.kind : null;
-    const list = (kind ? byKind[kind] : [].concat(...Object.values(byKind)))
+    const list = (ownPages[kind] || (kind ? byKind[kind] : [].concat(...Object.values(byKind))))
       .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
     const soon = new Date();
@@ -1268,10 +1550,13 @@ router.get("/documents", async (req, res) => {
       total: list.length,
       counts: {
         all: Object.values(byKind).reduce((n, l) => n + l.length, 0),
-        shared: byKind.shared.length,
+        agreement: byKind.agreement.length,
+        bestserve: byKind.bestserve.length,
+        quotation: byKind.quotation.length,
         invoice: byKind.invoice.length,
-        audit: byKind.audit.length,
-        photos: byKind.photos.length,
+        msds: byKind.msds.length,
+        photos: ownPages.photos.length,
+        audit: ownPages.audit.length,
       },
       expiring_soon: expiring,
       documents: list.slice(offset, offset + size),
@@ -1295,12 +1580,12 @@ function streamFile(res, objectKey, { type, name, download }) {
 // GET /api/client-portal/documents/shared/:id/file?download=1
 router.get("/documents/shared/:id/file", async (req, res) => {
   try {
-    const { companyIds, siteIds } = req.clientAccess;
+    // Same visibility rule as the list (a head-office-only file is refused to outlet logins).
+    const vis = sharedVisibleSql(req, req.clientAccess.siteIds);
     const [[doc]] = await pool.query(
-      `SELECT object_key, file_name, file_type FROM client_documents
-       WHERE id = ? AND is_active = 1 AND company_id IN (${placeholders(companyIds)})
-         AND (site_id IS NULL OR site_id IN (${placeholders(siteIds)}))`,
-      [req.params.id, ...companyIds, ...siteIds]
+      `SELECT d.object_key, d.file_name, d.file_type FROM client_documents d
+       WHERE d.id = ? AND ${vis.sql}`,
+      [req.params.id, ...vis.params]
     );
     if (!doc) return res.status(404).json({ error: "Document not found" });
     await streamFile(res, doc.object_key, { type: doc.file_type, name: doc.file_name, download: !!req.query.download });
@@ -1362,6 +1647,8 @@ router.get("/documents/invoice/:id/file", async (req, res) => {
 // ---------- Service requests (client_service_requests) ----------
 // Requests wait as NEW until staff assign them from Admin > Service Requests.
 
+// Each outlet requests one type only: Brigade Group outlets DEEP, everyone else PEST.
+// (BOTH is kept so older requests still read correctly; new ones cannot use it.)
 const REQUEST_TYPES = ["PEST", "DEEP", "BOTH"];
 const REQUEST_SLOTS = ["ANY", "MORNING", "AFTERNOON", "EVENING"];
 
@@ -1432,7 +1719,7 @@ router.get("/service-requests", async (req, res) => {
 });
 
 // POST /api/client-portal/service-requests
-// body: { site_id, service_type: PEST|DEEP|BOTH, sub_services: [], preferred_date?, preferred_slot?, notes? }
+// body: { site_id, service_type: PEST (or DEEP for Brigade Group outlets), sub_services: [], preferred_date?, preferred_slot?, notes? }
 router.post("/service-requests", async (req, res) => {
   try {
     const siteId = String(req.body?.site_id || "").trim();
@@ -1441,6 +1728,11 @@ router.post("/service-requests", async (req, res) => {
     }
     const serviceType = String(req.body?.service_type || "").toUpperCase();
     if (!REQUEST_TYPES.includes(serviceType)) return res.status(400).json({ error: "Please choose the type of service" });
+    const site = req.clientAccess.sites.find((s) => s.id === siteId);
+    const allowedType = (await brigadeCompanyIds([site.company_id])).has(site.company_id) ? "DEEP" : "PEST";
+    if (serviceType !== allowedType) {
+      return res.status(400).json({ error: allowedType === "DEEP" ? "This outlet can request deep cleaning services only" : "This outlet can request pest control services only" });
+    }
     const subServices = parseSubServices(req.body?.sub_services);
     if (!subServices.length) return res.status(400).json({ error: "Please choose at least one service" });
 
@@ -1452,7 +1744,6 @@ router.post("/service-requests", async (req, res) => {
     const slotRaw = String(req.body?.preferred_slot || "ANY").toUpperCase();
     const slot = REQUEST_SLOTS.includes(slotRaw) ? slotRaw : "ANY";
     const notes = String(req.body?.notes || "").trim().slice(0, 1000) || null;
-    const site = req.clientAccess.sites.find((s) => s.id === siteId);
 
     const id = uuid();
     await pool.query(
@@ -1609,7 +1900,7 @@ router.get("/outlets/:siteId", async (req, res) => {
     const [[openComplaints]] = await pool.query(
       `SELECT COUNT(*) AS n
        FROM job_tickets t
-       WHERE ${outletComplaintScope.sql} AND t.status IN ('OPEN','IN_PROGRESS')`,
+       WHERE ${outletComplaintScope.sql} AND t.status IN ('OPEN','IN_PROGRESS','VISIT_SCHEDULED')`,
       outletComplaintScope.params
     );
 

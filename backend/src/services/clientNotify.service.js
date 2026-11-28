@@ -93,7 +93,28 @@ async function notifyComplaintResolved(ticketId, authorId) {
     {
       type: "CLIENT_COMPLAINT_RESOLVED",
       title: "Your complaint was resolved",
-      message: shorten(`${t.subject} - tap to see the details or reopen it.`),
+      message: shorten(`${t.subject} - tap to see the details.`),
+      entityType: "client_complaint",
+      entityId: t.id,
+    },
+    { exceptUserId: authorId }
+  );
+}
+
+/** Staff scheduled a visit for a complaint (stage "Visit scheduled", with the day / time if given). */
+async function notifyComplaintVisit(ticketId, authorId) {
+  const [[t]] = await pool
+    .query("SELECT id, subject, site_id, visit_date, visit_slot FROM job_tickets WHERE id = ?", [ticketId])
+    .catch(() => [[null]]);
+  if (!t?.site_id) return 0;
+  const day = t.visit_date ? new Date(t.visit_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "";
+  const when = [day, t.visit_slot].filter(Boolean).join(", ");
+  return notifyClients(
+    { siteId: t.site_id },
+    {
+      type: "CLIENT_COMPLAINT_VISIT",
+      title: "A visit is scheduled for your complaint",
+      message: shorten(`${t.subject}${when ? ` - visit on ${when}` : ""}`),
       entityType: "client_complaint",
       entityId: t.id,
     },
@@ -152,17 +173,44 @@ async function notifyVisitCompleted(visitId) {
 }
 
 /** Staff shared a document with a company (siteId empty) or one outlet. */
-async function notifyDocumentShared({ companyId, siteId, title, docId }) {
-  return notifyClients(
-    { companyId, siteId: siteId || null },
-    {
-      type: "CLIENT_DOCUMENT_SHARED",
-      title: "New document available",
-      message: shorten(title || "A new document was shared with you."),
-      entityType: "client_document",
-      entityId: docId,
+// Told only the logins that can see it: ALL -> every login of the company; HEAD_OFFICE -> the
+// company (head-office) logins; SITES -> each ticked outlet's logins + head office.
+async function notifyDocumentShared({ companyId, visibility = "ALL", siteIds = [], siteId = null, title, docId }) {
+  const payload = {
+    type: "CLIENT_DOCUMENT_SHARED",
+    title: "New document available",
+    message: shorten(title || "A new document was shared with you."),
+    entityType: "client_document",
+    entityId: docId,
+    channelId: CLIENT_CHANNEL,
+  };
+  try {
+    let userIds = [];
+    if (visibility === "HEAD_OFFICE") {
+      const [rows] = await pool.query(
+        `SELECT DISTINCT u.id
+         FROM user_scopes us
+         JOIN users u ON u.id = us.user_id
+         LEFT JOIN roles r ON r.id = u.role_id
+         WHERE us.scope_type = 'company' AND us.scope_id = ?
+           AND COALESCE(u.is_active, 1) = 1
+           AND LOWER(COALESCE(r.name, u.role, '')) = 'client'`,
+        [companyId]
+      );
+      userIds = rows.map((r) => r.id);
+    } else if (visibility === "SITES" || siteId) {
+      const sites = siteIds.length ? siteIds : [siteId];
+      const lists = await Promise.all(sites.map((s) => clientUsersFor({ siteId: s, companyId })));
+      userIds = [...new Set(lists.flat())];
+    } else {
+      userIds = await clientUsersFor({ companyId });
     }
-  );
+    if (!userIds.length) return 0;
+    return await notifyUsers(userIds, payload);
+  } catch (err) {
+    console.error("[client-notify] document failed:", err.message);
+    return 0;
+  }
 }
 
 module.exports = {
@@ -171,6 +219,7 @@ module.exports = {
   notifyClients,
   notifyComplaintReply,
   notifyComplaintResolved,
+  notifyComplaintVisit,
   notifyServiceRequest,
   notifyVisitCompleted,
   notifyDocumentShared,

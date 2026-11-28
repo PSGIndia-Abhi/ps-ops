@@ -34,6 +34,7 @@ const PILLS = {
   CANCELED: { label: "Cancelled", tone: "slate" },
   PAUSED: { label: "Paused", tone: "slate" },
   OPEN: { label: "Open", tone: "orange" },
+  VISIT_SCHEDULED: { label: "Visit scheduled", tone: "violet" },
   RESOLVED: { label: "Resolved", tone: "green" },
   CLOSED: { label: "Closed", tone: "slate" },
 };
@@ -221,7 +222,7 @@ export default function PortalOutletDetail() {
               <section className="cp-card cp-od-card">
                 <header className="cp-od-head">
                   <h3>Activity</h3>
-                  <button className="cp-link" onClick={() => navigate(activityTab === "jobs" ? "/client/jobs" : "/client/jobs?tab=visits")}>
+                  <button className="cp-link" onClick={() => navigate(activityTab === "jobs" ? `/client/jobs?site=${site}` : `/client/jobs?tab=visits&site=${site}`)}>
                     All jobs &amp; visits <FiChevronRight aria-hidden="true" />
                   </button>
                 </header>
@@ -291,7 +292,7 @@ export default function PortalOutletDetail() {
               <ul className="cp-od-list">
                 {complaints.map((c) => {
                   const pill = pillFor(c.status);
-                  const open = ["OPEN", "IN_PROGRESS"].includes(String(c.status || "").toUpperCase());
+                  const open = ["OPEN", "IN_PROGRESS", "VISIT_SCHEDULED"].includes(String(c.status || "").toUpperCase());
                   return (
                     <li key={c.id}>
                       <button className={`cp-od-row ${open ? "warn" : ""}`} onClick={() => navigate(`/client/complaints/${encodeURIComponent(c.id)}`)}>

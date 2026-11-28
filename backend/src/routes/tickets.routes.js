@@ -242,6 +242,13 @@ router.get(
         }
       }
 
+      // Client complaints (raised from the Client Portal) are worked in the Feedback Desk by the
+      // feedback collector and the service coordinator, so Admin's ticket list leaves them out.
+      if (["admin", "branch_admin"].includes(req.user.role) && !jobId) {
+        const notClient = "LOWER(COALESCE((SELECT cr.name FROM roles cr WHERE cr.id = u.role_id), u.role, '')) <> 'client'";
+        where = where ? `${where} AND ${notClient}` : `WHERE ${notClient}`;
+      }
+
       if (branchId) {
         // ts.branch_id: client complaints raised against an outlet (job_tickets.site_id).
         where = where

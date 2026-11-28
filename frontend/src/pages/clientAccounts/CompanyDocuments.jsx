@@ -5,14 +5,34 @@ import { apiFetch, safeJson } from "../../api";
 // Admin > Client Accounts > company: documents shared with the client portal.
 // "All outlets" documents are visible to every login of the company.
 
+// Each type decides the client's Documents tab: Agreement, Final quotation, MSDS,
+// or "BestServe documents" (certificate, report, other).
 const DOC_TYPES = [
-  { key: "CERTIFICATE", label: "Certificate" },
-  { key: "CONTRACT", label: "Contract" },
+  { key: "CONTRACT", label: "Agreement" },
+  { key: "QUOTATION", label: "Final quotation" },
   { key: "MSDS", label: "MSDS / Safety sheet" },
-  { key: "REPORT", label: "Report" },
-  { key: "OTHER", label: "Other" },
+  { key: "CERTIFICATE", label: "BestServe document · Certificate" },
+  { key: "REPORT", label: "BestServe document · Report" },
+  { key: "OTHER", label: "BestServe document · Other" },
 ];
 const typeLabel = (k) => DOC_TYPES.find((t) => t.key === k)?.label || "Other";
+
+// Who sees the document in the client portal.
+const VISIBILITY = [
+  { key: "ALL", label: "Everyone in this company", hint: "Head office + all outlet logins" },
+  { key: "HEAD_OFFICE", label: "Head office only (confidential)", hint: "Only “All outlets” (company) logins - outlet logins never see it" },
+  { key: "SITES", label: "Selected outlets", hint: "Tick one or more outlets - head office also sees them" },
+];
+
+function VisibilityTag({ doc }) {
+  if (doc.visibility === "HEAD_OFFICE") return <span className="ca-tag ca-tag-ho">🔒 Head office only</span>;
+  if (doc.visibility === "SITES") {
+    const names = (doc.sites || []).map((s) => s.name || s.id);
+    const text = names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ") || "Selected outlets";
+    return <span className="ca-tag" title={names.join(", ")}>{text}</span>;
+  }
+  return <span className="ca-tag company">Everyone</span>;
+}
 
 function toDateInput(value) {
   if (!value) return "";
@@ -108,7 +128,7 @@ export default function CompanyDocuments({ companyId, sites, onStatus }) {
                   <span>{d.file_name} · {fmtDate(d.created_at)}{d.uploaded_by_name ? ` · ${d.uploaded_by_name}` : ""}</span>
                   <div className="ca-login-access">
                     <span className="ca-tag">{typeLabel(d.doc_type)}</span>
-                    <span className={`ca-tag ${d.site_id ? "" : "company"}`}>{d.site_id ? d.site_name || d.site_id : "All outlets"}</span>
+                    <VisibilityTag doc={d} />
                     {d.valid_until && <span className={`ca-tag ${expired ? "off" : ""}`}>{expired ? "Expired" : "Valid till"} {fmtDate(d.valid_until)}</span>}
                   </div>
                   {d.notes && <span className="ca-doc-notes">{d.notes}</span>}
@@ -147,7 +167,8 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     title: doc?.title || "",
     doc_type: doc?.doc_type || "CERTIFICATE",
-    site_id: doc?.site_id || "",
+    visibility: doc?.visibility || "ALL",
+    site_ids: (doc?.sites || []).map((s) => s.id),
     valid_until: toDateInput(doc?.valid_until),
     notes: doc?.notes || "",
   }));
@@ -170,6 +191,7 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
     e.preventDefault();
     if (!isEdit && !file) return setError("Choose a file to upload.");
     if (!form.title.trim()) return setError("Title is required.");
+    if (form.visibility === "SITES" && !form.site_ids.length) return setError("Tick at least one outlet.");
     setSaving(true);
     setError(null);
     try {
@@ -178,7 +200,7 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
         res = await apiFetch(`/api/client-accounts/documents/${doc.id}`, { method: "PUT", body: JSON.stringify(form) });
       } else {
         const fd = new FormData();
-        Object.entries(form).forEach(([k, v]) => fd.set(k, v));
+        Object.entries(form).forEach(([k, v]) => fd.set(k, Array.isArray(v) ? JSON.stringify(v) : v));
         fd.set("file", file, file.name);
         res = await apiFetch(`/api/client-accounts/companies/${encodeURIComponent(companyId)}/documents`, { method: "POST", body: fd });
       }
@@ -212,6 +234,7 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
               accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx"
               onChange={(e) => pickFile(e.target.files?.[0])}
             />
+            <small className="ca-muted ca-file-note">Photos (JPG / PNG) appear in the client's <b>Service Photos</b>; PDF, Word and Excel appear in <b>Documents</b>.</small>
           </label>
         )}
         <label>Title *
@@ -222,12 +245,42 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
             {DOC_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
         </label>
-        <label>Visible to
-          <select value={form.site_id} onChange={(e) => set("site_id", e.target.value)}>
-            <option value="">All outlets (every login of this company)</option>
-            {sites.map((s) => <option key={s.id} value={s.id}>Only {s.name || s.id}</option>)}
-          </select>
-        </label>
+        <fieldset className="ca-vis">
+          <legend>Visible to</legend>
+          {VISIBILITY.map((v) => (
+            <label key={v.key} className={`ca-vis-opt ${form.visibility === v.key ? "on" : ""} ${v.key === "HEAD_OFFICE" ? "ho" : ""}`}>
+              <input type="radio" name="doc-visibility" checked={form.visibility === v.key} onChange={() => set("visibility", v.key)} />
+              <span>
+                <strong>{v.label}</strong>
+                <small>{v.hint}</small>
+              </span>
+            </label>
+          ))}
+          {form.visibility === "SITES" && (
+            <div className="ca-vis-sites">
+              <div className="ca-vis-sites-head">
+                <span>{form.site_ids.length} of {sites.length} outlets ticked</span>
+                <button
+                  type="button" className="ca-link"
+                  onClick={() => set("site_ids", form.site_ids.length === sites.length ? [] : sites.map((s) => s.id))}
+                >
+                  {form.site_ids.length === sites.length ? "Clear all" : "Tick all"}
+                </button>
+              </div>
+              {sites.length === 0 && <small className="ca-muted">This company has no outlets yet.</small>}
+              {sites.map((s) => (
+                <label key={s.id} className="ca-vis-site">
+                  <input
+                    type="checkbox"
+                    checked={form.site_ids.includes(s.id)}
+                    onChange={(e) => set("site_ids", e.target.checked ? [...form.site_ids, s.id] : form.site_ids.filter((x) => x !== s.id))}
+                  />
+                  <span>{s.name || s.id}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </fieldset>
         <label>Valid until (optional)
           <input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} />
         </label>

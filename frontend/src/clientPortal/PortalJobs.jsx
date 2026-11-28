@@ -90,8 +90,11 @@ function VisitRing({ done, total }) {
 
 export default function PortalJobs() {
   const navigate = useNavigate();
-  const { portal, outletId, setOutletId } = useOutletContext();
-  const [params, setParams] = useSearchParams();
+  const { portal } = useOutletContext();
+  const [params] = useSearchParams();
+  // Outlet filter for this page only (the Dashboard's outlet picker affects the Dashboard alone).
+  // A link can open one outlet: /client/jobs?site=SITE59 (from the outlet page).
+  const [outletId, setOutletId] = useState(() => params.get("site") || "");
   const tab = params.get("tab") === "visits" ? "visits" : "jobs";
 
   // Jobs tab opens on "All jobs"; Visits tab on "Upcoming".
@@ -166,12 +169,6 @@ export default function PortalJobs() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, page]);
 
-  function switchTab(next) {
-    setParams(next === "visits" ? { tab: "visits" } : {}, { replace: true });
-    setStatus(next === "visits" ? "upcoming" : "");
-    setItems([]);
-  }
-
   const hasDateFilter = from || to;
   const outlets = portal.outlets || [];
   const manyOutlets = outlets.length > 1;
@@ -202,10 +199,6 @@ export default function PortalJobs() {
         <div>
           <h2>Jobs &amp; Visits</h2>
           <p>{tab === "jobs" ? "Every service booked for your outlets" : "Each visit by our team, by date"}</p>
-        </div>
-        <div className="cp-jv-switch" role="tablist" aria-label="Show">
-          <button role="tab" aria-selected={tab === "jobs"} className={tab === "jobs" ? "active" : ""} onClick={() => switchTab("jobs")}>Jobs</button>
-          <button role="tab" aria-selected={tab === "visits"} className={tab === "visits" ? "active" : ""} onClick={() => switchTab("visits")}>Visits</button>
         </div>
       </section>
 

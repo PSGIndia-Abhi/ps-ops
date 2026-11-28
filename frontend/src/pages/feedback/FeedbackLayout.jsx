@@ -4,6 +4,8 @@ import { FiArrowLeft, FiCheckSquare, FiLogOut } from "react-icons/fi";
 import logo from "../../assets/logo.png";
 import useMe from "../../hooks/useMe";
 import UserMenu from "../../components/UserMenu";
+import NotificationsMenu from "../../components/NotificationsMenu";
+import { complaintRequest } from "./complaints/complaintApi";
 import { FEEDBACK_HOME, feedbackBackLink } from "./access";
 import { getBadges, getDepartments, getMyAccess } from "./feedbackApi";
 import { taskSwitchCount } from "../taskpro/tasksApi";
@@ -76,6 +78,23 @@ export default function FeedbackLayout() {
     return () => clearInterval(timer);
   }, [access, loadBadges, location.pathname]);
 
+  // Complaints menu: shown when /api/complaint-desk lets this user in; the number = open complaints.
+  const [complaintDesk, setComplaintDesk] = useState(null);
+  useEffect(() => {
+    if (!access) return undefined;
+    let live = true;
+    const load = () =>
+      complaintRequest("/me")
+        .then((d) => live && setComplaintDesk(d))
+        .catch(() => live && setComplaintDesk({ allowed: false }));
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [access, location.pathname]);
+
   // The number on the "Task Management" switch: its menu's red numbers added up (Overdue + Requests).
   const switchesToTasks = back?.path === TASKPRO_HOME;
   const [taskUpdates, setTaskUpdates] = useState(null);
@@ -133,7 +152,17 @@ export default function FeedbackLayout() {
     };
   }, [access, role, departmentList, loadDepartments, loadBadges]);
 
-  const nav = NAV.filter((item) => !item.needs || item.needs.some((p) => context.permissions.includes(p)));
+  const navByPermission = NAV.filter((item) => !item.needs || item.needs.some((p) => context.permissions.includes(p)));
+  // Complaints (client complaints): feedback collector and service coordinator only, after Tickets.
+  const nav = complaintDesk?.allowed
+    ? (() => {
+        const item = { path: `${FEEDBACK_HOME}/complaints`, label: "Complaints", count: complaintDesk.open };
+        const at = navByPermission.findIndex((n) => n.path === `${FEEDBACK_HOME}/tickets`);
+        const list = [...navByPermission];
+        list.splice(at >= 0 ? at + 1 : list.length, 0, item);
+        return list;
+      })()
+    : navByPermission;
 
   function go(path) {
     setMenuOpen(false);
@@ -172,6 +201,7 @@ export default function FeedbackLayout() {
         </button>
 
         <div className="header-right">
+          <NotificationsMenu iconOnly />
           <UserMenu user={user} onLogout={logout} actions={back ? [{ label: back.label, onClick: () => navigate(back.path) }] : []} />
         </div>
       </header>
@@ -198,6 +228,7 @@ export default function FeedbackLayout() {
                     >
                       <span>{item.label}</span>
                       {item.badge && unseen(item.badge) > 0 && <span className="fb-nav-count">{unseen(item.badge)}</span>}
+                      {item.count > 0 && <span className="fb-nav-count">{item.count}</span>}
                     </button>
                   ),
                 )}

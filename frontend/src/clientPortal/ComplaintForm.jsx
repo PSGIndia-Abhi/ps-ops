@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { FiAlertTriangle, FiArrowDown, FiArrowUp, FiCheck, FiEye, FiMinus, FiPlus, FiSend, FiUploadCloud, FiX } from "react-icons/fi";
+import {
+  FiAlertTriangle, FiArrowDown, FiArrowUp, FiCheck, FiEye, FiMinus, FiPlus, FiSend, FiUploadCloud, FiX, FiTool, FiFileText,
+} from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 
 // "How urgent?" colour tiles: green Low, blue Normal, orange High, red Urgent.
@@ -9,6 +11,12 @@ const PRIORITIES = [
   { key: "HIGH", label: "High", hint: "Needs attention soon", Icon: FiArrowUp },
   { key: "URGENT", label: "Urgent", hint: "Needs action now", Icon: FiAlertTriangle },
 ];
+// "Complaint about" tiles (one or both). Accounts is shown to head-office logins only.
+const CATEGORIES = [
+  { key: "SERVICE", label: "Service", hint: "Treatment, technician, visit…", Icon: FiTool },
+  { key: "ACCOUNTS", label: "Accounts", hint: "Invoice, payment, billing…", Icon: FiFileText },
+];
+
 function fileSize(bytes) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -58,7 +66,10 @@ const MAX_SIZE = 10 * 1024 * 1024;
 
 // Modal form to raise a complaint. `initialSite` pre-fills the outlet. `initialJob` (when opened from
 // a job page) silently links the complaint to that job; changing the outlet drops the link.
-export default function ComplaintForm({ outlets, initialSite = "", initialJob = "", onClose, onCreated }) {
+export default function ComplaintForm({ outlets, headOffice = false, initialSite = "", initialJob = "", onClose, onCreated }) {
+  const categories = headOffice ? CATEGORIES : CATEGORIES.filter((c) => c.key !== "ACCOUNTS");
+  // One choice only (outlet logins: Service) -> already ticked.
+  const [category, setCategory] = useState(() => (categories.length === 1 ? [categories[0].key] : []));
   const [siteId, setSiteId] = useState(initialSite || (outlets.length === 1 ? outlets[0].id : ""));
   const [jobId, setJobId] = useState(initialJob);
   const [subject, setSubject] = useState("");
@@ -91,6 +102,7 @@ export default function ComplaintForm({ outlets, initialSite = "", initialJob = 
   async function submit(e) {
     e.preventDefault();
     if (!siteId) return setError("Please choose the outlet.");
+    if (!category.length) return setError("Please choose what the complaint is about: Service or Accounts.");
     if (!subject.trim()) return setError("Please add a short subject.");
     setSaving(true);
     setError(null);
@@ -101,6 +113,7 @@ export default function ComplaintForm({ outlets, initialSite = "", initialJob = 
       fd.set("subject", subject.trim());
       fd.set("message", message.trim());
       fd.set("priority", priority);
+      fd.set("category", category.join(","));
       files.forEach((f) => fd.append("files", f, f.name));
       const res = await apiFetch("/api/client-portal/complaints", { method: "POST", body: fd });
       const body = await safeJson(res);
@@ -131,6 +144,25 @@ export default function ComplaintForm({ outlets, initialSite = "", initialJob = 
             {outlets.map((o) => <option key={o.id} value={o.id}>{o.name || o.id}</option>)}
           </select>
         </label>
+
+        <div className="cp-field">Complaint about * {categories.length > 1 && <small className="cp-muted">(choose one or both)</small>}
+          <div className={`cp-cat-tiles n${categories.length}`} role="group" aria-label="Complaint about">
+            {categories.map((c) => {
+              const on = category.includes(c.key);
+              return (
+                <button
+                  type="button" key={c.key} aria-pressed={on}
+                  className={`cp-cat-tile cat-${c.key.toLowerCase()} ${on ? "active" : ""}`}
+                  onClick={() => setCategory(on ? category.filter((k) => k !== c.key) : [...category, c.key])}
+                >
+                  {on && <span className="cp-prio-check" aria-hidden="true"><FiCheck /></span>}
+                  <span className="cp-cat-icon" aria-hidden="true"><c.Icon /></span>
+                  <span className="cp-cat-text"><strong>{c.label}</strong><small>{c.hint}</small></span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <label className="cp-field">Subject *
           <input value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} placeholder="e.g. Cockroaches seen in the kitchen" />

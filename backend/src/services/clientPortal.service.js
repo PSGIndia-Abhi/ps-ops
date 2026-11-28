@@ -59,6 +59,9 @@ async function getClientAccess(userId, executor = pool) {
     companyIds,
     siteIds: sites.map((s) => s.id),
     isCompanyAdmin: companyScopeIds.length > 0,
+    // Companies this login is head office for (company-level access): sees invoices and
+    // "Head office only" documents of these companies.
+    headOfficeCompanyIds: companyScopeIds,
     sites,
   };
 }

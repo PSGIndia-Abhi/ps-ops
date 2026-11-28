@@ -45,6 +45,10 @@ function resolveNotificationPath(notification, role) {
   if (notification.entity_type === "feedback_ticket" && notification.entity_id) {
     return `/feedback-desk/tickets/${notification.entity_id}`;
   }
+  // Client complaints worked in the Feedback Desk (feedback collector, service coordinator).
+  if (notification.entity_type === "desk_complaint" && notification.entity_id) {
+    return `/feedback-desk/complaints/${notification.entity_id}`;
+  }
   if (notification.entity_type === "feedback_call" && notification.entity_id) {
     return `/feedback-desk/calls/${notification.entity_id}`;
   }

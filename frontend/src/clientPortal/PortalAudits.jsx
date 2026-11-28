@@ -5,10 +5,13 @@ import { apiFetch, safeJson } from "../api";
 import { formatDate, RISK_STYLE } from "./portalUtils";
 import { getPortalFile } from "./portalFiles";
 import PortalLoader from "./PortalLoader";
+import OutletPicker from "./OutletPicker";
 
 // Audit reports made by our supervisors (the generated PDF of each submitted audit).
 export default function PortalAudits() {
-  const { portal, outletId } = useOutletContext();
+  const { portal } = useOutletContext();
+  // Outlet filter for this page only (the Dashboard's outlet picker affects the Dashboard alone).
+  const [outletId, setOutletId] = useState("");
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -65,6 +68,12 @@ export default function PortalAudits() {
           <p>{outletName ? `Showing ${outletName}` : "All outlets"} · site audit reports prepared by our supervisors</p>
         </div>
       </section>
+
+      {portal.outlets.length > 1 && (
+        <div className="cp-toolbar">
+          <OutletPicker outlets={portal.outlets} value={outletId} onChange={setOutletId} className="cp-picker-box" />
+        </div>
+      )}
 
       {error && <div className="cp-alert">{error}<button className="cp-btn cp-btn-ghost" onClick={() => setReloadKey((n) => n + 1)}><FiRefreshCw /> Retry</button></div>}
       {fileError && <div className="cp-alert">{fileError}<button className="cp-icon-btn" onClick={() => setFileError(null)} aria-label="Dismiss"><FiX /></button></div>}
