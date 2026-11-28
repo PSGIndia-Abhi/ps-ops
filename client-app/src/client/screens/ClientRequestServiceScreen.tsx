@@ -56,11 +56,14 @@ const palette = (t: CrmTheme) => ({
   slateSoft: t.isDark ? 'rgba(255,255,255,0.08)' : '#F1F3F4',
 });
 
+// Each outlet is serviced for one type (from the server): Brigade Group outlets Deep cleaning,
+// everyone else Pest control. BOTH only reads older requests.
 const TYPES: { key: RequestType; label: string; hint: string; Icon: IconType }[] = [
-  { key: 'PEST', label: 'Pest control', hint: 'Cockroach, rodent, mosquito', Icon: ShieldIcon },
-  { key: 'DEEP', label: 'Cleaning', hint: 'Deep clean, floor care', Icon: SparkleIcon },
+  { key: 'PEST', label: 'Pest control', hint: 'Cockroach, rodent, mosquito, termite…', Icon: ShieldIcon },
+  { key: 'DEEP', label: 'Deep cleaning', hint: 'Deep cleaning, floor protection, painting…', Icon: SparkleIcon },
   { key: 'BOTH', label: 'Both', hint: 'Pest control + cleaning', Icon: BriefcaseIcon },
 ];
+const catalogFor = (t: RequestType) => (t === 'DEEP' ? DEEP_CLEANING_SERVICES : PEST_SERVICES);
 
 const SLOTS: { key: RequestSlot; label: string; sub: string }[] = [
   { key: 'ANY', label: 'Any time', sub: 'Flexible' },
@@ -106,6 +109,9 @@ const factory = (t: CrmTheme) => {
     typeLabel: { fontSize: 14.5, fontWeight: '600' as const, color: c.ink, marginTop: 10 },
     typeHint: { fontSize: 11.5, color: c.sub, textAlign: 'center' as const, marginTop: 3, lineHeight: 15 },
     tick: { position: 'absolute' as const, top: 8, right: 8 },
+    oneType: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 14, padding: 14, borderRadius: 18, backgroundColor: t.isDark ? 'rgba(168,199,250,0.10)' : '#F5F8FF', borderWidth: 1.5, borderColor: c.blue },
+    oneTypeLabel: { fontSize: 16, fontWeight: '700' as const, color: c.ink },
+    oneTypeHint: { fontSize: 12.5, color: c.sub, marginTop: 2, lineHeight: 17 },
     // services
     search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, minHeight: 46, paddingHorizontal: 14, borderRadius: 23, backgroundColor: c.white, marginBottom: 12 },
     searchInput: { flex: 1, fontSize: 15, color: c.ink, paddingVertical: 10 },
@@ -294,7 +300,6 @@ export function ClientRequestServiceScreen() {
   const [tab, setTab] = useState<'new' | 'mine'>(params?.tab === 'mine' ? 'mine' : 'new');
   // Form
   const [siteId, setSiteId] = useState(params?.siteId || (outlets.length === 1 ? outlets[0].id : outletId));
-  const [type, setType] = useState<RequestType>('PEST');
   const [picked, setPicked] = useState<string[]>([]);
   const [filter, setFilter] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -314,10 +319,18 @@ export function ClientRequestServiceScreen() {
   const [toCancel, setToCancel] = useState<ServiceRequest | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
-  const fullCatalog = useMemo(
-    () => (type === 'PEST' ? PEST_SERVICES : type === 'DEEP' ? DEEP_CLEANING_SERVICES : [...PEST_SERVICES, ...DEEP_CLEANING_SERVICES]),
-    [type],
+  // The outlet decides the service type; before one is chosen, the type all outlets share
+  // (Pest control if they differ).
+  const typeOf = useCallback(
+    (id: string): RequestType => {
+      const o = outlets.find((x) => x.id === id);
+      if (o) return o.service_type === 'DEEP' ? 'DEEP' : 'PEST';
+      return outlets.length > 0 && outlets.every((x) => x.service_type === 'DEEP') ? 'DEEP' : 'PEST';
+    },
+    [outlets],
   );
+  const type = typeOf(siteId);
+  const fullCatalog = useMemo(() => catalogFor(type), [type]);
   // Groups present for the chosen type, in a fixed order.
   const groups = useMemo(() => {
     const present = new Set(fullCatalog.map((sv) => serviceMeta(sv).group));
@@ -338,7 +351,8 @@ export function ClientRequestServiceScreen() {
 
   const loadList = useCallback(async () => {
     try {
-      const body = await listServiceRequests(outletId || undefined);
+      // All of the client's requests (the Home outlet does not narrow this list).
+      const body = await listServiceRequests();
       setRequests(body.requests);
       setCounts(body.counts);
       setListError(null);
@@ -347,19 +361,21 @@ export function ClientRequestServiceScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [outletId]);
+  }, []);
 
   useEffect(() => {
     loadList();
   }, [loadList]);
 
-  const changeType = (next: RequestType) => {
-    setType(next);
-    setShowAll(false);
-    setGroup('all');
-    // Keep only what still belongs to the new type.
-    const allowed = next === 'PEST' ? PEST_SERVICES : next === 'DEEP' ? DEEP_CLEANING_SERVICES : [...PEST_SERVICES, ...DEEP_CLEANING_SERVICES];
-    setPicked((p) => p.filter((s) => allowed.includes(s)));
+  const changeOutlet = (id: string) => {
+    setSiteId(id);
+    if (typeOf(id) !== type) {
+      setShowAll(false);
+      setGroup('all');
+    }
+    // Keep only what still belongs to the new outlet's type.
+    const allowed = catalogFor(typeOf(id));
+    setPicked((p) => p.filter((sv) => allowed.includes(sv)));
   };
   const toggle = (s: string) => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
 
@@ -428,30 +444,26 @@ export function ClientRequestServiceScreen() {
           </View>
         )}
 
-        {/* ---- service type ---- */}
+        {/* ---- service type: one per outlet, nothing to choose ---- */}
         <View style={styles.step}>
-          <StepHead n={n(1)} title="What do you need?" done />
-          <View style={styles.types}>
-            {TYPES.map((t) => {
-              const on = type === t.key;
-              return (
-                <Pressable key={t.key} onPress={() => changeType(t.key)} style={({ pressed }) => [styles.type, on && styles.typeOn, pressed && styles.pressed]} accessibilityRole="radio" accessibilityState={{ selected: on }}>
-                  {on && (
-                    <View style={styles.tick}>
-                      <Tick color={c.blue} size={18} />
-                    </View>
-                  )}
-                  <View style={[styles.typeIcon, on && styles.typeIconOn]}>
-                    <t.Icon size={22} color={on ? (theme.isDark ? '#0B1B3A' : '#FFFFFF') : c.blue} />
-                  </View>
-                  <Text style={styles.typeLabel}>{t.label}</Text>
-                  <Text style={styles.typeHint} numberOfLines={2}>
+          <StepHead n={n(1)} title="Service type" done />
+          {(() => {
+            const t = TYPES.find((x) => x.key === type) || TYPES[0];
+            return (
+              <View style={styles.oneType} accessibilityLabel={`Service type: ${t.label}`}>
+                <View style={[styles.typeIcon, styles.typeIconOn]}>
+                  <t.Icon size={22} color={theme.isDark ? '#0B1B3A' : '#FFFFFF'} />
+                </View>
+                <View style={styles.flex1}>
+                  <Text style={styles.oneTypeLabel}>{t.label}</Text>
+                  <Text style={styles.oneTypeHint} numberOfLines={2}>
                     {t.hint}
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                </View>
+                <Tick color={c.blue} size={20} />
+              </View>
+            );
+          })()}
         </View>
 
         {/* ---- services ---- */}
@@ -729,7 +741,7 @@ export function ClientRequestServiceScreen() {
       />
       {tab === 'new' ? form : list}
 
-      <OutletSheet visible={outletSheet} onClose={() => setOutletSheet(false)} outlets={outlets} value={siteId} onChange={setSiteId} allowAll={false} />
+      <OutletSheet visible={outletSheet} onClose={() => setOutletSheet(false)} outlets={outlets} value={siteId} onChange={changeOutlet} allowAll={false} />
       <DateSheet
         visible={dateSheet}
         onClose={() => setDateSheet(false)}

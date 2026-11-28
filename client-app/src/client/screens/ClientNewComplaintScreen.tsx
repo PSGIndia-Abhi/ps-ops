@@ -7,7 +7,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { BriefcaseIcon, CameraIcon, ChevronRightIcon, CloseIcon, DocumentIcon, GalleryIcon, PinIcon, PlusIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { AttachSheet, useFilePicker } from '../../helpdesk/ui';
-import { createComplaint, type ComplaintPriority } from '../api';
+import { createComplaint, type ComplaintCategory, type ComplaintPriority } from '../api';
 import { useClientPortal } from '../ClientPortalContext';
 import type { ClientStackParamList } from '../navigation';
 import { OutletSheet } from '../ui/OutletPicker';
@@ -83,6 +83,12 @@ const factory = (t: CrmTheme) => {
     prio: { width: '47.8%' as const, flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 16, backgroundColor: c.white, borderWidth: 1.5, borderColor: 'transparent' },
     prioIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center' as const, justifyContent: 'center' as const },
     prioLabel: { flex: 1, fontSize: 15, fontWeight: '600' as const, color: c.ink },
+    cats: { flexDirection: 'row' as const, gap: 10 },
+    cat: { flex: 1, padding: 12, borderRadius: 18, backgroundColor: c.white, borderWidth: 1.5, borderColor: 'transparent' },
+    catIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center' as const, justifyContent: 'center' as const },
+    catLabel: { fontSize: 15.5, fontWeight: '700' as const, color: c.ink, marginTop: 10 },
+    catHint: { fontSize: 12, color: c.sub, marginTop: 2, lineHeight: 16 },
+    catTick: { position: 'absolute' as const, top: 10, right: 10 },
     files: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 10 },
     tile: { width: 92, height: 92, borderRadius: 18, overflow: 'hidden' as const, backgroundColor: c.white, alignItems: 'center' as const, justifyContent: 'center' as const },
     thumb: { width: '100%' as const, height: '100%' as const },
@@ -106,6 +112,31 @@ const factory = (t: CrmTheme) => {
     sendText: { fontSize: 16, fontWeight: '700' as const, color: t.isDark ? '#0B1B3A' : '#FFFFFF', letterSpacing: 0.2 },
   };
 };
+
+// "Complaint about" tiles (one or both). Accounts is for head-office logins only.
+const CATEGORIES: { key: ComplaintCategory; label: string; hint: string; color: string; soft: string }[] = [
+  { key: 'SERVICE', label: 'Service', hint: 'Treatment, technician, visit…', color: '#0B57D0', soft: '#E3ECFD' },
+  { key: 'ACCOUNTS', label: 'Accounts', hint: 'Invoice, payment, billing…', color: '#00796B', soft: '#E0F4F2' },
+];
+
+function CategoryIcon({ kind, color }: { kind: ComplaintCategory; color: string }) {
+  const s = { fill: 'none', stroke: color, strokeWidth: 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  if (kind === 'SERVICE') {
+    // a wrench
+    return (
+      <Svg width={22} height={22} viewBox="0 0 24 24">
+        <Path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" {...s} />
+      </Svg>
+    );
+  }
+  // a receipt with a rupee sign
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Path d="M6 3h12v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L6 21z" {...s} />
+      <Path d="M9.5 8h5M9.5 10.5h5M11 8c1.7 0 2.6.8 2.6 1.9s-1 1.9-2.6 1.9h-1l3.2 2.8" {...s} />
+    </Svg>
+  );
+}
 
 function StepHead({ n, title, done, right }: { n: number; title: string; done?: boolean; right?: React.ReactNode }) {
   const { styles, theme } = useCrmStyles(factory);
@@ -133,7 +164,7 @@ export function ClientNewComplaintScreen() {
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
   const c = palette(theme);
-  const { outlets, outletId, outletName } = useClientPortal();
+  const { outlets, outletId, outletName, isCompanyAdmin } = useClientPortal();
   const picker = useFilePicker();
 
   const [siteId, setSiteId] = useState(params?.siteId || (outlets.length === 1 ? outlets[0].id : outletId));
@@ -141,6 +172,9 @@ export function ClientNewComplaintScreen() {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState<ComplaintPriority>('MEDIUM');
+  // Outlet logins can only raise Service complaints, so the choice is skipped for them.
+  const [category, setCategory] = useState<ComplaintCategory[]>(isCompanyAdmin ? [] : ['SERVICE']);
+  const toggleCategory = (k: ComplaintCategory) => setCategory((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]));
   const [focus, setFocus] = useState<'subject' | 'details' | null>(null);
   const [outletSheet, setOutletSheet] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -148,16 +182,18 @@ export function ClientNewComplaintScreen() {
   const [preview, setPreview] = useState<number | null>(null);
 
   const needsOutlet = outlets.length > 1;
-  const n = (k: number) => (needsOutlet ? k + 1 : k);
-  const ready = !!siteId && !!subject.trim();
+  const askCategory = isCompanyAdmin;
+  const n = (k: number) => k + (needsOutlet ? 1 : 0) + (askCategory ? 1 : 0);
+  const ready = !!siteId && !!subject.trim() && category.length > 0;
 
   const submit = async () => {
     if (!siteId) return setError('Please choose the outlet.');
+    if (!category.length) return setError('Please choose what the complaint is about: Service or Accounts.');
     if (!subject.trim()) return setError('Please add a short subject.');
     setSaving(true);
     setError(null);
     try {
-      const res = await createComplaint({ subject: subject.trim(), message: message.trim(), priority, siteId, jobId: jobId || undefined, files: picker.files });
+      const res = await createComplaint({ subject: subject.trim(), message: message.trim(), priority, category, siteId, jobId: jobId || undefined, files: picker.files });
       navigation.replace('ClientComplaintDetail', { complaintId: res.id, notice: res.warning || 'Complaint raised - we will get back to you soon' });
     } catch (err) {
       setError((err as Error).message || 'Could not raise the complaint. Please try again.');
@@ -181,6 +217,44 @@ export function ClientNewComplaintScreen() {
                 </Text>
                 <ChevronRightIcon size={18} color={c.sub} />
               </Pressable>
+            </View>
+          )}
+
+          {/* ---- complaint about (head office: Service and / or Accounts) ---- */}
+          {askCategory && (
+            <View style={styles.step}>
+              <StepHead n={needsOutlet ? 2 : 1} title="Complaint about" done={category.length > 0} right={<Text style={styles.stepHint}>One or both</Text>} />
+              <View style={styles.cats}>
+                {CATEGORIES.map((k) => {
+                  const on = category.includes(k.key);
+                  return (
+                    <Pressable
+                      key={k.key}
+                      onPress={() => toggleCategory(k.key)}
+                      style={({ pressed }) => [styles.cat, on && { borderColor: k.color, backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF' }, pressed && styles.pressed]}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: on }}
+                      accessibilityLabel={`${k.label}: ${k.hint}`}
+                    >
+                      {on && (
+                        <View style={styles.catTick}>
+                          <Svg width={20} height={20} viewBox="0 0 24 24">
+                            <Circle cx="12" cy="12" r="11" fill={k.color} />
+                            <Path d="M7.2 12.3l3.2 3.1 6.4-6.6" fill="none" stroke="#FFFFFF" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+                          </Svg>
+                        </View>
+                      )}
+                      <View style={[styles.catIcon, { backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : k.soft }]}>
+                        <CategoryIcon kind={k.key} color={theme.isDark ? c.ink : k.color} />
+                      </View>
+                      <Text style={styles.catLabel}>{k.label}</Text>
+                      <Text style={styles.catHint} numberOfLines={2}>
+                        {k.hint}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           )}
 

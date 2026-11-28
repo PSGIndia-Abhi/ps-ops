@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, StatusBar, Text, View } from 'react-native';
-import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
+import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import { BrandMark } from '../../components/BrandMark';
@@ -11,14 +11,14 @@ import { CrmErrorBanner } from '../../crm/ui/CrmScreen';
 import { initials } from '../../tasks/format';
 import { avatarColor } from '../../tasks/theme';
 import { shadows, spacing, typography } from '../../theme';
-import { getClientDashboard, getUnreadNotificationCount, type ClientDashboard } from '../api';
+import { getClientDashboard, type ClientDashboard } from '../api';
 import { useClientPortal } from '../ClientPortalContext';
 import { RISK_STYLE, SUPPORT_CONTACT, periodRange } from '../format';
 import type { ClientStackParamList } from '../navigation';
 import { ICON_DEEP, SearchGlyph } from '../ui/ClientIcons';
 import { CompanyMonogram } from '../ui/CompanyMonogram';
 import { UserAvatar } from '../ui/UserAvatar';
-import { AuditArt, BookServiceArt, HomeHeroArt, ComplaintArt, DocumentsArt, JobsArt, OutletArt, SupportArt, VisitsArt } from '../ui/IllustratedIcons';
+import { AuditArt, BookServiceArt, HomeHeroArt, ComplaintArt, DocumentsArt, JobsArt, OutletArt, PhotosArt, SupportArt } from '../ui/IllustratedIcons';
 import { OutletSheet } from '../ui/OutletPicker';
 import { PAGE_BG, TONES } from '../ui/page';
 import { HomeOverview, HomeOverviewSkeleton } from '../ui/HomeOverview';
@@ -33,16 +33,6 @@ const HERO = {
 } as const;
 /** Height of the curved edge at the bottom of the hero. */
 const HERO_CURVE = 26;
-
-/** Notification bell (line icon). */
-function BellGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={24} height={24} viewBox="0 0 24 24">
-      <Path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.6 1.6c.4.4.1 1-.4 1H4.8c-.5 0-.8-.6-.4-1z" fill="none" stroke={color} strokeWidth={1.9} strokeLinejoin="round" />
-      <Path d="M10 21.2a2.2 2.2 0 0 0 4 0" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" />
-    </Svg>
-  );
-}
 
 /** Filter / sliders icon for the search bar. */
 function FilterGlyph({ color }: { color: string }) {
@@ -102,8 +92,6 @@ const factory = (t: CrmTheme) => ({
     elevation: 3,
   },
   brandName: { fontSize: 22, fontWeight: '800' as const, color: t.isDark ? '#E6E9F2' : '#16224A', letterSpacing: 0.2 },
-  bell: { width: 44, height: 44, borderRadius: 22, alignItems: 'center' as const, justifyContent: 'center' as const },
-  bellDot: { position: 'absolute' as const, top: 9, right: 10, width: 10, height: 10, borderRadius: 5, backgroundColor: '#E5484D', borderWidth: 2, borderColor: t.isDark ? '#1B2B4A' : '#D3E3FF' },
   searchRow: { paddingHorizontal: spacing.lg, marginTop: 14 },
   search: {
     flexDirection: 'row' as const,
@@ -157,7 +145,7 @@ export function ClientDashboardScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
-  const { portal, outlets, outletId, setOutletId, outletName, companyName } = useClientPortal();
+  const { portal, outlets, outletId, setOutletId, outletName, companyName, isCompanyAdmin } = useClientPortal();
 
   const [outletSheet, setOutletSheet] = useState(false);
   // Home always covers the last 30 days (the "Service health" card with its period picker was removed).
@@ -169,22 +157,8 @@ export function ClientDashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [heroSize, setHeroSize] = useState<{ w: number; h: number } | null>(null);
-  const [unread, setUnread] = useState(0);
   const [pastHero, setPastHero] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-
-  // The bell's red dot: unread notifications, refreshed whenever Home is shown again.
-  useFocusEffect(
-    useCallback(() => {
-      let alive = true;
-      getUnreadNotificationCount()
-        .then((n) => alive && setUnread(n))
-        .catch(() => alive && setUnread(0));
-      return () => {
-        alive = false;
-      };
-    }, []),
-  );
 
   useEffect(() => {
     let alive = true;
@@ -236,7 +210,7 @@ export function ClientDashboardScreen() {
     { key: 'docs', label: 'Documents', Icon: DocumentsArt, onPress: () => navigation.navigate('ClientDocuments') },
     { key: 'audits', label: 'Audit\nreports', Icon: AuditArt, onPress: () => navigation.navigate('ClientAudits') },
     { key: 'outlets', label: 'Outlets', Icon: OutletArt, onPress: () => navigation.navigate('ClientOutlets') },
-    { key: 'visits', label: 'Visits', Icon: VisitsArt, onPress: () => navigation.navigate('Jobs') },
+    { key: 'photos', label: 'Photos', Icon: PhotosArt, onPress: () => navigation.navigate('ClientPhotos') },
     { key: 'support', label: 'Support', Icon: SupportArt, onPress: () => Linking.openURL(`tel:${SUPPORT_CONTACT.phone}`) },
   ];
 
@@ -315,10 +289,6 @@ export function ClientDashboardScreen() {
             <View style={styles.flex1}>
               <Text style={styles.brandName}>BestServe</Text>
             </View>
-            <Pressable onPress={() => navigation.navigate('ClientNotifications')} style={({ pressed }) => [styles.bell, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={unread ? `Notifications, ${unread} new` : 'Notifications'} hitSlop={4}>
-              <BellGlyph color={theme.isDark ? '#E6E9F2' : '#16224A'} />
-              {unread > 0 && <View style={styles.bellDot} />}
-            </Pressable>
             <Pressable onPress={() => navigation.navigate('ClientProfile')} style={({ pressed }) => [styles.tileRing, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Profile">
               <UserAvatar size={44} fallback={<CompanyMonogram name={companyName} colorKey={portal?.companies?.[0]?.id} size={44} style={{ borderRadius: 22 }} />} />
             </Pressable>
@@ -390,6 +360,9 @@ export function ClientDashboardScreen() {
               pendingInvoices={k.pending_invoices}
               overdueInvoices={k.overdue_invoices}
               pendingAmount={k.pending_amount}
+              showInvoices={isCompanyAdmin}
+              missedVisits={k.visits_missed}
+              onMissed={() => navigation.navigate('Jobs')}
               nextVisit={nextVisit}
               onViewAll={openOutlet}
               onComplaints={() => navigation.navigate('Complaints')}

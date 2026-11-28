@@ -347,6 +347,121 @@ export function CertificateArt({ size = 48 }: ArtProps) {
   );
 }
 
+/** Directions: a folded map with a glossy red location pin. */
+export function MapPinArt({ size = 48 }: ArtProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <LinearGradient id="mpMap" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFFFFF" />
+          <Stop offset="1" stopColor="#E3ECFB" />
+        </LinearGradient>
+        <LinearGradient id="mpPin" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#FF7A6B" />
+          <Stop offset="1" stopColor="#D92D3A" />
+        </LinearGradient>
+      </Defs>
+      <Ellipse cx="32" cy="58.5" rx="20" ry="3" fill="#1A3A7A" opacity={0.15} />
+      <Path d="M6 22l16-6 20 6 16-6v34l-16 6-20-6-16 6z" fill="url(#mpMap)" />
+      <Path d="M6 22l16-6 20 6 16-6v34l-16 6-20-6-16 6z" fill="none" stroke="#C9D8F2" strokeWidth={1} />
+      <Path d="M22 16v34M42 22v34" stroke="#C9D8F2" strokeWidth={1.2} />
+      <Path d="M10 42c6-4 10 2 16-2s10-8 16-4 8 2 12-1" fill="none" stroke="#5B9BFF" strokeWidth={2.2} strokeLinecap="round" strokeDasharray="0.1 4.5" />
+      <Path d="M32 6c-6.6 0-11.5 4.9-11.5 11.2 0 7.6 9 15.6 10.6 17a1.3 1.3 0 0 0 1.8 0c1.6-1.4 10.6-9.4 10.6-17C43.5 10.9 38.6 6 32 6z" fill="url(#mpPin)" />
+      <Circle cx="32" cy="17" r="4.2" fill="#FFFFFF" />
+      <Path d="M25 11a8 8 0 0 1 5-3" fill="none" stroke="#FFFFFF" strokeWidth={1.5} strokeLinecap="round" opacity={0.55} />
+    </Svg>
+  );
+}
+
+/** MSDS / safety sheets: a glossy green lab flask with liquid and bubbles. */
+export function MsdsArt({ size = 48 }: ArtProps) {
+  const flask = 'M25 8h14v4h-2v12.5l12.2 21.2A6 6 0 0 1 44 54H20a6 6 0 0 1-5.2-8.3L27 24.5V12h-2z';
+  return (
+    <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <LinearGradient id="msGlass" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFFFFF" />
+          <Stop offset="1" stopColor="#E4F4EC" />
+        </LinearGradient>
+        <LinearGradient id="msLiquid" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#4ADE80" />
+          <Stop offset="1" stopColor="#0E9F5A" />
+        </LinearGradient>
+      </Defs>
+      <Ellipse cx="32" cy="58.5" rx="18" ry="3" fill="#0B5A33" opacity={0.15} />
+      <Path d={flask} fill="url(#msGlass)" />
+      <Path d="M20.4 38h23.2l5.6 7.7A6 6 0 0 1 44 54H20a6 6 0 0 1-5.2-8.3z" fill="url(#msLiquid)" />
+      <Path d={flask} fill="none" stroke="#B5DCC6" strokeWidth={1.2} />
+      <Rect x="24" y="6" width="16" height="5" rx="2.5" fill="#1F8A57" />
+      <Circle cx="27" cy="46" r="2.2" fill="#FFFFFF" opacity={0.6} />
+      <Circle cx="35" cy="49" r="1.5" fill="#FFFFFF" opacity={0.5} />
+      <Circle cx="38" cy="43" r="1.2" fill="#FFFFFF" opacity={0.5} />
+      <Path d="M29.5 14v11.5L19.8 42" fill="none" stroke="#FFFFFF" strokeWidth={1.6} strokeLinecap="round" opacity={0.7} />
+    </Svg>
+  );
+}
+
+/** Quotations: a document with a teal header and a teal check badge. */
+export function QuotationArt({ size = 48 }: ArtProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <LinearGradient id="qtPaper" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFFFFF" />
+          <Stop offset="1" stopColor="#E2F3F2" />
+        </LinearGradient>
+        <LinearGradient id="qtBadge" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#2DD4BF" />
+          <Stop offset="1" stopColor="#0D8A7E" />
+        </LinearGradient>
+      </Defs>
+      <Ellipse cx="30" cy="58.5" rx="17" ry="3" fill="#0B4A45" opacity={0.15} />
+      <Rect x="10" y="7" width="36" height="47" rx="6" fill="url(#qtPaper)" />
+      <Rect x="10" y="7" width="36" height="47" rx="6" fill="none" stroke="#BCDDD9" strokeWidth={1} />
+      <Path d="M16 7h24a6 6 0 0 1 6 6v3H10v-3a6 6 0 0 1 6-6z" fill="#14B8A6" />
+      <Rect x="16" y="23" width="22" height="2.8" rx="1.4" fill="#BFDCD8" />
+      <Rect x="16" y="29.5" width="17" height="2.8" rx="1.4" fill="#BFDCD8" />
+      <Rect x="16" y="36" width="20" height="2.8" rx="1.4" fill="#BFDCD8" />
+      <Circle cx="45" cy="45" r="11" fill="#FFFFFF" />
+      <Circle cx="45" cy="45" r="9" fill="url(#qtBadge)" />
+      <Path d="M40.6 45.2l3 2.9 5.6-5.8" fill="none" stroke="#FFFFFF" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+/** Service photos: a glossy photo card with hills and a sun, a camera badge. */
+export function PhotosArt({ size = 48 }: ArtProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 64 64">
+      <Defs>
+        <LinearGradient id="phSky" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#CFE0FF" />
+          <Stop offset="1" stopColor="#F2F6FF" />
+        </LinearGradient>
+        <LinearGradient id="phHill" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#5B9BFF" />
+          <Stop offset="1" stopColor="#1A56D6" />
+        </LinearGradient>
+        <LinearGradient id="phBadge" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#FF8A7A" />
+          <Stop offset="1" stopColor="#E0394B" />
+        </LinearGradient>
+      </Defs>
+      <Ellipse cx="31" cy="58.5" rx="20" ry="3" fill="#1A3A7A" opacity={0.16} />
+      <Rect x="12" y="6" width="38" height="30" rx="6" fill="#DCE6F8" transform="rotate(-8 31 21)" />
+      <Rect x="8" y="14" width="44" height="38" rx="7" fill="#FFFFFF" />
+      <Rect x="12" y="18" width="36" height="28" rx="4" fill="url(#phSky)" />
+      <Circle cx="40" cy="25" r="3.6" fill="#FFC93C" />
+      <Path d="M12 41l9-10 7 7 6-5 14 12v1a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" fill="url(#phHill)" />
+      <Circle cx="48" cy="48" r="10" fill="#FFFFFF" />
+      <Circle cx="48" cy="48" r="8" fill="url(#phBadge)" />
+      <Rect x="43.5" y="45" width="9" height="6.5" rx="1.6" fill="none" stroke="#FFFFFF" strokeWidth={1.5} />
+      <Circle cx="48" cy="48.2" r="1.8" fill="none" stroke="#FFFFFF" strokeWidth={1.4} />
+      <Path d="M46 45l.8-1.4h2.4L50 45" fill="none" stroke="#FFFFFF" strokeWidth={1.3} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 /**
  * Home hero illustration in the illustrated style: gradient buildings with lit windows, a glossy
  * blue shield with a tick, a green leaf drop and gold sparkles, on a soft ground shadow.

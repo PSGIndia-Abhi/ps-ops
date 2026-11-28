@@ -8,8 +8,9 @@ import { formatDate, formatMoney, serviceLabel } from '../format';
 import { AuditArt, ComplaintArt, InvoiceArt, VisitsArt } from './IllustratedIcons';
 
 /**
- * Home's Overview: three pastel stat cards (Complaints, Audit, Documents) and an Upcoming visit
- * banner. Every number comes from the dashboard / documents APIs - no made-up trends.
+ * Home's Overview: three pastel stat cards (Complaints, Audit risk, and Invoices due for head
+ * office or Missed visits for outlet logins - invoices are head-office only) and an Upcoming
+ * visit banner. Every number comes from the dashboard API - no made-up trends.
  */
 
 type Tone = 'good' | 'warn' | 'bad' | 'muted';
@@ -20,6 +21,10 @@ interface Props {
   pendingInvoices: number;
   overdueInvoices: number;
   pendingAmount: number;
+  /** Head office sees invoices; outlet logins see missed visits instead. */
+  showInvoices: boolean;
+  missedVisits: number;
+  onMissed: () => void;
   nextVisit: UpcomingVisit | undefined;
   onViewAll: () => void;
   onComplaints: () => void;
@@ -148,16 +153,29 @@ export function HomeOverview(p: Props) {
           border="#E1D7FB"
           onPress={p.onAudits}
         />
-        <StatCard
-          Art={InvoiceArt}
-          value={String(p.pendingInvoices)}
-          label={p.pendingInvoices === 1 ? 'Invoice due' : 'Invoices due'}
-          line={invoiceLine}
-          tone={invoiceTone}
-          bg="#ECF3FF"
-          border="#D3E2FB"
-          onPress={p.onInvoices}
-        />
+        {p.showInvoices ? (
+          <StatCard
+            Art={InvoiceArt}
+            value={String(p.pendingInvoices)}
+            label={p.pendingInvoices === 1 ? 'Invoice due' : 'Invoices due'}
+            line={invoiceLine}
+            tone={invoiceTone}
+            bg="#ECF3FF"
+            border="#D3E2FB"
+            onPress={p.onInvoices}
+          />
+        ) : (
+          <StatCard
+            Art={VisitsArt}
+            value={String(p.missedVisits)}
+            label="Missed visits"
+            line={p.missedVisits > 0 ? 'Needs attention' : 'All clear'}
+            tone={p.missedVisits > 0 ? 'bad' : 'good'}
+            bg="#ECF3FF"
+            border="#D3E2FB"
+            onPress={p.onMissed}
+          />
+        )}
       </View>
 
       {/* Upcoming visit */}

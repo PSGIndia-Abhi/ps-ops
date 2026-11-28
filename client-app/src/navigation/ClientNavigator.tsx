@@ -24,6 +24,7 @@ import { ClientNewComplaintScreen } from '../client/screens/ClientNewComplaintSc
 import { ClientComplaintDetailScreen } from '../client/screens/ClientComplaintDetailScreen';
 import { ClientSearchScreen } from '../client/screens/ClientSearchScreen';
 import { ClientNotificationsScreen } from '../client/screens/ClientNotificationsScreen';
+import { ClientPhotosScreen } from '../client/screens/ClientPhotosScreen';
 import { useClientPush } from '../client/push';
 import { ClientHomeSkeletonScreen } from '../client/ui/skeletons';
 import { ClientChangePasswordScreen } from '../client/screens/ClientChangePasswordScreen';
@@ -92,6 +93,7 @@ export function ClientNavigator() {
           <Stack.Screen name="ClientRequestService" component={ClientRequestServiceScreen} options={{ animation: 'slide_from_bottom' }} />
           <Stack.Screen name="ClientDocuments" component={ClientDocumentsScreenRoute} />
           <Stack.Screen name="ClientAudits" component={ClientAuditsScreen} />
+          <Stack.Screen name="ClientPhotos" component={ClientPhotosScreen} />
           <Stack.Screen name="ClientOutlets" component={ClientOutletsScreen} />
           <Stack.Screen name="ClientOutletDetail" component={ClientOutletDetailScreen} />
           <Stack.Screen name="ClientSearch" component={ClientSearchScreen} options={{ animation: 'fade' }} />

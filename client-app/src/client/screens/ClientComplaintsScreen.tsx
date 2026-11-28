@@ -1,91 +1,134 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { brandRefreshControl, RefreshBanner } from '../../components/BrandRefresh';
-import { CheckCircleIcon, CloseIcon, PlusIcon } from '../../components/icons';
+import { CloseIcon, PlusIcon } from '../../components/icons';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmErrorBanner, CrmSkeleton } from '../../crm/ui/CrmScreen';
-import { listComplaints, type ClientComplaint, type ComplaintListResponse, type ComplaintStatusFilter } from '../api';
+import {
+  listComplaints,
+  type ClientComplaint,
+  type ComplaintCategory,
+  type ComplaintListResponse,
+  type ComplaintPriority,
+  type ComplaintStage,
+  type ComplaintStatusFilter,
+} from '../api';
+import { CATEGORY_LABEL, PRIORITY_LABEL, STAGE_TONE, stageLabel, stageOf } from '../complaints';
+import { Popup } from '../ui/Popup';
 import { useClientPortal } from '../ClientPortalContext';
-import { formatDate, relativeDay } from '../format';
+import { useAuth } from '../../auth/AuthContext';
+import { getSeenMap, isUnread } from '../seen';
+import { relativeDay } from '../format';
 import type { ClientStackParamList } from '../navigation';
+import { ComplaintArt } from '../ui/IllustratedIcons';
 import { OutletPicker } from '../ui/OutletPicker';
 import { ClientPage } from '../ui/page';
 
-const TABS: { key: ComplaintStatusFilter; label: string }[] = [
-  { key: 'open', label: 'Open' },
-  { key: 'resolved', label: 'Resolved' },
+const BLUE = '#0B57D0';
+
+// Status tabs: count per stage; tap to filter.
+const STATUS_TABS: { key: 'all' | ComplaintStage; label: string }[] = [
   { key: 'all', label: 'All' },
+  { key: 'OPEN', label: 'Open' },
+  { key: 'IN_PROGRESS', label: 'In progress' },
+  { key: 'VISIT_SCHEDULED', label: 'Visit scheduled' },
+  { key: 'RESOLVED', label: 'Resolved' },
+  { key: 'CLOSED', label: 'Closed' },
 ];
-
-const PRIORITY: Record<string, { label: string; color: string }> = {
-  LOW: { label: 'Low', color: '#5F6368' },
-  MEDIUM: { label: 'Normal', color: '#0B57D0' },
-  HIGH: { label: 'High', color: '#B06000' },
-  URGENT: { label: 'Urgent', color: '#B3261E' },
-};
-
-const palette = (t: CrmTheme) => ({
-  page: t.isDark ? t.background : '#FFFFFF',
-  ink: t.isDark ? '#E6E7EA' : '#1B1C1F',
-  sub: t.isDark ? '#A3A7AE' : '#5E6470',
-  faint: t.isDark ? '#6E737C' : '#9AA1AD',
-  blue: t.isDark ? '#A8C7FA' : '#0B57D0',
-  blueSoft: t.isDark ? 'rgba(168,199,250,0.16)' : '#E3ECFD',
-  tint: t.isDark ? t.surfaceAlt : '#F2F5FB',
-  white: t.isDark ? t.surface : '#FFFFFF',
-  amber: t.isDark ? '#FDD663' : '#B06000',
-  amberSoft: t.isDark ? 'rgba(253,214,99,0.14)' : '#FEF3E0',
-  green: t.isDark ? '#81C995' : '#188038',
-  greenSoft: t.isDark ? 'rgba(129,201,149,0.14)' : '#E6F4EA',
-});
+const PRIORITIES: (ComplaintPriority | '')[] = ['', 'URGENT', 'HIGH', 'MEDIUM', 'LOW'];
+const CATEGORIES: (ComplaintCategory | '')[] = ['', 'SERVICE', 'ACCOUNTS'];
 
 const factory = (t: CrmTheme) => {
-  const c = palette(t);
+  const ink = t.isDark ? '#E6E7EA' : '#1B1C1F';
+  const sub = t.isDark ? '#A3A7AE' : '#5E6470';
+  const faint = t.isDark ? '#6E737C' : '#9AA1AD';
+  const blue = t.isDark ? '#A8C7FA' : BLUE;
+  const line = t.isDark ? 'rgba(255,255,255,0.10)' : '#E6EBF3';
+  const border = t.isDark ? 'rgba(168,199,250,0.35)' : '#A9C4F5';
   return {
     flex1: { flex: 1 },
     pressed: { opacity: 0.65 },
     head: { paddingHorizontal: 16 },
-    stats: { flexDirection: 'row' as const, gap: 10, marginTop: 4 },
-    stat: { flex: 1, borderRadius: 20, padding: 14, borderWidth: 1.5, borderColor: 'transparent' },
-    statOn: { borderColor: c.blue },
-    statTop: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const },
-    statValue: { fontSize: 26, fontWeight: '600' as const, color: c.ink },
-    statLabel: { fontSize: 13.5, color: c.sub, marginTop: 2 },
-    statIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: c.white },
-    search: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, minHeight: 50, paddingHorizontal: 16, borderRadius: 25, backgroundColor: c.tint, marginTop: 6 },
-    searchInput: { flex: 1, fontSize: 15, color: c.ink, paddingVertical: 0 },
-    outlet: { marginTop: 12 },
-    tabs: { flexDirection: 'row' as const, padding: 4, borderRadius: 999, backgroundColor: c.tint, marginTop: 14, marginBottom: 6 },
-    tab: { flex: 1, minHeight: 38, borderRadius: 999, alignItems: 'center' as const, justifyContent: 'center' as const, flexDirection: 'row' as const, gap: 6 },
-    tabOn: { backgroundColor: c.white, ...t.cardShadow },
-    tabText: { fontSize: 14, fontWeight: '500' as const, color: c.sub },
-    tabTextOn: { color: c.ink, fontWeight: '700' as const },
-    tabCount: { fontSize: 12.5, color: c.faint },
-    tabCountOn: { color: c.blue, fontWeight: '700' as const },
-    error: { marginTop: 10 },
+    // search + filter (same look as Documents)
+    top: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, marginTop: 4 },
+    search: { flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10, height: 50, paddingHorizontal: 16, borderRadius: 25, backgroundColor: t.isDark ? t.surface : '#FFFFFF', borderWidth: 1.5, borderColor: border },
+    searchFocused: { borderColor: blue, shadowColor: BLUE, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.14, shadowRadius: 8, elevation: 3 },
+    searchInput: { flex: 1, fontSize: 15, color: ink, paddingVertical: 0 },
+    filterBtn: { width: 50, height: 50, borderRadius: 25, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.isDark ? t.surface : '#FFFFFF', borderWidth: 1.5, borderColor: border },
+    filterBtnOn: { backgroundColor: blue, borderColor: blue },
+    outlet: { marginTop: 10 },
+    active: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 8, marginTop: 10 },
+    activeChip: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, paddingLeft: 12, paddingRight: 8, height: 32, borderRadius: 16, backgroundColor: t.isDark ? 'rgba(168,199,250,0.16)' : '#E3ECFD' },
+    activeText: { fontSize: 13, fontWeight: '600' as const, color: blue },
+    // status tabs (underline)
+    tabsWrap: { marginTop: 12, borderBottomWidth: 1, borderBottomColor: line },
+    tabs: { paddingHorizontal: 12 },
+    tab: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 12, flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+    tabText: { fontSize: 14.5, fontWeight: '500' as const, color: sub },
+    tabTextOn: { color: ink, fontWeight: '700' as const },
+    tabCount: { fontSize: 13, fontWeight: '600' as const, color: faint },
+    tabCountOn: { color: blue },
+    tabBar: { position: 'absolute' as const, left: 10, right: 10, bottom: -1, height: 3, borderRadius: 2, backgroundColor: blue },
+    error: { marginTop: 10, paddingHorizontal: 16 },
+    // chat-style rows
     list: { paddingBottom: 120 },
-    card: { marginHorizontal: 16, marginTop: 10, backgroundColor: c.tint, borderRadius: 22, padding: 14 },
-    cardTop: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: 12 },
-    cardIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center' as const, justifyContent: 'center' as const },
-    title: { fontSize: 15.5, fontWeight: '600' as const, color: c.ink, lineHeight: 21 },
-    meta: { fontSize: 13, color: c.sub, marginTop: 3 },
-    when: { fontSize: 12.5, color: c.faint, marginTop: 2 },
-    tags: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 6, marginTop: 12, marginLeft: 54 },
-    tag: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: c.white },
-    tagDot: { width: 7, height: 7, borderRadius: 4 },
-    tagText: { fontSize: 12.5, fontWeight: '600' as const },
-    reply: { backgroundColor: c.blue },
-    replyText: { color: t.isDark ? '#0B1B3A' : '#FFFFFF' },
-    empty: { alignItems: 'center' as const, paddingTop: 48, paddingHorizontal: 28 },
-    emptyIcon: { width: 84, height: 84, borderRadius: 42, backgroundColor: c.greenSoft, alignItems: 'center' as const, justifyContent: 'center' as const },
-    emptyTitle: { fontSize: 18, fontWeight: '600' as const, color: c.ink, marginTop: 16 },
-    emptySub: { fontSize: 14.5, color: c.sub, textAlign: 'center' as const, marginTop: 6, lineHeight: 21 },
-    footer: { paddingVertical: 18, alignItems: 'center' as const },
-    footerText: { fontSize: 12.5, color: c.faint },
-    skeleton: { marginHorizontal: 16, marginTop: 10 },
+    row: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 14, paddingHorizontal: 16, paddingVertical: 18, backgroundColor: t.isDark ? t.background : '#FFFFFF' },
+    rowPressed: { backgroundColor: t.isDark ? 'rgba(255,255,255,0.05)' : '#F4F6FA' },
+    divider: { height: 1, backgroundColor: line, marginLeft: 16 + 58 + 14 },
+    avatar: {
+      width: 58,
+      height: 58,
+      borderRadius: 29,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      borderWidth: 2,
+      borderColor: t.isDark ? 'rgba(255,255,255,0.12)' : '#FFFFFF',
+      overflow: 'hidden' as const,
+      shadowColor: '#1A2B5C',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: t.isDark ? 0 : 0.12,
+      shadowRadius: 6,
+      elevation: 3,
+      backgroundColor: t.isDark ? t.surface : '#FFFFFF',
+    },
+    avatarBg: { position: 'absolute' as const, left: 0, top: 0 },
+    rowMain: { flex: 1, minWidth: 0 },
+    title: { fontSize: 17, fontWeight: '700' as const, color: ink },
+    titleUnread: { fontWeight: '800' as const },
+    subRow: { flexDirection: 'row' as const, alignItems: 'center' as const, marginTop: 6 },
+    dot: { width: 7, height: 7, borderRadius: 4, marginRight: 6 },
+    subText: { flexShrink: 1, fontSize: 14.5, color: sub },
+    subTextUnread: { color: ink },
+    subStatus: { fontWeight: '600' as const },
+    rowSide: { alignItems: 'flex-end' as const, gap: 6, minWidth: 56 },
+    when: { fontSize: 13, color: faint },
+    whenUnread: { color: blue, fontWeight: '700' as const },
+    badges: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6, minHeight: 20 },
+    unread: { width: 12, height: 12, borderRadius: 6, backgroundColor: blue },
+    unreadText: { fontSize: 11, fontWeight: '800' as const, color: t.isDark ? '#0B1B3A' : '#FFFFFF' },
+    urgent: { width: 20, height: 20, borderRadius: 10, alignItems: 'center' as const, justifyContent: 'center' as const, borderWidth: 1.5 },
+    urgentText: { fontSize: 11, fontWeight: '900' as const },
+    empty: { alignItems: 'center' as const, paddingTop: 40, paddingHorizontal: 28 },
+    emptyArt: { width: 104, height: 104, borderRadius: 52, backgroundColor: t.isDark ? t.surfaceAlt : '#F2F5FB', alignItems: 'center' as const, justifyContent: 'center' as const },
+    emptyTitle: { fontSize: 18, fontWeight: '700' as const, color: ink, marginTop: 16 },
+    emptySub: { fontSize: 14.5, color: sub, textAlign: 'center' as const, marginTop: 6, lineHeight: 21 },
+    more: { paddingVertical: 20, alignItems: 'center' as const },
+    skeletonRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 14, paddingHorizontal: 16, paddingVertical: 14 },
+    // filter popup
+    fGroup: { fontSize: 13, fontWeight: '700' as const, color: sub, letterSpacing: 0.4, marginBottom: 8 },
+    fPills: { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 8, marginBottom: 18 },
+    fPill: { paddingHorizontal: 14, minHeight: 40, borderRadius: 20, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.isDark ? t.surfaceAlt : '#F2F5FB', borderWidth: 1.5, borderColor: 'transparent' },
+    fPillOn: { backgroundColor: t.isDark ? 'rgba(168,199,250,0.16)' : '#E3ECFD', borderColor: blue },
+    fPillText: { fontSize: 14, fontWeight: '500' as const, color: ink },
+    fPillTextOn: { color: blue, fontWeight: '700' as const },
+    fActions: { flexDirection: 'row' as const, gap: 10 },
+    fClear: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.isDark ? t.surfaceAlt : '#F2F5FB' },
+    fClearText: { fontSize: 15, fontWeight: '600' as const, color: ink },
+    fDone: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: blue },
+    fDoneText: { fontSize: 15, fontWeight: '700' as const, color: t.isDark ? '#0B1B3A' : '#FFFFFF' },
     fab: {
       position: 'absolute' as const,
       right: 18,
@@ -96,7 +139,7 @@ const factory = (t: CrmTheme) => {
       paddingRight: 22,
       height: 56,
       borderRadius: 28,
-      backgroundColor: c.blue,
+      backgroundColor: blue,
       shadowColor: '#0B3A8C',
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 0.3,
@@ -107,11 +150,11 @@ const factory = (t: CrmTheme) => {
   };
 };
 
-/** The complaint mark: a speech bubble with "!" (open), "..." (in progress) or a tick (resolved). */
-function ComplaintIcon({ state, color }: { state: 'open' | 'progress' | 'done'; color: string }) {
+/** The complaint mark: a speech bubble with "!" (open), "..." (in progress), a calendar (visit) or a tick (resolved). */
+function ComplaintIcon({ state, color }: { state: 'open' | 'progress' | 'visit' | 'done'; color: string }) {
   const s = { fill: 'none', stroke: color, strokeWidth: 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   return (
-    <Svg width={22} height={22} viewBox="0 0 24 24">
+    <Svg width={26} height={26} viewBox="0 0 24 24">
       <Path d="M6 4h12a3 3 0 0 1 3 3v7.5a3 3 0 0 1-3 3h-5.2l-4.3 3.2c-.4.3-1 0-1-.5v-2.7H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" {...s} />
       {state === 'open' && (
         <>
@@ -127,6 +170,22 @@ function ComplaintIcon({ state, color }: { state: 'open' | 'progress' | 'done'; 
         </>
       )}
       {state === 'done' && <Path d="M8.3 10.9l2.5 2.4 4.9-5" {...s} strokeWidth={2.2} />}
+      {state === 'visit' && (
+        <>
+          <Path d="M8 8.5h8v6H8z" {...s} strokeWidth={1.7} />
+          <Path d="M8 10.6h8M10 7.2v2M14 7.2v2" {...s} strokeWidth={1.7} />
+        </>
+      )}
+    </Svg>
+  );
+}
+
+function FilterGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Circle cx="16" cy="7" r="2.2" fill="none" stroke={color} strokeWidth={2} />
+      <Circle cx="10" cy="17" r="2.2" fill="none" stroke={color} strokeWidth={2} />
     </Svg>
   );
 }
@@ -140,17 +199,24 @@ function SearchGlass({ color }: { color: string }) {
   );
 }
 
-/** Complaints (web: PortalComplaints) - summary, search, Open / Resolved / All, and a raise button. */
+/** Complaints (web: PortalComplaints) - search, status tabs, type / priority filter, and a raise button. */
 export function ClientComplaintsScreen() {
   const navigation = useNavigation<NavigationProp<ClientStackParamList>>();
   const insets = useSafeAreaInsets();
   const { styles, theme } = useCrmStyles(factory);
-  const c = palette(theme);
-  const { outlets, outletId, setOutletId, outletName } = useClientPortal();
+  const { outlets, outletId, setOutletId, outletName, isCompanyAdmin } = useClientPortal();
+  const { user, session } = useAuth();
+  const seenScope = String(user?.id ?? session?.userId ?? '');
+  const [seen, setSeen] = useState<Record<string, number>>({});
+  const blue = theme.isDark ? '#A8C7FA' : BLUE;
 
-  const [status, setStatus] = useState<ComplaintStatusFilter>('open');
+  const [status, setStatus] = useState<ComplaintStatusFilter>('all');
+  const [priority, setPriority] = useState<ComplaintPriority | ''>('');
+  const [category, setCategory] = useState<ComplaintCategory | ''>('');
+  const [filterOpen, setFilterOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [focused, setFocused] = useState(false);
   const [items, setItems] = useState<ClientComplaint[]>([]);
   const [meta, setMeta] = useState<{ total: number; counts: Partial<ComplaintListResponse['counts']> }>({ total: 0, counts: {} });
   const [page, setPage] = useState(1);
@@ -164,7 +230,7 @@ export function ClientComplaintsScreen() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const filterKey = `${status}|${search}|${outletId}|${reloadKey}`;
+  const filterKey = `${status}|${priority}|${category}|${search}|${outletId}|${reloadKey}`;
   const lastKey = useRef(filterKey);
   if (lastKey.current !== filterKey) {
     lastKey.current = filterKey;
@@ -174,7 +240,7 @@ export function ClientComplaintsScreen() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    listComplaints({ page, siteId: outletId || undefined, status, search })
+    listComplaints({ page, siteId: outletId || undefined, status, search, priority, category })
       .then((body) => {
         if (!alive) return;
         setItems((prev) => (page === 1 ? body.complaints : [...prev, ...body.complaints]));
@@ -190,18 +256,19 @@ export function ClientComplaintsScreen() {
     return () => {
       alive = false;
     };
-  }, [filterKey, page, status, search, outletId]);
+  }, [filterKey, page, status, search, outletId, priority, category]);
 
-  // Back from a complaint (a reply, closed, a new one): show the latest.
+  // Back from a complaint (a reply, a new one): show the latest, and drop "new" from what was opened.
   const first = useRef(true);
   useFocusEffect(
     useCallback(() => {
+      getSeenMap(seenScope).then(setSeen);
       if (first.current) {
         first.current = false;
         return;
       }
       setReloadKey((n) => n + 1);
-    }, []),
+    }, [seenScope]),
   );
 
   const onRefresh = useCallback(() => {
@@ -212,36 +279,79 @@ export function ClientComplaintsScreen() {
   const firstLoad = loading && page === 1 && items.length === 0;
   const canLoadMore = !loading && items.length < meta.total;
   const raise = () => navigation.navigate('ClientNewComplaint', {});
+  const filtersOn = !!priority || !!category;
 
   const header = (
-    <View style={styles.head}>
-      <View style={styles.search}>
-        <SearchGlass color={c.sub} />
-        <TextInput value={searchInput} onChangeText={setSearchInput} placeholder="Search complaints" placeholderTextColor={c.faint} style={styles.searchInput} returnKeyType="search" />
-        {!!searchInput && (
-          <Pressable onPress={() => setSearchInput('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
-            <CloseIcon size={16} color={c.sub} />
+    <View>
+      <View style={styles.head}>
+        <View style={styles.top}>
+          <View style={[styles.search, focused && styles.searchFocused]}>
+            <SearchGlass color={focused ? blue : theme.textMuted} />
+            <TextInput
+              value={searchInput}
+              onChangeText={setSearchInput}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="Search complaints"
+              placeholderTextColor={theme.textMuted}
+              style={styles.searchInput}
+              returnKeyType="search"
+            />
+            {!!searchInput && (
+              <Pressable onPress={() => setSearchInput('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+                <CloseIcon size={16} color={theme.textMuted} />
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            onPress={() => setFilterOpen(true)}
+            style={({ pressed }) => [styles.filterBtn, filtersOn && styles.filterBtnOn, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Filter by type and priority"
+          >
+            <FilterGlyph color={filtersOn ? (theme.isDark ? '#0B1B3A' : '#FFFFFF') : blue} />
           </Pressable>
+        </View>
+
+        {outlets.length > 1 && (
+          <View style={styles.outlet}>
+            <OutletPicker outlets={outlets} value={outletId} onChange={setOutletId} />
+          </View>
+        )}
+
+        {filtersOn && (
+          <View style={styles.active}>
+            {!!category && (
+              <Pressable onPress={() => setCategory('')} style={({ pressed }) => [styles.activeChip, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Remove ${CATEGORY_LABEL[category]} filter`}>
+                <Text style={styles.activeText}>{CATEGORY_LABEL[category]}</Text>
+                <CloseIcon size={14} color={blue} />
+              </Pressable>
+            )}
+            {!!priority && (
+              <Pressable onPress={() => setPriority('')} style={({ pressed }) => [styles.activeChip, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel={`Remove ${PRIORITY_LABEL[priority]} filter`}>
+                <Text style={styles.activeText}>{PRIORITY_LABEL[priority]} priority</Text>
+                <CloseIcon size={14} color={blue} />
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
 
-      {outlets.length > 1 && (
-        <View style={styles.outlet}>
-          <OutletPicker outlets={outlets} value={outletId} onChange={setOutletId} />
-        </View>
-      )}
-
-      <View style={styles.tabs}>
-        {TABS.map((tb) => {
-          const on = status === tb.key;
-          const count = meta.counts[tb.key];
-          return (
-            <Pressable key={tb.key} onPress={() => setStatus(tb.key)} style={[styles.tab, on && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
-              <Text style={[styles.tabText, on && styles.tabTextOn]}>{tb.label}</Text>
-              {count != null && <Text style={[styles.tabCount, on && styles.tabCountOn]}>{count}</Text>}
-            </Pressable>
-          );
-        })}
+      {/* Status tabs with counts */}
+      <View style={styles.tabsWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+          {STATUS_TABS.map((tb) => {
+            const on = status === tb.key;
+            const n = meta.counts[tb.key] ?? 0;
+            return (
+              <Pressable key={tb.key} onPress={() => setStatus(tb.key)} style={({ pressed }) => [styles.tab, pressed && styles.pressed]} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${tb.label}, ${n}`}>
+                <Text style={[styles.tabText, on && styles.tabTextOn]}>{tb.label}</Text>
+                <Text style={[styles.tabCount, on && styles.tabCountOn]}>{n}</Text>
+                {on && <View style={styles.tabBar} />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {!!error && (
@@ -253,42 +363,43 @@ export function ClientComplaintsScreen() {
   );
 
   const renderItem = ({ item: cp }: { item: ClientComplaint }) => {
-    const open = cp.status === 'OPEN' || cp.status === 'IN_PROGRESS';
-    const statusLabel = cp.status === 'IN_PROGRESS' ? 'In progress' : open ? 'Open' : cp.status === 'CLOSED' ? 'Closed' : 'Resolved';
-    const progress = cp.status === 'IN_PROGRESS';
-    const stColor = progress ? c.blue : open ? c.amber : c.green;
-    const pr = cp.priority ? PRIORITY[cp.priority] : null;
+    const stage = stageOf(cp.status);
+    const tone = STAGE_TONE[stage];
+    const open = stage === 'OPEN' || stage === 'IN_PROGRESS' || stage === 'VISIT_SCHEDULED';
+    const icon = stage === 'IN_PROGRESS' ? 'progress' : stage === 'VISIT_SCHEDULED' ? 'visit' : open ? 'open' : 'done';
+    // New = BestServe wrote last, and after this complaint was last opened on this phone.
+    const newReply = cp.awaiting_you && stage !== 'CLOSED' && isUnread(seen, cp.id, cp.last_message_at || cp.updated_at);
     return (
-      <Pressable onPress={() => navigation.navigate('ClientComplaintDetail', { complaintId: cp.id })} style={({ pressed }) => [styles.card, pressed && styles.pressed]} accessibilityRole="button">
-        <View style={styles.cardTop}>
-          <View style={[styles.cardIcon, { backgroundColor: progress ? c.blueSoft : open ? c.amberSoft : c.greenSoft }]}>
-            <ComplaintIcon state={progress ? 'progress' : open ? 'open' : 'done'} color={progress ? c.blue : open ? c.amber : c.green} />
-          </View>
-          <View style={styles.flex1}>
-            <Text style={styles.title} numberOfLines={2}>
-              {cp.subject}
-            </Text>
-            <Text style={styles.meta} numberOfLines={1}>
-              {[cp.site_name, cp.job_code ? `Job #${cp.job_code}` : null, formatDate(cp.created_at, { day: 'numeric', month: 'short' })].filter(Boolean).join(' · ')}
-            </Text>
-          </View>
-          <Text style={styles.when}>{relativeDay(cp.last_message_at || cp.updated_at || cp.created_at)}</Text>
+      <Pressable
+        onPress={() => navigation.navigate('ClientComplaintDetail', { complaintId: cp.id })}
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`${cp.subject}, ${stageLabel(stage)}${newReply ? ', new reply from BestServe' : ''}`}
+      >
+        <View style={styles.avatar}>
+          <Svg width={54} height={54} style={styles.avatarBg}>
+            <Defs>
+              <LinearGradient id={`av-${cp.id}`} x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0" stopColor={theme.isDark ? '#2A3352' : '#FFFFFF'} />
+                <Stop offset="1" stopColor={theme.isDark ? '#1C2440' : tone.bg} />
+              </LinearGradient>
+            </Defs>
+            <Circle cx="27" cy="27" r="27" fill={`url(#av-${cp.id})`} />
+          </Svg>
+          <ComplaintIcon state={icon} color={tone.fg} />
         </View>
-        <View style={styles.tags}>
-          <View style={styles.tag}>
-            <View style={[styles.tagDot, { backgroundColor: stColor }]} />
-            <Text style={[styles.tagText, { color: stColor }]}>{statusLabel}</Text>
-          </View>
-          {!!pr && open && (
-            <View style={styles.tag}>
-              <Text style={[styles.tagText, { color: theme.isDark ? c.sub : pr.color }]}>{pr.label}</Text>
-            </View>
-          )}
-          {open && cp.awaiting_you && (
-            <View style={[styles.tag, styles.reply]}>
-              <Text style={[styles.tagText, styles.replyText]}>New reply</Text>
-            </View>
-          )}
+        <View style={styles.rowMain}>
+          <Text style={[styles.title, newReply && styles.titleUnread]} numberOfLines={1}>
+            {cp.subject}
+          </Text>
+          <Text style={[styles.subText, styles.subRow, newReply && styles.subTextUnread]} numberOfLines={1}>
+            <Text style={[styles.subStatus, { color: tone.fg }]}>{stageLabel(stage)}</Text>
+            {cp.site_name ? ` · ${cp.site_name}` : ''}
+          </Text>
+        </View>
+        <View style={styles.rowSide}>
+          <Text style={[styles.when, newReply && styles.whenUnread]}>{relativeDay(cp.last_message_at || cp.updated_at || cp.created_at)}</Text>
+          <View style={styles.badges}>{newReply && <View style={styles.unread} accessibilityLabel="New reply" />}</View>
         </View>
       </Pressable>
     );
@@ -300,6 +411,7 @@ export function ClientComplaintsScreen() {
         data={firstLoad ? [] : items}
         keyExtractor={(cp) => cp.id}
         renderItem={renderItem}
+        ItemSeparatorComponent={() => <View style={styles.divider} />}
         ListHeaderComponent={
           <>
             <RefreshBanner refreshing={refreshing} />
@@ -314,41 +426,75 @@ export function ClientComplaintsScreen() {
         ListEmptyComponent={
           firstLoad ? (
             <View>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <CrmSkeleton key={i} height={104} radius={22} style={styles.skeleton} />
+              {Array.from({ length: 6 }).map((_, i) => (
+                <View key={i} style={styles.skeletonRow}>
+                  <CrmSkeleton width={58} height={58} radius={29} />
+                  <View style={styles.flex1}>
+                    <CrmSkeleton height={15} width="65%" />
+                    <CrmSkeleton height={12} width="40%" style={{ marginTop: 8 }} />
+                  </View>
+                </View>
               ))}
             </View>
           ) : error ? undefined : (
             <View style={styles.empty}>
-              <View style={styles.emptyIcon}>
-                <CheckCircleIcon size={36} color={c.green} />
+              <View style={styles.emptyArt}>
+                <ComplaintArt size={64} />
               </View>
-              <Text style={styles.emptyTitle}>{search ? 'No matches' : status === 'open' ? 'All clear' : 'Nothing here yet'}</Text>
+              <Text style={styles.emptyTitle}>{search || filtersOn || status !== 'all' ? 'No complaints found' : 'No complaints yet'}</Text>
               <Text style={styles.emptySub}>
-                {search ? 'Nothing matches your search.' : status === 'open' ? 'No open complaints. If something is not right, let us know.' : 'Complaints you raise will be listed here.'}
+                {search || filtersOn || status !== 'all' ? 'Try another filter.' : 'Everything looks fine. If something is not right at an outlet, let us know.'}
               </Text>
             </View>
           )
         }
-        ListFooterComponent={
-          items.length > 0 ? (
-            <View style={styles.footer}>
-              {loading && page > 1 ? (
-                <ActivityIndicator color={c.blue} />
-              ) : (
-                <Text style={styles.footerText}>
-                  {items.length} of {meta.total}
-                </Text>
-              )}
-            </View>
-          ) : undefined
-        }
+        ListFooterComponent={loading && page > 1 ? <View style={styles.more}><ActivityIndicator color={blue} /></View> : undefined}
       />
 
       <Pressable onPress={raise} style={({ pressed }) => [styles.fab, { bottom: Math.max(insets.bottom, 12) + 14 }, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Raise a complaint">
         <PlusIcon size={22} color={theme.isDark ? '#0B1B3A' : '#FFFFFF'} />
         <Text style={styles.fabText}>Raise complaint</Text>
       </Pressable>
+
+      <Popup visible={filterOpen} onClose={() => setFilterOpen(false)} title="Filter complaints">
+        <Text style={styles.fGroup}>TYPE</Text>
+        <View style={styles.fPills}>
+          {CATEGORIES.filter((k) => k !== 'ACCOUNTS' || isCompanyAdmin || category === 'ACCOUNTS').map((k) => {
+            const on = category === k;
+            return (
+              <Pressable key={k || 'all'} onPress={() => setCategory(k)} style={({ pressed }) => [styles.fPill, on && styles.fPillOn, pressed && styles.pressed]} accessibilityRole="radio" accessibilityState={{ selected: on }}>
+                <Text style={[styles.fPillText, on && styles.fPillTextOn]}>{k ? CATEGORY_LABEL[k] : 'All types'}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.fGroup}>PRIORITY</Text>
+        <View style={styles.fPills}>
+          {PRIORITIES.map((k) => {
+            const on = priority === k;
+            return (
+              <Pressable key={k || 'all'} onPress={() => setPriority(k)} style={({ pressed }) => [styles.fPill, on && styles.fPillOn, pressed && styles.pressed]} accessibilityRole="radio" accessibilityState={{ selected: on }}>
+                <Text style={[styles.fPillText, on && styles.fPillTextOn]}>{k ? PRIORITY_LABEL[k] : 'All'}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={styles.fActions}>
+          <Pressable
+            onPress={() => {
+              setCategory('');
+              setPriority('');
+            }}
+            style={({ pressed }) => [styles.fClear, pressed && styles.pressed]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.fClearText}>Clear</Text>
+          </Pressable>
+          <Pressable onPress={() => setFilterOpen(false)} style={({ pressed }) => [styles.fDone, pressed && styles.pressed]} accessibilityRole="button">
+            <Text style={styles.fDoneText}>Show results</Text>
+          </Pressable>
+        </View>
+      </Popup>
     </ClientPage>
   );
 }

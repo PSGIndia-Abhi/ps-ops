@@ -10,6 +10,8 @@ export interface ClientOutlet {
   city: string | null;
   state: string | null;
   company_id: string | null;
+  /** What this outlet can request: DEEP (Brigade Group outlets) or PEST (everyone else). */
+  service_type?: 'PEST' | 'DEEP';
 }
 
 export interface ClientCompany {
@@ -239,8 +241,13 @@ export const jobAttachmentPath = (id: string | number) => `/api/client-portal/at
 
 // ---------- Complaints ----------
 
-export type ComplaintStatusFilter = 'open' | 'resolved' | 'all';
+export type ComplaintStage = 'OPEN' | 'IN_PROGRESS' | 'VISIT_SCHEDULED' | 'RESOLVED' | 'CLOSED';
+export type ComplaintStatusFilter = 'open' | 'resolved' | 'all' | ComplaintStage;
 export type ComplaintPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type ComplaintCategory = 'SERVICE' | 'ACCOUNTS';
+
+/** Complaint statuses still being worked on (shown as "open"). */
+export const OPEN_COMPLAINT_STATUSES = ['OPEN', 'IN_PROGRESS', 'VISIT_SCHEDULED'];
 
 export interface ClientComplaint {
   id: string;
@@ -255,6 +262,8 @@ export interface ClientComplaint {
   message_count: number;
   last_message_at: string | null;
   job_code: string | null;
+  /** SERVICE and/or ACCOUNTS (older complaints: SERVICE). */
+  category: ComplaintCategory[];
   /** Our team wrote the last message. */
   awaiting_you: boolean;
 }
@@ -263,7 +272,7 @@ export interface ComplaintListResponse {
   page: number;
   page_size: number;
   total: number;
-  counts: { all: number; open: number; resolved: number };
+  counts: { all: number; open: number; resolved: number } & Partial<Record<ComplaintStage, number>>;
   complaints: ClientComplaint[];
 }
 
@@ -273,6 +282,8 @@ export interface ComplaintMessage {
   created_at: string;
   mine: boolean;
   from_team: boolean;
+  /** The automatic first answer from BestServe. */
+  auto?: boolean;
   author: string | null;
   attachments: { id: string | number; file_name: string; file_type: string }[];
 }
@@ -288,6 +299,10 @@ export interface ClientComplaintDetail {
     site_id: string | null;
     site_name: string | null;
     raised_by_me: boolean;
+    raised_by_name?: string | null;
+    category: ComplaintCategory[];
+    visit_date?: string | null;
+    visit_slot?: string | null;
   };
   jobs: { id: string; code: string | null; service_type: string | null; sub_service: string | null; site_id: string | null; site_name: string | null }[];
   messages: ComplaintMessage[];
@@ -304,9 +319,24 @@ const appendUploads = (form: FormData, files: UploadFile[]) =>
   // React Native's FormData streams this {uri,name,type} shape from the uri (see api/jobs.ts).
   files.forEach((f) => form.append('files', { uri: f.uri, name: f.name, type: f.type } as unknown as Blob));
 
-export async function listComplaints(p: { page?: number; siteId?: string; status?: ComplaintStatusFilter; search?: string }): Promise<ComplaintListResponse> {
+export async function listComplaints(p: {
+  page?: number;
+  siteId?: string;
+  status?: ComplaintStatusFilter;
+  search?: string;
+  priority?: ComplaintPriority | '';
+  category?: ComplaintCategory | '';
+}): Promise<ComplaintListResponse> {
   const { data } = await httpClient.get<ComplaintListResponse>('/api/client-portal/complaints', {
-    params: clean({ page: p.page ?? 1, page_size: 20, site_id: p.siteId, status: p.status === 'all' ? undefined : p.status, search: p.search }),
+    params: clean({
+      page: p.page ?? 1,
+      page_size: 20,
+      site_id: p.siteId,
+      status: p.status === 'all' ? undefined : p.status,
+      search: p.search,
+      priority: p.priority,
+      category: p.category,
+    }),
   });
   return data;
 }
@@ -315,6 +345,7 @@ export async function createComplaint(input: {
   subject: string;
   message: string;
   priority: ComplaintPriority;
+  category: ComplaintCategory[];
   siteId: string;
   jobId?: string;
   files: UploadFile[];
@@ -323,6 +354,7 @@ export async function createComplaint(input: {
   form.append('subject', input.subject);
   form.append('message', input.message);
   form.append('priority', input.priority);
+  form.append('category', input.category.join(','));
   form.append('site_id', input.siteId);
   if (input.jobId) form.append('job_id', input.jobId);
   appendUploads(form, input.files);
@@ -347,10 +379,6 @@ export async function replyToComplaint(id: string, input: { message: string; fil
     timeout: 60000,
   });
   return data;
-}
-
-export async function setComplaintStatus(id: string, status: 'CLOSED' | 'OPEN'): Promise<void> {
-  await httpClient.patch(`/api/client-portal/complaints/${encodeURIComponent(id)}/status`, { status });
 }
 
 export const complaintFilePath = (id: string | number) => `/api/client-portal/complaint-files/${encodeURIComponent(String(id))}`;
@@ -460,7 +488,8 @@ export async function getOutlet(siteId: string): Promise<OutletDetail> {
 
 // ---------- Documents & audit reports ----------
 
-export type DocKind = 'shared' | 'invoice' | 'audit' | 'photos';
+/** Documents tabs (shared files split by type), plus audit / photos for their own pages. */
+export type DocKind = 'agreement' | 'bestserve' | 'quotation' | 'invoice' | 'msds' | 'audit' | 'photos';
 
 export interface ClientDocument {
   key: string;
@@ -471,6 +500,9 @@ export interface ClientDocument {
   site_name: string | null;
   /** /api/client-portal/... file address, or null when there is no file to open. */
   download: string | null;
+  /** A file BestServe shared (agreement, BestServe document, quotation, MSDS). */
+  shared?: boolean;
+  visibility?: 'ALL' | 'HEAD_OFFICE' | 'SITES';
   // shared
   doc_type?: string | null;
   file_name?: string | null;
@@ -500,14 +532,66 @@ export interface DocumentListResponse {
   page: number;
   page_size: number;
   total: number;
-  counts: { all: number; shared: number; invoice: number; audit: number; photos: number };
+  counts: { all: number } & Partial<Record<DocKind, number>>;
   expiring_soon: number;
   documents: ClientDocument[];
 }
 
-export async function listDocuments(p: { page?: number; siteId?: string; kind?: DocKind | ''; search?: string }): Promise<DocumentListResponse> {
+export async function listDocuments(p: { page?: number; siteId?: string; kind?: DocKind | ''; search?: string; from?: string; to?: string }): Promise<DocumentListResponse> {
   const { data } = await httpClient.get<DocumentListResponse>('/api/client-portal/documents', {
-    params: clean({ page: p.page ?? 1, page_size: 30, site_id: p.siteId, kind: p.kind, search: p.search }),
+    params: clean({ page: p.page ?? 1, page_size: 30, site_id: p.siteId, kind: p.kind, search: p.search, from: p.from, to: p.to }),
+  });
+  return data;
+}
+
+export interface ServicePhoto {
+  id: string | number;
+  type: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  phase: 'before' | 'after' | 'other';
+  created_at: string;
+}
+
+export interface PhotoJob {
+  id: string;
+  code: string | null;
+  service_type: string | null;
+  sub_service: string | null;
+  status: string;
+  site_id: string | null;
+  site_name: string | null;
+  city: string | null;
+  photo_count: number;
+  last_at: string;
+  photos: ServicePhoto[];
+}
+
+export interface SharedPhoto {
+  id: string;
+  title: string;
+  notes: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  created_at: string;
+  site_name: string | null;
+  /** /api/client-portal/documents/shared/:id/file */
+  path: string;
+}
+
+export interface PhotoListResponse {
+  page: number;
+  page_size: number;
+  total: number;
+  photo_total: number;
+  /** Photos BestServe shared (first page only). */
+  shared: SharedPhoto[];
+  jobs: PhotoJob[];
+}
+
+export async function listPhotos(p: { page?: number; siteId?: string; search?: string; from?: string; to?: string }): Promise<PhotoListResponse> {
+  const { data } = await httpClient.get<PhotoListResponse>('/api/client-portal/photos', {
+    params: clean({ page: p.page ?? 1, page_size: 12, site_id: p.siteId, search: p.search, from: p.from, to: p.to }),
   });
   return data;
 }

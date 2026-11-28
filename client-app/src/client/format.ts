@@ -102,6 +102,7 @@ const STATUS_LABELS: Record<string, { label: string; tone: Tone }> = {
   MISSED: { label: 'Missed', tone: 'danger' },
   CANCELED: { label: 'Cancelled', tone: 'neutral' },
   OPEN: { label: 'Open', tone: 'warning' },
+  VISIT_SCHEDULED: { label: 'Visit scheduled', tone: 'accent' },
   RESOLVED: { label: 'Resolved', tone: 'success' },
   CLOSED: { label: 'Closed', tone: 'neutral' },
 };

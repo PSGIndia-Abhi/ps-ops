@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StatusBar, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StatusBar, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getToken } from '../../auth/tokenStorage';
-import { ChevronLeftIcon, CloseIcon, DocumentIcon, GalleryIcon } from '../../components/icons';
+import { CheckCircleIcon, ChevronLeftIcon, CloseIcon, DocumentIcon, DownloadIcon, GalleryIcon } from '../../components/icons';
 import { API_BASE_URL } from '../../config/env';
 import { useCrmStyles, type CrmTheme } from '../../crm/theme';
 import { CrmSkeleton } from '../../crm/ui/CrmScreen';
@@ -68,6 +68,10 @@ const factory = (t: CrmTheme) => ({
   viewer: { flex: 1, backgroundColor: '#000000', alignItems: 'center' as const, justifyContent: 'center' as const },
   viewerImg: { width: '100%' as const, height: '80%' as const },
   viewerClose: { position: 'absolute' as const, right: spacing.md, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center' as const, justifyContent: 'center' as const },
+  viewerBroken: { alignItems: 'center' as const, gap: 12 },
+  viewerBrokenText: { fontSize: 15, fontWeight: '500' as const, color: 'rgba(255,255,255,0.75)' },
+  viewerNote: { position: 'absolute' as const, alignSelf: 'center' as const, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.18)' },
+  viewerNoteText: { fontSize: 14, fontWeight: '600' as const, color: '#FFFFFF' },
   viewerCaption: { ...typography.bodyMedium, color: '#FFFFFF', marginTop: spacing.md },
 });
 
@@ -215,20 +219,74 @@ export function PortalImage({
   );
 }
 
-/** Full-screen photo viewer. */
-export function PhotoViewer({ path, caption, onClose }: { path: string | null; caption?: string; onClose: () => void }) {
+/**
+ * Full-screen photo viewer. With `onDownload` (returns true when saved) a download button sits
+ * beside the close button; the result shows inside the viewer, as toasts sit behind the modal.
+ */
+export function PhotoViewer({
+  path,
+  caption,
+  onClose,
+  onDownload,
+}: {
+  path: string | null;
+  caption?: string;
+  onClose: () => void;
+  onDownload?: () => Promise<boolean>;
+}) {
   const { styles } = useCrmStyles(factory);
   const insets = useSafeAreaInsets();
   const auth = useAuthHeader();
+  const [state, setState] = useState<'idle' | 'busy' | 'saved' | 'failed'>('idle');
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    if (path) {
+      setState('idle');
+      setBroken(false);
+    }
+  }, [path]);
+  useEffect(() => {
+    if (state !== 'saved' && state !== 'failed') return;
+    const t = setTimeout(() => setState('idle'), 2400);
+    return () => clearTimeout(t);
+  }, [state]);
+  const download = async () => {
+    if (!onDownload || state === 'busy') return;
+    setState('busy');
+    setState((await onDownload()) ? 'saved' : 'failed');
+  };
   return (
     <Modal visible={!!path} transparent={false} animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle="light-content" />
       <View style={styles.viewer}>
-        {!!path && !!auth && <Image source={{ uri: `${API_BASE_URL}${path}`, headers: { Authorization: auth } }} style={styles.viewerImg} resizeMode="contain" />}
+        {!!path && !!auth && !broken && (
+          <Image source={{ uri: `${API_BASE_URL}${path}`, headers: { Authorization: auth } }} style={styles.viewerImg} resizeMode="contain" onError={() => setBroken(true)} />
+        )}
+        {broken && (
+          <View style={styles.viewerBroken}>
+            <GalleryIcon size={40} color="rgba(255,255,255,0.6)" />
+            <Text style={styles.viewerBrokenText}>This photo could not be loaded</Text>
+          </View>
+        )}
         {!!caption && <Text style={styles.viewerCaption}>{caption}</Text>}
+        {!!onDownload && !broken && (
+          <Pressable
+            onPress={download}
+            style={({ pressed }) => [styles.viewerClose, { top: insets.top + spacing.sm, right: spacing.md + 56 }, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Download photo"
+          >
+            {state === 'busy' ? <ActivityIndicator color="#FFFFFF" size="small" /> : state === 'saved' ? <CheckCircleIcon size={20} color="#FFFFFF" /> : <DownloadIcon size={20} color="#FFFFFF" />}
+          </Pressable>
+        )}
         <Pressable onPress={onClose} style={[styles.viewerClose, { top: insets.top + spacing.sm }]} accessibilityRole="button" accessibilityLabel="Close photo">
           <CloseIcon size={20} color="#FFFFFF" />
         </Pressable>
+        {(state === 'saved' || state === 'failed') && (
+          <View style={[styles.viewerNote, { bottom: insets.bottom + 40 }]} accessibilityLiveRegion="polite">
+            <Text style={styles.viewerNoteText}>{state === 'saved' ? 'Saved to Downloads / BestServe' : 'Could not save the photo'}</Text>
+          </View>
+        )}
       </View>
     </Modal>
   );
