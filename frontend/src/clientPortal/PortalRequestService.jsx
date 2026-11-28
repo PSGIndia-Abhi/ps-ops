@@ -4,18 +4,21 @@ import {
   FiCheck, FiRefreshCw, FiX, FiClock, FiCalendar, FiMapPin, FiSend,
   FiSun, FiSunrise, FiMoon, FiSlash,
 } from "react-icons/fi";
-import { MdPestControl, MdCleaningServices, MdAutoAwesome } from "react-icons/md";
+import { MdPestControl, MdCleaningServices } from "react-icons/md";
 import { apiFetch, safeJson } from "../api";
 import { pestServices, deepCleaningServices } from "../components/CreateBookingModal";
 import { formatDate, serviceLabel, ymd } from "./portalUtils";
 import PortalLoader from "./PortalLoader";
 import ServiceMultiSelect from "./ServiceMultiSelect";
 
+// Each outlet gets one service type from the server (outlet.service_type): Brigade Group
+// outlets Deep Cleaning, every other client Pest Control. There is no "Both".
 const TYPES = [
   { key: "PEST", label: "Pest Control", hint: "Cockroach, rodent, mosquito, termite…", tone: "green", Icon: MdPestControl },
-  { key: "DEEP", label: "Cleaning", hint: "Deep cleaning, floor protection…", tone: "blue", Icon: MdCleaningServices },
-  { key: "BOTH", label: "Both", hint: "Pest control and cleaning together", tone: "violet", Icon: MdAutoAwesome },
+  { key: "DEEP", label: "Deep Cleaning", hint: "Deep cleaning, floor protection, painting…", tone: "blue", Icon: MdCleaningServices },
 ];
+const catalogFor = (t) => (t === "DEEP" ? deepCleaningServices : pestServices);
+
 const SLOTS = [
   { key: "ANY", label: "Any time", Icon: FiClock },
   { key: "MORNING", label: "Morning", Icon: FiSunrise },
@@ -48,12 +51,11 @@ function quickDates() {
 
 export default function PortalRequestService() {
   const navigate = useNavigate();
-  const { portal, outletId } = useOutletContext();
+  const { portal } = useOutletContext();
   const [params] = useSearchParams();
   const outlets = portal.outlets;
 
-  const [siteId, setSiteId] = useState(() => params.get("site") || outletId || (outlets.length === 1 ? outlets[0].id : ""));
-  const [type, setType] = useState("PEST");
+  const [siteId, setSiteId] = useState(() => params.get("site") || (outlets.length === 1 ? outlets[0].id : ""));
   const [picked, setPicked] = useState([]);
   const [date, setDate] = useState("");
   const [showPicker, setShowPicker] = useState(false);
@@ -68,11 +70,23 @@ export default function PortalRequestService() {
   const [listError, setListError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Services offered for the chosen type (the dropdown has its own search box).
-  const catalog = useMemo(
-    () => (type === "PEST" ? pestServices : type === "DEEP" ? deepCleaningServices : [...pestServices, ...deepCleaningServices]),
-    [type]
-  );
+  // The outlet decides the service type; before one is chosen, use the type all the
+  // client's outlets share (Pest Control if they differ or the server has not said).
+  const typeOf = (id) => {
+    const o = outlets.find((x) => x.id === id);
+    if (o) return o.service_type === "DEEP" ? "DEEP" : "PEST";
+    return outlets.length && outlets.every((x) => x.service_type === "DEEP") ? "DEEP" : "PEST";
+  };
+  const type = typeOf(siteId);
+  // Services offered for the outlet's type (the dropdown has its own search box).
+  const catalog = useMemo(() => catalogFor(type), [type]);
+
+  function changeOutlet(id) {
+    setSiteId(id);
+    // Keep only choices that still belong to the new outlet's type.
+    const allowed = catalogFor(typeOf(id));
+    setPicked((p) => p.filter((s) => allowed.includes(s)));
+  }
   const quick = useMemo(() => quickDates(), []);
 
   useEffect(() => {
@@ -80,7 +94,7 @@ export default function PortalRequestService() {
     (async () => {
       setListLoading(true);
       try {
-        const q = outletId ? `?site_id=${encodeURIComponent(outletId)}` : "";
+        const q = ""; // all of the client's requests (the Dashboard outlet does not apply here)
         const res = await apiFetch(`/api/client-portal/service-requests${q}`);
         const body = await safeJson(res);
         if (!res?.ok) throw new Error(body?.error || "Failed to load your requests");
@@ -97,14 +111,7 @@ export default function PortalRequestService() {
     return () => {
       cancelled = true;
     };
-  }, [outletId, reloadKey]);
-
-  function changeType(next) {
-    setType(next);
-    // Keep only choices that still belong to the new type.
-    const allowed = next === "PEST" ? pestServices : next === "DEEP" ? deepCleaningServices : [...pestServices, ...deepCleaningServices];
-    setPicked((p) => p.filter((s) => allowed.includes(s)));
-  }
+  }, [reloadKey]);
 
   async function submit(e) {
     e.preventDefault();
@@ -195,7 +202,7 @@ export default function PortalRequestService() {
               {outlets.length > 1 && (
                 <label className="cp-rq-outlet-change">
                   <span>{siteId ? "Change" : "Choose"}</span>
-                  <select value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Outlet">
+                  <select value={siteId} onChange={(e) => changeOutlet(e.target.value)} aria-label="Outlet">
                     <option value="">Choose outlet</option>
                     {outlets.map((o) => <option key={o.id} value={o.id}>{o.name || o.id}{o.city ? ` · ${o.city}` : ""}</option>)}
                   </select>
@@ -206,19 +213,14 @@ export default function PortalRequestService() {
 
           <section className="cp-rq-sec">
             <h3>2 · Service type</h3>
-            <div className="cp-rq-types" role="radiogroup" aria-label="Type of service">
-              {TYPES.map((t) => {
-                const on = type === t.key;
-                const Icon = t.Icon;
-                return (
-                  <button type="button" role="radio" aria-checked={on} key={t.key} className={`cp-rq-type tone-${t.tone} ${on ? "active" : ""}`} onClick={() => changeType(t.key)}>
-                    {on && <span className="cp-rq-type-check" aria-hidden="true"><FiCheck /></span>}
-                    <span className="cp-rq-type-icon" aria-hidden="true"><Icon /></span>
-                    <strong>{t.label}</strong>
-                    <small>{t.hint}</small>
-                  </button>
-                );
-              })}
+            {/* One tile only: the type this outlet is serviced for (no choice to make). */}
+            <div className="cp-rq-types single">
+              <div className={`cp-rq-type tone-${typeInfo.tone} active`}>
+                <span className="cp-rq-type-check" aria-hidden="true"><FiCheck /></span>
+                <span className="cp-rq-type-icon" aria-hidden="true"><typeInfo.Icon /></span>
+                <strong>{typeInfo.label}</strong>
+                <small>{typeInfo.hint}</small>
+              </div>
             </div>
           </section>
 

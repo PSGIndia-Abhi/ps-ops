@@ -28,6 +28,7 @@ import PortalComplaints from "./clientPortal/PortalComplaints";
 import PortalComplaintDetail from "./clientPortal/PortalComplaintDetail";
 import PortalDocuments from "./clientPortal/PortalDocuments";
 import PortalAudits from "./clientPortal/PortalAudits";
+import PortalPhotos from "./clientPortal/PortalPhotos";
 import PortalRequestService from "./clientPortal/PortalRequestService";
 import PortalProfile from "./clientPortal/PortalProfile";
 import AccountantLayout from "./layouts/AccountantLayout";
@@ -109,6 +110,8 @@ import FeedbackLayout from "./pages/feedback/FeedbackLayout";
 import FeedbackCallList from "./pages/feedback/CallList";
 import FeedbackCallPage from "./pages/feedback/CallPage";
 import FeedbackTicketList from "./pages/feedback/TicketList";
+import FeedbackComplaintList from "./pages/feedback/complaints/ComplaintList";
+import FeedbackComplaintPage from "./pages/feedback/complaints/ComplaintPage";
 import FeedbackTicketPage from "./pages/feedback/TicketPage";
 import FeedbackCustomerReport from "./pages/feedback/CustomerReport";
 import FeedbackQuestions from "./pages/feedback/QuestionsMaster";
@@ -277,6 +280,7 @@ const router = createBrowserRouter([
       { path: "tickets", element: <Navigate to="/client/complaints" replace /> },
       { path: "documents", element: <PortalDocuments /> },
       { path: "audits", element: <PortalAudits /> },
+      { path: "photos", element: <PortalPhotos /> },
       { path: "request-service", element: <PortalRequestService /> },
       { path: "profile", element: <PortalProfile /> },
     ],
@@ -446,6 +450,8 @@ const router = createBrowserRouter([
       { path: "calls/:id", element: <FeedbackCallPage /> },
       { path: "tickets", element: <FeedbackTicketList /> },
       { path: "tickets/:id", element: <FeedbackTicketPage /> },
+      { path: "complaints", element: <FeedbackComplaintList /> },
+      { path: "complaints/:id", element: <FeedbackComplaintPage /> },
       { path: "report", element: <FeedbackCustomerReport /> },
       { path: "questions", element: <FeedbackQuestions /> },
       { path: "issues", element: <FeedbackIssues /> },

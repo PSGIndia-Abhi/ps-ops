@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { HiOutlineQuestionMarkCircle, HiOutlineXMark } from "react-icons/hi2";
+import { HiOutlineXMark } from "react-icons/hi2";
 
 // "?" button that opens a small guide to the colours used on the dashboard.
 const COLOURS = [
@@ -34,7 +34,7 @@ export default function ColorGuide() {
         aria-label="What do the colours mean?" title="What do the colours mean?"
         onClick={() => setOpen((o) => !o)}
       >
-        <HiOutlineQuestionMarkCircle aria-hidden="true" />
+        <span aria-hidden="true">?</span>
       </button>
       {open && (
         <div className="cp-cg-pop" role="dialog" aria-label="Colour guide">

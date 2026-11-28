@@ -1,28 +1,35 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import {
-  FiSearch, FiRefreshCw, FiDownload, FiEye, FiFileText, FiShield, FiCamera, FiFile, FiX, FiAlertTriangle, FiChevronRight,
+  FiSearch, FiRefreshCw, FiDownload, FiEye, FiFileText, FiShield, FiCamera, FiFile, FiX, FiAlertTriangle, FiChevronRight, FiCheck,
 } from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 import { formatDate, formatMoney, RISK_STYLE, statusInfo } from "./portalUtils";
 import { getPortalFile } from "./portalFiles";
 import PortalLoader from "./PortalLoader";
 import InvoiceDetailsModal from "./InvoiceDetailsModal";
+import OutletPicker from "./OutletPicker";
+import {
+  HiOutlineSquares2X2, HiOutlineDocumentCheck, HiOutlineShieldCheck, HiOutlineDocumentText, HiOutlineReceiptPercent, HiOutlineBeaker,
+} from "react-icons/hi2";
 
+// Documents tabs (audit reports live on their own Audit Reports page).
 const KINDS = [
-  { key: "", label: "All", count: "all" },
-  { key: "shared", label: "Shared by us", count: "shared" },
-  { key: "invoice", label: "Invoices", count: "invoice" },
-  { key: "audit", label: "Audit reports", count: "audit" },
-  { key: "photos", label: "Service photos", count: "photos" },
+  { key: "", label: "All documents", count: "all", tone: "blue", Icon: HiOutlineSquares2X2 },
+  { key: "agreement", label: "Agreement", count: "agreement", tone: "indigo", Icon: HiOutlineDocumentCheck },
+  { key: "bestserve", label: "BestServe documents", count: "bestserve", tone: "violet", Icon: HiOutlineShieldCheck },
+  { key: "quotation", label: "Final quotation", count: "quotation", tone: "teal", Icon: HiOutlineDocumentText },
+  { key: "invoice", label: "Invoices", count: "invoice", tone: "amber", Icon: HiOutlineReceiptPercent },
+  { key: "msds", label: "MSDS", count: "msds", tone: "green", Icon: HiOutlineBeaker },
 ];
 
 const DOC_TYPE_LABELS = {
   CERTIFICATE: "Certificate",
-  CONTRACT: "Contract",
+  CONTRACT: "Agreement",
+  QUOTATION: "Final quotation",
   MSDS: "MSDS / Safety sheet",
   REPORT: "Report",
-  OTHER: "Document",
+  OTHER: "BestServe document",
 };
 
 const INVOICE_STATUS = {
@@ -40,18 +47,23 @@ function fileSize(bytes) {
 }
 
 function KindIcon({ kind }) {
-  if (kind === "invoice") return <FiFileText aria-hidden="true" />;
-  if (kind === "audit") return <FiShield aria-hidden="true" />;
+  if (kind === "invoice" || kind === "quotation") return <FiFileText aria-hidden="true" />;
+  if (kind === "audit" || kind === "msds") return <FiShield aria-hidden="true" />;
   if (kind === "photos") return <FiCamera aria-hidden="true" />;
   return <FiFile aria-hidden="true" />;
 }
 
 export default function PortalDocuments() {
   const navigate = useNavigate();
-  const { portal, outletId } = useOutletContext();
+  const { portal } = useOutletContext();
+  // Outlet filter for this page only (the Dashboard's outlet picker affects the Dashboard alone).
+  const [outletId, setOutletId] = useState("");
   const [params] = useSearchParams();
 
-  const [kind, setKind] = useState(() => (KINDS.some((k) => k.key === params.get("kind")) ? params.get("kind") : ""));
+  // Invoices are confidential: only head-office ("All outlets") logins get the Invoices card.
+  const headOffice = portal?.access === "company";
+  const kinds = headOffice ? KINDS : KINDS.filter((k) => k.key !== "invoice");
+  const [kind, setKindRaw] = useState(() => (kinds.some((k) => k.key === params.get("kind")) ? params.get("kind") : ""));
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
@@ -65,6 +77,11 @@ export default function PortalDocuments() {
   const [busy, setBusy] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [invoice, setInvoice] = useState(null); // invoice row picked with "View"
+  // Changing tab closes the invoice details.
+  const setKind = (next) => {
+    setKindRaw(next);
+    setInvoice(null);
+  };
 
   // Wide screens show invoice details beside the list; narrow ones use the pop-up.
   const WIDE_QUERY = "(min-width: 1100px)";
@@ -135,13 +152,10 @@ export default function PortalDocuments() {
   const outletName = outletId ? portal.outlets.find((o) => o.id === outletId)?.name : null;
   const today = new Date(new Date().toDateString());
 
-  // Invoice details beside the list on wide screens: on the Invoices tab always (the picked
-  // invoice, else the first one); on other tabs once an invoice's "View" is clicked (closable).
-  // Audits, shared documents and photos keep plain View (open PDF) / Download buttons.
+  // Invoice details open beside the list (wide screens) only after an invoice's "View" is
+  // clicked; ✕ or changing tab closes them. Shared documents keep plain View / Download.
   const picked = invoice ? items.find((d) => d.key === invoice.key) : null;
-  const shownInvoice = wide
-    ? picked || (kind === "invoice" ? items.find((d) => d.kind === "invoice") || null : null)
-    : null;
+  const shownInvoice = wide ? picked || null : null;
   const split = !!shownInvoice;
 
   return (
@@ -149,14 +163,14 @@ export default function PortalDocuments() {
       <section className="cp-hero">
         <div>
           <h2>Documents</h2>
-          <p>{outletName ? `Showing ${outletName}` : "All outlets"} · certificates, invoices, audit reports and service photos</p>
+          <p>{outletName ? `Showing ${outletName}` : "All outlets"} · agreements, BestServe documents, quotations{headOffice ? ", invoices" : ""} and MSDS</p>
         </div>
       </section>
 
       {meta.expiring_soon > 0 && (
         <div className="cp-notice warn">
           <span><FiAlertTriangle aria-hidden="true" /> {meta.expiring_soon} shared document{meta.expiring_soon === 1 ? "" : "s"} expire{meta.expiring_soon === 1 ? "s" : ""} within 30 days or already expired.</span>
-          <button className="cp-link" onClick={() => setKind("shared")}>View</button>
+          <button className="cp-link" onClick={() => setKind("")}>View</button>
         </div>
       )}
 
@@ -165,6 +179,9 @@ export default function PortalDocuments() {
           <FiSearch aria-hidden="true" />
           <input type="search" placeholder="Search documents" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
         </label>
+        {portal.outlets.length > 1 && (
+          <OutletPicker outlets={portal.outlets} value={outletId} onChange={setOutletId} className="cp-picker-box" />
+        )}
         <div className="cp-daterange cp-select">
           <span>Date</span>
           <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
@@ -174,12 +191,24 @@ export default function PortalDocuments() {
         </div>
       </div>
 
-      <div className="cp-chips cp-chips-wide" role="tablist" aria-label="Document type">
-        {KINDS.map((k) => (
-          <button key={k.key || "all"} role="tab" aria-selected={kind === k.key} className={`cp-chip ${kind === k.key ? "active" : ""}`} onClick={() => setKind(k.key)}>
-            {k.label} <span className="cp-chip-count">{meta.counts[k.count] ?? 0}</span>
-          </button>
-        ))}
+      {/* Document type cards: icon, count, name; selected = light colour + border + ✓. */}
+      <div className={`cp-dk-grid n${kinds.length}`} role="tablist" aria-label="Document type">
+        {kinds.map((k) => {
+          const on = kind === k.key;
+          const n = meta.counts[k.count] ?? 0;
+          return (
+            <button
+              key={k.key || "all"} type="button" role="tab" aria-selected={on}
+              className={`cp-dk-card tone-${k.tone} ${on ? "active" : ""} ${n ? "" : "zero"}`}
+              onClick={() => setKind(k.key)}
+            >
+              {on && <span className="cp-dk-check" aria-hidden="true"><FiCheck /></span>}
+              <span className="cp-dk-icon" aria-hidden="true"><k.Icon /></span>
+              <strong>{n}</strong>
+              <span>{k.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {error && (
@@ -210,11 +239,11 @@ export default function PortalDocuments() {
                   <div className="cp-jobrow-main">
                     <strong>{d.title}</strong>
                     <small>
-                      {d.kind === "shared" && (DOC_TYPE_LABELS[d.doc_type] || "Document")}
+                      {d.shared && (DOC_TYPE_LABELS[d.doc_type] || "Document")}
                       {d.kind === "invoice" && `${formatMoney(d.amount)}${d.pending ? ` · ${formatMoney(d.pending)} due` : ""}${d.due_date && d.status !== "PAID" ? ` by ${formatDate(d.due_date)}` : ""}`}
                       {d.kind === "audit" && `${d.audit_type || "Audit"}${d.page_count ? ` · ${d.page_count} pages` : ""}`}
                       {d.kind === "photos" && `${d.photos} photo${d.photos === 1 ? "" : "s"}${d.sub_service ? ` · ${d.sub_service}` : ""}`}
-                      {` · ${d.site_name || (d.kind === "shared" ? "All outlets" : "—")} · ${formatDate(d.date)}`}
+                      {` · ${d.site_name || (d.shared ? "All outlets" : "—")} · ${formatDate(d.date)}`}
                       {d.size_bytes ? ` · ${fileSize(d.size_bytes)}` : ""}
                     </small>
                     {d.notes && <small className="cp-doc-notes">{d.notes}</small>}
@@ -267,7 +296,7 @@ export default function PortalDocuments() {
         <aside className="cp-inv-side" aria-label="Invoice details">
           <InvoiceDetailsModal
             variant="panel"
-            closable={kind !== "invoice"}
+            closable
             invoice={shownInvoice}
             busy={busy && busy.startsWith(`${shownInvoice.key}:`) ? busy.slice(-1) : null}
             onOpenFile={(download) => openFile(shownInvoice, download)}

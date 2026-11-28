@@ -105,6 +105,7 @@ const STATUS_LABELS = {
   MISSED: { label: "Missed", className: "st-red" },
   CANCELED: { label: "Cancelled", className: "st-slate" },
   OPEN: { label: "Open", className: "st-amber" },
+  VISIT_SCHEDULED: { label: "Visit scheduled", className: "st-violet" },
   RESOLVED: { label: "Resolved", className: "st-green" },
   CLOSED: { label: "Closed", className: "st-slate" },
 };

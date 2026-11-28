@@ -281,3 +281,28 @@
   .ca-doc { flex-wrap: wrap; }
   .ca-icon-actions { width: 100%; justify-content: flex-end; }
 }
+
+/* Documents: "Visible to" (everyone / head office only / ticked outlets). */
+.ca-vis { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ca-vis legend { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; padding: 0; }
+.ca-modal label.ca-vis-opt {
+  flex-direction: row; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1.5px solid #e2e8f0;
+  border-radius: 12px; cursor: pointer; font-weight: 500;
+}
+.ca-vis-opt input { margin-top: 3px; accent-color: #4f46e5; }
+.ca-vis-opt span { display: flex; flex-direction: column; gap: 2px; }
+.ca-vis-opt strong { font-size: 14px; color: #0f172a; }
+.ca-vis-opt small { font-size: 12px; color: #64748b; font-weight: 400; }
+.ca-vis-opt.on { border-color: #6366f1; background: #eef2ff; }
+.ca-vis-opt.ho.on { border-color: #dc2626; background: #fef2f2; }
+.ca-vis-opt.ho.on input { accent-color: #dc2626; }
+.ca-vis-sites {
+  margin-left: 28px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc;
+  display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto;
+}
+.ca-vis-sites-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; }
+.ca-link { border: 0; background: none; color: #4f46e5; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.ca-modal label.ca-vis-site { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; font-size: 14px; cursor: pointer; }
+.ca-vis-site input { accent-color: #4f46e5; width: 16px; height: 16px; }
+.ca-tag.ca-tag-ho { background: #fef2f2; color: #b91c1c; }
+.ca-modal .ca-file-note { font-weight: 400; font-size: 12px; line-height: 1.4; }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  HiOutlineClipboardDocumentList, HiOutlineCalendarDays, HiOutlineCheckBadge, HiOutlineChatBubbleLeftRight,
+  HiOutlineClipboardDocumentList, HiOutlineCalendarDays, HiOutlineCheckBadge, HiOutlineChatBubbleLeftRight, HiOutlineExclamationTriangle,
   HiOutlineArrowPath, HiOutlineSparkles, HiOutlinePlus,
   HiOutlineArrowRight, HiOutlineMapPin, HiOutlineCamera, HiOutlineBolt, HiOutlineFlag, HiOutlineChevronRight,
   HiOutlineCheck,
@@ -94,9 +94,12 @@ function KpiBar({ segments }) {
 export default function PortalDashboard() {
   const navigate = useNavigate();
   const { portal, outletId, setOutletId } = useOutletContext();
+  // Dashboard links into Jobs & Visits keep the outlet picked here (other pages have their own filter).
+  const withSite = (to) =>
+    outletId && to.startsWith("/client/jobs") ? `${to}${to.includes("?") ? "&" : "?"}site=${encodeURIComponent(outletId)}` : to;
 
-  const [period, setPeriod] = useState("30d");
-  const [custom, setCustom] = useState(() => periodRange("30d"));
+  const [period, setPeriod] = useState("month"); // dashboard opens on "This month"
+  const [custom, setCustom] = useState(() => periodRange("month"));
   const range = useMemo(() => periodRange(period, custom), [period, custom]);
 
   const [data, setData] = useState(null);
@@ -176,21 +179,18 @@ export default function PortalDashboard() {
           bar: [{ value: k.active_jobs, color: "#2453e6" }, { value: k.completed_jobs, color: VISIT_DONE }],
         },
         {
-          key: "visits", icon: <HiOutlineCalendarDays />, tone: "violet", label: "Visits scheduled", value: k.visits_total,
-          sub: k.visits_total ? `${k.upcoming_visits} upcoming · ${k.visits_in_progress} in progress` : "No visits in this period", to: "/client/jobs?tab=visits",
-          bar: [
-            { value: k.visits_done, color: VISIT_DONE },
-            { value: k.visits_in_progress, color: "#7c3aed" },
-            { value: k.upcoming_visits, color: "#94a3b8" },
-            { value: k.visits_missed, color: VISIT_MISSED },
-          ],
-        },
-        {
           key: "done", icon: <HiOutlineCheckBadge />, tone: "green", label: "Services completed", value: k.visits_done,
           badge: completionRate != null ? { text: `${completionRate}% on time`, kind: completionRate >= 80 ? "good" : "warn" } : null,
           sub: completionRate != null ? (k.visits_missed ? `${k.visits_missed} visit${k.visits_missed === 1 ? "" : "s"} missed this period` : "No visits missed") : "None in this period",
           to: "/client/jobs?tab=visits",
           bar: [{ value: k.visits_done, color: VISIT_DONE }, { value: k.visits_missed, color: VISIT_MISSED }],
+        },
+        {
+          // Missed visits (replaces "Visits scheduled"): visits whose date passed without the service.
+          key: "missed", icon: <HiOutlineExclamationTriangle />, tone: "red", label: "Missed visits", value: k.visits_missed,
+          badge: k.visits_missed ? { text: "Needs attention", kind: "warn" } : { text: "All clear", kind: "good" },
+          sub: k.visits_missed ? "Tap to see which visits were missed" : "No visits missed this period",
+          to: k.visits_missed ? "/client/jobs?tab=visits&status=missed" : "/client/jobs?tab=visits",
         },
         {
           key: "complaints", icon: <HiOutlineChatBubbleLeftRight />, tone: "amber", label: "Complaints", value: k.complaints_raised,
@@ -234,7 +234,7 @@ export default function PortalDashboard() {
             {issues.map((p) => (
               <button
                 key={p.key} type="button" className={`cp-welcome-status issue tone-${p.tone}`}
-                onClick={() => navigate(p.to)} title="Open"
+                onClick={() => navigate(withSite(p.to))} title="Open"
               >
                 <i aria-hidden="true" />{p.text}<HiOutlineChevronRight aria-hidden="true" />
               </button>
@@ -314,6 +314,7 @@ export default function PortalDashboard() {
           <p>{outletName || "All outlets"} · {formatDate(range.from)} – {formatDate(range.to)}</p>
         </div>
         <div className="cp-filters">
+          <ColorGuide />
           <div className="cp-segmented" role="tablist" aria-label="Period">
             {PERIODS.map((p) => (
               <button key={p.key} role="tab" aria-selected={period === p.key} className={period === p.key ? "active" : ""} onClick={() => setPeriod(p.key)}>
@@ -321,7 +322,6 @@ export default function PortalDashboard() {
               </button>
             ))}
           </div>
-          <ColorGuide />
           {period === "custom" && (
             <div className="cp-daterange cp-select">
               <input type="date" value={custom.from} max={custom.to} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} aria-label="From date" />
@@ -347,7 +347,7 @@ export default function PortalDashboard() {
         <div className={`cp-dash-body ${loading ? "cp-refreshing" : ""}`}>
           <div className="cp-kpis">
             {cards.map((c) => (
-              <button key={c.key} className={`cp-kpi tone-${c.tone}`} onClick={() => navigate(c.to)}>
+              <button key={c.key} className={`cp-kpi tone-${c.tone}`} onClick={() => navigate(withSite(c.to))}>
                 <span className="cp-kpi-top">
                   <span className="cp-kpi-label">{c.label}</span>
                   <span className="cp-kpi-icon" aria-hidden="true">{c.icon}</span>
@@ -445,7 +445,7 @@ export default function PortalDashboard() {
             <section className="cp-card">
               <header className="cp-card-head">
                 <div><h3>Upcoming visits</h3><small>Next scheduled services</small></div>
-                <button className="cp-link" onClick={() => navigate("/client/jobs?tab=visits")}>View all <HiOutlineChevronRight /></button>
+                <button className="cp-link" onClick={() => navigate(withSite("/client/jobs?tab=visits"))}>View all <HiOutlineChevronRight /></button>
               </header>
               {data.upcoming_visits.length === 0 ? (
                 <div className="cp-empty-state compact cp-empty-dashed">
@@ -476,7 +476,7 @@ export default function PortalDashboard() {
               <header className="cp-activity-head">
                 <span className="cp-activity-badge" aria-hidden="true"><HiOutlineBolt /></span>
                 <div><h3>Recent activity</h3><small>Updates on your jobs</small></div>
-                <button className="cp-link cp-activity-all" onClick={() => navigate("/client/jobs")}>All jobs <HiOutlineChevronRight /></button>
+                <button className="cp-link cp-activity-all" onClick={() => navigate(withSite("/client/jobs"))}>All jobs <HiOutlineChevronRight /></button>
               </header>
               {data.activity.length === 0 ? (
                 <div className="cp-activity-empty"><strong>No updates in this period</strong><span>New job updates will appear here.</span></div>

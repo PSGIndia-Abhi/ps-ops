@@ -1,20 +1,45 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { FiPlus, FiSearch, FiRefreshCw, FiChevronRight, FiMessageSquare, FiMapPin } from "react-icons/fi";
+import {
+  FiPlus, FiSearch, FiRefreshCw, FiChevronRight, FiMessageSquare, FiMapPin, FiLayers, FiAlertCircle, FiClock, FiCheckCircle, FiArchive, FiCalendar,
+} from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 import ComplaintForm from "./ComplaintForm";
 import { formatDate, relativeDay, statusInfo } from "./portalUtils";
 import PortalLoader from "./PortalLoader";
+import OutletPicker from "./OutletPicker";
 
-const CHIPS = [
-  { key: "open", label: "Open" },
-  { key: "resolved", label: "Resolved" },
-  { key: "all", label: "All" },
+// Status cards (All / Open / In progress / Resolved / Closed) - click one to filter.
+const STATUS_CARDS = [
+  { key: "all", label: "All", count: "all", tone: "blue", Icon: FiLayers },
+  { key: "OPEN", label: "Open", count: "OPEN", tone: "red", Icon: FiAlertCircle },
+  { key: "IN_PROGRESS", label: "In progress", count: "IN_PROGRESS", tone: "amber", Icon: FiClock },
+  { key: "VISIT_SCHEDULED", label: "Visit scheduled", count: "VISIT_SCHEDULED", tone: "violet", Icon: FiCalendar },
+  { key: "RESOLVED", label: "Resolved", count: "RESOLVED", tone: "green", Icon: FiCheckCircle },
+  { key: "CLOSED", label: "Closed", count: "CLOSED", tone: "slate", Icon: FiArchive },
 ];
+
+const PRIORITIES = [
+  { key: "", label: "All priorities" },
+  { key: "URGENT", label: "Urgent" },
+  { key: "HIGH", label: "High" },
+  { key: "MEDIUM", label: "Normal" },
+  { key: "LOW", label: "Low" },
+];
+const CATEGORY_LABEL = { SERVICE: "Service", ACCOUNTS: "Accounts" };
+
+const PRIORITY_PILL = {
+  URGENT: { label: "Urgent", className: "pr-urgent" },
+  HIGH: { label: "High", className: "pr-high" },
+  MEDIUM: { label: "Normal", className: "pr-normal" },
+  LOW: { label: "Low", className: "pr-low" },
+};
 
 export default function PortalComplaints() {
   const navigate = useNavigate();
-  const { portal, outletId } = useOutletContext();
+  const { portal } = useOutletContext();
+  // Outlet filter for this page only (the Dashboard's outlet picker affects the Dashboard alone).
+  const [outletId, setOutletId] = useState("");
   const [params, setParams] = useSearchParams();
 
   // ?site=…&job=… (from outlet/job pages) opens the form pre-filled.
@@ -24,7 +49,9 @@ export default function PortalComplaints() {
       : null
   );
 
-  const [status, setStatus] = useState("open");
+  const [status, setStatus] = useState("all");
+  const [priority, setPriority] = useState("");
+  const [category, setCategory] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([]);
@@ -39,7 +66,7 @@ export default function PortalComplaints() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const filterKey = `${status}|${search}|${outletId}|${reloadKey}`;
+  const filterKey = `${status}|${priority}|${category}|${search}|${outletId}|${reloadKey}`;
   const [lastKey, setLastKey] = useState(filterKey);
   if (lastKey !== filterKey) {
     setLastKey(filterKey);
@@ -54,6 +81,8 @@ export default function PortalComplaints() {
         const q = new URLSearchParams({ status, page: String(page), page_size: "20" });
         if (outletId) q.set("site_id", outletId);
         if (search) q.set("search", search);
+        if (priority) q.set("priority", priority);
+        if (category) q.set("category", category);
         const res = await apiFetch(`/api/client-portal/complaints?${q}`);
         const body = await safeJson(res);
         if (!res?.ok) throw new Error(body?.error || "Failed to load complaints");
@@ -89,18 +118,46 @@ export default function PortalComplaints() {
         <button className="cp-btn" onClick={() => setForm({ site: outletId || "", job: "" })}><FiPlus /> Raise a complaint</button>
       </section>
 
+      {/* Status cards: count per stage; click to filter the list. */}
+      <div className="cp-cs-cards" role="tablist" aria-label="Complaint status">
+        {STATUS_CARDS.map((s) => {
+          const on = status === s.key;
+          const n = meta.counts[s.count] ?? 0;
+          return (
+            <button
+              key={s.key} type="button" role="tab" aria-selected={on}
+              className={`cp-cs-card tone-${s.tone} ${on ? "active" : ""}`}
+              onClick={() => setStatus(s.key)}
+            >
+              <span className="cp-cs-icon" aria-hidden="true"><s.Icon /></span>
+              <span className="cp-cs-text"><strong>{n}</strong><span>{s.label}</span></span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="cp-toolbar">
         <label className="cp-search">
           <FiSearch aria-hidden="true" />
           <input type="search" placeholder="Search by subject" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
         </label>
-        <div className="cp-chips" role="tablist" aria-label="Status">
-          {CHIPS.map((c) => (
-            <button key={c.key} role="tab" aria-selected={status === c.key} className={`cp-chip ${status === c.key ? "active" : ""}`} onClick={() => setStatus(c.key)}>
-              {c.label} <span className="cp-chip-count">{meta.counts[c.key] ?? 0}</span>
-            </button>
-          ))}
-        </div>
+        {portal.outlets.length > 1 && (
+          <OutletPicker outlets={portal.outlets} value={outletId} onChange={setOutletId} className="cp-picker-box" />
+        )}
+        <label className="cp-select">
+          Type
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All types</option>
+            <option value="SERVICE">Service</option>
+            <option value="ACCOUNTS">Accounts</option>
+          </select>
+        </label>
+        <label className="cp-select">
+          Priority
+          <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+            {PRIORITIES.map((p) => <option key={p.key || "all"} value={p.key}>{p.label}</option>)}
+          </select>
+        </label>
       </div>
 
       {error && (
@@ -116,32 +173,50 @@ export default function PortalComplaints() {
         ) : items.length === 0 ? (
           <div className="cp-empty-state">
             <FiMessageSquare aria-hidden="true" />
-            <strong>{status === "open" ? "No open complaints" : "No complaints found"}</strong>
-            <span>{status === "open" ? "Everything looks fine. If something is wrong at an outlet, let us know." : "Try another filter."}</span>
-            {status === "open" && <button className="cp-btn" onClick={() => setForm({ site: outletId || "", job: "" })}><FiPlus /> Raise a complaint</button>}
+            <strong>{status === "all" && !search && !priority && !category ? "No complaints yet" : "No complaints found"}</strong>
+            <span>{status === "all" && !search && !priority && !category ? "Everything looks fine. If something is wrong at an outlet, let us know." : "Try another filter."}</span>
+            {status === "all" && !search && !priority && !category && <button className="cp-btn" onClick={() => setForm({ site: outletId || "", job: "" })}><FiPlus /> Raise a complaint</button>}
           </div>
         ) : (
-          <div className="cp-rowlist">
+          <div className="cp-cs-table" role="table" aria-label="Complaints">
+            <div className="cp-cs-row cp-cs-headrow" role="row">
+              <span role="columnheader">Complaint</span>
+              <span role="columnheader">Outlet</span>
+              <span role="columnheader">Priority</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Last update</span>
+              <span aria-hidden="true" />
+            </div>
             {items.map((c) => {
               const st = statusInfo(c.status);
+              const pr = PRIORITY_PILL[c.priority] || PRIORITY_PILL.MEDIUM;
+              const newReply = c.awaiting_you && c.status !== "CLOSED";
               return (
-                <button key={c.id} className="cp-complaint-row" onClick={() => navigate(`/client/complaints/${encodeURIComponent(c.id)}`)}>
-                  <div className="cp-jobrow-main">
+                <button
+                  key={c.id} type="button" role="row"
+                  className={`cp-cs-row ${newReply ? "unread" : ""}`}
+                  onClick={() => navigate(`/client/complaints/${encodeURIComponent(c.id)}`)}
+                >
+                  <span className="cp-cs-main" role="cell">
                     <strong>
-                      {c.awaiting_you && c.status !== "CLOSED" && <span className="cp-new-dot" title="New reply from our team" />}
-                      {c.subject}
+                      {newReply && <span className="cp-new-dot" title="New reply from our team" />}
+                      <span className="cp-cs-subject">{c.subject}</span>
+                      {(c.category || ["SERVICE"]).map((k) => (
+                        <span key={k} className={`cp-cat-tag cat-${k.toLowerCase()}`}>{CATEGORY_LABEL[k] || k}</span>
+                      ))}
                     </strong>
                     <small>
-                      <FiMapPin aria-hidden="true" /> {c.site_name || "—"}
-                      {c.job_code ? ` · Job #${c.job_code}` : ""} · Raised {formatDate(c.created_at)} by {c.raised_by_name}
+                      {c.job_code ? `Job #${c.job_code} · ` : ""}Raised {formatDate(c.created_at)} by {c.raised_by_name}
+                      {` · ${c.message_count} message${c.message_count === 1 ? "" : "s"}`}
                     </small>
-                  </div>
-                  <div className="cp-jobrow-next">
-                    <small><FiMessageSquare aria-hidden="true" /> {c.message_count} message{c.message_count === 1 ? "" : "s"}</small>
-                    <small>{c.awaiting_you && c.status !== "CLOSED" ? "Reply from our team" : `Updated ${relativeDay(c.last_message_at || c.updated_at).toLowerCase()}`}</small>
-                  </div>
-                  {["HIGH", "URGENT"].includes(c.priority) ? <span className={`cp-status ${c.priority === "URGENT" ? "st-red" : "st-amber"}`}>{c.priority === "URGENT" ? "Urgent" : "High"}</span> : <span />}
-                  <span className={`cp-status ${st.className}`}>{st.label}</span>
+                  </span>
+                  <span className="cp-cs-outlet" role="cell"><FiMapPin aria-hidden="true" /> {c.site_name || "—"}</span>
+                  <span role="cell"><span className={`cp-cs-pill ${pr.className}`}>{pr.label}</span></span>
+                  <span role="cell"><span className={`cp-status ${st.className}`}>{st.label}</span></span>
+                  <span className="cp-cs-when" role="cell">
+                    {relativeDay(c.last_message_at || c.updated_at)}
+                    <small>{newReply ? "Reply from BestServe" : c.last_message_at ? "Last message" : "Raised"}</small>
+                  </span>
                   <FiChevronRight className="cp-chevron" aria-hidden="true" />
                 </button>
               );
@@ -162,6 +237,7 @@ export default function PortalComplaints() {
       {form && (
         <ComplaintForm
           outlets={portal.outlets}
+          headOffice={portal.access === "company"}
           initialSite={form.site}
           initialJob={form.job}
           onClose={closeForm}

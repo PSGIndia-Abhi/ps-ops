@@ -1,10 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { FiArrowLeft, FiMapPin, FiBriefcase, FiPaperclip, FiSend, FiX, FiRefreshCw, FiCheckCircle, FiRotateCcw } from "react-icons/fi";
+import { FiArrowLeft, FiMapPin, FiBriefcase, FiPaperclip, FiSend, FiX, FiRefreshCw, FiCheckCircle } from "react-icons/fi";
 import { apiFetch, safeJson } from "../api";
 import PortalPhoto from "./PortalPhoto";
 import { formatDateTime, serviceLabel, statusInfo } from "./portalUtils";
 import PortalLoader from "./PortalLoader";
+
+// Complaint stages, in order, with a one-line explanation of the current one.
+const STAGES = [
+  { key: "OPEN", label: "Raised", note: "We have your complaint. Our team will pick it up shortly." },
+  { key: "IN_PROGRESS", label: "In progress", note: "Our team is working on it." },
+  { key: "VISIT_SCHEDULED", label: "Visit scheduled", note: "Our team will visit your outlet to fix it." },
+  { key: "RESOLVED", label: "Resolved", note: "Marked as fixed by our team. Reply if the problem is still there." },
+  { key: "CLOSED", label: "Closed", note: "Closed by our team. Raise a new complaint if the issue comes back." },
+];
+
+const PRIORITY_LABEL = { LOW: "Low", MEDIUM: "Normal", HIGH: "High", URGENT: "Urgent" };
+const CATEGORY_LABEL = { SERVICE: "Service", ACCOUNTS: "Accounts" };
+
+// Stages box on the right side: ✓ Raised │ ● In progress │ ○ Visit scheduled │ ○ Resolved │ ○ Closed
+function StageCard({ status, createdAt, visitText }) {
+  const idx = Math.max(0, STAGES.findIndex((s) => s.key === String(status || "").toUpperCase()));
+  const allDone = idx === STAGES.length - 1;
+  return (
+    <section className="cp-card cp-cd-card">
+      <h3>Stages</h3>
+      <ol className="cp-vstages" aria-label="Complaint stages">
+        {STAGES.map((s, i) => {
+          const state = i < idx || allDone ? "done" : i === idx ? "now" : "next";
+          return (
+            <li key={s.key} className={state} aria-current={i === idx ? "step" : undefined}>
+              <span className="cp-vstage-dot" aria-hidden="true">{state === "done" ? "✓" : i + 1}</span>
+              <span className="cp-vstage-text">
+                <strong>{s.label}</strong>
+                {i === 0 && <em>{formatDateTime(createdAt)}</em>}
+                {s.key === "VISIT_SCHEDULED" && visitText && i <= idx && <em className="visit">{visitText}</em>}
+                {i === idx && !allDone && <small>{s.note}</small>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
 
 const MAX_FILES = 10; // per reply; the server allows the same (MAX_COMPLAINT_FILES)
 const MAX_SIZE = 10 * 1024 * 1024;
@@ -90,25 +129,13 @@ export default function PortalComplaintDetail() {
       setReply("");
       setFiles([]);
       if (body.warning) setNotice({ type: "warn", text: body.warning });
-      else if (body.reopened) setNotice({ type: "ok", text: "Complaint reopened. Our team will take another look." });
+      else if (body.reopened) setNotice({ type: "ok", text: "Message sent. Our team will take another look." });
       setReloadKey((n) => n + 1);
     } catch (err) {
       setReplyError(err.message);
     } finally {
       setSending(false);
     }
-  }
-
-  async function changeStatus(next) {
-    if (next === "CLOSED" && !window.confirm("Close this complaint? You can reopen it later if the problem comes back.")) return;
-    const res = await apiFetch(`/api/client-portal/complaints/${encodeURIComponent(complaintId)}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status: next }),
-    });
-    const body = await safeJson(res);
-    if (!res?.ok) return setNotice({ type: "warn", text: body?.error || "Could not update the complaint" });
-    setNotice({ type: "ok", text: next === "CLOSED" ? "Complaint closed. Thank you!" : "Complaint reopened." });
-    setReloadKey((n) => n + 1);
   }
 
   const back = (
@@ -132,6 +159,10 @@ export default function PortalComplaintDetail() {
   const { complaint: c, jobs, messages } = data;
   const st = statusInfo(c.status);
   const isDone = ["RESOLVED", "CLOSED"].includes(c.status);
+  const visitText = [
+    c.visit_date ? new Date(c.visit_date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" }) : "",
+    c.visit_slot,
+  ].filter(Boolean).join(", ");
 
   return (
     <div className="cp-page">
@@ -144,96 +175,119 @@ export default function PortalComplaintDetail() {
         </div>
       )}
 
-      <section className="cp-card cp-complaint-head">
-        <div className="cp-job-header-top">
-          <div>
-            <small className="cp-muted">Raised {formatDateTime(c.created_at)} by {c.raised_by_name}</small>
+      {/* One card: blue header (subject, tags, stage bar), the conversation, then the reply box. */}
+      <div className="cp-cd-layout">
+      <section className="cp-card cp-cx">
+        <header className="cp-cx-head">
+          {/* Subject with the status beside it (raised date / by are in Details). */}
+          <div className="cp-cx-top">
             <h2>{c.subject}</h2>
+            <span className="cp-cx-status">{st.label}</span>
           </div>
-          <span className={`cp-status lg ${st.className}`}>{st.label}</span>
-        </div>
-        <div className="cp-tags">
-          {c.site_name && (
-            <button className="cp-tag cp-tag-link" onClick={() => c.site_id && navigate(`/client/outlets/${encodeURIComponent(c.site_id)}`)}>
-              <FiMapPin aria-hidden="true" /> {c.site_name}
-            </button>
-          )}
-          {jobs.map((j) => (
-            <button key={j.id} className="cp-tag cp-tag-link" onClick={() => navigate(`/client/jobs/${encodeURIComponent(j.id)}`)}>
-              <FiBriefcase aria-hidden="true" /> #{j.code} · {serviceLabel(j.service_type)}
-            </button>
-          ))}
-          {["HIGH", "URGENT"].includes(c.priority) && (
-            <span className={`cp-status ${c.priority === "URGENT" ? "st-red" : "st-amber"}`}>{c.priority === "URGENT" ? "Urgent" : "High priority"}</span>
-          )}
-        </div>
-        <div className="cp-actions">
-          {c.status === "RESOLVED" && (
-            <span className="cp-muted">Our team marked this resolved. Happy with the fix?</span>
-          )}
-          {!isDone || c.status === "RESOLVED" ? (
-            <button className="cp-btn cp-btn-ghost" onClick={() => changeStatus("CLOSED")}><FiCheckCircle /> {c.status === "RESOLVED" ? "Yes, close it" : "Close complaint"}</button>
-          ) : null}
-          {isDone && (
-            <button className="cp-btn cp-btn-ghost" onClick={() => changeStatus("OPEN")}><FiRotateCcw /> Reopen</button>
-          )}
-        </div>
-      </section>
-
-      <section className="cp-card cp-thread">
-        {messages.map((m) => (
-          <div key={m.id} className={`cp-msg ${m.mine ? "mine" : m.from_team ? "team" : "colleague"}`}>
-            <div className="cp-msg-meta">
-              <strong>{m.mine ? "You" : m.from_team ? `${m.author} · BestServe` : m.author}</strong>
-              <small>{formatDateTime(m.created_at)}</small>
-            </div>
-            {m.message && m.message !== "(attachment)" && <p>{m.message}</p>}
-            {m.attachments.length > 0 && (
-              <div className="cp-msg-files">
-                {m.attachments.map((a) => (
-                  <PortalPhoto
-                    key={a.id}
-                    attachment={{ ...a, path: `/api/client-portal/complaint-files/${encodeURIComponent(a.id)}` }}
-                    onOpen={(url) => setViewer({ url, name: a.file_name })}
-                  />
-                ))}
-              </div>
+          <div className="cp-cx-tags">
+            {c.site_name && (
+              <button type="button" onClick={() => c.site_id && navigate(`/client/outlets/${encodeURIComponent(c.site_id)}`)}>
+                <FiMapPin aria-hidden="true" /> {c.site_name}
+              </button>
             )}
+            {jobs.map((j) => (
+              <button type="button" key={j.id} onClick={() => navigate(`/client/jobs/${encodeURIComponent(j.id)}`)}>
+                <FiBriefcase aria-hidden="true" /> #{j.code} · {serviceLabel(j.service_type)}
+              </button>
+            ))}
+            {(c.category || ["SERVICE"]).map((k) => <span key={k}>{CATEGORY_LABEL[k] || k}</span>)}
+            {["HIGH", "URGENT"].includes(c.priority) && <span className="prio">● {c.priority === "URGENT" ? "Urgent" : "High priority"}</span>}
           </div>
-        ))}
-        <div ref={threadEnd} />
+        </header>
+
+        <div className="cp-cx-thread">
+          {messages.map((m) => (
+            <div key={m.id} className={`cp-cx-msg ${m.mine ? "mine" : m.auto ? "auto" : m.from_team ? "team" : "colleague"}`}>
+              <span className="cp-cx-who">
+                {m.mine ? "You" : m.auto || m.from_team ? "BestServe" : m.author} · {formatDateTime(m.created_at)}
+              </span>
+              <div className="cp-cx-bubble">
+                {m.message && m.message !== "(attachment)" && <p>{m.message}</p>}
+                {m.attachments.length > 0 && (
+                  <div className="cp-msg-files">
+                    {m.attachments.map((a) => (
+                      <PortalPhoto
+                        key={a.id}
+                        attachment={{ ...a, path: `/api/client-portal/complaint-files/${encodeURIComponent(a.id)}` }}
+                        onOpen={(url) => setViewer({ url, name: a.file_name })}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {/* The client only views and replies; BestServe moves the complaint through its stages. */}
+          {isDone && (
+            <p className={`cp-cd-donenote ${c.status === "CLOSED" ? "closed" : ""}`}>
+              <FiCheckCircle aria-hidden="true" />
+              {c.status === "CLOSED" ? "BestServe has closed this complaint." : "BestServe has marked this complaint as resolved. Reply if the problem is still there."}
+            </p>
+          )}
+          <div ref={threadEnd} />
+        </div>
+
+        {c.status === "CLOSED" ? (
+          <div className="cp-cx-closed">This complaint is closed, so replies are turned off. If the problem comes back, please raise a new complaint.</div>
+        ) : (
+          <form className="cp-cx-reply" onSubmit={sendReply}>
+            {replyError && <div className="cp-alert">{replyError}</div>}
+            {files.length > 0 && (
+              <ul className="cp-file-list">
+                {files.map((f, i) => (
+                  <li key={`${f.name}-${i}`}>
+                    <span>{f.name}</span>
+                    <button type="button" className="cp-icon-btn" onClick={() => setFiles(files.filter((_, x) => x !== i))} aria-label={`Remove ${f.name}`}><FiX /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="cp-cx-bar">
+              <button type="button" className="cp-cx-attach" onClick={() => fileInput.current?.click()} disabled={files.length >= MAX_FILES} aria-label="Attach photos" title="Attach photos">
+                <FiPaperclip />
+              </button>
+              <input ref={fileInput} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+              <textarea
+                rows={1}
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                placeholder="Write a reply…  (Enter to send, Shift + Enter for a new line)"
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) sendReply(e); }}
+                aria-label="Reply"
+              />
+              <button type="submit" className="cp-cx-send" disabled={sending || (!reply.trim() && files.length === 0)} aria-label="Send">
+                <FiSend />
+              </button>
+            </div>
+          </form>
+        )}
       </section>
 
-      <form className="cp-card cp-reply" onSubmit={sendReply}>
-        {replyError && <div className="cp-alert">{replyError}</div>}
-        {c.status === "CLOSED" && <p className="cp-muted cp-reply-hint">This complaint is closed. Sending a message will reopen it.</p>}
-        <textarea
-          rows={3}
-          value={reply}
-          onChange={(e) => setReply(e.target.value)}
-          placeholder="Write a reply…"
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendReply(e); }}
-        />
-        {files.length > 0 && (
-          <ul className="cp-file-list">
-            {files.map((f, i) => (
-              <li key={`${f.name}-${i}`}>
-                <span>{f.name}</span>
-                <button type="button" className="cp-icon-btn" onClick={() => setFiles(files.filter((_, x) => x !== i))} aria-label={`Remove ${f.name}`}><FiX /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="cp-reply-actions">
-          <button type="button" className="cp-btn cp-btn-ghost" onClick={() => fileInput.current?.click()} disabled={files.length >= MAX_FILES}>
-            <FiPaperclip /> Attach
-          </button>
-          <input ref={fileInput} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
-          <button type="submit" className="cp-btn" disabled={sending || (!reply.trim() && files.length === 0)}>
-            <FiSend /> {sending ? "Sending…" : "Send"}
-          </button>
-        </div>
-      </form>
+      <aside className="cp-cd-side">
+        <StageCard status={c.status} createdAt={c.created_at} visitText={visitText} />
+        <section className="cp-card cp-cd-card">
+          <h3>Details</h3>
+          <dl className="cp-cd-details">
+            <div><dt>Status</dt><dd><span className={`cp-status ${st.className}`}>{st.label}</span></dd></div>
+            <div><dt>Complaint about</dt><dd>{(c.category || ["SERVICE"]).map((k) => CATEGORY_LABEL[k] || k).join(" + ")}</dd></div>
+            <div><dt>Priority</dt><dd className={`prio-${String(c.priority || "").toLowerCase()}`}>{PRIORITY_LABEL[c.priority] || c.priority || "—"}</dd></div>
+            <div><dt>Outlet</dt><dd>{c.site_name || "—"}</dd></div>
+            <div><dt>Raised by</dt><dd>{c.raised_by_name || "—"}</dd></div>
+            {jobs.length > 0 && (
+              <div><dt>Linked job</dt><dd>{jobs.map((j) => `#${j.code}`).join(", ")}</dd></div>
+            )}
+            {visitText && <div><dt>Scheduled visit</dt><dd>{visitText}</dd></div>}
+            <div><dt>Raised on</dt><dd>{formatDateTime(c.created_at)}</dd></div>
+            {c.updated_at && <div><dt>Last updated</dt><dd>{formatDateTime(c.updated_at)}</dd></div>}
+          </dl>
+        </section>
+      </aside>
+      </div>
 
       {viewer && (
         <div className="cp-viewer" onClick={() => setViewer(null)} role="dialog" aria-label="Photo">

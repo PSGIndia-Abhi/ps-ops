@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   HiOutlineSquares2X2, HiOutlineBuildingStorefront, HiOutlineClipboardDocumentList, HiOutlineChatBubbleLeftRight,
   HiOutlineFolderOpen, HiOutlineShieldCheck, HiOutlineSparkles, HiOutlineUserCircle, HiOutlineBars3,
-  HiOutlineArrowRightOnRectangle, HiOutlinePhone, HiOutlineEnvelope, HiOutlineMapPin, HiOutlinePlus,
+  HiOutlineArrowRightOnRectangle, HiOutlinePhone, HiOutlineEnvelope, HiOutlineMapPin, HiOutlinePlus, HiOutlinePhoto,
 } from "react-icons/hi2";
 import logo from "../assets/logo.png";
 import { apiFetch, safeJson } from "../api";
@@ -41,6 +41,7 @@ const NAV_GROUPS = [
     label: "Records",
     items: [
       { to: "/client/documents", label: "Documents", icon: <HiOutlineFolderOpen aria-hidden="true" /> },
+      { to: "/client/photos", label: "Service Photos", icon: <HiOutlinePhoto aria-hidden="true" /> },
       { to: "/client/audits", label: "Audit Reports", icon: <HiOutlineShieldCheck aria-hidden="true" /> },
     ],
   },
