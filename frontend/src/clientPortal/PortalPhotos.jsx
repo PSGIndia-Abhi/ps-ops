@@ -16,6 +16,16 @@ import PortalPhoto from "./PortalPhoto";
 const PHASE_LABEL = { before: "Before", after: "After", other: "Photo" };
 const THUMBS = 4;
 // Visit photos stream from /attachments/:id; photos shared by staff carry their own path.
+// A shared photo's caption: the staff note, else its title unless that is just the file name.
+const photoCaption = (p) => {
+  const note = String(p.notes || "").trim();
+  if (note) return note;
+  const title = String(p.title || "").trim();
+  const fileBase = String(p.file_name || "").replace(/\.[^.]+$/, "").trim();
+  return title && title !== fileBase ? title : "";
+};
+// Date, plus the outlet names when it was shared with chosen outlets.
+const photoWhen = (p) => [formatDate(p.created_at), p.site_name && !["All outlets", "Head office"].includes(p.site_name) ? p.site_name : ""].filter(Boolean).join(" · ");
 const photoPath = (p) => p.path || `/api/client-portal/attachments/${encodeURIComponent(p.id)}`;
 const isImage = (p) => String(p.file_type || "").startsWith("image/") || p.type === "IMAGE";
 
@@ -139,7 +149,10 @@ export default function PortalPhotos() {
             {shared.map((p, i) => (
               <figure key={p.id} className="cp-ph-shared-item">
                 <PortalPhoto attachment={p} onOpen={() => setGallery({ job: sharedJob, index: i })} />
-                <figcaption><b title={p.title}>{p.title}</b><small>{formatDate(p.created_at)}</small></figcaption>
+                <figcaption>
+                  <b title={photoCaption(p) || undefined}>{photoCaption(p) || photoWhen(p)}</b>
+                  {photoCaption(p) && <small>{photoWhen(p)}</small>}
+                </figcaption>
                 <div className="cp-ph-shared-actions">
                   <button type="button" className="cp-btn cp-btn-ghost" onClick={() => setGallery({ job: sharedJob, index: i })}><FiEye /> View</button>
                   <button
@@ -290,7 +303,7 @@ function PhotoGallery({ job, index, onIndex, onClose }) {
     <div className="cp-gallery" role="dialog" aria-modal="true" aria-label={`Photos for job ${job.code}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <header className="cp-gallery-bar">
         <div>
-          <strong>{job.code ? `${job.sub_service || serviceLabel(job.service_type)} · Job #${job.code}` : (photo.title || job.sub_service)}</strong>
+          <strong>{job.code ? `${job.sub_service || serviceLabel(job.service_type)} · Job #${job.code}` : (photoCaption(photo) || photoWhen(photo) || job.sub_service)}</strong>
           <small>{job.site_name ? `${job.site_name}${job.city ? `, ${job.city}` : ""} · ` : ""}{formatDate(photo.created_at)}</small>
         </div>
         <span className={`cp-ph-tag ${photo.phase}`}>{PHASE_LABEL[photo.phase]}</span>

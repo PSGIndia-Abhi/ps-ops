@@ -176,6 +176,8 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
+  // A photo goes to the client's Service Photos; its title is shown as the caption.
+  const isPhoto = file ? file.type.startsWith("image/") : String(doc?.file_type || "").startsWith("image/");
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -184,13 +186,14 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
     if (f.size > 20 * 1024 * 1024) return setError("The file must be 20 MB or smaller.");
     setError(null);
     setFile(f);
-    if (!form.title.trim()) set("title", f.name.replace(/\.[^.]+$/, ""));
+    // Photos need a real caption, so their title is not filled from the file name.
+    if (!form.title.trim() && !f.type.startsWith("image/")) set("title", f.name.replace(/\.[^.]+$/, ""));
   }
 
   async function submit(e) {
     e.preventDefault();
     if (!isEdit && !file) return setError("Choose a file to upload.");
-    if (!form.title.trim()) return setError("Title is required.");
+    if (!form.title.trim()) return setError(isPhoto ? "Please add a caption for the photo." : "Title is required.");
     if (form.visibility === "SITES" && !form.site_ids.length) return setError("Tick at least one outlet.");
     setSaving(true);
     setError(null);
@@ -237,8 +240,8 @@ function DocumentModal({ mode, doc, companyId, sites, onClose, onSaved }) {
             <small className="ca-muted ca-file-note">Photos (JPG / PNG) appear in the client's <b>Service Photos</b>; PDF, Word and Excel appear in <b>Documents</b>.</small>
           </label>
         )}
-        <label>Title *
-          <input value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={200} placeholder="e.g. Pest control certificate 2026" />
+        <label>{isPhoto ? "Caption * (what does the photo show?)" : "Title *"}
+          <input value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={200} placeholder={isPhoto ? "e.g. Kitchen after treatment" : "e.g. Pest control certificate 2026"} />
         </label>
         <label>Type
           <select value={form.doc_type} onChange={(e) => set("doc_type", e.target.value)}>
